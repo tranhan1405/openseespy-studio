@@ -4,7 +4,7 @@ import math
 from collections.abc import Callable
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,11 +26,16 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
 
 from ..generator import section_to_openseespy
+from ..section_visualization import (
+    equivalent_fiber_radius,
+    section_preview_bounds,
+)
 from ..project import (
     FiberComponentData,
     FiberData,
@@ -69,21 +74,432 @@ def _material_color(tag: int) -> QColor:
 class FiberPreviewWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumSize(420, 420)
+        self.setMinimumSize(440, 440)
+        self.setMouseTracking(True)
+        self._section: SectionData | None = None
         self._fibers: list[FiberData] = []
         self._materials: dict[int, MaterialData] = {}
+        self._view_transform: tuple[float, float, float, float, float] | None = None
+        self._hover_index: int | None = None
+
+        self.show_patch_outlines = True
+        self.show_fiber_mesh = True
+        self.show_rebars = True
+        self.show_dimensions = True
         self.show_axes = True
         self.show_centroid = True
-        self.show_fibers = True
 
-    def set_data(
+    def set_section(
         self,
-        fibers: list[FiberData],
+        section: SectionData,
         materials: dict[int, MaterialData],
     ) -> None:
-        self._fibers = list(fibers)
+        self._section = section
+        self._fibers = section.compiled_fibers()
         self._materials = dict(materials)
+        self._hover_index = None
         self.update()
+
+    def _map_point(self, y: float, z: float) -> QPointF:
+        if self._view_transform is None:
+            return QPointF(0.0, 0.0)
+        scale, center_x, center_screen_y, center_y, center_z = self._view_transform
+        # OpenSees section convention shown in the builder:
+        # +y is upward and +z is toward the left.
+        return QPointF(
+            center_x - (z - center_z) * scale,
+            center_screen_y - (y - center_y) * scale,
+        )
+
+    @staticmethod
+    def _sample_arc(
+        y_center: float,
+        z_center: float,
+        radius: float,
+        start_deg: float,
+        end_deg: float,
+        count: int = 64,
+    ) -> list[tuple[float, float]]:
+        if radius <= 0.0:
+            return [(y_center, z_center)]
+        span = end_deg - start_deg
+        segments = max(4, int(count * abs(span) / 360.0))
+        result = []
+        for index in range(segments + 1):
+            angle = math.radians(start_deg + span * index / segments)
+            result.append(
+                (
+                    y_center + radius * math.cos(angle),
+                    z_center + radius * math.sin(angle),
+                )
+            )
+        return result
+
+    def _draw_polyline(
+        self,
+        painter: QPainter,
+        points: list[tuple[float, float]],
+    ) -> None:
+        if len(points) < 2:
+            return
+        painter.drawPolyline(
+            QPolygonF([
+                self._map_point(y, z)
+                for y, z in points
+            ])
+        )
+
+    def _draw_rect_patch(
+        self,
+        painter: QPainter,
+        component: FiberComponentData,
+    ) -> None:
+        p = component.parameters
+        y0 = p["y_center"] - 0.5 * p["width_y"]
+        y1 = p["y_center"] + 0.5 * p["width_y"]
+        z0 = p["z_center"] - 0.5 * p["depth_z"]
+        z1 = p["z_center"] + 0.5 * p["depth_z"]
+
+        top_left = self._map_point(y1, z1)
+        bottom_right = self._map_point(y0, z0)
+        rect = QRectF(top_left, bottom_right).normalized()
+        color = _material_color(component.material_tag)
+
+        if self.show_patch_outlines:
+            fill = QColor(color)
+            fill.setAlpha(55)
+            painter.setBrush(fill)
+            painter.setPen(QPen(color.darker(145), 1.6))
+            painter.drawRect(rect)
+
+        if self.show_fiber_mesh:
+            painter.setBrush(Qt.NoBrush)
+            mesh_color = QColor(color.darker(150))
+            mesh_color.setAlpha(135)
+            painter.setPen(QPen(mesh_color, 0.7))
+            n_y = max(1, int(p["n_y"]))
+            n_z = max(1, int(p["n_z"]))
+            for index in range(1, n_y):
+                y = y0 + p["width_y"] * index / n_y
+                painter.drawLine(
+                    self._map_point(y, z0),
+                    self._map_point(y, z1),
+                )
+            for index in range(1, n_z):
+                z = z0 + p["depth_z"] * index / n_z
+                painter.drawLine(
+                    self._map_point(y0, z),
+                    self._map_point(y1, z),
+                )
+
+    def _draw_circ_patch(
+        self,
+        painter: QPainter,
+        component: FiberComponentData,
+    ) -> None:
+        p = component.parameters
+        yc = p["y_center"]
+        zc = p["z_center"]
+        r0 = p["r_inner"]
+        r1 = p["r_outer"]
+        start = p["start_angle"]
+        end = p["end_angle"]
+        color = _material_color(component.material_tag)
+
+        outer = self._sample_arc(yc, zc, r1, start, end)
+        inner = (
+            self._sample_arc(yc, zc, r0, end, start)
+            if r0 > 0.0
+            else [(yc, zc)]
+        )
+
+        if self.show_patch_outlines:
+            path = QPainterPath()
+            first = self._map_point(*outer[0])
+            path.moveTo(first)
+            for point in outer[1:]:
+                path.lineTo(self._map_point(*point))
+            for point in inner:
+                path.lineTo(self._map_point(*point))
+            path.closeSubpath()
+
+            fill = QColor(color)
+            fill.setAlpha(55)
+            painter.setBrush(fill)
+            painter.setPen(QPen(color.darker(145), 1.6))
+            painter.drawPath(path)
+
+        if self.show_fiber_mesh:
+            painter.setBrush(Qt.NoBrush)
+            mesh_color = QColor(color.darker(150))
+            mesh_color.setAlpha(135)
+            painter.setPen(QPen(mesh_color, 0.7))
+            n_r = max(1, int(p["n_radial"]))
+            n_t = max(1, int(p["n_circum"]))
+            for index in range(1, n_r):
+                radius = r0 + (r1 - r0) * index / n_r
+                self._draw_polyline(
+                    painter,
+                    self._sample_arc(
+                        yc, zc, radius, start, end
+                    ),
+                )
+            for index in range(n_t + 1):
+                angle = math.radians(
+                    start + (end - start) * index / n_t
+                )
+                inner_point = (
+                    yc + r0 * math.cos(angle),
+                    zc + r0 * math.sin(angle),
+                )
+                outer_point = (
+                    yc + r1 * math.cos(angle),
+                    zc + r1 * math.sin(angle),
+                )
+                painter.drawLine(
+                    self._map_point(*inner_point),
+                    self._map_point(*outer_point),
+                )
+
+    def _draw_rebar_component(
+        self,
+        painter: QPainter,
+        component: FiberComponentData,
+    ) -> None:
+        if not self.show_rebars:
+            return
+        if component.component_type not in {
+            "StraightLayer",
+            "CircLayer",
+            "SingleFiber",
+        }:
+            return
+
+        color = _material_color(component.material_tag)
+        painter.setBrush(color)
+        painter.setPen(QPen(color.darker(170), 1.1))
+        for fiber in component.compile_fibers():
+            point = self._map_point(fiber.y, fiber.z)
+            radius = (
+                equivalent_fiber_radius(fiber.area)
+                * self._view_transform[0]
+                if self._view_transform is not None
+                else 2.0
+            )
+            radius = max(2.2, radius)
+            painter.drawEllipse(point, radius, radius)
+
+    def _draw_manual_fibers(self, painter: QPainter) -> None:
+        if self._section is None or not self.show_rebars:
+            return
+        for fiber in self._section.fibers:
+            color = _material_color(fiber.material_tag)
+            point = self._map_point(fiber.y, fiber.z)
+            radius = (
+                equivalent_fiber_radius(fiber.area)
+                * self._view_transform[0]
+                if self._view_transform is not None
+                else 2.0
+            )
+            radius = max(2.2, radius)
+            painter.setBrush(color)
+            painter.setPen(QPen(color.darker(170), 1.1))
+            painter.drawEllipse(point, radius, radius)
+
+    @staticmethod
+    def _arrow_head(
+        painter: QPainter,
+        tip: QPointF,
+        direction: QPointF,
+        size: float = 6.0,
+    ) -> None:
+        dx, dy = direction.x(), direction.y()
+        length = math.hypot(dx, dy)
+        if length <= 1.0e-12:
+            return
+        ux, uy = dx / length, dy / length
+        px, py = -uy, ux
+        base_x = tip.x() - ux * size
+        base_y = tip.y() - uy * size
+        painter.drawLine(
+            tip,
+            QPointF(
+                base_x + px * size * 0.45,
+                base_y + py * size * 0.45,
+            ),
+        )
+        painter.drawLine(
+            tip,
+            QPointF(
+                base_x - px * size * 0.45,
+                base_y - py * size * 0.45,
+            ),
+        )
+
+    def _draw_axes(self, painter: QPainter, model_span: float) -> None:
+        if not self.show_axes:
+            return
+        origin = self._map_point(0.0, 0.0)
+        scale = self._view_transform[0] if self._view_transform else 1.0
+        physical_length = max(model_span * 0.22, 1.0e-9)
+        pixel_length = min(52.0, physical_length * scale)
+        pixel_length = max(pixel_length, 28.0)
+
+        painter.setPen(QPen(QColor("#17202a"), 1.7))
+        y_tip = QPointF(origin.x(), origin.y() - pixel_length)
+        z_tip = QPointF(origin.x() - pixel_length, origin.y())
+        painter.drawLine(origin, y_tip)
+        painter.drawLine(origin, z_tip)
+        self._arrow_head(
+            painter,
+            y_tip,
+            QPointF(0.0, -1.0),
+        )
+        self._arrow_head(
+            painter,
+            z_tip,
+            QPointF(-1.0, 0.0),
+        )
+        painter.drawText(
+            QPointF(y_tip.x() + 6.0, y_tip.y() + 4.0),
+            "y",
+        )
+        painter.drawText(
+            QPointF(z_tip.x() - 12.0, z_tip.y() - 6.0),
+            "z",
+        )
+
+    def _draw_dimensions(
+        self,
+        painter: QPainter,
+        bounds: tuple[float, float, float, float],
+    ) -> None:
+        if not self.show_dimensions:
+            return
+        y_min, y_max, z_min, z_max = bounds
+        center_y = 0.5 * (y_min + y_max)
+        center_z = 0.5 * (z_min + z_max)
+
+        left = self._map_point(center_y, z_max).x()
+        right = self._map_point(center_y, z_min).x()
+        top = self._map_point(y_max, center_z).y()
+        bottom = self._map_point(y_min, center_z).y()
+
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor("#263746"), 1.0))
+
+        y_dim = bottom + 26.0
+        painter.drawLine(QPointF(left, bottom), QPointF(left, y_dim + 5.0))
+        painter.drawLine(QPointF(right, bottom), QPointF(right, y_dim + 5.0))
+        painter.drawLine(QPointF(left, y_dim), QPointF(right, y_dim))
+        self._arrow_head(
+            painter, QPointF(left, y_dim), QPointF(1.0, 0.0), 5.5
+        )
+        self._arrow_head(
+            painter, QPointF(right, y_dim), QPointF(-1.0, 0.0), 5.5
+        )
+        b_text = f"B(z) = {z_max - z_min:.6g}"
+        painter.drawText(
+            QRectF(
+                left,
+                y_dim + 4.0,
+                max(1.0, right - left),
+                18.0,
+            ),
+            Qt.AlignCenter,
+            b_text,
+        )
+
+        x_dim = right + 28.0
+        painter.drawLine(QPointF(right, top), QPointF(x_dim + 5.0, top))
+        painter.drawLine(QPointF(right, bottom), QPointF(x_dim + 5.0, bottom))
+        painter.drawLine(QPointF(x_dim, top), QPointF(x_dim, bottom))
+        self._arrow_head(
+            painter, QPointF(x_dim, top), QPointF(0.0, 1.0), 5.5
+        )
+        self._arrow_head(
+            painter, QPointF(x_dim, bottom), QPointF(0.0, -1.0), 5.5
+        )
+        h_text = f"H(y) = {y_max - y_min:.6g}"
+        painter.drawText(
+            QRectF(
+                x_dim + 5.0,
+                0.5 * (top + bottom) - 9.0,
+                100.0,
+                18.0,
+            ),
+            Qt.AlignLeft | Qt.AlignVCenter,
+            h_text,
+        )
+
+    def _draw_centroid(self, painter: QPainter) -> None:
+        if (
+            not self.show_centroid
+            or self._section is None
+        ):
+            return
+        area, (cy, cz) = self._section.fiber_area_and_centroid()
+        if area <= 0.0:
+            return
+        point = self._map_point(cy, cz)
+        painter.setBrush(QColor("#ffffff"))
+        painter.setPen(QPen(QColor("#d32f2f"), 2.0))
+        painter.drawEllipse(point, 3.0, 3.0)
+        painter.drawLine(
+            QPointF(point.x() - 8.0, point.y()),
+            QPointF(point.x() + 8.0, point.y()),
+        )
+        painter.drawLine(
+            QPointF(point.x(), point.y() - 8.0),
+            QPointF(point.x(), point.y() + 8.0),
+        )
+        painter.drawText(
+            QPointF(point.x() + 8.0, point.y() - 7.0),
+            "C",
+        )
+
+    def _draw_hover(self, painter: QPainter) -> None:
+        if (
+            self._hover_index is None
+            or self._hover_index < 0
+            or self._hover_index >= len(self._fibers)
+        ):
+            return
+        fiber = self._fibers[self._hover_index]
+        point = self._map_point(fiber.y, fiber.z)
+        radius = (
+            equivalent_fiber_radius(fiber.area)
+            * self._view_transform[0]
+            if self._view_transform is not None
+            else 3.0
+        )
+        radius = max(4.0, radius + 2.5)
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor("#e53935"), 2.0))
+        painter.drawEllipse(point, radius, radius)
+
+    def _draw_legend(self, painter: QPainter, top: float) -> None:
+        tags = sorted({
+            fiber.material_tag
+            for fiber in self._fibers
+        })
+        if not tags:
+            return
+        x = 18.0
+        y = top + 16.0
+        painter.setPen(QColor("#34495e"))
+        for tag in tags:
+            color = _material_color(tag)
+            painter.fillRect(QRectF(x, y - 10.0, 11.0, 11.0), color)
+            painter.setPen(QPen(QColor("#34495e"), 1))
+            material = self._materials.get(tag)
+            label = (
+                f"{tag} - {material.name}"
+                if material is not None
+                else f"Material {tag}"
+            )
+            painter.drawText(QPointF(x + 17.0, y), label)
+            y += 18.0
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -92,126 +508,150 @@ class FiberPreviewWidget(QWidget):
         painter.setPen(QPen(QColor("#ccd6df"), 1))
         painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
 
-        if not self._fibers:
+        if (
+            self._section is None
+            or not self._fibers
+        ):
+            self._view_transform = None
             painter.setPen(QColor("#708090"))
             painter.drawText(
                 self.rect(),
                 Qt.AlignCenter,
-                "No fibers yet\nAdd a patch, rebar layer, or manual fiber.",
+                "No fibers yet\n"
+                "Add a patch, rebar layer, or manual fiber.",
             )
             return
 
-        ys = [fiber.y for fiber in self._fibers]
-        zs = [fiber.z for fiber in self._fibers]
-        y_min, y_max = min(ys), max(ys)
-        z_min, z_max = min(zs), max(zs)
-
-        max_equivalent_radius = max(
-            math.sqrt(max(fiber.area, 0.0) / math.pi)
-            for fiber in self._fibers
-        )
-        y_min -= max_equivalent_radius
-        y_max += max_equivalent_radius
-        z_min -= max_equivalent_radius
-        z_max += max_equivalent_radius
-
+        bounds = section_preview_bounds(self._section)
+        if bounds is None:
+            return
+        y_min, y_max, z_min, z_max = bounds
         span_y = max(y_max - y_min, 1.0e-9)
         span_z = max(z_max - z_min, 1.0e-9)
-        margin = 48.0
-        legend_height = min(84.0, 20.0 + 18.0 * len({
-            fiber.material_tag for fiber in self._fibers
-        }))
-        available_w = max(40.0, self.width() - 2.0 * margin)
-        available_h = max(
-            40.0,
-            self.height() - 2.0 * margin - legend_height,
+
+        legend_tags = {
+            fiber.material_tag
+            for fiber in self._fibers
+        }
+        legend_height = min(
+            100.0,
+            18.0 + 18.0 * len(legend_tags),
         )
-        scale = min(available_w / span_y, available_h / span_z)
+        margin_left = 48.0
+        margin_right = 125.0 if self.show_dimensions else 48.0
+        margin_top = 42.0
+        margin_bottom = (
+            72.0 if self.show_dimensions else 38.0
+        ) + legend_height
+
+        available_w = max(
+            80.0,
+            self.width() - margin_left - margin_right,
+        )
+        available_h = max(
+            80.0,
+            self.height() - margin_top - margin_bottom,
+        )
+        scale = min(
+            available_w / span_z,
+            available_h / span_y,
+        ) * 0.92
         center_y = 0.5 * (y_min + y_max)
         center_z = 0.5 * (z_min + z_max)
-        origin_x = 0.5 * self.width() - center_y * scale
-        origin_y = (
-            margin
+        center_x = (
+            margin_left
+            + 0.5 * available_w
+        )
+        center_screen_y = (
+            margin_top
             + 0.5 * available_h
-            + center_z * scale
+        )
+        self._view_transform = (
+            scale,
+            center_x,
+            center_screen_y,
+            center_y,
+            center_z,
         )
 
-        def map_point(y: float, z: float) -> QPointF:
-            return QPointF(
-                origin_x + y * scale,
-                origin_y - z * scale,
-            )
+        for component in self._section.fiber_components:
+            if component.component_type == "RectPatch":
+                self._draw_rect_patch(painter, component)
+            elif component.component_type == "CircPatch":
+                self._draw_circ_patch(painter, component)
 
-        if self.show_axes:
-            axis_pen = QPen(QColor("#5b6b7d"), 1)
-            painter.setPen(axis_pen)
-            zero = map_point(0.0, 0.0)
-            painter.drawLine(
-                QPointF(margin, zero.y()),
-                QPointF(self.width() - margin, zero.y()),
-            )
-            painter.drawLine(
-                QPointF(zero.x(), margin),
-                QPointF(zero.x(), margin + available_h),
-            )
-            painter.drawText(
-                QPointF(self.width() - margin - 12.0, zero.y() - 6.0),
-                "y",
-            )
-            painter.drawText(
-                QPointF(zero.x() + 7.0, margin + 12.0),
-                "z",
-            )
+        for component in self._section.fiber_components:
+            self._draw_rebar_component(painter, component)
+        self._draw_manual_fibers(painter)
 
-        if self.show_fibers:
-            for fiber in self._fibers:
-                point = map_point(fiber.y, fiber.z)
-                radius = math.sqrt(max(fiber.area, 0.0) / math.pi) * scale
-                radius = max(1.8, min(radius, 11.0))
-                color = _material_color(fiber.material_tag)
-                painter.setBrush(color)
-                painter.setPen(QPen(color.darker(135), 0.6))
-                painter.drawEllipse(point, radius, radius)
+        self._draw_axes(
+            painter,
+            max(span_y, span_z),
+        )
+        self._draw_centroid(painter)
+        self._draw_dimensions(painter, bounds)
+        self._draw_hover(painter)
 
-        total_area = sum(fiber.area for fiber in self._fibers)
-        if total_area > 0.0 and self.show_centroid:
-            cy = (
-                sum(fiber.y * fiber.area for fiber in self._fibers)
-                / total_area
-            )
-            cz = (
-                sum(fiber.z * fiber.area for fiber in self._fibers)
-                / total_area
-            )
-            point = map_point(cy, cz)
-            painter.setPen(QPen(QColor("#d32f2f"), 2))
-            painter.drawLine(
-                QPointF(point.x() - 7, point.y()),
-                QPointF(point.x() + 7, point.y()),
-            )
-            painter.drawLine(
-                QPointF(point.x(), point.y() - 7),
-                QPointF(point.x(), point.y() + 7),
-            )
+        legend_top = self.height() - legend_height
+        painter.setPen(QPen(QColor("#d7dee5"), 1))
+        painter.drawLine(
+            QPointF(12.0, legend_top - 4.0),
+            QPointF(self.width() - 12.0, legend_top - 4.0),
+        )
+        self._draw_legend(painter, legend_top)
 
-        legend_tags = sorted({
-            fiber.material_tag for fiber in self._fibers
-        })
-        x = margin
-        y = self.height() - legend_height + 18
-        painter.setPen(QColor("#34495e"))
-        for tag in legend_tags:
-            color = _material_color(tag)
-            painter.fillRect(QRectF(x, y - 10, 11, 11), color)
-            painter.setPen(QPen(QColor("#34495e"), 1))
-            material = self._materials.get(tag)
-            label = (
-                f"{tag} - {material.name}"
+    def mouseMoveEvent(self, event) -> None:
+        if self._view_transform is None or not self._fibers:
+            return super().mouseMoveEvent(event)
+
+        cursor = event.position()
+        nearest: int | None = None
+        nearest_distance = 1.0e30
+        for index, fiber in enumerate(self._fibers):
+            point = self._map_point(fiber.y, fiber.z)
+            dx = point.x() - cursor.x()
+            dy = point.y() - cursor.y()
+            distance = dx * dx + dy * dy
+            if distance < nearest_distance:
+                nearest_distance = distance
+                nearest = index
+
+        if nearest is not None and nearest_distance <= 12.0 ** 2:
+            if nearest != self._hover_index:
+                self._hover_index = nearest
+                self.update()
+            fiber = self._fibers[nearest]
+            material = self._materials.get(fiber.material_tag)
+            material_name = (
+                material.name
                 if material is not None
-                else f"Material {tag}"
+                else f"Material {fiber.material_tag}"
             )
-            painter.drawText(QPointF(x + 17, y), label)
-            y += 18
+            QToolTip.showText(
+                event.globalPosition().toPoint(),
+                (
+                    f"Fiber #{nearest + 1}\n"
+                    f"Material: {material_name} [{fiber.material_tag}]\n"
+                    f"y = {fiber.y:.6g}\n"
+                    f"z = {fiber.z:.6g}\n"
+                    f"Area = {fiber.area:.6g}"
+                ),
+                self,
+            )
+        else:
+            if self._hover_index is not None:
+                self._hover_index = None
+                self.update()
+            QToolTip.hideText()
+
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        if self._hover_index is not None:
+            self._hover_index = None
+            self.update()
+        QToolTip.hideText()
+        super().leaveEvent(event)
 
 
 class FiberComponentDialog(QDialog):
@@ -639,16 +1079,25 @@ class SectionDialog(QDialog):
         right_layout.setContentsMargins(6, 0, 0, 0)
 
         controls = QHBoxLayout()
-        self.show_axes = QCheckBox("Axes")
+        self.show_patch_outlines = QCheckBox("Patch outlines")
+        self.show_patch_outlines.setChecked(True)
+        self.show_fiber_mesh = QCheckBox("Fiber mesh")
+        self.show_fiber_mesh.setChecked(True)
+        self.show_rebars = QCheckBox("Rebars")
+        self.show_rebars.setChecked(True)
+        self.show_dimensions = QCheckBox("Dimensions")
+        self.show_dimensions.setChecked(True)
+        self.show_axes = QCheckBox("Local axes")
         self.show_axes.setChecked(True)
         self.show_centroid = QCheckBox("Centroid")
         self.show_centroid.setChecked(True)
-        self.show_fibers = QCheckBox("Fibers")
-        self.show_fibers.setChecked(True)
         for checkbox in (
+            self.show_patch_outlines,
+            self.show_fiber_mesh,
+            self.show_rebars,
+            self.show_dimensions,
             self.show_axes,
             self.show_centroid,
-            self.show_fibers,
         ):
             checkbox.toggled.connect(self._sync_preview_options)
             controls.addWidget(checkbox)
@@ -952,9 +1401,14 @@ class SectionDialog(QDialog):
         self._update_fiber_outputs()
 
     def _sync_preview_options(self) -> None:
+        self.preview.show_patch_outlines = (
+            self.show_patch_outlines.isChecked()
+        )
+        self.preview.show_fiber_mesh = self.show_fiber_mesh.isChecked()
+        self.preview.show_rebars = self.show_rebars.isChecked()
+        self.preview.show_dimensions = self.show_dimensions.isChecked()
         self.preview.show_axes = self.show_axes.isChecked()
         self.preview.show_centroid = self.show_centroid.isChecked()
-        self.preview.show_fibers = self.show_fibers.isChecked()
         self.preview.update()
 
     def _temporary_fiber_section(self) -> SectionData:
@@ -980,7 +1434,7 @@ class SectionDialog(QDialog):
         except (ValueError, AttributeError, TypeError):
             return
 
-        self.preview.set_data(fibers, self.materials)
+        self.preview.set_section(section, self.materials)
         total_area, (cy, cz) = section.fiber_area_and_centroid()
         self.fiber_stats.setText(
             f"Components: {len(section.fiber_components)}   ·   "
