@@ -71,7 +71,7 @@ def test_material_generator_lines():
     line = material_to_openseespy(steel)
 
     assert "Steel02" in line
-    assert "355000000" in line
+    assert "3.55e+08" in line
     assert line.startswith("ops.uniaxialMaterial")
 
 
