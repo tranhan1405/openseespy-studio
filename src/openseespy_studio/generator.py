@@ -205,7 +205,6 @@ def section_to_openseespy(
         # Keep manually entered fibers explicit. Builder primitives remain
         # native OpenSees patch/layer commands instead of being flattened.
         if section.fibers:
-            lines.append("# Manual fibers")
             for fiber in section.fibers:
                 lines.append(
                     "ops.fiber("
