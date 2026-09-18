@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
 
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..model import StructuralModel
-from ..project import MaterialData, ProjectDatabase, SectionData, SelectionSetData
+from ..project import MaterialData, ProjectDatabase, SectionData, SelectionSetData, TransformationData
 from .code_editor import CodeEditor
 from .geometry_dialogs import (
     ElementDialog,
@@ -54,6 +54,7 @@ from .geometry_dialogs import (
 from .history import ProjectSnapshotCommand
 from .material_dialog import MaterialDialog
 from .section_dialog import SectionDialog
+from .transformation_dialog import TransformationDialog
 from .icons import studio_icon
 from .results_panel import ResultsPanel
 from .selection import SelectionManager, parse_tag_expression
@@ -756,6 +757,13 @@ class MainWindow(QMainWindow):
             self._create_section,
             "Create OpenSees section",
         )
+        self._make_action(
+            "new_transformation",
+            "New Transformation...",
+            "transform",
+            self._create_transformation,
+            "Create OpenSees geometric transformation",
+        )
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action("plot", "Plot", "plot", self._not_implemented, "Plot results")
 
@@ -766,6 +774,7 @@ class MainWindow(QMainWindow):
         menus["Edit"].addActions([self.actions["undo"], self.actions["redo"]])
         menus["Model"].addAction(self.actions["new_material"])
         menus["Model"].addAction(self.actions["new_section"])
+        menus["Model"].addAction(self.actions["new_transformation"])
         menus["Geometry"].addActions([
             self.actions["node"], self.actions["line"], self.actions["frame"],
             self.actions["grid"], self.actions["extrude"],
@@ -892,6 +901,7 @@ class MainWindow(QMainWindow):
                 self.model,
                 self.project.materials,
                 self.project.sections,
+                self.project.transformations,
             )
         )
         self._selection_changed(self.selection.snapshot())
@@ -1020,10 +1030,31 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("section", tag))
             sections_root.addChild(item)
 
+        transformations_root = QTreeWidgetItem([
+            f"Transformations ({len(self.project.transformations)})"
+        ])
+        transformations_root.setIcon(0, studio_icon("transform"))
+        transformations_root.setData(
+            0,
+            Qt.UserRole,
+            ("transformations_root", None),
+        )
+        transformations_root.setExpanded(True)
+        root.addChild(transformations_root)
+
+        for tag in sorted(self.project.transformations):
+            transformation = self.project.transformations[tag]
+            item = QTreeWidgetItem([
+                f"{transformation.transformation_type} [{tag}]  "
+                f"{transformation.name}"
+            ])
+            item.setIcon(0, studio_icon("transform"))
+            item.setData(0, Qt.UserRole, ("transformation", tag))
+            transformations_root.addChild(item)
+
         fixed_count = sum(any(node.fixity) for node in self.model.nodes.values())
 
         for label, icon in (
-            (f"Transformations ({len(self.project.transformations)})", "transform"),
             (f"Boundary Conditions ({fixed_count})", "boundary"),
             (f"Time Series ({len(self.project.time_series)})", "timeseries"),
             (f"Load Patterns ({len(self.project.load_patterns)})", "load"),
@@ -1053,6 +1084,7 @@ class MainWindow(QMainWindow):
         elements: set[int] = set()
         material_tag: int | None = None
         section_tag: int | None = None
+        transformation_tag: int | None = None
 
         for item in self.tree.selectedItems():
             payload = item.data(0, Qt.UserRole)
@@ -1072,12 +1104,16 @@ class MainWindow(QMainWindow):
                 material_tag = int(tag)
             elif kind == "section":
                 section_tag = int(tag)
+            elif kind == "transformation":
+                transformation_tag = int(tag)
 
         self.selection.set_selection(nodes=nodes, elements=elements)
         if material_tag is not None:
             self._show_material_properties(material_tag)
         elif section_tag is not None:
             self._show_section_properties(section_tag)
+        elif transformation_tag is not None:
+            self._show_transformation_properties(transformation_tag)
 
     def _wire_selection(self) -> None:
         self.selection.changed.connect(self._selection_changed)
@@ -1983,6 +2019,153 @@ class MainWindow(QMainWindow):
             ))
         self.properties_panel.set_properties("Section", rows)
 
+    def _create_transformation(self) -> None:
+        dialog = TransformationDialog(
+            next_tag=self.project.next_transformation_tag(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            transformation = dialog.transformation_data()
+            self.project.add_transformation(transformation)
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Transformation Editor",
+                str(exc),
+            )
+            return
+
+        self._refresh_project_metadata(
+            f"Created {transformation.transformation_type} "
+            f"transformation {transformation.tag}"
+        )
+        self._show_transformation_properties(transformation.tag)
+        self._record_project_change(
+            f"Create transformation {transformation.tag}",
+            before,
+        )
+
+    def _edit_transformation(self, tag: int) -> None:
+        transformation = self.project.transformations.get(tag)
+        if transformation is None:
+            return
+
+        dialog = TransformationDialog(
+            transformation=transformation,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            updated = dialog.transformation_data()
+            self.project.update_transformation(tag, updated)
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Transformation Editor",
+                str(exc),
+            )
+            return
+
+        if updated.tag != tag:
+            for element in self.model.elements.values():
+                if element.transf_tag == tag:
+                    element.transf_tag = updated.tag
+
+        self._refresh_project_metadata(
+            f"Updated transformation {updated.tag}"
+        )
+        self._show_transformation_properties(updated.tag)
+        self._record_project_change(
+            f"Edit transformation {tag}",
+            before,
+        )
+
+    def _duplicate_transformation(self, tag: int) -> None:
+        source = self.project.transformations.get(tag)
+        if source is None:
+            return
+
+        new_tag = self.project.next_transformation_tag()
+        before = self.project.to_dict()
+        duplicate = TransformationData(
+            tag=new_tag,
+            name=f"{source.name} Copy",
+            transformation_type=source.transformation_type,
+            vecxz=source.vecxz,
+        )
+        self.project.add_transformation(duplicate)
+        self._refresh_project_metadata(
+            f"Duplicated transformation {tag} as {new_tag}"
+        )
+        self._show_transformation_properties(new_tag)
+        self._record_project_change(
+            f"Duplicate transformation {tag}",
+            before,
+        )
+
+    def _delete_transformation(self, tag: int) -> None:
+        transformation = self.project.transformations.get(tag)
+        if transformation is None:
+            return
+
+        used_by = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if element.transf_tag == tag
+        )
+        if used_by:
+            QMessageBox.warning(
+                self,
+                "Delete Transformation",
+                "Transformation is assigned to element(s): "
+                + ", ".join(map(str, used_by[:20]))
+                + ("..." if len(used_by) > 20 else ""),
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Delete Transformation",
+            f"Delete transformation {tag} ({transformation.name})?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        before = self.project.to_dict()
+        self.project.remove_transformation(tag)
+        self._refresh_project_metadata(
+            f"Deleted transformation {tag}"
+        )
+        self._record_project_change(
+            f"Delete transformation {tag}",
+            before,
+        )
+
+    def _show_transformation_properties(self, tag: int) -> None:
+        transformation = self.project.transformations.get(tag)
+        if transformation is None:
+            return
+        self.properties_panel.set_properties(
+            "Transformation",
+            [
+                ("Tag", transformation.tag),
+                ("Name", transformation.name),
+                ("Type", transformation.transformation_type),
+                ("vecxz X", f"{transformation.vecxz[0]:g}"),
+                ("vecxz Y", f"{transformation.vecxz[1]:g}"),
+                ("vecxz Z", f"{transformation.vecxz[2]:g}"),
+            ],
+        )
+
     def _create_named_selection(self) -> None:
         nodes, elements = self._selection_sets()
         if not nodes and not elements:
@@ -2078,6 +2261,30 @@ class MainWindow(QMainWindow):
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
+        if kind == "transformations_root":
+            create_action = menu.addAction("New Transformation...")
+            create_action.triggered.connect(self._create_transformation)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "transformation":
+            tag = int(value)
+            edit_action = menu.addAction("Edit...")
+            edit_action.triggered.connect(
+                lambda: self._edit_transformation(tag)
+            )
+            duplicate_action = menu.addAction("Duplicate")
+            duplicate_action.triggered.connect(
+                lambda: self._duplicate_transformation(tag)
+            )
+            menu.addSeparator()
+            delete_action = menu.addAction("Delete")
+            delete_action.triggered.connect(
+                lambda: self._delete_transformation(tag)
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
         if kind != "set":
             return
 
@@ -2113,6 +2320,8 @@ class MainWindow(QMainWindow):
             self._edit_material(int(value))
         elif kind == "section":
             self._edit_section(int(value))
+        elif kind == "transformation":
+            self._edit_transformation(int(value))
 
     def _select_named_selection(self, name: str) -> None:
         selection_set = self.project.selection_sets.get(name)

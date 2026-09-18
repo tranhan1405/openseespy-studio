@@ -9,7 +9,7 @@ from .model import StructuralModel
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 3
+PROJECT_FORMAT_VERSION = 4
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -187,6 +187,61 @@ class SectionData:
 
 
 @dataclass
+class TransformationData:
+    tag: int
+    name: str
+    transformation_type: str
+    vecxz: tuple[float, float, float] = (0.0, 0.0, 1.0)
+
+    def __post_init__(self) -> None:
+        self.tag = int(self.tag)
+        self.name = str(self.name).strip() or f"Transformation {self.tag}"
+        self.transformation_type = str(self.transformation_type)
+        if self.tag <= 0:
+            raise ValueError("Transformation tag must be a positive integer.")
+        if self.transformation_type not in {
+            "Linear",
+            "PDelta",
+            "Corotational",
+        }:
+            raise ValueError(
+                f"Unsupported transformation type: {self.transformation_type}"
+            )
+        self.vecxz = tuple(float(value) for value in self.vecxz)
+        if len(self.vecxz) != 3:
+            raise ValueError("Transformation orientation vector must have 3 values.")
+        if sum(value * value for value in self.vecxz) <= 1.0e-24:
+            raise ValueError("Transformation orientation vector cannot be zero.")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "transformation_type": self.transformation_type,
+            "vecxz": list(self.vecxz),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TransformationData":
+        raw_vec = data.get("vecxz", (0.0, 0.0, 1.0))
+        return cls(
+            tag=int(data["tag"]),
+            name=str(data.get("name", f"Transformation {data['tag']}")),
+            transformation_type=str(
+                data.get(
+                    "transformation_type",
+                    data.get("type", "Linear"),
+                )
+            ),
+            vecxz=(
+                float(raw_vec[0]),
+                float(raw_vec[1]),
+                float(raw_vec[2]),
+            ),
+        )
+
+
+@dataclass
 class SelectionSetData:
     name: str
     node_tags: set[int] = field(default_factory=set)
@@ -218,7 +273,7 @@ class ProjectDatabase:
     # Reserved object stores. They are persisted now so future editors can be
     # added without changing the top-level project architecture.
     sections: dict[int, SectionData] = field(default_factory=dict)
-    transformations: dict[str, dict[str, Any]] = field(default_factory=dict)
+    transformations: dict[int, TransformationData] = field(default_factory=dict)
     time_series: dict[str, dict[str, Any]] = field(default_factory=dict)
     load_patterns: dict[str, dict[str, Any]] = field(default_factory=dict)
     analyses: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -298,6 +353,39 @@ class ProjectDatabase:
             )
         )
 
+    def next_transformation_tag(self) -> int:
+        return max(self.transformations, default=0) + 1
+
+    def add_transformation(self, transformation: TransformationData) -> None:
+        if transformation.tag in self.transformations:
+            raise ValueError(
+                f"Transformation tag {transformation.tag} already exists."
+            )
+        self.transformations[transformation.tag] = transformation
+
+    def update_transformation(
+        self,
+        original_tag: int,
+        transformation: TransformationData,
+    ) -> None:
+        original_tag = int(original_tag)
+        if original_tag not in self.transformations:
+            raise ValueError(
+                f"Transformation tag {original_tag} does not exist."
+            )
+        if (
+            transformation.tag != original_tag
+            and transformation.tag in self.transformations
+        ):
+            raise ValueError(
+                f"Transformation tag {transformation.tag} already exists."
+            )
+        self.transformations.pop(original_tag)
+        self.transformations[transformation.tag] = transformation
+
+    def remove_transformation(self, tag: int) -> None:
+        self.transformations.pop(int(tag), None)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "format": PROJECT_FORMAT,
@@ -317,7 +405,10 @@ class ProjectDatabase:
                 self.sections[tag].to_dict()
                 for tag in sorted(self.sections)
             ],
-            "transformations": self.transformations,
+            "transformations": [
+                self.transformations[tag].to_dict()
+                for tag in sorted(self.transformations)
+            ],
             "time_series": self.time_series,
             "load_patterns": self.load_patterns,
             "analyses": self.analyses,
@@ -404,6 +495,44 @@ class ProjectDatabase:
 
         return sections
 
+    @staticmethod
+    def _load_transformations(raw: Any) -> dict[int, TransformationData]:
+        transformations: dict[int, TransformationData] = {}
+
+        if isinstance(raw, list):
+            for item in raw:
+                transformation = TransformationData.from_dict(dict(item))
+                if transformation.tag in transformations:
+                    raise ValueError(
+                        f"Duplicate transformation tag {transformation.tag}."
+                    )
+                transformations[transformation.tag] = transformation
+            return transformations
+
+        if isinstance(raw, dict):
+            for raw_tag, raw_data in raw.items():
+                if not isinstance(raw_data, dict):
+                    continue
+                data = dict(raw_data)
+                if "tag" not in data:
+                    try:
+                        data["tag"] = int(raw_tag)
+                    except (TypeError, ValueError):
+                        continue
+                data.setdefault(
+                    "name",
+                    f"Transformation {data['tag']}",
+                )
+                data.setdefault(
+                    "transformation_type",
+                    data.get("type", "Linear"),
+                )
+                data.setdefault("vecxz", [0.0, 0.0, 1.0])
+                transformation = TransformationData.from_dict(data)
+                transformations[transformation.tag] = transformation
+
+        return transformations
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectDatabase":
         project_format = data.get("format")
@@ -432,7 +561,7 @@ class ProjectDatabase:
             selection_sets=selection_sets,
             materials=cls._load_materials(data.get("materials", [])),
             sections=cls._load_sections(data.get("sections", [])),
-            transformations=dict(data.get("transformations", {})),
+            transformations=cls._load_transformations(data.get("transformations", [])),
             time_series=dict(data.get("time_series", {})),
             load_patterns=dict(data.get("load_patterns", {})),
             analyses=dict(data.get("analyses", {})),
