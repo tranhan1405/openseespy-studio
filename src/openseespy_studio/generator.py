@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .model import StructuralModel
-from .project import MaterialData
+from .project import MaterialData, SectionData
 
 
 @dataclass(slots=True)
@@ -100,9 +100,34 @@ def material_to_openseespy(material: MaterialData) -> str:
     raise ValueError(f"Unsupported material type: {material.material_type}")
 
 
+def section_to_openseespy(section: SectionData) -> list[str]:
+    p = section.parameters
+    if section.section_type == "Elastic":
+        return [
+            "ops.section('Elastic', "
+            f"{section.tag}, {p['E']:g}, {p['A']:g}, "
+            f"{p['Iz']:g}, {p['Iy']:g}, {p['G']:g}, {p['J']:g})"
+        ]
+
+    if section.section_type == "Fiber":
+        lines = [
+            f"ops.section('Fiber', {section.tag}, '-GJ', {p['GJ']:g})"
+        ]
+        for fiber in section.fibers:
+            lines.append(
+                "ops.fiber("
+                f"{fiber.y:g}, {fiber.z:g}, {fiber.area:g}, "
+                f"{fiber.material_tag})"
+            )
+        return lines
+
+    raise ValueError(f"Unsupported section type: {section.section_type}")
+
+
 def to_openseespy(
     model: StructuralModel,
     materials: dict[int, MaterialData] | None = None,
+    sections: dict[int, SectionData] | None = None,
 ) -> str:
     lines: list[str] = [
         "import openseespy.opensees as ops",
@@ -129,6 +154,11 @@ def to_openseespy(
         lines.extend(["", "# Materials"])
         for tag in sorted(materials):
             lines.append(material_to_openseespy(materials[tag]))
+
+    if sections:
+        lines.extend(["", "# Sections"])
+        for tag in sorted(sections):
+            lines.extend(section_to_openseespy(sections[tag]))
 
     lines.extend([
         "",

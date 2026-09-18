@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
 
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..model import StructuralModel
-from ..project import MaterialData, ProjectDatabase, SelectionSetData
+from ..project import MaterialData, ProjectDatabase, SectionData, SelectionSetData
 from .code_editor import CodeEditor
 from .geometry_dialogs import (
     ElementDialog,
@@ -53,6 +53,7 @@ from .geometry_dialogs import (
 )
 from .history import ProjectSnapshotCommand
 from .material_dialog import MaterialDialog
+from .section_dialog import SectionDialog
 from .icons import studio_icon
 from .results_panel import ResultsPanel
 from .selection import SelectionManager, parse_tag_expression
@@ -748,6 +749,13 @@ class MainWindow(QMainWindow):
             self._create_material,
             "Create OpenSees uniaxial material",
         )
+        self._make_action(
+            "new_section",
+            "New Section...",
+            "section",
+            self._create_section,
+            "Create OpenSees section",
+        )
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action("plot", "Plot", "plot", self._not_implemented, "Plot results")
 
@@ -757,6 +765,7 @@ class MainWindow(QMainWindow):
         menus["File"].addAction(self.actions["export_py"])
         menus["Edit"].addActions([self.actions["undo"], self.actions["redo"]])
         menus["Model"].addAction(self.actions["new_material"])
+        menus["Model"].addAction(self.actions["new_section"])
         menus["Geometry"].addActions([
             self.actions["node"], self.actions["line"], self.actions["frame"],
             self.actions["grid"], self.actions["extrude"],
@@ -879,7 +888,11 @@ class MainWindow(QMainWindow):
         )
         self._refresh_tree()
         self.script.setPlainText(
-            to_openseespy(self.model, self.project.materials)
+            to_openseespy(
+                self.model,
+                self.project.materials,
+                self.project.sections,
+            )
         )
         self._selection_changed(self.selection.snapshot())
 
@@ -990,10 +1003,26 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("material", tag))
             materials_root.addChild(item)
 
+        sections_root = QTreeWidgetItem([
+            f"Sections ({len(self.project.sections)})"
+        ])
+        sections_root.setIcon(0, studio_icon("section"))
+        sections_root.setData(0, Qt.UserRole, ("sections_root", None))
+        sections_root.setExpanded(True)
+        root.addChild(sections_root)
+
+        for tag in sorted(self.project.sections):
+            section = self.project.sections[tag]
+            item = QTreeWidgetItem([
+                f"{section.section_type} [{tag}]  {section.name}"
+            ])
+            item.setIcon(0, studio_icon("section"))
+            item.setData(0, Qt.UserRole, ("section", tag))
+            sections_root.addChild(item)
+
         fixed_count = sum(any(node.fixity) for node in self.model.nodes.values())
 
         for label, icon in (
-            (f"Sections ({len(self.project.sections)})", "section"),
             (f"Transformations ({len(self.project.transformations)})", "transform"),
             (f"Boundary Conditions ({fixed_count})", "boundary"),
             (f"Time Series ({len(self.project.time_series)})", "timeseries"),
@@ -1023,6 +1052,7 @@ class MainWindow(QMainWindow):
         nodes: set[int] = set()
         elements: set[int] = set()
         material_tag: int | None = None
+        section_tag: int | None = None
 
         for item in self.tree.selectedItems():
             payload = item.data(0, Qt.UserRole)
@@ -1040,10 +1070,14 @@ class MainWindow(QMainWindow):
                     elements.update(selection_set.element_tags)
             elif kind == "material":
                 material_tag = int(tag)
+            elif kind == "section":
+                section_tag = int(tag)
 
         self.selection.set_selection(nodes=nodes, elements=elements)
         if material_tag is not None:
             self._show_material_properties(material_tag)
+        elif section_tag is not None:
+            self._show_section_properties(section_tag)
 
     def _wire_selection(self) -> None:
         self.selection.changed.connect(self._selection_changed)
@@ -1765,6 +1799,17 @@ class MainWindow(QMainWindow):
         if material is None:
             return
 
+        used_by = self.project.sections_using_material(tag)
+        if used_by:
+            QMessageBox.warning(
+                self,
+                "Delete Material",
+                "Material is used by Fiber section(s): "
+                + ", ".join(map(str, used_by))
+                + ". Reassign those fibers first.",
+            )
+            return
+
         answer = QMessageBox.question(
             self,
             "Delete Material",
@@ -1797,6 +1842,146 @@ class MainWindow(QMainWindow):
             for key, value in material.parameters.items()
         )
         self.properties_panel.set_properties("Material", rows)
+
+    def _create_section(self) -> None:
+        dialog = SectionDialog(
+            self.project.materials,
+            next_tag=self.project.next_section_tag(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            section = dialog.section_data()
+            self.project.add_section(section)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Section Editor", str(exc))
+            return
+
+        self._refresh_project_metadata(
+            f"Created {section.section_type} section {section.tag}"
+        )
+        self._show_section_properties(section.tag)
+        self._record_project_change(
+            f"Create section {section.tag}",
+            before,
+        )
+
+    def _edit_section(self, tag: int) -> None:
+        section = self.project.sections.get(tag)
+        if section is None:
+            return
+
+        dialog = SectionDialog(
+            self.project.materials,
+            section=section,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            updated = dialog.section_data()
+            self.project.update_section(tag, updated)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Section Editor", str(exc))
+            return
+
+        self._refresh_project_metadata(
+            f"Updated section {updated.tag}"
+        )
+        self._show_section_properties(updated.tag)
+        self._record_project_change(
+            f"Edit section {tag}",
+            before,
+        )
+
+    def _duplicate_section(self, tag: int) -> None:
+        source = self.project.sections.get(tag)
+        if source is None:
+            return
+
+        new_tag = self.project.next_section_tag()
+        before = self.project.to_dict()
+        duplicate = SectionData.from_dict(source.to_dict())
+        duplicate.tag = new_tag
+        duplicate.name = f"{source.name} Copy"
+        self.project.add_section(duplicate)
+        self._refresh_project_metadata(
+            f"Duplicated section {tag} as {new_tag}"
+        )
+        self._show_section_properties(new_tag)
+        self._record_project_change(
+            f"Duplicate section {tag}",
+            before,
+        )
+
+    def _delete_section(self, tag: int) -> None:
+        section = self.project.sections.get(tag)
+        if section is None:
+            return
+
+        used_by = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if element.section_tag == tag
+        )
+        if used_by:
+            QMessageBox.warning(
+                self,
+                "Delete Section",
+                "Section is assigned to element(s): "
+                + ", ".join(map(str, used_by[:20]))
+                + ("..." if len(used_by) > 20 else ""),
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Delete Section",
+            f"Delete section {tag} ({section.name})?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        before = self.project.to_dict()
+        self.project.remove_section(tag)
+        self._refresh_project_metadata(f"Deleted section {tag}")
+        self._record_project_change(
+            f"Delete section {tag}",
+            before,
+        )
+
+    def _show_section_properties(self, tag: int) -> None:
+        section = self.project.sections.get(tag)
+        if section is None:
+            return
+
+        rows: list[tuple[str, object]] = [
+            ("Tag", section.tag),
+            ("Name", section.name),
+            ("Type", section.section_type),
+        ]
+        rows.extend(
+            (key, f"{value:g}")
+            for key, value in section.parameters.items()
+        )
+        if section.section_type == "Fiber":
+            rows.append(("Fibers", len(section.fibers)))
+            material_tags = sorted({
+                fiber.material_tag
+                for fiber in section.fibers
+            })
+            rows.append((
+                "Materials",
+                ", ".join(map(str, material_tags)) or "-",
+            ))
+        self.properties_panel.set_properties("Section", rows)
 
     def _create_named_selection(self) -> None:
         nodes, elements = self._selection_sets()
@@ -1869,6 +2054,30 @@ class MainWindow(QMainWindow):
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
+        if kind == "sections_root":
+            create_action = menu.addAction("New Section...")
+            create_action.triggered.connect(self._create_section)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "section":
+            tag = int(value)
+            edit_action = menu.addAction("Edit...")
+            edit_action.triggered.connect(
+                lambda: self._edit_section(tag)
+            )
+            duplicate_action = menu.addAction("Duplicate")
+            duplicate_action.triggered.connect(
+                lambda: self._duplicate_section(tag)
+            )
+            menu.addSeparator()
+            delete_action = menu.addAction("Delete")
+            delete_action.triggered.connect(
+                lambda: self._delete_section(tag)
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
         if kind != "set":
             return
 
@@ -1902,6 +2111,8 @@ class MainWindow(QMainWindow):
         kind, value = payload
         if kind == "material":
             self._edit_material(int(value))
+        elif kind == "section":
+            self._edit_section(int(value))
 
     def _select_named_selection(self, name: str) -> None:
         selection_set = self.project.selection_sets.get(name)

@@ -9,7 +9,7 @@ from .model import StructuralModel
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 2
+PROJECT_FORMAT_VERSION = 3
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -86,6 +86,106 @@ class MaterialData:
         )
 
 
+SECTION_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
+    "Elastic": ("E", "A", "Iz", "Iy", "G", "J"),
+    "Fiber": ("GJ",),
+}
+
+SECTION_DEFAULTS: dict[str, dict[str, float]] = {
+    "Elastic": {
+        "E": 2.0e11,
+        "A": 0.02,
+        "Iz": 8.0e-5,
+        "Iy": 8.0e-5,
+        "G": 7.6923e10,
+        "J": 8.0e-5,
+    },
+    "Fiber": {
+        "GJ": 1.0e6,
+    },
+}
+
+
+@dataclass
+class FiberData:
+    y: float
+    z: float
+    area: float
+    material_tag: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "y": float(self.y),
+            "z": float(self.z),
+            "area": float(self.area),
+            "material_tag": int(self.material_tag),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FiberData":
+        return cls(
+            y=float(data["y"]),
+            z=float(data["z"]),
+            area=float(data["area"]),
+            material_tag=int(data["material_tag"]),
+        )
+
+
+@dataclass
+class SectionData:
+    tag: int
+    name: str
+    section_type: str
+    parameters: dict[str, float] = field(default_factory=dict)
+    fibers: list[FiberData] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.tag = int(self.tag)
+        self.name = str(self.name).strip() or f"Section {self.tag}"
+        self.section_type = str(self.section_type)
+        if self.tag <= 0:
+            raise ValueError("Section tag must be a positive integer.")
+        if self.section_type not in SECTION_PARAMETER_ORDER:
+            raise ValueError(f"Unsupported section type: {self.section_type}")
+
+        defaults = SECTION_DEFAULTS[self.section_type]
+        self.parameters = {
+            key: float(self.parameters.get(key, defaults[key]))
+            for key in SECTION_PARAMETER_ORDER[self.section_type]
+        }
+        self.fibers = [
+            fiber if isinstance(fiber, FiberData) else FiberData.from_dict(fiber)
+            for fiber in self.fibers
+        ]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "section_type": self.section_type,
+            "parameters": dict(self.parameters),
+            "fibers": [fiber.to_dict() for fiber in self.fibers],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SectionData":
+        return cls(
+            tag=int(data["tag"]),
+            name=str(data.get("name", f"Section {data['tag']}")),
+            section_type=str(
+                data.get("section_type", data.get("type", "Elastic"))
+            ),
+            parameters={
+                str(key): float(value)
+                for key, value in dict(data.get("parameters", {})).items()
+            },
+            fibers=[
+                FiberData.from_dict(dict(item))
+                for item in data.get("fibers", [])
+            ],
+        )
+
+
 @dataclass
 class SelectionSetData:
     name: str
@@ -117,7 +217,7 @@ class ProjectDatabase:
 
     # Reserved object stores. They are persisted now so future editors can be
     # added without changing the top-level project architecture.
-    sections: dict[str, dict[str, Any]] = field(default_factory=dict)
+    sections: dict[int, SectionData] = field(default_factory=dict)
     transformations: dict[str, dict[str, Any]] = field(default_factory=dict)
     time_series: dict[str, dict[str, Any]] = field(default_factory=dict)
     load_patterns: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -151,6 +251,53 @@ class ProjectDatabase:
     def remove_material(self, tag: int) -> None:
         self.materials.pop(int(tag), None)
 
+    def next_section_tag(self) -> int:
+        return max(self.sections, default=0) + 1
+
+    def add_section(self, section: SectionData) -> None:
+        if section.tag in self.sections:
+            raise ValueError(f"Section tag {section.tag} already exists.")
+        self._validate_section_materials(section)
+        self.sections[section.tag] = section
+
+    def update_section(self, original_tag: int, section: SectionData) -> None:
+        original_tag = int(original_tag)
+        if original_tag not in self.sections:
+            raise ValueError(f"Section tag {original_tag} does not exist.")
+        if section.tag != original_tag and section.tag in self.sections:
+            raise ValueError(f"Section tag {section.tag} already exists.")
+        self._validate_section_materials(section)
+        self.sections.pop(original_tag)
+        self.sections[section.tag] = section
+
+    def remove_section(self, tag: int) -> None:
+        self.sections.pop(int(tag), None)
+
+    def _validate_section_materials(self, section: SectionData) -> None:
+        if section.section_type != "Fiber":
+            return
+        missing = sorted({
+            fiber.material_tag
+            for fiber in section.fibers
+            if fiber.material_tag not in self.materials
+        })
+        if missing:
+            raise ValueError(
+                "Fiber section references missing material tag(s): "
+                + ", ".join(map(str, missing))
+            )
+
+    def sections_using_material(self, material_tag: int) -> list[int]:
+        material_tag = int(material_tag)
+        return sorted(
+            section.tag
+            for section in self.sections.values()
+            if any(
+                fiber.material_tag == material_tag
+                for fiber in section.fibers
+            )
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "format": PROJECT_FORMAT,
@@ -166,7 +313,10 @@ class ProjectDatabase:
                 self.materials[tag].to_dict()
                 for tag in sorted(self.materials)
             ],
-            "sections": self.sections,
+            "sections": [
+                self.sections[tag].to_dict()
+                for tag in sorted(self.sections)
+            ],
             "transformations": self.transformations,
             "time_series": self.time_series,
             "load_patterns": self.load_patterns,
@@ -214,6 +364,46 @@ class ProjectDatabase:
 
         return materials
 
+    @staticmethod
+    def _load_sections(raw: Any) -> dict[int, SectionData]:
+        sections: dict[int, SectionData] = {}
+
+        if isinstance(raw, list):
+            for item in raw:
+                section = SectionData.from_dict(dict(item))
+                if section.tag in sections:
+                    raise ValueError(f"Duplicate section tag {section.tag}.")
+                sections[section.tag] = section
+            return sections
+
+        if isinstance(raw, dict):
+            for raw_tag, raw_data in raw.items():
+                if not isinstance(raw_data, dict):
+                    continue
+                data = dict(raw_data)
+                if "tag" not in data:
+                    try:
+                        data["tag"] = int(raw_tag)
+                    except (TypeError, ValueError):
+                        continue
+                data.setdefault("name", f"Section {data['tag']}")
+                data.setdefault(
+                    "section_type",
+                    data.get("type", "Elastic"),
+                )
+                if "parameters" not in data:
+                    section_type = str(data["section_type"])
+                    order = SECTION_PARAMETER_ORDER.get(section_type, ())
+                    data["parameters"] = {
+                        key: data[key]
+                        for key in order
+                        if key in data
+                    }
+                section = SectionData.from_dict(data)
+                sections[section.tag] = section
+
+        return sections
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectDatabase":
         project_format = data.get("format")
@@ -241,7 +431,7 @@ class ProjectDatabase:
             model=StructuralModel.from_dict(data.get("model", {})),
             selection_sets=selection_sets,
             materials=cls._load_materials(data.get("materials", [])),
-            sections=dict(data.get("sections", {})),
+            sections=cls._load_sections(data.get("sections", [])),
             transformations=dict(data.get("transformations", {})),
             time_series=dict(data.get("time_series", {})),
             load_patterns=dict(data.get("load_patterns", {})),
