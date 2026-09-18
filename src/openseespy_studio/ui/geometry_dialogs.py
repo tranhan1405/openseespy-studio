@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QLabel,
     QSpinBox,
     QVBoxLayout,
 )
@@ -82,11 +84,30 @@ class ElementDialog(_BaseDialog):
         self.group = QComboBox()
         self.group.setEditable(True)
         self.group.addItems(["frame", "column", "beam-x", "beam-y"])
+
+        self.integration_type = QComboBox()
+        self.integration_type.addItems(["Lobatto", "Legendre"])
+        self.integration_points = QSpinBox()
+        self.integration_points.setRange(2, 50)
+        self.integration_points.setValue(5)
+
         self.form.addRow("Tag:", self.tag)
         self.form.addRow("Node I:", self.node_i)
         self.form.addRow("Node J:", self.node_j)
         self.form.addRow("Type:", self.element_type)
         self.form.addRow("Group:", self.group)
+        self.form.addRow("Beam integration:", self.integration_type)
+        self.form.addRow("Integration points:", self.integration_points)
+
+        self.element_type.currentTextChanged.connect(
+            self._sync_formulation_controls
+        )
+        self._sync_formulation_controls(self.element_type.currentText())
+
+    def _sync_formulation_controls(self, element_type: str) -> None:
+        nonlinear = element_type in {"forceBeamColumn", "dispBeamColumn"}
+        self.integration_type.setEnabled(nonlinear)
+        self.integration_points.setEnabled(nonlinear)
 
     def values(self):
         return (
@@ -95,7 +116,100 @@ class ElementDialog(_BaseDialog):
             self.node_j.value(),
             self.element_type.currentText(),
             self.group.currentText().strip() or "frame",
+            self.integration_type.currentText(),
+            self.integration_points.value(),
         )
+
+
+class ElementFormulationDialog(_BaseDialog):
+    def __init__(
+        self,
+        *,
+        element_type: str = "elasticBeamColumn",
+        integration_type: str = "Lobatto",
+        integration_points: int = 5,
+        force_max_iter: int = 10,
+        force_tolerance: float = 1.0e-12,
+        mass_per_length: float = 0.0,
+        consistent_mass: bool = False,
+        parent=None,
+    ):
+        super().__init__("Element Formulation", parent)
+
+        self.element_type = QComboBox()
+        self.element_type.addItems([
+            "elasticBeamColumn",
+            "forceBeamColumn",
+            "dispBeamColumn",
+        ])
+        self.element_type.setCurrentText(element_type)
+
+        self.integration_type = QComboBox()
+        self.integration_type.addItems(["Lobatto", "Legendre"])
+        self.integration_type.setCurrentText(integration_type)
+
+        self.integration_points = QSpinBox()
+        self.integration_points.setRange(2, 50)
+        self.integration_points.setValue(int(integration_points))
+
+        self.force_max_iter = QSpinBox()
+        self.force_max_iter.setRange(1, 10000)
+        self.force_max_iter.setValue(int(force_max_iter))
+
+        self.force_tolerance = QDoubleSpinBox()
+        self.force_tolerance.setDecimals(14)
+        self.force_tolerance.setRange(1.0e-16, 1.0)
+        self.force_tolerance.setValue(float(force_tolerance))
+
+        self.mass_per_length = QDoubleSpinBox()
+        self.mass_per_length.setDecimals(10)
+        self.mass_per_length.setRange(0.0, 1.0e20)
+        self.mass_per_length.setValue(float(mass_per_length))
+
+        self.consistent_mass = QCheckBox(
+            "Use consistent mass matrix (dispBeamColumn)"
+        )
+        self.consistent_mass.setChecked(bool(consistent_mass))
+
+        self.form.addRow("Type:", self.element_type)
+        self.form.addRow("Beam integration:", self.integration_type)
+        self.form.addRow("Integration points:", self.integration_points)
+        self.form.addRow("Force max iterations:", self.force_max_iter)
+        self.form.addRow("Force tolerance:", self.force_tolerance)
+        self.form.addRow("Mass / length:", self.mass_per_length)
+        self.form.addRow("", self.consistent_mass)
+
+        note = QLabel(
+            "Lobatto places integration points at the member ends and is "
+            "the common distributed-plasticity choice for forceBeamColumn."
+        )
+        note.setWordWrap(True)
+        self.root.insertWidget(1, note)
+
+        self.element_type.currentTextChanged.connect(self._sync)
+        self._sync(self.element_type.currentText())
+
+    def _sync(self, element_type: str) -> None:
+        nonlinear = element_type in {"forceBeamColumn", "dispBeamColumn"}
+        force_based = element_type == "forceBeamColumn"
+        displacement_based = element_type == "dispBeamColumn"
+
+        self.integration_type.setEnabled(nonlinear)
+        self.integration_points.setEnabled(nonlinear)
+        self.force_max_iter.setEnabled(force_based)
+        self.force_tolerance.setEnabled(force_based)
+        self.consistent_mass.setEnabled(displacement_based)
+
+    def values(self) -> dict[str, object]:
+        return {
+            "element_type": self.element_type.currentText(),
+            "integration_type": self.integration_type.currentText(),
+            "integration_points": self.integration_points.value(),
+            "force_max_iter": self.force_max_iter.value(),
+            "force_tolerance": self.force_tolerance.value(),
+            "mass_per_length": self.mass_per_length.value(),
+            "consistent_mass": self.consistent_mass.isChecked(),
+        }
 
 
 class VectorDialog(_BaseDialog):

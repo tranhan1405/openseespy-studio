@@ -131,7 +131,7 @@ def test_zero_length_and_duplicate_geometry_are_detected():
 
 def test_unsupported_element_formulation_blocks_run():
     project = _frame_project()
-    project.model.elements[1].element_type = "forceBeamColumn"
+    project.model.elements[1].element_type = "truss"
 
     issues = validate_project(project)
 
@@ -290,5 +290,70 @@ def test_self_weight_without_density_is_blocked():
         issue.severity == "ERROR"
         and issue.category == "Self weight"
         and "linked material density" in issue.message
+        for issue in issues
+    )
+
+
+
+def test_force_beam_column_with_fiber_section_is_supported():
+    from openseespy_studio.project import FiberData, MaterialData
+
+    project = _frame_project()
+    project.materials[1] = MaterialData(
+        1, "Steel", "Elastic", {"E": 200e9}
+    )
+    project.sections[2] = SectionData(
+        2,
+        "Fiber",
+        "Fiber",
+        {"GJ": 1.0e6},
+        fibers=[
+            FiberData(-0.1, 0.0, 1.0e-4, 1),
+            FiberData(0.1, 0.0, 1.0e-4, 1),
+        ],
+    )
+    project.model.elements[1].section_tag = 2
+    project.model.assign_element_formulation(
+        {1},
+        element_type="forceBeamColumn",
+        integration_type="Lobatto",
+        integration_points=5,
+    )
+
+    issues = validate_project(project)
+
+    assert not any(
+        issue.severity == "ERROR"
+        and issue.entity_tag == 1
+        and issue.category in {"Element formulation", "Beam integration"}
+        for issue in issues
+    )
+
+
+def test_elastic_beam_column_with_fiber_section_is_rejected():
+    from openseespy_studio.project import FiberData, MaterialData
+
+    project = _frame_project()
+    project.materials[1] = MaterialData(
+        1, "Steel", "Elastic", {"E": 200e9}
+    )
+    project.sections[2] = SectionData(
+        2,
+        "Fiber",
+        "Fiber",
+        {"GJ": 1.0e6},
+        fibers=[
+            FiberData(-0.1, 0.0, 1.0e-4, 1),
+            FiberData(0.1, 0.0, 1.0e-4, 1),
+        ],
+    )
+    project.model.elements[1].section_tag = 2
+
+    issues = validate_project(project)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.entity_tag == 1
+        and "cannot use Fiber section" in issue.message
         for issue in issues
     )

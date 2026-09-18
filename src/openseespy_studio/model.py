@@ -41,6 +41,44 @@ class Element:
     section_tag: int | None = None
     transf_tag: int | None = None
     group: str = "frame"
+    integration_type: str = "Lobatto"
+    integration_points: int = 5
+    force_max_iter: int = 10
+    force_tolerance: float = 1.0e-12
+    mass_per_length: float = 0.0
+    consistent_mass: bool = False
+
+    def __post_init__(self) -> None:
+        self.tag = int(self.tag)
+        self.i = int(self.i)
+        self.j = int(self.j)
+        self.element_type = str(self.element_type)
+        self.group = str(self.group)
+        self.integration_type = str(self.integration_type)
+        self.integration_points = int(self.integration_points)
+        self.force_max_iter = int(self.force_max_iter)
+        self.force_tolerance = float(self.force_tolerance)
+        self.mass_per_length = float(self.mass_per_length)
+        self.consistent_mass = bool(self.consistent_mass)
+        self.section_tag = (
+            None if self.section_tag is None else int(self.section_tag)
+        )
+        self.transf_tag = (
+            None if self.transf_tag is None else int(self.transf_tag)
+        )
+
+        if self.integration_type not in {"Lobatto", "Legendre"}:
+            raise ValueError(
+                f"Unsupported beam integration type: {self.integration_type}"
+            )
+        if self.integration_points < 2:
+            raise ValueError("Beam integration needs at least 2 points.")
+        if self.force_max_iter < 1:
+            raise ValueError("Force-based element max iterations must be >= 1.")
+        if self.force_tolerance <= 0.0:
+            raise ValueError("Force-based element tolerance must be positive.")
+        if self.mass_per_length < 0.0:
+            raise ValueError("Element mass per length cannot be negative.")
 
 
 @dataclass
@@ -71,12 +109,32 @@ class StructuralModel:
         section_tag: int | None = None,
         transf_tag: int | None = None,
         group: str = "frame",
+        integration_type: str = "Lobatto",
+        integration_points: int = 5,
+        force_max_iter: int = 10,
+        force_tolerance: float = 1.0e-12,
+        mass_per_length: float = 0.0,
+        consistent_mass: bool = False,
     ) -> Element:
         if tag in self.elements:
             raise ValueError(f"Element tag {tag} already exists")
         if i not in self.nodes or j not in self.nodes:
             raise ValueError(f"Element {tag} references missing nodes {i}, {j}")
-        ele = Element(tag, i, j, element_type, section_tag, transf_tag, group)
+        ele = Element(
+            tag,
+            i,
+            j,
+            element_type,
+            section_tag,
+            transf_tag,
+            group,
+            integration_type,
+            integration_points,
+            force_max_iter,
+            force_tolerance,
+            mass_per_length,
+            consistent_mass,
+        )
         self.elements[tag] = ele
         return ele
 
@@ -189,6 +247,42 @@ class StructuralModel:
             element.section_tag = value
             assigned.add(element.tag)
         return assigned
+
+    def assign_element_formulation(
+        self,
+        element_tags: Iterable[int],
+        *,
+        element_type: str,
+        integration_type: str = "Lobatto",
+        integration_points: int = 5,
+        force_max_iter: int = 10,
+        force_tolerance: float = 1.0e-12,
+        mass_per_length: float = 0.0,
+        consistent_mass: bool = False,
+    ) -> set[int]:
+        updated: set[int] = set()
+        for tag in element_tags:
+            element = self.elements.get(int(tag))
+            if element is None:
+                continue
+            candidate = Element(
+                tag=element.tag,
+                i=element.i,
+                j=element.j,
+                element_type=element_type,
+                section_tag=element.section_tag,
+                transf_tag=element.transf_tag,
+                group=element.group,
+                integration_type=integration_type,
+                integration_points=integration_points,
+                force_max_iter=force_max_iter,
+                force_tolerance=force_tolerance,
+                mass_per_length=mass_per_length,
+                consistent_mass=consistent_mass,
+            )
+            self.elements[element.tag] = candidate
+            updated.add(element.tag)
+        return updated
 
     def assign_transformation(
         self,
@@ -380,6 +474,12 @@ class StructuralModel:
                     source.section_tag,
                     source.transf_tag,
                     source.group,
+                    source.integration_type,
+                    source.integration_points,
+                    source.force_max_iter,
+                    source.force_tolerance,
+                    source.mass_per_length,
+                    source.consistent_mass,
                 )
                 created_elements.add(new_tag)
 
@@ -408,6 +508,12 @@ class StructuralModel:
                     "section_tag": element.section_tag,
                     "transf_tag": element.transf_tag,
                     "group": element.group,
+                    "integration_type": element.integration_type,
+                    "integration_points": element.integration_points,
+                    "force_max_iter": element.force_max_iter,
+                    "force_tolerance": element.force_tolerance,
+                    "mass_per_length": element.mass_per_length,
+                    "consistent_mass": element.consistent_mass,
                 }
                 for element in sorted(self.elements.values(), key=lambda item: item.tag)
             ],
@@ -455,6 +561,12 @@ class StructuralModel:
                 item.get("section_tag"),
                 item.get("transf_tag"),
                 str(item.get("group", "frame")),
+                str(item.get("integration_type", "Lobatto")),
+                int(item.get("integration_points", 5)),
+                int(item.get("force_max_iter", 10)),
+                float(item.get("force_tolerance", 1.0e-12)),
+                float(item.get("mass_per_length", 0.0)),
+                bool(item.get("consistent_mass", False)),
             )
 
         return model

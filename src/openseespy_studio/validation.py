@@ -13,7 +13,11 @@ FRAME_ELEMENT_TYPES = {
     "forceBeamColumn",
     "dispBeamColumn",
 }
-SUPPORTED_ELEMENT_TYPES = {"elasticBeamColumn"}
+SUPPORTED_ELEMENT_TYPES = {
+    "elasticBeamColumn",
+    "forceBeamColumn",
+    "dispBeamColumn",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,7 +157,7 @@ def _element_geometry_checks(
                     f"Element {tag} has no section assigned.",
                     "element",
                     tag,
-                    "Assign an Elastic section before running.",
+                    "Assign a section before running.",
                 )
             )
         else:
@@ -170,18 +174,36 @@ def _element_geometry_checks(
                         "Assign an existing section.",
                     )
                 )
-            elif section.section_type != "Elastic":
+            elif (
+                element.element_type == "elasticBeamColumn"
+                and section.section_type != "Elastic"
+            ):
                 issues.append(
                     ValidationIssue(
                         "ERROR",
                         "Element formulation",
-                        f"Element {tag} uses {section.section_type} section "
-                        f"{section.tag}, but nonlinear beam-section generation "
-                        "is not implemented yet.",
+                        f"elasticBeamColumn element {tag} cannot use "
+                        f"{section.section_type} section {section.tag} in the "
+                        "current 3D generator.",
                         "element",
                         tag,
-                        "Use an Elastic section for the current "
-                        "elasticBeamColumn workflow.",
+                        "Use an Elastic section, or switch the element to "
+                        "forceBeamColumn / dispBeamColumn for Fiber sections.",
+                    )
+                )
+            elif (
+                element.element_type
+                in {"forceBeamColumn", "dispBeamColumn"}
+                and element.integration_points < 2
+            ):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Beam integration",
+                        f"Element {tag} needs at least 2 integration points.",
+                        "element",
+                        tag,
+                        "Increase the integration-point count.",
                     )
                 )
 

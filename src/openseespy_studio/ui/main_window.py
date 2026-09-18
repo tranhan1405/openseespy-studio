@@ -54,6 +54,7 @@ from .connection_dialog import ConnectionDialog
 from .constraint_dialog import ConstraintDialog
 from .geometry_dialogs import (
     ElementDialog,
+    ElementFormulationDialog,
     MirrorDialog,
     NodeDialog,
     RotateDialog,
@@ -881,6 +882,13 @@ class MainWindow(QMainWindow):
             "Assign geometric transformation to selected elements",
         )
         self._make_action(
+            "element_formulation",
+            "Element Formulation...",
+            "element",
+            self._set_element_formulation,
+            "Set elastic, force-based, or displacement-based formulation",
+        )
+        self._make_action(
             "support",
             "Support...",
             "boundary",
@@ -929,6 +937,7 @@ class MainWindow(QMainWindow):
         menus["Model"].addSeparator()
         menus["Model"].addAction(self.actions["assign_section"])
         menus["Model"].addAction(self.actions["assign_transformation"])
+        menus["Model"].addAction(self.actions["element_formulation"])
         menus["Geometry"].addActions([
             self.actions["node"], self.actions["line"], self.actions["frame"],
             self.actions["grid"], self.actions["extrude"],
@@ -1736,6 +1745,32 @@ class MainWindow(QMainWindow):
                     ("Group", element.group),
                     ("Section", section_text),
                     ("Transformation", transformation_text),
+                    (
+                        "Integration",
+                        (
+                            f"{element.integration_type} × "
+                            f"{element.integration_points}"
+                            if element.element_type
+                            in {"forceBeamColumn", "dispBeamColumn"}
+                            else "-"
+                        ),
+                    ),
+                    (
+                        "Force iter/tol",
+                        (
+                            f"{element.force_max_iter} / "
+                            f"{element.force_tolerance:g}"
+                            if element.element_type == "forceBeamColumn"
+                            else "-"
+                        ),
+                    ),
+                    ("Mass / length", f"{element.mass_per_length:g}"),
+                    (
+                        "Mass matrix",
+                        "Consistent"
+                        if element.consistent_mass
+                        else "Lumped",
+                    ),
                 ],
             )
 
@@ -1801,6 +1836,13 @@ class MainWindow(QMainWindow):
         beam_load_action = menu.addAction("Create Beam Load...")
         beam_load_action.setEnabled(bool(self.selection.elements))
         beam_load_action.triggered.connect(self._create_element_load)
+        formulation_action = menu.addAction(
+            "Element Formulation..."
+        )
+        formulation_action.setEnabled(bool(self.selection.elements))
+        formulation_action.triggered.connect(
+            self._set_element_formulation
+        )
 
         menu.addSeparator()
         assign_menu = menu.addMenu("Assign")
@@ -2373,6 +2415,111 @@ class MainWindow(QMainWindow):
             return None
         return tags
 
+    def _set_element_formulation(self) -> None:
+        element_tags = self._selected_element_tags(
+            "Element Formulation"
+        )
+        if element_tags is None:
+            return
+
+        selected = [
+            self.model.elements[tag]
+            for tag in sorted(element_tags)
+            if tag in self.model.elements
+        ]
+        first = selected[0]
+        same_type = all(
+            element.element_type == first.element_type
+            for element in selected
+        )
+        same_integration = all(
+            (
+                element.integration_type,
+                element.integration_points,
+                element.force_max_iter,
+                element.force_tolerance,
+                element.mass_per_length,
+                element.consistent_mass,
+            )
+            == (
+                first.integration_type,
+                first.integration_points,
+                first.force_max_iter,
+                first.force_tolerance,
+                first.mass_per_length,
+                first.consistent_mass,
+            )
+            for element in selected
+        )
+
+        dialog = ElementFormulationDialog(
+            element_type=(
+                first.element_type
+                if same_type and first.element_type
+                in {
+                    "elasticBeamColumn",
+                    "forceBeamColumn",
+                    "dispBeamColumn",
+                }
+                else "elasticBeamColumn"
+            ),
+            integration_type=(
+                first.integration_type
+                if same_integration
+                else "Lobatto"
+            ),
+            integration_points=(
+                first.integration_points
+                if same_integration
+                else 5
+            ),
+            force_max_iter=(
+                first.force_max_iter
+                if same_integration
+                else 10
+            ),
+            force_tolerance=(
+                first.force_tolerance
+                if same_integration
+                else 1.0e-12
+            ),
+            mass_per_length=(
+                first.mass_per_length
+                if same_integration
+                else 0.0
+            ),
+            consistent_mass=(
+                first.consistent_mass
+                if same_integration
+                else False
+            ),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            updated = self.model.assign_element_formulation(
+                element_tags,
+                **dialog.values(),
+            )
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Element Formulation",
+                str(exc),
+            )
+            return
+
+        self._refresh_project_metadata(
+            f"Updated formulation for {len(updated)} element(s)"
+        )
+        self._record_project_change(
+            "Set element formulation",
+            before,
+        )
+
     def _assign_section_to_selection(self) -> None:
         element_tags = self._selected_element_tags("Assign Section")
         if element_tags is None:
@@ -2525,7 +2672,15 @@ class MainWindow(QMainWindow):
         )
         if not dialog.exec():
             return
-        tag, i, j, element_type, group = dialog.values()
+        (
+            tag,
+            i,
+            j,
+            element_type,
+            group,
+            integration_type,
+            integration_points,
+        ) = dialog.values()
         before = self.project.to_dict()
         try:
             if tag in self.project.connections:
@@ -2538,6 +2693,8 @@ class MainWindow(QMainWindow):
                 j,
                 element_type=element_type,
                 group=group,
+                integration_type=integration_type,
+                integration_points=integration_points,
             )
         except ValueError as exc:
             QMessageBox.warning(self, "Create Element", str(exc))
@@ -3879,6 +4036,33 @@ class MainWindow(QMainWindow):
             clear_mass.triggered.connect(self._clear_mass)
             nodal_load = menu.addAction("Create Nodal Load...")
             nodal_load.triggered.connect(self._create_nodal_load)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "element":
+            tag = int(value)
+            if tag not in self.selection.elements:
+                self.selection.select("element", tag, "replace")
+            properties_action = menu.addAction("Properties")
+            properties_action.triggered.connect(
+                lambda: self._show_entity_properties("element", tag)
+            )
+            formulation = menu.addAction("Element Formulation...")
+            formulation.triggered.connect(
+                self._set_element_formulation
+            )
+            section_action = menu.addAction("Assign Section...")
+            section_action.triggered.connect(
+                self._assign_section_to_selection
+            )
+            transformation_action = menu.addAction(
+                "Assign Transformation..."
+            )
+            transformation_action.triggered.connect(
+                self._assign_transformation_to_selection
+            )
+            beam_load = menu.addAction("Create Beam Load...")
+            beam_load.triggered.connect(self._create_element_load)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 

@@ -1,6 +1,6 @@
 from openseespy_studio.generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from openseespy_studio.model import StructuralModel
-from openseespy_studio.project import SectionData, TransformationData
+from openseespy_studio.project import FiberData, MaterialData, SectionData, TransformationData
 
 
 def elastic_section(tag: int = 3) -> SectionData:
@@ -101,3 +101,122 @@ def test_generator_uses_assigned_elastic_section_and_transformation():
         "0.025, 2.1e+11, 8e+10, 6e-05, 7e-05, 9e-05, 4)"
         in script
     )
+
+
+
+def test_force_beam_column_uses_real_beam_integration_and_fiber_section():
+    model = StructuralModel()
+    model.add_node(1, 0, 0, 0)
+    model.add_node(2, 3, 0, 0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=2,
+        transf_tag=4,
+        integration_type="Lobatto",
+        integration_points=6,
+        force_max_iter=20,
+        force_tolerance=1.0e-10,
+    )
+    materials = {
+        1: MaterialData(
+            1,
+            "Steel",
+            "Elastic",
+            {"E": 200e9},
+        )
+    }
+    sections = {
+        2: SectionData(
+            2,
+            "Fiber",
+            "Fiber",
+            {"GJ": 1.0e6},
+            fibers=[
+                FiberData(-0.1, 0.0, 1.0e-4, 1),
+                FiberData(0.1, 0.0, 1.0e-4, 1),
+            ],
+        )
+    }
+    transformations = {
+        4: TransformationData(
+            4,
+            "Linear",
+            "Linear",
+            (0.0, 0.0, 1.0),
+        )
+    }
+
+    script = to_openseespy(
+        model,
+        materials=materials,
+        sections=sections,
+        transformations=transformations,
+    )
+
+    assert "ops.section('Fiber', 2, '-GJ', 1e+06)" in script
+    assert "ops.beamIntegration('Lobatto', 1, 2, 6)" in script
+    assert (
+        "ops.element('forceBeamColumn', 1, 1, 2, 4, 1, "
+        "'-iter', 20, 1e-10)"
+        in script
+    )
+    assert "full nonlinear element generation is not implemented" not in script
+
+
+def test_disp_beam_column_uses_real_beam_integration():
+    model = StructuralModel()
+    model.add_node(1, 0, 0, 0)
+    model.add_node(2, 3, 0, 0)
+    model.add_element(
+        8,
+        1,
+        2,
+        element_type="dispBeamColumn",
+        section_tag=3,
+        transf_tag=4,
+        integration_type="Legendre",
+        integration_points=5,
+        mass_per_length=2.5,
+        consistent_mass=True,
+    )
+    sections = {3: elastic_section(3)}
+    transformations = {4: transformation(4)}
+
+    script = to_openseespy(
+        model,
+        sections=sections,
+        transformations=transformations,
+    )
+
+    assert "ops.beamIntegration('Legendre', 8, 3, 5)" in script
+    assert (
+        "ops.element('dispBeamColumn', 8, 1, 2, 4, 8, "
+        "'-cMass', '-mass', 2.5)"
+        in script
+    )
+
+
+def test_truss_is_not_silently_replaced_by_elastic_beam():
+    model = StructuralModel()
+    model.add_node(1, 0, 0, 0)
+    model.add_node(2, 1, 0, 0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="truss",
+        section_tag=3,
+        transf_tag=4,
+    )
+
+    script = to_openseespy(
+        model,
+        sections={3: elastic_section(3)},
+        transformations={4: transformation(4)},
+    )
+
+    assert "type 'truss' is not implemented" in script
+    assert "ops.element('elasticBeamColumn', 1" not in script

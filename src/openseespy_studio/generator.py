@@ -626,36 +626,83 @@ def to_openseespy(
             )
             continue
 
+        if e.section_tag is None:
+            lines.append(
+                f"# ERROR: Element {tag} has no section assigned; "
+                "element not generated."
+            )
+            continue
         assigned_section = (
             sections.get(e.section_tag)
-            if sections is not None and e.section_tag is not None
+            if sections is not None
             else None
         )
-
-        if (
-            e.element_type == "elasticBeamColumn"
-            and assigned_section is not None
-            and assigned_section.section_type == "Elastic"
-        ):
-            p = assigned_section.resolved_elastic_parameters(materials)
+        if assigned_section is None:
             lines.append(
-                "ops.element('elasticBeamColumn', "
-                f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
-                f"{p['G']:g}, {p['J']:g}, {p['Iy']:g}, {p['Iz']:g}, "
-                f"{transf_tag})"
+                f"# ERROR: Element {tag} references missing section "
+                f"{e.section_tag}; element not generated."
             )
             continue
 
-        if assigned_section is not None and assigned_section.section_type != "Elastic":
+        if e.element_type == "elasticBeamColumn":
+            if assigned_section.section_type != "Elastic":
+                lines.append(
+                    f"# ERROR: elasticBeamColumn element {tag} requires an "
+                    "Elastic section in the current Studio generator; "
+                    "element not generated."
+                )
+                continue
+            p = assigned_section.resolved_elastic_parameters(materials)
+            args = (
+                "ops.element('elasticBeamColumn', "
+                f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
+                f"{p['G']:g}, {p['J']:g}, {p['Iy']:g}, {p['Iz']:g}, "
+                f"{transf_tag}"
+            )
+            if e.mass_per_length > 0.0:
+                args += f", '-mass', {e.mass_per_length:g}"
+                if e.consistent_mass:
+                    args += ", '-cMass'"
+            args += ")"
+            lines.append(args)
+            continue
+
+        if e.element_type in {"forceBeamColumn", "dispBeamColumn"}:
+            integration_tag = tag
             lines.append(
-                f"# WARNING: Element {tag} ({e.element_type}) is assigned "
-                f"section {assigned_section.tag} ({assigned_section.section_type}); "
-                "full nonlinear element generation is not implemented yet."
+                "ops.beamIntegration("
+                f"'{e.integration_type}', {integration_tag}, "
+                f"{assigned_section.tag}, {e.integration_points})"
             )
 
+            if e.element_type == "forceBeamColumn":
+                args = (
+                    "ops.element('forceBeamColumn', "
+                    f"{tag}, {e.i}, {e.j}, {transf_tag}, "
+                    f"{integration_tag}, '-iter', {e.force_max_iter}, "
+                    f"{e.force_tolerance:g}"
+                )
+                if e.mass_per_length > 0.0:
+                    args += f", '-mass', {e.mass_per_length:g}"
+                args += ")"
+                lines.append(args)
+            else:
+                args = (
+                    "ops.element('dispBeamColumn', "
+                    f"{tag}, {e.i}, {e.j}, {transf_tag}, "
+                    f"{integration_tag}"
+                )
+                if e.consistent_mass:
+                    args += ", '-cMass'"
+                if e.mass_per_length > 0.0:
+                    args += f", '-mass', {e.mass_per_length:g}"
+                args += ")"
+                lines.append(args)
+            continue
+
         lines.append(
-            "ops.element('elasticBeamColumn', "
-            f"{tag}, {e.i}, {e.j}, A, E, G, J, Iy, Iz, {transf_tag})"
+            f"# ERROR: Element {tag} type {e.element_type!r} is not "
+            "implemented by the Studio generator; element not generated."
         )
 
     if connections:

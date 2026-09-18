@@ -43,8 +43,67 @@ def test_model_round_trip_dict():
         section_tag=3,
         transf_tag=2,
         group="column",
+        integration_type="Legendre",
+        integration_points=7,
+        force_max_iter=25,
+        force_tolerance=1.0e-10,
+        mass_per_length=12.5,
+        consistent_mass=True,
     )
 
     restored = StructuralModel.from_dict(model.to_dict())
 
     assert restored.to_dict() == model.to_dict()
+
+
+
+def test_bulk_assign_element_formulation():
+    model = StructuralModel()
+    model.add_node(1, 0, 0, 0)
+    model.add_node(2, 1, 0, 0)
+    model.add_node(3, 2, 0, 0)
+    model.add_element(1, 1, 2)
+    model.add_element(2, 2, 3)
+
+    updated = model.assign_element_formulation(
+        {1, 2},
+        element_type="forceBeamColumn",
+        integration_type="Lobatto",
+        integration_points=6,
+        force_max_iter=30,
+        force_tolerance=1.0e-11,
+        mass_per_length=5.0,
+    )
+
+    assert updated == {1, 2}
+    assert all(
+        element.element_type == "forceBeamColumn"
+        for element in model.elements.values()
+    )
+    assert all(
+        element.integration_points == 6
+        for element in model.elements.values()
+    )
+    assert all(
+        element.force_max_iter == 30
+        for element in model.elements.values()
+    )
+
+
+def test_invalid_beam_integration_settings_are_rejected():
+    model = StructuralModel()
+    model.add_node(1, 0, 0, 0)
+    model.add_node(2, 1, 0, 0)
+
+    try:
+        model.add_element(
+            1,
+            1,
+            2,
+            element_type="forceBeamColumn",
+            integration_points=1,
+        )
+    except ValueError as exc:
+        assert "at least 2 points" in str(exc)
+    else:
+        raise AssertionError("Expected integration-point validation failure")
