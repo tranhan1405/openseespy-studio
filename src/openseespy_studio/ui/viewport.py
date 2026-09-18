@@ -60,6 +60,8 @@ class ModelViewport(QWidget):
         self._element_actor_data: dict[str, tuple[object, np.ndarray]] = {}
         self._left_press_pos: tuple[int, int] | None = None
         self._right_press_pos: tuple[int, int] | None = None
+        self._nav_mode: str | None = None
+        self._nav_last_pos: tuple[float, float] | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -139,6 +141,7 @@ class ModelViewport(QWidget):
         self.plotter.interactor.setStyleSheet(
             "border: 1px solid #cbd4de; background: #edf2f6;"
         )
+        self.plotter.interactor.setMouseTracking(True)
         layout.addWidget(self.plotter.interactor, 1)
 
         self._current_view = "iso"
@@ -151,20 +154,15 @@ class ModelViewport(QWidget):
         self._reset_scene()
 
     def _install_mouse_observers(self) -> None:
-        self.plotter.iren.add_observer("LeftButtonPressEvent", self._on_left_press)
-        self.plotter.iren.add_observer("LeftButtonReleaseEvent", self._on_left_release)
-        self.plotter.iren.add_observer("RightButtonPressEvent", self._on_right_press)
-        self.plotter.iren.add_observer("RightButtonReleaseEvent", self._on_right_release)
-        self.plotter.iren.add_observer("MouseMoveEvent", self._on_mouse_move)
+        # All viewport mouse input is handled through Qt so the default VTK
+        # left/right-drag navigation cannot conflict with selection/context menus.
         self.plotter.interactor.installEventFilter(self)
 
-    def _event_position(self) -> tuple[int, int]:
-        try:
-            pos = self.plotter.iren.get_event_position()
-            return int(pos[0]), int(pos[1])
-        except Exception:
-            pos = self.plotter.interactor.GetEventPosition()
-            return int(pos[0]), int(pos[1])
+    def _vtk_position_from_qt(self, event) -> tuple[int, int]:
+        pos = event.position()
+        x = int(pos.x())
+        y = int(self.plotter.interactor.height() - pos.y())
+        return x, y
 
     @staticmethod
     def _moved(a: tuple[int, int] | None, b: tuple[int, int], tol: int = 5) -> bool:
@@ -181,59 +179,105 @@ class ModelViewport(QWidget):
         except Exception:
             return str(id(actor))
 
-    def _selection_mode_from_keyboard(self) -> str:
-        modifiers = QApplication.keyboardModifiers()
+    @staticmethod
+    def _selection_mode_from_modifiers(modifiers) -> str:
         if modifiers & Qt.ControlModifier:
             return "toggle"
         if modifiers & Qt.ShiftModifier:
             return "add"
         return "replace"
 
-    def _on_left_press(self, *args) -> None:
-        self._left_press_pos = self._event_position()
+    def _start_navigation(self, modifiers, pos: tuple[float, float]) -> None:
+        # ANSYS-style current navigation:
+        # MMB = rotate, Ctrl+MMB = pan, Shift+MMB = zoom.
+        ctrl = bool(modifiers & Qt.ControlModifier)
+        shift = bool(modifiers & Qt.ShiftModifier)
+        if ctrl and shift:
+            self._nav_mode = None
+        elif ctrl:
+            self._nav_mode = "pan"
+        elif shift:
+            self._nav_mode = "zoom"
+        else:
+            self._nav_mode = "rotate"
+        self._nav_last_pos = pos
+        self._hover_ref = None
+        self._update_highlight_overlays()
 
-    def _on_left_release(self, *args) -> None:
-        pos = self._event_position()
-        if self._moved(self._left_press_pos, pos):
+    def _navigate(self, pos: tuple[float, float]) -> None:
+        if self._nav_mode is None or self._nav_last_pos is None:
             return
-        entity = self.pick_entity(*pos)
-        payload = {
-            "kind": entity[0] if entity else None,
-            "tag": entity[1] if entity else None,
-            "mode": self._selection_mode_from_keyboard(),
-        }
-        self.entity_clicked.emit(payload)
 
-    def eventFilter(self, obj, event):
-        if (
-            obj is self.plotter.interactor
-            and event.type() == QEvent.MouseButtonDblClick
-            and event.button() == Qt.LeftButton
-        ):
-            pos = event.position()
-            x = int(pos.x())
-            y = int(self.plotter.interactor.height() - pos.y())
-            entity = self.pick_entity(x, y)
-            if entity:
-                self.entity_double_clicked.emit(
-                    {"kind": entity[0], "tag": entity[1]}
+        dx = pos[0] - self._nav_last_pos[0]
+        dy = pos[1] - self._nav_last_pos[1]
+        self._nav_last_pos = pos
+
+        if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+            return
+
+        camera = self.plotter.camera
+
+        if self._nav_mode == "rotate":
+            camera.Azimuth(-dx * 0.35)
+            camera.Elevation(dy * 0.35)
+            camera.OrthogonalizeViewUp()
+
+        elif self._nav_mode == "pan":
+            position = np.asarray(camera.GetPosition(), dtype=float)
+            focal = np.asarray(camera.GetFocalPoint(), dtype=float)
+            view_up = np.asarray(camera.GetViewUp(), dtype=float)
+            direction = focal - position
+            distance = float(np.linalg.norm(direction))
+            if distance <= 1e-12:
+                return
+            direction /= distance
+            view_up_norm = np.linalg.norm(view_up)
+            if view_up_norm <= 1e-12:
+                return
+            view_up /= view_up_norm
+            right = np.cross(direction, view_up)
+            right_norm = np.linalg.norm(right)
+            if right_norm <= 1e-12:
+                return
+            right /= right_norm
+            up = np.cross(right, direction)
+            up /= max(np.linalg.norm(up), 1e-12)
+
+            height = max(self.plotter.interactor.height(), 1)
+            if camera.GetParallelProjection():
+                world_per_pixel = 2.0 * camera.GetParallelScale() / height
+            else:
+                view_angle = math.radians(camera.GetViewAngle())
+                world_per_pixel = (
+                    2.0 * distance * math.tan(view_angle * 0.5) / height
                 )
-        return super().eventFilter(obj, event)
 
-    def _on_right_press(self, *args) -> None:
-        self._right_press_pos = self._event_position()
+            translation = (
+                -dx * world_per_pixel * right
+                + dy * world_per_pixel * up
+            )
+            camera.SetPosition(*(position + translation))
+            camera.SetFocalPoint(*(focal + translation))
 
-    def _on_right_release(self, *args) -> None:
-        pos = self._event_position()
-        if self._moved(self._right_press_pos, pos):
+        elif self._nav_mode == "zoom":
+            factor = math.exp(-dy * 0.012)
+            factor = max(0.25, min(4.0, factor))
+            camera.Zoom(factor)
+
+        self.plotter.render()
+
+    def _wheel_zoom(self, delta_y: int) -> None:
+        if delta_y == 0:
             return
-        entity = self.pick_entity(*pos)
-        self.context_requested.emit(
-            {"kind": entity[0], "tag": entity[1]} if entity else None
-        )
+        steps = delta_y / 120.0
+        factor = math.pow(1.12, steps)
+        self.plotter.camera.Zoom(factor)
+        self.plotter.render()
 
-    def _on_mouse_move(self, *args) -> None:
-        entity = self.pick_entity(*self._event_position())
+    def _update_hover_from_qt(self, event) -> None:
+        if event.buttons() != Qt.NoButton:
+            return
+        entity = self.pick_entity(*self._vtk_position_from_qt(event))
         if entity == self._hover_ref:
             return
         self._hover_ref = entity
@@ -241,6 +285,93 @@ class ModelViewport(QWidget):
         self.entity_hovered.emit(
             {"kind": entity[0], "tag": entity[1]} if entity else None
         )
+
+    def eventFilter(self, obj, event):
+        if obj is not self.plotter.interactor:
+            return super().eventFilter(obj, event)
+
+        event_type = event.type()
+
+        if event_type == QEvent.MouseButtonPress:
+            pos = event.position()
+            qt_pos = (float(pos.x()), float(pos.y()))
+
+            if event.button() == Qt.LeftButton:
+                self._left_press_pos = self._vtk_position_from_qt(event)
+                return True
+
+            if event.button() == Qt.MiddleButton:
+                self._start_navigation(event.modifiers(), qt_pos)
+                return True
+
+            if event.button() == Qt.RightButton:
+                self._right_press_pos = self._vtk_position_from_qt(event)
+                return True
+
+        elif event_type == QEvent.MouseMove:
+            pos = event.position()
+            qt_pos = (float(pos.x()), float(pos.y()))
+
+            if event.buttons() & Qt.MiddleButton:
+                self._navigate(qt_pos)
+                return True
+
+            if event.buttons() == Qt.NoButton:
+                self._update_hover_from_qt(event)
+                return False
+
+            # Consume left/right dragging so VTK cannot interpret it as camera motion.
+            if event.buttons() & (Qt.LeftButton | Qt.RightButton):
+                return True
+
+        elif event_type == QEvent.MouseButtonRelease:
+            vtk_pos = self._vtk_position_from_qt(event)
+
+            if event.button() == Qt.MiddleButton:
+                self._nav_mode = None
+                self._nav_last_pos = None
+                return True
+
+            if event.button() == Qt.LeftButton:
+                if not self._moved(self._left_press_pos, vtk_pos):
+                    entity = self.pick_entity(*vtk_pos)
+                    self.entity_clicked.emit(
+                        {
+                            "kind": entity[0] if entity else None,
+                            "tag": entity[1] if entity else None,
+                            "mode": self._selection_mode_from_modifiers(
+                                event.modifiers()
+                            ),
+                        }
+                    )
+                self._left_press_pos = None
+                return True
+
+            if event.button() == Qt.RightButton:
+                if not self._moved(self._right_press_pos, vtk_pos):
+                    entity = self.pick_entity(*vtk_pos)
+                    self.context_requested.emit(
+                        {"kind": entity[0], "tag": entity[1]}
+                        if entity
+                        else None
+                    )
+                self._right_press_pos = None
+                return True
+
+        elif event_type == QEvent.MouseButtonDblClick:
+            if event.button() == Qt.LeftButton:
+                entity = self.pick_entity(*self._vtk_position_from_qt(event))
+                if entity:
+                    self.entity_double_clicked.emit(
+                        {"kind": entity[0], "tag": entity[1]}
+                    )
+                return True
+
+        elif event_type == QEvent.Wheel:
+            self._wheel_zoom(event.angleDelta().y())
+            return True
+
+        return super().eventFilter(obj, event)
 
     def _noop(self):
         return None
