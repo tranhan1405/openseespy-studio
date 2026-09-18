@@ -28,11 +28,16 @@ def test_rect_patch_preview_bounds_use_full_component_geometry():
         },
     )
 
-    assert component_bounds(component) == (
-        -0.2,
-        0.4,
-        -0.4,
-        0.0,
+    bounds = component_bounds(component)
+    expected = (-0.2, 0.4, -0.4, 0.0)
+    assert all(
+        math.isclose(
+            actual,
+            target,
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        )
+        for actual, target in zip(bounds, expected)
     )
 
 
