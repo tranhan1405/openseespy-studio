@@ -27,3 +27,24 @@ def test_remove_node_without_cascade_rejects_connected_node():
         assert "connected" in str(exc)
     else:
         raise AssertionError("Expected ValueError for connected node")
+
+
+
+def test_model_round_trip_dict():
+    model = StructuralModel("RoundTrip")
+    model.add_node(1, 1.0, 2.0, 3.0)
+    model.add_node(2, 4.0, 5.0, 6.0)
+    model.set_fixity(1, (1, 0, 1, 0, 1, 0))
+    model.add_element(
+        5,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=3,
+        transf_tag=2,
+        group="column",
+    )
+
+    restored = StructuralModel.from_dict(model.to_dict())
+
+    assert restored.to_dict() == model.to_dict()

@@ -99,6 +99,69 @@ class StructuralModel:
         for node_tag in set(node_tags):
             self.remove_node(node_tag, cascade=cascade_nodes)
 
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "ndm": self.ndm,
+            "ndf": self.ndf,
+            "nodes": [
+                {
+                    "tag": node.tag,
+                    "xyz": list(node.xyz),
+                    "fixity": list(node.fixity),
+                }
+                for node in sorted(self.nodes.values(), key=lambda item: item.tag)
+            ],
+            "elements": [
+                {
+                    "tag": element.tag,
+                    "i": element.i,
+                    "j": element.j,
+                    "element_type": element.element_type,
+                    "section_tag": element.section_tag,
+                    "transf_tag": element.transf_tag,
+                    "group": element.group,
+                }
+                for element in sorted(self.elements.values(), key=lambda item: item.tag)
+            ],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "StructuralModel":
+        model = cls(
+            name=str(data.get("name", "Untitled")),
+            ndm=int(data.get("ndm", 3)),
+            ndf=int(data.get("ndf", 6)),
+        )
+
+        for item in data.get("nodes", []):
+            xyz = item.get("xyz", (0.0, 0.0, 0.0))
+            node = model.add_node(
+                int(item["tag"]),
+                float(xyz[0]),
+                float(xyz[1]),
+                float(xyz[2]) if len(xyz) > 2 else 0.0,
+            )
+            fixity = tuple(int(value) for value in item.get("fixity", (0,) * model.ndf))
+            if len(fixity) != model.ndf:
+                raise ValueError(
+                    f"Node {node.tag} has {len(fixity)} fixities; expected {model.ndf}."
+                )
+            node.fixity = fixity
+
+        for item in data.get("elements", []):
+            model.add_element(
+                int(item["tag"]),
+                int(item["i"]),
+                int(item["j"]),
+                str(item.get("element_type", "elasticBeamColumn")),
+                item.get("section_tag"),
+                item.get("transf_tag"),
+                str(item.get("group", "frame")),
+            )
+
+        return model
+
     def bounds(self) -> tuple[Vec3, Vec3]:
         if not self.nodes:
             return (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)

@@ -6,7 +6,7 @@ import sys
 import tempfile
 
 from PySide6.QtCore import QProcess, QTimer, QSize, Qt
-from PySide6.QtGui import QAction, QColor, QCursor, QFont, QKeySequence, QPainter, QPen, QShortcut, QTextCursor
+from PySide6.QtGui import QAction, QColor, QCursor, QFont, QKeySequence, QPainter, QPen, QShortcut, QTextCursor, QUndoStack
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -40,7 +41,9 @@ from PySide6.QtWidgets import (
 
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..model import StructuralModel
+from ..project import ProjectDatabase, SelectionSetData
 from .code_editor import CodeEditor
+from .history import ProjectSnapshotCommand
 from .icons import studio_icon
 from .results_panel import ResultsPanel
 from .selection import SelectionManager
@@ -505,14 +508,21 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1150, 720)
         self.setStyleSheet(APP_STYLE)
 
-        self.model = StructuralModel("3D_Frame")
+        self.project = ProjectDatabase(
+            name="Untitled",
+            model=StructuralModel("3D_Frame"),
+        )
+        self.model = self.project.model
+        self._project_path: Path | None = None
         self.actions: dict[str, QAction] = {}
+        self.undo_stack = QUndoStack(self)
         self.selection = SelectionManager(self)
         self._tree_node_items: dict[int, QTreeWidgetItem] = {}
         self._tree_element_items: dict[int, QTreeWidgetItem] = {}
         self._shortcuts: list[QShortcut] = []
         self._analysis_process: QProcess | None = None
         self._analysis_script_path: str | None = None
+        self._dirty = False
 
         self.setCorner(Qt.BottomLeftCorner, Qt.LeftDockWidgetArea)
         self.setCorner(Qt.BottomRightCorner, Qt.BottomDockWidgetArea)
@@ -524,6 +534,7 @@ class MainWindow(QMainWindow):
         self._build_bottom_docks()
         self._build_actions_and_ribbon()
         self._build_status_bar()
+        self._wire_history()
         self._wire_selection()
         self._install_shortcuts()
         self._create_default_model()
@@ -549,7 +560,9 @@ class MainWindow(QMainWindow):
         self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tree.setIconSize(QSize(17, 17))
         self.tree.setIndentation(16)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.itemSelectionChanged.connect(self._tree_selection_changed)
+        self.tree.customContextMenuRequested.connect(self._show_tree_context_menu)
 
         history = QLabel("Command history will appear here.")
         history.setAlignment(Qt.AlignCenter)
@@ -646,11 +659,19 @@ class MainWindow(QMainWindow):
         ):
             menus[name] = self.menuBar().addMenu(name)
 
-        self._make_action("new", "New", "new", self._new_model, "New model")
-        self._make_action("open", "Open", "open", self._not_implemented, "Open model")
-        self._make_action("save", "Save", "save", self._export_script, "Export OpenSeesPy script")
-        self._make_action("undo", "Undo", "undo", self._not_implemented, "Undo")
-        self._make_action("redo", "Redo", "redo", self._not_implemented, "Redo")
+        self._make_action("new", "New", "new", self._new_model, "New project")
+        self._make_action("open", "Open", "open", self._open_project, "Open project")
+        self._make_action("save", "Save", "save", self._save_project, "Save project")
+        self._make_action("undo", "Undo", "undo", self.undo_stack.undo, "Undo")
+        self._make_action("redo", "Redo", "redo", self.undo_stack.redo, "Redo")
+        self._make_action("save_as", "Save As...", "save", self._save_project_as, "Save project as")
+        self._make_action("export_py", "Export Python...", "save", self._export_script, "Export OpenSeesPy script")
+
+        self.actions["save"].setShortcut(QKeySequence.Save)
+        self.actions["open"].setShortcut(QKeySequence.Open)
+        self.actions["new"].setShortcut(QKeySequence.New)
+        self.actions["undo"].setShortcut(QKeySequence.Undo)
+        self.actions["redo"].setShortcut(QKeySequence.Redo)
 
         self._make_action("node", "Node", "node", self._not_implemented, "Create node")
         self._make_action("line", "Line", "element", self._not_implemented, "Create line")
@@ -701,6 +722,9 @@ class MainWindow(QMainWindow):
         self._make_action("plot", "Plot", "plot", self._not_implemented, "Plot results")
 
         menus["File"].addActions([self.actions["new"], self.actions["open"], self.actions["save"]])
+        menus["File"].addAction(self.actions["save_as"])
+        menus["File"].addSeparator()
+        menus["File"].addAction(self.actions["export_py"])
         menus["Edit"].addActions([self.actions["undo"], self.actions["redo"]])
         menus["Geometry"].addActions([
             self.actions["node"], self.actions["line"], self.actions["frame"],
@@ -777,23 +801,38 @@ class MainWindow(QMainWindow):
     def _create_default_model(self) -> None:
         generate_frame_grid(self.model, FrameGridSpec(nx=4, ny=3, nz=3))
         self._refresh_all("Generated default 4 × 3 bay, 3-storey frame")
+        self.undo_stack.clear()
+        self.undo_stack.setClean()
+        self._set_dirty(False)
         self._show_frame_grid()
 
     def _new_model(self) -> None:
+        if not self._maybe_save_changes():
+            return
         self.selection.clear()
-        self.model.clear()
-        self._refresh_all("New empty model")
+        self.project = ProjectDatabase(
+            name="Untitled",
+            model=StructuralModel("Untitled"),
+        )
+        self.model = self.project.model
+        self._project_path = None
+        self.undo_stack.clear()
+        self.undo_stack.setClean()
+        self._set_dirty(False)
+        self._refresh_all("New empty project")
 
     def _show_frame_grid(self) -> None:
         self.create_dock.show()
         self.create_dock.raise_()
 
     def _generate_frame_grid(self, spec: FrameGridSpec) -> None:
+        before = self.project.to_dict()
         self.selection.clear()
         generate_frame_grid(self.model, spec)
         self._refresh_all(
             f"Generated {spec.nx} × {spec.ny} bay, {spec.nz}-storey frame"
         )
+        self._record_project_change("Generate frame grid", before)
 
     def _refresh_all(self, message: str = "") -> None:
         self.viewport.draw_model(self.model)
@@ -813,6 +852,11 @@ class MainWindow(QMainWindow):
 
         self.status_counts.setText(
             f"Nodes: {len(self.model.nodes)}   Elements: {len(self.model.elements)}"
+        )
+        units = self.project.units
+        self.status_units.setText(
+            f"Units: {units.get('length', 'm')}, "
+            f"{units.get('force', 'kN')}, {units.get('time', 's')}"
         )
 
     def _refresh_tree(self) -> None:
@@ -868,6 +912,23 @@ class MainWindow(QMainWindow):
             type_items.get(element.element_type, elements).addChild(item)
             self._tree_element_items[tag] = item
 
+        named_sets = QTreeWidgetItem([
+            f"Named Selections ({len(self.project.selection_sets)})"
+        ])
+        named_sets.setIcon(0, studio_icon("select"))
+        named_sets.setExpanded(True)
+        root.addChild(named_sets)
+
+        for name in sorted(self.project.selection_sets):
+            selection_set = self.project.selection_sets[name]
+            item = QTreeWidgetItem([
+                f"{name}  ({len(selection_set.node_tags)}N / "
+                f"{len(selection_set.element_tags)}E)"
+            ])
+            item.setIcon(0, studio_icon("select"))
+            item.setData(0, Qt.UserRole, ("set", name))
+            named_sets.addChild(item)
+
         fixed_count = sum(any(node.fixity) for node in self.model.nodes.values())
 
         for label, icon in (
@@ -910,6 +971,11 @@ class MainWindow(QMainWindow):
                 nodes.add(tag)
             elif kind == "element":
                 elements.add(tag)
+            elif kind == "set":
+                selection_set = self.project.selection_sets.get(str(tag))
+                if selection_set is not None:
+                    nodes.update(selection_set.node_tags)
+                    elements.update(selection_set.element_tags)
         self.selection.set_selection(nodes=nodes, elements=elements)
 
     def _wire_selection(self) -> None:
@@ -1103,10 +1169,8 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         copy_tag = menu.addAction("Copy Tag(s)")
         copy_tag.triggered.connect(self._copy_selected_tags)
-        create_set = menu.addAction("Create Set from Selection")
-        create_set.triggered.connect(
-            lambda: self._log("Selection sets are planned for Selection v2")
-        )
+        create_set = menu.addAction("Create Named Selection")
+        create_set.triggered.connect(self._create_named_selection)
 
         menu.addSeparator()
         delete = menu.addAction("Delete")
@@ -1165,13 +1229,282 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.Yes:
             return
 
+        before = self.project.to_dict()
         self.model.delete_entities(
             node_tags=nodes,
             element_tags=elements,
             cascade_nodes=True,
         )
+        self._prune_selection_sets()
         self.selection.clear()
         self._refresh_all("Deleted selected entities")
+        self._record_project_change("Delete selected entities", before)
+
+    def _wire_history(self) -> None:
+        self.actions["undo"].setEnabled(False)
+        self.actions["redo"].setEnabled(False)
+        self.undo_stack.canUndoChanged.connect(self.actions["undo"].setEnabled)
+        self.undo_stack.canRedoChanged.connect(self.actions["redo"].setEnabled)
+        self.undo_stack.undoTextChanged.connect(
+            lambda text: self.actions["undo"].setText(
+                f"Undo {text}" if text else "Undo"
+            )
+        )
+        self.undo_stack.redoTextChanged.connect(
+            lambda text: self.actions["redo"].setText(
+                f"Redo {text}" if text else "Redo"
+            )
+        )
+        self.undo_stack.cleanChanged.connect(
+            lambda clean: self._set_dirty(not clean)
+        )
+
+    def _set_dirty(self, dirty: bool) -> None:
+        self._dirty = bool(dirty)
+        self._update_window_title()
+
+    def _update_window_title(self) -> None:
+        display_name = (
+            self._project_path.name
+            if self._project_path is not None
+            else self.project.name
+        )
+        marker = " *" if self._dirty else ""
+        self.setWindowTitle(
+            f"OpenSeesPy Studio (Beta) - [{display_name}]{marker}"
+        )
+
+    def _record_project_change(self, text: str, before: dict) -> None:
+        after = self.project.to_dict()
+        if before == after:
+            return
+        self.undo_stack.push(
+            ProjectSnapshotCommand(
+                text,
+                before,
+                after,
+                self._apply_project_snapshot,
+                already_applied=True,
+            )
+        )
+
+    def _apply_project_snapshot(self, snapshot: dict) -> None:
+        self.project = ProjectDatabase.from_dict(snapshot)
+        self.model = self.project.model
+        self.selection.clear()
+        self._refresh_all()
+
+    def _save_project(self) -> bool:
+        if self._project_path is None:
+            return self._save_project_as()
+        try:
+            self.project.save(self._project_path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Save project", str(exc))
+            return False
+
+        self.undo_stack.setClean()
+        self._set_dirty(False)
+        self.status_message.setText(f"Saved {self._project_path.name}")
+        return True
+
+    def _save_project_as(self) -> bool:
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save OpenSeesPy Studio Project",
+            str(self._project_path or Path("Untitled.opsstudio")),
+            "OpenSeesPy Studio Project (*.opsstudio)",
+        )
+        if not path:
+            return False
+        target = Path(path)
+        if target.suffix.lower() != ".opsstudio":
+            target = target.with_suffix(".opsstudio")
+        self._project_path = target
+        self.project.name = target.stem
+        return self._save_project()
+
+    def _open_project(self) -> None:
+        if not self._maybe_save_changes():
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open OpenSeesPy Studio Project",
+            "",
+            "OpenSeesPy Studio Project (*.opsstudio);;All Files (*)",
+        )
+        if not path:
+            return
+
+        try:
+            project = ProjectDatabase.load(path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Open project", str(exc))
+            return
+
+        self.selection.clear()
+        self.project = project
+        self.model = project.model
+        self._project_path = Path(path)
+        self.undo_stack.clear()
+        self.undo_stack.setClean()
+        self._set_dirty(False)
+        self._refresh_all(f"Opened {self._project_path.name}")
+
+    def _maybe_save_changes(self) -> bool:
+        if not self._dirty:
+            return True
+
+        answer = QMessageBox.warning(
+            self,
+            "Unsaved changes",
+            "The project has unsaved changes.",
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+            QMessageBox.Save,
+        )
+        if answer == QMessageBox.Cancel:
+            return False
+        if answer == QMessageBox.Save:
+            return self._save_project()
+        return True
+
+    def _create_named_selection(self) -> None:
+        nodes, elements = self._selection_sets()
+        if not nodes and not elements:
+            QMessageBox.information(
+                self,
+                "Named Selection",
+                "Select at least one node or element first.",
+            )
+            return
+
+        name, ok = QInputDialog.getText(
+            self,
+            "Create Named Selection",
+            "Name:",
+        )
+        name = name.strip()
+        if not ok or not name:
+            return
+        if name in self.project.selection_sets:
+            QMessageBox.warning(
+                self,
+                "Named Selection",
+                f"A named selection called '{name}' already exists.",
+            )
+            return
+
+        before = self.project.to_dict()
+        self.project.selection_sets[name] = SelectionSetData(
+            name=name,
+            node_tags=set(nodes),
+            element_tags=set(elements),
+        )
+        self._refresh_tree()
+        self._record_project_change(f"Create named selection {name}", before)
+        self.status_message.setText(f"Created named selection: {name}")
+
+    def _show_tree_context_menu(self, position) -> None:
+        item = self.tree.itemAt(position)
+        if item is None:
+            return
+        payload = item.data(0, Qt.UserRole)
+        if not payload or payload[0] != "set":
+            return
+
+        name = str(payload[1])
+        menu = QMenu(self)
+
+        select_action = menu.addAction("Select")
+        select_action.triggered.connect(
+            lambda: self._select_named_selection(name)
+        )
+
+        update_action = menu.addAction("Update from Current Selection")
+        update_action.triggered.connect(
+            lambda: self._update_named_selection(name)
+        )
+
+        menu.addSeparator()
+        rename_action = menu.addAction("Rename...")
+        rename_action.triggered.connect(
+            lambda: self._rename_named_selection(name)
+        )
+        delete_action = menu.addAction("Delete")
+        delete_action.triggered.connect(
+            lambda: self._delete_named_selection(name)
+        )
+
+        menu.exec(self.tree.viewport().mapToGlobal(position))
+
+    def _select_named_selection(self, name: str) -> None:
+        selection_set = self.project.selection_sets.get(name)
+        if selection_set is None:
+            return
+        self.selection.set_selection(
+            nodes=set(selection_set.node_tags),
+            elements=set(selection_set.element_tags),
+        )
+
+    def _update_named_selection(self, name: str) -> None:
+        selection_set = self.project.selection_sets.get(name)
+        if selection_set is None:
+            return
+        nodes, elements = self._selection_sets()
+        if not nodes and not elements:
+            return
+
+        before = self.project.to_dict()
+        selection_set.node_tags = set(nodes)
+        selection_set.element_tags = set(elements)
+        self._refresh_tree()
+        self._record_project_change(f"Update named selection {name}", before)
+
+    def _rename_named_selection(self, old_name: str) -> None:
+        selection_set = self.project.selection_sets.get(old_name)
+        if selection_set is None:
+            return
+        new_name, ok = QInputDialog.getText(
+            self,
+            "Rename Named Selection",
+            "Name:",
+            text=old_name,
+        )
+        new_name = new_name.strip()
+        if not ok or not new_name or new_name == old_name:
+            return
+        if new_name in self.project.selection_sets:
+            QMessageBox.warning(
+                self,
+                "Named Selection",
+                f"A named selection called '{new_name}' already exists.",
+            )
+            return
+
+        before = self.project.to_dict()
+        self.project.selection_sets.pop(old_name)
+        selection_set.name = new_name
+        self.project.selection_sets[new_name] = selection_set
+        self._refresh_tree()
+        self._record_project_change(
+            f"Rename named selection {old_name}",
+            before,
+        )
+
+    def _delete_named_selection(self, name: str) -> None:
+        if name not in self.project.selection_sets:
+            return
+        before = self.project.to_dict()
+        self.project.selection_sets.pop(name)
+        self._refresh_tree()
+        self._record_project_change(f"Delete named selection {name}", before)
+
+    def _prune_selection_sets(self) -> None:
+        node_tags = set(self.model.nodes)
+        element_tags = set(self.model.elements)
+        for selection_set in self.project.selection_sets.values():
+            selection_set.node_tags.intersection_update(node_tags)
+            selection_set.element_tags.intersection_update(element_tags)
 
     def _export_script(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -1315,6 +1648,9 @@ class MainWindow(QMainWindow):
                 pass
 
     def closeEvent(self, event) -> None:
+        if not self._maybe_save_changes():
+            event.ignore()
+            return
         process = self._analysis_process
         if process is not None and process.state() != QProcess.NotRunning:
             process.kill()
