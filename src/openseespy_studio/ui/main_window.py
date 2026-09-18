@@ -747,9 +747,14 @@ class MainWindow(QMainWindow):
         self.status_message = QLabel("Ready")
         self.status_units = QLabel("Units: m, kN, s")
         self.status_view = QLabel("View: 3D")
+        self.status_navigation = QLabel(
+            "MMB Rotate · Ctrl+MMB Pan · Shift+MMB Zoom · Wheel Zoom"
+        )
+        self.status_navigation.setStyleSheet("color: #6c7c8d;")
         self.status_counts = QLabel("Nodes: 0   Elements: 0")
 
         self.statusBar().addWidget(self.status_message, 1)
+        self.statusBar().addPermanentWidget(self.status_navigation)
         self.statusBar().addPermanentWidget(self.status_units)
         self.statusBar().addPermanentWidget(self.status_view)
         self.statusBar().addPermanentWidget(self.status_counts)
