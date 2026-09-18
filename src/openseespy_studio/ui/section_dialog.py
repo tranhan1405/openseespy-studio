@@ -32,8 +32,11 @@ from PySide6.QtWidgets import (
 )
 
 from ..generator import section_to_openseespy
+from ..section_geometry import section_geometry_properties
 from ..section_templates import (
+    create_circle_section_components,
     create_i_section_components,
+    create_rectangle_section_components,
     create_t_section_components,
 )
 from ..section_visualization import (
@@ -67,6 +70,13 @@ def _float_spin(
 def _positive_int(value: int, high: int = 10000) -> QSpinBox:
     spin = QSpinBox()
     spin.setRange(1, high)
+    spin.setValue(int(value))
+    return spin
+
+
+def _nonnegative_int(value: int, high: int = 10000) -> QSpinBox:
+    spin = QSpinBox()
+    spin.setRange(0, high)
     spin.setValue(int(value))
     return spin
 
@@ -885,70 +895,298 @@ class FiberComponentDialog(QDialog):
         self.reject()
 
 
-class ShapeTemplateDialog(QDialog):
-    def __init__(
-        self,
-        materials: dict[int, MaterialData],
-        shape: str,
-        parent=None,
-    ):
+class SectionShapeSketchWidget(QWidget):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.materials = materials
-        self.shape = str(shape).upper()
-        if self.shape not in {"T", "I"}:
-            raise ValueError(f"Unsupported section template: {shape}")
+        self.setMinimumSize(250, 220)
+        self.shape = "Rectangle"
+        self.dimensions: dict[str, float] = {
+            "height": 0.5,
+            "width": 0.4,
+        }
 
-        self.setWindowTitle(f"{self.shape}-Section Fiber Template")
+    def set_geometry(
+        self,
+        shape: str,
+        dimensions: dict[str, float],
+    ) -> None:
+        self.shape = str(shape)
+        self.dimensions = {
+            str(key): float(value)
+            for key, value in dimensions.items()
+        }
+        self.update()
+
+    def _shape_extents(self) -> tuple[float, float]:
+        if self.shape in {"Circle", "Hollow Circle"}:
+            diameter = self.dimensions.get("outer_diameter", 0.5)
+            return diameter, diameter
+        if self.shape in {"T", "I"}:
+            return (
+                self.dimensions.get("flange_width", 0.6),
+                self.dimensions.get("height", 0.6),
+            )
+        return (
+            self.dimensions.get("width", 0.4),
+            self.dimensions.get("height", 0.5),
+        )
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#fbfcfd"))
+        painter.setPen(QPen(QColor("#ccd6df"), 1))
+        painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
+
+        width, height = self._shape_extents()
+        width = max(width, 1.0e-9)
+        height = max(height, 1.0e-9)
+
+        left_margin = 42.0
+        right_margin = 38.0
+        top_margin = 30.0
+        bottom_margin = 48.0
+        available_w = max(
+            40.0,
+            self.width() - left_margin - right_margin,
+        )
+        available_h = max(
+            40.0,
+            self.height() - top_margin - bottom_margin,
+        )
+        scale = min(available_w / width, available_h / height)
+        cx = left_margin + 0.5 * available_w
+        cy = top_margin + 0.5 * available_h
+
+        def point(y: float, z: float) -> QPointF:
+            return QPointF(cx - z * scale, cy - y * scale)
+
+        painter.setPen(QPen(QColor("#263746"), 2.0))
+        painter.setBrush(QColor("#e7edf2"))
+
+        if self.shape == "Rectangle":
+            h = self.dimensions["height"]
+            b = self.dimensions["width"]
+            rect = QRectF(
+                point(0.5 * h, 0.5 * b),
+                point(-0.5 * h, -0.5 * b),
+            ).normalized()
+            painter.drawRect(rect)
+
+        elif self.shape in {"Circle", "Hollow Circle"}:
+            do = self.dimensions["outer_diameter"]
+            outer = QRectF(
+                cx - 0.5 * do * scale,
+                cy - 0.5 * do * scale,
+                do * scale,
+                do * scale,
+            )
+            painter.drawEllipse(outer)
+            di = self.dimensions.get("inner_diameter", 0.0)
+            if di > 0.0:
+                inner = QRectF(
+                    cx - 0.5 * di * scale,
+                    cy - 0.5 * di * scale,
+                    di * scale,
+                    di * scale,
+                )
+                painter.setBrush(QColor("#fbfcfd"))
+                painter.drawEllipse(inner)
+
+        elif self.shape == "T":
+            h = self.dimensions["height"]
+            bf = self.dimensions["flange_width"]
+            tf = self.dimensions["flange_thickness"]
+            bw = self.dimensions["web_width"]
+            yt = 0.5 * h
+            yfb = yt - tf
+            yb = -0.5 * h
+            points = QPolygonF([
+                point(yt, -0.5 * bf),
+                point(yt, 0.5 * bf),
+                point(yfb, 0.5 * bf),
+                point(yfb, 0.5 * bw),
+                point(yb, 0.5 * bw),
+                point(yb, -0.5 * bw),
+                point(yfb, -0.5 * bw),
+                point(yfb, -0.5 * bf),
+            ])
+            painter.drawPolygon(points)
+
+        elif self.shape == "I":
+            h = self.dimensions["height"]
+            bf = self.dimensions["flange_width"]
+            tf = self.dimensions["flange_thickness"]
+            bw = self.dimensions["web_width"]
+            yt = 0.5 * h
+            ytb = yt - tf
+            ybb = -yt + tf
+            yb = -yt
+            points = QPolygonF([
+                point(yt, -0.5 * bf),
+                point(yt, 0.5 * bf),
+                point(ytb, 0.5 * bf),
+                point(ytb, 0.5 * bw),
+                point(ybb, 0.5 * bw),
+                point(ybb, 0.5 * bf),
+                point(yb, 0.5 * bf),
+                point(yb, -0.5 * bf),
+                point(ybb, -0.5 * bf),
+                point(ybb, -0.5 * bw),
+                point(ytb, -0.5 * bw),
+                point(ytb, -0.5 * bf),
+            ])
+            painter.drawPolygon(points)
+
+        cover = self.dimensions.get("cover", 0.0)
+        if (
+            cover > 0.0
+            and self.shape == "Rectangle"
+            and 2.0 * cover < min(
+                self.dimensions["height"],
+                self.dimensions["width"],
+            )
+        ):
+            h = self.dimensions["height"] - 2.0 * cover
+            b = self.dimensions["width"] - 2.0 * cover
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QPen(QColor("#5d8aa8"), 1.2, Qt.DashLine))
+            painter.drawRect(
+                QRectF(
+                    point(0.5 * h, 0.5 * b),
+                    point(-0.5 * h, -0.5 * b),
+                ).normalized()
+            )
+        elif (
+            cover > 0.0
+            and self.shape in {"Circle", "Hollow Circle"}
+        ):
+            do = self.dimensions["outer_diameter"]
+            core_outer = do - 2.0 * cover
+            if core_outer > 0.0:
+                painter.setBrush(Qt.NoBrush)
+                painter.setPen(
+                    QPen(QColor("#5d8aa8"), 1.2, Qt.DashLine)
+                )
+                painter.drawEllipse(
+                    QRectF(
+                        cx - 0.5 * core_outer * scale,
+                        cy - 0.5 * core_outer * scale,
+                        core_outer * scale,
+                        core_outer * scale,
+                    )
+                )
+
+        # Local axes: +y upward, +z left.
+        origin = QPointF(left_margin - 10.0, self.height() - 28.0)
+        painter.setPen(QPen(QColor("#17202a"), 1.4))
+        painter.drawLine(origin, QPointF(origin.x(), origin.y() - 24.0))
+        painter.drawLine(origin, QPointF(origin.x() - 24.0, origin.y()))
+        painter.drawText(
+            QPointF(origin.x() + 5.0, origin.y() - 23.0),
+            "y",
+        )
+        painter.drawText(
+            QPointF(origin.x() - 31.0, origin.y() - 5.0),
+            "z",
+        )
+
+        painter.setPen(QColor("#34495e"))
+        if self.shape == "Rectangle":
+            painter.drawText(
+                QRectF(0.0, self.height() - 24.0, self.width(), 18.0),
+                Qt.AlignCenter,
+                f"B = {self.dimensions['width']:.6g}",
+            )
+            painter.drawText(
+                QPointF(
+                    self.width() - right_margin + 4.0,
+                    cy,
+                ),
+                f"H = {self.dimensions['height']:.6g}",
+            )
+        elif self.shape in {"Circle", "Hollow Circle"}:
+            label = f"Do = {self.dimensions['outer_diameter']:.6g}"
+            di = self.dimensions.get("inner_diameter", 0.0)
+            if di > 0.0:
+                label += f"   Di = {di:.6g}"
+            painter.drawText(
+                QRectF(0.0, self.height() - 24.0, self.width(), 18.0),
+                Qt.AlignCenter,
+                label,
+            )
+        else:
+            painter.drawText(
+                QRectF(0.0, self.height() - 24.0, self.width(), 18.0),
+                Qt.AlignCenter,
+                (
+                    f"H={self.dimensions['height']:.6g}   "
+                    f"Bf={self.dimensions['flange_width']:.6g}   "
+                    f"bw={self.dimensions['web_width']:.6g}   "
+                    f"tf={self.dimensions['flange_thickness']:.6g}"
+                ),
+            )
+
+
+class ElasticGeometryDialog(QDialog):
+    SHAPES = ("Rectangle", "Circle", "Hollow Circle", "T", "I")
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Elastic Section Geometry")
         self.setModal(True)
-        self.setMinimumWidth(430)
+        self.resize(760, 470)
 
         root = QVBoxLayout(self)
-        form = QFormLayout()
+        body = QHBoxLayout()
+        root.addLayout(body, 1)
 
-        shape_label = QLabel(
-            "T section · flange at +y"
-            if self.shape == "T"
-            else "I section · symmetric flanges"
+        form_host = QWidget()
+        form = QFormLayout(form_host)
+        body.addWidget(form_host, 3)
+
+        self.shape = QComboBox()
+        self.shape.addItems(self.SHAPES)
+        form.addRow("Shape:", self.shape)
+
+        self.fields: dict[str, QDoubleSpinBox] = {}
+        self.field_labels: dict[str, QLabel] = {}
+
+        def add_field(
+            key: str,
+            label: str,
+            value: float,
+        ) -> None:
+            label_widget = QLabel(label)
+            spin = _float_spin(value, low=0.0)
+            self.fields[key] = spin
+            self.field_labels[key] = label_widget
+            form.addRow(label_widget, spin)
+            spin.valueChanged.connect(self._update_preview)
+
+        add_field("height", "Height H (local y):", 0.50)
+        add_field("width", "Width B (local z):", 0.40)
+        add_field("outer_diameter", "Outer diameter Do:", 0.50)
+        add_field("inner_diameter", "Inner diameter Di:", 0.30)
+        add_field("flange_width", "Flange width Bf:", 0.60)
+        add_field("flange_thickness", "Flange thickness tf:", 0.12)
+        add_field("web_width", "Web width bw:", 0.20)
+
+        self.result_label = QLabel()
+        self.result_label.setWordWrap(True)
+        self.result_label.setStyleSheet(
+            "padding: 8px; background: #f3f6f8; color: #34495e;"
         )
-        shape_label.setStyleSheet("font-weight: 700;")
-        form.addRow("Template:", shape_label)
+        form.addRow("Calculated:", self.result_label)
 
-        self.height = _float_spin(0.60, low=1.0e-9)
-        self.flange_width = _float_spin(0.60, low=1.0e-9)
-        self.flange_thickness = _float_spin(0.15, low=1.0e-9)
-        self.web_width = _float_spin(0.25, low=1.0e-9)
-        self.cover = _float_spin(0.04, low=0.0)
-
-        form.addRow("Total height H (local y):", self.height)
-        form.addRow("Flange width Bf (local z):", self.flange_width)
-        form.addRow("Flange thickness tf:", self.flange_thickness)
-        form.addRow("Web width bw:", self.web_width)
-        form.addRow("Concrete cover c:", self.cover)
-
-        self.core_material = QComboBox()
-        self.cover_material = QComboBox()
-        for tag in sorted(materials):
-            material = materials[tag]
-            text = f"{tag} - {material.name} ({material.material_type})"
-            self.core_material.addItem(text, tag)
-            self.cover_material.addItem(text, tag)
-        if self.cover_material.count() > 1:
-            self.cover_material.setCurrentIndex(1)
-
-        form.addRow("Core material:", self.core_material)
-        form.addRow("Cover material:", self.cover_material)
-
-        self.n_y = _positive_int(24, 200)
-        self.n_z = _positive_int(24, 200)
-        form.addRow("Target divisions along y:", self.n_y)
-        form.addRow("Target divisions along z:", self.n_z)
-        root.addLayout(form)
+        self.sketch = SectionShapeSketchWidget()
+        body.addWidget(self.sketch, 2)
 
         note = QLabel(
-            "The template creates non-overlapping rectangular patches. "
-            "Cover is assigned only along exposed faces; the internal "
-            "web/flange interface is not treated as cover. Generated patches "
-            "remain individually editable in the Builder."
+            "A, Iy and Iz are calculated from the entered geometry. "
+            "Circle/annulus J is exact. Rectangle, T and I use an engineering "
+            "Saint-Venant torsion approximation; review J when torsion is "
+            "important."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color: #657586;")
@@ -961,6 +1199,277 @@ class ShapeTemplateDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
 
+        self.shape.currentTextChanged.connect(self._update_preview)
+        self._update_preview()
+
+    def _visible_keys(self) -> set[str]:
+        shape = self.shape.currentText()
+        if shape == "Rectangle":
+            return {"height", "width"}
+        if shape == "Circle":
+            return {"outer_diameter"}
+        if shape == "Hollow Circle":
+            return {"outer_diameter", "inner_diameter"}
+        return {
+            "height",
+            "flange_width",
+            "flange_thickness",
+            "web_width",
+        }
+
+    def dimensions(self) -> dict[str, float]:
+        return {
+            key: field.value()
+            for key, field in self.fields.items()
+        }
+
+    def properties(self):
+        return section_geometry_properties(
+            self.shape.currentText(),
+            **self.dimensions(),
+        )
+
+    def _update_preview(self, *args) -> None:
+        visible = self._visible_keys()
+        for key, field in self.fields.items():
+            show = key in visible
+            field.setVisible(show)
+            self.field_labels[key].setVisible(show)
+
+        shape = self.shape.currentText()
+        dimensions = self.dimensions()
+        self.sketch.set_geometry(shape, dimensions)
+
+        try:
+            props = self.properties()
+        except (ValueError, KeyError) as exc:
+            self.result_label.setText(str(exc))
+            return
+
+        suffix = " (approx.)" if props.j_is_approximate else ""
+        centroid = ""
+        if abs(props.centroid_y) > 1.0e-14:
+            centroid = f"   yc={props.centroid_y:.6g}"
+        self.result_label.setText(
+            f"A={props.area:.6g}   "
+            f"Iy={props.iy:.6g}   "
+            f"Iz={props.iz:.6g}   "
+            f"J={props.j:.6g}{suffix}"
+            f"{centroid}"
+        )
+
+    def _accept(self) -> None:
+        try:
+            self.properties()
+        except (ValueError, KeyError) as exc:
+            QMessageBox.warning(
+                self,
+                "Elastic Section Geometry",
+                str(exc),
+            )
+            return
+        self.accept()
+
+
+class ShapeTemplateDialog(QDialog):
+    def __init__(
+        self,
+        materials: dict[int, MaterialData],
+        shape: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.materials = materials
+        self.shape = str(shape).upper()
+        if self.shape not in {"RECTANGLE", "CIRCLE", "T", "I"}:
+            raise ValueError(f"Unsupported section template: {shape}")
+
+        title = {
+            "RECTANGLE": "Rectangle RC",
+            "CIRCLE": "Circle RC",
+            "T": "T-section RC",
+            "I": "I-section RC",
+        }[self.shape]
+        self.setWindowTitle(f"{title} Fiber Template")
+        self.setModal(True)
+        self.resize(780, 560)
+
+        root = QVBoxLayout(self)
+        body = QHBoxLayout()
+        root.addLayout(body, 1)
+
+        form_host = QWidget()
+        form = QFormLayout(form_host)
+        body.addWidget(form_host, 3)
+
+        shape_label = QLabel(title)
+        shape_label.setStyleSheet("font-weight: 700;")
+        form.addRow("Template:", shape_label)
+
+        self.height = None
+        self.width = None
+        self.outer_diameter = None
+        self.inner_diameter = None
+        self.flange_width = None
+        self.flange_thickness = None
+        self.web_width = None
+
+        if self.shape == "RECTANGLE":
+            self.height = _float_spin(0.50, low=1.0e-9)
+            self.width = _float_spin(0.40, low=1.0e-9)
+            form.addRow("Height H (local y):", self.height)
+            form.addRow("Width B (local z):", self.width)
+        elif self.shape == "CIRCLE":
+            self.outer_diameter = _float_spin(0.50, low=1.0e-9)
+            self.inner_diameter = _float_spin(0.0, low=0.0)
+            form.addRow("Outer diameter Do:", self.outer_diameter)
+            form.addRow("Inner diameter Di (0 = solid):", self.inner_diameter)
+        else:
+            self.height = _float_spin(0.60, low=1.0e-9)
+            self.flange_width = _float_spin(0.60, low=1.0e-9)
+            self.flange_thickness = _float_spin(0.15, low=1.0e-9)
+            self.web_width = _float_spin(0.25, low=1.0e-9)
+            form.addRow("Total height H (local y):", self.height)
+            form.addRow("Flange width Bf (local z):", self.flange_width)
+            form.addRow("Flange thickness tf:", self.flange_thickness)
+            form.addRow("Web width bw:", self.web_width)
+
+        self.cover = _float_spin(0.04, low=0.0)
+        form.addRow("Concrete cover c:", self.cover)
+
+        self.core_material = QComboBox()
+        self.cover_material = QComboBox()
+        for tag in sorted(materials):
+            material = materials[tag]
+            text = f"{tag} - {material.name} ({material.material_type})"
+            self.core_material.addItem(text, tag)
+            self.cover_material.addItem(text, tag)
+        if self.cover_material.count() > 1:
+            self.cover_material.setCurrentIndex(1)
+        form.addRow("Core material:", self.core_material)
+        form.addRow("Cover material:", self.cover_material)
+
+        self.rebar_material = None
+        self.bar_diameter = None
+        self.bars_top = None
+        self.bars_bottom = None
+        self.side_bars_each = None
+        self.outer_bars = None
+        self.inner_bars = None
+
+        if self.shape in {"RECTANGLE", "CIRCLE"}:
+            self.rebar_material = QComboBox()
+            self.rebar_material.addItem("No reinforcement", None)
+            for tag in sorted(materials):
+                material = materials[tag]
+                self.rebar_material.addItem(
+                    f"{tag} - {material.name} ({material.material_type})",
+                    tag,
+                )
+            self.bar_diameter = _float_spin(0.02, low=1.0e-9)
+            form.addRow("Rebar material:", self.rebar_material)
+            form.addRow("Bar diameter:", self.bar_diameter)
+
+            if self.shape == "RECTANGLE":
+                self.bars_top = _nonnegative_int(4, 100)
+                self.bars_bottom = _nonnegative_int(4, 100)
+                self.side_bars_each = _nonnegative_int(2, 100)
+                form.addRow("Bars on top row:", self.bars_top)
+                form.addRow("Bars on bottom row:", self.bars_bottom)
+                form.addRow(
+                    "Intermediate bars per side:",
+                    self.side_bars_each,
+                )
+            else:
+                self.outer_bars = _nonnegative_int(12, 200)
+                self.inner_bars = _nonnegative_int(0, 200)
+                form.addRow("Bars on outer ring:", self.outer_bars)
+                form.addRow("Bars on inner ring:", self.inner_bars)
+
+        if self.shape == "CIRCLE":
+            self.n_radial = _positive_int(12, 200)
+            self.n_circum = _positive_int(48, 360)
+            form.addRow("Radial divisions:", self.n_radial)
+            form.addRow("Circumferential divisions:", self.n_circum)
+            self.n_y = None
+            self.n_z = None
+        else:
+            self.n_y = _positive_int(24, 200)
+            self.n_z = _positive_int(24, 200)
+            form.addRow("Target divisions along y:", self.n_y)
+            form.addRow("Target divisions along z:", self.n_z)
+            self.n_radial = None
+            self.n_circum = None
+
+        self.sketch = SectionShapeSketchWidget()
+        body.addWidget(self.sketch, 2)
+
+        note = QLabel(
+            "The template generates geometry-consistent, non-overlapping "
+            "components. Di=0 creates a solid circle; Di>0 creates a hollow "
+            "circle with cover on both exposed circular faces. Generated "
+            "components remain individually editable in the Builder."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #657586;")
+        root.addWidget(note)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+        for widget in (
+            self.height,
+            self.width,
+            self.outer_diameter,
+            self.inner_diameter,
+            self.flange_width,
+            self.flange_thickness,
+            self.web_width,
+            self.cover,
+        ):
+            if widget is not None:
+                widget.valueChanged.connect(self._sync_sketch)
+        self._sync_sketch()
+
+    def _geometry_for_sketch(self) -> tuple[str, dict[str, float]]:
+        if self.shape == "RECTANGLE":
+            return (
+                "Rectangle",
+                {
+                    "height": self.height.value(),
+                    "width": self.width.value(),
+                    "cover": self.cover.value(),
+                },
+            )
+        if self.shape == "CIRCLE":
+            di = self.inner_diameter.value()
+            return (
+                "Hollow Circle" if di > 0.0 else "Circle",
+                {
+                    "outer_diameter": self.outer_diameter.value(),
+                    "inner_diameter": di,
+                    "cover": self.cover.value(),
+                },
+            )
+        return (
+            self.shape,
+            {
+                "height": self.height.value(),
+                "flange_width": self.flange_width.value(),
+                "flange_thickness": self.flange_thickness.value(),
+                "web_width": self.web_width.value(),
+                "cover": self.cover.value(),
+            },
+        )
+
+    def _sync_sketch(self, *args) -> None:
+        shape, dimensions = self._geometry_for_sketch()
+        self.sketch.set_geometry(shape, dimensions)
+
     def components(self) -> list[FiberComponentData]:
         if (
             self.core_material.currentData() is None
@@ -968,14 +1477,68 @@ class ShapeTemplateDialog(QDialog):
         ):
             raise ValueError("Create and select concrete materials first.")
 
+        core_tag = int(self.core_material.currentData())
+        cover_tag = int(self.cover_material.currentData())
+
+        if self.shape == "RECTANGLE":
+            rebar_tag = self.rebar_material.currentData()
+            use_rebar = rebar_tag is not None
+            return create_rectangle_section_components(
+                height=self.height.value(),
+                width=self.width.value(),
+                cover=self.cover.value(),
+                core_material_tag=core_tag,
+                cover_material_tag=cover_tag,
+                n_y=self.n_y.value(),
+                n_z=self.n_z.value(),
+                rebar_material_tag=(
+                    int(rebar_tag) if use_rebar else None
+                ),
+                bar_diameter=(
+                    self.bar_diameter.value() if use_rebar else 0.0
+                ),
+                bars_top=self.bars_top.value() if use_rebar else 0,
+                bars_bottom=(
+                    self.bars_bottom.value() if use_rebar else 0
+                ),
+                side_bars_each=(
+                    self.side_bars_each.value() if use_rebar else 0
+                ),
+            )
+
+        if self.shape == "CIRCLE":
+            rebar_tag = self.rebar_material.currentData()
+            use_rebar = rebar_tag is not None
+            return create_circle_section_components(
+                outer_diameter=self.outer_diameter.value(),
+                inner_diameter=self.inner_diameter.value(),
+                cover=self.cover.value(),
+                core_material_tag=core_tag,
+                cover_material_tag=cover_tag,
+                n_radial=self.n_radial.value(),
+                n_circum=self.n_circum.value(),
+                rebar_material_tag=(
+                    int(rebar_tag) if use_rebar else None
+                ),
+                bar_diameter=(
+                    self.bar_diameter.value() if use_rebar else 0.0
+                ),
+                outer_bars=(
+                    self.outer_bars.value() if use_rebar else 0
+                ),
+                inner_bars=(
+                    self.inner_bars.value() if use_rebar else 0
+                ),
+            )
+
         kwargs = {
             "height": self.height.value(),
             "flange_width": self.flange_width.value(),
             "flange_thickness": self.flange_thickness.value(),
             "web_width": self.web_width.value(),
             "cover": self.cover.value(),
-            "core_material_tag": int(self.core_material.currentData()),
-            "cover_material_tag": int(self.cover_material.currentData()),
+            "core_material_tag": core_tag,
+            "cover_material_tag": cover_tag,
             "n_y": self.n_y.value(),
             "n_z": self.n_z.value(),
         }
@@ -997,7 +1560,7 @@ class ShapeTemplateDialog(QDialog):
             QMessageBox.warning(
                 self,
                 f"{self.shape}-Section Template",
-                "The template did not create any section patches.",
+                "The template did not create any section components.",
             )
             return
         self.accept()
@@ -1077,6 +1640,20 @@ class SectionDialog(QDialog):
         page = QWidget()
         form = QFormLayout(page)
 
+        geometry_button = QPushButton("Geometry Template...")
+        geometry_button.clicked.connect(
+            self._apply_elastic_geometry_template
+        )
+        self.elastic_geometry_status = QLabel(
+            "Enter properties manually, or derive A/I/J from a standard shape."
+        )
+        self.elastic_geometry_status.setWordWrap(True)
+        self.elastic_geometry_status.setStyleSheet("color: #657586;")
+        geometry_row = QHBoxLayout()
+        geometry_row.addWidget(geometry_button)
+        geometry_row.addWidget(self.elastic_geometry_status, 1)
+        form.addRow("Geometry:", geometry_row)
+
         self.elastic_material = QComboBox()
         self.elastic_material.addItem("Manual section properties", None)
         for tag in sorted(self.materials):
@@ -1155,17 +1732,29 @@ class SectionDialog(QDialog):
         )
         left_layout.addWidget(self.component_list, 1)
 
-        template_row = QHBoxLayout()
+        template_row_1 = QHBoxLayout()
         for text, shape in (
-            ("T Template...", "T"),
-            ("I Template...", "I"),
+            ("Rectangle RC...", "RECTANGLE"),
+            ("Circle RC...", "CIRCLE"),
         ):
             button = QPushButton(text)
             button.clicked.connect(
                 lambda checked=False, s=shape: self._apply_shape_template(s)
             )
-            template_row.addWidget(button)
-        left_layout.addLayout(template_row)
+            template_row_1.addWidget(button)
+        left_layout.addLayout(template_row_1)
+
+        template_row_2 = QHBoxLayout()
+        for text, shape in (
+            ("T RC...", "T"),
+            ("I RC...", "I"),
+        ):
+            button = QPushButton(text)
+            button.clicked.connect(
+                lambda checked=False, s=shape: self._apply_shape_template(s)
+            )
+            template_row_2.addWidget(button)
+        left_layout.addLayout(template_row_2)
 
         add_row_1 = QHBoxLayout()
         for text, kind in (
@@ -1300,6 +1889,20 @@ class SectionDialog(QDialog):
                 self._add_fiber_row(fiber)
 
         return page
+
+    def _apply_elastic_geometry_template(self) -> None:
+        dialog = ElasticGeometryDialog(parent=self)
+        if not dialog.exec():
+            return
+        props = dialog.properties()
+        values = props.as_elastic_parameters()
+        for key in ("A", "Iy", "Iz", "J"):
+            self.elastic_spins[key].setValue(values[key])
+        note = "J approximate" if props.j_is_approximate else "J exact"
+        self.elastic_geometry_status.setText(
+            f"{dialog.shape.currentText()} geometry applied · "
+            f"A/Iy/Iz/J auto-calculated · {note}."
+        )
 
     def _update_elastic_material_link(self) -> None:
         material_tag = self.elastic_material.currentData()
