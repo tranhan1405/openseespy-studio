@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
+import sys
+import tempfile
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QAction, QColor, QCursor, QFont, QKeySequence, QPainter, QPen, QShortcut
+from PySide6.QtCore import QProcess, QTimer, QSize, Qt
+from PySide6.QtGui import QAction, QColor, QCursor, QFont, QKeySequence, QPainter, QPen, QShortcut, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -508,6 +511,8 @@ class MainWindow(QMainWindow):
         self._tree_node_items: dict[int, QTreeWidgetItem] = {}
         self._tree_element_items: dict[int, QTreeWidgetItem] = {}
         self._shortcuts: list[QShortcut] = []
+        self._analysis_process: QProcess | None = None
+        self._analysis_script_path: str | None = None
 
         self.setCorner(Qt.BottomLeftCorner, Qt.LeftDockWidgetArea)
         self.setCorner(Qt.BottomRightCorner, Qt.BottomDockWidgetArea)
@@ -692,7 +697,7 @@ class MainWindow(QMainWindow):
                 f"{label} view",
             )
 
-        self._make_action("run", "Run", "run", self._run_generated_model, "Run model")
+        self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action("plot", "Plot", "plot", self._not_implemented, "Plot results")
 
         menus["File"].addActions([self.actions["new"], self.actions["open"], self.actions["save"]])
@@ -1180,25 +1185,142 @@ class MainWindow(QMainWindow):
         Path(path).write_text(self.script.toPlainText(), encoding="utf-8")
         self._log(f"Exported: {path}")
 
-    def _run_generated_model(self) -> None:
-        try:
-            import openseespy.opensees as ops  # noqa: F401
-        except ImportError:
-            QMessageBox.warning(
-                self,
-                "OpenSeesPy missing",
-                "Install dependencies first: pip install -r requirements.txt",
-            )
+    def _toggle_analysis(self) -> None:
+        if self._analysis_process is not None:
+            if self._analysis_process.state() != QProcess.NotRunning:
+                self._stop_analysis()
+                return
+        self._start_analysis()
+
+    def _start_analysis(self) -> None:
+        script_text = self.script.toPlainText()
+        if not script_text.strip():
+            QMessageBox.information(self, "Run", "The generated script is empty.")
             return
 
-        scope = {}
-        try:
-            exec(self.script.toPlainText(), scope, scope)
-            self._log("OpenSeesPy model executed successfully")
-            self.status_message.setText("Model executed successfully")
-        except Exception as exc:
-            self._log(f"ERROR: {type(exc).__name__}: {exc}")
-            QMessageBox.critical(self, "Execution error", str(exc))
+        fd, path = tempfile.mkstemp(
+            prefix="openseespy_studio_",
+            suffix=".py",
+            text=True,
+        )
+        os.close(fd)
+        Path(path).write_text(script_text, encoding="utf-8")
+        self._analysis_script_path = path
+
+        process = QProcess(self)
+        process.setProgram(sys.executable)
+        process.setArguments([
+            "-m",
+            "openseespy_studio.solver_worker",
+            path,
+        ])
+        process.setProcessChannelMode(QProcess.SeparateChannels)
+        process.readyReadStandardOutput.connect(self._read_analysis_stdout)
+        process.readyReadStandardError.connect(self._read_analysis_stderr)
+        process.finished.connect(self._analysis_finished)
+        process.errorOccurred.connect(self._analysis_process_error)
+        self._analysis_process = process
+
+        self.console.appendPlainText(
+            f">> Starting analysis worker with {Path(sys.executable).name}..."
+        )
+        self.status_message.setText("Analysis running...")
+        self.actions["run"].setText("Stop")
+        self.actions["run"].setToolTip("Stop running analysis")
+        process.start()
+
+    def _stop_analysis(self) -> None:
+        process = self._analysis_process
+        if process is None or process.state() == QProcess.NotRunning:
+            return
+
+        self.console.appendPlainText(">> Stopping analysis worker...")
+        self.status_message.setText("Stopping analysis...")
+        process.terminate()
+        QTimer.singleShot(2000, self._kill_analysis_if_needed)
+
+    def _kill_analysis_if_needed(self) -> None:
+        process = self._analysis_process
+        if process is not None and process.state() != QProcess.NotRunning:
+            self.console.appendPlainText(
+                ">> Worker did not stop in time; forcing termination."
+            )
+            process.kill()
+
+    def _read_analysis_stdout(self) -> None:
+        process = self._analysis_process
+        if process is None:
+            return
+        text = bytes(process.readAllStandardOutput()).decode(
+            "utf-8",
+            errors="replace",
+        )
+        if text:
+            self.console.moveCursor(QTextCursor.End)
+            self.console.insertPlainText(text)
+
+    def _read_analysis_stderr(self) -> None:
+        process = self._analysis_process
+        if process is None:
+            return
+        text = bytes(process.readAllStandardError()).decode(
+            "utf-8",
+            errors="replace",
+        )
+        if text:
+            self.console.moveCursor(QTextCursor.End)
+            self.console.insertPlainText(text)
+
+    def _analysis_process_error(self, error) -> None:
+        process = self._analysis_process
+        if process is None:
+            return
+        self.console.appendPlainText(
+            f"\n>> Analysis worker process error: {process.errorString()}"
+        )
+
+    def _analysis_finished(self, exit_code: int, exit_status) -> None:
+        crashed = exit_status == QProcess.CrashExit
+        if crashed:
+            self.console.appendPlainText(
+                f"\n>> Analysis worker crashed (exit code {exit_code}). "
+                "The Studio GUI remains available."
+            )
+            self.status_message.setText("Analysis worker crashed")
+        elif exit_code == 0:
+            self.console.appendPlainText(
+                "\n>> Analysis worker completed successfully."
+            )
+            self.status_message.setText("Analysis completed")
+        else:
+            self.console.appendPlainText(
+                f"\n>> Analysis worker exited with code {exit_code}."
+            )
+            self.status_message.setText(
+                f"Analysis failed (exit code {exit_code})"
+            )
+
+        self.actions["run"].setText("Run")
+        self.actions["run"].setToolTip("Run model")
+        self._cleanup_analysis_script()
+        self._analysis_process = None
+
+    def _cleanup_analysis_script(self) -> None:
+        path = self._analysis_script_path
+        self._analysis_script_path = None
+        if path:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def closeEvent(self, event) -> None:
+        process = self._analysis_process
+        if process is not None and process.state() != QProcess.NotRunning:
+            process.kill()
+            process.waitForFinished(1000)
+        self._cleanup_analysis_script()
+        super().closeEvent(event)
 
     def _not_implemented(self) -> None:
         action = self.sender()
