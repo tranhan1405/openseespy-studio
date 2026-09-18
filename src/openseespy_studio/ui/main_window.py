@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
 
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..model import StructuralModel, classify_fixity
-from ..project import ConnectionData, ConstraintData, MaterialData, ProjectDatabase, SectionData, SelectionSetData, TransformationData
+from ..project import ConnectionData, ConstraintData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, SectionData, SelectionSetData, TimeSeriesData, TransformationData
 from .code_editor import CodeEditor
 from .connection_dialog import ConnectionDialog
 from .constraint_dialog import ConstraintDialog
@@ -54,6 +54,7 @@ from .geometry_dialogs import (
     VectorDialog,
 )
 from .history import ProjectSnapshotCommand
+from .load_dialogs import LoadPatternDialog, MassDialog, NodalLoadDialog, TimeSeriesDialog
 from .material_dialog import MaterialDialog
 from .section_dialog import SectionDialog
 from .transformation_dialog import TransformationDialog
@@ -848,6 +849,10 @@ class MainWindow(QMainWindow):
             self._create_connection,
             "Create zeroLength or twoNodeLink spring / link",
         )
+        self._make_action("mass", "Mass...", "load", self._assign_mass, "Assign nodal mass")
+        self._make_action("time_series", "Time Series...", "timeseries", self._create_time_series, "Create time series")
+        self._make_action("load_pattern", "Load Pattern...", "load", self._create_load_pattern, "Create load pattern or ground motion")
+        self._make_action("nodal_load", "Nodal Load...", "load", self._create_nodal_load, "Create nodal load")
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action("plot", "Plot", "plot", self._not_implemented, "Plot results")
 
@@ -874,6 +879,11 @@ class MainWindow(QMainWindow):
         menus["Loads"].addSeparator()
         menus["Loads"].addAction(self.actions["constraint"])
         menus["Loads"].addAction(self.actions["connection"])
+        menus["Loads"].addSeparator()
+        menus["Loads"].addAction(self.actions["mass"])
+        menus["Loads"].addAction(self.actions["time_series"])
+        menus["Loads"].addAction(self.actions["load_pattern"])
+        menus["Loads"].addAction(self.actions["nodal_load"])
         menus["Analysis"].addAction(self.actions["run"])
         menus["Results"].addAction(self.actions["plot"])
 
@@ -891,6 +901,7 @@ class MainWindow(QMainWindow):
             ("Selection", ["select", "box", "polygon", "byid", "bytype"]),
             ("View", ["xy", "yz", "xz", "iso"]),
             ("Supports", ["support", "clear_support", "constraint", "connection"]),
+            ("Loads", ["mass", "time_series", "load_pattern", "nodal_load"]),
             ("Analysis", ["run", "plot"]),
         )
 
@@ -978,6 +989,7 @@ class MainWindow(QMainWindow):
         self._prune_selection_sets()
         self.project.prune_constraints()
         self.project.prune_connections()
+        self.project.prune_nodal_loads()
         self._refresh_all(
             f"Generated {spec.nx} × {spec.ny} bay, {spec.nz}-storey frame"
         )
@@ -1008,6 +1020,9 @@ class MainWindow(QMainWindow):
                 self.project.transformations,
                 self.project.constraints,
                 self.project.connections,
+                self.project.time_series,
+                self.project.load_patterns,
+                self.project.nodal_loads,
             )
         )
         self._selection_changed(self.selection.snapshot())
@@ -1247,13 +1262,52 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("connection", tag))
             connection_groups[connection.connection_type].addChild(item)
 
-        for label, icon in (
-            (f"Time Series ({len(self.project.time_series)})", "timeseries"),
-            (f"Load Patterns ({len(self.project.load_patterns)})", "load"),
-        ):
-            item = QTreeWidgetItem([label])
-            item.setIcon(0, studio_icon(icon))
-            root.addChild(item)
+        mass_nodes = [
+            tag for tag, node in self.model.nodes.items()
+            if any(abs(value) > 0.0 for value in node.mass)
+        ]
+        masses_root = QTreeWidgetItem([f"Masses ({len(mass_nodes)})"])
+        masses_root.setIcon(0, studio_icon("load"))
+        masses_root.setData(0, Qt.UserRole, ("masses_root", None))
+        root.addChild(masses_root)
+        for tag in sorted(mass_nodes):
+            item = QTreeWidgetItem([f"Node {tag}"])
+            item.setIcon(0, studio_icon("load"))
+            item.setData(0, Qt.UserRole, ("node", tag))
+            masses_root.addChild(item)
+
+        series_root = QTreeWidgetItem([f"Time Series ({len(self.project.time_series)})"])
+        series_root.setIcon(0, studio_icon("timeseries"))
+        series_root.setData(0, Qt.UserRole, ("time_series_root", None))
+        series_root.setExpanded(True)
+        root.addChild(series_root)
+        for tag in sorted(self.project.time_series):
+            series = self.project.time_series[tag]
+            item = QTreeWidgetItem([f"{series.series_type} [{tag}]  {series.name}"])
+            item.setIcon(0, studio_icon("timeseries"))
+            item.setData(0, Qt.UserRole, ("time_series", tag))
+            series_root.addChild(item)
+
+        patterns_root = QTreeWidgetItem([f"Load Patterns ({len(self.project.load_patterns)})"])
+        patterns_root.setIcon(0, studio_icon("load"))
+        patterns_root.setData(0, Qt.UserRole, ("load_patterns_root", None))
+        patterns_root.setExpanded(True)
+        root.addChild(patterns_root)
+        for tag in sorted(self.project.load_patterns):
+            pattern = self.project.load_patterns[tag]
+            item = QTreeWidgetItem([f"{pattern.pattern_type} [{tag}]  {pattern.name}"])
+            item.setIcon(0, studio_icon("load"))
+            item.setData(0, Qt.UserRole, ("load_pattern", tag))
+            item.setExpanded(True)
+            patterns_root.addChild(item)
+            for load_tag in sorted(self.project.nodal_loads):
+                load = self.project.nodal_loads[load_tag]
+                if load.pattern_tag != tag:
+                    continue
+                load_item = QTreeWidgetItem([f"{load.name} [{load.tag}] → Node {load.node_tag}"])
+                load_item.setIcon(0, studio_icon("load"))
+                load_item.setData(0, Qt.UserRole, ("nodal_load", load.tag))
+                item.addChild(load_item)
 
         analysis = QTreeWidgetItem(["Analysis"])
         analysis.setIcon(0, studio_icon("analysis"))
@@ -1279,6 +1333,9 @@ class MainWindow(QMainWindow):
         transformation_tag: int | None = None
         constraint_tag: int | None = None
         connection_tag: int | None = None
+        time_series_tag: int | None = None
+        load_pattern_tag: int | None = None
+        nodal_load_tag: int | None = None
 
         for item in self.tree.selectedItems():
             payload = item.data(0, Qt.UserRole)
@@ -1304,6 +1361,12 @@ class MainWindow(QMainWindow):
                 constraint_tag = int(tag)
             elif kind == "connection":
                 connection_tag = int(tag)
+            elif kind == "time_series":
+                time_series_tag = int(tag)
+            elif kind == "load_pattern":
+                load_pattern_tag = int(tag)
+            elif kind == "nodal_load":
+                nodal_load_tag = int(tag)
 
         self.selection.set_selection(nodes=nodes, elements=elements)
         if material_tag is not None:
@@ -1316,6 +1379,12 @@ class MainWindow(QMainWindow):
             self._show_constraint_properties(constraint_tag)
         elif connection_tag is not None:
             self._show_connection_properties(connection_tag)
+        elif time_series_tag is not None:
+            self._show_time_series_properties(time_series_tag)
+        elif load_pattern_tag is not None:
+            self._show_load_pattern_properties(load_pattern_tag)
+        elif nodal_load_tag is not None:
+            self._show_nodal_load_properties(nodal_load_tag)
 
     def _wire_selection(self) -> None:
         self.selection.changed.connect(self._selection_changed)
@@ -1483,7 +1552,7 @@ class MainWindow(QMainWindow):
                     ("RX", "Fixed" if node.fixity[3] else "Free"),
                     ("RY", "Fixed" if node.fixity[4] else "Free"),
                     ("RZ", "Fixed" if node.fixity[5] else "Free"),
-                    ("Mass", "0.0, 0.0, 0.0"),
+                    ("Mass", ", ".join(f"{value:g}" for value in node.mass)),
                     ("Connected", ", ".join(map(str, connected)) or "-"),
                 ],
             )
@@ -1573,10 +1642,15 @@ class MainWindow(QMainWindow):
         constraint_action.triggered.connect(self._create_constraint)
 
         connection_action = menu.addAction("Create Connection / Spring...")
-        connection_action.setEnabled(
-            1 <= len(self.selection.nodes) <= 2
-        )
+        connection_action.setEnabled(1 <= len(self.selection.nodes) <= 2)
         connection_action.triggered.connect(self._create_connection)
+
+        mass_action = menu.addAction("Assign Mass...")
+        mass_action.setEnabled(bool(self.selection.nodes))
+        mass_action.triggered.connect(self._assign_mass)
+        load_action = menu.addAction("Create Nodal Load...")
+        load_action.setEnabled(bool(self.selection.nodes))
+        load_action.triggered.connect(self._create_nodal_load)
 
         menu.addSeparator()
         assign_menu = menu.addMenu("Assign")
@@ -1678,6 +1752,278 @@ class MainWindow(QMainWindow):
             "Clear restraint",
             before,
         )
+
+    def _assign_mass(self) -> None:
+        node_tags = self._selected_node_tags("Nodal Mass")
+        if node_tags is None:
+            return
+        masses = {
+            tuple(self.model.nodes[tag].mass)
+            for tag in node_tags
+            if tag in self.model.nodes
+        }
+        initial = next(iter(masses)) if len(masses) == 1 else None
+        dialog = MassDialog(initial=initial, parent=self)
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated = self.model.set_mass_many(node_tags, dialog.values())
+        except ValueError as exc:
+            QMessageBox.warning(self, "Nodal Mass", str(exc))
+            return
+        self._refresh_project_metadata(
+            f"Assigned mass to {len(updated)} node(s)"
+        )
+        self._record_project_change("Assign nodal mass", before)
+
+    def _clear_mass(self) -> None:
+        node_tags = self._selected_node_tags("Clear Mass")
+        if node_tags is None:
+            return
+        before = self.project.to_dict()
+        updated = self.model.clear_mass_many(node_tags)
+        self._refresh_project_metadata(
+            f"Cleared mass on {len(updated)} node(s)"
+        )
+        self._record_project_change("Clear nodal mass", before)
+
+    def _create_time_series(self) -> None:
+        dialog = TimeSeriesDialog(
+            next_tag=self.project.next_time_series_tag(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            series = dialog.data()
+            self.project.add_time_series(series)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Time Series Editor", str(exc))
+            return
+        self._refresh_project_metadata(f"Created time series {series.tag}")
+        self._show_time_series_properties(series.tag)
+        self._record_project_change(f"Create time series {series.tag}", before)
+
+    def _edit_time_series(self, tag: int) -> None:
+        series = self.project.time_series.get(tag)
+        if series is None:
+            return
+        dialog = TimeSeriesDialog(series=series, parent=self)
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated = dialog.data()
+            self.project.update_time_series(tag, updated)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Time Series Editor", str(exc))
+            return
+        self._refresh_project_metadata(f"Updated time series {updated.tag}")
+        self._show_time_series_properties(updated.tag)
+        self._record_project_change(f"Edit time series {tag}", before)
+
+    def _delete_time_series(self, tag: int) -> None:
+        if tag not in self.project.time_series:
+            return
+        before = self.project.to_dict()
+        try:
+            self.project.remove_time_series(tag)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Delete Time Series", str(exc))
+            return
+        self._refresh_project_metadata(f"Deleted time series {tag}")
+        self._record_project_change(f"Delete time series {tag}", before)
+
+    def _show_time_series_properties(self, tag: int) -> None:
+        series = self.project.time_series.get(tag)
+        if series is None:
+            return
+        rows = [
+            ("Tag", series.tag), ("Name", series.name),
+            ("Type", series.series_type), ("Factor", f"{series.factor:g}"),
+        ]
+        if series.series_type == "Path":
+            rows.extend([
+                ("dt", f"{series.dt:g}"),
+                ("Points", len(series.values)),
+            ])
+        self.properties_panel.set_properties("Time Series", rows)
+
+    def _create_load_pattern(self) -> None:
+        if not self.project.time_series:
+            QMessageBox.information(
+                self, "Load Pattern", "Create a time series first."
+            )
+            return
+        dialog = LoadPatternDialog(
+            self.project.time_series,
+            next_tag=self.project.next_load_pattern_tag(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            pattern = dialog.data()
+            self.project.add_load_pattern(pattern)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Load Pattern Editor", str(exc))
+            return
+        self._refresh_project_metadata(f"Created load pattern {pattern.tag}")
+        self._show_load_pattern_properties(pattern.tag)
+        self._record_project_change(f"Create load pattern {pattern.tag}", before)
+
+    def _edit_load_pattern(self, tag: int) -> None:
+        pattern = self.project.load_patterns.get(tag)
+        if pattern is None:
+            return
+        dialog = LoadPatternDialog(
+            self.project.time_series, pattern=pattern, parent=self
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated = dialog.data()
+            self.project.update_load_pattern(tag, updated)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Load Pattern Editor", str(exc))
+            return
+        self._refresh_project_metadata(f"Updated load pattern {updated.tag}")
+        self._show_load_pattern_properties(updated.tag)
+        self._record_project_change(f"Edit load pattern {tag}", before)
+
+    def _delete_load_pattern(self, tag: int) -> None:
+        if tag not in self.project.load_patterns:
+            return
+        before = self.project.to_dict()
+        self.project.remove_load_pattern(tag)
+        self._refresh_project_metadata(f"Deleted load pattern {tag}")
+        self._record_project_change(f"Delete load pattern {tag}", before)
+
+    def _show_load_pattern_properties(self, tag: int) -> None:
+        pattern = self.project.load_patterns.get(tag)
+        if pattern is None:
+            return
+        series = self.project.time_series.get(pattern.time_series_tag)
+        rows = [
+            ("Tag", pattern.tag), ("Name", pattern.name),
+            ("Type", pattern.pattern_type),
+            ("Time Series", f"{pattern.time_series_tag} - {series.name}" if series else pattern.time_series_tag),
+        ]
+        if pattern.pattern_type == "UniformExcitation":
+            rows.extend([
+                ("Direction", pattern.direction),
+                ("Scale", f"{pattern.factor:g}"),
+                ("Vel0", f"{pattern.vel0:g}"),
+            ])
+        else:
+            rows.append((
+                "Nodal Loads",
+                sum(load.pattern_tag == tag for load in self.project.nodal_loads.values()),
+            ))
+        self.properties_panel.set_properties("Load Pattern", rows)
+
+    def _create_nodal_load(self) -> None:
+        plain = {
+            tag: pattern
+            for tag, pattern in self.project.load_patterns.items()
+            if pattern.pattern_type == "Plain"
+        }
+        if not plain:
+            QMessageBox.information(
+                self, "Nodal Load", "Create a Plain load pattern first."
+            )
+            return
+        selected = sorted(self.selection.nodes)
+        node_tag = selected[0] if selected else min(self.model.nodes, default=1)
+        dialog = NodalLoadDialog(
+            plain,
+            next_tag=self.project.next_nodal_load_tag(),
+            node_tag=node_tag,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        template = dialog.data()
+        targets = selected or [template.node_tag]
+        before = self.project.to_dict()
+        created = []
+        next_tag = template.tag
+        try:
+            for node_tag in targets:
+                while next_tag in self.project.nodal_loads:
+                    next_tag += 1
+                load = NodalLoadData(
+                    tag=next_tag,
+                    name=(
+                        f"{template.name} - Node {node_tag}"
+                        if len(targets) > 1 else template.name
+                    ),
+                    pattern_tag=template.pattern_tag,
+                    node_tag=node_tag,
+                    values=template.values,
+                )
+                self.project.add_nodal_load(load)
+                created.append(load.tag)
+                next_tag += 1
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Nodal Load Editor", str(exc))
+            self._refresh_all()
+            return
+        self._refresh_project_metadata(
+            f"Created {len(created)} nodal load(s)"
+        )
+        self._record_project_change("Create nodal load(s)", before)
+
+    def _edit_nodal_load(self, tag: int) -> None:
+        load = self.project.nodal_loads.get(tag)
+        if load is None:
+            return
+        plain = {
+            key: pattern
+            for key, pattern in self.project.load_patterns.items()
+            if pattern.pattern_type == "Plain"
+        }
+        dialog = NodalLoadDialog(
+            plain, load=load, parent=self
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated = dialog.data()
+            self.project.update_nodal_load(tag, updated)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Nodal Load Editor", str(exc))
+            return
+        self._refresh_project_metadata(f"Updated nodal load {updated.tag}")
+        self._show_nodal_load_properties(updated.tag)
+        self._record_project_change(f"Edit nodal load {tag}", before)
+
+    def _delete_nodal_load(self, tag: int) -> None:
+        if tag not in self.project.nodal_loads:
+            return
+        before = self.project.to_dict()
+        self.project.remove_nodal_load(tag)
+        self._refresh_project_metadata(f"Deleted nodal load {tag}")
+        self._record_project_change(f"Delete nodal load {tag}", before)
+
+    def _show_nodal_load_properties(self, tag: int) -> None:
+        load = self.project.nodal_loads.get(tag)
+        if load is None:
+            return
+        labels = ("FX", "FY", "FZ", "MX", "MY", "MZ")
+        rows = [
+            ("Tag", load.tag), ("Name", load.name),
+            ("Pattern", load.pattern_tag), ("Node", load.node_tag),
+        ]
+        rows.extend((label, f"{value:g}") for label, value in zip(labels, load.values))
+        self.properties_panel.set_properties("Nodal Load", rows)
 
     def _selected_element_tags(
         self,
@@ -2086,6 +2432,7 @@ class MainWindow(QMainWindow):
         self._prune_selection_sets()
         self.project.prune_constraints()
         self.project.prune_connections()
+        self.project.prune_nodal_loads()
         self.selection.clear()
         self._refresh_all("Deleted selected entities")
         self._record_project_change("Delete selected entities", before)
@@ -3094,6 +3441,13 @@ class MainWindow(QMainWindow):
             support_action.triggered.connect(self._apply_restraint)
             clear_action = menu.addAction("Clear Support")
             clear_action.triggered.connect(self._clear_restraint)
+            menu.addSeparator()
+            mass_action = menu.addAction("Assign Mass...")
+            mass_action.triggered.connect(self._assign_mass)
+            clear_mass = menu.addAction("Clear Mass")
+            clear_mass.triggered.connect(self._clear_mass)
+            nodal_load = menu.addAction("Create Nodal Load...")
+            nodal_load.triggered.connect(self._create_nodal_load)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
@@ -3132,6 +3486,57 @@ class MainWindow(QMainWindow):
             delete_action.triggered.connect(
                 lambda: self._delete_connection(tag)
             )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "masses_root":
+            assign_action = menu.addAction("Assign to Current Node Selection...")
+            assign_action.triggered.connect(self._assign_mass)
+            clear_action = menu.addAction("Clear Current Node Selection")
+            clear_action.triggered.connect(self._clear_mass)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "time_series_root":
+            action = menu.addAction("New Time Series...")
+            action.triggered.connect(self._create_time_series)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "time_series":
+            tag = int(value)
+            edit = menu.addAction("Edit...")
+            edit.triggered.connect(lambda: self._edit_time_series(tag))
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(lambda: self._delete_time_series(tag))
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "load_patterns_root":
+            action = menu.addAction("New Load Pattern...")
+            action.triggered.connect(self._create_load_pattern)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "load_pattern":
+            tag = int(value)
+            edit = menu.addAction("Edit...")
+            edit.triggered.connect(lambda: self._edit_load_pattern(tag))
+            pattern = self.project.load_patterns.get(tag)
+            if pattern is not None and pattern.pattern_type == "Plain":
+                add_load = menu.addAction("Add Nodal Load...")
+                add_load.triggered.connect(self._create_nodal_load)
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(lambda: self._delete_load_pattern(tag))
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "nodal_load":
+            tag = int(value)
+            edit = menu.addAction("Edit...")
+            edit.triggered.connect(lambda: self._edit_nodal_load(tag))
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(lambda: self._delete_nodal_load(tag))
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
@@ -3248,6 +3653,12 @@ class MainWindow(QMainWindow):
             self._edit_constraint(int(value))
         elif kind == "connection":
             self._edit_connection(int(value))
+        elif kind == "time_series":
+            self._edit_time_series(int(value))
+        elif kind == "load_pattern":
+            self._edit_load_pattern(int(value))
+        elif kind == "nodal_load":
+            self._edit_nodal_load(int(value))
 
     def _select_named_selection(self, name: str) -> None:
         selection_set = self.project.selection_sets.get(name)

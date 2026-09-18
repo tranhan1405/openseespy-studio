@@ -29,6 +29,7 @@ class Node:
     tag: int
     xyz: Vec3
     fixity: Tuple[int, ...] = (0, 0, 0, 0, 0, 0)
+    mass: Tuple[float, ...] = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 
 @dataclass(slots=True)
@@ -107,6 +108,41 @@ class StructuralModel:
 
     def clear_fixity_many(self, node_tags: Iterable[int]) -> set[int]:
         return self.set_fixity_many(node_tags, (0,) * self.ndf)
+
+    def set_mass(self, tag: int, values: Iterable[float]) -> None:
+        node = self.nodes[tag]
+        vals = tuple(float(v) for v in values)
+        if len(vals) != self.ndf:
+            raise ValueError(
+                f"Expected {self.ndf} mass values, got {len(vals)}"
+            )
+        if any(value < 0.0 for value in vals):
+            raise ValueError("Nodal mass values cannot be negative.")
+        node.mass = vals
+
+    def set_mass_many(
+        self,
+        node_tags: Iterable[int],
+        values: Iterable[float],
+    ) -> set[int]:
+        vals = tuple(float(v) for v in values)
+        if len(vals) != self.ndf:
+            raise ValueError(
+                f"Expected {self.ndf} mass values, got {len(vals)}"
+            )
+        if any(value < 0.0 for value in vals):
+            raise ValueError("Nodal mass values cannot be negative.")
+        updated: set[int] = set()
+        for tag in node_tags:
+            node = self.nodes.get(int(tag))
+            if node is None:
+                continue
+            node.mass = vals
+            updated.add(node.tag)
+        return updated
+
+    def clear_mass_many(self, node_tags: Iterable[int]) -> set[int]:
+        return self.set_mass_many(node_tags, (0.0,) * self.ndf)
 
     def remove_element(self, tag: int) -> None:
         self.elements.pop(tag, None)
@@ -301,6 +337,7 @@ class StructuralModel:
             tag: (
                 self.nodes[tag].xyz,
                 self.nodes[tag].fixity,
+                self.nodes[tag].mass,
             )
             for tag in source_nodes
         }
@@ -317,7 +354,7 @@ class StructuralModel:
         for copy_index in range(1, copies + 1):
             node_map: dict[int, int] = {}
             for source_tag in sorted(source_nodes):
-                xyz, fixity = base_nodes[source_tag]
+                xyz, fixity, mass = base_nodes[source_tag]
                 new_tag = next_node
                 next_node += 1
                 node = self.add_node(
@@ -327,6 +364,7 @@ class StructuralModel:
                     xyz[2] + float(dz) * copy_index,
                 )
                 node.fixity = tuple(fixity)
+                node.mass = tuple(mass)
                 node_map[source_tag] = new_tag
                 created_nodes.add(new_tag)
 
@@ -357,6 +395,7 @@ class StructuralModel:
                     "tag": node.tag,
                     "xyz": list(node.xyz),
                     "fixity": list(node.fixity),
+                    "mass": list(node.mass),
                 }
                 for node in sorted(self.nodes.values(), key=lambda item: item.tag)
             ],
@@ -396,6 +435,16 @@ class StructuralModel:
                     f"Node {node.tag} has {len(fixity)} fixities; expected {model.ndf}."
                 )
             node.fixity = fixity
+            mass = tuple(
+                float(value)
+                for value in item.get("mass", (0.0,) * model.ndf)
+            )
+            if len(mass) != model.ndf:
+                raise ValueError(
+                    f"Node {node.tag} has {len(mass)} mass values; "
+                    f"expected {model.ndf}."
+                )
+            node.mass = mass
 
         for item in data.get("elements", []):
             model.add_element(

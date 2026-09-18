@@ -9,7 +9,7 @@ from .model import StructuralModel
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 7
+PROJECT_FORMAT_VERSION = 8
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -506,6 +506,147 @@ class ConnectionData:
 
 
 @dataclass
+class TimeSeriesData:
+    tag: int
+    name: str
+    series_type: str
+    factor: float = 1.0
+    dt: float = 0.01
+    values: list[float] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.tag = int(self.tag)
+        self.name = str(self.name).strip() or f"Time Series {self.tag}"
+        self.series_type = str(self.series_type)
+        self.factor = float(self.factor)
+        self.dt = float(self.dt)
+        self.values = [float(value) for value in self.values]
+        if self.tag <= 0:
+            raise ValueError("Time series tag must be positive.")
+        if self.series_type not in {"Constant", "Linear", "Path"}:
+            raise ValueError(f"Unsupported time series type: {self.series_type}")
+        if self.series_type == "Path":
+            if self.dt <= 0.0:
+                raise ValueError("Path time series dt must be positive.")
+            if not self.values:
+                raise ValueError("Path time series needs at least one value.")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "series_type": self.series_type,
+            "factor": self.factor,
+            "dt": self.dt,
+            "values": list(self.values),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TimeSeriesData":
+        return cls(
+            tag=int(data["tag"]),
+            name=str(data.get("name", f"Time Series {data['tag']}")),
+            series_type=str(data.get("series_type", "Linear")),
+            factor=float(data.get("factor", 1.0)),
+            dt=float(data.get("dt", 0.01)),
+            values=[float(value) for value in data.get("values", [])],
+        )
+
+
+@dataclass
+class LoadPatternData:
+    tag: int
+    name: str
+    pattern_type: str
+    time_series_tag: int
+    direction: int = 1
+    factor: float = 1.0
+    vel0: float = 0.0
+
+    def __post_init__(self) -> None:
+        self.tag = int(self.tag)
+        self.name = str(self.name).strip() or f"Load Pattern {self.tag}"
+        self.pattern_type = str(self.pattern_type)
+        self.time_series_tag = int(self.time_series_tag)
+        self.direction = int(self.direction)
+        self.factor = float(self.factor)
+        self.vel0 = float(self.vel0)
+        if self.tag <= 0:
+            raise ValueError("Load pattern tag must be positive.")
+        if self.time_series_tag <= 0:
+            raise ValueError("Load pattern needs a valid time series tag.")
+        if self.pattern_type not in {"Plain", "UniformExcitation"}:
+            raise ValueError(f"Unsupported pattern type: {self.pattern_type}")
+        if self.pattern_type == "UniformExcitation" and not 1 <= self.direction <= 6:
+            raise ValueError("UniformExcitation direction must be 1..6.")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "pattern_type": self.pattern_type,
+            "time_series_tag": self.time_series_tag,
+            "direction": self.direction,
+            "factor": self.factor,
+            "vel0": self.vel0,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LoadPatternData":
+        return cls(
+            tag=int(data["tag"]),
+            name=str(data.get("name", f"Load Pattern {data['tag']}")),
+            pattern_type=str(data.get("pattern_type", "Plain")),
+            time_series_tag=int(data["time_series_tag"]),
+            direction=int(data.get("direction", 1)),
+            factor=float(data.get("factor", 1.0)),
+            vel0=float(data.get("vel0", 0.0)),
+        )
+
+
+@dataclass
+class NodalLoadData:
+    tag: int
+    name: str
+    pattern_tag: int
+    node_tag: int
+    values: tuple[float, float, float, float, float, float]
+
+    def __post_init__(self) -> None:
+        self.tag = int(self.tag)
+        self.name = str(self.name).strip() or f"Nodal Load {self.tag}"
+        self.pattern_tag = int(self.pattern_tag)
+        self.node_tag = int(self.node_tag)
+        self.values = tuple(float(value) for value in self.values)
+        if self.tag <= 0:
+            raise ValueError("Nodal load tag must be positive.")
+        if self.pattern_tag <= 0 or self.node_tag <= 0:
+            raise ValueError("Nodal load needs valid pattern and node tags.")
+        if len(self.values) != 6:
+            raise ValueError("Nodal load needs six DOF values.")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "pattern_tag": self.pattern_tag,
+            "node_tag": self.node_tag,
+            "values": list(self.values),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "NodalLoadData":
+        values = tuple(float(value) for value in data.get("values", (0.0,) * 6))
+        return cls(
+            tag=int(data["tag"]),
+            name=str(data.get("name", f"Nodal Load {data['tag']}")),
+            pattern_tag=int(data["pattern_tag"]),
+            node_tag=int(data["node_tag"]),
+            values=values,
+        )
+
+
+@dataclass
 class SelectionSetData:
     name: str
     node_tags: set[int] = field(default_factory=set)
@@ -540,8 +681,9 @@ class ProjectDatabase:
     transformations: dict[int, TransformationData] = field(default_factory=dict)
     constraints: dict[int, ConstraintData] = field(default_factory=dict)
     connections: dict[int, ConnectionData] = field(default_factory=dict)
-    time_series: dict[str, dict[str, Any]] = field(default_factory=dict)
-    load_patterns: dict[str, dict[str, Any]] = field(default_factory=dict)
+    time_series: dict[int, TimeSeriesData] = field(default_factory=dict)
+    load_patterns: dict[int, LoadPatternData] = field(default_factory=dict)
+    nodal_loads: dict[int, NodalLoadData] = field(default_factory=dict)
     analyses: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     units: dict[str, str] = field(
@@ -880,6 +1022,132 @@ class ProjectDatabase:
                 removed.append(tag)
         return sorted(removed)
 
+    def next_time_series_tag(self) -> int:
+        return max(self.time_series, default=0) + 1
+
+    def add_time_series(self, series: TimeSeriesData) -> None:
+        if series.tag in self.time_series:
+            raise ValueError(f"Time series tag {series.tag} already exists.")
+        self.time_series[series.tag] = series
+
+    def update_time_series(self, original_tag: int, series: TimeSeriesData) -> None:
+        original_tag = int(original_tag)
+        if original_tag not in self.time_series:
+            raise ValueError(f"Time series tag {original_tag} does not exist.")
+        if series.tag != original_tag and series.tag in self.time_series:
+            raise ValueError(f"Time series tag {series.tag} already exists.")
+        self.time_series.pop(original_tag)
+        self.time_series[series.tag] = series
+        if series.tag != original_tag:
+            for pattern in self.load_patterns.values():
+                if pattern.time_series_tag == original_tag:
+                    pattern.time_series_tag = series.tag
+
+    def remove_time_series(self, tag: int) -> None:
+        tag = int(tag)
+        used_by = sorted(
+            pattern.tag
+            for pattern in self.load_patterns.values()
+            if pattern.time_series_tag == tag
+        )
+        if used_by:
+            raise ValueError(
+                "Time series is used by load pattern(s): "
+                + ", ".join(map(str, used_by))
+            )
+        self.time_series.pop(tag, None)
+
+    def next_load_pattern_tag(self) -> int:
+        return max(self.load_patterns, default=0) + 1
+
+    def _validate_load_pattern(self, pattern: LoadPatternData) -> None:
+        if pattern.time_series_tag not in self.time_series:
+            raise ValueError(
+                f"Load pattern references missing time series "
+                f"{pattern.time_series_tag}."
+            )
+
+    def add_load_pattern(self, pattern: LoadPatternData) -> None:
+        if pattern.tag in self.load_patterns:
+            raise ValueError(f"Load pattern tag {pattern.tag} already exists.")
+        self._validate_load_pattern(pattern)
+        self.load_patterns[pattern.tag] = pattern
+
+    def update_load_pattern(
+        self,
+        original_tag: int,
+        pattern: LoadPatternData,
+    ) -> None:
+        original_tag = int(original_tag)
+        if original_tag not in self.load_patterns:
+            raise ValueError(f"Load pattern tag {original_tag} does not exist.")
+        if pattern.tag != original_tag and pattern.tag in self.load_patterns:
+            raise ValueError(f"Load pattern tag {pattern.tag} already exists.")
+        self._validate_load_pattern(pattern)
+        self.load_patterns.pop(original_tag)
+        self.load_patterns[pattern.tag] = pattern
+        if pattern.tag != original_tag:
+            for load in self.nodal_loads.values():
+                if load.pattern_tag == original_tag:
+                    load.pattern_tag = pattern.tag
+
+    def remove_load_pattern(self, tag: int) -> None:
+        tag = int(tag)
+        self.load_patterns.pop(tag, None)
+        for load_tag, load in list(self.nodal_loads.items()):
+            if load.pattern_tag == tag:
+                self.nodal_loads.pop(load_tag)
+
+    def next_nodal_load_tag(self) -> int:
+        return max(self.nodal_loads, default=0) + 1
+
+    def _validate_nodal_load(self, load: NodalLoadData) -> None:
+        if load.node_tag not in self.model.nodes:
+            raise ValueError(
+                f"Nodal load references missing node {load.node_tag}."
+            )
+        pattern = self.load_patterns.get(load.pattern_tag)
+        if pattern is None:
+            raise ValueError(
+                f"Nodal load references missing pattern {load.pattern_tag}."
+            )
+        if pattern.pattern_type != "Plain":
+            raise ValueError(
+                "Nodal loads can only be assigned to Plain load patterns."
+            )
+
+    def add_nodal_load(self, load: NodalLoadData) -> None:
+        if load.tag in self.nodal_loads:
+            raise ValueError(f"Nodal load tag {load.tag} already exists.")
+        self._validate_nodal_load(load)
+        self.nodal_loads[load.tag] = load
+
+    def update_nodal_load(self, original_tag: int, load: NodalLoadData) -> None:
+        original_tag = int(original_tag)
+        if original_tag not in self.nodal_loads:
+            raise ValueError(f"Nodal load tag {original_tag} does not exist.")
+        if load.tag != original_tag and load.tag in self.nodal_loads:
+            raise ValueError(f"Nodal load tag {load.tag} already exists.")
+        self._validate_nodal_load(load)
+        self.nodal_loads.pop(original_tag)
+        self.nodal_loads[load.tag] = load
+
+    def remove_nodal_load(self, tag: int) -> None:
+        self.nodal_loads.pop(int(tag), None)
+
+    def prune_nodal_loads(self) -> list[int]:
+        removed: list[int] = []
+        existing_nodes = set(self.model.nodes)
+        existing_patterns = set(self.load_patterns)
+        for tag, load in list(self.nodal_loads.items()):
+            if (
+                load.node_tag not in existing_nodes
+                or load.pattern_tag not in existing_patterns
+            ):
+                self.nodal_loads.pop(tag)
+                removed.append(tag)
+        return sorted(removed)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "format": PROJECT_FORMAT,
@@ -911,8 +1179,18 @@ class ProjectDatabase:
                 self.connections[tag].to_dict()
                 for tag in sorted(self.connections)
             ],
-            "time_series": self.time_series,
-            "load_patterns": self.load_patterns,
+            "time_series": [
+                self.time_series[tag].to_dict()
+                for tag in sorted(self.time_series)
+            ],
+            "load_patterns": [
+                self.load_patterns[tag].to_dict()
+                for tag in sorted(self.load_patterns)
+            ],
+            "nodal_loads": [
+                self.nodal_loads[tag].to_dict()
+                for tag in sorted(self.nodal_loads)
+            ],
             "analyses": self.analyses,
         }
 
@@ -1063,6 +1341,33 @@ class ProjectDatabase:
             connections[connection.tag] = connection
         return connections
 
+    @staticmethod
+    def _load_time_series(raw: Any) -> dict[int, TimeSeriesData]:
+        result: dict[int, TimeSeriesData] = {}
+        if isinstance(raw, list):
+            for item in raw:
+                series = TimeSeriesData.from_dict(dict(item))
+                result[series.tag] = series
+        return result
+
+    @staticmethod
+    def _load_patterns(raw: Any) -> dict[int, LoadPatternData]:
+        result: dict[int, LoadPatternData] = {}
+        if isinstance(raw, list):
+            for item in raw:
+                pattern = LoadPatternData.from_dict(dict(item))
+                result[pattern.tag] = pattern
+        return result
+
+    @staticmethod
+    def _load_nodal_loads(raw: Any) -> dict[int, NodalLoadData]:
+        result: dict[int, NodalLoadData] = {}
+        if isinstance(raw, list):
+            for item in raw:
+                load = NodalLoadData.from_dict(dict(item))
+                result[load.tag] = load
+        return result
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectDatabase":
         project_format = data.get("format")
@@ -1094,8 +1399,9 @@ class ProjectDatabase:
             transformations=cls._load_transformations(data.get("transformations", [])),
             constraints=cls._load_constraints(data.get("constraints", [])),
             connections=cls._load_connections(data.get("connections", [])),
-            time_series=dict(data.get("time_series", {})),
-            load_patterns=dict(data.get("load_patterns", {})),
+            time_series=cls._load_time_series(data.get("time_series", [])),
+            load_patterns=cls._load_patterns(data.get("load_patterns", [])),
+            nodal_loads=cls._load_nodal_loads(data.get("nodal_loads", [])),
             analyses=dict(data.get("analyses", {})),
             units={
                 str(key): str(value)
