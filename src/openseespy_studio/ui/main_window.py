@@ -332,6 +332,8 @@ class MainWindow(QMainWindow):
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.setUniformRowHeights(True)
+        self.tree.setIconSize(QSize(18, 18))
+        self.tree.setIndentation(18)
         self.tree.itemSelectionChanged.connect(self._tree_selection_changed)
 
         dock.setWidget(self.tree)
