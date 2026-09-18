@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..frame_setup import prepare_frame_grid
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..jobs import JobRecord
 from ..model import StructuralModel, classify_fixity
@@ -482,9 +483,18 @@ class FrameGridPanel(QWidget):
         )
         previous = [combo.currentData() for combo in combos]
 
-        for combo in combos:
+        for combo in (self.column_section, self.beam_section):
             combo.clear()
             combo.addItem("None", None)
+
+        self.column_transformation.clear()
+        self.column_transformation.addItem(
+            "Auto (Column_PDelta)", None
+        )
+        self.beam_transformation.clear()
+        self.beam_transformation.addItem(
+            "Auto (Beam_Linear)", None
+        )
 
         for tag in sorted(sections):
             section = sections[tag]
@@ -504,6 +514,24 @@ class FrameGridPanel(QWidget):
         for combo, value in zip(combos, previous):
             index = combo.findData(value)
             combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def set_assignment_tags(
+        self,
+        *,
+        column_section_tag: int | None = None,
+        beam_section_tag: int | None = None,
+        column_transf_tag: int | None = None,
+        beam_transf_tag: int | None = None,
+    ) -> None:
+        for combo, value in (
+            (self.column_section, column_section_tag),
+            (self.beam_section, beam_section_tag),
+            (self.column_transformation, column_transf_tag),
+            (self.beam_transformation, beam_transf_tag),
+        ):
+            index = combo.findData(value)
+            if index >= 0:
+                combo.setCurrentIndex(index)
 
     def _generate(self) -> None:
         self.generate_callback(FrameGridSpec(
@@ -987,8 +1015,17 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.script_dock], [245], Qt.Vertical)
 
     def _create_default_model(self) -> None:
-        generate_frame_grid(self.model, FrameGridSpec(nx=4, ny=3, nz=3))
-        self._refresh_all("Generated default 4 × 3 bay, 3-storey frame")
+        spec = FrameGridSpec(nx=4, ny=3, nz=3)
+        prepare_frame_grid(self.project, spec)
+        generate_frame_grid(self.model, spec)
+        self._refresh_all(
+            "Generated default 4 × 3 bay, 3-storey frame "
+            "with automatic geometric transformations"
+        )
+        self.frame_grid_panel.set_assignment_tags(
+            column_transf_tag=spec.column_transf_tag,
+            beam_transf_tag=spec.beam_transf_tag,
+        )
         self.undo_stack.clear()
         self.undo_stack.setClean()
         self._set_dirty(False)
@@ -1021,13 +1058,42 @@ class MainWindow(QMainWindow):
     def _generate_frame_grid(self, spec: FrameGridSpec) -> None:
         before = self.project.to_dict()
         self.selection.clear()
+        try:
+            created_transformations = prepare_frame_grid(
+                self.project,
+                spec,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Create Frame Grid", str(exc))
+            return
+
         generate_frame_grid(self.model, spec)
         self._prune_selection_sets()
         self.project.prune_constraints()
         self.project.prune_connections()
         self.project.prune_nodal_loads()
-        self._refresh_all(
-            f"Generated {spec.nx} × {spec.ny} bay, {spec.nz}-storey frame"
+
+        if created_transformations:
+            names = ", ".join(
+                f"{item.name} [{item.tag}]"
+                for item in created_transformations
+            )
+            message = (
+                f"Generated {spec.nx} × {spec.ny} bay, "
+                f"{spec.nz}-storey frame · created {names}"
+            )
+        else:
+            message = (
+                f"Generated {spec.nx} × {spec.ny} bay, "
+                f"{spec.nz}-storey frame"
+            )
+
+        self._refresh_all(message)
+        self.frame_grid_panel.set_assignment_tags(
+            column_section_tag=spec.column_section_tag,
+            beam_section_tag=spec.beam_section_tag,
+            column_transf_tag=spec.column_transf_tag,
+            beam_transf_tag=spec.beam_transf_tag,
         )
         self._record_project_change("Generate frame grid", before)
 

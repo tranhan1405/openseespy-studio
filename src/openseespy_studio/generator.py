@@ -552,9 +552,7 @@ def to_openseespy(
                 section_to_openseespy(sections[tag], materials)
             )
 
-    default_transf_tag = 1
     if transformations:
-        default_transf_tag = min(transformations)
         lines.extend(["", "# Geometric transformations"])
         for tag in sorted(transformations):
             lines.append(
@@ -571,16 +569,25 @@ def to_openseespy(
         "Iy = 8.0e-5",
         "Iz = 8.0e-5",
     ])
-    if not transformations:
-        lines.append("ops.geomTransf('Linear', 1, 0, 1, 0)")
-
     lines.extend([
         "",
         "# Elements",
     ])
     for tag in sorted(model.elements):
         e = model.elements[tag]
-        transf_tag = e.transf_tag or default_transf_tag
+        transf_tag = e.transf_tag
+        if transf_tag is None:
+            lines.append(
+                f"# ERROR: Element {tag} has no geometric "
+                "transformation assigned; element not generated."
+            )
+            continue
+        if not transformations or transf_tag not in transformations:
+            lines.append(
+                f"# ERROR: Element {tag} references missing geometric "
+                f"transformation {transf_tag}; element not generated."
+            )
+            continue
 
         assigned_section = (
             sections.get(e.section_tag)
