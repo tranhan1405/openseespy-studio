@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QAction, QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QAction, QColor, QCursor, QFont, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QDockWidget,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QMenu,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -38,6 +40,7 @@ from ..model import StructuralModel
 from .code_editor import CodeEditor
 from .icons import studio_icon
 from .results_panel import ResultsPanel
+from .selection import SelectionManager
 from .viewport import ModelViewport
 
 
@@ -276,6 +279,9 @@ class RibbonGroup(QWidget):
         button.setAutoRaise(True)
         self.button_row.addWidget(button)
 
+    def add_widget(self, widget: QWidget) -> None:
+        self.button_row.addWidget(widget)
+
 
 class FrameGridPanel(QWidget):
     def __init__(self, generate_callback, close_callback, parent=None):
@@ -498,6 +504,10 @@ class MainWindow(QMainWindow):
 
         self.model = StructuralModel("3D_Frame")
         self.actions: dict[str, QAction] = {}
+        self.selection = SelectionManager(self)
+        self._tree_node_items: dict[int, QTreeWidgetItem] = {}
+        self._tree_element_items: dict[int, QTreeWidgetItem] = {}
+        self._shortcuts: list[QShortcut] = []
 
         self.setCorner(Qt.BottomLeftCorner, Qt.LeftDockWidgetArea)
         self.setCorner(Qt.BottomRightCorner, Qt.BottomDockWidgetArea)
@@ -509,6 +519,8 @@ class MainWindow(QMainWindow):
         self._build_bottom_docks()
         self._build_actions_and_ribbon()
         self._build_status_bar()
+        self._wire_selection()
+        self._install_shortcuts()
         self._create_default_model()
         self._size_initial_docks()
 
@@ -529,6 +541,7 @@ class MainWindow(QMainWindow):
         self.tree.setHeaderHidden(True)
         self.tree.setUniformRowHeights(True)
         self.tree.setAlternatingRowColors(True)
+        self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tree.setIconSize(QSize(17, 17))
         self.tree.setIndentation(16)
         self.tree.itemSelectionChanged.connect(self._tree_selection_changed)
@@ -656,7 +669,16 @@ class MainWindow(QMainWindow):
             ("byid", "By ID", "by-id"),
             ("bytype", "By Type", "by-id"),
         ):
-            self._make_action(key, label, icon, self._not_implemented, label)
+            callback = self._activate_select_tool if key == "select" else self._not_implemented
+            self._make_action(
+                key,
+                label,
+                icon,
+                callback,
+                label,
+                checkable=(key == "select"),
+            )
+        self.actions["select"].setChecked(True)
 
         for key, label, icon, view in (
             ("xy", "XY", "xy", "xy"),
@@ -705,6 +727,15 @@ class MainWindow(QMainWindow):
             group = RibbonGroup(caption)
             for key in keys:
                 group.add_action(self.actions[key])
+            if caption == "Selection":
+                self.selection_filter_combo = QComboBox()
+                self.selection_filter_combo.addItems(["All", "Node", "Element"])
+                self.selection_filter_combo.setFixedWidth(76)
+                self.selection_filter_combo.setToolTip("Selection filter")
+                self.selection_filter_combo.currentTextChanged.connect(
+                    self._set_selection_filter
+                )
+                group.add_widget(self.selection_filter_combo)
             ribbon.addWidget(group)
 
         spacer = QWidget()
@@ -739,6 +770,7 @@ class MainWindow(QMainWindow):
         self._show_frame_grid()
 
     def _new_model(self) -> None:
+        self.selection.clear()
         self.model.clear()
         self._refresh_all("New empty model")
 
@@ -747,6 +779,7 @@ class MainWindow(QMainWindow):
         self.create_dock.raise_()
 
     def _generate_frame_grid(self, spec: FrameGridSpec) -> None:
+        self.selection.clear()
         generate_frame_grid(self.model, spec)
         self._refresh_all(
             f"Generated {spec.nx} × {spec.ny} bay, {spec.nz}-storey frame"
@@ -774,6 +807,8 @@ class MainWindow(QMainWindow):
 
     def _refresh_tree(self) -> None:
         self.tree.clear()
+        self._tree_node_items.clear()
+        self._tree_element_items.clear()
 
         root = QTreeWidgetItem(["OpenSees Model"])
         root.setIcon(0, studio_icon("model"))
@@ -813,6 +848,7 @@ class MainWindow(QMainWindow):
             item.setIcon(0, studio_icon("node"))
             item.setData(0, Qt.UserRole, ("node", tag))
             nodes.addChild(item)
+            self._tree_node_items[tag] = item
 
         for tag in sorted(self.model.elements):
             element = self.model.elements[tag]
@@ -820,6 +856,7 @@ class MainWindow(QMainWindow):
             item.setIcon(0, studio_icon("element"))
             item.setData(0, Qt.UserRole, ("element", tag))
             type_items.get(element.element_type, elements).addChild(item)
+            self._tree_element_items[tag] = item
 
         fixed_count = sum(any(node.fixity) for node in self.model.nodes.values())
 
@@ -852,16 +889,136 @@ class MainWindow(QMainWindow):
         self.tree.addTopLevelItem(root)
 
     def _tree_selection_changed(self) -> None:
-        items = self.tree.selectedItems()
-        if not items:
-            return
-        payload = items[0].data(0, Qt.UserRole)
-        if not payload:
-            return
+        nodes: set[int] = set()
+        elements: set[int] = set()
+        for item in self.tree.selectedItems():
+            payload = item.data(0, Qt.UserRole)
+            if not payload:
+                continue
+            kind, tag = payload
+            if kind == "node":
+                nodes.add(tag)
+            elif kind == "element":
+                elements.add(tag)
+        self.selection.set_selection(nodes=nodes, elements=elements)
 
-        kind, tag = payload
+    def _wire_selection(self) -> None:
+        self.selection.changed.connect(self._selection_changed)
+        self.viewport.entity_clicked.connect(self._viewport_entity_clicked)
+        self.viewport.entity_hovered.connect(self._viewport_entity_hovered)
+        self.viewport.entity_double_clicked.connect(self._viewport_entity_double_clicked)
+        self.viewport.context_requested.connect(self._show_viewport_context_menu)
+        self.viewport.set_selection_filter(self.selection.filter)
+
+    def _install_shortcuts(self) -> None:
+        bindings = (
+            ("Escape", self.selection.clear),
+            ("Delete", self._delete_selection),
+            ("F", self._zoom_selection),
+            ("H", self._hide_selection),
+            ("Shift+H", self._show_all),
+            ("I", self._isolate_selection),
+        )
+        for sequence, callback in bindings:
+            shortcut = QShortcut(QKeySequence(sequence), self)
+            shortcut.activated.connect(callback)
+            self._shortcuts.append(shortcut)
+
+    def _activate_select_tool(self) -> None:
+        self.actions["select"].setChecked(True)
+        self.status_message.setText("Select tool active")
+
+    def _set_selection_filter(self, text: str) -> None:
+        value = text.lower()
+        self.selection.set_filter(value)
+        self.viewport.set_selection_filter(value)
+        self.status_message.setText(f"Selection filter: {text}")
+
+    def _viewport_entity_clicked(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        kind = payload.get("kind")
+        tag = payload.get("tag")
+        mode = payload.get("mode", "replace")
+        if kind is None:
+            if mode == "replace":
+                self.selection.clear()
+            return
+        self.selection.select(str(kind), int(tag), str(mode))
+
+    def _viewport_entity_hovered(self, payload: object) -> None:
+        if isinstance(payload, dict):
+            kind = str(payload.get("kind", "")).title()
+            tag = payload.get("tag")
+            self.status_message.setText(f"Hover: {kind} {tag}")
+        elif not self.selection.nodes and not self.selection.elements:
+            self.status_message.setText("Ready")
+
+    def _viewport_entity_double_clicked(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        kind = str(payload.get("kind"))
+        tag = int(payload.get("tag"))
+        self.selection.select(kind, tag, "replace")
+        self._show_entity_properties(kind, tag)
+        self.properties_dock.raise_()
+
+    def _selection_changed(self, snapshot: object) -> None:
+        if not isinstance(snapshot, dict):
+            return
+        nodes = set(snapshot.get("nodes", ()))
+        elements = set(snapshot.get("elements", ()))
+
+        self.viewport.set_selection(nodes, elements)
+
+        self.tree.blockSignals(True)
+        self.tree.clearSelection()
+        first_item = None
+        for tag in sorted(nodes):
+            item = self._tree_node_items.get(tag)
+            if item is not None:
+                item.setSelected(True)
+                first_item = first_item or item
+        for tag in sorted(elements):
+            item = self._tree_element_items.get(tag)
+            if item is not None:
+                item.setSelected(True)
+                first_item = first_item or item
+        self.tree.blockSignals(False)
+
+        if first_item is not None:
+            self.tree.scrollToItem(first_item)
+
+        total = len(nodes) + len(elements)
+        if total == 1:
+            if nodes:
+                self._show_entity_properties("node", next(iter(nodes)))
+            else:
+                self._show_entity_properties("element", next(iter(elements)))
+        elif total > 1:
+            self.properties_panel.set_properties(
+                "Selection",
+                [
+                    ("Nodes", len(nodes)),
+                    ("Elements", len(elements)),
+                    ("Total", total),
+                ],
+            )
+        else:
+            self.properties_panel.set_properties("Properties", [])
+
+        if total:
+            self.status_message.setText(
+                f"Selected: {len(nodes)} node(s), {len(elements)} element(s)"
+            )
+        else:
+            self.status_message.setText("Ready")
+
+    def _show_entity_properties(self, kind: str, tag: int) -> None:
         if kind == "node":
-            node = self.model.nodes[tag]
+            node = self.model.nodes.get(tag)
+            if node is None:
+                return
             connected = [
                 element.tag
                 for element in self.model.elements.values()
@@ -881,7 +1038,9 @@ class MainWindow(QMainWindow):
                 ],
             )
         elif kind == "element":
-            element = self.model.elements[tag]
+            element = self.model.elements.get(tag)
+            if element is None:
+                return
             self.properties_panel.set_properties(
                 "Element",
                 [
@@ -893,6 +1052,116 @@ class MainWindow(QMainWindow):
                     ("Transformation", element.transf_tag or "-"),
                 ],
             )
+
+    def _show_viewport_context_menu(self, payload: object) -> None:
+        if isinstance(payload, dict):
+            kind = str(payload.get("kind"))
+            tag = int(payload.get("tag"))
+            selected = (
+                tag in self.selection.nodes
+                if kind == "node"
+                else tag in self.selection.elements
+            )
+            if not selected:
+                self.selection.select(kind, tag, "replace")
+
+        menu = QMenu(self)
+
+        if isinstance(payload, dict):
+            kind = str(payload.get("kind"))
+            tag = int(payload.get("tag"))
+            header = menu.addAction(f"{kind.title()} {tag}")
+            header.setEnabled(False)
+            menu.addSeparator()
+
+            query = menu.addAction("Query / Properties")
+            query.triggered.connect(
+                lambda checked=False, k=kind, t=tag: self._show_entity_properties(k, t)
+            )
+
+        zoom = menu.addAction("Zoom to Selection")
+        zoom.triggered.connect(self._zoom_selection)
+        menu.addSeparator()
+
+        hide = menu.addAction("Hide")
+        hide.triggered.connect(self._hide_selection)
+        isolate = menu.addAction("Isolate")
+        isolate.triggered.connect(self._isolate_selection)
+        show_all = menu.addAction("Show All")
+        show_all.triggered.connect(self._show_all)
+
+        menu.addSeparator()
+        copy_tag = menu.addAction("Copy Tag(s)")
+        copy_tag.triggered.connect(self._copy_selected_tags)
+        create_set = menu.addAction("Create Set from Selection")
+        create_set.triggered.connect(
+            lambda: self._log("Selection sets are planned for Selection v2")
+        )
+
+        menu.addSeparator()
+        delete = menu.addAction("Delete")
+        delete.triggered.connect(self._delete_selection)
+        clear = menu.addAction("Clear Selection")
+        clear.triggered.connect(self.selection.clear)
+
+        menu.exec(QCursor.pos())
+
+    def _selection_sets(self) -> tuple[set[int], set[int]]:
+        return set(self.selection.nodes), set(self.selection.elements)
+
+    def _zoom_selection(self) -> None:
+        nodes, elements = self._selection_sets()
+        self.viewport.zoom_to_selection(nodes, elements)
+
+    def _hide_selection(self) -> None:
+        nodes, elements = self._selection_sets()
+        if not nodes and not elements:
+            return
+        self.viewport.hide_entities(nodes, elements)
+        self.selection.clear()
+
+    def _isolate_selection(self) -> None:
+        nodes, elements = self._selection_sets()
+        if not nodes and not elements:
+            return
+        self.viewport.isolate_entities(nodes, elements)
+
+    def _show_all(self) -> None:
+        self.viewport.show_all()
+        self.status_message.setText("All entities visible")
+
+    def _copy_selected_tags(self) -> None:
+        nodes, elements = self._selection_sets()
+        parts = []
+        if nodes:
+            parts.append("Nodes: " + ", ".join(map(str, sorted(nodes))))
+        if elements:
+            parts.append("Elements: " + ", ".join(map(str, sorted(elements))))
+        QApplication.clipboard().setText("\n".join(parts))
+
+    def _delete_selection(self) -> None:
+        nodes, elements = self._selection_sets()
+        if not nodes and not elements:
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Delete selected entities",
+            f"Delete {len(nodes)} node(s) and {len(elements)} element(s)?\n"
+            "Deleting a node also deletes connected elements.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        self.model.delete_entities(
+            node_tags=nodes,
+            element_tags=elements,
+            cascade_nodes=True,
+        )
+        self.selection.clear()
+        self._refresh_all("Deleted selected entities")
 
     def _export_script(self) -> None:
         path, _ = QFileDialog.getSaveFileName(

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QSize, Qt, Signal
+import numpy as np
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QHBoxLayout,
     QLabel,
@@ -16,16 +18,22 @@ from PySide6.QtWidgets import (
 try:
     import pyvista as pv
     from pyvistaqt import QtInteractor
+    from vtkmodules.vtkRenderingCore import vtkCellPicker, vtkPointPicker
 except ImportError:
     pv = None
     QtInteractor = None
+    vtkCellPicker = None
+    vtkPointPicker = None
 
 from ..model import StructuralModel
 from .icons import studio_icon
 
 
 class ModelViewport(QWidget):
-    node_picked = Signal(int)
+    entity_clicked = Signal(object)
+    entity_hovered = Signal(object)
+    entity_double_clicked = Signal(object)
+    context_requested = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -35,6 +43,24 @@ class ModelViewport(QWidget):
             )
 
         self.setObjectName("ViewportRoot")
+        self._model: StructuralModel | None = None
+        self._selection_filter = "all"
+        self._selected_nodes: set[int] = set()
+        self._selected_elements: set[int] = set()
+        self._hover_ref: tuple[str, int] | None = None
+
+        self._hidden_nodes: set[int] = set()
+        self._hidden_elements: set[int] = set()
+        self._isolate_active = False
+        self._isolate_nodes: set[int] = set()
+        self._isolate_elements: set[int] = set()
+
+        self._node_actor = None
+        self._node_tags: list[int] = []
+        self._element_actor_data: dict[str, tuple[object, np.ndarray]] = {}
+        self._left_press_pos: tuple[int, int] | None = None
+        self._right_press_pos: tuple[int, int] | None = None
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(4)
@@ -116,7 +142,105 @@ class ModelViewport(QWidget):
         layout.addWidget(self.plotter.interactor, 1)
 
         self._current_view = "iso"
+        self._point_picker = vtkPointPicker()
+        self._point_picker.SetTolerance(0.018)
+        self._cell_picker = vtkCellPicker()
+        self._cell_picker.SetTolerance(0.006)
+
+        self._install_mouse_observers()
         self._reset_scene()
+
+    def _install_mouse_observers(self) -> None:
+        self.plotter.iren.add_observer("LeftButtonPressEvent", self._on_left_press)
+        self.plotter.iren.add_observer("LeftButtonReleaseEvent", self._on_left_release)
+        self.plotter.iren.add_observer("RightButtonPressEvent", self._on_right_press)
+        self.plotter.iren.add_observer("RightButtonReleaseEvent", self._on_right_release)
+        self.plotter.iren.add_observer("MouseMoveEvent", self._on_mouse_move)
+        self.plotter.interactor.installEventFilter(self)
+
+    def _event_position(self) -> tuple[int, int]:
+        try:
+            pos = self.plotter.iren.get_event_position()
+            return int(pos[0]), int(pos[1])
+        except Exception:
+            pos = self.plotter.interactor.GetEventPosition()
+            return int(pos[0]), int(pos[1])
+
+    @staticmethod
+    def _moved(a: tuple[int, int] | None, b: tuple[int, int], tol: int = 5) -> bool:
+        if a is None:
+            return True
+        return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 > tol * tol
+
+    @staticmethod
+    def _actor_key(actor) -> str:
+        if actor is None:
+            return ""
+        try:
+            return actor.GetAddressAsString("")
+        except Exception:
+            return str(id(actor))
+
+    def _selection_mode_from_keyboard(self) -> str:
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers & Qt.ControlModifier:
+            return "toggle"
+        if modifiers & Qt.ShiftModifier:
+            return "add"
+        return "replace"
+
+    def _on_left_press(self, *args) -> None:
+        self._left_press_pos = self._event_position()
+
+    def _on_left_release(self, *args) -> None:
+        pos = self._event_position()
+        if self._moved(self._left_press_pos, pos):
+            return
+        entity = self.pick_entity(*pos)
+        payload = {
+            "kind": entity[0] if entity else None,
+            "tag": entity[1] if entity else None,
+            "mode": self._selection_mode_from_keyboard(),
+        }
+        self.entity_clicked.emit(payload)
+
+    def eventFilter(self, obj, event):
+        if (
+            obj is self.plotter.interactor
+            and event.type() == QEvent.MouseButtonDblClick
+            and event.button() == Qt.LeftButton
+        ):
+            pos = event.position()
+            x = int(pos.x())
+            y = int(self.plotter.interactor.height() - pos.y())
+            entity = self.pick_entity(x, y)
+            if entity:
+                self.entity_double_clicked.emit(
+                    {"kind": entity[0], "tag": entity[1]}
+                )
+        return super().eventFilter(obj, event)
+
+    def _on_right_press(self, *args) -> None:
+        self._right_press_pos = self._event_position()
+
+    def _on_right_release(self, *args) -> None:
+        pos = self._event_position()
+        if self._moved(self._right_press_pos, pos):
+            return
+        entity = self.pick_entity(*pos)
+        self.context_requested.emit(
+            {"kind": entity[0], "tag": entity[1]} if entity else None
+        )
+
+    def _on_mouse_move(self, *args) -> None:
+        entity = self.pick_entity(*self._event_position())
+        if entity == self._hover_ref:
+            return
+        self._hover_ref = entity
+        self._update_highlight_overlays()
+        self.entity_hovered.emit(
+            {"kind": entity[0], "tag": entity[1]} if entity else None
+        )
 
     def _noop(self):
         return None
@@ -152,6 +276,62 @@ class ModelViewport(QWidget):
         self.material_label.setText(f"Materials: {materials}")
         self.section_label.setText(f"Sections: {sections}")
 
+    def set_selection_filter(self, value: str) -> None:
+        self._selection_filter = value.lower()
+        self._hover_ref = None
+        self._update_highlight_overlays()
+
+    def set_selection(self, nodes: set[int], elements: set[int]) -> None:
+        self._selected_nodes = set(nodes)
+        self._selected_elements = set(elements)
+        self._update_highlight_overlays()
+
+    def _visible_element_tags(self) -> set[int]:
+        if self._model is None:
+            return set()
+        tags = set(self._model.elements) - self._hidden_elements
+        if self._isolate_active:
+            tags &= self._isolate_elements
+        return tags
+
+    def _visible_node_tags(self) -> set[int]:
+        if self._model is None:
+            return set()
+        tags = set(self._model.nodes) - self._hidden_nodes
+        if self._isolate_active:
+            tags &= self._isolate_nodes
+            for element_tag in self._visible_element_tags():
+                element = self._model.elements[element_tag]
+                tags.update((element.i, element.j))
+        return tags
+
+    def hide_entities(self, nodes: set[int], elements: set[int]) -> None:
+        self._hidden_nodes.update(nodes)
+        self._hidden_elements.update(elements)
+        self._rebuild_visible_scene()
+
+    def isolate_entities(self, nodes: set[int], elements: set[int]) -> None:
+        self._isolate_active = True
+        self._isolate_nodes = set(nodes)
+        self._isolate_elements = set(elements)
+        self._rebuild_visible_scene()
+
+    def show_all(self) -> None:
+        self._hidden_nodes.clear()
+        self._hidden_elements.clear()
+        self._isolate_active = False
+        self._isolate_nodes.clear()
+        self._isolate_elements.clear()
+        self._rebuild_visible_scene()
+
+    def _rebuild_visible_scene(self) -> None:
+        if self._model is None:
+            return
+        camera = self.plotter.camera_position
+        self._render_model(reset_camera=False)
+        self.plotter.camera_position = camera
+        self.plotter.render()
+
     def _add_ground_grid(self, model: StructuralModel) -> None:
         low, high = model.bounds()
         xmin, ymin, zmin = low
@@ -162,10 +342,12 @@ class ModelViewport(QWidget):
         x_values = sorted({round(n.xyz[0], 8) for n in model.nodes.values()})
         y_values = sorted({round(n.xyz[1], 8) for n in model.nodes.values()})
         dx = min(
-            [b - a for a, b in zip(x_values[:-1], x_values[1:]) if b > a] or [span_x / 4]
+            [b - a for a, b in zip(x_values[:-1], x_values[1:]) if b > a]
+            or [span_x / 4]
         )
         dy = min(
-            [b - a for a, b in zip(y_values[:-1], y_values[1:]) if b > a] or [span_y / 4]
+            [b - a for a, b in zip(y_values[:-1], y_values[1:]) if b > a]
+            or [span_y / 4]
         )
 
         gx0, gx1 = xmin - dx * 0.55, xmax + dx * 0.55
@@ -182,6 +364,7 @@ class ModelViewport(QWidget):
                 pv.Line((x, gy0, z), (x, gy1, z)),
                 color=color,
                 line_width=1,
+                pickable=False,
             )
         for j in range(ny + 1):
             y = gy0 + (gy1 - gy0) * j / ny
@@ -189,6 +372,7 @@ class ModelViewport(QWidget):
                 pv.Line((gx0, y, z), (gx1, y, z)),
                 color=color,
                 line_width=1,
+                pickable=False,
             )
 
     @staticmethod
@@ -215,17 +399,60 @@ class ModelViewport(QWidget):
             capping=True,
         )
 
+    def _combined_element_meshes(self, visible_tags: set[int], span: float):
+        if self._model is None:
+            return {}
+        groups: dict[str, list[object]] = {"column": [], "beam": []}
+        beam_size = max(span * 0.010, 0.08)
+        column_size = max(span * 0.0115, 0.09)
+
+        for tag in visible_tags:
+            element = self._model.elements[tag]
+            start = self._model.nodes[element.i].xyz
+            end = self._model.nodes[element.j].xyz
+            is_column = element.group == "column"
+            mesh = self._member_mesh(
+                start,
+                end,
+                column_size if is_column else beam_size,
+            )
+            if mesh is None:
+                continue
+            mesh.cell_data["element_tag"] = np.full(mesh.n_cells, tag, dtype=np.int64)
+            groups["column" if is_column else "beam"].append(mesh)
+
+        combined = {}
+        for name, meshes in groups.items():
+            if meshes:
+                combined[name] = pv.merge(meshes, merge_points=False)
+        return combined
+
     def draw_model(self, model: StructuralModel) -> None:
+        self._model = model
+        self._hidden_nodes.clear()
+        self._hidden_elements.clear()
+        self._isolate_active = False
+        self._isolate_nodes.clear()
+        self._isolate_elements.clear()
+        self._selected_nodes.clear()
+        self._selected_elements.clear()
+        self._hover_ref = None
+        self._render_model(reset_camera=True)
+
+    def _render_model(self, *, reset_camera: bool) -> None:
         self.plotter.clear()
         self._reset_scene()
+        self._node_actor = None
+        self._node_tags = []
+        self._element_actor_data.clear()
 
-        if not model.nodes:
+        if self._model is None or not self._model.nodes:
             self.plotter.render()
             return
 
-        self._add_ground_grid(model)
+        self._add_ground_grid(self._model)
 
-        low, high = model.bounds()
+        low, high = self._model.bounds()
         span = max(
             high[0] - low[0],
             high[1] - low[1],
@@ -233,40 +460,47 @@ class ModelViewport(QWidget):
             1.0,
         )
 
-        beam_size = max(span * 0.010, 0.08)
-        column_size = max(span * 0.0115, 0.09)
+        visible_elements = self._visible_element_tags()
+        group_meshes = self._combined_element_meshes(visible_elements, span)
+        group_colors = {"column": "#687d90", "beam": "#74889b"}
 
-        for element in model.elements.values():
-            start = model.nodes[element.i].xyz
-            end = model.nodes[element.j].xyz
-            radius = column_size if element.group == "column" else beam_size
-            mesh = self._member_mesh(start, end, radius)
-            if mesh is None:
-                continue
-            self.plotter.add_mesh(
+        self._cell_picker.InitializePickList()
+        self._cell_picker.PickFromListOn()
+
+        for group_name, mesh in group_meshes.items():
+            actor = self.plotter.add_mesh(
                 mesh,
-                color="#74889b" if element.group != "column" else "#687d90",
+                color=group_colors[group_name],
                 edge_color="#243b52",
                 show_edges=True,
                 line_width=1,
                 smooth_shading=False,
                 pickable=True,
             )
+            tags = np.asarray(mesh.cell_data["element_tag"], dtype=np.int64)
+            self._element_actor_data[self._actor_key(actor)] = (mesh, tags)
+            self._cell_picker.AddPickList(actor)
 
-        points = [model.nodes[tag].xyz for tag in sorted(model.nodes)]
-        tags = list(sorted(model.nodes))
-        nodes = pv.PolyData(points)
-        nodes["tag"] = tags
-        self.plotter.add_mesh(
-            nodes,
-            render_points_as_spheres=True,
-            point_size=7,
-            color="#064fd4",
-            pickable=True,
-        )
+        visible_nodes = sorted(self._visible_node_tags())
+        if visible_nodes:
+            points = [self._model.nodes[tag].xyz for tag in visible_nodes]
+            nodes = pv.PolyData(points)
+            nodes.point_data["node_tag"] = np.asarray(visible_nodes, dtype=np.int64)
+            self._node_actor = self.plotter.add_mesh(
+                nodes,
+                render_points_as_spheres=True,
+                point_size=7,
+                color="#064fd4",
+                pickable=True,
+            )
+            self._node_tags = visible_nodes
+            self._point_picker.InitializePickList()
+            self._point_picker.AddPickList(self._node_actor)
+            self._point_picker.PickFromListOn()
 
         support_size = max(span * 0.016, 0.08)
-        for node in model.nodes.values():
+        for tag in visible_nodes:
+            node = self._model.nodes[tag]
             if not any(node.fixity):
                 continue
             x, y, z = node.xyz
@@ -283,11 +517,164 @@ class ModelViewport(QWidget):
                 edge_color="#0b7d32",
                 show_edges=True,
                 line_width=1,
+                pickable=False,
             )
 
+        self._update_highlight_overlays()
         self.set_view(self._current_view)
-        self.plotter.reset_camera()
-        self.plotter.camera.zoom(1.28)
+        if reset_camera:
+            self.plotter.reset_camera()
+            self.plotter.camera.zoom(1.28)
+        self.plotter.render()
+
+    def pick_entity(self, x: int, y: int) -> tuple[str, int] | None:
+        renderer = self.plotter.renderer
+
+        if self._selection_filter in {"all", "node"} and self._node_actor is not None:
+            if self._point_picker.Pick(x, y, 0, renderer):
+                point_id = self._point_picker.GetPointId()
+                if 0 <= point_id < len(self._node_tags):
+                    return "node", int(self._node_tags[point_id])
+
+        if self._selection_filter in {"all", "element"}:
+            if self._cell_picker.Pick(x, y, 0, renderer):
+                actor = self._cell_picker.GetActor()
+                cell_id = self._cell_picker.GetCellId()
+                data = self._element_actor_data.get(self._actor_key(actor))
+                if data is not None and cell_id >= 0:
+                    _, tags = data
+                    if cell_id < len(tags):
+                        return "element", int(tags[cell_id])
+
+        return None
+
+    def _remove_overlay(self, name: str) -> None:
+        try:
+            self.plotter.remove_actor(name, reset_camera=False, render=False)
+        except Exception:
+            pass
+
+    def _element_overlay_mesh(self, tags: set[int]):
+        if not tags:
+            return None
+        pieces = []
+        for mesh, cell_tags in self._element_actor_data.values():
+            ids = np.flatnonzero(np.isin(cell_tags, list(tags)))
+            if len(ids):
+                pieces.append(mesh.extract_cells(ids))
+        if not pieces:
+            return None
+        return pieces[0] if len(pieces) == 1 else pv.merge(pieces, merge_points=False)
+
+    def _update_highlight_overlays(self) -> None:
+        for name in (
+            "selection-elements",
+            "selection-nodes",
+            "hover-element",
+            "hover-node",
+        ):
+            self._remove_overlay(name)
+
+        if self._model is None:
+            return
+
+        selected_element_mesh = self._element_overlay_mesh(self._selected_elements)
+        if selected_element_mesh is not None:
+            self.plotter.add_mesh(
+                selected_element_mesh,
+                name="selection-elements",
+                color="#ff9800",
+                edge_color="#d46500",
+                show_edges=True,
+                line_width=2,
+                opacity=1.0,
+                pickable=False,
+                render=False,
+            )
+
+        selected_node_tags = [
+            tag
+            for tag in self._selected_nodes
+            if tag in self._model.nodes and tag in self._visible_node_tags()
+        ]
+        if selected_node_tags:
+            selected_nodes = pv.PolyData(
+                [self._model.nodes[tag].xyz for tag in selected_node_tags]
+            )
+            self.plotter.add_mesh(
+                selected_nodes,
+                name="selection-nodes",
+                color="#ff6d00",
+                render_points_as_spheres=True,
+                point_size=13,
+                pickable=False,
+                render=False,
+            )
+
+        if self._hover_ref:
+            kind, tag = self._hover_ref
+            if kind == "element" and tag not in self._selected_elements:
+                mesh = self._element_overlay_mesh({tag})
+                if mesh is not None:
+                    self.plotter.add_mesh(
+                        mesh,
+                        name="hover-element",
+                        color="#20c5e8",
+                        edge_color="#087a94",
+                        show_edges=True,
+                        line_width=2,
+                        opacity=0.78,
+                        pickable=False,
+                        render=False,
+                    )
+            elif (
+                kind == "node"
+                and tag not in self._selected_nodes
+                and tag in self._model.nodes
+            ):
+                node = pv.PolyData([self._model.nodes[tag].xyz])
+                self.plotter.add_mesh(
+                    node,
+                    name="hover-node",
+                    color="#21c7e8",
+                    render_points_as_spheres=True,
+                    point_size=11,
+                    pickable=False,
+                    render=False,
+                )
+
+        self.plotter.render()
+
+    def zoom_to_selection(self, nodes: set[int], elements: set[int]) -> None:
+        if self._model is None:
+            return
+        points = []
+        for tag in nodes:
+            if tag in self._model.nodes:
+                points.append(self._model.nodes[tag].xyz)
+        for tag in elements:
+            element = self._model.elements.get(tag)
+            if element:
+                points.extend(
+                    (self._model.nodes[element.i].xyz, self._model.nodes[element.j].xyz)
+                )
+        if not points:
+            return
+
+        arr = np.asarray(points, dtype=float)
+        mins = arr.min(axis=0)
+        maxs = arr.max(axis=0)
+        span = max(float(np.max(maxs - mins)), 1.0)
+        pad = span * 0.25
+        bounds = (
+            mins[0] - pad,
+            maxs[0] + pad,
+            mins[1] - pad,
+            maxs[1] + pad,
+            mins[2] - pad,
+            maxs[2] + pad,
+        )
+        self.plotter.renderer.reset_camera(bounds=bounds)
         self.plotter.render()
 
     def set_view(self, view: str) -> None:
@@ -305,6 +692,9 @@ class ModelViewport(QWidget):
             button.setChecked(button.property("view_name") == view)
 
     def fit_view(self) -> None:
+        if self._selected_nodes or self._selected_elements:
+            self.zoom_to_selection(self._selected_nodes, self._selected_elements)
+            return
         self.plotter.reset_camera()
         self.plotter.camera.zoom(1.18)
         self.plotter.render()

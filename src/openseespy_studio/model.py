@@ -68,6 +68,37 @@ class StructuralModel:
             raise ValueError(f"Expected {self.ndf} fixity values, got {len(vals)}")
         node.fixity = vals
 
+    def remove_element(self, tag: int) -> None:
+        self.elements.pop(tag, None)
+
+    def remove_node(self, tag: int, *, cascade: bool = False) -> None:
+        if tag not in self.nodes:
+            return
+        connected = [
+            element_tag
+            for element_tag, element in self.elements.items()
+            if element.i == tag or element.j == tag
+        ]
+        if connected and not cascade:
+            raise ValueError(
+                f"Node {tag} is connected to elements {connected}; use cascade=True"
+            )
+        for element_tag in connected:
+            self.elements.pop(element_tag, None)
+        self.nodes.pop(tag, None)
+
+    def delete_entities(
+        self,
+        *,
+        node_tags: Iterable[int] = (),
+        element_tags: Iterable[int] = (),
+        cascade_nodes: bool = True,
+    ) -> None:
+        for element_tag in set(element_tags):
+            self.remove_element(element_tag)
+        for node_tag in set(node_tags):
+            self.remove_node(node_tag, cascade=cascade_nodes)
+
     def bounds(self) -> tuple[Vec3, Vec3]:
         if not self.nodes:
             return (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)
