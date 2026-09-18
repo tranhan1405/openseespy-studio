@@ -19,6 +19,10 @@ class FrameGridSpec:
     create_columns: bool = True
     create_beams_x: bool = True
     create_beams_y: bool = True
+    column_section_tag: int | None = None
+    beam_section_tag: int | None = None
+    column_transf_tag: int | None = None
+    beam_transf_tag: int | None = None
 
 
 def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
@@ -47,6 +51,8 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         ele_tag,
                         node_at[(i, j, k)],
                         node_at[(i, j, k + 1)],
+                        section_tag=spec.column_section_tag,
+                        transf_tag=spec.column_transf_tag,
                         group="column",
                     )
                     ele_tag += 1
@@ -59,6 +65,8 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         ele_tag,
                         node_at[(i, j, k)],
                         node_at[(i + 1, j, k)],
+                        section_tag=spec.beam_section_tag,
+                        transf_tag=spec.beam_transf_tag,
                         group="beam-x",
                     )
                     ele_tag += 1
@@ -71,6 +79,8 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         ele_tag,
                         node_at[(i, j, k)],
                         node_at[(i, j + 1, k)],
+                        section_tag=spec.beam_section_tag,
+                        transf_tag=spec.beam_transf_tag,
                         group="beam-y",
                     )
                     ele_tag += 1
@@ -200,6 +210,34 @@ def to_openseespy(
     for tag in sorted(model.elements):
         e = model.elements[tag]
         transf_tag = e.transf_tag or default_transf_tag
+
+        assigned_section = (
+            sections.get(e.section_tag)
+            if sections is not None and e.section_tag is not None
+            else None
+        )
+
+        if (
+            e.element_type == "elasticBeamColumn"
+            and assigned_section is not None
+            and assigned_section.section_type == "Elastic"
+        ):
+            p = assigned_section.parameters
+            lines.append(
+                "ops.element('elasticBeamColumn', "
+                f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
+                f"{p['G']:g}, {p['J']:g}, {p['Iy']:g}, {p['Iz']:g}, "
+                f"{transf_tag})"
+            )
+            continue
+
+        if assigned_section is not None and assigned_section.section_type != "Elastic":
+            lines.append(
+                f"# WARNING: Element {tag} ({e.element_type}) is assigned "
+                f"section {assigned_section.tag} ({assigned_section.section_type}); "
+                "full nonlinear element generation is not implemented yet."
+            )
+
         lines.append(
             "ops.element('elasticBeamColumn', "
             f"{tag}, {e.i}, {e.j}, A, E, G, J, Iy, Iz, {transf_tag})"

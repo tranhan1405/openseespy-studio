@@ -366,15 +366,18 @@ class FrameGridPanel(QWidget):
         layout.addWidget(self.beams)
 
         self.column_section = QComboBox()
-        self.column_section.addItems(["1 - Column Section"])
         self.beam_section = QComboBox()
-        self.beam_section.addItems(["2 - Beam Section"])
+        self.column_transformation = QComboBox()
+        self.beam_transformation = QComboBox()
+        self.refresh_assignments({}, {})
 
         assignment = QFormLayout()
         assignment.setContentsMargins(0, 1, 0, 0)
         assignment.setVerticalSpacing(5)
-        assignment.addRow("Assign section (columns):", self.column_section)
-        assignment.addRow("Assign section (beams):", self.beam_section)
+        assignment.addRow("Section (columns):", self.column_section)
+        assignment.addRow("Section (beams):", self.beam_section)
+        assignment.addRow("Transformation (columns):", self.column_transformation)
+        assignment.addRow("Transformation (beams):", self.beam_transformation)
         assign_widget = QWidget()
         assign_widget.setLayout(assignment)
         layout.addWidget(assign_widget)
@@ -459,6 +462,38 @@ class FrameGridPanel(QWidget):
         widget.setValue(value)
         return widget
 
+    def refresh_assignments(self, sections, transformations) -> None:
+        combos = (
+            self.column_section,
+            self.beam_section,
+            self.column_transformation,
+            self.beam_transformation,
+        )
+        previous = [combo.currentData() for combo in combos]
+
+        for combo in combos:
+            combo.clear()
+            combo.addItem("None", None)
+
+        for tag in sorted(sections):
+            section = sections[tag]
+            text = f"{tag} - {section.name} ({section.section_type})"
+            self.column_section.addItem(text, tag)
+            self.beam_section.addItem(text, tag)
+
+        for tag in sorted(transformations):
+            transformation = transformations[tag]
+            text = (
+                f"{tag} - {transformation.name} "
+                f"({transformation.transformation_type})"
+            )
+            self.column_transformation.addItem(text, tag)
+            self.beam_transformation.addItem(text, tag)
+
+        for combo, value in zip(combos, previous):
+            index = combo.findData(value)
+            combo.setCurrentIndex(index if index >= 0 else 0)
+
     def _generate(self) -> None:
         self.generate_callback(FrameGridSpec(
             nx=self.nx.value(),
@@ -472,6 +507,10 @@ class FrameGridPanel(QWidget):
             create_columns=self.columns.isChecked(),
             create_beams_x=self.beams.isChecked(),
             create_beams_y=self.beams.isChecked(),
+            column_section_tag=self.column_section.currentData(),
+            beam_section_tag=self.beam_section.currentData(),
+            column_transf_tag=self.column_transformation.currentData(),
+            beam_transf_tag=self.beam_transformation.currentData(),
         ))
 
 
@@ -764,6 +803,20 @@ class MainWindow(QMainWindow):
             self._create_transformation,
             "Create OpenSees geometric transformation",
         )
+        self._make_action(
+            "assign_section",
+            "Assign Section...",
+            "section",
+            self._assign_section_to_selection,
+            "Assign section to selected elements",
+        )
+        self._make_action(
+            "assign_transformation",
+            "Assign Transformation...",
+            "transform",
+            self._assign_transformation_to_selection,
+            "Assign geometric transformation to selected elements",
+        )
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action("plot", "Plot", "plot", self._not_implemented, "Plot results")
 
@@ -775,6 +828,9 @@ class MainWindow(QMainWindow):
         menus["Model"].addAction(self.actions["new_material"])
         menus["Model"].addAction(self.actions["new_section"])
         menus["Model"].addAction(self.actions["new_transformation"])
+        menus["Model"].addSeparator()
+        menus["Model"].addAction(self.actions["assign_section"])
+        menus["Model"].addAction(self.actions["assign_transformation"])
         menus["Geometry"].addActions([
             self.actions["node"], self.actions["line"], self.actions["frame"],
             self.actions["grid"], self.actions["extrude"],
@@ -871,6 +927,10 @@ class MainWindow(QMainWindow):
         self._refresh_all("New empty project")
 
     def _show_frame_grid(self) -> None:
+        self.frame_grid_panel.refresh_assignments(
+            self.project.sections,
+            self.project.transformations,
+        )
         self.create_dock.show()
         self.create_dock.raise_()
 
@@ -894,6 +954,10 @@ class MainWindow(QMainWindow):
             len(self.model.elements),
             len(self.project.materials),
             len(self.project.sections),
+        )
+        self.frame_grid_panel.refresh_assignments(
+            self.project.sections,
+            self.project.transformations,
         )
         self._refresh_tree()
         self.script.setPlainText(
@@ -1282,6 +1346,26 @@ class MainWindow(QMainWindow):
             element = self.model.elements.get(tag)
             if element is None:
                 return
+            section_text = "-"
+            if element.section_tag is not None:
+                section = self.project.sections.get(element.section_tag)
+                section_text = (
+                    f"{element.section_tag} - {section.name}"
+                    if section is not None
+                    else f"{element.section_tag} (missing)"
+                )
+
+            transformation_text = "-"
+            if element.transf_tag is not None:
+                transformation = self.project.transformations.get(
+                    element.transf_tag
+                )
+                transformation_text = (
+                    f"{element.transf_tag} - {transformation.name}"
+                    if transformation is not None
+                    else f"{element.transf_tag} (missing)"
+                )
+
             self.properties_panel.set_properties(
                 "Element",
                 [
@@ -1289,8 +1373,8 @@ class MainWindow(QMainWindow):
                     ("Type", element.element_type),
                     ("Nodes", f"{element.i}, {element.j}"),
                     ("Group", element.group),
-                    ("Section", element.section_tag or "-"),
-                    ("Transformation", element.transf_tag or "-"),
+                    ("Section", section_text),
+                    ("Transformation", transformation_text),
                 ],
             )
 
@@ -1332,6 +1416,23 @@ class MainWindow(QMainWindow):
         show_all.triggered.connect(self._show_all)
 
         menu.addSeparator()
+        assign_menu = menu.addMenu("Assign")
+        assign_menu.setEnabled(bool(self.selection.elements))
+        assign_section = assign_menu.addAction("Section...")
+        assign_section.triggered.connect(self._assign_section_to_selection)
+        assign_transformation = assign_menu.addAction("Transformation...")
+        assign_transformation.triggered.connect(
+            self._assign_transformation_to_selection
+        )
+        assign_menu.addSeparator()
+        clear_section = assign_menu.addAction("Clear Section")
+        clear_section.triggered.connect(self._clear_section_assignment)
+        clear_transformation = assign_menu.addAction("Clear Transformation")
+        clear_transformation.triggered.connect(
+            self._clear_transformation_assignment
+        )
+
+        menu.addSeparator()
         move_action = menu.addAction("Move...")
         move_action.triggered.connect(self._move_selection)
         copy_action = menu.addAction("Copy...")
@@ -1357,6 +1458,141 @@ class MainWindow(QMainWindow):
 
     def _selection_sets(self) -> tuple[set[int], set[int]]:
         return set(self.selection.nodes), set(self.selection.elements)
+
+    def _selected_element_tags(
+        self,
+        title: str,
+    ) -> set[int] | None:
+        tags = set(self.selection.elements)
+        if not tags:
+            QMessageBox.information(
+                self,
+                title,
+                "Select at least one element first.",
+            )
+            return None
+        return tags
+
+    def _assign_section_to_selection(self) -> None:
+        element_tags = self._selected_element_tags("Assign Section")
+        if element_tags is None:
+            return
+        if not self.project.sections:
+            QMessageBox.information(
+                self,
+                "Assign Section",
+                "No sections exist yet. Create a section first.",
+            )
+            return
+
+        tags = sorted(self.project.sections)
+        labels = [
+            (
+                f"{tag} - {self.project.sections[tag].name} "
+                f"({self.project.sections[tag].section_type})"
+            )
+            for tag in tags
+        ]
+        label, ok = QInputDialog.getItem(
+            self,
+            "Assign Section",
+            f"Assign to {len(element_tags)} selected element(s):",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        section_tag = tags[labels.index(label)]
+
+        before = self.project.to_dict()
+        assigned = self.model.assign_section(element_tags, section_tag)
+        self._refresh_project_metadata(
+            f"Assigned section {section_tag} to {len(assigned)} element(s)"
+        )
+        self._record_project_change(
+            f"Assign section {section_tag}",
+            before,
+        )
+
+    def _assign_transformation_to_selection(self) -> None:
+        element_tags = self._selected_element_tags(
+            "Assign Transformation"
+        )
+        if element_tags is None:
+            return
+        if not self.project.transformations:
+            QMessageBox.information(
+                self,
+                "Assign Transformation",
+                "No transformations exist yet. "
+                "Create a transformation first.",
+            )
+            return
+
+        tags = sorted(self.project.transformations)
+        labels = [
+            (
+                f"{tag} - {self.project.transformations[tag].name} "
+                f"({self.project.transformations[tag].transformation_type})"
+            )
+            for tag in tags
+        ]
+        label, ok = QInputDialog.getItem(
+            self,
+            "Assign Transformation",
+            f"Assign to {len(element_tags)} selected element(s):",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        transformation_tag = tags[labels.index(label)]
+
+        before = self.project.to_dict()
+        assigned = self.model.assign_transformation(
+            element_tags,
+            transformation_tag,
+        )
+        self._refresh_project_metadata(
+            f"Assigned transformation {transformation_tag} "
+            f"to {len(assigned)} element(s)"
+        )
+        self._record_project_change(
+            f"Assign transformation {transformation_tag}",
+            before,
+        )
+
+    def _clear_section_assignment(self) -> None:
+        element_tags = self._selected_element_tags("Clear Section")
+        if element_tags is None:
+            return
+        before = self.project.to_dict()
+        assigned = self.model.assign_section(element_tags, None)
+        self._refresh_project_metadata(
+            f"Cleared section on {len(assigned)} element(s)"
+        )
+        self._record_project_change("Clear section assignment", before)
+
+    def _clear_transformation_assignment(self) -> None:
+        element_tags = self._selected_element_tags(
+            "Clear Transformation"
+        )
+        if element_tags is None:
+            return
+        before = self.project.to_dict()
+        assigned = self.model.assign_transformation(
+            element_tags,
+            None,
+        )
+        self._refresh_project_metadata(
+            f"Cleared transformation on {len(assigned)} element(s)"
+        )
+        self._record_project_change(
+            "Clear transformation assignment",
+            before,
+        )
 
     def _create_node(self) -> None:
         dialog = NodeDialog(self.model.next_node_tag(), self)
@@ -1794,6 +2030,11 @@ class MainWindow(QMainWindow):
         try:
             updated = dialog.material_data()
             self.project.update_material(tag, updated)
+            if updated.tag != tag:
+                for section in self.project.sections.values():
+                    for fiber in section.fibers:
+                        if fiber.material_tag == tag:
+                            fiber.material_tag = updated.tag
         except ValueError as exc:
             QMessageBox.warning(self, "Material Editor", str(exc))
             return
@@ -1922,6 +2163,10 @@ class MainWindow(QMainWindow):
         try:
             updated = dialog.section_data()
             self.project.update_section(tag, updated)
+            if updated.tag != tag:
+                for element in self.model.elements.values():
+                    if element.section_tag == tag:
+                        element.section_tag = updated.tag
         except ValueError as exc:
             QMessageBox.warning(self, "Section Editor", str(exc))
             return

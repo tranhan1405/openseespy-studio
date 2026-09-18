@@ -99,6 +99,36 @@ class StructuralModel:
         for node_tag in set(node_tags):
             self.remove_node(node_tag, cascade=cascade_nodes)
 
+    def assign_section(
+        self,
+        element_tags: Iterable[int],
+        section_tag: int | None,
+    ) -> set[int]:
+        assigned: set[int] = set()
+        value = None if section_tag is None else int(section_tag)
+        for tag in element_tags:
+            element = self.elements.get(int(tag))
+            if element is None:
+                continue
+            element.section_tag = value
+            assigned.add(element.tag)
+        return assigned
+
+    def assign_transformation(
+        self,
+        element_tags: Iterable[int],
+        transf_tag: int | None,
+    ) -> set[int]:
+        assigned: set[int] = set()
+        value = None if transf_tag is None else int(transf_tag)
+        for tag in element_tags:
+            element = self.elements.get(int(tag))
+            if element is None:
+                continue
+            element.transf_tag = value
+            assigned.add(element.tag)
+        return assigned
+
     def next_node_tag(self) -> int:
         return max(self.nodes, default=0) + 1
 
