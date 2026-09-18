@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+import math
+
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QHBoxLayout,
@@ -33,15 +35,17 @@ class ModelViewport(QWidget):
         self.setObjectName("ViewportRoot")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(5)
+        layout.setSpacing(4)
 
         top = QHBoxLayout()
         self.model_label = QLabel("Model: Untitled")
-        self.model_label.setStyleSheet("font-weight: 700; color: #173e67;")
+        self.model_label.setStyleSheet(
+            "font-weight: 700; color: #203a55; font-size: 12px;"
+        )
         self.count_label = QLabel("Nodes: 0   Elements: 0")
-        self.count_label.setStyleSheet("color: #687b8f;")
+        self.count_label.setStyleSheet("color: #637588;")
         top.addWidget(self.model_label)
-        top.addSpacing(12)
+        top.addSpacing(10)
         top.addWidget(self.count_label)
         top.addStretch(1)
 
@@ -56,7 +60,7 @@ class ModelViewport(QWidget):
             button = QPushButton(label)
             button.setCheckable(True)
             button.setProperty("view_name", view)
-            button.setMinimumHeight(25)
+            button.setMinimumHeight(26)
             button.clicked.connect(
                 lambda checked=False, v=view: self.set_view(v)
             )
@@ -72,38 +76,83 @@ class ModelViewport(QWidget):
 
         self.plotter = QtInteractor(self)
         self.plotter.interactor.setStyleSheet(
-            "border: 1px solid #c6d2df; background: #eaf0f6;"
+            "border: 1px solid #c8d1db; background: #edf1f5;"
         )
         layout.addWidget(self.plotter.interactor, 1)
 
-        self.plotter.set_background("#edf3f8", top="#dce6ef")
+        self._current_view = "iso"
+        self._reset_scene()
+
+    def _reset_scene(self) -> None:
+        self.plotter.set_background("#eef2f6", top="#dfe7ef")
         self.plotter.add_axes(
             line_width=2,
-            color="#29465f",
+            color="#29445e",
             xlabel="X",
             ylabel="Y",
             zlabel="Z",
         )
-        self._current_view = "iso"
 
     def set_model_info(self, name: str, nodes: int, elements: int) -> None:
         self.model_label.setText(f"Model: {name}")
         self.count_label.setText(f"Nodes: {nodes}   Elements: {elements}")
 
+    def _add_ground_grid(self, model: StructuralModel) -> None:
+        low, high = model.bounds()
+        xmin, ymin, zmin = low
+        xmax, ymax, _ = high
+        span_x = max(xmax - xmin, 1.0)
+        span_y = max(ymax - ymin, 1.0)
+
+        nx = min(12, max(4, len({round(n.xyz[0], 8) for n in model.nodes.values()})))
+        ny = min(12, max(4, len({round(n.xyz[1], 8) for n in model.nodes.values()})))
+
+        dx = span_x / max(nx - 1, 1)
+        dy = span_y / max(ny - 1, 1)
+        pad_x = dx * 0.5
+        pad_y = dy * 0.5
+
+        gx0, gx1 = xmin - pad_x, xmax + pad_x
+        gy0, gy1 = ymin - pad_y, ymax + pad_y
+        z = zmin - max(span_x, span_y) * 0.002
+
+        color = "#cfd8e2"
+        for i in range(nx + 1):
+            x = gx0 + (gx1 - gx0) * i / nx
+            self.plotter.add_mesh(
+                pv.Line((x, gy0, z), (x, gy1, z)),
+                color=color,
+                line_width=1,
+            )
+        for j in range(ny + 1):
+            y = gy0 + (gy1 - gy0) * j / ny
+            self.plotter.add_mesh(
+                pv.Line((gx0, y, z), (gx1, y, z)),
+                color=color,
+                line_width=1,
+            )
+
     def draw_model(self, model: StructuralModel) -> None:
         self.plotter.clear()
-        self.plotter.set_background("#edf3f8", top="#dce6ef")
-        self.plotter.add_axes(
-            line_width=2,
-            color="#29465f",
-            xlabel="X",
-            ylabel="Y",
-            zlabel="Z",
-        )
+        self._reset_scene()
 
         if not model.nodes:
             self.plotter.render()
             return
+
+        self._add_ground_grid(model)
+
+        # Members: dark outline + lighter inner stroke gives a rectangular
+        # engineering-member appearance without requiring section extrusion.
+        for element in model.elements.values():
+            start = model.nodes[element.i].xyz
+            end = model.nodes[element.j].xyz
+            line = pv.Line(start, end)
+
+            outline = "#31485f"
+            inner = "#74889b" if element.group != "column" else "#64798d"
+            self.plotter.add_mesh(line, color=outline, line_width=8, pickable=True)
+            self.plotter.add_mesh(line, color=inner, line_width=5, pickable=True)
 
         points = [model.nodes[tag].xyz for tag in sorted(model.nodes)]
         tags = list(sorted(model.nodes))
@@ -112,35 +161,20 @@ class ModelViewport(QWidget):
         self.plotter.add_mesh(
             nodes,
             render_points_as_spheres=True,
-            point_size=8,
-            color="#0f62ce",
+            point_size=7,
+            color="#064fd4",
             pickable=True,
         )
 
-        group_color = {
-            "column": "#445d73",
-            "beam-x": "#667f95",
-            "beam-y": "#667f95",
-        }
-        for element in model.elements.values():
-            start = model.nodes[element.i].xyz
-            end = model.nodes[element.j].xyz
-            self.plotter.add_mesh(
-                pv.Line(start, end),
-                color=group_color.get(element.group, "#5b7288"),
-                line_width=6,
-                pickable=True,
-            )
-
-        bounds_min, bounds_max = model.bounds()
+        low, high = model.bounds()
         span = max(
-            bounds_max[0] - bounds_min[0],
-            bounds_max[1] - bounds_min[1],
-            bounds_max[2] - bounds_min[2],
+            high[0] - low[0],
+            high[1] - low[1],
+            high[2] - low[2],
             1.0,
         )
 
-        support_size = max(span * 0.018, 0.08)
+        support_size = max(span * 0.017, 0.08)
         for node in model.nodes.values():
             if not any(node.fixity):
                 continue
@@ -148,32 +182,27 @@ class ModelViewport(QWidget):
             support = pv.Cone(
                 center=(x, y, z - support_size * 0.55),
                 direction=(0.0, 0.0, -1.0),
-                height=support_size * 1.1,
-                radius=support_size * 0.62,
+                height=support_size * 1.15,
+                radius=support_size * 0.72,
                 resolution=4,
             )
             self.plotter.add_mesh(
                 support,
-                color="#19a957",
-                smooth_shading=False,
+                color="#16b34a",
+                edge_color="#0b7d32",
+                show_edges=True,
+                line_width=1,
             )
-        self.plotter.show_grid(
-            color="#bcc9d6",
-            font_size=9,
-            grid="back",
-            location="outer",
-            all_edges=False,
-        )
+
+        self.set_view(self._current_view)
+        self.plotter.reset_camera()
+        self.plotter.camera.zoom(1.30)
         self.plotter.add_text(
             "OpenSeesPy Studio",
             position="lower_right",
             font_size=8,
-            color="#6d7f91",
+            color="#75869a",
         )
-
-        self.set_view(self._current_view)
-        self.plotter.reset_camera()
-        self.plotter.camera.zoom(1.22)
         self.plotter.render()
 
     def set_view(self, view: str) -> None:
@@ -193,4 +222,5 @@ class ModelViewport(QWidget):
 
     def fit_view(self) -> None:
         self.plotter.reset_camera()
+        self.plotter.camera.zoom(1.20)
         self.plotter.render()
