@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,7 @@ from .model import StructuralModel
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 12
+PROJECT_FORMAT_VERSION = 13
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -190,6 +191,265 @@ class FiberData:
 
 
 @dataclass
+class FiberComponentData:
+    component_type: str
+    name: str
+    material_tag: int
+    parameters: dict[str, float] = field(default_factory=dict)
+
+    DEFAULTS: dict[str, dict[str, float]] = field(
+        init=False,
+        repr=False,
+        default_factory=lambda: {
+            "RectPatch": {
+                "y_center": 0.0,
+                "z_center": 0.0,
+                "width_y": 0.4,
+                "depth_z": 0.4,
+                "n_y": 10.0,
+                "n_z": 10.0,
+            },
+            "CircPatch": {
+                "y_center": 0.0,
+                "z_center": 0.0,
+                "r_inner": 0.0,
+                "r_outer": 0.2,
+                "n_radial": 4.0,
+                "n_circum": 24.0,
+                "start_angle": 0.0,
+                "end_angle": 360.0,
+            },
+            "StraightLayer": {
+                "y_i": -0.15,
+                "z_i": -0.15,
+                "y_j": 0.15,
+                "z_j": -0.15,
+                "n_bars": 4.0,
+                "bar_area": math.pi * 0.02 ** 2 / 4.0,
+            },
+            "CircLayer": {
+                "y_center": 0.0,
+                "z_center": 0.0,
+                "radius": 0.15,
+                "n_bars": 8.0,
+                "bar_area": math.pi * 0.02 ** 2 / 4.0,
+                "start_angle": 0.0,
+                "end_angle": 360.0,
+            },
+            "SingleFiber": {
+                "y": 0.0,
+                "z": 0.0,
+                "area": 1.0e-4,
+            },
+        },
+    )
+
+    def __post_init__(self) -> None:
+        self.component_type = str(self.component_type)
+        self.name = str(self.name).strip() or self.component_type
+        self.material_tag = int(self.material_tag)
+        defaults = self.DEFAULTS.get(self.component_type)
+        if defaults is None:
+            raise ValueError(
+                f"Unsupported fiber component type: {self.component_type}"
+            )
+        if self.material_tag <= 0:
+            raise ValueError(
+                "Fiber component material tag must be positive."
+            )
+        self.parameters = {
+            key: float(self.parameters.get(key, default))
+            for key, default in defaults.items()
+        }
+        self._validate()
+
+    def _positive_int(self, key: str) -> int:
+        value = int(round(self.parameters[key]))
+        if value < 1:
+            raise ValueError(f"{key} must be at least 1.")
+        self.parameters[key] = float(value)
+        return value
+
+    def _validate_angles(self) -> None:
+        start = self.parameters["start_angle"]
+        end = self.parameters["end_angle"]
+        span = end - start
+        if span <= 0.0 or span > 360.0 + 1.0e-9:
+            raise ValueError(
+                "Fiber component angle span must be in (0, 360] degrees."
+            )
+
+    def _validate(self) -> None:
+        p = self.parameters
+        if self.component_type == "RectPatch":
+            if p["width_y"] <= 0.0 or p["depth_z"] <= 0.0:
+                raise ValueError("Rectangle patch dimensions must be positive.")
+            self._positive_int("n_y")
+            self._positive_int("n_z")
+        elif self.component_type == "CircPatch":
+            if p["r_inner"] < 0.0 or p["r_outer"] <= p["r_inner"]:
+                raise ValueError(
+                    "Circular patch needs 0 <= inner radius < outer radius."
+                )
+            self._positive_int("n_radial")
+            self._positive_int("n_circum")
+            self._validate_angles()
+        elif self.component_type == "StraightLayer":
+            self._positive_int("n_bars")
+            if p["bar_area"] <= 0.0:
+                raise ValueError("Rebar area must be positive.")
+        elif self.component_type == "CircLayer":
+            self._positive_int("n_bars")
+            if p["radius"] <= 0.0 or p["bar_area"] <= 0.0:
+                raise ValueError(
+                    "Circular rebar radius and bar area must be positive."
+                )
+            self._validate_angles()
+        elif self.component_type == "SingleFiber":
+            if p["area"] <= 0.0:
+                raise ValueError("Fiber area must be positive.")
+
+    def compile_fibers(self) -> list[FiberData]:
+        p = self.parameters
+        mat = self.material_tag
+        result: list[FiberData] = []
+
+        if self.component_type == "RectPatch":
+            n_y = int(p["n_y"])
+            n_z = int(p["n_z"])
+            dy = p["width_y"] / n_y
+            dz = p["depth_z"] / n_z
+            y0 = p["y_center"] - 0.5 * p["width_y"]
+            z0 = p["z_center"] - 0.5 * p["depth_z"]
+            area = dy * dz
+            for iy in range(n_y):
+                y = y0 + (iy + 0.5) * dy
+                for iz in range(n_z):
+                    z = z0 + (iz + 0.5) * dz
+                    result.append(FiberData(y, z, area, mat))
+            return result
+
+        if self.component_type == "CircPatch":
+            n_r = int(p["n_radial"])
+            n_t = int(p["n_circum"])
+            r0 = p["r_inner"]
+            r1 = p["r_outer"]
+            dr = (r1 - r0) / n_r
+            start = math.radians(p["start_angle"])
+            span = math.radians(p["end_angle"] - p["start_angle"])
+            dtheta = span / n_t
+            for ir in range(n_r):
+                inner = r0 + ir * dr
+                outer = inner + dr
+                ring_delta = outer * outer - inner * inner
+                for it in range(n_t):
+                    theta0 = start + it * dtheta
+                    theta = theta0 + 0.5 * dtheta
+                    area = 0.5 * ring_delta * dtheta
+                    if ring_delta <= 1.0e-30:
+                        radius = 0.0
+                    else:
+                        radius = (
+                            4.0
+                            * math.sin(0.5 * dtheta)
+                            * (outer ** 3 - inner ** 3)
+                            / (3.0 * dtheta * ring_delta)
+                        )
+                    result.append(
+                        FiberData(
+                            p["y_center"] + radius * math.cos(theta),
+                            p["z_center"] + radius * math.sin(theta),
+                            area,
+                            mat,
+                        )
+                    )
+            return result
+
+        if self.component_type == "StraightLayer":
+            count = int(p["n_bars"])
+            if count == 1:
+                positions = [(0.5,)]
+            else:
+                positions = [
+                    (index / (count - 1),)
+                    for index in range(count)
+                ]
+            for (ratio,) in positions:
+                result.append(
+                    FiberData(
+                        p["y_i"] + ratio * (p["y_j"] - p["y_i"]),
+                        p["z_i"] + ratio * (p["z_j"] - p["z_i"]),
+                        p["bar_area"],
+                        mat,
+                    )
+                )
+            return result
+
+        if self.component_type == "CircLayer":
+            count = int(p["n_bars"])
+            start_deg = p["start_angle"]
+            span_deg = p["end_angle"] - start_deg
+            closed = math.isclose(span_deg, 360.0, abs_tol=1.0e-9)
+            if count == 1:
+                angles = [start_deg + 0.5 * span_deg]
+            elif closed:
+                angles = [
+                    start_deg + span_deg * index / count
+                    for index in range(count)
+                ]
+            else:
+                angles = [
+                    start_deg + span_deg * index / (count - 1)
+                    for index in range(count)
+                ]
+            for angle_deg in angles:
+                angle = math.radians(angle_deg)
+                result.append(
+                    FiberData(
+                        p["y_center"] + p["radius"] * math.cos(angle),
+                        p["z_center"] + p["radius"] * math.sin(angle),
+                        p["bar_area"],
+                        mat,
+                    )
+                )
+            return result
+
+        if self.component_type == "SingleFiber":
+            return [
+                FiberData(
+                    p["y"],
+                    p["z"],
+                    p["area"],
+                    mat,
+                )
+            ]
+
+        raise ValueError(
+            f"Unsupported fiber component type: {self.component_type}"
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "component_type": self.component_type,
+            "name": self.name,
+            "material_tag": self.material_tag,
+            "parameters": dict(self.parameters),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FiberComponentData":
+        return cls(
+            component_type=str(data["component_type"]),
+            name=str(data.get("name", data["component_type"])),
+            material_tag=int(data["material_tag"]),
+            parameters={
+                str(key): float(value)
+                for key, value in dict(data.get("parameters", {})).items()
+            },
+        )
+
+
+@dataclass
 class SectionData:
     tag: int
     name: str
@@ -197,6 +457,7 @@ class SectionData:
     parameters: dict[str, float] = field(default_factory=dict)
     fibers: list[FiberData] = field(default_factory=list)
     material_tag: int | None = None
+    fiber_components: list[FiberComponentData] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.tag = int(self.tag)
@@ -216,11 +477,47 @@ class SectionData:
             fiber if isinstance(fiber, FiberData) else FiberData.from_dict(fiber)
             for fiber in self.fibers
         ]
+        self.fiber_components = [
+            component
+            if isinstance(component, FiberComponentData)
+            else FiberComponentData.from_dict(component)
+            for component in self.fiber_components
+        ]
         self.material_tag = (
             None if self.material_tag is None else int(self.material_tag)
         )
         if self.section_type != "Elastic":
             self.material_tag = None
+
+    def compiled_fibers(self) -> list[FiberData]:
+        if self.section_type != "Fiber":
+            return []
+        compiled = list(self.fibers)
+        for component in self.fiber_components:
+            compiled.extend(component.compile_fibers())
+        return compiled
+
+    def fiber_material_tags(self) -> set[int]:
+        if self.section_type != "Fiber":
+            return set()
+        return {
+            fiber.material_tag
+            for fiber in self.fibers
+        } | {
+            component.material_tag
+            for component in self.fiber_components
+        }
+
+    def fiber_area_and_centroid(
+        self,
+    ) -> tuple[float, tuple[float, float]]:
+        fibers = self.compiled_fibers()
+        total = sum(fiber.area for fiber in fibers)
+        if total <= 0.0:
+            return 0.0, (0.0, 0.0)
+        y = sum(fiber.y * fiber.area for fiber in fibers) / total
+        z = sum(fiber.z * fiber.area for fiber in fibers) / total
+        return total, (y, z)
 
     def resolved_elastic_parameters(
         self,
@@ -252,6 +549,10 @@ class SectionData:
             "section_type": self.section_type,
             "parameters": dict(self.parameters),
             "fibers": [fiber.to_dict() for fiber in self.fibers],
+            "fiber_components": [
+                component.to_dict()
+                for component in self.fiber_components
+            ],
             "material_tag": self.material_tag,
         }
 
@@ -270,6 +571,10 @@ class SectionData:
             fibers=[
                 FiberData.from_dict(dict(item))
                 for item in data.get("fibers", [])
+            ],
+            fiber_components=[
+                FiberComponentData.from_dict(dict(item))
+                for item in data.get("fiber_components", [])
             ],
             material_tag=data.get("material_tag"),
         )
@@ -907,11 +1212,11 @@ class ProjectDatabase:
         if section.section_type != "Fiber":
             return
 
-        missing = sorted({
-            fiber.material_tag
-            for fiber in section.fibers
-            if fiber.material_tag not in self.materials
-        })
+        missing = sorted(
+            material_tag
+            for material_tag in section.fiber_material_tags()
+            if material_tag not in self.materials
+        )
         if missing:
             raise ValueError(
                 "Fiber section references missing material tag(s): "
@@ -925,10 +1230,7 @@ class ProjectDatabase:
             for section in self.sections.values()
             if (
                 section.material_tag == material_tag
-                or any(
-                    fiber.material_tag == material_tag
-                    for fiber in section.fibers
-                )
+                or material_tag in section.fiber_material_tags()
             )
         )
 

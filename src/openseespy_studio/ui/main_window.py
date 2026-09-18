@@ -3103,6 +3103,9 @@ class MainWindow(QMainWindow):
                     for fiber in section.fibers:
                         if fiber.material_tag == tag:
                             fiber.material_tag = updated.tag
+                    for component in section.fiber_components:
+                        if component.material_tag == tag:
+                            component.material_tag = updated.tag
                 for connection in self.project.connections.values():
                     connection.materials_by_dof = {
                         dof: (
@@ -3376,11 +3379,15 @@ class MainWindow(QMainWindow):
                 (key, f"{value:g}")
                 for key, value in section.parameters.items()
             )
-            rows.append(("Fibers", len(section.fibers)))
-            material_tags = sorted({
-                fiber.material_tag
-                for fiber in section.fibers
-            })
+            compiled = section.compiled_fibers()
+            total_area, (cy, cz) = section.fiber_area_and_centroid()
+            rows.append(("Builder Components", len(section.fiber_components)))
+            rows.append(("Manual Fibers", len(section.fibers)))
+            rows.append(("Compiled Fibers", len(compiled)))
+            rows.append(("Fiber Area", f"{total_area:g}"))
+            rows.append(("Centroid y", f"{cy:g}"))
+            rows.append(("Centroid z", f"{cz:g}"))
+            material_tags = sorted(section.fiber_material_tags())
             rows.append((
                 "Materials",
                 ", ".join(map(str, material_tags)) or "-",

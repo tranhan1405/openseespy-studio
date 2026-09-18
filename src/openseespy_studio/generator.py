@@ -131,7 +131,7 @@ def section_to_openseespy(
         lines = [
             f"ops.section('Fiber', {section.tag}, '-GJ', {p['GJ']:g})"
         ]
-        for fiber in section.fibers:
+        for fiber in section.compiled_fibers():
             lines.append(
                 "ops.fiber("
                 f"{fiber.y:g}, {fiber.z:g}, {fiber.area:g}, "
