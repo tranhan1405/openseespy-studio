@@ -6,7 +6,7 @@ import os
 import sys
 import tempfile
 
-from PySide6.QtCore import QProcess, QTimer, QSize, Qt
+from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, QSize, Qt
 from PySide6.QtGui import QAction, QColor, QCursor, QFont, QKeySequence, QPainter, QPen, QShortcut, QTextCursor, QUndoStack
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -44,6 +44,7 @@ from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..jobs import JobRecord
 from ..model import StructuralModel, classify_fixity
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, SectionData, SelectionSetData, TimeSeriesData, TransformationData
+from ..runtime import build_worker_pythonpath
 from .analysis_dialog import AnalysisDialog
 from .code_editor import CodeEditor
 from .connection_dialog import ConnectionDialog
@@ -4006,6 +4007,14 @@ class MainWindow(QMainWindow):
             self._launch_external_solver_terminal(log_path, job.job_id)
 
         process = QProcess(self)
+        process_environment = QProcessEnvironment.systemEnvironment()
+        process_environment.insert(
+            "PYTHONPATH",
+            build_worker_pythonpath(
+                process_environment.value("PYTHONPATH")
+            ),
+        )
+        process.setProcessEnvironment(process_environment)
         process.setProgram(sys.executable)
         process.setArguments([
             "-m",
@@ -4024,6 +4033,10 @@ class MainWindow(QMainWindow):
         self.console.appendPlainText(
             f">> Job {job.job_id}: starting {settings.analysis_type} "
             f"analysis with {Path(sys.executable).name}..."
+        )
+        self.console.appendPlainText(
+            ">> Worker source path: "
+            + build_worker_pythonpath("").split(os.pathsep)[0]
         )
         self.status_message.setText(
             f"Job {job.job_id} · 0/{total} · 0% · starting"
