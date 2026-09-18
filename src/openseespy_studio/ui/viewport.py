@@ -37,9 +37,9 @@ class ModelViewport(QWidget):
 
         top = QHBoxLayout()
         self.model_label = QLabel("Model: Untitled")
-        self.model_label.setStyleSheet("font-weight: 700; color: #24384d;")
+        self.model_label.setStyleSheet("font-weight: 700; color: #173e67;")
         self.count_label = QLabel("Nodes: 0   Elements: 0")
-        self.count_label.setStyleSheet("color: #657384;")
+        self.count_label.setStyleSheet("color: #687b8f;")
         top.addWidget(self.model_label)
         top.addSpacing(12)
         top.addWidget(self.count_label)
@@ -72,14 +72,14 @@ class ModelViewport(QWidget):
 
         self.plotter = QtInteractor(self)
         self.plotter.interactor.setStyleSheet(
-            "border: 1px solid #c9d1db; background: #f5f7fa;"
+            "border: 1px solid #c6d2df; background: #eaf0f6;"
         )
         layout.addWidget(self.plotter.interactor, 1)
 
-        self.plotter.set_background("#f6f8fb", top="#e8edf3")
+        self.plotter.set_background("#edf3f8", top="#dce6ef")
         self.plotter.add_axes(
             line_width=2,
-            color="#27374a",
+            color="#29465f",
             xlabel="X",
             ylabel="Y",
             zlabel="Z",
@@ -92,10 +92,10 @@ class ModelViewport(QWidget):
 
     def draw_model(self, model: StructuralModel) -> None:
         self.plotter.clear()
-        self.plotter.set_background("#f6f8fb", top="#e8edf3")
+        self.plotter.set_background("#edf3f8", top="#dce6ef")
         self.plotter.add_axes(
             line_width=2,
-            color="#27374a",
+            color="#29465f",
             xlabel="X",
             ylabel="Y",
             zlabel="Z",
@@ -113,35 +113,23 @@ class ModelViewport(QWidget):
             nodes,
             render_points_as_spheres=True,
             point_size=8,
-            color="#1558c0",
+            color="#0f62ce",
             pickable=True,
         )
 
         group_color = {
-            "column": "#5d6f82",
-            "beam-x": "#73879a",
-            "beam-y": "#73879a",
+            "column": "#445d73",
+            "beam-x": "#667f95",
+            "beam-y": "#667f95",
         }
         for element in model.elements.values():
             start = model.nodes[element.i].xyz
             end = model.nodes[element.j].xyz
             self.plotter.add_mesh(
                 pv.Line(start, end),
-                color=group_color.get(element.group, "#6c7f91"),
-                line_width=5,
+                color=group_color.get(element.group, "#5b7288"),
+                line_width=6,
                 pickable=True,
-            )
-
-        support_points = [
-            node.xyz for node in model.nodes.values() if any(node.fixity)
-        ]
-        if support_points:
-            supports = pv.PolyData(support_points)
-            self.plotter.add_mesh(
-                supports,
-                render_points_as_spheres=True,
-                point_size=11,
-                color="#24a148",
             )
 
         bounds_min, bounds_max = model.bounds()
@@ -151,8 +139,26 @@ class ModelViewport(QWidget):
             bounds_max[2] - bounds_min[2],
             1.0,
         )
+
+        support_size = max(span * 0.018, 0.08)
+        for node in model.nodes.values():
+            if not any(node.fixity):
+                continue
+            x, y, z = node.xyz
+            support = pv.Cone(
+                center=(x, y, z - support_size * 0.55),
+                direction=(0.0, 0.0, -1.0),
+                height=support_size * 1.1,
+                radius=support_size * 0.62,
+                resolution=4,
+            )
+            self.plotter.add_mesh(
+                support,
+                color="#19a957",
+                smooth_shading=False,
+            )
         self.plotter.show_grid(
-            color="#c8d0d9",
+            color="#bcc9d6",
             font_size=9,
             grid="back",
             location="outer",
@@ -162,12 +168,12 @@ class ModelViewport(QWidget):
             "OpenSeesPy Studio",
             position="lower_right",
             font_size=8,
-            color="#7b8794",
+            color="#6d7f91",
         )
 
         self.set_view(self._current_view)
         self.plotter.reset_camera()
-        self.plotter.camera.zoom(1.05)
+        self.plotter.camera.zoom(1.22)
         self.plotter.render()
 
     def set_view(self, view: str) -> None:
