@@ -9,12 +9,18 @@ from .model import StructuralModel
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 4
+PROJECT_FORMAT_VERSION = 5
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
     "Steel02": ("Fy", "E0", "b", "R0", "cR1", "cR2"),
     "Concrete02": ("fpc", "epsc0", "fpcu", "epsU", "lambda", "ft", "Ets"),
+}
+
+MATERIAL_ENGINEERING_DEFAULTS: dict[str, dict[str, float]] = {
+    "Elastic": {"poisson_ratio": 0.3, "density": 0.0},
+    "Steel02": {"poisson_ratio": 0.3, "density": 7850.0},
+    "Concrete02": {"poisson_ratio": 0.2, "density": 2400.0},
 }
 
 MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
@@ -47,6 +53,8 @@ class MaterialData:
     name: str
     material_type: str
     parameters: dict[str, float] = field(default_factory=dict)
+    poisson_ratio: float = 0.3
+    density: float = 0.0
 
     def __post_init__(self) -> None:
         self.tag = int(self.tag)
@@ -63,12 +71,46 @@ class MaterialData:
             normalized[key] = float(self.parameters.get(key, defaults[key]))
         self.parameters = normalized
 
+        engineering_defaults = MATERIAL_ENGINEERING_DEFAULTS[self.material_type]
+        if self.poisson_ratio is None:
+            self.poisson_ratio = engineering_defaults["poisson_ratio"]
+        if self.density is None:
+            self.density = engineering_defaults["density"]
+
+        self.poisson_ratio = float(self.poisson_ratio)
+        self.density = float(self.density)
+        if not (-0.99 < self.poisson_ratio < 0.5):
+            raise ValueError("Poisson ratio must be between -0.99 and 0.5.")
+        if self.density < 0.0:
+            raise ValueError("Material density cannot be negative.")
+
+    def elastic_modulus(self) -> float:
+        if self.material_type == "Elastic":
+            return float(self.parameters["E"])
+        if self.material_type == "Steel02":
+            return float(self.parameters["E0"])
+        if self.material_type == "Concrete02":
+            epsc0 = float(self.parameters["epsc0"])
+            if abs(epsc0) <= 1.0e-16:
+                raise ValueError(
+                    f"Concrete02 material {self.tag} has zero epsc0."
+                )
+            return abs(2.0 * float(self.parameters["fpc"]) / epsc0)
+        raise ValueError(
+            f"Material {self.tag} does not expose an elastic modulus."
+        )
+
+    def shear_modulus(self) -> float:
+        return self.elastic_modulus() / (2.0 * (1.0 + self.poisson_ratio))
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "tag": self.tag,
             "name": self.name,
             "material_type": self.material_type,
             "parameters": dict(self.parameters),
+            "poisson_ratio": self.poisson_ratio,
+            "density": self.density,
         }
 
     @classmethod
@@ -83,6 +125,22 @@ class MaterialData:
                 str(key): float(value)
                 for key, value in dict(data.get("parameters", {})).items()
             },
+            poisson_ratio=float(
+                data.get(
+                    "poisson_ratio",
+                    MATERIAL_ENGINEERING_DEFAULTS[
+                        str(data.get("material_type", data.get("type", "Elastic")))
+                    ]["poisson_ratio"],
+                )
+            ),
+            density=float(
+                data.get(
+                    "density",
+                    MATERIAL_ENGINEERING_DEFAULTS[
+                        str(data.get("material_type", data.get("type", "Elastic")))
+                    ]["density"],
+                )
+            ),
         )
 
 
@@ -138,6 +196,7 @@ class SectionData:
     section_type: str
     parameters: dict[str, float] = field(default_factory=dict)
     fibers: list[FiberData] = field(default_factory=list)
+    material_tag: int | None = None
 
     def __post_init__(self) -> None:
         self.tag = int(self.tag)
@@ -157,6 +216,34 @@ class SectionData:
             fiber if isinstance(fiber, FiberData) else FiberData.from_dict(fiber)
             for fiber in self.fibers
         ]
+        self.material_tag = (
+            None if self.material_tag is None else int(self.material_tag)
+        )
+        if self.section_type != "Elastic":
+            self.material_tag = None
+
+    def resolved_elastic_parameters(
+        self,
+        materials: dict[int, MaterialData] | None = None,
+    ) -> dict[str, float]:
+        if self.section_type != "Elastic":
+            raise ValueError(
+                f"Section {self.tag} is not an Elastic section."
+            )
+
+        resolved = dict(self.parameters)
+        if self.material_tag is None:
+            return resolved
+        if materials is None or self.material_tag not in materials:
+            raise ValueError(
+                f"Section {self.tag} references missing material "
+                f"{self.material_tag}."
+            )
+
+        material = materials[self.material_tag]
+        resolved["E"] = material.elastic_modulus()
+        resolved["G"] = material.shear_modulus()
+        return resolved
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -165,6 +252,7 @@ class SectionData:
             "section_type": self.section_type,
             "parameters": dict(self.parameters),
             "fibers": [fiber.to_dict() for fiber in self.fibers],
+            "material_tag": self.material_tag,
         }
 
     @classmethod
@@ -183,6 +271,7 @@ class SectionData:
                 FiberData.from_dict(dict(item))
                 for item in data.get("fibers", [])
             ],
+            material_tag=data.get("material_tag"),
         )
 
 
@@ -329,8 +418,19 @@ class ProjectDatabase:
         self.sections.pop(int(tag), None)
 
     def _validate_section_materials(self, section: SectionData) -> None:
+        if (
+            section.section_type == "Elastic"
+            and section.material_tag is not None
+            and section.material_tag not in self.materials
+        ):
+            raise ValueError(
+                f"Elastic section references missing material tag "
+                f"{section.material_tag}."
+            )
+
         if section.section_type != "Fiber":
             return
+
         missing = sorted({
             fiber.material_tag
             for fiber in section.fibers
@@ -347,9 +447,12 @@ class ProjectDatabase:
         return sorted(
             section.tag
             for section in self.sections.values()
-            if any(
-                fiber.material_tag == material_tag
-                for fiber in section.fibers
+            if (
+                section.material_tag == material_tag
+                or any(
+                    fiber.material_tag == material_tag
+                    for fiber in section.fibers
+                )
             )
         )
 

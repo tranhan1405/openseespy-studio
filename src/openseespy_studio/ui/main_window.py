@@ -2032,6 +2032,8 @@ class MainWindow(QMainWindow):
             self.project.update_material(tag, updated)
             if updated.tag != tag:
                 for section in self.project.sections.values():
+                    if section.material_tag == tag:
+                        section.material_tag = updated.tag
                     for fiber in section.fibers:
                         if fiber.material_tag == tag:
                             fiber.material_tag = updated.tag
@@ -2060,6 +2062,8 @@ class MainWindow(QMainWindow):
             name=f"{source.name} Copy",
             material_type=source.material_type,
             parameters=dict(source.parameters),
+            poisson_ratio=source.poisson_ratio,
+            density=source.density,
         )
         self.project.add_material(duplicate)
         self._refresh_project_metadata(
@@ -2081,9 +2085,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Delete Material",
-                "Material is used by Fiber section(s): "
+                "Material is used by section(s): "
                 + ", ".join(map(str, used_by))
-                + ". Reassign those fibers first.",
+                + ". Reassign those section/material links first.",
             )
             return
 
@@ -2113,6 +2117,10 @@ class MainWindow(QMainWindow):
             ("Tag", material.tag),
             ("Name", material.name),
             ("Type", material.material_type),
+            ("Poisson ratio", f"{material.poisson_ratio:g}"),
+            ("Density", f"{material.density:g}"),
+            ("Elastic E", f"{material.elastic_modulus():g}"),
+            ("Elastic G", f"{material.shear_modulus():g}"),
         ]
         rows.extend(
             (key, f"{value:g}")
@@ -2248,11 +2256,39 @@ class MainWindow(QMainWindow):
             ("Name", section.name),
             ("Type", section.section_type),
         ]
-        rows.extend(
-            (key, f"{value:g}")
-            for key, value in section.parameters.items()
-        )
-        if section.section_type == "Fiber":
+
+        if section.section_type == "Elastic":
+            if section.material_tag is None:
+                rows.append(("Material", "Manual"))
+                resolved = section.resolved_elastic_parameters()
+            else:
+                material = self.project.materials.get(section.material_tag)
+                material_text = (
+                    f"{section.material_tag} - {material.name}"
+                    if material is not None
+                    else f"{section.material_tag} (missing)"
+                )
+                rows.append(("Material", material_text))
+                try:
+                    resolved = section.resolved_elastic_parameters(
+                        self.project.materials
+                    )
+                except ValueError:
+                    resolved = dict(section.parameters)
+
+            for key in ("A", "Iz", "Iy", "J"):
+                rows.append((key, f"{resolved[key]:g}"))
+            rows.append(("Resolved E", f"{resolved['E']:g}"))
+            rows.append(("Resolved G", f"{resolved['G']:g}"))
+            if section.material_tag is not None:
+                material = self.project.materials.get(section.material_tag)
+                if material is not None:
+                    rows.append(("Density", f"{material.density:g}"))
+        else:
+            rows.extend(
+                (key, f"{value:g}")
+                for key, value in section.parameters.items()
+            )
             rows.append(("Fibers", len(section.fibers)))
             material_tags = sorted({
                 fiber.material_tag
@@ -2262,6 +2298,7 @@ class MainWindow(QMainWindow):
                 "Materials",
                 ", ".join(map(str, material_tags)) or "-",
             ))
+
         self.properties_panel.set_properties("Section", rows)
 
     def _create_transformation(self) -> None:

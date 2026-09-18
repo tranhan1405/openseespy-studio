@@ -79,6 +79,25 @@ class SectionDialog(QDialog):
 
         self.elastic_page = QWidget()
         elastic_form = QFormLayout(self.elastic_page)
+
+        self.elastic_material = QComboBox()
+        self.elastic_material.addItem("Manual section properties", None)
+        for tag in sorted(self.materials):
+            material = self.materials[tag]
+            self.elastic_material.addItem(
+                f"{tag} - {material.name} ({material.material_type})",
+                tag,
+            )
+        if (
+            section is not None
+            and section.section_type == "Elastic"
+            and section.material_tag is not None
+        ):
+            index = self.elastic_material.findData(section.material_tag)
+            if index >= 0:
+                self.elastic_material.setCurrentIndex(index)
+        elastic_form.addRow("Material:", self.elastic_material)
+
         self.elastic_spins: dict[str, QDoubleSpinBox] = {}
         for key in SECTION_PARAMETER_ORDER["Elastic"]:
             initial = (
@@ -89,6 +108,11 @@ class SectionDialog(QDialog):
             spin = _float_spin(initial)
             elastic_form.addRow(f"{key}:", spin)
             self.elastic_spins[key] = spin
+
+        self.elastic_material.currentIndexChanged.connect(
+            self._update_elastic_material_link
+        )
+        self._update_elastic_material_link()
         self.stack.addWidget(self.elastic_page)
 
         self.fiber_page = QWidget()
@@ -142,6 +166,23 @@ class SectionDialog(QDialog):
         if section and section.section_type == "Fiber":
             for fiber in section.fibers:
                 self._add_fiber_row(fiber)
+
+    def _update_elastic_material_link(self) -> None:
+        material_tag = self.elastic_material.currentData()
+        linked = material_tag is not None
+
+        self.elastic_spins["E"].setEnabled(not linked)
+        self.elastic_spins["G"].setEnabled(not linked)
+
+        if not linked:
+            return
+
+        material = self.materials.get(int(material_tag))
+        if material is None:
+            return
+
+        self.elastic_spins["E"].setValue(material.elastic_modulus())
+        self.elastic_spins["G"].setValue(material.shear_modulus())
 
     def _sync_page(self, section_type: str) -> None:
         self.stack.setCurrentIndex(0 if section_type == "Elastic" else 1)
@@ -224,9 +265,11 @@ class SectionDialog(QDialog):
                 for key in SECTION_PARAMETER_ORDER["Elastic"]
             }
             fibers: list[FiberData] = []
+            material_tag = self.elastic_material.currentData()
         else:
             parameters = {"GJ": self.gj.value()}
             fibers = self._fiber_data()
+            material_tag = None
 
         return SectionData(
             tag=self.tag.value(),
@@ -234,4 +277,5 @@ class SectionDialog(QDialog):
             section_type=section_type,
             parameters=parameters,
             fibers=fibers,
+            material_tag=material_tag,
         )

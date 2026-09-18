@@ -110,8 +110,15 @@ def material_to_openseespy(material: MaterialData) -> str:
     raise ValueError(f"Unsupported material type: {material.material_type}")
 
 
-def section_to_openseespy(section: SectionData) -> list[str]:
-    p = section.parameters
+def section_to_openseespy(
+    section: SectionData,
+    materials: dict[int, MaterialData] | None = None,
+) -> list[str]:
+    p = (
+        section.resolved_elastic_parameters(materials)
+        if section.section_type == "Elastic"
+        else section.parameters
+    )
     if section.section_type == "Elastic":
         return [
             "ops.section('Elastic', "
@@ -179,7 +186,9 @@ def to_openseespy(
     if sections:
         lines.extend(["", "# Sections"])
         for tag in sorted(sections):
-            lines.extend(section_to_openseespy(sections[tag]))
+            lines.extend(
+                section_to_openseespy(sections[tag], materials)
+            )
 
     default_transf_tag = 1
     if transformations:
@@ -222,7 +231,7 @@ def to_openseespy(
             and assigned_section is not None
             and assigned_section.section_type == "Elastic"
         ):
-            p = assigned_section.parameters
+            p = assigned_section.resolved_elastic_parameters(materials)
             lines.append(
                 "ops.element('elasticBeamColumn', "
                 f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "

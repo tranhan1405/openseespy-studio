@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from ..project import (
     MATERIAL_DEFAULTS,
+    MATERIAL_ENGINEERING_DEFAULTS,
     MATERIAL_PARAMETER_ORDER,
     MaterialData,
 )
@@ -45,6 +46,31 @@ class MaterialDialog(QDialog):
         form.addRow("Tag:", self.tag)
         form.addRow("Name:", self.name)
         form.addRow("Type:", self.material_type)
+
+        engineering_defaults = MATERIAL_ENGINEERING_DEFAULTS[
+            material.material_type if material else self.material_type.currentText()
+        ]
+        self.poisson_ratio = QDoubleSpinBox()
+        self.poisson_ratio.setDecimals(6)
+        self.poisson_ratio.setRange(-0.99, 0.499999)
+        self.poisson_ratio.setSingleStep(0.01)
+        self.poisson_ratio.setValue(
+            material.poisson_ratio
+            if material is not None
+            else engineering_defaults["poisson_ratio"]
+        )
+
+        self.density = QDoubleSpinBox()
+        self.density.setDecimals(6)
+        self.density.setRange(0.0, 1.0e12)
+        self.density.setValue(
+            material.density
+            if material is not None
+            else engineering_defaults["density"]
+        )
+
+        form.addRow("Poisson ratio ν:", self.poisson_ratio)
+        form.addRow("Density:", self.density)
         root.addLayout(form)
 
         scroll = QScrollArea()
@@ -63,8 +89,15 @@ class MaterialDialog(QDialog):
 
         self._parameter_spins: dict[str, QDoubleSpinBox] = {}
         self._initial_material = material
-        self.material_type.currentTextChanged.connect(self._rebuild_parameters)
+        self.material_type.currentTextChanged.connect(self._material_type_changed)
         self._rebuild_parameters(self.material_type.currentText())
+
+    def _material_type_changed(self, material_type: str) -> None:
+        self._rebuild_parameters(material_type)
+        if self._initial_material is None:
+            defaults = MATERIAL_ENGINEERING_DEFAULTS[material_type]
+            self.poisson_ratio.setValue(defaults["poisson_ratio"])
+            self.density.setValue(defaults["density"])
 
     def _clear_parameter_form(self) -> None:
         while self.parameter_form.rowCount():
@@ -114,4 +147,6 @@ class MaterialDialog(QDialog):
                 key: self._parameter_spins[key].value()
                 for key in MATERIAL_PARAMETER_ORDER[material_type]
             },
+            poisson_ratio=self.poisson_ratio.value(),
+            density=self.density.value(),
         )
