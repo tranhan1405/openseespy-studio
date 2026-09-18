@@ -324,9 +324,7 @@ class ModelViewport(QWidget):
                     self._rubber_band.setGeometry(
                         QRect(self._box_origin, self._box_origin)
                     )
-                    if self._rubber_band is None:
-                    return True
-                self._rubber_band.setStyleSheet(
+                    self._rubber_band.setStyleSheet(
                         "border: 1px solid #2f80ed;"
                         "background-color: rgba(47,128,237,35);"
                     )
