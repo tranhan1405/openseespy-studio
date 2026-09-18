@@ -42,118 +42,210 @@ from .viewport import ModelViewport
 
 APP_STYLE = """
 QMainWindow {
-    background: #eef1f5;
+    background: #eaf0f6;
+    color: #23364a;
 }
 QMenuBar {
-    background: #f8f9fb;
-    border-bottom: 1px solid #cfd5dd;
-    padding: 2px;
+    background: #fbfcfe;
+    color: #23364a;
+    border-bottom: 1px solid #c9d4df;
+    padding: 2px 4px;
 }
 QMenuBar::item {
-    padding: 5px 9px;
+    padding: 6px 10px;
+    margin: 0 1px;
     background: transparent;
-}
-QMenuBar::item:selected {
-    background: #e3eaf3;
-}
-QToolBar {
-    background: #f6f8fb;
-    border: none;
-    border-bottom: 1px solid #cbd2dc;
-    spacing: 3px;
-    padding: 4px;
-}
-QToolBar QToolButton {
-    min-width: 50px;
-    padding: 4px 5px;
-    border: 1px solid transparent;
     border-radius: 3px;
 }
+QMenuBar::item:selected {
+    background: #dfeeff;
+    color: #1659a7;
+}
+QToolBar {
+    background: #f8fafc;
+    border: none;
+    border-bottom: 1px solid #c7d2de;
+    spacing: 3px;
+    padding: 5px 6px;
+}
+QToolBar::separator {
+    background: #c9d4df;
+    width: 1px;
+    margin: 4px 6px;
+}
+QToolBar QToolButton {
+    min-width: 52px;
+    min-height: 48px;
+    padding: 4px 6px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: #2c4055;
+}
 QToolBar QToolButton:hover {
-    background: #e4ecf7;
-    border-color: #b8c7db;
+    background: #e1efff;
+    border-color: #b7d2f3;
+    color: #14589e;
+}
+QToolBar QToolButton:pressed,
+QToolBar QToolButton:checked {
+    background: #cfe5ff;
+    border-color: #6fa8e8;
+    color: #0f4f91;
 }
 QDockWidget {
-    color: #1f2937;
+    color: #22364b;
     font-weight: 600;
 }
 QDockWidget::title {
-    background: #f3f5f8;
-    border: 1px solid #ccd3dc;
-    padding: 6px 8px;
+    background: #e8eef5;
+    border: 1px solid #c9d4df;
+    padding: 7px 9px;
     text-align: left;
 }
 QTreeWidget, QTableWidget, QPlainTextEdit {
     background: #ffffff;
-    border: 1px solid #ccd3dc;
-    selection-background-color: #d7e8ff;
-    selection-color: #10253a;
+    color: #25384b;
+    border: 1px solid #cbd5df;
+    selection-background-color: #2f80ed;
+    selection-color: #ffffff;
 }
 QTreeWidget {
-    padding: 3px;
+    padding: 4px;
+    alternate-background-color: #f7faff;
+}
+QTreeWidget::item {
+    min-height: 22px;
+    padding: 2px 3px;
+    border-radius: 2px;
+}
+QTreeWidget::item:hover {
+    background: #eaf3ff;
+    color: #1b5fa9;
+}
+QTreeWidget::item:selected {
+    background: #2f80ed;
+    color: #ffffff;
+}
+QTableWidget {
+    gridline-color: #e0e7ef;
+}
+QHeaderView::section {
+    background: #eef3f8;
+    color: #2c4055;
+    border: none;
+    border-right: 1px solid #d6dee7;
+    border-bottom: 1px solid #d6dee7;
+    padding: 5px;
+    font-weight: 600;
 }
 QTabWidget::pane {
-    border: 1px solid #ccd3dc;
+    border: 1px solid #c8d3de;
     background: #ffffff;
 }
 QTabBar::tab {
-    background: #edf1f5;
-    border: 1px solid #ccd3dc;
+    background: #e8eef5;
+    color: #516477;
+    border: 1px solid #c8d3de;
     border-bottom: none;
-    padding: 6px 12px;
+    padding: 7px 14px;
+    margin-right: 1px;
+}
+QTabBar::tab:hover {
+    background: #edf5ff;
+    color: #1c62aa;
 }
 QTabBar::tab:selected {
     background: #ffffff;
+    color: #1a5fa8;
+    border-top: 3px solid #2f80ed;
+    padding-top: 5px;
+    font-weight: 600;
 }
 QGroupBox {
     font-weight: 600;
-    border: 1px solid #d1d7df;
-    border-radius: 4px;
-    margin-top: 11px;
-    padding-top: 8px;
+    color: #2d4359;
+    background: #fbfcfe;
+    border: 1px solid #ccd7e2;
+    border-radius: 5px;
+    margin-top: 12px;
+    padding-top: 9px;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
-    left: 8px;
-    padding: 0 4px;
+    left: 9px;
+    padding: 0 5px;
+    color: #234b72;
+    background: #fbfcfe;
 }
 QSpinBox, QDoubleSpinBox, QComboBox {
-    min-height: 25px;
-    border: 1px solid #bcc6d2;
-    border-radius: 3px;
-    background: white;
-    padding: 1px 5px;
+    min-height: 26px;
+    color: #24384c;
+    border: 1px solid #b9c7d5;
+    border-radius: 4px;
+    background: #ffffff;
+    padding: 2px 6px;
+}
+QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover {
+    border-color: #7eaee2;
+}
+QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+    border: 2px solid #2f80ed;
+    background: #fbfdff;
+}
+QCheckBox {
+    color: #2c4055;
+    spacing: 7px;
 }
 QPushButton {
-    min-height: 28px;
-    border: 1px solid #b8c3d0;
+    min-height: 29px;
+    color: #2c4055;
+    border: 1px solid #b9c7d5;
     border-radius: 4px;
-    background: #f7f9fb;
-    padding: 3px 10px;
+    background: #f9fbfd;
+    padding: 4px 11px;
 }
 QPushButton:hover {
-    background: #e9f1fb;
+    background: #e9f3ff;
+    border-color: #86b4e7;
+    color: #155a9e;
 }
-QPushButton#PrimaryButton {
-    background: #1976d2;
-    border-color: #1976d2;
-    color: white;
+QPushButton:checked {
+    background: #2f80ed;
+    border-color: #2f80ed;
+    color: #ffffff;
     font-weight: 600;
 }
+QPushButton:disabled {
+    color: #9aa8b6;
+    background: #eef2f6;
+    border-color: #d6dee7;
+}
+QPushButton#PrimaryButton {
+    background: #2f80ed;
+    border-color: #2f80ed;
+    color: #ffffff;
+    font-weight: 700;
+    min-width: 96px;
+}
 QPushButton#PrimaryButton:hover {
-    background: #1565c0;
+    background: #1f6fd1;
+    border-color: #1f6fd1;
 }
 QLabel#PanelTitle {
     font-size: 15px;
     font-weight: 700;
-    color: #203247;
+    color: #183e65;
 }
 QLabel#Muted {
-    color: #6b7785;
+    color: #718296;
 }
 QStatusBar {
-    background: #f7f8fa;
-    border-top: 1px solid #ccd3dc;
+    background: #f8fafc;
+    color: #44576a;
+    border-top: 1px solid #c9d4df;
+}
+QStatusBar QLabel {
+    padding: 0 4px;
 }
 """
 
@@ -327,7 +419,7 @@ class MainWindow(QMainWindow):
         dock = QDockWidget("Model Tree", self)
         dock.setObjectName("ModelTreeDock")
         dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
-        dock.setMinimumWidth(240)
+        dock.setMinimumWidth(250)
 
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
@@ -344,7 +436,7 @@ class MainWindow(QMainWindow):
         dock = QDockWidget("Create / Edit", self)
         dock.setObjectName("ContextDock")
         dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
-        dock.setMinimumWidth(310)
+        dock.setMinimumWidth(325)
 
         self.context_stack = QStackedWidget()
         self.frame_grid_panel = FrameGridPanel(self._generate_frame_grid)
@@ -397,7 +489,7 @@ class MainWindow(QMainWindow):
 
         dock.setWidget(tabs)
         self.addDockWidget(Qt.BottomDockWidgetArea, dock)
-        self.resizeDocks([dock], [220], Qt.Vertical)
+        self.resizeDocks([dock], [185], Qt.Vertical)
         self.bottom_dock = dock
 
     def _build_actions(self) -> None:
