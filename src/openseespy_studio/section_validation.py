@@ -315,7 +315,10 @@ def validate_fiber_section_geometry(
             )
 
     if concrete_patches and reinforcement_fibers:
+        invalid_components: set[str] = set()
         for name, _, fiber in reinforcement_fibers:
+            if name in invalid_components:
+                continue
             if not any(
                 _fiber_inside_patch(
                     fiber,
@@ -334,12 +337,7 @@ def validate_fiber_section_geometry(
                     )
                 )
                 # One representative error per component is enough.
-                reinforcement_fibers = [
-                    item
-                    for item in reinforcement_fibers
-                    if item[0] != name
-                ]
-                break
+                invalid_components.add(name)
 
     seen: dict[tuple[int, int, int], str] = {}
     for name, material_tag, fiber in reinforcement_fibers:
