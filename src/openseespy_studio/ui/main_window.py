@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
-    QStyle,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -37,6 +36,7 @@ from PySide6.QtWidgets import (
 
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..model import StructuralModel
+from .icons import studio_icon
 from .viewport import ModelViewport
 
 
@@ -411,35 +411,36 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         toolbar.setFloatable(False)
         toolbar.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        toolbar.setIconSize(QSize(26, 26))
         self.addToolBar(Qt.TopToolBarArea, toolbar)
 
         new_action = self._action(
             "New",
-            QStyle.SP_FileIcon,
+            "new",
             self._new_model,
             "Create a new model",
         )
         open_action = self._action(
             "Open",
-            QStyle.SP_DialogOpenButton,
+            "open",
             self._not_implemented,
             "Open model (coming next)",
         )
         export_action = self._action(
             "Export",
-            QStyle.SP_DialogSaveButton,
+            "save",
             self._export_script,
             "Export generated OpenSeesPy script",
         )
         undo_action = self._action(
             "Undo",
-            QStyle.SP_ArrowBack,
+            "undo",
             self._not_implemented,
             "Undo (coming next)",
         )
         redo_action = self._action(
             "Redo",
-            QStyle.SP_ArrowForward,
+            "redo",
             self._not_implemented,
             "Redo (coming next)",
         )
@@ -457,19 +458,19 @@ class MainWindow(QMainWindow):
 
         node_action = self._action(
             "Node",
-            QStyle.SP_ArrowUp,
+            "node",
             self._not_implemented,
             "Create node by GUI (next milestone)",
         )
         element_action = self._action(
             "Element",
-            QStyle.SP_CommandLink,
+            "element",
             self._not_implemented,
             "Create element by GUI (next milestone)",
         )
         grid_action = self._action(
             "Frame Grid",
-            QStyle.SP_DirIcon,
+            "grid",
             self._show_frame_grid,
             "Create regular frame grid",
         )
@@ -478,20 +479,31 @@ class MainWindow(QMainWindow):
             toolbar.addAction(action)
 
         toolbar.addSeparator()
-        for label in ("Copy", "Move", "Rotate", "Mirror", "Delete"):
+        for label, icon_name in (
+            ("Copy", "copy"),
+            ("Move", "move"),
+            ("Rotate", "rotate"),
+            ("Mirror", "mirror"),
+            ("Delete", "delete"),
+        ):
             action = self._action(
                 label,
-                QStyle.SP_FileDialogDetailedView,
+                icon_name,
                 self._not_implemented,
                 f"{label} geometry (coming next)",
             )
             toolbar.addAction(action)
 
         toolbar.addSeparator()
-        for label in ("Select", "Box", "Polygon", "By ID"):
+        for label, icon_name in (
+            ("Select", "select"),
+            ("Box", "box"),
+            ("Polygon", "polygon"),
+            ("By ID", "by-id"),
+        ):
             action = self._action(
                 label,
-                QStyle.SP_DialogApplyButton,
+                icon_name,
                 self._not_implemented,
                 f"{label} selection (coming next)",
             )
@@ -506,7 +518,7 @@ class MainWindow(QMainWindow):
         ):
             action = self._action(
                 label,
-                QStyle.SP_DesktopIcon,
+                view,
                 lambda checked=False, v=view: self.viewport.set_view(v),
                 f"Set {label} view",
             )
@@ -515,7 +527,7 @@ class MainWindow(QMainWindow):
 
         fit_action = self._action(
             "Fit",
-            QStyle.SP_BrowserReload,
+            "fit",
             self.viewport.fit_view,
             "Fit model in viewport",
         )
@@ -524,13 +536,13 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         run_action = self._action(
             "Run",
-            QStyle.SP_MediaPlay,
+            "run",
             self._run_generated_model,
             "Execute generated OpenSeesPy model",
         )
         plot_action = self._action(
             "Plot",
-            QStyle.SP_FileDialogInfoView,
+            "plot",
             self._not_implemented,
             "Post-processing plots (coming later)",
         )
@@ -560,9 +572,8 @@ class MainWindow(QMainWindow):
         line.setFrameShadow(QFrame.Sunken)
         return line
 
-    def _action(self, text, standard_icon, callback, tooltip) -> QAction:
-        icon = self.style().standardIcon(standard_icon)
-        action = QAction(icon, text, self)
+    def _action(self, text, icon_name, callback, tooltip) -> QAction:
+        action = QAction(studio_icon(icon_name), text, self)
         action.setToolTip(tooltip)
         action.triggered.connect(callback)
         return action
