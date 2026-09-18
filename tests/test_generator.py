@@ -4,7 +4,7 @@ from openseespy_studio.generator import (
     to_openseespy,
 )
 from openseespy_studio.model import StructuralModel
-from openseespy_studio.project import TransformationData
+from openseespy_studio.project import SectionData, TransformationData
 
 
 def test_frame_grid_counts():
@@ -29,6 +29,8 @@ def test_generated_python_contains_model_entities():
         nx=1,
         ny=1,
         nz=1,
+        column_section_tag=1,
+        beam_section_tag=1,
         column_transf_tag=1,
         beam_transf_tag=2,
     )
@@ -42,7 +44,19 @@ def test_generated_python_contains_model_entities():
         ),
     }
 
-    code = to_openseespy(model, transformations=transformations)
+    sections = {
+        1: SectionData(
+            1,
+            "Elastic",
+            "Elastic",
+        )
+    }
+
+    code = to_openseespy(
+        model,
+        sections=sections,
+        transformations=transformations,
+    )
 
     assert "ops.model('basic', '-ndm', 3, '-ndf', 6)" in code
     assert "ops.node(1" in code
