@@ -39,6 +39,7 @@ from ..section_templates import (
     create_rectangle_section_components,
     create_t_section_components,
 )
+from ..section_validation import validate_fiber_section_geometry
 from ..section_visualization import (
     equivalent_fiber_radius,
     section_preview_bounds,
@@ -1835,6 +1836,13 @@ class SectionDialog(QDialog):
         self.fiber_stats.setStyleSheet("color: #526578;")
         right_layout.addWidget(self.fiber_stats)
 
+        self.fiber_validation = QLabel()
+        self.fiber_validation.setWordWrap(True)
+        self.fiber_validation.setStyleSheet(
+            "padding: 5px; background: #f5f7f9; color: #526578;"
+        )
+        right_layout.addWidget(self.fiber_validation)
+
         splitter.addWidget(left)
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 2)
@@ -2229,6 +2237,40 @@ class SectionDialog(QDialog):
             f"Area: {total_area:.6g}   ·   "
             f"Centroid (y,z): ({cy:.6g}, {cz:.6g})"
         )
+
+        issues = validate_fiber_section_geometry(
+            section,
+            self.materials,
+        )
+        errors = [
+            issue for issue in issues if issue.severity == "ERROR"
+        ]
+        warnings = [
+            issue for issue in issues if issue.severity == "WARNING"
+        ]
+        if errors:
+            self.fiber_validation.setStyleSheet(
+                "padding: 5px; background: #fdecea; color: #a12622;"
+            )
+            self.fiber_validation.setText(
+                f"Validation: {len(errors)} error(s), "
+                f"{len(warnings)} warning(s) · {errors[0].message}"
+            )
+        elif warnings:
+            self.fiber_validation.setStyleSheet(
+                "padding: 5px; background: #fff7e0; color: #7a5600;"
+            )
+            self.fiber_validation.setText(
+                f"Validation: {len(warnings)} warning(s) · "
+                f"{warnings[0].message}"
+            )
+        else:
+            self.fiber_validation.setStyleSheet(
+                "padding: 5px; background: #eaf6ee; color: #276738;"
+            )
+            self.fiber_validation.setText(
+                "Validation: geometry checks passed."
+            )
         try:
             lines = section_to_openseespy(section, self.materials)
             self.generated_code.setPlainText("\n".join(lines))
@@ -2248,6 +2290,44 @@ class SectionDialog(QDialog):
                         "Fiber section needs at least one patch, rebar layer, "
                         "or manual fiber."
                     )
+                issues = validate_fiber_section_geometry(
+                    section,
+                    self.materials,
+                )
+                errors = [
+                    issue
+                    for issue in issues
+                    if issue.severity == "ERROR"
+                ]
+                warnings = [
+                    issue
+                    for issue in issues
+                    if issue.severity == "WARNING"
+                ]
+                if errors:
+                    details = "\n".join(
+                        f"• {issue.message}"
+                        for issue in errors[:8]
+                    )
+                    raise ValueError(
+                        "Fiber section validation failed:\n" + details
+                    )
+                if warnings:
+                    details = "\n".join(
+                        f"• {issue.message}"
+                        for issue in warnings[:8]
+                    )
+                    answer = QMessageBox.question(
+                        self,
+                        "Fiber Section Validation",
+                        "The section has geometry warnings:\n\n"
+                        + details
+                        + "\n\nSave the section anyway?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No,
+                    )
+                    if answer != QMessageBox.Yes:
+                        return
         except (ValueError, AttributeError) as exc:
             QMessageBox.warning(self, "Section Editor", str(exc))
             return

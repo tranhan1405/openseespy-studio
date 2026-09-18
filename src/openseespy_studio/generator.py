@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from .beam_loads import resolve_self_weight_local
 from .model import StructuralModel
-from .project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, SectionData, TimeSeriesData, TransformationData
+from .project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NodalLoadData, SectionData, TimeSeriesData, TransformationData
 
 
 @dataclass(slots=True)
@@ -111,6 +111,76 @@ def material_to_openseespy(material: MaterialData) -> str:
     raise ValueError(f"Unsupported material type: {material.material_type}")
 
 
+def fiber_component_to_openseespy(
+    component: FiberComponentData,
+) -> list[str]:
+    p = component.parameters
+    mat = component.material_tag
+    lines = [f"# {component.name}"]
+
+    if component.component_type == "RectPatch":
+        y0 = p["y_center"] - 0.5 * p["width_y"]
+        y1 = p["y_center"] + 0.5 * p["width_y"]
+        z0 = p["z_center"] - 0.5 * p["depth_z"]
+        z1 = p["z_center"] + 0.5 * p["depth_z"]
+        lines.append(
+            "ops.patch('rect', "
+            f"{mat}, {int(p['n_y'])}, {int(p['n_z'])}, "
+            f"{y0:g}, {z0:g}, {y1:g}, {z1:g})"
+        )
+        return lines
+
+    if component.component_type == "CircPatch":
+        lines.append(
+            "ops.patch('circ', "
+            f"{mat}, {int(p['n_circum'])}, {int(p['n_radial'])}, "
+            f"{p['y_center']:g}, {p['z_center']:g}, "
+            f"{p['r_inner']:g}, {p['r_outer']:g}, "
+            f"{p['start_angle']:g}, {p['end_angle']:g})"
+        )
+        return lines
+
+    if component.component_type == "StraightLayer":
+        lines.append(
+            "ops.layer('straight', "
+            f"{mat}, {int(p['n_bars'])}, {p['bar_area']:g}, "
+            f"{p['y_i']:g}, {p['z_i']:g}, "
+            f"{p['y_j']:g}, {p['z_j']:g})"
+        )
+        return lines
+
+    if component.component_type == "CircLayer":
+        count = int(p["n_bars"])
+        span = p["end_angle"] - p["start_angle"]
+        base = (
+            "ops.layer('circ', "
+            f"{mat}, {count}, {p['bar_area']:g}, "
+            f"{p['y_center']:g}, {p['z_center']:g}, "
+            f"{p['radius']:g}"
+        )
+        if abs(span - 360.0) <= 1.0e-9:
+            # OpenSeesPy's omitted-angle form creates a full ring without
+            # duplicating the first bar at the final angle.
+            lines.append(base + ")")
+        else:
+            lines.append(
+                base
+                + f", {p['start_angle']:g}, {p['end_angle']:g})"
+            )
+        return lines
+
+    if component.component_type == "SingleFiber":
+        lines.append(
+            "ops.fiber("
+            f"{p['y']:g}, {p['z']:g}, {p['area']:g}, {mat})"
+        )
+        return lines
+
+    raise ValueError(
+        f"Unsupported fiber component type: {component.component_type}"
+    )
+
+
 def section_to_openseespy(
     section: SectionData,
     materials: dict[int, MaterialData] | None = None,
@@ -131,16 +201,23 @@ def section_to_openseespy(
         lines = [
             f"ops.section('Fiber', {section.tag}, '-GJ', {p['GJ']:g})"
         ]
-        for fiber in section.compiled_fibers():
-            lines.append(
-                "ops.fiber("
-                f"{fiber.y:g}, {fiber.z:g}, {fiber.area:g}, "
-                f"{fiber.material_tag})"
-            )
+
+        # Keep manually entered fibers explicit. Builder primitives remain
+        # native OpenSees patch/layer commands instead of being flattened.
+        if section.fibers:
+            lines.append("# Manual fibers")
+            for fiber in section.fibers:
+                lines.append(
+                    "ops.fiber("
+                    f"{fiber.y:g}, {fiber.z:g}, {fiber.area:g}, "
+                    f"{fiber.material_tag})"
+                )
+
+        for component in section.fiber_components:
+            lines.extend(fiber_component_to_openseespy(component))
         return lines
 
     raise ValueError(f"Unsupported section type: {section.section_type}")
-
 
 def constraint_to_openseespy(
     constraint: ConstraintData,

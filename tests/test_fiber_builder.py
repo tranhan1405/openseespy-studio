@@ -206,7 +206,7 @@ def test_fiber_builder_round_trip_is_editable_not_flattened():
     assert len(restored.sections[2].compiled_fibers()) == 400
 
 
-def test_generator_compiles_builder_to_opensees_fibers():
+def test_generator_keeps_builder_rectangle_as_native_patch():
     section = SectionData(
         5,
         "Builder",
@@ -218,6 +218,8 @@ def test_generator_compiles_builder_to_opensees_fibers():
                 "Patch",
                 7,
                 {
+                    "y_center": 0.0,
+                    "z_center": 0.0,
                     "width_y": 0.2,
                     "depth_z": 0.1,
                     "n_y": 2,
@@ -230,8 +232,77 @@ def test_generator_compiles_builder_to_opensees_fibers():
     lines = section_to_openseespy(section)
 
     assert lines[0] == "ops.section('Fiber', 5, '-GJ', 3e+06)"
-    assert len([line for line in lines if line.startswith("ops.fiber(")]) == 4
-    assert not any("ops.patch(" in line for line in lines)
+    assert "ops.patch('rect', 7, 2, 2, -0.1, -0.05, 0.1, 0.05)" in lines
+    assert not any(line.startswith("ops.fiber(") for line in lines)
+
+
+def test_generator_exports_native_patch_layer_and_manual_fiber_commands():
+    section = SectionData(
+        6,
+        "Native",
+        "Fiber",
+        {"GJ": 4.0e6},
+        fibers=[FiberData(0.0, 0.0, 1.0e-4, 9)],
+        fiber_components=[
+            FiberComponentData(
+                "CircPatch",
+                "Ring",
+                1,
+                {
+                    "y_center": 0.0,
+                    "z_center": 0.0,
+                    "r_inner": 0.1,
+                    "r_outer": 0.2,
+                    "n_radial": 3,
+                    "n_circum": 24,
+                    "start_angle": 0.0,
+                    "end_angle": 360.0,
+                },
+            ),
+            FiberComponentData(
+                "StraightLayer",
+                "Line",
+                2,
+                {
+                    "y_i": -0.1,
+                    "z_i": -0.15,
+                    "y_j": 0.1,
+                    "z_j": -0.15,
+                    "n_bars": 4,
+                    "bar_area": 2.0e-4,
+                },
+            ),
+            FiberComponentData(
+                "CircLayer",
+                "Circle",
+                3,
+                {
+                    "y_center": 0.0,
+                    "z_center": 0.0,
+                    "radius": 0.16,
+                    "n_bars": 8,
+                    "bar_area": 2.0e-4,
+                    "start_angle": 0.0,
+                    "end_angle": 360.0,
+                },
+            ),
+        ],
+    )
+
+    lines = section_to_openseespy(section)
+
+    assert "ops.fiber(0, 0, 0.0001, 9)" in lines
+    assert (
+        "ops.patch('circ', 1, 24, 3, 0, 0, 0.1, 0.2, 0, 360)"
+        in lines
+    )
+    assert (
+        "ops.layer('straight', 2, 4, 0.0002, -0.1, -0.15, 0.1, -0.15)"
+        in lines
+    )
+    # Full circular layer uses the omitted-angle OpenSees form to avoid a
+    # duplicated start/end bar.
+    assert "ops.layer('circ', 3, 8, 0.0002, 0, 0, 0.16)" in lines
 
 
 def test_project_validates_material_references_inside_builder_components():
