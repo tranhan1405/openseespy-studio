@@ -9,7 +9,7 @@ from .model import StructuralModel
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 6
+PROJECT_FORMAT_VERSION = 7
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -409,6 +409,103 @@ class ConstraintData:
 
 
 @dataclass
+class ConnectionData:
+    tag: int
+    name: str
+    connection_type: str
+    node_i: int
+    node_j: int
+    materials_by_dof: dict[int, int] = field(default_factory=dict)
+    orient_x: tuple[float, float, float] = (1.0, 0.0, 0.0)
+    orient_y: tuple[float, float, float] = (0.0, 1.0, 0.0)
+    do_rayleigh: bool = False
+    generated_ground_node: int | None = None
+
+    def __post_init__(self) -> None:
+        self.tag = int(self.tag)
+        self.name = str(self.name).strip() or f"Connection {self.tag}"
+        self.connection_type = str(self.connection_type)
+        self.node_i = int(self.node_i)
+        self.node_j = int(self.node_j)
+        self.materials_by_dof = {
+            int(dof): int(material_tag)
+            for dof, material_tag in self.materials_by_dof.items()
+        }
+        self.orient_x = tuple(float(v) for v in self.orient_x)
+        self.orient_y = tuple(float(v) for v in self.orient_y)
+        self.do_rayleigh = bool(self.do_rayleigh)
+        self.generated_ground_node = (
+            None
+            if self.generated_ground_node is None
+            else int(self.generated_ground_node)
+        )
+
+        if self.tag <= 0:
+            raise ValueError("Connection tag must be a positive integer.")
+        if self.connection_type not in {"zeroLength", "twoNodeLink"}:
+            raise ValueError(
+                f"Unsupported connection type: {self.connection_type}"
+            )
+        if self.node_i <= 0 or self.node_j <= 0:
+            raise ValueError("Connection node tags must be positive.")
+        if self.node_i == self.node_j:
+            raise ValueError("Connection needs two different node tags.")
+        if not self.materials_by_dof:
+            raise ValueError("Connection needs at least one active DOF.")
+        if any(dof < 1 or dof > 6 for dof in self.materials_by_dof):
+            raise ValueError("Connection DOFs must be in the range 1..6.")
+        if len(self.orient_x) != 3 or len(self.orient_y) != 3:
+            raise ValueError("Connection orientation vectors need 3 values.")
+        if sum(v * v for v in self.orient_x) <= 1.0e-24:
+            raise ValueError("Connection local X vector cannot be zero.")
+        if sum(v * v for v in self.orient_y) <= 1.0e-24:
+            raise ValueError("Connection local Y vector cannot be zero.")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "connection_type": self.connection_type,
+            "node_i": self.node_i,
+            "node_j": self.node_j,
+            "materials_by_dof": {
+                str(dof): material_tag
+                for dof, material_tag in sorted(self.materials_by_dof.items())
+            },
+            "orient_x": list(self.orient_x),
+            "orient_y": list(self.orient_y),
+            "do_rayleigh": self.do_rayleigh,
+            "generated_ground_node": self.generated_ground_node,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ConnectionData":
+        return cls(
+            tag=int(data["tag"]),
+            name=str(data.get("name", f"Connection {data['tag']}")),
+            connection_type=str(
+                data.get("connection_type", "zeroLength")
+            ),
+            node_i=int(data["node_i"]),
+            node_j=int(data["node_j"]),
+            materials_by_dof={
+                int(dof): int(material_tag)
+                for dof, material_tag in dict(
+                    data.get("materials_by_dof", {})
+                ).items()
+            },
+            orient_x=tuple(
+                float(v) for v in data.get("orient_x", (1.0, 0.0, 0.0))
+            ),
+            orient_y=tuple(
+                float(v) for v in data.get("orient_y", (0.0, 1.0, 0.0))
+            ),
+            do_rayleigh=bool(data.get("do_rayleigh", False)),
+            generated_ground_node=data.get("generated_ground_node"),
+        )
+
+
+@dataclass
 class SelectionSetData:
     name: str
     node_tags: set[int] = field(default_factory=set)
@@ -442,6 +539,7 @@ class ProjectDatabase:
     sections: dict[int, SectionData] = field(default_factory=dict)
     transformations: dict[int, TransformationData] = field(default_factory=dict)
     constraints: dict[int, ConstraintData] = field(default_factory=dict)
+    connections: dict[int, ConnectionData] = field(default_factory=dict)
     time_series: dict[str, dict[str, Any]] = field(default_factory=dict)
     load_patterns: dict[str, dict[str, Any]] = field(default_factory=dict)
     analyses: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -637,6 +735,151 @@ class ProjectDatabase:
                 removed.append(tag)
         return sorted(removed)
 
+    def next_connection_tag(self) -> int:
+        return max(
+            set(self.connections) | set(self.model.elements),
+            default=0,
+        ) + 1
+
+    def _validate_connection(self, connection: ConnectionData) -> None:
+        if connection.tag in self.model.elements:
+            raise ValueError(
+                f"Connection tag {connection.tag} conflicts with an element tag."
+            )
+        missing_nodes = [
+            tag
+            for tag in (connection.node_i, connection.node_j)
+            if tag not in self.model.nodes
+        ]
+        if missing_nodes:
+            raise ValueError(
+                "Connection references missing node tag(s): "
+                + ", ".join(map(str, missing_nodes))
+            )
+        missing_materials = sorted({
+            material_tag
+            for material_tag in connection.materials_by_dof.values()
+            if material_tag not in self.materials
+        })
+        if missing_materials:
+            raise ValueError(
+                "Connection references missing material tag(s): "
+                + ", ".join(map(str, missing_materials))
+            )
+
+        if connection.connection_type == "zeroLength":
+            a = self.model.nodes[connection.node_i].xyz
+            b = self.model.nodes[connection.node_j].xyz
+            distance2 = sum((x - y) ** 2 for x, y in zip(a, b))
+            if distance2 > 1.0e-14:
+                raise ValueError(
+                    "zeroLength connection nodes must be coincident. "
+                    "Use twoNodeLink for separated nodes."
+                )
+
+    def add_connection(self, connection: ConnectionData) -> None:
+        if connection.tag in self.connections:
+            raise ValueError(
+                f"Connection tag {connection.tag} already exists."
+            )
+        self._validate_connection(connection)
+        self.connections[connection.tag] = connection
+
+    def update_connection(
+        self,
+        original_tag: int,
+        connection: ConnectionData,
+    ) -> None:
+        original_tag = int(original_tag)
+        if original_tag not in self.connections:
+            raise ValueError(
+                f"Connection tag {original_tag} does not exist."
+            )
+        if (
+            connection.tag != original_tag
+            and connection.tag in self.connections
+        ):
+            raise ValueError(
+                f"Connection tag {connection.tag} already exists."
+            )
+        self._validate_connection(connection)
+        self.connections.pop(original_tag)
+        self.connections[connection.tag] = connection
+
+    def _ground_node_in_use_elsewhere(
+        self,
+        node_tag: int,
+        *,
+        excluding_connection: int | None = None,
+    ) -> bool:
+        if any(
+            element.i == node_tag or element.j == node_tag
+            for element in self.model.elements.values()
+        ):
+            return True
+        for tag, connection in self.connections.items():
+            if tag == excluding_connection:
+                continue
+            if node_tag in {connection.node_i, connection.node_j}:
+                return True
+        for constraint in self.constraints.values():
+            if (
+                constraint.retained_node == node_tag
+                or node_tag in constraint.constrained_nodes
+            ):
+                return True
+        return False
+
+    def remove_connection(
+        self,
+        tag: int,
+        *,
+        cleanup_ground: bool = True,
+    ) -> None:
+        tag = int(tag)
+        connection = self.connections.pop(tag, None)
+        if connection is None or not cleanup_ground:
+            return
+        ground_tag = connection.generated_ground_node
+        if (
+            ground_tag is not None
+            and ground_tag in self.model.nodes
+            and not self._ground_node_in_use_elsewhere(ground_tag)
+        ):
+            self.model.remove_node(ground_tag, cascade=True)
+
+    def create_ground_node(self, source_node_tag: int) -> int:
+        source_node_tag = int(source_node_tag)
+        source = self.model.nodes.get(source_node_tag)
+        if source is None:
+            raise ValueError(
+                f"Source node {source_node_tag} does not exist."
+            )
+        tag = self.model.next_node_tag()
+        node = self.model.add_node(tag, *source.xyz)
+        node.fixity = (1,) * self.model.ndf
+        return tag
+
+    def connections_using_material(self, material_tag: int) -> list[int]:
+        material_tag = int(material_tag)
+        return sorted(
+            connection.tag
+            for connection in self.connections.values()
+            if material_tag in connection.materials_by_dof.values()
+        )
+
+    def prune_connections(self) -> list[int]:
+        removed: list[int] = []
+        existing_nodes = set(self.model.nodes)
+        for tag, connection in list(self.connections.items()):
+            if (
+                connection.node_i not in existing_nodes
+                or connection.node_j not in existing_nodes
+            ):
+                self.remove_connection(tag, cleanup_ground=True)
+                removed.append(tag)
+        return sorted(removed)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "format": PROJECT_FORMAT,
@@ -663,6 +906,10 @@ class ProjectDatabase:
             "constraints": [
                 self.constraints[tag].to_dict()
                 for tag in sorted(self.constraints)
+            ],
+            "connections": [
+                self.connections[tag].to_dict()
+                for tag in sorted(self.connections)
             ],
             "time_series": self.time_series,
             "load_patterns": self.load_patterns,
@@ -802,6 +1049,20 @@ class ProjectDatabase:
             constraints[constraint.tag] = constraint
         return constraints
 
+    @staticmethod
+    def _load_connections(raw: Any) -> dict[int, ConnectionData]:
+        connections: dict[int, ConnectionData] = {}
+        if not isinstance(raw, list):
+            return connections
+        for item in raw:
+            connection = ConnectionData.from_dict(dict(item))
+            if connection.tag in connections:
+                raise ValueError(
+                    f"Duplicate connection tag {connection.tag}."
+                )
+            connections[connection.tag] = connection
+        return connections
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectDatabase":
         project_format = data.get("format")
@@ -832,6 +1093,7 @@ class ProjectDatabase:
             sections=cls._load_sections(data.get("sections", [])),
             transformations=cls._load_transformations(data.get("transformations", [])),
             constraints=cls._load_constraints(data.get("constraints", [])),
+            connections=cls._load_connections(data.get("connections", [])),
             time_series=dict(data.get("time_series", {})),
             load_patterns=dict(data.get("load_patterns", {})),
             analyses=dict(data.get("analyses", {})),

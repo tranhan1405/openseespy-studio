@@ -41,8 +41,9 @@ from PySide6.QtWidgets import (
 
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..model import StructuralModel, classify_fixity
-from ..project import ConstraintData, MaterialData, ProjectDatabase, SectionData, SelectionSetData, TransformationData
+from ..project import ConnectionData, ConstraintData, MaterialData, ProjectDatabase, SectionData, SelectionSetData, TransformationData
 from .code_editor import CodeEditor
+from .connection_dialog import ConnectionDialog
 from .constraint_dialog import ConstraintDialog
 from .geometry_dialogs import (
     ElementDialog,
@@ -840,6 +841,13 @@ class MainWindow(QMainWindow):
             self._create_constraint,
             "Create equalDOF, rigidLink, or rigidDiaphragm",
         )
+        self._make_action(
+            "connection",
+            "Connection...",
+            "element",
+            self._create_connection,
+            "Create zeroLength or twoNodeLink spring / link",
+        )
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action("plot", "Plot", "plot", self._not_implemented, "Plot results")
 
@@ -865,6 +873,7 @@ class MainWindow(QMainWindow):
         menus["Loads"].addAction(self.actions["clear_support"])
         menus["Loads"].addSeparator()
         menus["Loads"].addAction(self.actions["constraint"])
+        menus["Loads"].addAction(self.actions["connection"])
         menus["Analysis"].addAction(self.actions["run"])
         menus["Results"].addAction(self.actions["plot"])
 
@@ -881,7 +890,7 @@ class MainWindow(QMainWindow):
             ("Modify", ["copy", "move", "rotate", "mirror", "delete"]),
             ("Selection", ["select", "box", "polygon", "byid", "bytype"]),
             ("View", ["xy", "yz", "xz", "iso"]),
-            ("Supports", ["support", "clear_support", "constraint"]),
+            ("Supports", ["support", "clear_support", "constraint", "connection"]),
             ("Analysis", ["run", "plot"]),
         )
 
@@ -966,13 +975,16 @@ class MainWindow(QMainWindow):
         before = self.project.to_dict()
         self.selection.clear()
         generate_frame_grid(self.model, spec)
+        self._prune_selection_sets()
+        self.project.prune_constraints()
+        self.project.prune_connections()
         self._refresh_all(
             f"Generated {spec.nx} × {spec.ny} bay, {spec.nz}-storey frame"
         )
         self._record_project_change("Generate frame grid", before)
 
     def _refresh_all(self, message: str = "") -> None:
-        self.viewport.draw_model(self.model)
+        self.viewport.draw_model(self.model, self.project.connections)
         self._refresh_project_metadata(message)
 
     def _refresh_project_metadata(self, message: str = "") -> None:
@@ -995,6 +1007,7 @@ class MainWindow(QMainWindow):
                 self.project.sections,
                 self.project.transformations,
                 self.project.constraints,
+                self.project.connections,
             )
         )
         self._selection_changed(self.selection.snapshot())
@@ -1048,7 +1061,6 @@ class MainWindow(QMainWindow):
             "elasticBeamColumn",
             "forceBeamColumn",
             "dispBeamColumn",
-            "zeroLength",
             "truss",
         }
         for element_type in sorted(known_types | set(type_counts)):
@@ -1203,6 +1215,38 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("constraint", tag))
             constraints_root.addChild(item)
 
+        connections_root = QTreeWidgetItem([
+            f"Connections ({len(self.project.connections)})"
+        ])
+        connections_root.setIcon(0, studio_icon("element"))
+        connections_root.setData(0, Qt.UserRole, ("connections_root", None))
+        connections_root.setExpanded(True)
+        root.addChild(connections_root)
+
+        connection_groups: dict[str, QTreeWidgetItem] = {}
+        for connection_type in ("zeroLength", "twoNodeLink"):
+            tags = [
+                tag
+                for tag, connection in self.project.connections.items()
+                if connection.connection_type == connection_type
+            ]
+            group = QTreeWidgetItem([
+                f"{connection_type} ({len(tags)})"
+            ])
+            group.setIcon(0, studio_icon("element"))
+            group.setExpanded(True)
+            connections_root.addChild(group)
+            connection_groups[connection_type] = group
+
+        for tag in sorted(self.project.connections):
+            connection = self.project.connections[tag]
+            item = QTreeWidgetItem([
+                f"{connection.name} [{tag}]"
+            ])
+            item.setIcon(0, studio_icon("element"))
+            item.setData(0, Qt.UserRole, ("connection", tag))
+            connection_groups[connection.connection_type].addChild(item)
+
         for label, icon in (
             (f"Time Series ({len(self.project.time_series)})", "timeseries"),
             (f"Load Patterns ({len(self.project.load_patterns)})", "load"),
@@ -1234,6 +1278,7 @@ class MainWindow(QMainWindow):
         section_tag: int | None = None
         transformation_tag: int | None = None
         constraint_tag: int | None = None
+        connection_tag: int | None = None
 
         for item in self.tree.selectedItems():
             payload = item.data(0, Qt.UserRole)
@@ -1257,6 +1302,8 @@ class MainWindow(QMainWindow):
                 transformation_tag = int(tag)
             elif kind == "constraint":
                 constraint_tag = int(tag)
+            elif kind == "connection":
+                connection_tag = int(tag)
 
         self.selection.set_selection(nodes=nodes, elements=elements)
         if material_tag is not None:
@@ -1267,6 +1314,8 @@ class MainWindow(QMainWindow):
             self._show_transformation_properties(transformation_tag)
         elif constraint_tag is not None:
             self._show_constraint_properties(constraint_tag)
+        elif connection_tag is not None:
+            self._show_connection_properties(connection_tag)
 
     def _wire_selection(self) -> None:
         self.selection.changed.connect(self._selection_changed)
@@ -1522,6 +1571,12 @@ class MainWindow(QMainWindow):
         constraint_action = menu.addAction("Create Constraint...")
         constraint_action.setEnabled(len(self.selection.nodes) >= 2)
         constraint_action.triggered.connect(self._create_constraint)
+
+        connection_action = menu.addAction("Create Connection / Spring...")
+        connection_action.setEnabled(
+            1 <= len(self.selection.nodes) <= 2
+        )
+        connection_action.triggered.connect(self._create_connection)
 
         menu.addSeparator()
         assign_menu = menu.addMenu("Assign")
@@ -1793,6 +1848,10 @@ class MainWindow(QMainWindow):
         tag, i, j, element_type, group = dialog.values()
         before = self.project.to_dict()
         try:
+            if tag in self.project.connections:
+                raise ValueError(
+                    f"Element tag {tag} is already used by a connection."
+                )
             self.model.add_element(
                 tag,
                 i,
@@ -2026,6 +2085,7 @@ class MainWindow(QMainWindow):
         )
         self._prune_selection_sets()
         self.project.prune_constraints()
+        self.project.prune_connections()
         self.selection.clear()
         self._refresh_all("Deleted selected entities")
         self._record_project_change("Delete selected entities", before)
@@ -2203,6 +2263,16 @@ class MainWindow(QMainWindow):
                     for fiber in section.fibers:
                         if fiber.material_tag == tag:
                             fiber.material_tag = updated.tag
+                for connection in self.project.connections.values():
+                    connection.materials_by_dof = {
+                        dof: (
+                            updated.tag
+                            if material_tag == tag
+                            else material_tag
+                        )
+                        for dof, material_tag
+                        in connection.materials_by_dof.items()
+                    }
         except ValueError as exc:
             QMessageBox.warning(self, "Material Editor", str(exc))
             return
@@ -2247,13 +2317,24 @@ class MainWindow(QMainWindow):
             return
 
         used_by = self.project.sections_using_material(tag)
-        if used_by:
+        connection_uses = self.project.connections_using_material(tag)
+        if used_by or connection_uses:
+            details = []
+            if used_by:
+                details.append(
+                    "section(s): " + ", ".join(map(str, used_by))
+                )
+            if connection_uses:
+                details.append(
+                    "connection(s): "
+                    + ", ".join(map(str, connection_uses))
+                )
             QMessageBox.warning(
                 self,
                 "Delete Material",
-                "Material is used by section(s): "
-                + ", ".join(map(str, used_by))
-                + ". Reassign those section/material links first.",
+                "Material is still referenced by "
+                + "; ".join(details)
+                + ". Reassign those references first.",
             )
             return
 
@@ -2614,6 +2695,224 @@ class MainWindow(QMainWindow):
             ],
         )
 
+    def _connection_dialog_defaults(self) -> tuple[int, int, bool]:
+        selected = sorted(self.selection.nodes)
+        if len(selected) >= 2:
+            return selected[0], selected[1], False
+        if len(selected) == 1:
+            return selected[0], selected[0], True
+
+        tags = sorted(self.model.nodes)
+        if len(tags) >= 2:
+            return tags[0], tags[1], False
+        if len(tags) == 1:
+            return tags[0], tags[0], True
+        return 1, 2, False
+
+    def _create_connection(self) -> None:
+        if not self.model.nodes:
+            QMessageBox.information(
+                self,
+                "Connection Editor",
+                "Create at least one node first.",
+            )
+            return
+        if not self.project.materials:
+            QMessageBox.information(
+                self,
+                "Connection Editor",
+                "Create at least one uniaxial material first.",
+            )
+            return
+
+        node_i, node_j, to_ground = self._connection_dialog_defaults()
+        dialog = ConnectionDialog(
+            self.project.materials,
+            next_tag=self.project.next_connection_tag(),
+            initial_node_i=node_i,
+            initial_node_j=node_j,
+            default_to_ground=to_ground,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        created_ground = None
+        try:
+            spec = dialog.spec()
+            node_j = int(spec["node_j"])
+            if spec["to_ground"]:
+                created_ground = self.project.create_ground_node(
+                    int(spec["node_i"])
+                )
+                node_j = created_ground
+
+            connection = ConnectionData(
+                tag=int(spec["tag"]),
+                name=str(spec["name"]),
+                connection_type=str(spec["connection_type"]),
+                node_i=int(spec["node_i"]),
+                node_j=node_j,
+                materials_by_dof=dict(spec["materials_by_dof"]),
+                orient_x=tuple(spec["orient_x"]),
+                orient_y=tuple(spec["orient_y"]),
+                do_rayleigh=bool(spec["do_rayleigh"]),
+                generated_ground_node=created_ground,
+            )
+            self.project.add_connection(connection)
+        except ValueError as exc:
+            if created_ground is not None:
+                self.model.remove_node(created_ground, cascade=True)
+            QMessageBox.warning(self, "Connection Editor", str(exc))
+            return
+
+        self._refresh_all(
+            f"Created {connection.connection_type} connection "
+            f"{connection.tag}"
+        )
+        self._show_connection_properties(connection.tag)
+        self._record_project_change(
+            f"Create connection {connection.tag}",
+            before,
+        )
+
+    def _edit_connection(self, tag: int) -> None:
+        connection = self.project.connections.get(tag)
+        if connection is None:
+            return
+
+        dialog = ConnectionDialog(
+            self.project.materials,
+            connection=connection,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        old_ground = connection.generated_ground_node
+        created_ground = None
+        try:
+            spec = dialog.spec()
+            requested_ground = bool(spec["to_ground"])
+            node_j = int(spec["node_j"])
+
+            if requested_ground:
+                if (
+                    old_ground is not None
+                    and old_ground in self.model.nodes
+                    and int(spec["node_i"]) == connection.node_i
+                ):
+                    node_j = old_ground
+                    created_ground = old_ground
+                else:
+                    created_ground = self.project.create_ground_node(
+                        int(spec["node_i"])
+                    )
+                    node_j = created_ground
+
+            updated = ConnectionData(
+                tag=int(spec["tag"]),
+                name=str(spec["name"]),
+                connection_type=str(spec["connection_type"]),
+                node_i=int(spec["node_i"]),
+                node_j=node_j,
+                materials_by_dof=dict(spec["materials_by_dof"]),
+                orient_x=tuple(spec["orient_x"]),
+                orient_y=tuple(spec["orient_y"]),
+                do_rayleigh=bool(spec["do_rayleigh"]),
+                generated_ground_node=(
+                    created_ground if requested_ground else None
+                ),
+            )
+            self.project.update_connection(tag, updated)
+
+            if (
+                old_ground is not None
+                and old_ground != updated.generated_ground_node
+                and old_ground in self.model.nodes
+                and old_ground not in {updated.node_i, updated.node_j}
+                and not self.project._ground_node_in_use_elsewhere(
+                    old_ground,
+                    excluding_connection=updated.tag,
+                )
+            ):
+                self.model.remove_node(old_ground, cascade=True)
+        except ValueError as exc:
+            if (
+                created_ground is not None
+                and created_ground != old_ground
+                and created_ground in self.model.nodes
+            ):
+                self.model.remove_node(created_ground, cascade=True)
+            QMessageBox.warning(self, "Connection Editor", str(exc))
+            return
+
+        self._refresh_all(
+            f"Updated connection {updated.tag}"
+        )
+        self._show_connection_properties(updated.tag)
+        self._record_project_change(
+            f"Edit connection {tag}",
+            before,
+        )
+
+    def _delete_connection(self, tag: int) -> None:
+        connection = self.project.connections.get(tag)
+        if connection is None:
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Delete Connection",
+            f"Delete connection {tag} ({connection.name})?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        before = self.project.to_dict()
+        self.project.remove_connection(tag, cleanup_ground=True)
+        self._refresh_all(f"Deleted connection {tag}")
+        self._record_project_change(
+            f"Delete connection {tag}",
+            before,
+        )
+
+    def _show_connection_properties(self, tag: int) -> None:
+        connection = self.project.connections.get(tag)
+        if connection is None:
+            return
+
+        dof_labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+        material_text = []
+        for dof in sorted(connection.materials_by_dof):
+            material_tag = connection.materials_by_dof[dof]
+            material = self.project.materials.get(material_tag)
+            name = material.name if material is not None else "missing"
+            material_text.append(
+                f"{dof_labels[dof - 1]} → {material_tag} - {name}"
+            )
+
+        rows: list[tuple[str, object]] = [
+            ("Tag", connection.tag),
+            ("Name", connection.name),
+            ("Type", connection.connection_type),
+            ("Node I", connection.node_i),
+            ("Node J", connection.node_j),
+            (
+                "To ground",
+                "Yes" if connection.generated_ground_node else "No",
+            ),
+            ("DOF materials", "; ".join(material_text)),
+            ("Rayleigh", "Yes" if connection.do_rayleigh else "No"),
+            ("Local X", connection.orient_x),
+            ("Local Y", connection.orient_y),
+        ]
+        self.properties_panel.set_properties("Connection", rows)
+
     def _create_constraint(self) -> None:
         selected_nodes = sorted(self.selection.nodes)
         if len(selected_nodes) >= 2:
@@ -2817,6 +3116,25 @@ class MainWindow(QMainWindow):
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
+        if kind == "connections_root":
+            create_action = menu.addAction("New Connection / Spring...")
+            create_action.triggered.connect(self._create_connection)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "connection":
+            tag = int(value)
+            edit_action = menu.addAction("Edit...")
+            edit_action.triggered.connect(
+                lambda: self._edit_connection(tag)
+            )
+            delete_action = menu.addAction("Delete")
+            delete_action.triggered.connect(
+                lambda: self._delete_connection(tag)
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
         if kind == "materials_root":
             create_action = menu.addAction("New Material...")
             create_action.triggered.connect(self._create_material)
@@ -2928,6 +3246,8 @@ class MainWindow(QMainWindow):
             self._edit_transformation(int(value))
         elif kind == "constraint":
             self._edit_constraint(int(value))
+        elif kind == "connection":
+            self._edit_connection(int(value))
 
     def _select_named_selection(self, name: str) -> None:
         selection_set = self.project.selection_sets.get(name)

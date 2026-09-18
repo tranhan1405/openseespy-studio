@@ -27,6 +27,7 @@ except ImportError:
     vtkPointPicker = None
 
 from ..model import StructuralModel, classify_fixity
+from ..project import ConnectionData
 from .icons import studio_icon
 
 
@@ -46,6 +47,7 @@ class ModelViewport(QWidget):
 
         self.setObjectName("ViewportRoot")
         self._model: StructuralModel | None = None
+        self._connections: dict[int, ConnectionData] = {}
         self._selection_filter = "all"
         self._selected_nodes: set[int] = set()
         self._selected_elements: set[int] = set()
@@ -726,8 +728,13 @@ class ModelViewport(QWidget):
                 combined[name] = pv.merge(meshes, merge_points=False)
         return combined
 
-    def draw_model(self, model: StructuralModel) -> None:
+    def draw_model(
+        self,
+        model: StructuralModel,
+        connections: dict[int, ConnectionData] | None = None,
+    ) -> None:
         self._model = model
+        self._connections = dict(connections or {})
         self._hidden_nodes.clear()
         self._hidden_elements.clear()
         self._isolate_active = False
@@ -864,6 +871,54 @@ class ModelViewport(QWidget):
                     pv.Line(p1, p2),
                     color="#147b80",
                     line_width=3,
+                    pickable=False,
+                )
+
+        visible_node_set = set(visible_nodes)
+        connection_size = max(span * 0.012, 0.06)
+        for connection in self._connections.values():
+            if (
+                connection.node_i not in visible_node_set
+                or connection.node_j not in visible_node_set
+            ):
+                continue
+            a = self._model.nodes[connection.node_i].xyz
+            b = self._model.nodes[connection.node_j].xyz
+
+            if connection.connection_type == "twoNodeLink":
+                self.plotter.add_mesh(
+                    pv.Line(a, b),
+                    color="#8e44ad",
+                    line_width=4,
+                    pickable=False,
+                )
+                center = tuple(
+                    (float(x) + float(y)) * 0.5
+                    for x, y in zip(a, b)
+                )
+                self.plotter.add_mesh(
+                    pv.Sphere(
+                        radius=connection_size * 0.42,
+                        center=center,
+                    ),
+                    color="#9b59b6",
+                    pickable=False,
+                )
+            else:
+                center = tuple(
+                    (float(x) + float(y)) * 0.5
+                    for x, y in zip(a, b)
+                )
+                self.plotter.add_mesh(
+                    pv.Sphere(
+                        radius=connection_size * 0.58,
+                        center=center,
+                        theta_resolution=12,
+                        phi_resolution=8,
+                    ),
+                    color="#8e44ad",
+                    edge_color="#5e3370",
+                    show_edges=True,
                     pickable=False,
                 )
 

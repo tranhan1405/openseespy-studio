@@ -78,7 +78,6 @@ class ElementDialog(_BaseDialog):
             "forceBeamColumn",
             "dispBeamColumn",
             "truss",
-            "zeroLength",
         ])
         self.group = QComboBox()
         self.group.setEditable(True)
