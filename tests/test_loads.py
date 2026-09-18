@@ -1,4 +1,5 @@
 from openseespy_studio.generator import (
+    element_load_to_openseespy,
     load_pattern_to_openseespy,
     nodal_load_to_openseespy,
     time_series_to_openseespy,
@@ -6,10 +7,14 @@ from openseespy_studio.generator import (
 )
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
+    ElementLoadData,
     LoadPatternData,
+    MaterialData,
     NodalLoadData,
     ProjectDatabase,
+    SectionData,
     TimeSeriesData,
+    TransformationData,
 )
 
 
@@ -97,3 +102,220 @@ def test_prune_nodal_load_after_node_delete():
     project.add_nodal_load(NodalLoadData(1,"P1",1,2,(1,0,0,0,0,0)))
     project.model.remove_node(2,cascade=True)
     assert project.prune_nodal_loads()==[1]
+
+
+
+def test_element_load_round_trip_and_project_validation():
+    project=ProjectDatabase(model=model_with_nodes())
+    project.model.add_element(1,1,2,transf_tag=1)
+    project.add_time_series(TimeSeriesData(1,"Linear","Linear"))
+    project.add_load_pattern(LoadPatternData(1,"Dead","Plain",1))
+    project.add_element_load(
+        ElementLoadData(
+            1,
+            "UDL",
+            1,
+            1,
+            "Uniform",
+            wx=1.0,
+            wy=-2.0,
+            wz=-3.0,
+        )
+    )
+
+    restored=ProjectDatabase.from_dict(project.to_dict())
+
+    load=restored.element_loads[1]
+    assert load.load_type=="Uniform"
+    assert load.element_tag==1
+    assert (load.wx,load.wy,load.wz)==(1.0,-2.0,-3.0)
+
+
+def test_uniform_and_point_element_load_generator():
+    uniform=ElementLoadData(
+        1,"UDL",1,5,"Uniform",wx=1.0,wy=-2.0,wz=-3.0
+    )
+    point=ElementLoadData(
+        2,"Point",1,5,"Point",
+        px=4.0,py=-5.0,pz=-6.0,x_over_l=0.25
+    )
+
+    uniform_text=element_load_to_openseespy(
+        uniform,
+        StructuralModel(),
+    )
+    point_text=element_load_to_openseespy(
+        point,
+        StructuralModel(),
+    )
+
+    assert uniform_text == (
+        "ops.eleLoad('-ele', 5, '-type', '-beamUniform', -2, -3, 1)"
+    )
+    assert point_text == (
+        "ops.eleLoad('-ele', 5, '-type', '-beamPoint', -5, -6, 0.25, 4)"
+    )
+
+
+def _self_weight_model_and_data(*, vertical=False):
+    model=StructuralModel()
+    model.add_node(1,0,0,0)
+    model.add_node(2,0,0,2 if vertical else 0)
+    if not vertical:
+        model.nodes[2].xyz=(2.0,0.0,0.0)
+    model.add_element(1,1,2,section_tag=1,transf_tag=1)
+
+    material=MaterialData(
+        1,
+        "Dense",
+        "Elastic",
+        {"E":2.0e11},
+        density=1000.0,
+    )
+    section=SectionData(
+        1,
+        "A=0.2",
+        "Elastic",
+        {"A":0.2},
+        material_tag=1,
+    )
+    transformation=TransformationData(
+        1,
+        "T",
+        "Linear",
+        (1.0,0.0,0.0) if vertical else (0.0,0.0,1.0),
+    )
+    load=ElementLoadData(
+        1,
+        "Self Weight",
+        1,
+        1,
+        "SelfWeight",
+        gravity=(0.0,0.0,-10.0),
+    )
+    return model,{1:section},{1:material},{1:transformation},load
+
+
+def test_self_weight_horizontal_beam_projects_global_z_to_local_z():
+    model,sections,materials,transformations,load=(
+        _self_weight_model_and_data(vertical=False)
+    )
+
+    text=element_load_to_openseespy(
+        load,
+        model,
+        sections,
+        materials,
+        transformations,
+    )
+
+    assert text == (
+        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', 0, -2000, 0)"
+    )
+
+
+def test_self_weight_vertical_column_projects_global_z_to_local_x():
+    model,sections,materials,transformations,load=(
+        _self_weight_model_and_data(vertical=True)
+    )
+
+    text=element_load_to_openseespy(
+        load,
+        model,
+        sections,
+        materials,
+        transformations,
+    )
+
+    assert text == (
+        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', 0, 0, -2000)"
+    )
+
+
+def test_self_weight_density_override_works_without_linked_material():
+    model=StructuralModel()
+    model.add_node(1,0,0,0)
+    model.add_node(2,2,0,0)
+    model.add_element(1,1,2,section_tag=1,transf_tag=1)
+    sections={
+        1:SectionData(
+            1,
+            "Manual",
+            "Elastic",
+            {"A":0.1},
+        )
+    }
+    transformations={
+        1:TransformationData(
+            1,"Beam","Linear",(0.0,0.0,1.0)
+        )
+    }
+    load=ElementLoadData(
+        1,
+        "Self Weight",
+        1,
+        1,
+        "SelfWeight",
+        gravity=(0.0,0.0,-10.0),
+        density_override=500.0,
+    )
+
+    text=element_load_to_openseespy(
+        load,
+        model,
+        sections,
+        {},
+        transformations,
+    )
+
+    assert text == (
+        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', 0, -500, 0)"
+    )
+
+
+def test_full_script_places_element_load_under_plain_pattern():
+    model=StructuralModel()
+    model.add_node(1,0,0,0)
+    model.add_node(2,2,0,0)
+    model.set_fixity(1,(1,1,1,1,1,1))
+    model.add_element(1,1,2,transf_tag=1)
+
+    ts={1:TimeSeriesData(1,"Linear","Linear")}
+    patterns={1:LoadPatternData(1,"Dead","Plain",1)}
+    transformations={
+        1:TransformationData(
+            1,"Beam","Linear",(0.0,0.0,1.0)
+        )
+    }
+    loads={
+        1:ElementLoadData(
+            1,"UDL",1,1,"Uniform",wz=-100.0
+        )
+    }
+
+    script=to_openseespy(
+        model,
+        transformations=transformations,
+        time_series=ts,
+        load_patterns=patterns,
+        element_loads=loads,
+    )
+
+    assert "ops.pattern('Plain', 1, 1)" in script
+    assert (
+        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', 0, -100, 0)"
+        in script
+    )
+
+
+def test_prune_element_load_after_element_delete():
+    project=ProjectDatabase(model=model_with_nodes())
+    project.model.add_element(1,1,2,transf_tag=1)
+    project.add_time_series(TimeSeriesData(1,"Linear","Linear"))
+    project.add_load_pattern(LoadPatternData(1,"P","Plain",1))
+    project.add_element_load(
+        ElementLoadData(1,"UDL",1,1,"Uniform",wy=-1.0)
+    )
+    project.model.remove_element(1)
+
+    assert project.prune_element_loads()==[1]

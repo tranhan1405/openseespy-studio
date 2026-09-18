@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QSpinBox, QVBoxLayout
 )
 
-from ..project import LoadPatternData, NodalLoadData, TimeSeriesData
+from ..project import ElementLoadData, LoadPatternData, NodalLoadData, TimeSeriesData
 
 
 def _spin(value=0.0, low=-1e20, high=1e20):
@@ -116,4 +116,169 @@ class NodalLoadDialog(QDialog):
     def _accept(self):
         try:self.data()
         except ValueError as e: QMessageBox.warning(self,"Nodal Load Editor",str(e)); return
+        self.accept()
+
+
+
+class ElementLoadDialog(QDialog):
+    def __init__(
+        self,
+        patterns,
+        load=None,
+        *,
+        next_tag=1,
+        element_tag=1,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Beam / Element Load Editor")
+        self.setModal(True)
+        self.resize(470, 480)
+
+        root = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.tag = QSpinBox()
+        self.tag.setRange(1, 2147483647)
+        self.tag.setValue(load.tag if load else next_tag)
+
+        self.name = QLineEdit(
+            load.name if load else f"Element Load {next_tag}"
+        )
+
+        self.pattern = QComboBox()
+        for tag in sorted(patterns):
+            pattern = patterns[tag]
+            if pattern.pattern_type == "Plain":
+                self.pattern.addItem(
+                    f"{tag} - {pattern.name}",
+                    tag,
+                )
+        if load:
+            index = self.pattern.findData(load.pattern_tag)
+            if index >= 0:
+                self.pattern.setCurrentIndex(index)
+
+        self.element = QSpinBox()
+        self.element.setRange(1, 2147483647)
+        self.element.setValue(
+            load.element_tag if load else element_tag
+        )
+
+        self.kind = QComboBox()
+        self.kind.addItem("Uniform (local axes)", "Uniform")
+        self.kind.addItem("Point (local axes)", "Point")
+        self.kind.addItem("Self Weight (global gravity)", "SelfWeight")
+        if load:
+            index = self.kind.findData(load.load_type)
+            if index >= 0:
+                self.kind.setCurrentIndex(index)
+
+        form.addRow("Tag:", self.tag)
+        form.addRow("Name:", self.name)
+        form.addRow("Plain pattern:", self.pattern)
+        form.addRow("Element:", self.element)
+        form.addRow("Type:", self.kind)
+
+        self.wx = _spin(load.wx if load else 0.0)
+        self.wy = _spin(load.wy if load else 0.0)
+        self.wz = _spin(load.wz if load else 0.0)
+        form.addRow("Uniform Wx (local x):", self.wx)
+        form.addRow("Uniform Wy (local y):", self.wy)
+        form.addRow("Uniform Wz (local z):", self.wz)
+
+        self.px = _spin(load.px if load else 0.0)
+        self.py = _spin(load.py if load else 0.0)
+        self.pz = _spin(load.pz if load else 0.0)
+        self.x_over_l = _spin(
+            load.x_over_l if load else 0.5,
+            0.0,
+            1.0,
+        )
+        form.addRow("Point Px (local x):", self.px)
+        form.addRow("Point Py (local y):", self.py)
+        form.addRow("Point Pz (local z):", self.pz)
+        form.addRow("Location x/L:", self.x_over_l)
+
+        gravity = load.gravity if load else (0.0, 0.0, -9.81)
+        self.gx = _spin(gravity[0])
+        self.gy = _spin(gravity[1])
+        self.gz = _spin(gravity[2])
+        self.density = _spin(
+            load.density_override if load else 0.0,
+            0.0,
+            1.0e20,
+        )
+        form.addRow("Gravity GX:", self.gx)
+        form.addRow("Gravity GY:", self.gy)
+        form.addRow("Gravity GZ:", self.gz)
+        form.addRow("Density override:", self.density)
+
+        root.addLayout(form)
+        note = QLabel(
+            "Self Weight: density override = 0 uses the linked material "
+            "density. With SI inputs, density [kg/m³] × A [m²] × gravity "
+            "[m/s²] gives line load [N/m]."
+        )
+        note.setWordWrap(True)
+        root.addWidget(note)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+        self.kind.currentIndexChanged.connect(self._sync)
+        self._sync()
+
+    def _sync(self):
+        kind = self.kind.currentData()
+        uniform = kind == "Uniform"
+        point = kind == "Point"
+        self_weight = kind == "SelfWeight"
+
+        for widget in (self.wx, self.wy, self.wz):
+            widget.setEnabled(uniform)
+        for widget in (self.px, self.py, self.pz, self.x_over_l):
+            widget.setEnabled(point)
+        for widget in (self.gx, self.gy, self.gz, self.density):
+            widget.setEnabled(self_weight)
+
+    def data(self):
+        if self.pattern.currentData() is None:
+            raise ValueError("Create a Plain load pattern first.")
+        return ElementLoadData(
+            tag=self.tag.value(),
+            name=self.name.text().strip()
+            or f"Element Load {self.tag.value()}",
+            pattern_tag=int(self.pattern.currentData()),
+            element_tag=self.element.value(),
+            load_type=str(self.kind.currentData()),
+            wx=self.wx.value(),
+            wy=self.wy.value(),
+            wz=self.wz.value(),
+            px=self.px.value(),
+            py=self.py.value(),
+            pz=self.pz.value(),
+            x_over_l=self.x_over_l.value(),
+            gravity=(
+                self.gx.value(),
+                self.gy.value(),
+                self.gz.value(),
+            ),
+            density_override=self.density.value(),
+        )
+
+    def _accept(self):
+        try:
+            self.data()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Beam / Element Load Editor",
+                str(exc),
+            )
+            return
         self.accept()

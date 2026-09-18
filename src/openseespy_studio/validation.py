@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import math
 from typing import Iterable
 
+from .beam_loads import resolve_self_weight_local
 from .project import AnalysisSettingsData, ProjectDatabase
 
 
@@ -361,6 +362,85 @@ def _support_and_connectivity_checks(
         )
 
 
+def _element_load_checks(
+    project: ProjectDatabase,
+    issues: list[ValidationIssue],
+) -> None:
+    for tag in sorted(project.element_loads):
+        load = project.element_loads[tag]
+        element = project.model.elements.get(load.element_tag)
+        if element is None:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Element load",
+                    f"Element load {load.tag} references missing element "
+                    f"{load.element_tag}.",
+                    suggestion="Reassign or delete the element load.",
+                )
+            )
+            continue
+
+        pattern = project.load_patterns.get(load.pattern_tag)
+        if pattern is None or pattern.pattern_type != "Plain":
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Element load",
+                    f"Element load {load.tag} must belong to a Plain load "
+                    "pattern.",
+                    "element",
+                    element.tag,
+                    "Assign the load to an existing Plain load pattern.",
+                )
+            )
+
+        transformation = (
+            project.transformations.get(element.transf_tag)
+            if element.transf_tag is not None
+            else None
+        )
+        if (
+            transformation is not None
+            and transformation.transformation_type == "Corotational"
+        ):
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Element load",
+                    f"Element load {load.tag} is assigned to element "
+                    f"{element.tag} using a Corotational transformation. "
+                    "OpenSees 3D beam eleLoad is not supported with this "
+                    "transformation.",
+                    "element",
+                    element.tag,
+                    "Use Linear/PDelta for loaded 3D beam-column elements.",
+                )
+            )
+
+        if load.load_type == "SelfWeight":
+            try:
+                resolve_self_weight_local(
+                    load,
+                    project.model,
+                    project.sections,
+                    project.materials,
+                    project.transformations,
+                )
+            except ValueError as exc:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Self weight",
+                        str(exc),
+                        "element",
+                        element.tag,
+                        "Link an Elastic section to a material with positive "
+                        "density, or provide a density override.",
+                    )
+                )
+
+
 def _dynamic_checks(
     project: ProjectDatabase,
     analysis: AnalysisSettingsData,
@@ -453,6 +533,7 @@ def validate_project(
 
     _element_geometry_checks(project, issues)
     _support_and_connectivity_checks(project, issues)
+    _element_load_checks(project, issues)
 
     if analysis is not None:
         _dynamic_checks(project, analysis, issues)

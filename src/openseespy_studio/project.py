@@ -9,7 +9,7 @@ from .model import StructuralModel
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 10
+PROJECT_FORMAT_VERSION = 11
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -647,6 +647,99 @@ class NodalLoadData:
 
 
 @dataclass
+class ElementLoadData:
+    tag: int
+    name: str
+    pattern_tag: int
+    element_tag: int
+    load_type: str = "Uniform"
+    wx: float = 0.0
+    wy: float = 0.0
+    wz: float = 0.0
+    px: float = 0.0
+    py: float = 0.0
+    pz: float = 0.0
+    x_over_l: float = 0.5
+    gravity: tuple[float, float, float] = (0.0, 0.0, -9.81)
+    density_override: float = 0.0
+
+    def __post_init__(self) -> None:
+        self.tag = int(self.tag)
+        self.name = str(self.name).strip() or f"Element Load {self.tag}"
+        self.pattern_tag = int(self.pattern_tag)
+        self.element_tag = int(self.element_tag)
+        self.load_type = str(self.load_type)
+        self.wx = float(self.wx)
+        self.wy = float(self.wy)
+        self.wz = float(self.wz)
+        self.px = float(self.px)
+        self.py = float(self.py)
+        self.pz = float(self.pz)
+        self.x_over_l = float(self.x_over_l)
+        self.gravity = tuple(float(value) for value in self.gravity)
+        self.density_override = float(self.density_override)
+
+        if self.tag <= 0:
+            raise ValueError("Element load tag must be positive.")
+        if self.pattern_tag <= 0 or self.element_tag <= 0:
+            raise ValueError(
+                "Element load needs valid pattern and element tags."
+            )
+        if self.load_type not in {"Uniform", "Point", "SelfWeight"}:
+            raise ValueError(
+                f"Unsupported element load type: {self.load_type}"
+            )
+        if len(self.gravity) != 3:
+            raise ValueError("Gravity vector needs three components.")
+        if self.density_override < 0.0:
+            raise ValueError("Density override cannot be negative.")
+        if self.load_type == "Point" and not 0.0 <= self.x_over_l <= 1.0:
+            raise ValueError("Point-load x/L must be between 0 and 1.")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "pattern_tag": self.pattern_tag,
+            "element_tag": self.element_tag,
+            "load_type": self.load_type,
+            "wx": self.wx,
+            "wy": self.wy,
+            "wz": self.wz,
+            "px": self.px,
+            "py": self.py,
+            "pz": self.pz,
+            "x_over_l": self.x_over_l,
+            "gravity": list(self.gravity),
+            "density_override": self.density_override,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ElementLoadData":
+        gravity = data.get("gravity", (0.0, 0.0, -9.81))
+        return cls(
+            tag=int(data["tag"]),
+            name=str(data.get("name", f"Element Load {data['tag']}")),
+            pattern_tag=int(data["pattern_tag"]),
+            element_tag=int(data["element_tag"]),
+            load_type=str(data.get("load_type", "Uniform")),
+            wx=float(data.get("wx", 0.0)),
+            wy=float(data.get("wy", 0.0)),
+            wz=float(data.get("wz", 0.0)),
+            px=float(data.get("px", 0.0)),
+            py=float(data.get("py", 0.0)),
+            pz=float(data.get("pz", 0.0)),
+            x_over_l=float(data.get("x_over_l", 0.5)),
+            gravity=(
+                float(gravity[0]),
+                float(gravity[1]),
+                float(gravity[2]),
+            ),
+            density_override=float(data.get("density_override", 0.0)),
+        )
+
+
+@dataclass
 class AnalysisSettingsData:
     tag: int
     name: str
@@ -746,6 +839,7 @@ class ProjectDatabase:
     time_series: dict[int, TimeSeriesData] = field(default_factory=dict)
     load_patterns: dict[int, LoadPatternData] = field(default_factory=dict)
     nodal_loads: dict[int, NodalLoadData] = field(default_factory=dict)
+    element_loads: dict[int, ElementLoadData] = field(default_factory=dict)
     analyses: dict[int, AnalysisSettingsData] = field(default_factory=dict)
     active_analysis_tag: int | None = None
 
@@ -1153,6 +1247,9 @@ class ProjectDatabase:
             for load in self.nodal_loads.values():
                 if load.pattern_tag == original_tag:
                     load.pattern_tag = pattern.tag
+            for load in self.element_loads.values():
+                if load.pattern_tag == original_tag:
+                    load.pattern_tag = pattern.tag
 
     def remove_load_pattern(self, tag: int) -> None:
         tag = int(tag)
@@ -1160,6 +1257,9 @@ class ProjectDatabase:
         for load_tag, load in list(self.nodal_loads.items()):
             if load.pattern_tag == tag:
                 self.nodal_loads.pop(load_tag)
+        for load_tag, load in list(self.element_loads.items()):
+            if load.pattern_tag == tag:
+                self.element_loads.pop(load_tag)
 
     def next_nodal_load_tag(self) -> int:
         return max(self.nodal_loads, default=0) + 1
@@ -1208,6 +1308,75 @@ class ProjectDatabase:
                 or load.pattern_tag not in existing_patterns
             ):
                 self.nodal_loads.pop(tag)
+                removed.append(tag)
+        return sorted(removed)
+
+    def next_element_load_tag(self) -> int:
+        return max(self.element_loads, default=0) + 1
+
+    def _validate_element_load(self, load: ElementLoadData) -> None:
+        element = self.model.elements.get(load.element_tag)
+        if element is None:
+            raise ValueError(
+                f"Element load references missing element {load.element_tag}."
+            )
+        pattern = self.load_patterns.get(load.pattern_tag)
+        if pattern is None:
+            raise ValueError(
+                f"Element load references missing pattern {load.pattern_tag}."
+            )
+        if pattern.pattern_type != "Plain":
+            raise ValueError(
+                "Element loads can only be assigned to Plain load patterns."
+            )
+        if element.element_type not in {
+            "elasticBeamColumn",
+            "forceBeamColumn",
+            "dispBeamColumn",
+        }:
+            raise ValueError(
+                "Beam element loads require a beam-column element."
+            )
+
+    def add_element_load(self, load: ElementLoadData) -> None:
+        if load.tag in self.element_loads:
+            raise ValueError(
+                f"Element load tag {load.tag} already exists."
+            )
+        self._validate_element_load(load)
+        self.element_loads[load.tag] = load
+
+    def update_element_load(
+        self,
+        original_tag: int,
+        load: ElementLoadData,
+    ) -> None:
+        original_tag = int(original_tag)
+        if original_tag not in self.element_loads:
+            raise ValueError(
+                f"Element load tag {original_tag} does not exist."
+            )
+        if load.tag != original_tag and load.tag in self.element_loads:
+            raise ValueError(
+                f"Element load tag {load.tag} already exists."
+            )
+        self._validate_element_load(load)
+        self.element_loads.pop(original_tag)
+        self.element_loads[load.tag] = load
+
+    def remove_element_load(self, tag: int) -> None:
+        self.element_loads.pop(int(tag), None)
+
+    def prune_element_loads(self) -> list[int]:
+        removed: list[int] = []
+        existing_elements = set(self.model.elements)
+        existing_patterns = set(self.load_patterns)
+        for tag, load in list(self.element_loads.items()):
+            if (
+                load.element_tag not in existing_elements
+                or load.pattern_tag not in existing_patterns
+            ):
+                self.element_loads.pop(tag)
                 removed.append(tag)
         return sorted(removed)
 
@@ -1284,6 +1453,10 @@ class ProjectDatabase:
             "nodal_loads": [
                 self.nodal_loads[tag].to_dict()
                 for tag in sorted(self.nodal_loads)
+            ],
+            "element_loads": [
+                self.element_loads[tag].to_dict()
+                for tag in sorted(self.element_loads)
             ],
             "analyses": [
                 self.analyses[tag].to_dict()
@@ -1467,6 +1640,15 @@ class ProjectDatabase:
         return result
 
     @staticmethod
+    def _load_element_loads(raw: Any) -> dict[int, ElementLoadData]:
+        result: dict[int, ElementLoadData] = {}
+        if isinstance(raw, list):
+            for item in raw:
+                load = ElementLoadData.from_dict(dict(item))
+                result[load.tag] = load
+        return result
+
+    @staticmethod
     def _load_analyses(raw: Any) -> dict[int, AnalysisSettingsData]:
         result: dict[int, AnalysisSettingsData] = {}
         if isinstance(raw,list):
@@ -1509,6 +1691,9 @@ class ProjectDatabase:
             time_series=cls._load_time_series(data.get("time_series", [])),
             load_patterns=cls._load_patterns(data.get("load_patterns", [])),
             nodal_loads=cls._load_nodal_loads(data.get("nodal_loads", [])),
+            element_loads=cls._load_element_loads(
+                data.get("element_loads", [])
+            ),
             analyses=cls._load_analyses(data.get("analyses", [])),
             active_analysis_tag=(
                 int(data["active_analysis_tag"])

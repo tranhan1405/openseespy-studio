@@ -2,6 +2,7 @@ from openseespy_studio.generator import FrameGridSpec, generate_frame_grid
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
     AnalysisSettingsData,
+    ElementLoadData,
     LoadPatternData,
     ProjectDatabase,
     SectionData,
@@ -209,5 +210,85 @@ def test_no_support_is_obvious_stability_error():
         issue.severity == "ERROR"
         and issue.category == "Stability"
         and "no restrained/support node" in issue.message
+        for issue in issues
+    )
+
+
+
+def test_element_load_with_corotational_transformation_is_blocked():
+    project = _frame_project()
+    project.transformations[2] = TransformationData(
+        2,
+        "Beam Corot",
+        "Corotational",
+        (0.0, 0.0, 1.0),
+    )
+    project.time_series[1] = TimeSeriesData(
+        1,
+        "Linear",
+        "Linear",
+    )
+    project.load_patterns[1] = LoadPatternData(
+        1,
+        "Dead",
+        "Plain",
+        1,
+    )
+    first_beam = min(
+        tag
+        for tag, element in project.model.elements.items()
+        if element.group.startswith("beam")
+    )
+    project.element_loads[1] = ElementLoadData(
+        1,
+        "UDL",
+        1,
+        first_beam,
+        "Uniform",
+        wz=-1.0,
+    )
+
+    issues = validate_project(project)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Element load"
+        and "Corotational" in issue.message
+        for issue in issues
+    )
+
+
+def test_self_weight_without_density_is_blocked():
+    project = _frame_project()
+    project.time_series[1] = TimeSeriesData(
+        1,
+        "Linear",
+        "Linear",
+    )
+    project.load_patterns[1] = LoadPatternData(
+        1,
+        "Dead",
+        "Plain",
+        1,
+    )
+    first_beam = min(
+        tag
+        for tag, element in project.model.elements.items()
+        if element.group.startswith("beam")
+    )
+    project.element_loads[1] = ElementLoadData(
+        1,
+        "Self Weight",
+        1,
+        first_beam,
+        "SelfWeight",
+    )
+
+    issues = validate_project(project)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Self weight"
+        and "linked material density" in issue.message
         for issue in issues
     )

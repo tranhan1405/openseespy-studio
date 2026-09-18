@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .beam_loads import resolve_self_weight_local
 from .model import StructuralModel
-from .project import AnalysisSettingsData, ConnectionData, ConstraintData, LoadPatternData, MaterialData, NodalLoadData, SectionData, TimeSeriesData, TransformationData
+from .project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, SectionData, TimeSeriesData, TransformationData
 
 
 @dataclass(slots=True)
@@ -226,6 +227,41 @@ def load_pattern_to_openseespy(pattern: LoadPatternData) -> str:
 def nodal_load_to_openseespy(load: NodalLoadData) -> str:
     values = ", ".join(f"{value:g}" for value in load.values)
     return f"ops.load({load.node_tag}, {values})"
+
+
+def element_load_to_openseespy(
+    load: ElementLoadData,
+    model: StructuralModel,
+    sections: dict[int, SectionData] | None = None,
+    materials: dict[int, MaterialData] | None = None,
+    transformations: dict[int, TransformationData] | None = None,
+) -> str:
+    if load.load_type == "Uniform":
+        wx, wy, wz = load.wx, load.wy, load.wz
+    elif load.load_type == "Point":
+        return (
+            "ops.eleLoad('-ele', "
+            f"{load.element_tag}, '-type', '-beamPoint', "
+            f"{load.py:g}, {load.pz:g}, {load.x_over_l:g}, {load.px:g})"
+        )
+    elif load.load_type == "SelfWeight":
+        wx, wy, wz = resolve_self_weight_local(
+            load,
+            model,
+            sections or {},
+            materials or {},
+            transformations or {},
+        )
+    else:
+        raise ValueError(
+            f"Unsupported element load type: {load.load_type}"
+        )
+
+    return (
+        "ops.eleLoad('-ele', "
+        f"{load.element_tag}, '-type', '-beamUniform', "
+        f"{wy:g}, {wz:g}, {wx:g})"
+    )
 
 
 def analysis_to_openseespy(
@@ -502,6 +538,7 @@ def to_openseespy(
     nodal_loads: dict[int, NodalLoadData] | None = None,
     analyses: dict[int, AnalysisSettingsData] | None = None,
     active_analysis_tag: int | None = None,
+    element_loads: dict[int, ElementLoadData] | None = None,
 ) -> str:
     lines: list[str] = [
         "import json",
@@ -633,22 +670,42 @@ def to_openseespy(
 
     if load_patterns:
         lines.extend(["", "# Load patterns"])
-        loads_by_pattern: dict[int, list[NodalLoadData]] = {}
+        nodal_by_pattern: dict[int, list[NodalLoadData]] = {}
         for load in (nodal_loads or {}).values():
-            loads_by_pattern.setdefault(load.pattern_tag, []).append(load)
+            nodal_by_pattern.setdefault(load.pattern_tag, []).append(load)
+
+        element_by_pattern: dict[int, list[ElementLoadData]] = {}
+        for load in (element_loads or {}).values():
+            element_by_pattern.setdefault(load.pattern_tag, []).append(load)
 
         for tag in sorted(load_patterns):
             pattern = load_patterns[tag]
             lines.append(load_pattern_to_openseespy(pattern))
             if pattern.pattern_type == "Plain":
                 for load in sorted(
-                    loads_by_pattern.get(tag, []),
+                    nodal_by_pattern.get(tag, []),
                     key=lambda item: item.tag,
                 ):
                     lines.append(
                         f"# Nodal load {load.tag}: {load.name}"
                     )
                     lines.append(nodal_load_to_openseespy(load))
+                for load in sorted(
+                    element_by_pattern.get(tag, []),
+                    key=lambda item: item.tag,
+                ):
+                    lines.append(
+                        f"# Element load {load.tag}: {load.name}"
+                    )
+                    lines.append(
+                        element_load_to_openseespy(
+                            load,
+                            model,
+                            sections,
+                            materials,
+                            transformations,
+                        )
+                    )
 
     if analyses and active_analysis_tag in analyses:
         lines.extend(["", "# Analysis settings"])

@@ -45,7 +45,7 @@ from ..frame_setup import prepare_frame_grid
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..jobs import JobRecord
 from ..model import StructuralModel, classify_fixity
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, SectionData, SelectionSetData, TimeSeriesData, TransformationData
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, SectionData, SelectionSetData, TimeSeriesData, TransformationData
 from ..runtime import build_worker_pythonpath, probe_opensees_runtime
 from ..validation import ValidationIssue, validate_project
 from .analysis_dialog import AnalysisDialog
@@ -61,7 +61,7 @@ from .geometry_dialogs import (
     VectorDialog,
 )
 from .history import ProjectSnapshotCommand
-from .load_dialogs import LoadPatternDialog, MassDialog, NodalLoadDialog, TimeSeriesDialog
+from .load_dialogs import ElementLoadDialog, LoadPatternDialog, MassDialog, NodalLoadDialog, TimeSeriesDialog
 from .material_dialog import MaterialDialog
 from .model_check_dialog import ModelCheckDialog
 from .section_dialog import SectionDialog
@@ -912,6 +912,7 @@ class MainWindow(QMainWindow):
         self._make_action("time_series", "Time Series...", "timeseries", self._create_time_series, "Create time series")
         self._make_action("load_pattern", "Load Pattern...", "load", self._create_load_pattern, "Create load pattern or ground motion")
         self._make_action("nodal_load", "Nodal Load...", "load", self._create_nodal_load, "Create nodal load")
+        self._make_action("beam_load", "Beam Load...", "load", self._create_element_load, "Create uniform, point, or self-weight beam load")
         self._make_action("analysis_setup", "Analysis Setup...", "analysis", self._create_analysis, "Create analysis settings")
         self._make_action("check_model", "Check Model", "analysis", self._check_model, "Validate the model before analysis")
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
@@ -945,6 +946,7 @@ class MainWindow(QMainWindow):
         menus["Loads"].addAction(self.actions["time_series"])
         menus["Loads"].addAction(self.actions["load_pattern"])
         menus["Loads"].addAction(self.actions["nodal_load"])
+        menus["Loads"].addAction(self.actions["beam_load"])
         menus["Analysis"].addAction(self.actions["analysis_setup"])
         menus["Analysis"].addAction(self.actions["check_model"])
         menus["Analysis"].addAction(self.actions["run"])
@@ -964,7 +966,7 @@ class MainWindow(QMainWindow):
             ("Selection", ["select", "box", "polygon", "byid", "bytype"]),
             ("View", ["xy", "yz", "xz", "iso"]),
             ("Supports", ["support", "clear_support", "constraint", "connection"]),
-            ("Loads", ["mass", "time_series", "load_pattern", "nodal_load"]),
+            ("Loads", ["mass", "time_series", "load_pattern", "nodal_load", "beam_load"]),
             ("Analysis", ["analysis_setup", "check_model", "run", "plot"]),
         )
 
@@ -1072,6 +1074,7 @@ class MainWindow(QMainWindow):
         self.project.prune_constraints()
         self.project.prune_connections()
         self.project.prune_nodal_loads()
+        self.project.prune_element_loads()
 
         if created_transformations:
             names = ", ".join(
@@ -1127,6 +1130,7 @@ class MainWindow(QMainWindow):
                 self.project.nodal_loads,
                 self.project.analyses,
                 self.project.active_analysis_tag,
+                element_loads=self.project.element_loads,
             )
         )
         self._selection_changed(self.selection.snapshot())
@@ -1412,6 +1416,21 @@ class MainWindow(QMainWindow):
                 load_item.setIcon(0, studio_icon("load"))
                 load_item.setData(0, Qt.UserRole, ("nodal_load", load.tag))
                 item.addChild(load_item)
+            for load_tag in sorted(self.project.element_loads):
+                load = self.project.element_loads[load_tag]
+                if load.pattern_tag != tag:
+                    continue
+                load_item = QTreeWidgetItem([
+                    f"{load.load_type}: {load.name} [{load.tag}] "
+                    f"→ Element {load.element_tag}"
+                ])
+                load_item.setIcon(0, studio_icon("load"))
+                load_item.setData(
+                    0,
+                    Qt.UserRole,
+                    ("element_load", load.tag),
+                )
+                item.addChild(load_item)
 
         analysis = QTreeWidgetItem([f"Analysis ({len(self.project.analyses)})"])
         analysis.setIcon(0, studio_icon("analysis"))
@@ -1454,6 +1473,7 @@ class MainWindow(QMainWindow):
         time_series_tag: int | None = None
         load_pattern_tag: int | None = None
         nodal_load_tag: int | None = None
+        element_load_tag: int | None = None
         analysis_tag: int | None = None
 
         for item in self.tree.selectedItems():
@@ -1486,6 +1506,8 @@ class MainWindow(QMainWindow):
                 load_pattern_tag = int(tag)
             elif kind == "nodal_load":
                 nodal_load_tag = int(tag)
+            elif kind == "element_load":
+                element_load_tag = int(tag)
             elif kind == "analysis":
                 analysis_tag = int(tag)
 
@@ -1506,6 +1528,8 @@ class MainWindow(QMainWindow):
             self._show_load_pattern_properties(load_pattern_tag)
         elif nodal_load_tag is not None:
             self._show_nodal_load_properties(nodal_load_tag)
+        elif element_load_tag is not None:
+            self._show_element_load_properties(element_load_tag)
         elif analysis_tag is not None:
             self._show_analysis_properties(analysis_tag)
 
@@ -1774,6 +1798,9 @@ class MainWindow(QMainWindow):
         load_action = menu.addAction("Create Nodal Load...")
         load_action.setEnabled(bool(self.selection.nodes))
         load_action.triggered.connect(self._create_nodal_load)
+        beam_load_action = menu.addAction("Create Beam Load...")
+        beam_load_action.setEnabled(bool(self.selection.elements))
+        beam_load_action.triggered.connect(self._create_element_load)
 
         menu.addSeparator()
         assign_menu = menu.addMenu("Assign")
@@ -2045,7 +2072,17 @@ class MainWindow(QMainWindow):
         else:
             rows.append((
                 "Nodal Loads",
-                sum(load.pattern_tag == tag for load in self.project.nodal_loads.values()),
+                sum(
+                    load.pattern_tag == tag
+                    for load in self.project.nodal_loads.values()
+                ),
+            ))
+            rows.append((
+                "Element Loads",
+                sum(
+                    load.pattern_tag == tag
+                    for load in self.project.element_loads.values()
+                ),
             ))
         self.properties_panel.set_properties("Load Pattern", rows)
 
@@ -2147,6 +2184,180 @@ class MainWindow(QMainWindow):
         ]
         rows.extend((label, f"{value:g}") for label, value in zip(labels, load.values))
         self.properties_panel.set_properties("Nodal Load", rows)
+
+    def _create_element_load(self) -> None:
+        plain = {
+            tag: pattern
+            for tag, pattern in self.project.load_patterns.items()
+            if pattern.pattern_type == "Plain"
+        }
+        if not plain:
+            QMessageBox.information(
+                self,
+                "Beam / Element Load",
+                "Create a Plain load pattern first.",
+            )
+            return
+
+        selected = sorted(self.selection.elements)
+        if not selected:
+            QMessageBox.information(
+                self,
+                "Beam / Element Load",
+                "Select at least one beam-column element first.",
+            )
+            return
+
+        dialog = ElementLoadDialog(
+            plain,
+            next_tag=self.project.next_element_load_tag(),
+            element_tag=selected[0],
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        template = dialog.data()
+        before = self.project.to_dict()
+        created: list[int] = []
+        next_tag = template.tag
+        try:
+            for element_tag in selected:
+                while next_tag in self.project.element_loads:
+                    next_tag += 1
+                load = ElementLoadData(
+                    tag=next_tag,
+                    name=(
+                        f"{template.name} - Element {element_tag}"
+                        if len(selected) > 1
+                        else template.name
+                    ),
+                    pattern_tag=template.pattern_tag,
+                    element_tag=element_tag,
+                    load_type=template.load_type,
+                    wx=template.wx,
+                    wy=template.wy,
+                    wz=template.wz,
+                    px=template.px,
+                    py=template.py,
+                    pz=template.pz,
+                    x_over_l=template.x_over_l,
+                    gravity=template.gravity,
+                    density_override=template.density_override,
+                )
+                self.project.add_element_load(load)
+                created.append(load.tag)
+                next_tag += 1
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "Beam / Element Load Editor",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+
+        self._refresh_project_metadata(
+            f"Created {len(created)} element load(s)"
+        )
+        self._record_project_change(
+            "Create element load(s)",
+            before,
+        )
+
+    def _edit_element_load(self, tag: int) -> None:
+        load = self.project.element_loads.get(tag)
+        if load is None:
+            return
+        plain = {
+            key: pattern
+            for key, pattern in self.project.load_patterns.items()
+            if pattern.pattern_type == "Plain"
+        }
+        dialog = ElementLoadDialog(
+            plain,
+            load=load,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated = dialog.data()
+            self.project.update_element_load(tag, updated)
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Beam / Element Load Editor",
+                str(exc),
+            )
+            return
+        self._refresh_project_metadata(
+            f"Updated element load {updated.tag}"
+        )
+        self._show_element_load_properties(updated.tag)
+        self._record_project_change(
+            f"Edit element load {tag}",
+            before,
+        )
+
+    def _delete_element_load(self, tag: int) -> None:
+        if tag not in self.project.element_loads:
+            return
+        before = self.project.to_dict()
+        self.project.remove_element_load(tag)
+        self._refresh_project_metadata(
+            f"Deleted element load {tag}"
+        )
+        self._record_project_change(
+            f"Delete element load {tag}",
+            before,
+        )
+
+    def _show_element_load_properties(self, tag: int) -> None:
+        load = self.project.element_loads.get(tag)
+        if load is None:
+            return
+        rows: list[tuple[str, object]] = [
+            ("Tag", load.tag),
+            ("Name", load.name),
+            ("Pattern", load.pattern_tag),
+            ("Element", load.element_tag),
+            ("Type", load.load_type),
+        ]
+        if load.load_type == "Uniform":
+            rows.extend([
+                ("Wx", f"{load.wx:g}"),
+                ("Wy", f"{load.wy:g}"),
+                ("Wz", f"{load.wz:g}"),
+            ])
+        elif load.load_type == "Point":
+            rows.extend([
+                ("Px", f"{load.px:g}"),
+                ("Py", f"{load.py:g}"),
+                ("Pz", f"{load.pz:g}"),
+                ("x/L", f"{load.x_over_l:g}"),
+            ])
+        else:
+            rows.extend([
+                ("Gravity", ", ".join(
+                    f"{value:g}" for value in load.gravity
+                )),
+                (
+                    "Density override",
+                    (
+                        f"{load.density_override:g}"
+                        if load.density_override > 0.0
+                        else "Linked material"
+                    ),
+                ),
+            ])
+        self.properties_panel.set_properties(
+            "Beam / Element Load",
+            rows,
+        )
 
     def _selected_element_tags(
         self,
@@ -2556,6 +2767,7 @@ class MainWindow(QMainWindow):
         self.project.prune_constraints()
         self.project.prune_connections()
         self.project.prune_nodal_loads()
+        self.project.prune_element_loads()
         self.selection.clear()
         self._refresh_all("Deleted selected entities")
         self._record_project_change("Delete selected entities", before)
@@ -3763,6 +3975,10 @@ class MainWindow(QMainWindow):
             if pattern is not None and pattern.pattern_type == "Plain":
                 add_load = menu.addAction("Add Nodal Load...")
                 add_load.triggered.connect(self._create_nodal_load)
+                add_element_load = menu.addAction("Add Beam Load...")
+                add_element_load.triggered.connect(
+                    self._create_element_load
+                )
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_load_pattern(tag))
             menu.exec(self.tree.viewport().mapToGlobal(position))
@@ -3774,6 +3990,19 @@ class MainWindow(QMainWindow):
             edit.triggered.connect(lambda: self._edit_nodal_load(tag))
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_nodal_load(tag))
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "element_load":
+            tag = int(value)
+            edit = menu.addAction("Edit...")
+            edit.triggered.connect(
+                lambda: self._edit_element_load(tag)
+            )
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(
+                lambda: self._delete_element_load(tag)
+            )
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
@@ -3896,6 +4125,8 @@ class MainWindow(QMainWindow):
             self._edit_load_pattern(int(value))
         elif kind == "nodal_load":
             self._edit_nodal_load(int(value))
+        elif kind == "element_load":
+            self._edit_element_load(int(value))
         elif kind == "analysis":
             self._edit_analysis(int(value))
 
