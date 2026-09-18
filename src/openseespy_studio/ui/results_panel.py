@@ -88,6 +88,7 @@ class ResultsPanel(QWidget):
     deformation_requested = Signal(float)
     mode_shape_requested = Signal(int, float)
     clear_overlay_requested = Signal()
+    job_selected = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -105,6 +106,7 @@ class ResultsPanel(QWidget):
         self._build_deformation_tab()
         self._build_mode_tab()
         self._build_node_tab()
+        self._build_element_tab()
         self._build_history_tab()
 
     def _build_jobs_tab(self) -> None:
@@ -120,6 +122,7 @@ class ResultsPanel(QWidget):
         )
         self.jobs_table.horizontalHeader().setStretchLastSection(True)
         self.jobs_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.jobs_table.cellClicked.connect(self._job_clicked)
         layout.addWidget(self.jobs_table)
         self.tabs.addTab(page, "Jobs")
 
@@ -198,12 +201,32 @@ class ResultsPanel(QWidget):
         layout.addWidget(self.node_table)
         self.tabs.addTab(page, "Node Results")
 
+    def _build_element_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        self.element_table = QTableWidget(0, 2)
+        self.element_table.setHorizontalHeaderLabels(["Element", "Force vector"])
+        self.element_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.element_table.horizontalHeader().setStretchLastSection(True)
+        self.element_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        layout.addWidget(self.element_table)
+        self.tabs.addTab(page, "Element Results")
+
     def _build_history_tab(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
         row = QHBoxLayout()
         self.history_label = QLabel("Monitor node: -")
         row.addWidget(self.history_label)
+        row.addWidget(QLabel("Quantity:"))
+        self.history_quantity = QComboBox()
+        self.history_quantity.addItems(["Monitor displacement", "Base shear"])
+        self.history_quantity.currentTextChanged.connect(
+            self._update_history_plot
+        )
+        row.addWidget(self.history_quantity)
         row.addWidget(QLabel("DOF:"))
         self.history_dof = QComboBox()
         self.history_dof.addItems(["UX", "UY", "UZ", "RX", "RY", "RZ"])
@@ -214,6 +237,27 @@ class ResultsPanel(QWidget):
         self.history_plot = TimeHistoryPlot()
         layout.addWidget(self.history_plot, 1)
         self.tabs.addTab(page, "Time History")
+
+    def _job_clicked(self, row: int, column: int) -> None:
+        item = self.jobs_table.item(row, 0)
+        if item is None:
+            return
+        job_id = item.data(Qt.UserRole)
+        if job_id is not None:
+            self.job_selected.emit(int(job_id))
+
+    def clear_all(self) -> None:
+        self._result = {}
+        self.jobs_table.setRowCount(0)
+        self.node_table.setRowCount(0)
+        self.element_table.setRowCount(0)
+        self.mode_combo.clear()
+        self.deformation_info.setText(
+            "Run a non-modal analysis to view deformation."
+        )
+        self.mode_info.setText("Run a Modal analysis to populate mode shapes.")
+        self.history_label.setText("Monitor node: -")
+        self.history_plot.set_series([], [])
 
     def _emit_mode(self) -> None:
         mode = self.mode_combo.currentData()
@@ -275,6 +319,7 @@ class ResultsPanel(QWidget):
         )
 
         self._populate_node_table()
+        self._populate_element_table()
         self._update_history_plot()
 
     def _populate_node_table(self) -> None:
@@ -299,16 +344,40 @@ class ResultsPanel(QWidget):
                     QTableWidgetItem(f"{float(value):.6g}"),
                 )
 
+    def _populate_element_table(self) -> None:
+        final = self._result.get("final", {})
+        forces = (
+            final.get("element_forces", {})
+            if isinstance(final, dict)
+            else {}
+        )
+        tags = sorted(forces, key=lambda value: int(value))
+        self.element_table.setRowCount(len(tags))
+        for row, tag in enumerate(tags):
+            values = forces[tag]
+            text = ", ".join(f"{float(value):.6g}" for value in values)
+            self.element_table.setItem(row, 0, QTableWidgetItem(str(tag)))
+            self.element_table.setItem(row, 1, QTableWidgetItem(text))
+
     def _update_history_plot(self) -> None:
         history = self._result.get("history", {})
         time = [float(value) for value in history.get("time", [])]
-        rows = history.get("displacement", [])
-        index = self.history_dof.currentIndex()
-        values = [
-            float(row[index]) if index < len(row) else 0.0
-            for row in rows
-        ]
         self.history_label.setText(
             f"Monitor node: {history.get('monitor_node', '-')}"
         )
+
+        if self.history_quantity.currentText() == "Base shear":
+            self.history_dof.setEnabled(False)
+            values = [
+                float(value)
+                for value in history.get("base_shear", [])
+            ]
+        else:
+            self.history_dof.setEnabled(True)
+            rows = history.get("displacement", [])
+            index = self.history_dof.currentIndex()
+            values = [
+                float(row[index]) if index < len(row) else 0.0
+                for row in rows
+            ]
         self.history_plot.set_series(time, values)

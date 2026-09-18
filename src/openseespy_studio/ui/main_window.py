@@ -701,6 +701,7 @@ class MainWindow(QMainWindow):
         self.results_panel.clear_overlay_requested.connect(
             self.viewport.clear_result_overlay
         )
+        self.results_panel.job_selected.connect(self._select_job_result)
         results_dock.setWidget(self.results_panel)
         self.splitDockWidget(console_dock, results_dock, Qt.Horizontal)
 
@@ -989,6 +990,7 @@ class MainWindow(QMainWindow):
         )
         self.model = self.project.model
         self._project_path = None
+        self._reset_runtime_results()
         self.undo_stack.clear()
         self.undo_stack.setClean()
         self._set_dirty(False)
@@ -2584,6 +2586,7 @@ class MainWindow(QMainWindow):
         self.project = project
         self.model = project.model
         self._project_path = Path(path)
+        self._reset_runtime_results()
         self.undo_stack.clear()
         self.undo_stack.setClean()
         self._set_dirty(False)
@@ -4120,6 +4123,24 @@ class MainWindow(QMainWindow):
         self._current_job_id = None
         self._cleanup_analysis_files()
         self._refresh_tree()
+
+    def _reset_runtime_results(self) -> None:
+        self._jobs.clear()
+        self._job_counter = 0
+        self._current_job_id = None
+        self._last_result = {}
+        self.viewport.clear_result_overlay()
+        self.results_panel.clear_all()
+
+    def _select_job_result(self, job_id: int) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None or not job.results:
+            return
+        self._last_result = dict(job.results)
+        self.results_panel.set_result(self._last_result)
+        self.status_message.setText(
+            f"Selected Job {job.job_id}: {job.analysis_name}"
+        )
 
     def _show_deformation_result(self, scale: float) -> None:
         if not self._last_result:
