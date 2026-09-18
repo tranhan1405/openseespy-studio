@@ -13,21 +13,20 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QFrame,
-    QGroupBox,
-    QHeaderView,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
-    QStackedWidget,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QToolBar,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -36,235 +35,230 @@ from PySide6.QtWidgets import (
 
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..model import StructuralModel
+from .code_editor import CodeEditor
 from .icons import studio_icon
+from .results_panel import ResultsPanel
 from .viewport import ModelViewport
 
 
 APP_STYLE = """
 QMainWindow {
-    background: #eaf0f6;
+    background: #edf1f5;
     color: #23364a;
 }
 QMenuBar {
-    background: #fbfcfe;
-    color: #23364a;
-    border-bottom: 1px solid #c9d4df;
-    padding: 2px 4px;
+    background: #f7f8fa;
+    color: #1f2f40;
+    border-bottom: 1px solid #ccd4dd;
+    padding: 1px 3px;
 }
 QMenuBar::item {
-    padding: 6px 10px;
-    margin: 0 1px;
+    padding: 5px 9px;
     background: transparent;
-    border-radius: 3px;
 }
 QMenuBar::item:selected {
-    background: #dfeeff;
-    color: #1659a7;
+    background: #e4edf8;
 }
-QToolBar {
-    background: #f8fafc;
+QToolBar#Ribbon {
+    background: #f7f8fa;
     border: none;
-    border-bottom: 1px solid #c7d2de;
-    spacing: 3px;
-    padding: 5px 6px;
+    border-bottom: 1px solid #c9d1da;
+    spacing: 0;
+    padding: 3px 4px 0 4px;
 }
-QToolBar::separator {
-    background: #c9d4df;
-    width: 1px;
-    margin: 4px 6px;
+QWidget#RibbonGroup {
+    border-right: 1px solid #d5dbe2;
+    background: transparent;
 }
-QToolBar QToolButton {
-    min-width: 52px;
-    min-height: 48px;
-    padding: 4px 6px;
+QLabel#RibbonCaption {
+    color: #526273;
+    font-size: 10px;
+    padding: 1px 3px 2px 3px;
+}
+QToolButton#RibbonButton {
+    color: #203247;
     border: 1px solid transparent;
-    border-radius: 4px;
-    color: #2c4055;
+    border-radius: 3px;
+    padding: 3px 5px;
+    min-width: 47px;
+    min-height: 53px;
 }
-QToolBar QToolButton:hover {
-    background: #e1efff;
-    border-color: #b7d2f3;
-    color: #14589e;
+QToolButton#RibbonButton:hover {
+    background: #e4effc;
+    border-color: #b6cee9;
 }
-QToolBar QToolButton:pressed,
-QToolBar QToolButton:checked {
-    background: #cfe5ff;
-    border-color: #6fa8e8;
-    color: #0f4f91;
+QToolButton#RibbonButton:pressed,
+QToolButton#RibbonButton:checked {
+    background: #d0e6ff;
+    border-color: #7fb0e6;
 }
 QDockWidget {
-    color: #22364b;
+    color: #203247;
     font-weight: 600;
 }
 QDockWidget::title {
-    background: #e8eef5;
-    border: 1px solid #c9d4df;
-    padding: 7px 9px;
+    background: #f1f4f7;
+    border: 1px solid #cbd3dc;
+    padding: 6px 8px;
     text-align: left;
+}
+QTabWidget::pane {
+    background: #ffffff;
+    border: 1px solid #cbd3dc;
+}
+QTabBar::tab {
+    background: #edf1f5;
+    color: #4b5e71;
+    border: 1px solid #cbd3dc;
+    border-bottom: none;
+    padding: 6px 12px;
+}
+QTabBar::tab:selected {
+    background: #ffffff;
+    color: #163f68;
+    border-top: 2px solid #2f80ed;
+    font-weight: 600;
 }
 QTreeWidget, QTableWidget, QPlainTextEdit {
     background: #ffffff;
-    color: #25384b;
-    border: 1px solid #cbd5df;
+    color: #23364a;
+    border: 0;
     selection-background-color: #2f80ed;
     selection-color: #ffffff;
 }
 QTreeWidget {
-    padding: 4px;
-    alternate-background-color: #f7faff;
+    alternate-background-color: #fbfcfd;
+    padding: 3px;
 }
 QTreeWidget::item {
-    min-height: 22px;
-    padding: 2px 3px;
-    border-radius: 2px;
+    min-height: 21px;
+    padding: 1px 2px;
 }
 QTreeWidget::item:hover {
-    background: #eaf3ff;
-    color: #1b5fa9;
-}
-QTreeWidget::item:selected {
-    background: #2f80ed;
-    color: #ffffff;
+    background: #e8f2fe;
 }
 QTableWidget {
-    gridline-color: #e0e7ef;
-}
-QHeaderView::section {
-    background: #eef3f8;
-    color: #2c4055;
-    border: none;
-    border-right: 1px solid #d6dee7;
-    border-bottom: 1px solid #d6dee7;
-    padding: 5px;
-    font-weight: 600;
-}
-QTabWidget::pane {
-    border: 1px solid #c8d3de;
-    background: #ffffff;
-}
-QTabBar::tab {
-    background: #e8eef5;
-    color: #516477;
-    border: 1px solid #c8d3de;
-    border-bottom: none;
-    padding: 7px 14px;
-    margin-right: 1px;
-}
-QTabBar::tab:hover {
-    background: #edf5ff;
-    color: #1c62aa;
-}
-QTabBar::tab:selected {
-    background: #ffffff;
-    color: #1a5fa8;
-    border-top: 3px solid #2f80ed;
-    padding-top: 5px;
-    font-weight: 600;
-}
-QGroupBox {
-    font-weight: 600;
-    color: #2d4359;
-    background: #fbfcfe;
-    border: 1px solid #ccd7e2;
-    border-radius: 5px;
-    margin-top: 12px;
-    padding-top: 9px;
-}
-QGroupBox::title {
-    subcontrol-origin: margin;
-    left: 9px;
-    padding: 0 5px;
-    color: #234b72;
-    background: #fbfcfe;
-}
-QSpinBox, QDoubleSpinBox, QComboBox {
-    min-height: 26px;
-    color: #24384c;
-    border: 1px solid #b9c7d5;
-    border-radius: 4px;
-    background: #ffffff;
-    padding: 2px 6px;
-}
-QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover {
-    border-color: #7eaee2;
-}
-QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
-    border: 2px solid #2f80ed;
-    background: #fbfdff;
-}
-QCheckBox {
-    color: #2c4055;
-    spacing: 7px;
+    gridline-color: #e1e6ec;
 }
 QPushButton {
-    min-height: 29px;
-    color: #2c4055;
-    border: 1px solid #b9c7d5;
-    border-radius: 4px;
-    background: #f9fbfd;
-    padding: 4px 11px;
+    min-height: 27px;
+    border: 1px solid #bcc7d2;
+    border-radius: 3px;
+    background: #f8fafc;
+    color: #26394c;
+    padding: 3px 10px;
 }
 QPushButton:hover {
     background: #e9f3ff;
     border-color: #86b4e7;
-    color: #155a9e;
 }
 QPushButton:checked {
-    background: #2f80ed;
-    border-color: #2f80ed;
-    color: #ffffff;
+    background: #dcecff;
+    border-color: #79aee8;
+    color: #14599d;
     font-weight: 600;
 }
-QPushButton:disabled {
-    color: #9aa8b6;
-    background: #eef2f6;
-    border-color: #d6dee7;
-}
 QPushButton#PrimaryButton {
-    background: #2f80ed;
-    border-color: #2f80ed;
-    color: #ffffff;
+    background: #1877d3;
+    border-color: #1877d3;
+    color: white;
     font-weight: 700;
-    min-width: 96px;
+    min-width: 92px;
 }
 QPushButton#PrimaryButton:hover {
-    background: #1f6fd1;
-    border-color: #1f6fd1;
+    background: #0f68c2;
+}
+QPushButton#CloseButton {
+    min-width: 86px;
+}
+QSpinBox, QDoubleSpinBox, QComboBox {
+    min-height: 25px;
+    border: 1px solid #bac6d2;
+    border-radius: 3px;
+    background: #ffffff;
+    color: #25394c;
+    padding: 1px 5px;
+}
+QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+    border: 1px solid #2f80ed;
+}
+QCheckBox {
+    spacing: 6px;
+    color: #263a4f;
 }
 QLabel#PanelTitle {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 700;
     color: #183e65;
 }
+QLabel#SectionTitle {
+    font-size: 12px;
+    font-weight: 700;
+    color: #1f3348;
+    padding-top: 4px;
+}
 QLabel#Muted {
-    color: #718296;
+    color: #718195;
+}
+QFrame#SectionLine {
+    color: #d7dee6;
 }
 QStatusBar {
-    background: #f8fafc;
-    color: #44576a;
-    border-top: 1px solid #c9d4df;
-}
-QStatusBar QLabel {
-    padding: 0 4px;
+    background: #f7f8fa;
+    color: #42566b;
+    border-top: 1px solid #ccd4dd;
 }
 """
 
 
+class RibbonGroup(QWidget):
+    def __init__(self, caption: str, parent=None):
+        super().__init__(parent)
+        self.setObjectName("RibbonGroup")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(3, 1, 6, 0)
+        layout.setSpacing(0)
+
+        self.button_row = QHBoxLayout()
+        self.button_row.setSpacing(1)
+        layout.addLayout(self.button_row)
+
+        label = QLabel(caption)
+        label.setObjectName("RibbonCaption")
+        label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(label)
+
+    def add_action(self, action: QAction) -> None:
+        button = QToolButton()
+        button.setObjectName("RibbonButton")
+        button.setDefaultAction(action)
+        button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        button.setIconSize(QSize(25, 25))
+        button.setAutoRaise(True)
+        self.button_row.addWidget(button)
+
+
 class FrameGridPanel(QWidget):
-    def __init__(self, generate_callback, parent=None):
+    def __init__(self, generate_callback, close_callback, parent=None):
         super().__init__(parent)
         self.generate_callback = generate_callback
+        self.close_callback = close_callback
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 7, 8, 8)
+        root.setSpacing(6)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        body = QWidget()
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(4)
 
         title = QLabel("Create Frame Grid")
         title.setObjectName("PanelTitle")
-        subtitle = QLabel("Generate a regular 3D structural frame.")
-        subtitle.setObjectName("Muted")
         layout.addWidget(title)
-        layout.addWidget(subtitle)
 
         mode_row = QHBoxLayout()
         self.rectangular = QPushButton("Rectangular Grid")
@@ -276,59 +270,97 @@ class FrameGridPanel(QWidget):
         mode_row.addWidget(self.circular)
         layout.addLayout(mode_row)
 
-        geometry = QGroupBox("Grid Geometry")
-        form = QFormLayout(geometry)
         self.nx = self._int_spin(4)
         self.dx = self._float_spin(5.0)
         self.ny = self._int_spin(3)
         self.dy = self._float_spin(6.0)
         self.nz = self._int_spin(3)
         self.dz = self._float_spin(3.5)
-        form.addRow("X bays", self.nx)
-        form.addRow("X bay width (m)", self.dx)
-        form.addRow("Y bays", self.ny)
-        form.addRow("Y bay width (m)", self.dy)
-        form.addRow("Storeys", self.nz)
-        form.addRow("Storey height (m)", self.dz)
-        layout.addWidget(geometry)
 
-        members = QGroupBox("Members")
-        members_layout = QVBoxLayout(members)
+        self._add_section(layout, "X Direction (Bays)", [
+            ("Number of bays", self.nx),
+            ("Bay width (m)", self.dx),
+        ])
+        self._add_section(layout, "Y Direction (Bays)", [
+            ("Number of bays", self.ny),
+            ("Bay width (m)", self.dy),
+        ])
+        self._add_section(layout, "Z Direction (Storeys)", [
+            ("Number of storeys", self.nz),
+            ("Storey height (m)", self.dz),
+        ])
+
+        options_title = QLabel("Options")
+        options_title.setObjectName("SectionTitle")
+        layout.addWidget(options_title)
         self.columns = QCheckBox("Create columns")
         self.beams_x = QCheckBox("Create beams in X")
         self.beams_y = QCheckBox("Create beams in Y")
         for checkbox in (self.columns, self.beams_x, self.beams_y):
             checkbox.setChecked(True)
-            members_layout.addWidget(checkbox)
-        layout.addWidget(members)
+            layout.addWidget(checkbox)
 
-        assignment = QGroupBox("Assignment")
-        assign_form = QFormLayout(assignment)
         self.column_section = QComboBox()
-        self.column_section.addItems(["1 - Column Section (placeholder)"])
+        self.column_section.addItems(["1 - Column Section"])
         self.beam_section = QComboBox()
-        self.beam_section.addItems(["2 - Beam Section (placeholder)"])
-        assign_form.addRow("Column section", self.column_section)
-        assign_form.addRow("Beam section", self.beam_section)
-        layout.addWidget(assignment)
+        self.beam_section.addItems(["2 - Beam Section"])
+        assignment = QFormLayout()
+        assignment.setContentsMargins(0, 2, 0, 0)
+        assignment.addRow("Assign section (columns)", self.column_section)
+        assignment.addRow("Assign section (beams)", self.beam_section)
+        assign_widget = QWidget()
+        assign_widget.setLayout(assignment)
+        layout.addWidget(assign_widget)
 
-        tags = QGroupBox("Tags")
-        tags_form = QFormLayout(tags)
         self.node_tag = self._int_spin(1, 1, 10_000_000)
         self.element_tag = self._int_spin(1, 1, 10_000_000)
-        tags_form.addRow("Start node tag", self.node_tag)
-        tags_form.addRow("Start element tag", self.element_tag)
-        layout.addWidget(tags)
+        tags = QFormLayout()
+        tags.setContentsMargins(0, 2, 0, 0)
+        tags.addRow("Start node tag", self.node_tag)
+        tags.addRow("Start element tag", self.element_tag)
+        tags_widget = QWidget()
+        tags_widget.setLayout(tags)
+        layout.addWidget(tags_widget)
 
         layout.addStretch(1)
+        scroll.setWidget(body)
+        root.addWidget(scroll, 1)
 
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
         generate = QPushButton("Generate")
         generate.setObjectName("PrimaryButton")
         generate.clicked.connect(self._generate)
-        button_row.addWidget(generate)
-        layout.addLayout(button_row)
+        close = QPushButton("Close")
+        close.setObjectName("CloseButton")
+        close.clicked.connect(self.close_callback)
+        buttons.addWidget(generate)
+        buttons.addWidget(close)
+        root.addLayout(buttons)
+
+    @staticmethod
+    def _separator() -> QFrame:
+        line = QFrame()
+        line.setObjectName("SectionLine")
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Plain)
+        return line
+
+    def _add_section(self, parent_layout, title: str, rows) -> None:
+        if parent_layout.count() > 2:
+            parent_layout.addWidget(self._separator())
+        label = QLabel(title)
+        label.setObjectName("SectionTitle")
+        parent_layout.addWidget(label)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setVerticalSpacing(5)
+        for text, widget in rows:
+            form.addRow(text, widget)
+        container = QWidget()
+        container.setLayout(form)
+        parent_layout.addWidget(container)
 
     @staticmethod
     def _int_spin(value: int, low: int = 1, high: int = 100) -> QSpinBox:
@@ -346,7 +378,7 @@ class FrameGridPanel(QWidget):
         return widget
 
     def _generate(self) -> None:
-        spec = FrameGridSpec(
+        self.generate_callback(FrameGridSpec(
             nx=self.nx.value(),
             ny=self.ny.value(),
             nz=self.nz.value(),
@@ -358,141 +390,173 @@ class FrameGridPanel(QWidget):
             create_columns=self.columns.isChecked(),
             create_beams_x=self.beams_x.isChecked(),
             create_beams_y=self.beams_y.isChecked(),
-        )
-        self.generate_callback(spec)
+        ))
 
 
 class PropertiesPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(6, 5, 6, 6)
+        layout.setSpacing(4)
 
-        self.title = QLabel("Properties")
-        self.title.setObjectName("PanelTitle")
-        self.subtitle = QLabel("Select an entity in the model tree.")
-        self.subtitle.setObjectName("Muted")
-        layout.addWidget(self.title)
-        layout.addWidget(self.subtitle)
+        self.entity_label = QLabel("Node")
+        self.entity_label.setObjectName("PanelTitle")
+        layout.addWidget(self.entity_label)
 
         self.table = QTableWidget(0, 2)
         self.table.horizontalHeader().hide()
         self.table.verticalHeader().hide()
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.setShowGrid(True)
+        self.table.setSelectionMode(QAbstractItemView.NoSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setColumnWidth(0, 115)
         layout.addWidget(self.table, 1)
 
-    def set_properties(self, entity_title: str, rows: list[tuple[str, object]]) -> None:
-        self.title.setText(entity_title)
-        self.subtitle.setText("Entity information")
+        row = QHBoxLayout()
+        row.addStretch(1)
+        apply_button = QPushButton("Apply")
+        apply_button.setEnabled(False)
+        row.addWidget(apply_button)
+        layout.addLayout(row)
+
+    def set_properties(self, title: str, rows: list[tuple[str, object]]) -> None:
+        self.entity_label.setText(title)
         self.table.setRowCount(len(rows))
-        for row, (key, value) in enumerate(rows):
-            self.table.setItem(row, 0, QTableWidgetItem(str(key)))
-            self.table.setItem(row, 1, QTableWidgetItem(str(value)))
+        for index, (key, value) in enumerate(rows):
+            self.table.setItem(index, 0, QTableWidgetItem(str(key)))
+            self.table.setItem(index, 1, QTableWidgetItem(str(value)))
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("OpenSeesPy Studio (Alpha)")
-        self.resize(1600, 960)
-        self.setMinimumSize(1100, 700)
+        self.setWindowTitle("OpenSeesPy Studio (Beta) - [Untitled]")
+        self.resize(1536, 960)
+        self.setMinimumSize(1150, 720)
         self.setStyleSheet(APP_STYLE)
 
         self.model = StructuralModel("3D_Frame")
-        self.context_mode = "frame-grid"
+        self.actions: dict[str, QAction] = {}
 
-        self._build_ui()
+        self.setCorner(Qt.BottomLeftCorner, Qt.LeftDockWidgetArea)
+        self.setCorner(Qt.BottomRightCorner, Qt.BottomDockWidgetArea)
+
+        self._build_central_view()
+        self._build_model_tree_dock()
+        self._build_properties_dock()
+        self._build_create_dock()
+        self._build_bottom_docks()
+        self._build_actions_and_ribbon()
+        self._build_status_bar()
         self._create_default_model()
+        self._size_initial_docks()
 
-    def _build_ui(self) -> None:
+    def _build_central_view(self) -> None:
         self.viewport = ModelViewport(self)
         self.setCentralWidget(self.viewport)
 
-        self._build_tree()
-        self._build_context_panel()
-        self._build_bottom_panel()
-        self._build_actions()
-        self._build_status_bar()
-
-    def _build_tree(self) -> None:
+    def _build_model_tree_dock(self) -> None:
         dock = QDockWidget("Model Tree", self)
         dock.setObjectName("ModelTreeDock")
-        dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
-        dock.setMinimumWidth(250)
-
-        self.tree = QTreeWidget()
-        self.tree.setHeaderHidden(True)
-        self.tree.setUniformRowHeights(True)
-        self.tree.setIconSize(QSize(18, 18))
-        self.tree.setIndentation(18)
-        self.tree.itemSelectionChanged.connect(self._tree_selection_changed)
-
-        dock.setWidget(self.tree)
-        self.addDockWidget(Qt.LeftDockWidgetArea, dock)
-        self.model_tree_dock = dock
-
-    def _build_context_panel(self) -> None:
-        dock = QDockWidget("Create / Edit", self)
-        dock.setObjectName("ContextDock")
-        dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
-        dock.setMinimumWidth(325)
-
-        self.context_stack = QStackedWidget()
-        self.frame_grid_panel = FrameGridPanel(self._generate_frame_grid)
-        self.properties_panel = PropertiesPanel()
-        self.context_stack.addWidget(self.frame_grid_panel)
-        self.context_stack.addWidget(self.properties_panel)
-
-        dock.setWidget(self.context_stack)
-        self.addDockWidget(Qt.RightDockWidgetArea, dock)
-        self.context_dock = dock
-
-    def _build_bottom_panel(self) -> None:
-        dock = QDockWidget("Workspace", self)
-        dock.setObjectName("BottomDock")
-        dock.setAllowedAreas(Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea)
+        dock.setAllowedAreas(Qt.LeftDockWidgetArea)
+        dock.setMinimumWidth(245)
 
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
 
-        self.script = QPlainTextEdit()
-        self.script.setFont(QFont("Consolas", 10))
-        self.script.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderHidden(True)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setIconSize(QSize(17, 17))
+        self.tree.setIndentation(17)
+        self.tree.itemSelectionChanged.connect(self._tree_selection_changed)
 
+        history = QLabel("Command history will appear here.")
+        history.setAlignment(Qt.AlignCenter)
+        history.setObjectName("Muted")
+
+        tabs.addTab(self.tree, "Model Tree")
+        tabs.addTab(history, "History")
+        dock.setWidget(tabs)
+
+        self.addDockWidget(Qt.LeftDockWidgetArea, dock)
+        self.model_tree_dock = dock
+
+    def _build_properties_dock(self) -> None:
+        dock = QDockWidget("Properties", self)
+        dock.setObjectName("PropertiesDock")
+        dock.setAllowedAreas(Qt.LeftDockWidgetArea)
+        dock.setMinimumWidth(245)
+
+        self.properties_panel = PropertiesPanel()
+        dock.setWidget(self.properties_panel)
+
+        self.splitDockWidget(self.model_tree_dock, dock, Qt.Vertical)
+        self.properties_dock = dock
+
+    def _build_create_dock(self) -> None:
+        dock = QDockWidget("Create Frame Grid", self)
+        dock.setObjectName("CreateDock")
+        dock.setAllowedAreas(Qt.RightDockWidgetArea)
+        dock.setMinimumWidth(315)
+
+        self.frame_grid_panel = FrameGridPanel(
+            self._generate_frame_grid,
+            dock.hide,
+        )
+        dock.setWidget(self.frame_grid_panel)
+
+        self.addDockWidget(Qt.RightDockWidgetArea, dock)
+        self.create_dock = dock
+
+    def _build_bottom_docks(self) -> None:
+        script_dock = QDockWidget("Python Script", self)
+        script_dock.setObjectName("PythonDock")
+        script_dock.setAllowedAreas(Qt.BottomDockWidgetArea)
+        self.script = CodeEditor()
+        script_dock.setWidget(self.script)
+        self.addDockWidget(Qt.BottomDockWidgetArea, script_dock)
+
+        console_dock = QDockWidget("Console", self)
+        console_dock.setObjectName("ConsoleDock")
+        console_dock.setAllowedAreas(Qt.BottomDockWidgetArea)
         self.console = QPlainTextEdit()
         self.console.setReadOnly(True)
         self.console.setFont(QFont("Consolas", 9))
+        console_dock.setWidget(self.console)
+        self.splitDockWidget(script_dock, console_dock, Qt.Horizontal)
 
-        results = QWidget()
-        results_layout = QVBoxLayout(results)
-        results_layout.setContentsMargins(12, 12, 12, 12)
-        result_header = QHBoxLayout()
-        for label in ("Deformation", "Mode Shape", "Node Results", "Element Results"):
-            button = QPushButton(label)
-            button.setEnabled(False)
-            result_header.addWidget(button)
-        result_header.addStretch(1)
-        results_layout.addLayout(result_header)
+        results_dock = QDockWidget("Results Viewer", self)
+        results_dock.setObjectName("ResultsDock")
+        results_dock.setAllowedAreas(Qt.BottomDockWidgetArea)
+        self.results_panel = ResultsPanel()
+        results_dock.setWidget(self.results_panel)
+        self.splitDockWidget(console_dock, results_dock, Qt.Horizontal)
 
-        empty_results = QLabel(
-            "Results Viewer\n\nRun an analysis to populate deformation, mode shapes, "
-            "nodal results and element results."
-        )
-        empty_results.setAlignment(Qt.AlignCenter)
-        empty_results.setObjectName("Muted")
-        results_layout.addWidget(empty_results, 1)
+        self.script_dock = script_dock
+        self.console_dock = console_dock
+        self.results_dock = results_dock
 
-        tabs.addTab(self.script, "Python Script")
-        tabs.addTab(self.console, "Console")
-        tabs.addTab(results, "Results Viewer")
+    def _make_action(
+        self,
+        key: str,
+        text: str,
+        icon_name: str,
+        callback,
+        tooltip: str,
+        checkable: bool = False,
+    ) -> QAction:
+        action = QAction(studio_icon(icon_name), text, self)
+        action.setToolTip(tooltip)
+        action.setCheckable(checkable)
+        action.triggered.connect(callback)
+        self.actions[key] = action
+        return action
 
-        dock.setWidget(tabs)
-        self.addDockWidget(Qt.BottomDockWidgetArea, dock)
-        self.resizeDocks([dock], [185], Qt.Vertical)
-        self.bottom_dock = dock
-
-    def _build_actions(self) -> None:
+    def _build_actions_and_ribbon(self) -> None:
         menus = {}
         for name in (
             "File", "Edit", "View", "Geometry", "Model", "Loads",
@@ -500,150 +564,100 @@ class MainWindow(QMainWindow):
         ):
             menus[name] = self.menuBar().addMenu(name)
 
-        toolbar = QToolBar("CAE Tools")
-        toolbar.setObjectName("MainToolbar")
-        toolbar.setMovable(False)
-        toolbar.setFloatable(False)
-        toolbar.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        toolbar.setIconSize(QSize(26, 26))
-        self.addToolBar(Qt.TopToolBarArea, toolbar)
+        self._make_action("new", "New", "new", self._new_model, "New model")
+        self._make_action("open", "Open", "open", self._not_implemented, "Open model")
+        self._make_action("save", "Save", "save", self._export_script, "Export OpenSeesPy script")
+        self._make_action("undo", "Undo", "undo", self._not_implemented, "Undo")
+        self._make_action("redo", "Redo", "redo", self._not_implemented, "Redo")
 
-        new_action = self._action(
-            "New",
-            "new",
-            self._new_model,
-            "Create a new model",
-        )
-        open_action = self._action(
-            "Open",
-            "open",
-            self._not_implemented,
-            "Open model (coming next)",
-        )
-        export_action = self._action(
-            "Export",
-            "save",
-            self._export_script,
-            "Export generated OpenSeesPy script",
-        )
-        undo_action = self._action(
-            "Undo",
-            "undo",
-            self._not_implemented,
-            "Undo (coming next)",
-        )
-        redo_action = self._action(
-            "Redo",
-            "redo",
-            self._not_implemented,
-            "Redo (coming next)",
-        )
+        self._make_action("node", "Node", "node", self._not_implemented, "Create node")
+        self._make_action("line", "Line", "element", self._not_implemented, "Create line")
+        self._make_action("frame", "Frame", "element", self._not_implemented, "Create frame element")
+        self._make_action("grid", "Grid", "grid", self._show_frame_grid, "Create frame grid")
+        self._make_action("extrude", "Extrude", "copy", self._not_implemented, "Extrude geometry")
 
-        for action in (new_action, open_action, export_action):
-            menus["File"].addAction(action)
-        menus["Edit"].addActions([undo_action, redo_action])
-
-        for action in (new_action, open_action, export_action):
-            toolbar.addAction(action)
-        toolbar.addSeparator()
-        toolbar.addAction(undo_action)
-        toolbar.addAction(redo_action)
-        toolbar.addSeparator()
-
-        node_action = self._action(
-            "Node",
-            "node",
-            self._not_implemented,
-            "Create node by GUI (next milestone)",
-        )
-        element_action = self._action(
-            "Element",
-            "element",
-            self._not_implemented,
-            "Create element by GUI (next milestone)",
-        )
-        grid_action = self._action(
-            "Frame Grid",
-            "grid",
-            self._show_frame_grid,
-            "Create regular frame grid",
-        )
-        menus["Geometry"].addActions([node_action, element_action, grid_action])
-        for action in (node_action, element_action, grid_action):
-            toolbar.addAction(action)
-
-        toolbar.addSeparator()
-        for label, icon_name in (
-            ("Copy", "copy"),
-            ("Move", "move"),
-            ("Rotate", "rotate"),
-            ("Mirror", "mirror"),
-            ("Delete", "delete"),
+        for key, label, icon in (
+            ("copy", "Copy", "copy"),
+            ("move", "Move", "move"),
+            ("rotate", "Rotate", "rotate"),
+            ("mirror", "Mirror", "mirror"),
+            ("delete", "Delete", "delete"),
         ):
-            action = self._action(
-                label,
-                icon_name,
-                self._not_implemented,
-                f"{label} geometry (coming next)",
-            )
-            toolbar.addAction(action)
+            self._make_action(key, label, icon, self._not_implemented, label)
 
-        toolbar.addSeparator()
-        for label, icon_name in (
-            ("Select", "select"),
-            ("Box", "box"),
-            ("Polygon", "polygon"),
-            ("By ID", "by-id"),
+        for key, label, icon in (
+            ("select", "Select", "select"),
+            ("box", "Box", "box"),
+            ("polygon", "Polygon", "polygon"),
+            ("byid", "By ID", "by-id"),
+            ("bytype", "By Type", "by-id"),
         ):
-            action = self._action(
-                label,
-                icon_name,
-                self._not_implemented,
-                f"{label} selection (coming next)",
-            )
-            toolbar.addAction(action)
+            self._make_action(key, label, icon, self._not_implemented, label)
 
-        toolbar.addSeparator()
-        for label, view in (
-            ("XY", "xy"),
-            ("XZ", "xz"),
-            ("YZ", "yz"),
-            ("ISO", "iso"),
+        for key, label, icon, view in (
+            ("xy", "XY", "xy", "xy"),
+            ("yz", "YZ", "yz", "yz"),
+            ("xz", "XZ", "xz", "xz"),
+            ("iso", "ISO", "iso", "iso"),
         ):
-            action = self._action(
-                label,
-                view,
+            self._make_action(
+                key, label, icon,
                 lambda checked=False, v=view: self.viewport.set_view(v),
-                f"Set {label} view",
+                f"{label} view",
             )
-            menus["View"].addAction(action)
-            toolbar.addAction(action)
 
-        fit_action = self._action(
-            "Fit",
-            "fit",
-            self.viewport.fit_view,
-            "Fit model in viewport",
-        )
-        toolbar.addAction(fit_action)
+        self._make_action("run", "Run", "run", self._run_generated_model, "Run model")
+        self._make_action("plot", "Plot", "plot", self._not_implemented, "Plot results")
 
-        toolbar.addSeparator()
-        run_action = self._action(
-            "Run",
-            "run",
-            self._run_generated_model,
-            "Execute generated OpenSeesPy model",
+        menus["File"].addActions([
+            self.actions["new"], self.actions["open"], self.actions["save"],
+        ])
+        menus["Edit"].addActions([self.actions["undo"], self.actions["redo"]])
+        menus["Geometry"].addActions([
+            self.actions["node"], self.actions["line"], self.actions["frame"],
+            self.actions["grid"], self.actions["extrude"],
+        ])
+        menus["View"].addActions([
+            self.actions["xy"], self.actions["yz"], self.actions["xz"], self.actions["iso"],
+        ])
+        menus["Analysis"].addAction(self.actions["run"])
+        menus["Results"].addAction(self.actions["plot"])
+
+        ribbon = QToolBar("Ribbon", self)
+        ribbon.setObjectName("Ribbon")
+        ribbon.setMovable(False)
+        ribbon.setFloatable(False)
+        self.addToolBar(Qt.TopToolBarArea, ribbon)
+
+        groups = (
+            ("File", ["new", "open", "save"]),
+            ("Edit", ["undo", "redo"]),
+            ("Geometry", ["node", "line", "frame", "grid", "extrude"]),
+            ("Modify", ["copy", "move", "rotate", "mirror", "delete"]),
+            ("Selection", ["select", "box", "polygon", "byid", "bytype"]),
+            ("View", ["xy", "yz", "xz", "iso"]),
+            ("Analysis", ["run", "plot"]),
         )
-        plot_action = self._action(
-            "Plot",
-            "plot",
-            self._not_implemented,
-            "Post-processing plots (coming later)",
-        )
-        menus["Analysis"].addAction(run_action)
-        menus["Results"].addAction(plot_action)
-        toolbar.addAction(run_action)
-        toolbar.addAction(plot_action)
+
+        for caption, keys in groups:
+            group = RibbonGroup(caption)
+            for key in keys:
+                group.add_action(self.actions[key])
+            ribbon.addWidget(group)
+
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        ribbon.addWidget(spacer)
+
+        logo = QWidget()
+        logo_layout = QHBoxLayout(logo)
+        logo_layout.setContentsMargins(12, 2, 10, 2)
+        mark = QLabel("∿")
+        mark.setStyleSheet("font-size: 32px; font-weight: 700; color: #c62828;")
+        title = QLabel("<b>OpenSeesPy Studio</b><br><span style='color:#6d7b89'>Model · Analyze · Visualize</span>")
+        logo_layout.addWidget(mark)
+        logo_layout.addWidget(title)
+        ribbon.addWidget(logo)
 
     def _build_status_bar(self) -> None:
         self.status_message = QLabel("Ready")
@@ -652,25 +666,31 @@ class MainWindow(QMainWindow):
         self.status_counts = QLabel("Nodes: 0   Elements: 0")
 
         self.statusBar().addWidget(self.status_message, 1)
-        self.statusBar().addPermanentWidget(self._status_separator())
         self.statusBar().addPermanentWidget(self.status_units)
-        self.statusBar().addPermanentWidget(self._status_separator())
         self.statusBar().addPermanentWidget(self.status_view)
-        self.statusBar().addPermanentWidget(self._status_separator())
         self.statusBar().addPermanentWidget(self.status_counts)
 
-    @staticmethod
-    def _status_separator() -> QFrame:
-        line = QFrame()
-        line.setFrameShape(QFrame.VLine)
-        line.setFrameShadow(QFrame.Sunken)
-        return line
-
-    def _action(self, text, icon_name, callback, tooltip) -> QAction:
-        action = QAction(studio_icon(icon_name), text, self)
-        action.setToolTip(tooltip)
-        action.triggered.connect(callback)
-        return action
+    def _size_initial_docks(self) -> None:
+        self.resizeDocks(
+            [self.model_tree_dock, self.create_dock],
+            [270, 340],
+            Qt.Horizontal,
+        )
+        self.resizeDocks(
+            [self.model_tree_dock, self.properties_dock],
+            [570, 230],
+            Qt.Vertical,
+        )
+        self.resizeDocks(
+            [self.script_dock, self.console_dock, self.results_dock],
+            [510, 280, 480],
+            Qt.Horizontal,
+        )
+        self.resizeDocks(
+            [self.script_dock],
+            [250],
+            Qt.Vertical,
+        )
 
     def _create_default_model(self) -> None:
         generate_frame_grid(self.model, FrameGridSpec(nx=4, ny=3, nz=3))
@@ -680,17 +700,10 @@ class MainWindow(QMainWindow):
     def _new_model(self) -> None:
         self.model.clear()
         self._refresh_all("New empty model")
-        self._show_frame_grid()
 
     def _show_frame_grid(self) -> None:
-        self.context_mode = "frame-grid"
-        self.context_dock.setWindowTitle("Create / Edit")
-        self.context_stack.setCurrentWidget(self.frame_grid_panel)
-
-    def _show_properties(self) -> None:
-        self.context_mode = "properties"
-        self.context_dock.setWindowTitle("Properties")
-        self.context_stack.setCurrentWidget(self.properties_panel)
+        self.create_dock.show()
+        self.create_dock.raise_()
 
     def _generate_frame_grid(self, spec: FrameGridSpec) -> None:
         generate_frame_grid(self.model, spec)
@@ -726,21 +739,35 @@ class MainWindow(QMainWindow):
         geometry = QTreeWidgetItem(["Geometry"])
         geometry.setIcon(0, studio_icon("grid"))
         geometry.setExpanded(True)
-        nodes = QTreeWidgetItem([f"Nodes ({len(self.model.nodes)})"])
-        nodes.setIcon(0, studio_icon("node"))
-        elements = QTreeWidgetItem([f"Elements ({len(self.model.elements)})"])
-        elements.setIcon(0, studio_icon("element"))
-        geometry.addChild(nodes)
-        geometry.addChild(elements)
         root.addChild(geometry)
 
-        element_groups: dict[str, QTreeWidgetItem] = {}
-        for group in ("column", "beam-x", "beam-y"):
-            count = sum(e.group == group for e in self.model.elements.values())
-            child = QTreeWidgetItem([f"{group} ({count})"])
-            child.setIcon(0, studio_icon("element"))
-            element_groups[group] = child
-            elements.addChild(child)
+        nodes = QTreeWidgetItem([f"Nodes ({len(self.model.nodes)})"])
+        nodes.setIcon(0, studio_icon("node"))
+        lines = QTreeWidgetItem(["Lines (0)"])
+        lines.setIcon(0, studio_icon("element"))
+        frame_grids = QTreeWidgetItem(["Frame Grids (1)"])
+        frame_grids.setIcon(0, studio_icon("grid"))
+        geometry.addChildren([nodes, lines, frame_grids])
+
+        elements = QTreeWidgetItem([f"Elements ({len(self.model.elements)})"])
+        elements.setIcon(0, studio_icon("element"))
+        root.addChild(elements)
+
+        type_counts = {
+            "elasticBeamColumn": 0,
+            "forceBeamColumn": 0,
+            "zeroLength": 0,
+            "truss": 0,
+        }
+        for element in self.model.elements.values():
+            type_counts[element.element_type] = type_counts.get(element.element_type, 0) + 1
+
+        type_items = {}
+        for element_type in ("elasticBeamColumn", "forceBeamColumn", "zeroLength", "truss"):
+            item = QTreeWidgetItem([f"{element_type} ({type_counts.get(element_type, 0)})"])
+            item.setIcon(0, studio_icon("element"))
+            type_items[element_type] = item
+            elements.addChild(item)
 
         for tag in sorted(self.model.nodes):
             item = QTreeWidgetItem([f"Node {tag}"])
@@ -753,25 +780,33 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([f"Element {tag}"])
             item.setIcon(0, studio_icon("element"))
             item.setData(0, Qt.UserRole, ("element", tag))
-            element_groups.get(element.group, elements).addChild(item)
+            type_items.get(element.element_type, elements).addChild(item)
 
-        fixed_count = sum(any(n.fixity) for n in self.model.nodes.values())
-
-        categories = (
+        fixed_count = sum(any(node.fixity) for node in self.model.nodes.values())
+        for label, icon in (
             ("Materials (0)", "material"),
             ("Sections (0)", "section"),
             ("Transformations (0)", "transform"),
             (f"Boundary Conditions ({fixed_count})", "boundary"),
             ("Time Series (0)", "timeseries"),
             ("Load Patterns (0)", "load"),
-            ("Recorders (0)", "recorder"),
-            ("Analysis", "analysis"),
-            ("Results", "results"),
-        )
-        for label, icon_name in categories:
+        ):
             item = QTreeWidgetItem([label])
-            item.setIcon(0, studio_icon(icon_name))
+            item.setIcon(0, studio_icon(icon))
             root.addChild(item)
+
+        analysis = QTreeWidgetItem(["Analysis"])
+        analysis.setIcon(0, studio_icon("analysis"))
+        settings = QTreeWidgetItem(["Settings"])
+        settings.setIcon(0, studio_icon("analysis"))
+        recorders = QTreeWidgetItem(["Recorders (0)"])
+        recorders.setIcon(0, studio_icon("recorder"))
+        analysis.addChildren([settings, recorders])
+        root.addChild(analysis)
+
+        results = QTreeWidgetItem(["Results"])
+        results.setIcon(0, studio_icon("results"))
+        root.addChild(results)
 
         self.tree.addTopLevelItem(root)
 
@@ -779,7 +814,6 @@ class MainWindow(QMainWindow):
         items = self.tree.selectedItems()
         if not items:
             return
-
         payload = items[0].data(0, Qt.UserRole)
         if not payload:
             return
@@ -788,38 +822,36 @@ class MainWindow(QMainWindow):
         if kind == "node":
             node = self.model.nodes[tag]
             connected = [
-                e.tag
-                for e in self.model.elements.values()
-                if e.i == tag or e.j == tag
+                element.tag
+                for element in self.model.elements.values()
+                if element.i == tag or element.j == tag
             ]
             self.properties_panel.set_properties(
-                f"Node {tag}",
+                "Node",
                 [
                     ("Tag", tag),
-                    ("Coordinates", node.xyz),
-                    ("X", node.xyz[0]),
-                    ("Y", node.xyz[1]),
-                    ("Z", node.xyz[2]),
+                    ("Coordinates (m)", f"{node.xyz}"),
+                    ("X", f"{node.xyz[0]:g}"),
+                    ("Y", f"{node.xyz[1]:g}"),
+                    ("Z", f"{node.xyz[2]:g}"),
                     ("Fixity", node.fixity),
-                    ("Connected elements", ", ".join(map(str, connected)) or "-"),
+                    ("Mass", "0.0, 0.0, 0.0"),
+                    ("Connected", ", ".join(map(str, connected)) or "-"),
                 ],
             )
         elif kind == "element":
             element = self.model.elements[tag]
             self.properties_panel.set_properties(
-                f"Element {tag}",
+                "Element",
                 [
                     ("Tag", tag),
                     ("Type", element.element_type),
-                    ("Node I", element.i),
-                    ("Node J", element.j),
+                    ("Nodes", f"{element.i}, {element.j}"),
                     ("Group", element.group),
                     ("Section", element.section_tag or "-"),
                     ("Transformation", element.transf_tag or "-"),
                 ],
             )
-
-        self._show_properties()
 
     def _export_script(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -830,7 +862,6 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
-
         Path(path).write_text(self.script.toPlainText(), encoding="utf-8")
         self._log(f"Exported: {path}")
 
@@ -849,7 +880,7 @@ class MainWindow(QMainWindow):
         try:
             exec(self.script.toPlainText(), scope, scope)
             self._log("OpenSeesPy model executed successfully")
-            self.status_message.setText("Analysis model executed successfully")
+            self.status_message.setText("Model executed successfully")
         except Exception as exc:
             self._log(f"ERROR: {type(exc).__name__}: {exc}")
             QMessageBox.critical(self, "Execution error", str(exc))
