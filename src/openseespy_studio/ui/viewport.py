@@ -481,6 +481,9 @@ class ModelViewport(QWidget):
             self._element_actor_data[self._actor_key(actor)] = (mesh, tags)
             self._cell_picker.AddPickList(actor)
 
+        self._point_picker.InitializePickList()
+        self._point_picker.PickFromListOn()
+
         visible_nodes = sorted(self._visible_node_tags())
         if visible_nodes:
             points = [self._model.nodes[tag].xyz for tag in visible_nodes]
