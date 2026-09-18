@@ -99,6 +99,184 @@ class StructuralModel:
         for node_tag in set(node_tags):
             self.remove_node(node_tag, cascade=cascade_nodes)
 
+    def next_node_tag(self) -> int:
+        return max(self.nodes, default=0) + 1
+
+    def next_element_tag(self) -> int:
+        return max(self.elements, default=0) + 1
+
+    def entity_node_tags(
+        self,
+        *,
+        node_tags: Iterable[int] = (),
+        element_tags: Iterable[int] = (),
+    ) -> set[int]:
+        tags = {int(tag) for tag in node_tags if int(tag) in self.nodes}
+        for element_tag in element_tags:
+            element = self.elements.get(int(element_tag))
+            if element is not None:
+                tags.update((element.i, element.j))
+        return tags
+
+    def translate_entities(
+        self,
+        *,
+        node_tags: Iterable[int] = (),
+        element_tags: Iterable[int] = (),
+        dx: float = 0.0,
+        dy: float = 0.0,
+        dz: float = 0.0,
+    ) -> set[int]:
+        tags = self.entity_node_tags(
+            node_tags=node_tags,
+            element_tags=element_tags,
+        )
+        for tag in tags:
+            node = self.nodes[tag]
+            x, y, z = node.xyz
+            node.xyz = (x + float(dx), y + float(dy), z + float(dz))
+        return tags
+
+    def rotate_entities(
+        self,
+        *,
+        node_tags: Iterable[int] = (),
+        element_tags: Iterable[int] = (),
+        axis: str = "z",
+        angle_deg: float = 0.0,
+        pivot: Vec3 = (0.0, 0.0, 0.0),
+    ) -> set[int]:
+        import math
+
+        axis = axis.lower()
+        if axis not in {"x", "y", "z"}:
+            raise ValueError("Rotation axis must be x, y, or z.")
+
+        tags = self.entity_node_tags(
+            node_tags=node_tags,
+            element_tags=element_tags,
+        )
+        px, py, pz = map(float, pivot)
+        angle = math.radians(float(angle_deg))
+        c = math.cos(angle)
+        s = math.sin(angle)
+
+        for tag in tags:
+            node = self.nodes[tag]
+            x, y, z = node.xyz
+            x -= px
+            y -= py
+            z -= pz
+
+            if axis == "x":
+                y, z = y * c - z * s, y * s + z * c
+            elif axis == "y":
+                x, z = x * c + z * s, -x * s + z * c
+            else:
+                x, y = x * c - y * s, x * s + y * c
+
+            node.xyz = (x + px, y + py, z + pz)
+        return tags
+
+    def mirror_entities(
+        self,
+        *,
+        node_tags: Iterable[int] = (),
+        element_tags: Iterable[int] = (),
+        normal_axis: str = "x",
+        coordinate: float = 0.0,
+    ) -> set[int]:
+        axis = normal_axis.lower()
+        if axis not in {"x", "y", "z"}:
+            raise ValueError("Mirror normal axis must be x, y, or z.")
+
+        tags = self.entity_node_tags(
+            node_tags=node_tags,
+            element_tags=element_tags,
+        )
+        coordinate = float(coordinate)
+        for tag in tags:
+            node = self.nodes[tag]
+            xyz = list(node.xyz)
+            index = {"x": 0, "y": 1, "z": 2}[axis]
+            xyz[index] = 2.0 * coordinate - xyz[index]
+            node.xyz = (float(xyz[0]), float(xyz[1]), float(xyz[2]))
+        return tags
+
+    def copy_entities(
+        self,
+        *,
+        node_tags: Iterable[int] = (),
+        element_tags: Iterable[int] = (),
+        dx: float = 0.0,
+        dy: float = 0.0,
+        dz: float = 0.0,
+        copies: int = 1,
+    ) -> tuple[set[int], set[int]]:
+        copies = int(copies)
+        if copies < 1:
+            raise ValueError("copies must be at least 1")
+
+        selected_elements = {
+            int(tag) for tag in element_tags if int(tag) in self.elements
+        }
+        source_nodes = self.entity_node_tags(
+            node_tags=node_tags,
+            element_tags=selected_elements,
+        )
+        if not source_nodes and not selected_elements:
+            return set(), set()
+
+        base_nodes = {
+            tag: (
+                self.nodes[tag].xyz,
+                self.nodes[tag].fixity,
+            )
+            for tag in source_nodes
+        }
+        base_elements = {
+            tag: self.elements[tag]
+            for tag in selected_elements
+        }
+
+        next_node = self.next_node_tag()
+        next_element = self.next_element_tag()
+        created_nodes: set[int] = set()
+        created_elements: set[int] = set()
+
+        for copy_index in range(1, copies + 1):
+            node_map: dict[int, int] = {}
+            for source_tag in sorted(source_nodes):
+                xyz, fixity = base_nodes[source_tag]
+                new_tag = next_node
+                next_node += 1
+                node = self.add_node(
+                    new_tag,
+                    xyz[0] + float(dx) * copy_index,
+                    xyz[1] + float(dy) * copy_index,
+                    xyz[2] + float(dz) * copy_index,
+                )
+                node.fixity = tuple(fixity)
+                node_map[source_tag] = new_tag
+                created_nodes.add(new_tag)
+
+            for source_tag in sorted(selected_elements):
+                source = base_elements[source_tag]
+                new_tag = next_element
+                next_element += 1
+                self.add_element(
+                    new_tag,
+                    node_map[source.i],
+                    node_map[source.j],
+                    source.element_type,
+                    source.section_tag,
+                    source.transf_tag,
+                    source.group,
+                )
+                created_elements.add(new_tag)
+
+        return created_nodes, created_elements
+
     def to_dict(self) -> dict:
         return {
             "name": self.name,

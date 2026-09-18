@@ -43,10 +43,18 @@ from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..model import StructuralModel
 from ..project import ProjectDatabase, SelectionSetData
 from .code_editor import CodeEditor
+from .geometry_dialogs import (
+    ElementDialog,
+    MirrorDialog,
+    NodeDialog,
+    RotateDialog,
+    SelectByIdDialog,
+    VectorDialog,
+)
 from .history import ProjectSnapshotCommand
 from .icons import studio_icon
 from .results_panel import ResultsPanel
-from .selection import SelectionManager
+from .selection import SelectionManager, parse_tag_expression
 from .viewport import ModelViewport
 
 
@@ -673,12 +681,19 @@ class MainWindow(QMainWindow):
         self.actions["undo"].setShortcut(QKeySequence.Undo)
         self.actions["redo"].setShortcut(QKeySequence.Redo)
 
-        self._make_action("node", "Node", "node", self._not_implemented, "Create node")
-        self._make_action("line", "Line", "element", self._not_implemented, "Create line")
-        self._make_action("frame", "Frame", "element", self._not_implemented, "Create frame")
+        self._make_action("node", "Node", "node", self._create_node, "Create node")
+        self._make_action("line", "Line", "element", self._create_element, "Create element")
+        self._make_action("frame", "Frame", "element", self._create_element, "Create frame element")
         self._make_action("grid", "Grid", "grid", self._show_frame_grid, "Create frame grid")
         self._make_action("extrude", "Extrude", "copy", self._not_implemented, "Extrude geometry")
 
+        modify_callbacks = {
+            "copy": self._copy_selection,
+            "move": self._move_selection,
+            "rotate": self._rotate_selection,
+            "mirror": self._mirror_selection,
+            "delete": self._delete_selection,
+        }
         for key, label, icon in (
             ("copy", "Copy", "copy"),
             ("move", "Move", "move"),
@@ -686,8 +701,15 @@ class MainWindow(QMainWindow):
             ("mirror", "Mirror", "mirror"),
             ("delete", "Delete", "delete"),
         ):
-            self._make_action(key, label, icon, self._not_implemented, label)
+            self._make_action(key, label, icon, modify_callbacks[key], label)
 
+        selection_callbacks = {
+            "select": self._activate_select_tool,
+            "box": self._activate_box_tool,
+            "polygon": self._not_implemented,
+            "byid": self._select_by_id,
+            "bytype": self._select_by_type,
+        }
         for key, label, icon in (
             ("select", "Select", "select"),
             ("box", "Box", "box"),
@@ -695,14 +717,13 @@ class MainWindow(QMainWindow):
             ("byid", "By ID", "by-id"),
             ("bytype", "By Type", "by-id"),
         ):
-            callback = self._activate_select_tool if key == "select" else self._not_implemented
             self._make_action(
                 key,
                 label,
                 icon,
-                callback,
+                selection_callbacks[key],
                 label,
-                checkable=(key == "select"),
+                checkable=(key in {"select", "box"}),
             )
         self.actions["select"].setChecked(True)
 
@@ -845,6 +866,7 @@ class MainWindow(QMainWindow):
         )
         self._refresh_tree()
         self.script.setPlainText(to_openseespy(self.model))
+        self._selection_changed(self.selection.snapshot())
 
         if message:
             self._log(message)
@@ -891,7 +913,14 @@ class MainWindow(QMainWindow):
             type_counts[element.element_type] = type_counts.get(element.element_type, 0) + 1
 
         type_items: dict[str, QTreeWidgetItem] = {}
-        for element_type in ("elasticBeamColumn", "forceBeamColumn", "zeroLength", "truss"):
+        known_types = {
+            "elasticBeamColumn",
+            "forceBeamColumn",
+            "dispBeamColumn",
+            "zeroLength",
+            "truss",
+        }
+        for element_type in sorted(known_types | set(type_counts)):
             item = QTreeWidgetItem([f"{element_type} ({type_counts.get(element_type, 0)})"])
             item.setIcon(0, studio_icon("element"))
             type_items[element_type] = item
@@ -984,6 +1013,7 @@ class MainWindow(QMainWindow):
         self.viewport.entity_hovered.connect(self._viewport_entity_hovered)
         self.viewport.entity_double_clicked.connect(self._viewport_entity_double_clicked)
         self.viewport.context_requested.connect(self._show_viewport_context_menu)
+        self.viewport.box_selected.connect(self._viewport_box_selected)
         self.viewport.set_selection_filter(self.selection.filter)
 
     def _install_shortcuts(self) -> None:
@@ -1001,8 +1031,18 @@ class MainWindow(QMainWindow):
             self._shortcuts.append(shortcut)
 
     def _activate_select_tool(self) -> None:
+        self.viewport.set_interaction_tool("select")
         self.actions["select"].setChecked(True)
+        self.actions["box"].setChecked(False)
         self.status_message.setText("Select tool active")
+
+    def _activate_box_tool(self) -> None:
+        self.viewport.set_interaction_tool("box")
+        self.actions["select"].setChecked(False)
+        self.actions["box"].setChecked(True)
+        self.status_message.setText(
+            "Box select: left→right = window, right→left = crossing"
+        )
 
     def _set_selection_filter(self, text: str) -> None:
         value = text.lower()
@@ -1021,6 +1061,23 @@ class MainWindow(QMainWindow):
                 self.selection.clear()
             return
         self.selection.select(str(kind), int(tag), str(mode))
+
+    def _viewport_box_selected(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        nodes = set(payload.get("nodes", ()))
+        elements = set(payload.get("elements", ()))
+        mode = str(payload.get("mode", "replace"))
+        self.selection.select_many(
+            nodes=nodes,
+            elements=elements,
+            mode=mode,
+        )
+        selection_kind = "crossing" if payload.get("crossing") else "window"
+        self.status_message.setText(
+            f"Box {selection_kind}: {len(nodes)} node(s), "
+            f"{len(elements)} element(s)"
+        )
 
     def _viewport_entity_hovered(self, payload: object) -> None:
         if isinstance(payload, dict):
@@ -1167,6 +1224,16 @@ class MainWindow(QMainWindow):
         show_all.triggered.connect(self._show_all)
 
         menu.addSeparator()
+        move_action = menu.addAction("Move...")
+        move_action.triggered.connect(self._move_selection)
+        copy_action = menu.addAction("Copy...")
+        copy_action.triggered.connect(self._copy_selection)
+        rotate_action = menu.addAction("Rotate...")
+        rotate_action.triggered.connect(self._rotate_selection)
+        mirror_action = menu.addAction("Mirror...")
+        mirror_action.triggered.connect(self._mirror_selection)
+
+        menu.addSeparator()
         copy_tag = menu.addAction("Copy Tag(s)")
         copy_tag.triggered.connect(self._copy_selected_tags)
         create_set = menu.addAction("Create Named Selection")
@@ -1182,6 +1249,219 @@ class MainWindow(QMainWindow):
 
     def _selection_sets(self) -> tuple[set[int], set[int]]:
         return set(self.selection.nodes), set(self.selection.elements)
+
+    def _create_node(self) -> None:
+        dialog = NodeDialog(self.model.next_node_tag(), self)
+        if not dialog.exec():
+            return
+        tag, x, y, z = dialog.values()
+        before = self.project.to_dict()
+        try:
+            self.model.add_node(tag, x, y, z)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Create Node", str(exc))
+            return
+        self._refresh_all(f"Created node {tag}")
+        self.selection.select("node", tag, "replace")
+        self._record_project_change(f"Create node {tag}", before)
+
+    def _create_element(self) -> None:
+        selected_nodes = sorted(self.selection.nodes)
+        node_i = selected_nodes[0] if len(selected_nodes) >= 1 else min(self.model.nodes, default=1)
+        node_j = selected_nodes[1] if len(selected_nodes) >= 2 else (
+            sorted(self.model.nodes)[1]
+            if len(self.model.nodes) >= 2
+            else node_i + 1
+        )
+        dialog = ElementDialog(
+            self.model.next_element_tag(),
+            node_i=node_i,
+            node_j=node_j,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        tag, i, j, element_type, group = dialog.values()
+        before = self.project.to_dict()
+        try:
+            self.model.add_element(
+                tag,
+                i,
+                j,
+                element_type=element_type,
+                group=group,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Create Element", str(exc))
+            return
+        self._refresh_all(f"Created element {tag}")
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(f"Create element {tag}", before)
+
+    def _require_selection(self, title: str) -> tuple[set[int], set[int]] | None:
+        nodes, elements = self._selection_sets()
+        if not nodes and not elements:
+            QMessageBox.information(
+                self,
+                title,
+                "Select at least one node or element first.",
+            )
+            return None
+        return nodes, elements
+
+    def _move_selection(self) -> None:
+        selected = self._require_selection("Move")
+        if selected is None:
+            return
+        dialog = VectorDialog("Move Selection", self)
+        if not dialog.exec():
+            return
+        dx, dy, dz, _ = dialog.values()
+        if abs(dx) + abs(dy) + abs(dz) <= 1.0e-15:
+            return
+        nodes, elements = selected
+        before = self.project.to_dict()
+        self.model.translate_entities(
+            node_tags=nodes,
+            element_tags=elements,
+            dx=dx,
+            dy=dy,
+            dz=dz,
+        )
+        self._refresh_all("Moved selected entities")
+        self._record_project_change("Move selection", before)
+
+    def _copy_selection(self) -> None:
+        selected = self._require_selection("Copy")
+        if selected is None:
+            return
+        dialog = VectorDialog("Copy Selection", self, copies=True)
+        if not dialog.exec():
+            return
+        dx, dy, dz, copies = dialog.values()
+        nodes, elements = selected
+        before = self.project.to_dict()
+        new_nodes, new_elements = self.model.copy_entities(
+            node_tags=nodes,
+            element_tags=elements,
+            dx=dx,
+            dy=dy,
+            dz=dz,
+            copies=copies,
+        )
+        self._refresh_all(
+            f"Created {copies} copy/copies: "
+            f"{len(new_nodes)} node(s), {len(new_elements)} element(s)"
+        )
+        self.selection.set_selection(
+            nodes=set(new_nodes),
+            elements=set(new_elements),
+        )
+        self._record_project_change("Copy selection", before)
+
+    def _rotate_selection(self) -> None:
+        selected = self._require_selection("Rotate")
+        if selected is None:
+            return
+        dialog = RotateDialog(self)
+        if not dialog.exec():
+            return
+        axis, angle, pivot = dialog.values()
+        if abs(angle) <= 1.0e-15:
+            return
+        nodes, elements = selected
+        before = self.project.to_dict()
+        self.model.rotate_entities(
+            node_tags=nodes,
+            element_tags=elements,
+            axis=axis,
+            angle_deg=angle,
+            pivot=pivot,
+        )
+        self._refresh_all(
+            f"Rotated selection {angle:g}° about {axis.upper()}"
+        )
+        self._record_project_change("Rotate selection", before)
+
+    def _mirror_selection(self) -> None:
+        selected = self._require_selection("Mirror")
+        if selected is None:
+            return
+        dialog = MirrorDialog(self)
+        if not dialog.exec():
+            return
+        normal_axis, coordinate = dialog.values()
+        nodes, elements = selected
+        before = self.project.to_dict()
+        self.model.mirror_entities(
+            node_tags=nodes,
+            element_tags=elements,
+            normal_axis=normal_axis,
+            coordinate=coordinate,
+        )
+        self._refresh_all(
+            f"Mirrored selection about {normal_axis.upper()}={coordinate:g}"
+        )
+        self._record_project_change("Mirror selection", before)
+
+    def _select_by_id(self) -> None:
+        dialog = SelectByIdDialog(self)
+        if not dialog.exec():
+            return
+        entity, expression = dialog.values()
+        try:
+            requested = parse_tag_expression(expression)
+        except (ValueError, TypeError) as exc:
+            QMessageBox.warning(self, "Select By ID", str(exc))
+            return
+
+        if entity == "node":
+            found = requested & set(self.model.nodes)
+            missing = requested - set(self.model.nodes)
+            self.selection.select_many(nodes=found, mode="replace")
+        else:
+            found = requested & set(self.model.elements)
+            missing = requested - set(self.model.elements)
+            self.selection.select_many(elements=found, mode="replace")
+
+        if missing:
+            self.status_message.setText(
+                f"Selected {len(found)} {entity}(s); "
+                f"{len(missing)} ID(s) not found"
+            )
+
+    def _select_by_type(self) -> None:
+        if not self.model.elements:
+            return
+        element_types = sorted({e.element_type for e in self.model.elements.values()})
+        groups = sorted({e.group for e in self.model.elements.values()})
+        choices = [f"Type: {value}" for value in element_types]
+        choices += [f"Group: {value}" for value in groups]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Select By Type",
+            "Filter:",
+            choices,
+            0,
+            False,
+        )
+        if not ok or not choice:
+            return
+
+        prefix, value = choice.split(": ", 1)
+        if prefix == "Type":
+            tags = {
+                tag
+                for tag, element in self.model.elements.items()
+                if element.element_type == value
+            }
+        else:
+            tags = {
+                tag
+                for tag, element in self.model.elements.items()
+                if element.group == value
+            }
+        self.selection.select_many(elements=tags, mode="replace")
 
     def _zoom_selection(self) -> None:
         nodes, elements = self._selection_sets()

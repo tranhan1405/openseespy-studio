@@ -3,13 +3,14 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from PySide6.QtCore import QEvent, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QRubberBand,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -34,6 +35,7 @@ class ModelViewport(QWidget):
     entity_hovered = Signal(object)
     entity_double_clicked = Signal(object)
     context_requested = Signal(object)
+    box_selected = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -62,6 +64,9 @@ class ModelViewport(QWidget):
         self._right_press_pos: tuple[int, int] | None = None
         self._nav_mode: str | None = None
         self._nav_last_pos: tuple[float, float] | None = None
+        self._interaction_tool = "select"
+        self._box_origin: QPoint | None = None
+        self._rubber_band: QRubberBand | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -143,6 +148,11 @@ class ModelViewport(QWidget):
         )
         self.plotter.interactor.setMouseTracking(True)
         layout.addWidget(self.plotter.interactor, 1)
+        self._rubber_band = QRubberBand(
+            QRubberBand.Rectangle,
+            self.plotter.interactor,
+        )
+        self._rubber_band.hide() if self._rubber_band is not None else None
 
         self._current_view = "iso"
         self._point_picker = vtkPointPicker()
@@ -152,6 +162,16 @@ class ModelViewport(QWidget):
 
         self._install_mouse_observers()
         self._reset_scene()
+
+    def set_interaction_tool(self, tool: str) -> None:
+        if tool not in {"select", "box"}:
+            raise ValueError(f"Unknown interaction tool: {tool}")
+        self._interaction_tool = tool
+        self._box_origin = None
+        self._rubber_band.hide() if self._rubber_band is not None else None
+
+    def interaction_tool(self) -> str:
+        return self._interaction_tool
 
     def _install_mouse_observers(self) -> None:
         # All viewport mouse input is handled through Qt so the default VTK
@@ -297,7 +317,22 @@ class ModelViewport(QWidget):
             qt_pos = (float(pos.x()), float(pos.y()))
 
             if event.button() == Qt.LeftButton:
-                self._left_press_pos = self._vtk_position_from_qt(event)
+                if self._interaction_tool == "box":
+                    self._box_origin = event.position().toPoint()
+                    if self._rubber_band is None:
+                        return True
+                    self._rubber_band.setGeometry(
+                        QRect(self._box_origin, self._box_origin)
+                    )
+                    if self._rubber_band is None:
+                    return True
+                self._rubber_band.setStyleSheet(
+                        "border: 1px solid #2f80ed;"
+                        "background-color: rgba(47,128,237,35);"
+                    )
+                    self._rubber_band.show()
+                else:
+                    self._left_press_pos = self._vtk_position_from_qt(event)
                 return True
 
             if event.button() == Qt.MiddleButton:
@@ -314,6 +349,29 @@ class ModelViewport(QWidget):
 
             if event.buttons() & Qt.MiddleButton:
                 self._navigate(qt_pos)
+                return True
+
+            if (
+                self._interaction_tool == "box"
+                and self._box_origin is not None
+                and event.buttons() & Qt.LeftButton
+            ):
+                current = event.position().toPoint()
+                crossing = current.x() < self._box_origin.x()
+                self._rubber_band.setStyleSheet(
+                    (
+                        "border: 1px solid #1c9b50;"
+                        "background-color: rgba(28,155,80,35);"
+                    )
+                    if crossing
+                    else (
+                        "border: 1px solid #2f80ed;"
+                        "background-color: rgba(47,128,237,35);"
+                    )
+                )
+                self._rubber_band.setGeometry(
+                    QRect(self._box_origin, current).normalized()
+                )
                 return True
 
             if event.buttons() == Qt.NoButton:
@@ -333,6 +391,29 @@ class ModelViewport(QWidget):
                 return True
 
             if event.button() == Qt.LeftButton:
+                if self._interaction_tool == "box" and self._box_origin is not None:
+                    end = event.position().toPoint()
+                    rect = QRect(self._box_origin, end).normalized()
+                    crossing = end.x() < self._box_origin.x()
+                    self._rubber_band.hide() if self._rubber_band is not None else None
+                    if rect.width() >= 3 and rect.height() >= 3:
+                        nodes, elements = self.entities_in_screen_rect(
+                            rect,
+                            crossing=crossing,
+                        )
+                        self.box_selected.emit(
+                            {
+                                "nodes": nodes,
+                                "elements": elements,
+                                "mode": self._selection_mode_from_modifiers(
+                                    event.modifiers()
+                                ),
+                                "crossing": crossing,
+                            }
+                        )
+                    self._box_origin = None
+                    return True
+
                 if not self._moved(self._left_press_pos, vtk_pos):
                     entity = self.pick_entity(*vtk_pos)
                     self.entity_clicked.emit(
@@ -372,6 +453,95 @@ class ModelViewport(QWidget):
             return True
 
         return super().eventFilter(obj, event)
+
+    def _world_to_qt(self, xyz) -> tuple[float, float]:
+        renderer = self.plotter.renderer
+        renderer.SetWorldPoint(float(xyz[0]), float(xyz[1]), float(xyz[2]), 1.0)
+        renderer.WorldToDisplay()
+        display = renderer.GetDisplayPoint()
+        return (
+            float(display[0]),
+            float(self.plotter.interactor.height() - display[1]),
+        )
+
+    @staticmethod
+    def _point_inside_rect(point: tuple[float, float], rect: QRect) -> bool:
+        return (
+            rect.left() <= point[0] <= rect.right()
+            and rect.top() <= point[1] <= rect.bottom()
+        )
+
+    @staticmethod
+    def _segments_intersect(a, b, c, d) -> bool:
+        def orient(p, q, r):
+            value = (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
+            if abs(value) < 1.0e-9:
+                return 0
+            return 1 if value > 0 else 2
+
+        o1 = orient(a, b, c)
+        o2 = orient(a, b, d)
+        o3 = orient(c, d, a)
+        o4 = orient(c, d, b)
+        return o1 != o2 and o3 != o4
+
+    def _segment_intersects_rect(self, a, b, rect: QRect) -> bool:
+        if self._point_inside_rect(a, rect) or self._point_inside_rect(b, rect):
+            return True
+        left = float(rect.left())
+        right = float(rect.right())
+        top = float(rect.top())
+        bottom = float(rect.bottom())
+        edges = (
+            ((left, top), (right, top)),
+            ((right, top), (right, bottom)),
+            ((right, bottom), (left, bottom)),
+            ((left, bottom), (left, top)),
+        )
+        return any(self._segments_intersect(a, b, p, q) for p, q in edges)
+
+    def entities_in_screen_rect(
+        self,
+        rect: QRect,
+        *,
+        crossing: bool,
+    ) -> tuple[set[int], set[int]]:
+        if self._model is None:
+            return set(), set()
+
+        node_screen = {
+            tag: self._world_to_qt(self._model.nodes[tag].xyz)
+            for tag in self._visible_node_tags()
+        }
+
+        nodes: set[int] = set()
+        elements: set[int] = set()
+
+        if self._selection_filter in {"all", "node"}:
+            nodes = {
+                tag
+                for tag, point in node_screen.items()
+                if self._point_inside_rect(point, rect)
+            }
+
+        if self._selection_filter in {"all", "element"}:
+            for tag in self._visible_element_tags():
+                element = self._model.elements[tag]
+                a = node_screen.get(element.i)
+                b = node_screen.get(element.j)
+                if a is None or b is None:
+                    continue
+                if crossing:
+                    selected = self._segment_intersects_rect(a, b, rect)
+                else:
+                    selected = (
+                        self._point_inside_rect(a, rect)
+                        and self._point_inside_rect(b, rect)
+                    )
+                if selected:
+                    elements.add(tag)
+
+        return nodes, elements
 
     def _noop(self):
         return None
