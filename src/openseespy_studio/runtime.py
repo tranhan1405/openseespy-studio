@@ -59,11 +59,11 @@ def probe_opensees_runtime(
         env.get("PYTHONPATH", "")
     )
     command = (
-        "import importlib.metadata as m; "
-        "import openseespy.opensees as ops; "
-        "print('openseespy=' + m.version('openseespy')); "
-        "print('openseespywin=' + m.version('openseespywin'))"
-        " if __import__('sys').platform == 'win32' else None
+        "import importlib.metadata as m, sys\n"
+        "import openseespy.opensees as ops\n"
+        "print('openseespy=' + m.version('openseespy'))\n"
+        "if sys.platform == 'win32':\n"
+        "    print('openseespywin=' + m.version('openseespywin'))\n"
     )
     try:
         result = subprocess.run(
