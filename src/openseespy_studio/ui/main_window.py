@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialog,
     QDockWidget,
     QDoubleSpinBox,
     QFileDialog,
@@ -45,6 +46,7 @@ from ..jobs import JobRecord
 from ..model import StructuralModel, classify_fixity
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, SectionData, SelectionSetData, TimeSeriesData, TransformationData
 from ..runtime import build_worker_pythonpath, probe_opensees_runtime
+from ..validation import ValidationIssue, validate_project
 from .analysis_dialog import AnalysisDialog
 from .code_editor import CodeEditor
 from .connection_dialog import ConnectionDialog
@@ -60,6 +62,7 @@ from .geometry_dialogs import (
 from .history import ProjectSnapshotCommand
 from .load_dialogs import LoadPatternDialog, MassDialog, NodalLoadDialog, TimeSeriesDialog
 from .material_dialog import MaterialDialog
+from .model_check_dialog import ModelCheckDialog
 from .section_dialog import SectionDialog
 from .transformation_dialog import TransformationDialog
 from .icons import studio_icon
@@ -882,6 +885,7 @@ class MainWindow(QMainWindow):
         self._make_action("load_pattern", "Load Pattern...", "load", self._create_load_pattern, "Create load pattern or ground motion")
         self._make_action("nodal_load", "Nodal Load...", "load", self._create_nodal_load, "Create nodal load")
         self._make_action("analysis_setup", "Analysis Setup...", "analysis", self._create_analysis, "Create analysis settings")
+        self._make_action("check_model", "Check Model", "analysis", self._check_model, "Validate the model before analysis")
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action("plot", "Plot", "plot", self._not_implemented, "Plot results")
 
@@ -914,6 +918,7 @@ class MainWindow(QMainWindow):
         menus["Loads"].addAction(self.actions["load_pattern"])
         menus["Loads"].addAction(self.actions["nodal_load"])
         menus["Analysis"].addAction(self.actions["analysis_setup"])
+        menus["Analysis"].addAction(self.actions["check_model"])
         menus["Analysis"].addAction(self.actions["run"])
         menus["Results"].addAction(self.actions["plot"])
 
@@ -932,7 +937,7 @@ class MainWindow(QMainWindow):
             ("View", ["xy", "yz", "xz", "iso"]),
             ("Supports", ["support", "clear_support", "constraint", "connection"]),
             ("Loads", ["mass", "time_series", "load_pattern", "nodal_load"]),
-            ("Analysis", ["analysis_setup", "run", "plot"]),
+            ("Analysis", ["analysis_setup", "check_model", "run", "plot"]),
         )
 
         for caption, keys in groups:
@@ -3909,6 +3914,71 @@ class MainWindow(QMainWindow):
         Path(path).write_text(self.script.toPlainText(), encoding="utf-8")
         self._log(f"Exported: {path}")
 
+    def _focus_validation_issue(
+        self,
+        issue: ValidationIssue,
+    ) -> None:
+        tag = issue.entity_tag
+        if tag is None:
+            return
+        if issue.entity_kind == "element" and tag in self.model.elements:
+            self.selection.set_selection(elements={tag})
+            self.viewport.zoom_to_selection(set(), {tag})
+            self.status_message.setText(
+                f"Model Check: selected element {tag}"
+            )
+        elif issue.entity_kind == "node" and tag in self.model.nodes:
+            self.selection.set_selection(nodes={tag})
+            self.viewport.zoom_to_selection({tag}, set())
+            self.status_message.setText(
+                f"Model Check: selected node {tag}"
+            )
+
+    def _model_check_issues(
+        self,
+        settings: AnalysisSettingsData | None,
+    ) -> list[ValidationIssue]:
+        return validate_project(self.project, settings)
+
+    def _show_model_check(
+        self,
+        issues: list[ValidationIssue],
+        *,
+        allow_run: bool,
+    ) -> bool:
+        errors = sum(issue.severity == "ERROR" for issue in issues)
+        warnings = sum(issue.severity == "WARNING" for issue in issues)
+        self.console.appendPlainText(
+            f">> Model check: {errors} error(s), {warnings} warning(s)"
+        )
+        dialog = ModelCheckDialog(
+            issues,
+            allow_run=allow_run and errors == 0,
+            select_callback=self._focus_validation_issue,
+            parent=self,
+        )
+        return dialog.exec() == QDialog.Accepted
+
+    def _check_model(self) -> None:
+        settings = self.project.analyses.get(
+            self.project.active_analysis_tag
+        )
+        issues = self._model_check_issues(settings)
+        if not issues:
+            self.console.appendPlainText(
+                ">> Model check passed: no errors or warnings."
+            )
+            self.status_message.setText(
+                "Model check passed"
+            )
+            QMessageBox.information(
+                self,
+                "Model Check",
+                "Model check passed. No errors or warnings were found.",
+            )
+            return
+        self._show_model_check(issues, allow_run=False)
+
     def _toggle_analysis(self) -> None:
         if self._analysis_process is not None:
             if self._analysis_process.state() != QProcess.NotRunning:
@@ -3935,6 +4005,39 @@ class MainWindow(QMainWindow):
                 "The generated script is empty.",
             )
             return
+
+        issues = self._model_check_issues(settings)
+        errors = [
+            issue for issue in issues
+            if issue.severity == "ERROR"
+        ]
+        warnings = [
+            issue for issue in issues
+            if issue.severity == "WARNING"
+        ]
+        if errors:
+            self._show_model_check(issues, allow_run=False)
+            self.status_message.setText(
+                f"Run blocked: {len(errors)} model error(s)"
+            )
+            return
+        if warnings:
+            proceed = self._show_model_check(
+                issues,
+                allow_run=True,
+            )
+            if not proceed:
+                self.status_message.setText(
+                    "Run cancelled after model check"
+                )
+                return
+        else:
+            self.console.appendPlainText(
+                ">> Model check passed — starting solver."
+            )
+            self.status_message.setText(
+                "Model check passed — starting solver"
+            )
 
         runtime_ok, runtime_detail = probe_opensees_runtime(
             sys.executable

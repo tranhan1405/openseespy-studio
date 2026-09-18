@@ -1,0 +1,469 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import math
+from typing import Iterable
+
+from .project import AnalysisSettingsData, ProjectDatabase
+
+
+FRAME_ELEMENT_TYPES = {
+    "elasticBeamColumn",
+    "forceBeamColumn",
+    "dispBeamColumn",
+}
+SUPPORTED_ELEMENT_TYPES = {"elasticBeamColumn"}
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationIssue:
+    severity: str
+    category: str
+    message: str
+    entity_kind: str | None = None
+    entity_tag: int | None = None
+    suggestion: str = ""
+
+    def __post_init__(self) -> None:
+        severity = self.severity.upper()
+        if severity not in {"ERROR", "WARNING", "INFO"}:
+            raise ValueError(f"Unsupported validation severity: {self.severity}")
+        object.__setattr__(self, "severity", severity)
+
+
+def _norm(values: Iterable[float]) -> float:
+    return math.sqrt(sum(float(value) ** 2 for value in values))
+
+
+def _cross(
+    a: tuple[float, float, float],
+    b: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    return (
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
+
+
+def _suggest_vecxz(
+    axis: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    # Prefer global Z for beams. If the member is vertical, fall back to X,
+    # then Y. This gives intuitive building-frame defaults.
+    candidates = (
+        (0.0, 0.0, 1.0),
+        (1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+    )
+    axis_norm = _norm(axis)
+    if axis_norm <= 1.0e-15:
+        return candidates[0]
+    for candidate in candidates:
+        sine = _norm(_cross(axis, candidate)) / axis_norm
+        if sine > 1.0e-6:
+            return candidate
+    return (1.0, 0.0, 0.0)
+
+
+def _format_vector(values: tuple[float, float, float]) -> str:
+    return "(" + ", ".join(f"{value:g}" for value in values) + ")"
+
+
+def _element_geometry_checks(
+    project: ProjectDatabase,
+    issues: list[ValidationIssue],
+) -> None:
+    model = project.model
+    seen_pairs: dict[tuple[int, int], int] = {}
+
+    for tag in sorted(model.elements):
+        element = model.elements[tag]
+        node_i = model.nodes.get(element.i)
+        node_j = model.nodes.get(element.j)
+        if node_i is None or node_j is None:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Geometry",
+                    f"Element {tag} references a missing node.",
+                    "element",
+                    tag,
+                    "Repair or recreate the element connectivity.",
+                )
+            )
+            continue
+
+        axis = tuple(
+            node_j.xyz[index] - node_i.xyz[index]
+            for index in range(3)
+        )
+        length = _norm(axis)
+        if length <= 1.0e-12:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Geometry",
+                    f"Element {tag} has zero or near-zero length.",
+                    "element",
+                    tag,
+                    "Move one end node or delete the element.",
+                )
+            )
+
+        pair = tuple(sorted((element.i, element.j)))
+        if pair in seen_pairs:
+            other = seen_pairs[pair]
+            issues.append(
+                ValidationIssue(
+                    "WARNING",
+                    "Geometry",
+                    f"Element {tag} duplicates the node pair of element {other}.",
+                    "element",
+                    tag,
+                    "Confirm that the duplicate member is intentional.",
+                )
+            )
+        else:
+            seen_pairs[pair] = tag
+
+        if element.element_type not in SUPPORTED_ELEMENT_TYPES:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Element formulation",
+                    f"Element {tag} uses {element.element_type}, which the "
+                    "current generator does not yet emit faithfully.",
+                    "element",
+                    tag,
+                    "Use elasticBeamColumn for now or wait for the dedicated "
+                    "formulation generator.",
+                )
+            )
+
+        if element.element_type not in FRAME_ELEMENT_TYPES:
+            continue
+
+        if element.section_tag is None:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Section",
+                    f"Element {tag} has no section assigned.",
+                    "element",
+                    tag,
+                    "Assign an Elastic section before running.",
+                )
+            )
+        else:
+            section = project.sections.get(element.section_tag)
+            if section is None:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Section",
+                        f"Element {tag} references missing section "
+                        f"{element.section_tag}.",
+                        "element",
+                        tag,
+                        "Assign an existing section.",
+                    )
+                )
+            elif section.section_type != "Elastic":
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Element formulation",
+                        f"Element {tag} uses {section.section_type} section "
+                        f"{section.tag}, but nonlinear beam-section generation "
+                        "is not implemented yet.",
+                        "element",
+                        tag,
+                        "Use an Elastic section for the current "
+                        "elasticBeamColumn workflow.",
+                    )
+                )
+
+        if element.transf_tag is None:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Transformation",
+                    f"Element {tag} has no geometric transformation assigned.",
+                    "element",
+                    tag,
+                    "Assign a transformation before running.",
+                )
+            )
+            continue
+
+        transformation = project.transformations.get(element.transf_tag)
+        if transformation is None:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Transformation",
+                    f"Element {tag} references missing transformation "
+                    f"{element.transf_tag}.",
+                    "element",
+                    tag,
+                    "Assign an existing transformation.",
+                )
+            )
+            continue
+
+        if length <= 1.0e-12:
+            continue
+
+        vecxz = transformation.vecxz
+        sine = _norm(_cross(axis, vecxz)) / (length * _norm(vecxz))
+        if sine <= 1.0e-8:
+            suggested = _suggest_vecxz(axis)
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Transformation orientation",
+                    f"Element {tag}: transformation {transformation.tag} "
+                    f"vecxz={_format_vector(vecxz)} is parallel to the "
+                    "element axis.",
+                    "element",
+                    tag,
+                    f"Suggested vecxz: {_format_vector(suggested)}.",
+                )
+            )
+        elif sine <= 1.0e-3:
+            issues.append(
+                ValidationIssue(
+                    "WARNING",
+                    "Transformation orientation",
+                    f"Element {tag}: transformation {transformation.tag} is "
+                    "nearly parallel to the element axis.",
+                    "element",
+                    tag,
+                    f"Consider vecxz={_format_vector(_suggest_vecxz(axis))}.",
+                )
+            )
+
+
+def _support_and_connectivity_checks(
+    project: ProjectDatabase,
+    issues: list[ValidationIssue],
+) -> None:
+    model = project.model
+    support_nodes = {
+        tag
+        for tag, node in model.nodes.items()
+        if any(node.fixity)
+    }
+    if (model.elements or project.connections) and not support_nodes:
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Stability",
+                "The structural model has no restrained/support node.",
+                suggestion="Add at least one physically appropriate support.",
+            )
+        )
+
+    adjacency: dict[int, set[int]] = {
+        tag: set() for tag in model.nodes
+    }
+    active_nodes: set[int] = set()
+
+    def connect(a: int, b: int) -> None:
+        if a not in adjacency or b not in adjacency:
+            return
+        adjacency[a].add(b)
+        adjacency[b].add(a)
+        active_nodes.update((a, b))
+
+    for element in model.elements.values():
+        connect(element.i, element.j)
+    for connection in project.connections.values():
+        connect(connection.node_i, connection.node_j)
+    for constraint in project.constraints.values():
+        for constrained in constraint.constrained_nodes:
+            connect(constraint.retained_node, constrained)
+
+    isolated = sorted(
+        tag
+        for tag in model.nodes
+        if not adjacency[tag] and tag not in support_nodes
+    )
+    if isolated:
+        preview = ", ".join(map(str, isolated[:8]))
+        suffix = "..." if len(isolated) > 8 else ""
+        issues.append(
+            ValidationIssue(
+                "WARNING",
+                "Connectivity",
+                f"{len(isolated)} isolated node(s) are not connected to the "
+                f"structural model: {preview}{suffix}",
+                "node",
+                isolated[0],
+                "Delete unused nodes or connect them intentionally.",
+            )
+        )
+
+    unseen = set(active_nodes)
+    components: list[set[int]] = []
+    while unseen:
+        seed = unseen.pop()
+        stack = [seed]
+        component = {seed}
+        while stack:
+            current = stack.pop()
+            for neighbour in adjacency[current]:
+                if neighbour in unseen:
+                    unseen.remove(neighbour)
+                    component.add(neighbour)
+                    stack.append(neighbour)
+        components.append(component)
+
+    unsupported_components = [
+        component
+        for component in components
+        if not (component & support_nodes)
+    ]
+    for component in unsupported_components:
+        representative = min(component)
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Stability",
+                f"Structural component containing node {representative} "
+                "has no path to a restrained node.",
+                "node",
+                representative,
+                "Connect this component to the supported structure or add "
+                "appropriate restraints.",
+            )
+        )
+
+    supported_components = [
+        component
+        for component in components
+        if component & support_nodes
+    ]
+    if len(supported_components) > 1:
+        representatives = sorted(min(component) for component in supported_components)
+        issues.append(
+            ValidationIssue(
+                "WARNING",
+                "Connectivity",
+                f"The model contains {len(supported_components)} disconnected "
+                f"supported structural components (e.g. nodes "
+                f"{', '.join(map(str, representatives[:6]))}).",
+                "node",
+                representatives[0],
+                "Confirm that independent structural components are intentional.",
+            )
+        )
+
+
+def _dynamic_checks(
+    project: ProjectDatabase,
+    analysis: AnalysisSettingsData,
+    issues: list[ValidationIssue],
+) -> None:
+    if analysis.analysis_type not in {"Transient", "Modal"}:
+        return
+
+    model = project.model
+    translational_mass = sum(
+        sum(max(0.0, float(value)) for value in node.mass[:3])
+        for node in model.nodes.values()
+    )
+    if translational_mass <= 0.0:
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Mass",
+                f"{analysis.analysis_type} analysis has no positive "
+                "translational nodal mass.",
+                suggestion="Assign UX/UY/UZ nodal masses before dynamic "
+                "or modal analysis.",
+            )
+        )
+    else:
+        zero_mass_free_nodes = [
+            tag
+            for tag, node in model.nodes.items()
+            if any(value == 0 for value in node.fixity[:3])
+            and sum(max(0.0, float(value)) for value in node.mass[:3]) <= 0.0
+        ]
+        if zero_mass_free_nodes:
+            issues.append(
+                ValidationIssue(
+                    "WARNING",
+                    "Mass",
+                    f"{len(zero_mass_free_nodes)} free node(s) have zero "
+                    "translational mass.",
+                    "node",
+                    zero_mass_free_nodes[0],
+                    "Confirm that the mass distribution is intentional.",
+                )
+            )
+
+    for pattern in project.load_patterns.values():
+        if pattern.pattern_type != "UniformExcitation":
+            continue
+        series = project.time_series.get(pattern.time_series_tag)
+        if series is None:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Ground motion",
+                    f"UniformExcitation pattern {pattern.tag} references "
+                    f"missing time series {pattern.time_series_tag}.",
+                    suggestion="Assign a valid acceleration time series.",
+                )
+            )
+            continue
+        if series.series_type == "Path":
+            if series.dt <= 0.0 or not series.values:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Ground motion",
+                        f"Path time series {series.tag} used by "
+                        f"UniformExcitation pattern {pattern.tag} has no "
+                        "usable ground-motion data.",
+                        suggestion="Provide positive dt and acceleration values.",
+                    )
+                )
+
+
+def validate_project(
+    project: ProjectDatabase,
+    analysis: AnalysisSettingsData | None = None,
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+
+    if not project.model.nodes:
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Geometry",
+                "The model contains no nodes.",
+                suggestion="Create or generate structural geometry first.",
+            )
+        )
+        return issues
+
+    _element_geometry_checks(project, issues)
+    _support_and_connectivity_checks(project, issues)
+
+    if analysis is not None:
+        _dynamic_checks(project, analysis, issues)
+
+    severity_order = {"ERROR": 0, "WARNING": 1, "INFO": 2}
+    return sorted(
+        issues,
+        key=lambda issue: (
+            severity_order[issue.severity],
+            issue.category,
+            issue.entity_tag if issue.entity_tag is not None else -1,
+            issue.message,
+        ),
+    )
