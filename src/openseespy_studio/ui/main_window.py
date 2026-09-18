@@ -286,7 +286,7 @@ class PropertiesPanel(QWidget):
         self.table.horizontalHeader().hide()
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         layout.addWidget(self.table, 1)
 
     def set_properties(self, entity_title: str, rows: list[tuple[str, object]]) -> None:
@@ -490,7 +490,7 @@ class MainWindow(QMainWindow):
         for label in ("Select", "Box", "Polygon", "By ID"):
             action = self._action(
                 label,
-                QStyle.SP_ArrowCursor,
+                QStyle.SP_DialogApplyButton,
                 self._not_implemented,
                 f"{label} selection (coming next)",
             )
