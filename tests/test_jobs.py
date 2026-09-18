@@ -12,6 +12,19 @@ def test_job_lifecycle():
     assert job.status == "Running"
     assert job.elapsed_seconds >= 0.0
 
+    job.update_progress(
+        25,
+        100,
+        algorithm="Newton",
+        iterations=7,
+        message="Newton · iter 7",
+    )
+    assert job.progress_current == 25
+    assert job.progress_total == 100
+    assert job.progress_percent == 25.0
+    assert job.current_algorithm == "Newton"
+    assert job.iterations == 7
+
     job.finish(
         "Completed",
         exit_code=0,
@@ -21,5 +34,6 @@ def test_job_lifecycle():
 
     assert job.status == "Completed"
     assert job.exit_code == 0
+    assert job.progress_percent == 100.0
     assert job.results["analysis"]["type"] == "Transient"
     assert job.elapsed_seconds >= 0.0

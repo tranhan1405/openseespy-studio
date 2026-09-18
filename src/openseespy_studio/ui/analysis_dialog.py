@@ -37,9 +37,17 @@ class AnalysisDialog(QDialog):
         self.beta=fs(analysis.beta if analysis else 0.25)
         self.modes=QSpinBox(); self.modes.setRange(1,10000); self.modes.setValue(analysis.num_modes if analysis else 3)
         self.recovery=QCheckBox("Try NewtonLineSearch / ModifiedNewton / Newton on failed step"); self.recovery.setChecked(analysis.recovery if analysis else True)
+        self.external_console=QCheckBox("Show external solver terminal (Windows debug)")
+        self.external_console.setChecked(analysis.show_external_console if analysis else False)
+        self.external_console.setToolTip(
+            "Opens a separate PowerShell window that mirrors the live solver log. "
+            "The Studio worker still runs in its isolated process."
+        )
         fields=(("Tag",self.tag),("Name",self.name),("Analysis type",self.kind),("Constraints",self.constraints),("Numberer",self.numberer),("System",self.system),("Test",self.test),("Tolerance",self.tol),("Max iterations",self.max_iter),("Algorithm",self.algorithm),("Steps",self.steps),("Load increment",self.load_inc),("Control node",self.control_node),("Control DOF",self.control_dof),("Disp. increment",self.disp_inc),("Time step dt",self.dt),("Newmark gamma",self.gamma),("Newmark beta",self.beta),("Number of modes",self.modes))
         for label,w in fields: form.addRow(label+":",w)
-        form.addRow("Recovery:",self.recovery); root.addLayout(form)
+        form.addRow("Recovery:",self.recovery)
+        form.addRow("External terminal:",self.external_console)
+        root.addLayout(form)
         b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); root.addWidget(b)
         self.kind.currentTextChanged.connect(self._sync); self._sync(self.kind.currentText())
     def _sync(self,kind):
@@ -56,5 +64,6 @@ class AnalysisDialog(QDialog):
             steps=self.steps.value(),load_increment=self.load_inc.value(),control_node=self.control_node.value(),
             control_dof=int(self.control_dof.currentData()),displacement_increment=self.disp_inc.value(),
             dt=self.dt.value(),gamma=self.gamma.value(),beta=self.beta.value(),num_modes=self.modes.value(),
-            recovery=self.recovery.isChecked()
+            recovery=self.recovery.isChecked(),
+            show_external_console=self.external_console.isChecked()
         )

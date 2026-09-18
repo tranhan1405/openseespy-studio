@@ -9,7 +9,7 @@ from .model import StructuralModel
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 9
+PROJECT_FORMAT_VERSION = 10
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -668,6 +668,7 @@ class AnalysisSettingsData:
     beta: float = 0.25
     num_modes: int = 3
     recovery: bool = True
+    show_external_console: bool = False
 
     def __post_init__(self) -> None:
         self.tag=int(self.tag); self.name=str(self.name).strip() or f"Analysis {self.tag}"
@@ -678,6 +679,7 @@ class AnalysisSettingsData:
         self.displacement_increment=float(self.displacement_increment)
         self.dt=float(self.dt); self.gamma=float(self.gamma); self.beta=float(self.beta)
         self.num_modes=int(self.num_modes); self.recovery=bool(self.recovery)
+        self.show_external_console=bool(self.show_external_console)
         if self.tag<=0: raise ValueError("Analysis tag must be positive.")
         if self.analysis_type not in {"Static","Pushover","Transient","Modal"}:
             raise ValueError(f"Unsupported analysis type: {self.analysis_type}")
@@ -698,7 +700,7 @@ class AnalysisSettingsData:
             "tag","name","analysis_type","constraints_handler","numberer","system",
             "test","tolerance","max_iterations","algorithm","steps","load_increment",
             "control_node","control_dof","displacement_increment","dt","gamma","beta",
-            "num_modes","recovery"
+            "num_modes","recovery","show_external_console"
         )}
 
     @classmethod

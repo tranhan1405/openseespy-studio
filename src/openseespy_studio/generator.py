@@ -243,6 +243,22 @@ def analysis_to_openseespy(
 
     lines = [
         f"# Active analysis {settings.tag}: {settings.name}",
+        "def _studio_emit(_event, **_payload):",
+        "    _payload['event'] = _event",
+        "    print('[STUDIO_EVENT] ' + json.dumps(_payload, separators=(',', ':')), flush=True)",
+        "",
+        "def _studio_test_state():",
+        "    try:",
+        "        _iterations = int(ops.testIter())",
+        "    except Exception:",
+        "        _iterations = -1",
+        "    try:",
+        "        _norms = ops.testNorms()",
+        "        _norm = float(_norms[-1]) if _norms else None",
+        "    except Exception:",
+        "        _norm = None",
+        "    return _iterations, _norm",
+        "",
         "_studio_results = {",
         "    'schema_version': 1,",
         "    'analysis': {",
@@ -266,20 +282,37 @@ def analysis_to_openseespy(
 
     if settings.analysis_type == "Modal":
         lines.append(
+            f"_studio_emit('start', total={settings.num_modes}, "
+            f"analysis_type='Modal', algorithm='Eigen')"
+        )
+        lines.append(
             f"_studio_eigenvalues = ops.eigen({settings.num_modes})"
         )
         lines.append("if not isinstance(_studio_eigenvalues, (list, tuple)):")
         lines.append("    _studio_eigenvalues = [_studio_eigenvalues]")
-        lines.append("for _studio_mode, _studio_lambda in enumerate(_studio_eigenvalues, start=1):")
+        lines.append(
+            "for _studio_mode, _studio_lambda in "
+            "enumerate(_studio_eigenvalues, start=1):"
+        )
         lines.append("    _studio_vectors = {}")
         lines.append("    for _studio_node in _studio_node_tags:")
         lines.append(
             "        _studio_vectors[str(_studio_node)] = "
-            "[float(v) for v in ops.nodeEigenvector(_studio_node, _studio_mode)]"
+            "[float(v) for v in "
+            "ops.nodeEigenvector(_studio_node, _studio_mode)]"
         )
         lines.append(
             "    _studio_results['modes'][str(_studio_mode)] = "
-            "{'eigenvalue': float(_studio_lambda), 'vectors': _studio_vectors}"
+            "{'eigenvalue': float(_studio_lambda), "
+            "'vectors': _studio_vectors}"
+        )
+        lines.append(
+            "    _studio_emit('progress', step=_studio_mode, "
+            f"total={settings.num_modes}, "
+            f"percent=100.0 * _studio_mode / {settings.num_modes}, "
+            "algorithm='Eigen', iterations=0, "
+            "time=0.0, monitor=0.0, base_shear=0.0, "
+            "eigenvalue=float(_studio_lambda))"
         )
         lines.append(
             "_studio_results['eigenvalues'] = "
@@ -293,6 +326,7 @@ def analysis_to_openseespy(
         f"{settings.max_iterations})"
     )
     lines.append(f"ops.algorithm('{settings.algorithm}')")
+    lines.append(f"_studio_primary_algorithm = {settings.algorithm!r}")
 
     if settings.analysis_type == "Static":
         lines.append(
@@ -309,7 +343,8 @@ def analysis_to_openseespy(
         analysis_kind = "Static"
     elif settings.analysis_type == "Transient":
         lines.append(
-            f"ops.integrator('Newmark', {settings.gamma:g}, {settings.beta:g})"
+            f"ops.integrator('Newmark', {settings.gamma:g}, "
+            f"{settings.beta:g})"
         )
         analyze_call = f"ops.analyze(1, {settings.dt:g})"
         analysis_kind = "Transient"
@@ -319,47 +354,104 @@ def analysis_to_openseespy(
         )
 
     lines.append(f"ops.analysis('{analysis_kind}')")
+    lines.append(
+        f"_studio_emit('start', total={settings.steps}, "
+        f"analysis_type={settings.analysis_type!r}, "
+        f"algorithm=_studio_primary_algorithm)"
+    )
     lines.append(f"for _studio_step in range({settings.steps}):")
+    lines.append("    _studio_step_no = _studio_step + 1")
+    lines.append("    _studio_active_algorithm = _studio_primary_algorithm")
     lines.append(f"    _studio_ok = {analyze_call}")
+    lines.append(
+        "    _studio_iterations, _studio_norm = _studio_test_state()"
+    )
+    lines.append("    if _studio_ok != 0:")
+    lines.append(
+        "        _studio_emit('convergence_failed', "
+        "step=_studio_step_no, "
+        f"total={settings.steps}, "
+        "algorithm=_studio_active_algorithm, "
+        "iterations=_studio_iterations, norm=_studio_norm, "
+        "code=int(_studio_ok))"
+    )
+
     if settings.recovery:
         fallbacks = [
             algorithm
             for algorithm in ("NewtonLineSearch", "ModifiedNewton", "Newton")
             if algorithm != settings.algorithm
         ]
-        lines.append("    if _studio_ok != 0:")
         lines.append(f"        for _studio_alg in {fallbacks!r}:")
+        lines.append(
+            "            _studio_emit('fallback', "
+            "step=_studio_step_no, "
+            f"total={settings.steps}, algorithm=_studio_alg)"
+        )
         lines.append("            ops.algorithm(_studio_alg)")
         lines.append(f"            _studio_ok = {analyze_call}")
+        lines.append(
+            "            _studio_iterations, _studio_norm = "
+            "_studio_test_state()"
+        )
         lines.append("            if _studio_ok == 0:")
+        lines.append("                _studio_active_algorithm = _studio_alg")
+        lines.append(
+            "                _studio_emit('recovered', "
+            "step=_studio_step_no, "
+            f"total={settings.steps}, algorithm=_studio_alg, "
+            "iterations=_studio_iterations, norm=_studio_norm)"
+        )
         lines.append("                break")
-        lines.append(f"        ops.algorithm('{settings.algorithm}')")
+        lines.append("        ops.algorithm(_studio_primary_algorithm)")
+
     lines.append("    if _studio_ok != 0:")
     lines.append(
+        "        _studio_emit('failed', step=_studio_step_no, "
+        f"total={settings.steps}, "
+        "algorithm=_studio_active_algorithm, "
+        "iterations=_studio_iterations, norm=_studio_norm, "
+        "code=int(_studio_ok))"
+    )
+    lines.append(
         "        raise RuntimeError("
-        "f'Analysis failed at step {_studio_step + 1}')"
+        "f'Analysis failed at step {_studio_step_no}')"
+    )
+    lines.append("    _studio_time = float(ops.getTime())")
+    lines.append(
+        "    _studio_disp = "
+        "[float(v) for v in ops.nodeDisp(_studio_monitor_node)]"
     )
     lines.append(
-        "    _studio_results['history']['time'].append(float(ops.getTime()))"
+        "    _studio_results['history']['time'].append(_studio_time)"
     )
     lines.append(
-        "    _studio_results['history']['displacement'].append("
-        "[float(v) for v in ops.nodeDisp(_studio_monitor_node)])"
+        "    _studio_results['history']['displacement'].append(_studio_disp)"
     )
+    lines.append("    _studio_base = 0.0")
     lines.append("    if _studio_support_node_tags:")
     lines.append("        ops.reactions()")
-    lines.append("        _studio_base = 0.0")
     lines.append("        for _studio_support in _studio_support_node_tags:")
     lines.append(
         f"            _studio_base += float(ops.nodeReaction("
         f"_studio_support, {settings.control_dof}))"
     )
     lines.append(
-        "        _studio_results['history']['base_shear'].append(_studio_base)"
+        "    _studio_results['history']['base_shear'].append(_studio_base)"
     )
-    lines.append("    else:")
     lines.append(
-        "        _studio_results['history']['base_shear'].append(0.0)"
+        f"    _studio_monitor = "
+        f"float(_studio_disp[{settings.control_dof - 1}]) "
+        f"if len(_studio_disp) >= {settings.control_dof} else 0.0"
+    )
+    lines.append(
+        "    _studio_emit('progress', step=_studio_step_no, "
+        f"total={settings.steps}, "
+        f"percent=100.0 * _studio_step_no / {settings.steps}, "
+        "algorithm=_studio_active_algorithm, "
+        "iterations=_studio_iterations, norm=_studio_norm, "
+        "time=_studio_time, monitor=_studio_monitor, "
+        "base_shear=_studio_base)"
     )
 
     lines.extend([
@@ -412,6 +504,7 @@ def to_openseespy(
     active_analysis_tag: int | None = None,
 ) -> str:
     lines: list[str] = [
+        "import json",
         "import openseespy.opensees as ops",
         "",
         "ops.wipe()",

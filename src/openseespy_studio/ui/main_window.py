@@ -580,12 +580,20 @@ class MainWindow(QMainWindow):
         self._analysis_process: QProcess | None = None
         self._analysis_script_path: str | None = None
         self._analysis_result_path: str | None = None
+        self._analysis_log_path: str | None = None
+        self._analysis_stdout_buffer = ""
+        self._analysis_stderr_buffer = ""
+        self._analysis_external_console = False
+        self._external_log_paths: list[str] = []
         self._analysis_stop_requested = False
         self._jobs: dict[int, JobRecord] = {}
         self._job_counter = 0
         self._current_job_id: int | None = None
         self._last_result: dict[str, object] = {}
         self._dirty = False
+        self._job_ui_timer = QTimer(self)
+        self._job_ui_timer.setInterval(1000)
+        self._job_ui_timer.timeout.connect(self._refresh_running_job_ui)
 
         self.setCorner(Qt.BottomLeftCorner, Qt.LeftDockWidgetArea)
         self.setCorner(Qt.BottomRightCorner, Qt.BottomDockWidgetArea)
@@ -3500,6 +3508,10 @@ class MainWindow(QMainWindow):
                 ("Max iterations", settings.max_iterations),
                 ("Algorithm", settings.algorithm), ("Steps", settings.steps),
                 ("Recovery", "On" if settings.recovery else "Off"),
+                (
+                    "External terminal",
+                    "On" if settings.show_external_console else "Off",
+                ),
             ])
             if settings.analysis_type == "Static":
                 rows.append(("Load increment", f"{settings.load_increment:g}"))
@@ -3940,6 +3952,19 @@ class MainWindow(QMainWindow):
         os.close(result_fd)
         self._analysis_result_path = result_path
 
+        log_fd, log_path = tempfile.mkstemp(
+            prefix="openseespy_studio_job_",
+            suffix=".log",
+            text=True,
+        )
+        os.close(log_fd)
+        self._analysis_log_path = log_path
+        self._analysis_stdout_buffer = ""
+        self._analysis_stderr_buffer = ""
+        self._analysis_external_console = bool(
+            settings.show_external_console
+        )
+
         self._job_counter += 1
         job = JobRecord(
             job_id=self._job_counter,
@@ -3948,11 +3973,37 @@ class MainWindow(QMainWindow):
             analysis_type=settings.analysis_type,
         )
         job.start()
+        total = (
+            settings.num_modes
+            if settings.analysis_type == "Modal"
+            else settings.steps
+        )
+        job.update_progress(
+            0,
+            total,
+            algorithm=(
+                "Eigen"
+                if settings.analysis_type == "Modal"
+                else settings.algorithm
+            ),
+            message="Starting solver",
+        )
         self._jobs[job.job_id] = job
         self._current_job_id = job.job_id
         self._analysis_stop_requested = False
         self.results_panel.add_or_update_job(job)
         self._refresh_tree()
+
+        self._append_analysis_log(
+            f"OpenSeesPy Studio · Job {job.job_id}\n"
+            f"Analysis: {settings.name} ({settings.analysis_type})\n"
+            f"Python: {sys.executable}\n"
+            + "-" * 72
+            + "\n"
+        )
+
+        if settings.show_external_console:
+            self._launch_external_solver_terminal(log_path, job.job_id)
 
         process = QProcess(self)
         process.setProgram(sys.executable)
@@ -3975,11 +4026,279 @@ class MainWindow(QMainWindow):
             f"analysis with {Path(sys.executable).name}..."
         )
         self.status_message.setText(
-            f"Job {job.job_id} running: {settings.analysis_type}"
+            f"Job {job.job_id} · 0/{total} · 0% · starting"
         )
         self.actions["run"].setText("Stop")
         self.actions["run"].setToolTip("Stop running analysis")
+        self._job_ui_timer.start()
         process.start()
+
+    def _launch_external_solver_terminal(
+        self,
+        log_path: str,
+        job_id: int,
+    ) -> None:
+        if sys.platform != "win32":
+            self.console.appendPlainText(
+                ">> External solver terminal is currently supported "
+                "only on Windows."
+            )
+            return
+
+        escaped_path = str(log_path).replace("'", "''")
+        command = (
+            f"$host.UI.RawUI.WindowTitle='OpenSeesPy Studio - Job {job_id}'; "
+            f"Get-Content -LiteralPath '{escaped_path}' -Wait"
+        )
+        try:
+            result = QProcess.startDetached(
+                "powershell.exe",
+                [
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NoExit",
+                    "-Command",
+                    command,
+                ],
+            )
+            started = (
+                bool(result[0])
+                if isinstance(result, tuple)
+                else bool(result)
+            )
+        except Exception as exc:
+            started = False
+            self.console.appendPlainText(
+                f">> Could not open external solver terminal: {exc}"
+            )
+
+        if started:
+            self.console.appendPlainText(
+                f">> External solver terminal opened for Job {job_id}. "
+                "Close that PowerShell window manually when finished."
+            )
+        else:
+            self.console.appendPlainText(
+                ">> External solver terminal could not be started. "
+                "Live output remains available in the Studio Console."
+            )
+
+    def _append_analysis_log(self, text: str) -> None:
+        path = self._analysis_log_path
+        if not path or not text:
+            return
+        try:
+            with Path(path).open("a", encoding="utf-8") as stream:
+                stream.write(text)
+        except OSError:
+            pass
+
+    def _format_solver_event(
+        self,
+        payload: dict[str, object],
+    ) -> str:
+        event = str(payload.get("event", ""))
+        step = int(payload.get("step", 0) or 0)
+        total = int(payload.get("total", 0) or 0)
+        algorithm = str(payload.get("algorithm", "") or "")
+        iterations = int(payload.get("iterations", 0) or 0)
+        norm = payload.get("norm")
+
+        if event == "start":
+            return (
+                f"[Job] Solver started · {payload.get('analysis_type', '')} "
+                f"· total={total} · algorithm={algorithm}"
+            )
+
+        if event == "progress":
+            percent = float(payload.get("percent", 0.0) or 0.0)
+            if "eigenvalue" in payload:
+                return (
+                    f"Mode {step}/{total} · {percent:5.1f}% "
+                    f"· λ={float(payload.get('eigenvalue', 0.0)):.6g}"
+                )
+
+            time_value = float(payload.get("time", 0.0) or 0.0)
+            monitor = float(payload.get("monitor", 0.0) or 0.0)
+            base_shear = float(
+                payload.get("base_shear", 0.0) or 0.0
+            )
+            norm_text = (
+                f"{float(norm):.3e}"
+                if norm is not None
+                else "-"
+            )
+            return (
+                f"Step {step}/{total} · {percent:5.1f}% "
+                f"· t={time_value:.6g} · iter={iterations} "
+                f"· norm={norm_text} · alg={algorithm} "
+                f"· monitor={monitor:.6g} "
+                f"· Vbase={base_shear:.6g} · OK"
+            )
+
+        if event == "convergence_failed":
+            code = int(payload.get("code", 0) or 0)
+            norm_text = (
+                f"{float(norm):.3e}"
+                if norm is not None
+                else "-"
+            )
+            return (
+                f"!! Step {step}/{total} · {algorithm} failed "
+                f"· code={code} · iter={iterations} · norm={norm_text}"
+            )
+
+        if event == "fallback":
+            return (
+                f"→ Step {step}/{total} · trying fallback {algorithm}"
+            )
+
+        if event == "recovered":
+            norm_text = (
+                f"{float(norm):.3e}"
+                if norm is not None
+                else "-"
+            )
+            return (
+                f"✓ Step {step}/{total} · recovered with {algorithm} "
+                f"· iter={iterations} · norm={norm_text}"
+            )
+
+        if event == "failed":
+            return (
+                f"✗ Step {step}/{total} · convergence recovery exhausted "
+                f"· algorithm={algorithm}"
+            )
+
+        return "[Solver event] " + json.dumps(
+            payload,
+            ensure_ascii=False,
+        )
+
+    def _handle_solver_event(
+        self,
+        payload: dict[str, object],
+    ) -> None:
+        job = (
+            self._jobs.get(self._current_job_id)
+            if self._current_job_id is not None
+            else None
+        )
+        if job is None:
+            return
+
+        event = str(payload.get("event", ""))
+        if event == "progress":
+            step = int(payload.get("step", 0) or 0)
+            total = int(payload.get("total", 0) or 0)
+            algorithm = str(payload.get("algorithm", "") or "")
+            iterations = int(payload.get("iterations", 0) or 0)
+            message = (
+                f"{algorithm} · iter {iterations}"
+                if algorithm
+                else f"Step {step}/{total}"
+            )
+            job.update_progress(
+                step,
+                total,
+                algorithm=algorithm,
+                iterations=iterations,
+                message=message,
+            )
+            self.status_message.setText(
+                f"Job {job.job_id} · {step}/{total} "
+                f"· {job.progress_percent:.1f}% · {message}"
+            )
+        elif event == "convergence_failed":
+            job.message = (
+                f"Step {payload.get('step')}: "
+                f"{payload.get('algorithm')} failed; recovering"
+            )
+        elif event == "fallback":
+            job.message = (
+                f"Trying {payload.get('algorithm')} "
+                f"at step {payload.get('step')}"
+            )
+        elif event == "recovered":
+            job.message = (
+                f"Recovered with {payload.get('algorithm')} "
+                f"at step {payload.get('step')}"
+            )
+        elif event == "failed":
+            job.message = (
+                f"Convergence failed at step {payload.get('step')}"
+            )
+
+        self.results_panel.add_or_update_job(job)
+
+    def _handle_solver_line(
+        self,
+        line: str,
+        *,
+        is_stderr: bool = False,
+    ) -> None:
+        if not line:
+            return
+
+        display = line
+        prefix = "[STUDIO_EVENT] "
+        if line.startswith(prefix):
+            try:
+                payload = json.loads(line[len(prefix):])
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict):
+                self._handle_solver_event(payload)
+                display = self._format_solver_event(payload)
+
+        if is_stderr:
+            display = "[stderr] " + display
+
+        self.console.appendPlainText(display)
+        self._append_analysis_log(display + "\n")
+
+    def _consume_solver_text(
+        self,
+        text: str,
+        *,
+        is_stderr: bool,
+    ) -> None:
+        attribute = (
+            "_analysis_stderr_buffer"
+            if is_stderr
+            else "_analysis_stdout_buffer"
+        )
+        combined = getattr(self, attribute) + text
+        lines = combined.split("\n")
+        setattr(self, attribute, lines.pop())
+        for line in lines:
+            self._handle_solver_line(
+                line.rstrip("\r"),
+                is_stderr=is_stderr,
+            )
+
+    def _flush_solver_buffers(self) -> None:
+        for attribute, is_stderr in (
+            ("_analysis_stdout_buffer", False),
+            ("_analysis_stderr_buffer", True),
+        ):
+            remainder = getattr(self, attribute)
+            if remainder:
+                self._handle_solver_line(
+                    remainder.rstrip("\r"),
+                    is_stderr=is_stderr,
+                )
+            setattr(self, attribute, "")
+
+    def _refresh_running_job_ui(self) -> None:
+        if self._current_job_id is None:
+            self._job_ui_timer.stop()
+            return
+        job = self._jobs.get(self._current_job_id)
+        if job is None:
+            self._job_ui_timer.stop()
+            return
+        self.results_panel.add_or_update_job(job)
 
     def _stop_analysis(self) -> None:
         process = self._analysis_process
@@ -4009,8 +4328,7 @@ class MainWindow(QMainWindow):
             errors="replace",
         )
         if text:
-            self.console.moveCursor(QTextCursor.End)
-            self.console.insertPlainText(text)
+            self._consume_solver_text(text, is_stderr=False)
 
     def _read_analysis_stderr(self) -> None:
         process = self._analysis_process
@@ -4021,8 +4339,7 @@ class MainWindow(QMainWindow):
             errors="replace",
         )
         if text:
-            self.console.moveCursor(QTextCursor.End)
-            self.console.insertPlainText(text)
+            self._consume_solver_text(text, is_stderr=True)
 
     def _analysis_process_error(self, error) -> None:
         process = self._analysis_process
@@ -4053,6 +4370,8 @@ class MainWindow(QMainWindow):
             return {}, ""
 
     def _analysis_finished(self, exit_code: int, exit_status) -> None:
+        self._flush_solver_buffers()
+        self._job_ui_timer.stop()
         crashed = exit_status == QProcess.CrashExit
         result, worker_error = self._read_worker_result()
         job = (
@@ -4116,6 +4435,10 @@ class MainWindow(QMainWindow):
             elif result.get("final"):
                 self.viewport.show_deformed_shape(result, scale=10.0)
 
+        self._append_analysis_log(
+            "-" * 72 + "\n"
+            + f"Job finished · status={status} · exit_code={exit_code}\n"
+        )
         self.actions["run"].setText("Run")
         self.actions["run"].setToolTip("Run model")
         self._analysis_process = None
@@ -4181,6 +4504,18 @@ class MainWindow(QMainWindow):
                 except OSError:
                     pass
 
+        log_path = self._analysis_log_path
+        self._analysis_log_path = None
+        if log_path:
+            if self._analysis_external_console:
+                self._external_log_paths.append(log_path)
+            else:
+                try:
+                    Path(log_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+        self._analysis_external_console = False
+
     def closeEvent(self, event) -> None:
         if not self._maybe_save_changes():
             event.ignore()
@@ -4190,6 +4525,12 @@ class MainWindow(QMainWindow):
             process.kill()
             process.waitForFinished(1000)
         self._cleanup_analysis_files()
+        for path in self._external_log_paths:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                pass
+        self._external_log_paths.clear()
         super().closeEvent(event)
 
     def _not_implemented(self) -> None:

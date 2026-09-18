@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
+    QProgressBar,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -113,9 +114,17 @@ class ResultsPanel(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(2, 2, 2, 2)
-        self.jobs_table = QTableWidget(0, 6)
+        self.jobs_table = QTableWidget(0, 7)
         self.jobs_table.setHorizontalHeaderLabels(
-            ["Job", "Analysis", "Type", "Status", "Elapsed (s)", "Message"]
+            [
+                "Job",
+                "Analysis",
+                "Type",
+                "Status",
+                "Progress",
+                "Elapsed (s)",
+                "Message",
+            ]
         )
         self.jobs_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeToContents
@@ -281,14 +290,36 @@ class ResultsPanel(QWidget):
             job.analysis_name,
             job.analysis_type,
             job.status,
-            f"{job.elapsed_seconds:.2f}",
-            job.message,
         ]
         for column, value in enumerate(values):
             item = QTableWidgetItem(str(value))
             if column == 0:
                 item.setData(Qt.UserRole, job.job_id)
             self.jobs_table.setItem(row, column, item)
+
+        progress = self.jobs_table.cellWidget(row, 4)
+        if not isinstance(progress, QProgressBar):
+            progress = QProgressBar()
+            progress.setRange(0, 100)
+            progress.setTextVisible(True)
+            self.jobs_table.setCellWidget(row, 4, progress)
+        progress.setValue(int(round(job.progress_percent)))
+        progress.setFormat(
+            f"{job.progress_current}/{job.progress_total} · %p%"
+            if job.progress_total > 0
+            else "%p%"
+        )
+
+        self.jobs_table.setItem(
+            row,
+            5,
+            QTableWidgetItem(f"{job.elapsed_seconds:.2f}"),
+        )
+        self.jobs_table.setItem(
+            row,
+            6,
+            QTableWidgetItem(job.message),
+        )
 
     def set_result(self, result: dict[str, Any]) -> None:
         self._result = dict(result or {})
