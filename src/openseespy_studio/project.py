@@ -9,7 +9,7 @@ from .model import StructuralModel
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 5
+PROJECT_FORMAT_VERSION = 6
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -331,6 +331,84 @@ class TransformationData:
 
 
 @dataclass
+class ConstraintData:
+    tag: int
+    name: str
+    constraint_type: str
+    retained_node: int
+    constrained_nodes: list[int] = field(default_factory=list)
+    dofs: tuple[int, ...] = ()
+    link_type: str = "beam"
+    perp_dirn: int = 3
+
+    def __post_init__(self) -> None:
+        self.tag = int(self.tag)
+        self.name = str(self.name).strip() or f"Constraint {self.tag}"
+        self.constraint_type = str(self.constraint_type)
+        self.retained_node = int(self.retained_node)
+        self.constrained_nodes = sorted({
+            int(tag)
+            for tag in self.constrained_nodes
+            if int(tag) != self.retained_node
+        })
+        self.dofs = tuple(sorted({int(dof) for dof in self.dofs}))
+        self.link_type = str(self.link_type)
+        self.perp_dirn = int(self.perp_dirn)
+
+        if self.tag <= 0:
+            raise ValueError("Constraint tag must be a positive integer.")
+        if self.retained_node <= 0:
+            raise ValueError("Retained node must be a positive integer.")
+        if not self.constrained_nodes:
+            raise ValueError("Constraint needs at least one constrained node.")
+
+        if self.constraint_type == "equalDOF":
+            if not self.dofs:
+                raise ValueError("equalDOF needs at least one DOF.")
+            if any(dof < 1 or dof > 6 for dof in self.dofs):
+                raise ValueError("equalDOF DOFs must be in the range 1..6.")
+        elif self.constraint_type == "rigidLink":
+            if self.link_type not in {"bar", "beam"}:
+                raise ValueError("rigidLink type must be 'bar' or 'beam'.")
+        elif self.constraint_type == "rigidDiaphragm":
+            if self.perp_dirn not in {1, 2, 3}:
+                raise ValueError(
+                    "rigidDiaphragm perpendicular direction must be 1, 2, or 3."
+                )
+        else:
+            raise ValueError(
+                f"Unsupported constraint type: {self.constraint_type}"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "constraint_type": self.constraint_type,
+            "retained_node": self.retained_node,
+            "constrained_nodes": list(self.constrained_nodes),
+            "dofs": list(self.dofs),
+            "link_type": self.link_type,
+            "perp_dirn": self.perp_dirn,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ConstraintData":
+        return cls(
+            tag=int(data["tag"]),
+            name=str(data.get("name", f"Constraint {data['tag']}")),
+            constraint_type=str(data.get("constraint_type", "equalDOF")),
+            retained_node=int(data["retained_node"]),
+            constrained_nodes=[
+                int(tag) for tag in data.get("constrained_nodes", [])
+            ],
+            dofs=tuple(int(dof) for dof in data.get("dofs", [])),
+            link_type=str(data.get("link_type", "beam")),
+            perp_dirn=int(data.get("perp_dirn", 3)),
+        )
+
+
+@dataclass
 class SelectionSetData:
     name: str
     node_tags: set[int] = field(default_factory=set)
@@ -363,6 +441,7 @@ class ProjectDatabase:
     # added without changing the top-level project architecture.
     sections: dict[int, SectionData] = field(default_factory=dict)
     transformations: dict[int, TransformationData] = field(default_factory=dict)
+    constraints: dict[int, ConstraintData] = field(default_factory=dict)
     time_series: dict[str, dict[str, Any]] = field(default_factory=dict)
     load_patterns: dict[str, dict[str, Any]] = field(default_factory=dict)
     analyses: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -489,6 +568,75 @@ class ProjectDatabase:
     def remove_transformation(self, tag: int) -> None:
         self.transformations.pop(int(tag), None)
 
+    def next_constraint_tag(self) -> int:
+        return max(self.constraints, default=0) + 1
+
+    def _validate_constraint_nodes(self, constraint: ConstraintData) -> None:
+        missing = []
+        if constraint.retained_node not in self.model.nodes:
+            missing.append(constraint.retained_node)
+        missing.extend(
+            tag
+            for tag in constraint.constrained_nodes
+            if tag not in self.model.nodes
+        )
+        if missing:
+            raise ValueError(
+                "Constraint references missing node tag(s): "
+                + ", ".join(map(str, sorted(set(missing))))
+            )
+
+    def add_constraint(self, constraint: ConstraintData) -> None:
+        if constraint.tag in self.constraints:
+            raise ValueError(
+                f"Constraint tag {constraint.tag} already exists."
+            )
+        self._validate_constraint_nodes(constraint)
+        self.constraints[constraint.tag] = constraint
+
+    def update_constraint(
+        self,
+        original_tag: int,
+        constraint: ConstraintData,
+    ) -> None:
+        original_tag = int(original_tag)
+        if original_tag not in self.constraints:
+            raise ValueError(
+                f"Constraint tag {original_tag} does not exist."
+            )
+        if (
+            constraint.tag != original_tag
+            and constraint.tag in self.constraints
+        ):
+            raise ValueError(
+                f"Constraint tag {constraint.tag} already exists."
+            )
+        self._validate_constraint_nodes(constraint)
+        self.constraints.pop(original_tag)
+        self.constraints[constraint.tag] = constraint
+
+    def remove_constraint(self, tag: int) -> None:
+        self.constraints.pop(int(tag), None)
+
+    def prune_constraints(self) -> list[int]:
+        removed: list[int] = []
+        existing_nodes = set(self.model.nodes)
+        for tag, constraint in list(self.constraints.items()):
+            if constraint.retained_node not in existing_nodes:
+                self.constraints.pop(tag)
+                removed.append(tag)
+                continue
+            constraint.constrained_nodes = [
+                node_tag
+                for node_tag in constraint.constrained_nodes
+                if node_tag in existing_nodes
+                and node_tag != constraint.retained_node
+            ]
+            if not constraint.constrained_nodes:
+                self.constraints.pop(tag)
+                removed.append(tag)
+        return sorted(removed)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "format": PROJECT_FORMAT,
@@ -511,6 +659,10 @@ class ProjectDatabase:
             "transformations": [
                 self.transformations[tag].to_dict()
                 for tag in sorted(self.transformations)
+            ],
+            "constraints": [
+                self.constraints[tag].to_dict()
+                for tag in sorted(self.constraints)
             ],
             "time_series": self.time_series,
             "load_patterns": self.load_patterns,
@@ -636,6 +788,20 @@ class ProjectDatabase:
 
         return transformations
 
+    @staticmethod
+    def _load_constraints(raw: Any) -> dict[int, ConstraintData]:
+        constraints: dict[int, ConstraintData] = {}
+        if not isinstance(raw, list):
+            return constraints
+        for item in raw:
+            constraint = ConstraintData.from_dict(dict(item))
+            if constraint.tag in constraints:
+                raise ValueError(
+                    f"Duplicate constraint tag {constraint.tag}."
+                )
+            constraints[constraint.tag] = constraint
+        return constraints
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectDatabase":
         project_format = data.get("format")
@@ -665,6 +831,7 @@ class ProjectDatabase:
             materials=cls._load_materials(data.get("materials", [])),
             sections=cls._load_sections(data.get("sections", [])),
             transformations=cls._load_transformations(data.get("transformations", [])),
+            constraints=cls._load_constraints(data.get("constraints", [])),
             time_series=dict(data.get("time_series", {})),
             load_patterns=dict(data.get("load_patterns", {})),
             analyses=dict(data.get("analyses", {})),

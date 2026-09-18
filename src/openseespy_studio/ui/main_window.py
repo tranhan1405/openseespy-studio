@@ -41,8 +41,9 @@ from PySide6.QtWidgets import (
 
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..model import StructuralModel, classify_fixity
-from ..project import MaterialData, ProjectDatabase, SectionData, SelectionSetData, TransformationData
+from ..project import ConstraintData, MaterialData, ProjectDatabase, SectionData, SelectionSetData, TransformationData
 from .code_editor import CodeEditor
+from .constraint_dialog import ConstraintDialog
 from .geometry_dialogs import (
     ElementDialog,
     MirrorDialog,
@@ -832,6 +833,13 @@ class MainWindow(QMainWindow):
             self._clear_restraint,
             "Clear restraint on selected nodes",
         )
+        self._make_action(
+            "constraint",
+            "Constraint...",
+            "transform",
+            self._create_constraint,
+            "Create equalDOF, rigidLink, or rigidDiaphragm",
+        )
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action("plot", "Plot", "plot", self._not_implemented, "Plot results")
 
@@ -855,6 +863,8 @@ class MainWindow(QMainWindow):
         ])
         menus["Loads"].addAction(self.actions["support"])
         menus["Loads"].addAction(self.actions["clear_support"])
+        menus["Loads"].addSeparator()
+        menus["Loads"].addAction(self.actions["constraint"])
         menus["Analysis"].addAction(self.actions["run"])
         menus["Results"].addAction(self.actions["plot"])
 
@@ -871,7 +881,7 @@ class MainWindow(QMainWindow):
             ("Modify", ["copy", "move", "rotate", "mirror", "delete"]),
             ("Selection", ["select", "box", "polygon", "byid", "bytype"]),
             ("View", ["xy", "yz", "xz", "iso"]),
-            ("Supports", ["support", "clear_support"]),
+            ("Supports", ["support", "clear_support", "constraint"]),
             ("Analysis", ["run", "plot"]),
         )
 
@@ -984,6 +994,7 @@ class MainWindow(QMainWindow):
                 self.project.materials,
                 self.project.sections,
                 self.project.transformations,
+                self.project.constraints,
             )
         )
         self._selection_changed(self.selection.snapshot())
@@ -1175,6 +1186,23 @@ class MainWindow(QMainWindow):
                 node_item.setData(0, Qt.UserRole, ("node", tag))
                 group_item.addChild(node_item)
 
+        constraints_root = QTreeWidgetItem([
+            f"Constraints ({len(self.project.constraints)})"
+        ])
+        constraints_root.setIcon(0, studio_icon("transform"))
+        constraints_root.setData(0, Qt.UserRole, ("constraints_root", None))
+        constraints_root.setExpanded(True)
+        root.addChild(constraints_root)
+
+        for tag in sorted(self.project.constraints):
+            constraint = self.project.constraints[tag]
+            item = QTreeWidgetItem([
+                f"{constraint.constraint_type} [{tag}]  {constraint.name}"
+            ])
+            item.setIcon(0, studio_icon("transform"))
+            item.setData(0, Qt.UserRole, ("constraint", tag))
+            constraints_root.addChild(item)
+
         for label, icon in (
             (f"Time Series ({len(self.project.time_series)})", "timeseries"),
             (f"Load Patterns ({len(self.project.load_patterns)})", "load"),
@@ -1205,6 +1233,7 @@ class MainWindow(QMainWindow):
         material_tag: int | None = None
         section_tag: int | None = None
         transformation_tag: int | None = None
+        constraint_tag: int | None = None
 
         for item in self.tree.selectedItems():
             payload = item.data(0, Qt.UserRole)
@@ -1226,6 +1255,8 @@ class MainWindow(QMainWindow):
                 section_tag = int(tag)
             elif kind == "transformation":
                 transformation_tag = int(tag)
+            elif kind == "constraint":
+                constraint_tag = int(tag)
 
         self.selection.set_selection(nodes=nodes, elements=elements)
         if material_tag is not None:
@@ -1234,6 +1265,8 @@ class MainWindow(QMainWindow):
             self._show_section_properties(section_tag)
         elif transformation_tag is not None:
             self._show_transformation_properties(transformation_tag)
+        elif constraint_tag is not None:
+            self._show_constraint_properties(constraint_tag)
 
     def _wire_selection(self) -> None:
         self.selection.changed.connect(self._selection_changed)
@@ -1485,6 +1518,10 @@ class MainWindow(QMainWindow):
         apply_support.triggered.connect(self._apply_restraint)
         clear_support = support_menu.addAction("Clear")
         clear_support.triggered.connect(self._clear_restraint)
+
+        constraint_action = menu.addAction("Create Constraint...")
+        constraint_action.setEnabled(len(self.selection.nodes) >= 2)
+        constraint_action.triggered.connect(self._create_constraint)
 
         menu.addSeparator()
         assign_menu = menu.addMenu("Assign")
@@ -1988,6 +2025,7 @@ class MainWindow(QMainWindow):
             cascade_nodes=True,
         )
         self._prune_selection_sets()
+        self.project.prune_constraints()
         self.selection.clear()
         self._refresh_all("Deleted selected entities")
         self._record_project_change("Delete selected entities", before)
@@ -2576,6 +2614,127 @@ class MainWindow(QMainWindow):
             ],
         )
 
+    def _create_constraint(self) -> None:
+        selected_nodes = sorted(self.selection.nodes)
+        if len(selected_nodes) >= 2:
+            retained = selected_nodes[0]
+            constrained = selected_nodes[1:]
+        else:
+            retained = selected_nodes[0] if selected_nodes else min(
+                self.model.nodes,
+                default=1,
+            )
+            constrained = []
+
+        dialog = ConstraintDialog(
+            next_tag=self.project.next_constraint_tag(),
+            initial_retained=retained,
+            initial_constrained=constrained,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            constraint = dialog.constraint_data()
+            self.project.add_constraint(constraint)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Constraint Editor", str(exc))
+            return
+
+        self._refresh_project_metadata(
+            f"Created {constraint.constraint_type} constraint "
+            f"{constraint.tag}"
+        )
+        self._show_constraint_properties(constraint.tag)
+        self._record_project_change(
+            f"Create constraint {constraint.tag}",
+            before,
+        )
+
+    def _edit_constraint(self, tag: int) -> None:
+        constraint = self.project.constraints.get(tag)
+        if constraint is None:
+            return
+
+        dialog = ConstraintDialog(
+            constraint=constraint,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            updated = dialog.constraint_data()
+            self.project.update_constraint(tag, updated)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Constraint Editor", str(exc))
+            return
+
+        self._refresh_project_metadata(
+            f"Updated constraint {updated.tag}"
+        )
+        self._show_constraint_properties(updated.tag)
+        self._record_project_change(
+            f"Edit constraint {tag}",
+            before,
+        )
+
+    def _delete_constraint(self, tag: int) -> None:
+        constraint = self.project.constraints.get(tag)
+        if constraint is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete Constraint",
+            f"Delete constraint {tag} ({constraint.name})?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        before = self.project.to_dict()
+        self.project.remove_constraint(tag)
+        self._refresh_project_metadata(
+            f"Deleted constraint {tag}"
+        )
+        self._record_project_change(
+            f"Delete constraint {tag}",
+            before,
+        )
+
+    def _show_constraint_properties(self, tag: int) -> None:
+        constraint = self.project.constraints.get(tag)
+        if constraint is None:
+            return
+
+        rows: list[tuple[str, object]] = [
+            ("Tag", constraint.tag),
+            ("Name", constraint.name),
+            ("Type", constraint.constraint_type),
+            ("Retained", constraint.retained_node),
+            (
+                "Constrained",
+                ", ".join(map(str, constraint.constrained_nodes)),
+            ),
+        ]
+        if constraint.constraint_type == "equalDOF":
+            labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+            rows.append((
+                "DOFs",
+                ", ".join(labels[dof - 1] for dof in constraint.dofs),
+            ))
+        elif constraint.constraint_type == "rigidLink":
+            rows.append(("Link type", constraint.link_type))
+        elif constraint.constraint_type == "rigidDiaphragm":
+            axis = {1: "X", 2: "Y", 3: "Z"}[constraint.perp_dirn]
+            rows.append(("Normal axis", axis))
+
+        self.properties_panel.set_properties("Constraint", rows)
+
     def _create_named_selection(self) -> None:
         nodes, elements = self._selection_sets()
         if not nodes and not elements:
@@ -2636,6 +2795,25 @@ class MainWindow(QMainWindow):
             support_action.triggered.connect(self._apply_restraint)
             clear_action = menu.addAction("Clear Support")
             clear_action.triggered.connect(self._clear_restraint)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "constraints_root":
+            create_action = menu.addAction("New Constraint...")
+            create_action.triggered.connect(self._create_constraint)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "constraint":
+            tag = int(value)
+            edit_action = menu.addAction("Edit...")
+            edit_action.triggered.connect(
+                lambda: self._edit_constraint(tag)
+            )
+            delete_action = menu.addAction("Delete")
+            delete_action.triggered.connect(
+                lambda: self._delete_constraint(tag)
+            )
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
@@ -2748,6 +2926,8 @@ class MainWindow(QMainWindow):
             self._edit_section(int(value))
         elif kind == "transformation":
             self._edit_transformation(int(value))
+        elif kind == "constraint":
+            self._edit_constraint(int(value))
 
     def _select_named_selection(self, name: str) -> None:
         selection_set = self.project.selection_sets.get(name)

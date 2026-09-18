@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .model import StructuralModel
-from .project import MaterialData, SectionData, TransformationData
+from .project import ConstraintData, MaterialData, SectionData, TransformationData
 
 
 @dataclass(slots=True)
@@ -141,6 +141,43 @@ def section_to_openseespy(
     raise ValueError(f"Unsupported section type: {section.section_type}")
 
 
+def constraint_to_openseespy(
+    constraint: ConstraintData,
+) -> list[str]:
+    lines = [f"# Constraint {constraint.tag}: {constraint.name}"]
+
+    if constraint.constraint_type == "equalDOF":
+        dofs = ", ".join(str(dof) for dof in constraint.dofs)
+        for constrained in constraint.constrained_nodes:
+            lines.append(
+                f"ops.equalDOF({constraint.retained_node}, "
+                f"{constrained}, {dofs})"
+            )
+        return lines
+
+    if constraint.constraint_type == "rigidLink":
+        for constrained in constraint.constrained_nodes:
+            lines.append(
+                f"ops.rigidLink('{constraint.link_type}', "
+                f"{constraint.retained_node}, {constrained})"
+            )
+        return lines
+
+    if constraint.constraint_type == "rigidDiaphragm":
+        constrained = ", ".join(
+            str(tag) for tag in constraint.constrained_nodes
+        )
+        lines.append(
+            f"ops.rigidDiaphragm({constraint.perp_dirn}, "
+            f"{constraint.retained_node}, {constrained})"
+        )
+        return lines
+
+    raise ValueError(
+        f"Unsupported constraint type: {constraint.constraint_type}"
+    )
+
+
 def transformation_to_openseespy(
     transformation: TransformationData,
 ) -> str:
@@ -156,6 +193,7 @@ def to_openseespy(
     materials: dict[int, MaterialData] | None = None,
     sections: dict[int, SectionData] | None = None,
     transformations: dict[int, TransformationData] | None = None,
+    constraints: dict[int, ConstraintData] | None = None,
 ) -> str:
     lines: list[str] = [
         "import openseespy.opensees as ops",
@@ -177,6 +215,11 @@ def to_openseespy(
         if any(node.fixity):
             fix = ", ".join(str(v) for v in node.fixity)
             lines.append(f"ops.fix({tag}, {fix})")
+
+    if constraints:
+        lines.extend(["", "# Multi-point constraints"])
+        for tag in sorted(constraints):
+            lines.extend(constraint_to_openseespy(constraints[tag]))
 
     if materials:
         lines.extend(["", "# Materials"])
