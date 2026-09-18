@@ -269,11 +269,13 @@ def analysis_to_openseespy(
     *,
     node_tags: list[int] | None = None,
     element_tags: list[int] | None = None,
+    frame_element_tags: list[int] | None = None,
     support_node_tags: list[int] | None = None,
     monitor_node: int | None = None,
 ) -> list[str]:
     node_tags = list(node_tags or [])
     element_tags = list(element_tags or [])
+    frame_element_tags = list(frame_element_tags or [])
     support_node_tags = list(support_node_tags or [])
     monitor_node = int(monitor_node or (node_tags[0] if node_tags else 1))
 
@@ -296,7 +298,7 @@ def analysis_to_openseespy(
         "    return _iterations, _norm",
         "",
         "_studio_results = {",
-        "    'schema_version': 1,",
+        "    'schema_version': 2,",
         "    'analysis': {",
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
@@ -309,6 +311,7 @@ def analysis_to_openseespy(
         "}",
         f"_studio_node_tags = {node_tags!r}",
         f"_studio_element_tags = {element_tags!r}",
+        f"_studio_frame_element_tags = {frame_element_tags!r}",
         f"_studio_support_node_tags = {support_node_tags!r}",
         f"_studio_monitor_node = {monitor_node}",
         f"ops.constraints('{settings.constraints_handler}')",
@@ -506,10 +509,20 @@ def analysis_to_openseespy(
         "[float(v) for v in ops.eleForce(_studio_element)]",
         "    except Exception:",
         "        _studio_element_forces[str(_studio_element)] = []",
+        "_studio_element_local_forces = {}",
+        "for _studio_element in _studio_frame_element_tags:",
+        "    try:",
+        "        _studio_local = ops.eleResponse("
+        "_studio_element, 'localForce')",
+        "        _studio_element_local_forces[str(_studio_element)] = "
+        "[float(v) for v in (_studio_local or [])]",
+        "    except Exception:",
+        "        _studio_element_local_forces[str(_studio_element)] = []",
         "_studio_results['final'] = {",
         "    'node_displacements': _studio_final_disp,",
         "    'node_reactions': _studio_final_reaction,",
         "    'element_forces': _studio_element_forces,",
+        "    'element_local_forces': _studio_element_local_forces,",
         "}",
         "print('Analysis completed:', "
         f"{settings.analysis_type!r}, {settings.steps}, 'step(s)')",
@@ -775,6 +788,7 @@ def to_openseespy(
                 active,
                 node_tags=sorted(model.nodes),
                 element_tags=result_element_tags,
+                frame_element_tags=sorted(model.elements),
                 support_node_tags=support_node_tags,
                 monitor_node=monitor_node,
             )

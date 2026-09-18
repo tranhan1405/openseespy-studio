@@ -739,6 +739,12 @@ class MainWindow(QMainWindow):
         self.results_panel.mode_shape_requested.connect(
             self._show_mode_shape_result
         )
+        self.results_panel.member_force_requested.connect(
+            self._show_member_force_result
+        )
+        self.results_panel.element_selected.connect(
+            self._select_result_element
+        )
         self.results_panel.clear_overlay_requested.connect(
             self.viewport.clear_result_overlay
         )
@@ -5107,6 +5113,37 @@ class MainWindow(QMainWindow):
         )
         self.status_message.setText(
             f"Showing deformed shape · scale {float(scale):g}"
+        )
+
+    def _select_result_element(self, tag: int) -> None:
+        tag = int(tag)
+        if tag not in self.model.elements:
+            return
+        self.selection.set_selection(elements={tag})
+        self.viewport.zoom_to_selection(set(), {tag})
+        self.status_message.setText(
+            f"Selected result member {tag}"
+        )
+
+    def _show_member_force_result(
+        self,
+        component: str,
+        scale: float,
+    ) -> None:
+        if not self._last_result:
+            self.status_message.setText(
+                "No member-force result available"
+            )
+            return
+        self.viewport.show_member_force_diagram(
+            self._last_result,
+            self.project.transformations,
+            str(component),
+            scale=float(scale),
+        )
+        self.status_message.setText(
+            f"Showing local {component} diagram · scale "
+            f"{float(scale):g}"
         )
 
     def _show_mode_shape_result(self, mode: int, scale: float) -> None:

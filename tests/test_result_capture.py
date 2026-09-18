@@ -15,6 +15,7 @@ def test_static_generator_collects_results_and_history():
             settings,
             node_tags=[1, 2],
             element_tags=[1],
+            frame_element_tags=[1],
             support_node_tags=[1],
             monitor_node=2,
         )
@@ -24,6 +25,9 @@ def test_static_generator_collects_results_and_history():
     assert "ops.nodeDisp(_studio_monitor_node)" in text
     assert "ops.nodeReaction(_studio_node)" in text
     assert "ops.eleForce(_studio_element)" in text
+    assert "ops.eleResponse(_studio_element, 'localForce')" in text
+    assert "'element_local_forces': _studio_element_local_forces" in text
+    assert "'schema_version': 2" in text
     assert "'monitor_node': 2" in text
 
 

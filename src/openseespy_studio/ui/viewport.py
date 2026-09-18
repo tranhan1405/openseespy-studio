@@ -26,7 +26,9 @@ except ImportError:
     vtkCellPicker = None
     vtkPointPicker = None
 
+from ..beam_loads import element_local_axes
 from ..model import StructuralModel, classify_fixity
+from ..postprocess import component_end_resultants
 from ..project import ConnectionData
 from .icons import studio_icon
 
@@ -1049,7 +1051,12 @@ class ModelViewport(QWidget):
         self.plotter.render()
 
     def clear_result_overlay(self) -> None:
-        for name in ("result-overlay", "result-nodes"):
+        for name in (
+            "result-overlay",
+            "result-nodes",
+            "result-force-diagram",
+            "result-force-connectors",
+        ):
             self._remove_overlay(name)
         self._result_overlay_active = False
         self.plotter.render()
@@ -1132,6 +1139,190 @@ class ModelViewport(QWidget):
                 cmap="turbo",
                 render_points_as_spheres=True,
                 point_size=7,
+                pickable=False,
+                show_scalar_bar=False,
+            )
+
+        self._result_overlay_active = True
+        self.plotter.render()
+
+    def show_member_force_diagram(
+        self,
+        result: dict[str, object],
+        transformations: dict[int, object],
+        component: str,
+        *,
+        scale: float = 1.0,
+    ) -> None:
+        if self._model is None or not self._model.elements:
+            return
+
+        final = result.get("final", {}) if isinstance(result, dict) else {}
+        local_forces = (
+            final.get("element_local_forces", {})
+            if isinstance(final, dict)
+            else {}
+        )
+        if not isinstance(local_forces, dict) or not local_forces:
+            self.clear_result_overlay()
+            return
+
+        available: dict[int, tuple[float, float]] = {}
+        for tag in self._visible_element_tags():
+            raw = local_forces.get(str(tag), local_forces.get(tag))
+            if not isinstance(raw, (list, tuple)):
+                continue
+            values = component_end_resultants(raw, component)
+            if values is not None:
+                available[tag] = values
+
+        if not available:
+            self.clear_result_overlay()
+            return
+
+        max_abs = max(
+            (
+                max(abs(value_i), abs(value_j))
+                for value_i, value_j in available.values()
+            ),
+            default=0.0,
+        )
+        if max_abs <= 1.0e-15:
+            max_abs = 1.0
+
+        low, high = self._model.bounds()
+        model_span = max(
+            high[0] - low[0],
+            high[1] - low[1],
+            high[2] - low[2],
+            1.0,
+        )
+        force_scale = (
+            max(float(scale), 0.0)
+            * 0.14
+            * model_span
+            / max_abs
+        )
+
+        diagram_points: list[np.ndarray] = []
+        diagram_lines: list[int] = []
+        diagram_values: list[float] = []
+        connector_points: list[np.ndarray] = []
+        connector_lines: list[int] = []
+
+        use_local_y = component in {"N", "Vy", "T", "Mz"}
+
+        for tag in sorted(available):
+            element = self._model.elements.get(tag)
+            if element is None or element.transf_tag is None:
+                continue
+            transformation = transformations.get(element.transf_tag)
+            if transformation is None:
+                continue
+
+            try:
+                _, local_y, local_z = element_local_axes(
+                    self._model,
+                    element,
+                    transformation,
+                )
+            except ValueError:
+                continue
+
+            axis = np.asarray(
+                local_y if use_local_y else local_z,
+                dtype=float,
+            )
+            p_i = np.asarray(
+                self._model.nodes[element.i].xyz,
+                dtype=float,
+            )
+            p_j = np.asarray(
+                self._model.nodes[element.j].xyz,
+                dtype=float,
+            )
+            value_i, value_j = available[tag]
+
+            sample_count = 17
+            first_index = len(diagram_points)
+            sampled_base: list[np.ndarray] = []
+            sampled_diagram: list[np.ndarray] = []
+            for index in range(sample_count):
+                ratio = index / (sample_count - 1)
+                base = (1.0 - ratio) * p_i + ratio * p_j
+                value = (
+                    (1.0 - ratio) * value_i
+                    + ratio * value_j
+                )
+                point = base + axis * value * force_scale
+                sampled_base.append(base)
+                sampled_diagram.append(point)
+                diagram_points.append(point)
+                diagram_values.append(value)
+
+            diagram_lines.extend(
+                [sample_count]
+                + list(
+                    range(
+                        first_index,
+                        first_index + sample_count,
+                    )
+                )
+            )
+
+            for index in (0, sample_count // 2, sample_count - 1):
+                base_index = len(connector_points)
+                connector_points.extend(
+                    (
+                        sampled_base[index],
+                        sampled_diagram[index],
+                    )
+                )
+                connector_lines.extend(
+                    (2, base_index, base_index + 1)
+                )
+
+        if not diagram_points:
+            self.clear_result_overlay()
+            return
+
+        self.clear_result_overlay()
+
+        mesh = pv.PolyData(
+            np.asarray(diagram_points, dtype=float)
+        )
+        mesh.lines = np.asarray(diagram_lines, dtype=np.int64)
+        mesh.point_data["member_force"] = np.asarray(
+            diagram_values,
+            dtype=float,
+        )
+        self.plotter.add_mesh(
+            mesh,
+            name="result-force-diagram",
+            scalars="member_force",
+            cmap="coolwarm",
+            line_width=5,
+            render_lines_as_tubes=True,
+            pickable=False,
+            scalar_bar_args={
+                "title": f"{component} · local member resultant"
+            },
+        )
+
+        if connector_points:
+            connectors = pv.PolyData(
+                np.asarray(connector_points, dtype=float)
+            )
+            connectors.lines = np.asarray(
+                connector_lines,
+                dtype=np.int64,
+            )
+            self.plotter.add_mesh(
+                connectors,
+                name="result-force-connectors",
+                color="#6f7f8f",
+                line_width=1,
+                opacity=0.6,
                 pickable=False,
                 show_scalar_bar=False,
             )

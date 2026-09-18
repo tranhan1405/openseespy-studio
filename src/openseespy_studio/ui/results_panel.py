@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..jobs import JobRecord
+from ..postprocess import component_end_resultants
 
 
 class TimeHistoryPlot(QWidget):
@@ -89,6 +90,8 @@ class ResultsPanel(QWidget):
     deformation_requested = Signal(float)
     mode_shape_requested = Signal(int, float)
     clear_overlay_requested = Signal()
+    member_force_requested = Signal(str, float)
+    element_selected = Signal(int)
     job_selected = Signal(int)
 
     def __init__(self, parent=None):
@@ -213,15 +216,59 @@ class ResultsPanel(QWidget):
     def _build_element_tab(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
-        self.element_table = QTableWidget(0, 2)
-        self.element_table.setHorizontalHeaderLabels(["Element", "Force vector"])
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Local component:"))
+        self.element_quantity = QComboBox()
+        self.element_quantity.addItems(["N", "Vy", "Vz", "T", "My", "Mz"])
+        self.element_quantity.currentTextChanged.connect(
+            self._populate_element_table
+        )
+        controls.addWidget(self.element_quantity)
+
+        controls.addWidget(QLabel("Diagram scale:"))
+        self.member_force_scale = QDoubleSpinBox()
+        self.member_force_scale.setRange(0.01, 1000.0)
+        self.member_force_scale.setDecimals(3)
+        self.member_force_scale.setValue(1.0)
+        controls.addWidget(self.member_force_scale)
+
+        show = QPushButton("Show Diagram")
+        show.clicked.connect(
+            lambda: self.member_force_requested.emit(
+                self.element_quantity.currentText(),
+                self.member_force_scale.value(),
+            )
+        )
+        clear = QPushButton("Clear")
+        clear.clicked.connect(self.clear_overlay_requested.emit)
+        controls.addWidget(show)
+        controls.addWidget(clear)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.element_info = QLabel(
+            "Local member resultants use OpenSees localForce. "
+            "I-end actions are reversed so I/J share one internal-section "
+            "sign convention."
+        )
+        self.element_info.setWordWrap(True)
+        layout.addWidget(self.element_info)
+
+        self.element_table = QTableWidget(0, 4)
+        self.element_table.setHorizontalHeaderLabels(
+            ["Element", "I end", "J end", "Max |end|"]
+        )
         self.element_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeToContents
         )
         self.element_table.horizontalHeader().setStretchLastSection(True)
         self.element_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.element_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.element_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.element_table.cellClicked.connect(self._element_clicked)
         layout.addWidget(self.element_table)
-        self.tabs.addTab(page, "Element Results")
+        self.tabs.addTab(page, "Member Forces")
 
     def _build_history_tab(self) -> None:
         page = QWidget()
@@ -247,6 +294,18 @@ class ResultsPanel(QWidget):
         layout.addWidget(self.history_plot, 1)
         self.tabs.addTab(page, "Time History")
 
+    def _element_clicked(self, row: int, column: int) -> None:
+        item = self.element_table.item(row, 0)
+        if item is None:
+            return
+        tag = item.data(Qt.UserRole)
+        if tag is None:
+            try:
+                tag = int(item.text())
+            except ValueError:
+                return
+        self.element_selected.emit(int(tag))
+
     def _job_clicked(self, row: int, column: int) -> None:
         item = self.jobs_table.item(row, 0)
         if item is None:
@@ -260,6 +319,9 @@ class ResultsPanel(QWidget):
         self.jobs_table.setRowCount(0)
         self.node_table.setRowCount(0)
         self.element_table.setRowCount(0)
+        self.element_info.setText(
+            "Run a non-modal frame analysis to populate local member forces."
+        )
         self.mode_combo.clear()
         self.deformation_info.setText(
             "Run a non-modal analysis to view deformation."
@@ -378,17 +440,64 @@ class ResultsPanel(QWidget):
     def _populate_element_table(self) -> None:
         final = self._result.get("final", {})
         forces = (
-            final.get("element_forces", {})
+            final.get("element_local_forces", {})
             if isinstance(final, dict)
             else {}
         )
-        tags = sorted(forces, key=lambda value: int(value))
-        self.element_table.setRowCount(len(tags))
-        for row, tag in enumerate(tags):
-            values = forces[tag]
-            text = ", ".join(f"{float(value):.6g}" for value in values)
-            self.element_table.setItem(row, 0, QTableWidgetItem(str(tag)))
-            self.element_table.setItem(row, 1, QTableWidgetItem(text))
+        if not isinstance(forces, dict):
+            forces = {}
+
+        component = self.element_quantity.currentText()
+        rows: list[tuple[int, float, float]] = []
+        skipped = 0
+        for raw_tag in sorted(forces, key=lambda value: int(value)):
+            values = forces[raw_tag]
+            end_values = component_end_resultants(
+                values if isinstance(values, (list, tuple)) else [],
+                component,
+            )
+            if end_values is None:
+                skipped += 1
+                continue
+            rows.append(
+                (
+                    int(raw_tag),
+                    float(end_values[0]),
+                    float(end_values[1]),
+                )
+            )
+
+        self.element_table.setRowCount(len(rows))
+        for row, (tag, value_i, value_j) in enumerate(rows):
+            item = QTableWidgetItem(str(tag))
+            item.setData(Qt.UserRole, tag)
+            self.element_table.setItem(row, 0, item)
+            self.element_table.setItem(
+                row, 1, QTableWidgetItem(f"{value_i:.6g}")
+            )
+            self.element_table.setItem(
+                row, 2, QTableWidgetItem(f"{value_j:.6g}")
+            )
+            self.element_table.setItem(
+                row,
+                3,
+                QTableWidgetItem(
+                    f"{max(abs(value_i), abs(value_j)):.6g}"
+                ),
+            )
+
+        if rows:
+            note = (
+                f"{component}: {len(rows)} member(s) with 3D local-force "
+                "results."
+            )
+            if skipped:
+                note += f" {skipped} element(s) had no 12-DOF localForce."
+            self.element_info.setText(note)
+        else:
+            self.element_info.setText(
+                "No 12-DOF localForce result is available for this job."
+            )
 
     def _update_history_plot(self) -> None:
         history = self._result.get("history", {})
