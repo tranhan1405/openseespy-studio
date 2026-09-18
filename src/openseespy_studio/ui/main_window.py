@@ -626,12 +626,16 @@ class MainWindow(QMainWindow):
         self.tree.clear()
 
         root = QTreeWidgetItem(["OpenSees Model"])
+        root.setIcon(0, studio_icon("model"))
         root.setExpanded(True)
 
         geometry = QTreeWidgetItem(["Geometry"])
+        geometry.setIcon(0, studio_icon("grid"))
         geometry.setExpanded(True)
         nodes = QTreeWidgetItem([f"Nodes ({len(self.model.nodes)})"])
+        nodes.setIcon(0, studio_icon("node"))
         elements = QTreeWidgetItem([f"Elements ({len(self.model.elements)})"])
+        elements.setIcon(0, studio_icon("element"))
         geometry.addChild(nodes)
         geometry.addChild(elements)
         root.addChild(geometry)
@@ -640,37 +644,39 @@ class MainWindow(QMainWindow):
         for group in ("column", "beam-x", "beam-y"):
             count = sum(e.group == group for e in self.model.elements.values())
             child = QTreeWidgetItem([f"{group} ({count})"])
+            child.setIcon(0, studio_icon("element"))
             element_groups[group] = child
             elements.addChild(child)
 
         for tag in sorted(self.model.nodes):
             item = QTreeWidgetItem([f"Node {tag}"])
+            item.setIcon(0, studio_icon("node"))
             item.setData(0, Qt.UserRole, ("node", tag))
             nodes.addChild(item)
 
         for tag in sorted(self.model.elements):
             element = self.model.elements[tag]
             item = QTreeWidgetItem([f"Element {tag}"])
+            item.setIcon(0, studio_icon("element"))
             item.setData(0, Qt.UserRole, ("element", tag))
             element_groups.get(element.group, elements).addChild(item)
 
         fixed_count = sum(any(n.fixity) for n in self.model.nodes.values())
 
         categories = (
-            ("Materials (0)", None),
-            ("Sections (0)", None),
-            ("Transformations (0)", None),
-            (f"Boundary Conditions ({fixed_count})", None),
-            ("Time Series (0)", None),
-            ("Load Patterns (0)", None),
-            ("Recorders (0)", None),
-            ("Analysis", None),
-            ("Results", None),
+            ("Materials (0)", "material"),
+            ("Sections (0)", "section"),
+            ("Transformations (0)", "transform"),
+            (f"Boundary Conditions ({fixed_count})", "boundary"),
+            ("Time Series (0)", "timeseries"),
+            ("Load Patterns (0)", "load"),
+            ("Recorders (0)", "recorder"),
+            ("Analysis", "analysis"),
+            ("Results", "results"),
         )
-        for label, payload in categories:
+        for label, icon_name in categories:
             item = QTreeWidgetItem([label])
-            if payload:
-                item.setData(0, Qt.UserRole, payload)
+            item.setIcon(0, studio_icon(icon_name))
             root.addChild(item)
 
         self.tree.addTopLevelItem(root)
