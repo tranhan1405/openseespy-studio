@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
-from ..model import StructuralModel
+from ..model import StructuralModel, classify_fixity
 from ..project import MaterialData, ProjectDatabase, SectionData, SelectionSetData, TransformationData
 from .code_editor import CodeEditor
 from .geometry_dialogs import (
@@ -57,6 +57,7 @@ from .section_dialog import SectionDialog
 from .transformation_dialog import TransformationDialog
 from .icons import studio_icon
 from .results_panel import ResultsPanel
+from .restraint_dialog import RestraintDialog
 from .selection import SelectionManager, parse_tag_expression
 from .viewport import ModelViewport
 
@@ -817,6 +818,20 @@ class MainWindow(QMainWindow):
             self._assign_transformation_to_selection,
             "Assign geometric transformation to selected elements",
         )
+        self._make_action(
+            "support",
+            "Support...",
+            "boundary",
+            self._apply_restraint,
+            "Apply support / restraint to selected nodes",
+        )
+        self._make_action(
+            "clear_support",
+            "Clear Support",
+            "boundary",
+            self._clear_restraint,
+            "Clear restraint on selected nodes",
+        )
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action("plot", "Plot", "plot", self._not_implemented, "Plot results")
 
@@ -838,6 +853,8 @@ class MainWindow(QMainWindow):
         menus["View"].addActions([
             self.actions["xy"], self.actions["yz"], self.actions["xz"], self.actions["iso"],
         ])
+        menus["Loads"].addAction(self.actions["support"])
+        menus["Loads"].addAction(self.actions["clear_support"])
         menus["Analysis"].addAction(self.actions["run"])
         menus["Results"].addAction(self.actions["plot"])
 
@@ -854,6 +871,7 @@ class MainWindow(QMainWindow):
             ("Modify", ["copy", "move", "rotate", "mirror", "delete"]),
             ("Selection", ["select", "box", "polygon", "byid", "bytype"]),
             ("View", ["xy", "yz", "xz", "iso"]),
+            ("Supports", ["support", "clear_support"]),
             ("Analysis", ["run", "plot"]),
         )
 
@@ -1116,10 +1134,48 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("transformation", tag))
             transformations_root.addChild(item)
 
-        fixed_count = sum(any(node.fixity) for node in self.model.nodes.values())
+        constrained_nodes = {
+            tag: classify_fixity(node.fixity)
+            for tag, node in self.model.nodes.items()
+            if any(node.fixity)
+        }
+        boundary_root = QTreeWidgetItem([
+            f"Boundary Conditions ({len(constrained_nodes)})"
+        ])
+        boundary_root.setIcon(0, studio_icon("boundary"))
+        boundary_root.setData(0, Qt.UserRole, ("boundary_root", None))
+        boundary_root.setExpanded(True)
+        root.addChild(boundary_root)
+
+        grouped: dict[str, list[int]] = {}
+        for tag, support_type in constrained_nodes.items():
+            grouped.setdefault(support_type, []).append(tag)
+
+        support_order = [
+            "Fixed",
+            "Pinned",
+            "Roller X",
+            "Roller Y",
+            "Roller Z",
+            "Custom",
+        ]
+        for support_type in support_order:
+            tags = sorted(grouped.get(support_type, []))
+            if not tags:
+                continue
+            group_item = QTreeWidgetItem([
+                f"{support_type} ({len(tags)})"
+            ])
+            group_item.setIcon(0, studio_icon("boundary"))
+            group_item.setExpanded(True)
+            boundary_root.addChild(group_item)
+            for tag in tags:
+                node_item = QTreeWidgetItem([f"Node {tag}"])
+                node_item.setIcon(0, studio_icon("boundary"))
+                node_item.setData(0, Qt.UserRole, ("node", tag))
+                group_item.addChild(node_item)
 
         for label, icon in (
-            (f"Boundary Conditions ({fixed_count})", "boundary"),
             (f"Time Series ({len(self.project.time_series)})", "timeseries"),
             (f"Load Patterns ({len(self.project.load_patterns)})", "load"),
         ):
@@ -1337,7 +1393,14 @@ class MainWindow(QMainWindow):
                     ("X", f"{node.xyz[0]:g}"),
                     ("Y", f"{node.xyz[1]:g}"),
                     ("Z", f"{node.xyz[2]:g}"),
+                    ("Support", classify_fixity(node.fixity)),
                     ("Fixity", node.fixity),
+                    ("UX", "Fixed" if node.fixity[0] else "Free"),
+                    ("UY", "Fixed" if node.fixity[1] else "Free"),
+                    ("UZ", "Fixed" if node.fixity[2] else "Free"),
+                    ("RX", "Fixed" if node.fixity[3] else "Free"),
+                    ("RY", "Fixed" if node.fixity[4] else "Free"),
+                    ("RZ", "Fixed" if node.fixity[5] else "Free"),
                     ("Mass", "0.0, 0.0, 0.0"),
                     ("Connected", ", ".join(map(str, connected)) or "-"),
                 ],
@@ -1416,6 +1479,14 @@ class MainWindow(QMainWindow):
         show_all.triggered.connect(self._show_all)
 
         menu.addSeparator()
+        support_menu = menu.addMenu("Support / Restraint")
+        support_menu.setEnabled(bool(self.selection.nodes))
+        apply_support = support_menu.addAction("Apply / Edit...")
+        apply_support.triggered.connect(self._apply_restraint)
+        clear_support = support_menu.addAction("Clear")
+        clear_support.triggered.connect(self._clear_restraint)
+
+        menu.addSeparator()
         assign_menu = menu.addMenu("Assign")
         assign_menu.setEnabled(bool(self.selection.elements))
         assign_section = assign_menu.addAction("Section...")
@@ -1458,6 +1529,63 @@ class MainWindow(QMainWindow):
 
     def _selection_sets(self) -> tuple[set[int], set[int]]:
         return set(self.selection.nodes), set(self.selection.elements)
+
+    def _selected_node_tags(
+        self,
+        title: str,
+    ) -> set[int] | None:
+        tags = set(self.selection.nodes)
+        if not tags:
+            QMessageBox.information(
+                self,
+                title,
+                "Select at least one node first.",
+            )
+            return None
+        return tags
+
+    def _apply_restraint(self) -> None:
+        node_tags = self._selected_node_tags("Support / Restraint")
+        if node_tags is None:
+            return
+
+        fixities = {
+            tuple(self.model.nodes[tag].fixity)
+            for tag in node_tags
+            if tag in self.model.nodes
+        }
+        initial = next(iter(fixities)) if len(fixities) == 1 else None
+
+        dialog = RestraintDialog(initial=initial, parent=self)
+        if not dialog.exec():
+            return
+
+        fixity = dialog.fixity()
+        before = self.project.to_dict()
+        updated = self.model.set_fixity_many(node_tags, fixity)
+        support_type = classify_fixity(fixity)
+        self._refresh_all(
+            f"Applied {support_type} restraint to {len(updated)} node(s)"
+        )
+        self._record_project_change(
+            f"Apply {support_type} restraint",
+            before,
+        )
+
+    def _clear_restraint(self) -> None:
+        node_tags = self._selected_node_tags("Clear Support")
+        if node_tags is None:
+            return
+
+        before = self.project.to_dict()
+        updated = self.model.clear_fixity_many(node_tags)
+        self._refresh_all(
+            f"Cleared restraint on {len(updated)} node(s)"
+        )
+        self._record_project_change(
+            "Clear restraint",
+            before,
+        )
 
     def _selected_element_tags(
         self,
@@ -2494,6 +2622,22 @@ class MainWindow(QMainWindow):
 
         kind, value = payload
         menu = QMenu(self)
+
+        if kind == "node":
+            tag = int(value)
+            if tag not in self.selection.nodes:
+                self.selection.select("node", tag, "replace")
+            properties_action = menu.addAction("Properties")
+            properties_action.triggered.connect(
+                lambda: self._show_entity_properties("node", tag)
+            )
+            menu.addSeparator()
+            support_action = menu.addAction("Support / Restraint...")
+            support_action.triggered.connect(self._apply_restraint)
+            clear_action = menu.addAction("Clear Support")
+            clear_action.triggered.connect(self._clear_restraint)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
 
         if kind == "materials_root":
             create_action = menu.addAction("New Material...")

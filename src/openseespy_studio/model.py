@@ -5,6 +5,24 @@ from typing import Dict, Iterable, Tuple
 
 Vec3 = Tuple[float, float, float]
 
+FIXITY_PRESETS: dict[str, Tuple[int, ...]] = {
+    "Fixed": (1, 1, 1, 1, 1, 1),
+    "Pinned": (1, 1, 1, 0, 0, 0),
+    "Roller X": (0, 1, 1, 0, 0, 0),
+    "Roller Y": (1, 0, 1, 0, 0, 0),
+    "Roller Z": (1, 1, 0, 0, 0, 0),
+}
+
+
+def classify_fixity(values: Iterable[int]) -> str:
+    fixity = tuple(int(v) for v in values)
+    if not any(fixity):
+        return "Free"
+    for name, preset in FIXITY_PRESETS.items():
+        if fixity == preset:
+            return name
+    return "Custom"
+
 
 @dataclass(slots=True)
 class Node:
@@ -67,6 +85,28 @@ class StructuralModel:
         if len(vals) != self.ndf:
             raise ValueError(f"Expected {self.ndf} fixity values, got {len(vals)}")
         node.fixity = vals
+
+    def set_fixity_many(
+        self,
+        node_tags: Iterable[int],
+        values: Iterable[int],
+    ) -> set[int]:
+        vals = tuple(int(v) for v in values)
+        if len(vals) != self.ndf:
+            raise ValueError(
+                f"Expected {self.ndf} fixity values, got {len(vals)}"
+            )
+        updated: set[int] = set()
+        for tag in node_tags:
+            node = self.nodes.get(int(tag))
+            if node is None:
+                continue
+            node.fixity = vals
+            updated.add(node.tag)
+        return updated
+
+    def clear_fixity_many(self, node_tags: Iterable[int]) -> set[int]:
+        return self.set_fixity_many(node_tags, (0,) * self.ndf)
 
     def remove_element(self, tag: int) -> None:
         self.elements.pop(tag, None)

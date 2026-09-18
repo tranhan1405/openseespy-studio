@@ -26,7 +26,7 @@ except ImportError:
     vtkCellPicker = None
     vtkPointPicker = None
 
-from ..model import StructuralModel
+from ..model import StructuralModel, classify_fixity
 from .icons import studio_icon
 
 
@@ -805,22 +805,67 @@ class ModelViewport(QWidget):
             node = self._model.nodes[tag]
             if not any(node.fixity):
                 continue
+
+            support_type = classify_fixity(node.fixity)
             x, y, z = node.xyz
-            support = pv.Cone(
-                center=(x, y, z - support_size * 0.58),
-                direction=(0.0, 0.0, -1.0),
-                height=support_size * 1.12,
-                radius=support_size * 0.72,
-                resolution=4,
-            )
+
+            if support_type == "Fixed":
+                support = pv.Cube(
+                    center=(x, y, z - support_size * 0.42),
+                    x_length=support_size * 1.15,
+                    y_length=support_size * 1.15,
+                    z_length=support_size * 0.52,
+                )
+                color = "#12843d"
+            else:
+                support = pv.Cone(
+                    center=(x, y, z - support_size * 0.58),
+                    direction=(0.0, 0.0, -1.0),
+                    height=support_size * 1.12,
+                    radius=support_size * 0.72,
+                    resolution=4,
+                )
+                color = (
+                    "#19b74e"
+                    if support_type == "Pinned"
+                    else "#16a3a8"
+                    if support_type.startswith("Roller")
+                    else "#d7a21b"
+                )
+
             self.plotter.add_mesh(
                 support,
-                color="#19b74e",
-                edge_color="#0b7d32",
+                color=color,
+                edge_color="#0b6330",
                 show_edges=True,
                 line_width=1,
                 pickable=False,
             )
+
+            if support_type.startswith("Roller"):
+                axis = support_type[-1].lower()
+                direction = {
+                    "x": (1.0, 0.0, 0.0),
+                    "y": (0.0, 1.0, 0.0),
+                    "z": (0.0, 0.0, 1.0),
+                }[axis]
+                half = support_size * 0.65
+                p1 = (
+                    x - direction[0] * half,
+                    y - direction[1] * half,
+                    z - support_size * 1.05 - direction[2] * half,
+                )
+                p2 = (
+                    x + direction[0] * half,
+                    y + direction[1] * half,
+                    z - support_size * 1.05 + direction[2] * half,
+                )
+                self.plotter.add_mesh(
+                    pv.Line(p1, p2),
+                    color="#147b80",
+                    line_width=3,
+                    pickable=False,
+                )
 
         self._update_highlight_overlays()
         self.set_view(self._current_view)
