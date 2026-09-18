@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .model import StructuralModel
+from .project import MaterialData
 
 
 @dataclass(slots=True)
@@ -79,7 +80,30 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
             model.set_fixity(node_at[(i, j, 0)], (1, 1, 1, 1, 1, 1))
 
 
-def to_openseespy(model: StructuralModel) -> str:
+def material_to_openseespy(material: MaterialData) -> str:
+    p = material.parameters
+    if material.material_type == "Elastic":
+        return f"ops.uniaxialMaterial('Elastic', {material.tag}, {p['E']:g})"
+    if material.material_type == "Steel02":
+        return (
+            "ops.uniaxialMaterial('Steel02', "
+            f"{material.tag}, {p['Fy']:g}, {p['E0']:g}, {p['b']:g}, "
+            f"{p['R0']:g}, {p['cR1']:g}, {p['cR2']:g})"
+        )
+    if material.material_type == "Concrete02":
+        return (
+            "ops.uniaxialMaterial('Concrete02', "
+            f"{material.tag}, {p['fpc']:g}, {p['epsc0']:g}, "
+            f"{p['fpcu']:g}, {p['epsU']:g}, {p['lambda']:g}, "
+            f"{p['ft']:g}, {p['Ets']:g})"
+        )
+    raise ValueError(f"Unsupported material type: {material.material_type}")
+
+
+def to_openseespy(
+    model: StructuralModel,
+    materials: dict[int, MaterialData] | None = None,
+) -> str:
     lines: list[str] = [
         "import openseespy.opensees as ops",
         "",
@@ -100,6 +124,11 @@ def to_openseespy(model: StructuralModel) -> str:
         if any(node.fixity):
             fix = ", ".join(str(v) for v in node.fixity)
             lines.append(f"ops.fix({tag}, {fix})")
+
+    if materials:
+        lines.extend(["", "# Materials"])
+        for tag in sorted(materials):
+            lines.append(material_to_openseespy(materials[tag]))
 
     lines.extend([
         "",

@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
 
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..model import StructuralModel
-from ..project import ProjectDatabase, SelectionSetData
+from ..project import MaterialData, ProjectDatabase, SelectionSetData
 from .code_editor import CodeEditor
 from .geometry_dialogs import (
     ElementDialog,
@@ -52,6 +52,7 @@ from .geometry_dialogs import (
     VectorDialog,
 )
 from .history import ProjectSnapshotCommand
+from .material_dialog import MaterialDialog
 from .icons import studio_icon
 from .results_panel import ResultsPanel
 from .selection import SelectionManager, parse_tag_expression
@@ -570,6 +571,7 @@ class MainWindow(QMainWindow):
         self.tree.setIndentation(16)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.itemSelectionChanged.connect(self._tree_selection_changed)
+        self.tree.itemDoubleClicked.connect(self._tree_item_double_clicked)
         self.tree.customContextMenuRequested.connect(self._show_tree_context_menu)
 
         history = QLabel("Command history will appear here.")
@@ -739,6 +741,13 @@ class MainWindow(QMainWindow):
                 f"{label} view",
             )
 
+        self._make_action(
+            "new_material",
+            "New Material...",
+            "material",
+            self._create_material,
+            "Create OpenSees uniaxial material",
+        )
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action("plot", "Plot", "plot", self._not_implemented, "Plot results")
 
@@ -747,6 +756,7 @@ class MainWindow(QMainWindow):
         menus["File"].addSeparator()
         menus["File"].addAction(self.actions["export_py"])
         menus["Edit"].addActions([self.actions["undo"], self.actions["redo"]])
+        menus["Model"].addAction(self.actions["new_material"])
         menus["Geometry"].addActions([
             self.actions["node"], self.actions["line"], self.actions["frame"],
             self.actions["grid"], self.actions["extrude"],
@@ -857,15 +867,20 @@ class MainWindow(QMainWindow):
 
     def _refresh_all(self, message: str = "") -> None:
         self.viewport.draw_model(self.model)
+        self._refresh_project_metadata(message)
+
+    def _refresh_project_metadata(self, message: str = "") -> None:
         self.viewport.set_model_info(
             self.model.name,
             len(self.model.nodes),
             len(self.model.elements),
-            0,
-            0,
+            len(self.project.materials),
+            len(self.project.sections),
         )
         self._refresh_tree()
-        self.script.setPlainText(to_openseespy(self.model))
+        self.script.setPlainText(
+            to_openseespy(self.model, self.project.materials)
+        )
         self._selection_changed(self.selection.snapshot())
 
         if message:
@@ -958,15 +973,31 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("set", name))
             named_sets.addChild(item)
 
+        materials_root = QTreeWidgetItem([
+            f"Materials ({len(self.project.materials)})"
+        ])
+        materials_root.setIcon(0, studio_icon("material"))
+        materials_root.setData(0, Qt.UserRole, ("materials_root", None))
+        materials_root.setExpanded(True)
+        root.addChild(materials_root)
+
+        for tag in sorted(self.project.materials):
+            material = self.project.materials[tag]
+            item = QTreeWidgetItem([
+                f"{material.material_type} [{tag}]  {material.name}"
+            ])
+            item.setIcon(0, studio_icon("material"))
+            item.setData(0, Qt.UserRole, ("material", tag))
+            materials_root.addChild(item)
+
         fixed_count = sum(any(node.fixity) for node in self.model.nodes.values())
 
         for label, icon in (
-            ("Materials (0)", "material"),
-            ("Sections (0)", "section"),
-            ("Transformations (0)", "transform"),
+            (f"Sections ({len(self.project.sections)})", "section"),
+            (f"Transformations ({len(self.project.transformations)})", "transform"),
             (f"Boundary Conditions ({fixed_count})", "boundary"),
-            ("Time Series (0)", "timeseries"),
-            ("Load Patterns (0)", "load"),
+            (f"Time Series ({len(self.project.time_series)})", "timeseries"),
+            (f"Load Patterns ({len(self.project.load_patterns)})", "load"),
         ):
             item = QTreeWidgetItem([label])
             item.setIcon(0, studio_icon(icon))
@@ -991,6 +1022,8 @@ class MainWindow(QMainWindow):
     def _tree_selection_changed(self) -> None:
         nodes: set[int] = set()
         elements: set[int] = set()
+        material_tag: int | None = None
+
         for item in self.tree.selectedItems():
             payload = item.data(0, Qt.UserRole)
             if not payload:
@@ -1005,7 +1038,12 @@ class MainWindow(QMainWindow):
                 if selection_set is not None:
                     nodes.update(selection_set.node_tags)
                     elements.update(selection_set.element_tags)
+            elif kind == "material":
+                material_tag = int(tag)
+
         self.selection.set_selection(nodes=nodes, elements=elements)
+        if material_tag is not None:
+            self._show_material_properties(material_tag)
 
     def _wire_selection(self) -> None:
         self.selection.changed.connect(self._selection_changed)
@@ -1648,6 +1686,118 @@ class MainWindow(QMainWindow):
             return self._save_project()
         return True
 
+    def _create_material(self) -> None:
+        dialog = MaterialDialog(
+            next_tag=self.project.next_material_tag(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            material = dialog.material_data()
+            self.project.add_material(material)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Material Editor", str(exc))
+            return
+
+        self._refresh_project_metadata(
+            f"Created {material.material_type} material {material.tag}"
+        )
+        self._show_material_properties(material.tag)
+        self._record_project_change(
+            f"Create material {material.tag}",
+            before,
+        )
+
+    def _edit_material(self, tag: int) -> None:
+        material = self.project.materials.get(tag)
+        if material is None:
+            return
+
+        dialog = MaterialDialog(material=material, parent=self)
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            updated = dialog.material_data()
+            self.project.update_material(tag, updated)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Material Editor", str(exc))
+            return
+
+        self._refresh_project_metadata(
+            f"Updated material {updated.tag}"
+        )
+        self._show_material_properties(updated.tag)
+        self._record_project_change(
+            f"Edit material {tag}",
+            before,
+        )
+
+    def _duplicate_material(self, tag: int) -> None:
+        source = self.project.materials.get(tag)
+        if source is None:
+            return
+
+        new_tag = self.project.next_material_tag()
+        before = self.project.to_dict()
+        duplicate = MaterialData(
+            tag=new_tag,
+            name=f"{source.name} Copy",
+            material_type=source.material_type,
+            parameters=dict(source.parameters),
+        )
+        self.project.add_material(duplicate)
+        self._refresh_project_metadata(
+            f"Duplicated material {tag} as {new_tag}"
+        )
+        self._show_material_properties(new_tag)
+        self._record_project_change(
+            f"Duplicate material {tag}",
+            before,
+        )
+
+    def _delete_material(self, tag: int) -> None:
+        material = self.project.materials.get(tag)
+        if material is None:
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Delete Material",
+            f"Delete material {tag} ({material.name})?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        before = self.project.to_dict()
+        self.project.remove_material(tag)
+        self._refresh_project_metadata(f"Deleted material {tag}")
+        self._record_project_change(
+            f"Delete material {tag}",
+            before,
+        )
+
+    def _show_material_properties(self, tag: int) -> None:
+        material = self.project.materials.get(tag)
+        if material is None:
+            return
+        rows: list[tuple[str, object]] = [
+            ("Tag", material.tag),
+            ("Name", material.name),
+            ("Type", material.material_type),
+        ]
+        rows.extend(
+            (key, f"{value:g}")
+            for key, value in material.parameters.items()
+        )
+        self.properties_panel.set_properties("Material", rows)
+
     def _create_named_selection(self) -> None:
         nodes, elements = self._selection_sets()
         if not nodes and not elements:
@@ -1689,12 +1839,40 @@ class MainWindow(QMainWindow):
         if item is None:
             return
         payload = item.data(0, Qt.UserRole)
-        if not payload or payload[0] != "set":
+        if not payload:
             return
 
-        name = str(payload[1])
+        kind, value = payload
         menu = QMenu(self)
 
+        if kind == "materials_root":
+            create_action = menu.addAction("New Material...")
+            create_action.triggered.connect(self._create_material)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "material":
+            tag = int(value)
+            edit_action = menu.addAction("Edit...")
+            edit_action.triggered.connect(
+                lambda: self._edit_material(tag)
+            )
+            duplicate_action = menu.addAction("Duplicate")
+            duplicate_action.triggered.connect(
+                lambda: self._duplicate_material(tag)
+            )
+            menu.addSeparator()
+            delete_action = menu.addAction("Delete")
+            delete_action.triggered.connect(
+                lambda: self._delete_material(tag)
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind != "set":
+            return
+
+        name = str(value)
         select_action = menu.addAction("Select")
         select_action.triggered.connect(
             lambda: self._select_named_selection(name)
@@ -1716,6 +1894,14 @@ class MainWindow(QMainWindow):
         )
 
         menu.exec(self.tree.viewport().mapToGlobal(position))
+
+    def _tree_item_double_clicked(self, item, column: int) -> None:
+        payload = item.data(0, Qt.UserRole)
+        if not payload:
+            return
+        kind, value = payload
+        if kind == "material":
+            self._edit_material(int(value))
 
     def _select_named_selection(self, name: str) -> None:
         selection_set = self.project.selection_sets.get(name)
