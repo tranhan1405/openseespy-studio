@@ -32,6 +32,10 @@ from PySide6.QtWidgets import (
 )
 
 from ..generator import section_to_openseespy
+from ..section_templates import (
+    create_i_section_components,
+    create_t_section_components,
+)
 from ..section_visualization import (
     equivalent_fiber_radius,
     section_preview_bounds,
@@ -881,6 +885,124 @@ class FiberComponentDialog(QDialog):
         self.reject()
 
 
+class ShapeTemplateDialog(QDialog):
+    def __init__(
+        self,
+        materials: dict[int, MaterialData],
+        shape: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.materials = materials
+        self.shape = str(shape).upper()
+        if self.shape not in {"T", "I"}:
+            raise ValueError(f"Unsupported section template: {shape}")
+
+        self.setWindowTitle(f"{self.shape}-Section Fiber Template")
+        self.setModal(True)
+        self.setMinimumWidth(430)
+
+        root = QVBoxLayout(self)
+        form = QFormLayout()
+
+        shape_label = QLabel(
+            "T section · flange at +y"
+            if self.shape == "T"
+            else "I section · symmetric flanges"
+        )
+        shape_label.setStyleSheet("font-weight: 700;")
+        form.addRow("Template:", shape_label)
+
+        self.height = _float_spin(0.60, low=1.0e-9)
+        self.flange_width = _float_spin(0.60, low=1.0e-9)
+        self.flange_thickness = _float_spin(0.15, low=1.0e-9)
+        self.web_width = _float_spin(0.25, low=1.0e-9)
+        self.cover = _float_spin(0.04, low=0.0)
+
+        form.addRow("Total height H (local y):", self.height)
+        form.addRow("Flange width Bf (local z):", self.flange_width)
+        form.addRow("Flange thickness tf:", self.flange_thickness)
+        form.addRow("Web width bw:", self.web_width)
+        form.addRow("Concrete cover c:", self.cover)
+
+        self.core_material = QComboBox()
+        self.cover_material = QComboBox()
+        for tag in sorted(materials):
+            material = materials[tag]
+            text = f"{tag} - {material.name} ({material.material_type})"
+            self.core_material.addItem(text, tag)
+            self.cover_material.addItem(text, tag)
+        if self.cover_material.count() > 1:
+            self.cover_material.setCurrentIndex(1)
+
+        form.addRow("Core material:", self.core_material)
+        form.addRow("Cover material:", self.cover_material)
+
+        self.n_y = _positive_int(24, 200)
+        self.n_z = _positive_int(24, 200)
+        form.addRow("Target divisions along y:", self.n_y)
+        form.addRow("Target divisions along z:", self.n_z)
+        root.addLayout(form)
+
+        note = QLabel(
+            "The template creates non-overlapping rectangular patches. "
+            "Cover is assigned only along exposed faces; the internal "
+            "web/flange interface is not treated as cover. Generated patches "
+            "remain individually editable in the Builder."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #657586;")
+        root.addWidget(note)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    def components(self) -> list[FiberComponentData]:
+        if (
+            self.core_material.currentData() is None
+            or self.cover_material.currentData() is None
+        ):
+            raise ValueError("Create and select concrete materials first.")
+
+        kwargs = {
+            "height": self.height.value(),
+            "flange_width": self.flange_width.value(),
+            "flange_thickness": self.flange_thickness.value(),
+            "web_width": self.web_width.value(),
+            "cover": self.cover.value(),
+            "core_material_tag": int(self.core_material.currentData()),
+            "cover_material_tag": int(self.cover_material.currentData()),
+            "n_y": self.n_y.value(),
+            "n_z": self.n_z.value(),
+        }
+        if self.shape == "T":
+            return create_t_section_components(**kwargs)
+        return create_i_section_components(**kwargs)
+
+    def _accept(self) -> None:
+        try:
+            components = self.components()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                f"{self.shape}-Section Template",
+                str(exc),
+            )
+            return
+        if not components:
+            QMessageBox.warning(
+                self,
+                f"{self.shape}-Section Template",
+                "The template did not create any section patches.",
+            )
+            return
+        self.accept()
+
+
 class SectionDialog(QDialog):
     def __init__(
         self,
@@ -1032,6 +1154,18 @@ class SectionDialog(QDialog):
             lambda _item: self._edit_selected_component()
         )
         left_layout.addWidget(self.component_list, 1)
+
+        template_row = QHBoxLayout()
+        for text, shape in (
+            ("T Template...", "T"),
+            ("I Template...", "I"),
+        ):
+            button = QPushButton(text)
+            button.clicked.connect(
+                lambda checked=False, s=shape: self._apply_shape_template(s)
+            )
+            template_row.addWidget(button)
+        left_layout.addLayout(template_row)
 
         add_row_1 = QHBoxLayout()
         for text, kind in (
@@ -1309,6 +1443,55 @@ class SectionDialog(QDialog):
             self.component_list.setCurrentRow(
                 min(max(current, 0), len(self._components) - 1)
             )
+
+    def _apply_shape_template(self, shape: str) -> None:
+        if not self.materials:
+            QMessageBox.information(
+                self,
+                "Fiber Section Template",
+                "Create at least one material first.",
+            )
+            return
+
+        dialog = ShapeTemplateDialog(
+            self.materials,
+            shape,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        try:
+            generated = dialog.components()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Fiber Section Template",
+                str(exc),
+            )
+            return
+
+        replace_existing = True
+        if self._components:
+            answer = QMessageBox.question(
+                self,
+                f"{shape}-Section Template",
+                "Replace the existing Builder components?\n"
+                "Choose No to append the template instead.",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                QMessageBox.Yes,
+            )
+            if answer == QMessageBox.Cancel:
+                return
+            replace_existing = answer == QMessageBox.Yes
+
+        if replace_existing:
+            self._components = generated
+        else:
+            self._components.extend(generated)
+
+        self._refresh_component_list()
+        self._update_fiber_outputs()
 
     def _add_component(self, component_type: str) -> None:
         if not self.materials:
