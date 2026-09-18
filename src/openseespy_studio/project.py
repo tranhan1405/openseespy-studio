@@ -9,7 +9,7 @@ from .model import StructuralModel
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 8
+PROJECT_FORMAT_VERSION = 9
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -647,6 +647,66 @@ class NodalLoadData:
 
 
 @dataclass
+class AnalysisSettingsData:
+    tag: int
+    name: str
+    analysis_type: str = "Static"
+    constraints_handler: str = "Transformation"
+    numberer: str = "RCM"
+    system: str = "UmfPack"
+    test: str = "NormDispIncr"
+    tolerance: float = 1.0e-8
+    max_iterations: int = 50
+    algorithm: str = "Newton"
+    steps: int = 10
+    load_increment: float = 0.1
+    control_node: int = 1
+    control_dof: int = 1
+    displacement_increment: float = 0.001
+    dt: float = 0.01
+    gamma: float = 0.5
+    beta: float = 0.25
+    num_modes: int = 3
+    recovery: bool = True
+
+    def __post_init__(self) -> None:
+        self.tag=int(self.tag); self.name=str(self.name).strip() or f"Analysis {self.tag}"
+        self.analysis_type=str(self.analysis_type)
+        self.tolerance=float(self.tolerance); self.max_iterations=int(self.max_iterations)
+        self.steps=int(self.steps); self.load_increment=float(self.load_increment)
+        self.control_node=int(self.control_node); self.control_dof=int(self.control_dof)
+        self.displacement_increment=float(self.displacement_increment)
+        self.dt=float(self.dt); self.gamma=float(self.gamma); self.beta=float(self.beta)
+        self.num_modes=int(self.num_modes); self.recovery=bool(self.recovery)
+        if self.tag<=0: raise ValueError("Analysis tag must be positive.")
+        if self.analysis_type not in {"Static","Pushover","Transient","Modal"}:
+            raise ValueError(f"Unsupported analysis type: {self.analysis_type}")
+        if self.constraints_handler not in {"Transformation","Plain"}:
+            raise ValueError("Unsupported constraints handler.")
+        if self.numberer not in {"RCM","Plain"}: raise ValueError("Unsupported numberer.")
+        if self.system not in {"UmfPack","BandGeneral","ProfileSPD"}: raise ValueError("Unsupported system.")
+        if self.test not in {"NormDispIncr","NormUnbalance","EnergyIncr"}: raise ValueError("Unsupported convergence test.")
+        if self.algorithm not in {"Newton","ModifiedNewton","NewtonLineSearch"}: raise ValueError("Unsupported algorithm.")
+        if self.tolerance<=0 or self.max_iterations<1: raise ValueError("Invalid convergence settings.")
+        if self.steps<1: raise ValueError("Analysis steps must be at least 1.")
+        if self.control_dof not in range(1,7): raise ValueError("Control DOF must be 1..6.")
+        if self.dt<=0: raise ValueError("Transient dt must be positive.")
+        if self.num_modes<1: raise ValueError("Number of modes must be at least 1.")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {key:getattr(self,key) for key in (
+            "tag","name","analysis_type","constraints_handler","numberer","system",
+            "test","tolerance","max_iterations","algorithm","steps","load_increment",
+            "control_node","control_dof","displacement_increment","dt","gamma","beta",
+            "num_modes","recovery"
+        )}
+
+    @classmethod
+    def from_dict(cls,data:dict[str,Any]) -> "AnalysisSettingsData":
+        return cls(**{key:value for key,value in data.items() if key in cls.__dataclass_fields__})
+
+
+@dataclass
 class SelectionSetData:
     name: str
     node_tags: set[int] = field(default_factory=set)
@@ -684,7 +744,8 @@ class ProjectDatabase:
     time_series: dict[int, TimeSeriesData] = field(default_factory=dict)
     load_patterns: dict[int, LoadPatternData] = field(default_factory=dict)
     nodal_loads: dict[int, NodalLoadData] = field(default_factory=dict)
-    analyses: dict[str, dict[str, Any]] = field(default_factory=dict)
+    analyses: dict[int, AnalysisSettingsData] = field(default_factory=dict)
+    active_analysis_tag: int | None = None
 
     units: dict[str, str] = field(
         default_factory=lambda: {
@@ -1148,6 +1209,37 @@ class ProjectDatabase:
                 removed.append(tag)
         return sorted(removed)
 
+    def next_analysis_tag(self) -> int:
+        return max(self.analyses, default=0) + 1
+
+    def add_analysis(self, analysis: AnalysisSettingsData) -> None:
+        if analysis.tag in self.analyses:
+            raise ValueError(f"Analysis tag {analysis.tag} already exists.")
+        if analysis.analysis_type == "Pushover" and analysis.control_node not in self.model.nodes:
+            raise ValueError(f"Pushover control node {analysis.control_node} does not exist.")
+        self.analyses[analysis.tag]=analysis
+        if self.active_analysis_tag is None:
+            self.active_analysis_tag=analysis.tag
+
+    def update_analysis(self, original_tag:int, analysis:AnalysisSettingsData) -> None:
+        original_tag=int(original_tag)
+        if original_tag not in self.analyses: raise ValueError(f"Analysis tag {original_tag} does not exist.")
+        if analysis.tag!=original_tag and analysis.tag in self.analyses: raise ValueError(f"Analysis tag {analysis.tag} already exists.")
+        if analysis.analysis_type=="Pushover" and analysis.control_node not in self.model.nodes:
+            raise ValueError(f"Pushover control node {analysis.control_node} does not exist.")
+        self.analyses.pop(original_tag); self.analyses[analysis.tag]=analysis
+        if self.active_analysis_tag==original_tag: self.active_analysis_tag=analysis.tag
+
+    def remove_analysis(self, tag:int) -> None:
+        tag=int(tag); self.analyses.pop(tag,None)
+        if self.active_analysis_tag==tag:
+            self.active_analysis_tag=min(self.analyses,default=None)
+
+    def set_active_analysis(self, tag:int) -> None:
+        tag=int(tag)
+        if tag not in self.analyses: raise ValueError(f"Analysis tag {tag} does not exist.")
+        self.active_analysis_tag=tag
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "format": PROJECT_FORMAT,
@@ -1191,7 +1283,11 @@ class ProjectDatabase:
                 self.nodal_loads[tag].to_dict()
                 for tag in sorted(self.nodal_loads)
             ],
-            "analyses": self.analyses,
+            "analyses": [
+                self.analyses[tag].to_dict()
+                for tag in sorted(self.analyses)
+            ],
+            "active_analysis_tag": self.active_analysis_tag,
         }
 
     @staticmethod
@@ -1368,6 +1464,15 @@ class ProjectDatabase:
                 result[load.tag] = load
         return result
 
+    @staticmethod
+    def _load_analyses(raw: Any) -> dict[int, AnalysisSettingsData]:
+        result: dict[int, AnalysisSettingsData] = {}
+        if isinstance(raw,list):
+            for item in raw:
+                analysis=AnalysisSettingsData.from_dict(dict(item))
+                result[analysis.tag]=analysis
+        return result
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectDatabase":
         project_format = data.get("format")
@@ -1402,7 +1507,12 @@ class ProjectDatabase:
             time_series=cls._load_time_series(data.get("time_series", [])),
             load_patterns=cls._load_patterns(data.get("load_patterns", [])),
             nodal_loads=cls._load_nodal_loads(data.get("nodal_loads", [])),
-            analyses=dict(data.get("analyses", {})),
+            analyses=cls._load_analyses(data.get("analyses", [])),
+            active_analysis_tag=(
+                int(data["active_analysis_tag"])
+                if data.get("active_analysis_tag") is not None
+                else None
+            ),
             units={
                 str(key): str(value)
                 for key, value in data.get(

@@ -41,7 +41,8 @@ from PySide6.QtWidgets import (
 
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..model import StructuralModel, classify_fixity
-from ..project import ConnectionData, ConstraintData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, SectionData, SelectionSetData, TimeSeriesData, TransformationData
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, SectionData, SelectionSetData, TimeSeriesData, TransformationData
+from .analysis_dialog import AnalysisDialog
 from .code_editor import CodeEditor
 from .connection_dialog import ConnectionDialog
 from .constraint_dialog import ConstraintDialog
@@ -853,6 +854,7 @@ class MainWindow(QMainWindow):
         self._make_action("time_series", "Time Series...", "timeseries", self._create_time_series, "Create time series")
         self._make_action("load_pattern", "Load Pattern...", "load", self._create_load_pattern, "Create load pattern or ground motion")
         self._make_action("nodal_load", "Nodal Load...", "load", self._create_nodal_load, "Create nodal load")
+        self._make_action("analysis_setup", "Analysis Setup...", "analysis", self._create_analysis, "Create analysis settings")
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action("plot", "Plot", "plot", self._not_implemented, "Plot results")
 
@@ -884,6 +886,7 @@ class MainWindow(QMainWindow):
         menus["Loads"].addAction(self.actions["time_series"])
         menus["Loads"].addAction(self.actions["load_pattern"])
         menus["Loads"].addAction(self.actions["nodal_load"])
+        menus["Analysis"].addAction(self.actions["analysis_setup"])
         menus["Analysis"].addAction(self.actions["run"])
         menus["Results"].addAction(self.actions["plot"])
 
@@ -902,7 +905,7 @@ class MainWindow(QMainWindow):
             ("View", ["xy", "yz", "xz", "iso"]),
             ("Supports", ["support", "clear_support", "constraint", "connection"]),
             ("Loads", ["mass", "time_series", "load_pattern", "nodal_load"]),
-            ("Analysis", ["run", "plot"]),
+            ("Analysis", ["analysis_setup", "run", "plot"]),
         )
 
         for caption, keys in groups:
@@ -1023,6 +1026,8 @@ class MainWindow(QMainWindow):
                 self.project.time_series,
                 self.project.load_patterns,
                 self.project.nodal_loads,
+                self.project.analyses,
+                self.project.active_analysis_tag,
             )
         )
         self._selection_changed(self.selection.snapshot())
@@ -1309,14 +1314,20 @@ class MainWindow(QMainWindow):
                 load_item.setData(0, Qt.UserRole, ("nodal_load", load.tag))
                 item.addChild(load_item)
 
-        analysis = QTreeWidgetItem(["Analysis"])
+        analysis = QTreeWidgetItem([f"Analysis ({len(self.project.analyses)})"])
         analysis.setIcon(0, studio_icon("analysis"))
+        analysis.setData(0, Qt.UserRole, ("analyses_root", None))
         analysis.setExpanded(True)
-        settings = QTreeWidgetItem(["Settings"])
-        settings.setIcon(0, studio_icon("analysis"))
+        for tag in sorted(self.project.analyses):
+            settings = self.project.analyses[tag]
+            active = " [Active]" if tag == self.project.active_analysis_tag else ""
+            item = QTreeWidgetItem([f"{settings.analysis_type} [{tag}] {settings.name}{active}"])
+            item.setIcon(0, studio_icon("analysis"))
+            item.setData(0, Qt.UserRole, ("analysis", tag))
+            analysis.addChild(item)
         recorders = QTreeWidgetItem(["Recorders (0)"])
         recorders.setIcon(0, studio_icon("recorder"))
-        analysis.addChildren([settings, recorders])
+        analysis.addChild(recorders)
         root.addChild(analysis)
 
         results = QTreeWidgetItem(["Results"])
@@ -1336,6 +1347,7 @@ class MainWindow(QMainWindow):
         time_series_tag: int | None = None
         load_pattern_tag: int | None = None
         nodal_load_tag: int | None = None
+        analysis_tag: int | None = None
 
         for item in self.tree.selectedItems():
             payload = item.data(0, Qt.UserRole)
@@ -1367,6 +1379,8 @@ class MainWindow(QMainWindow):
                 load_pattern_tag = int(tag)
             elif kind == "nodal_load":
                 nodal_load_tag = int(tag)
+            elif kind == "analysis":
+                analysis_tag = int(tag)
 
         self.selection.set_selection(nodes=nodes, elements=elements)
         if material_tag is not None:
@@ -1385,6 +1399,8 @@ class MainWindow(QMainWindow):
             self._show_load_pattern_properties(load_pattern_tag)
         elif nodal_load_tag is not None:
             self._show_nodal_load_properties(nodal_load_tag)
+        elif analysis_tag is not None:
+            self._show_analysis_properties(analysis_tag)
 
     def _wire_selection(self) -> None:
         self.selection.changed.connect(self._selection_changed)
@@ -3381,6 +3397,97 @@ class MainWindow(QMainWindow):
 
         self.properties_panel.set_properties("Constraint", rows)
 
+    def _create_analysis(self) -> None:
+        default_node = min(self.model.nodes, default=1)
+        dialog = AnalysisDialog(
+            next_tag=self.project.next_analysis_tag(),
+            default_node=default_node,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            settings = dialog.data()
+            self.project.add_analysis(settings)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Analysis Settings", str(exc))
+            return
+        self._refresh_project_metadata(f"Created analysis {settings.tag}")
+        self._show_analysis_properties(settings.tag)
+        self._record_project_change(f"Create analysis {settings.tag}", before)
+
+    def _edit_analysis(self, tag: int) -> None:
+        settings = self.project.analyses.get(tag)
+        if settings is None:
+            return
+        dialog = AnalysisDialog(analysis=settings, parent=self)
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated = dialog.data()
+            self.project.update_analysis(tag, updated)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Analysis Settings", str(exc))
+            return
+        self._refresh_project_metadata(f"Updated analysis {updated.tag}")
+        self._show_analysis_properties(updated.tag)
+        self._record_project_change(f"Edit analysis {tag}", before)
+
+    def _delete_analysis(self, tag: int) -> None:
+        if tag not in self.project.analyses:
+            return
+        before = self.project.to_dict()
+        self.project.remove_analysis(tag)
+        self._refresh_project_metadata(f"Deleted analysis {tag}")
+        self._record_project_change(f"Delete analysis {tag}", before)
+
+    def _set_active_analysis(self, tag: int) -> None:
+        before = self.project.to_dict()
+        try:
+            self.project.set_active_analysis(tag)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Analysis Settings", str(exc))
+            return
+        self._refresh_project_metadata(f"Active analysis: {tag}")
+        self._record_project_change(f"Set active analysis {tag}", before)
+
+    def _show_analysis_properties(self, tag: int) -> None:
+        settings = self.project.analyses.get(tag)
+        if settings is None:
+            return
+        rows = [
+            ("Tag", settings.tag), ("Name", settings.name),
+            ("Type", settings.analysis_type),
+            ("Active", "Yes" if tag == self.project.active_analysis_tag else "No"),
+            ("Constraints", settings.constraints_handler),
+            ("Numberer", settings.numberer), ("System", settings.system),
+        ]
+        if settings.analysis_type == "Modal":
+            rows.append(("Modes", settings.num_modes))
+        else:
+            rows.extend([
+                ("Test", settings.test), ("Tolerance", f"{settings.tolerance:g}"),
+                ("Max iterations", settings.max_iterations),
+                ("Algorithm", settings.algorithm), ("Steps", settings.steps),
+                ("Recovery", "On" if settings.recovery else "Off"),
+            ])
+            if settings.analysis_type == "Static":
+                rows.append(("Load increment", f"{settings.load_increment:g}"))
+            elif settings.analysis_type == "Pushover":
+                rows.extend([
+                    ("Control node", settings.control_node),
+                    ("Control DOF", settings.control_dof),
+                    ("Disp. increment", f"{settings.displacement_increment:g}"),
+                ])
+            elif settings.analysis_type == "Transient":
+                rows.extend([
+                    ("dt", f"{settings.dt:g}"), ("gamma", f"{settings.gamma:g}"),
+                    ("beta", f"{settings.beta:g}"),
+                ])
+        self.properties_panel.set_properties("Analysis Settings", rows)
+
     def _create_named_selection(self) -> None:
         nodes, elements = self._selection_sets()
         if not nodes and not elements:
@@ -3486,6 +3593,24 @@ class MainWindow(QMainWindow):
             delete_action.triggered.connect(
                 lambda: self._delete_connection(tag)
             )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "analyses_root":
+            action = menu.addAction("New Analysis...")
+            action.triggered.connect(self._create_analysis)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "analysis":
+            tag = int(value)
+            active = menu.addAction("Set Active")
+            active.setEnabled(tag != self.project.active_analysis_tag)
+            active.triggered.connect(lambda: self._set_active_analysis(tag))
+            edit = menu.addAction("Edit...")
+            edit.triggered.connect(lambda: self._edit_analysis(tag))
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(lambda: self._delete_analysis(tag))
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
@@ -3659,6 +3784,8 @@ class MainWindow(QMainWindow):
             self._edit_load_pattern(int(value))
         elif kind == "nodal_load":
             self._edit_nodal_load(int(value))
+        elif kind == "analysis":
+            self._edit_analysis(int(value))
 
     def _select_named_selection(self, name: str) -> None:
         selection_set = self.project.selection_sets.get(name)
