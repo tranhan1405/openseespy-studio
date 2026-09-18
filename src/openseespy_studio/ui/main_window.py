@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import os
 import sys
 import tempfile
@@ -40,6 +41,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
+from ..jobs import JobRecord
 from ..model import StructuralModel, classify_fixity
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, SectionData, SelectionSetData, TimeSeriesData, TransformationData
 from .analysis_dialog import AnalysisDialog
@@ -577,6 +579,12 @@ class MainWindow(QMainWindow):
         self._shortcuts: list[QShortcut] = []
         self._analysis_process: QProcess | None = None
         self._analysis_script_path: str | None = None
+        self._analysis_result_path: str | None = None
+        self._analysis_stop_requested = False
+        self._jobs: dict[int, JobRecord] = {}
+        self._job_counter = 0
+        self._current_job_id: int | None = None
+        self._last_result: dict[str, object] = {}
         self._dirty = False
 
         self.setCorner(Qt.BottomLeftCorner, Qt.LeftDockWidgetArea)
@@ -684,6 +692,15 @@ class MainWindow(QMainWindow):
         results_dock.setObjectName("ResultsDock")
         results_dock.setAllowedAreas(Qt.BottomDockWidgetArea)
         self.results_panel = ResultsPanel()
+        self.results_panel.deformation_requested.connect(
+            self._show_deformation_result
+        )
+        self.results_panel.mode_shape_requested.connect(
+            self._show_mode_shape_result
+        )
+        self.results_panel.clear_overlay_requested.connect(
+            self.viewport.clear_result_overlay
+        )
         results_dock.setWidget(self.results_panel)
         self.splitDockWidget(console_dock, results_dock, Qt.Horizontal)
 
@@ -1330,8 +1347,16 @@ class MainWindow(QMainWindow):
         analysis.addChild(recorders)
         root.addChild(analysis)
 
-        results = QTreeWidgetItem(["Results"])
+        results = QTreeWidgetItem([f"Results / Jobs ({len(self._jobs)})"])
         results.setIcon(0, studio_icon("results"))
+        results.setExpanded(True)
+        for job_id in sorted(self._jobs, reverse=True):
+            job = self._jobs[job_id]
+            item = QTreeWidgetItem([
+                f"Job {job_id} · {job.analysis_type} · {job.status}"
+            ])
+            item.setIcon(0, studio_icon("results"))
+            results.addChild(item)
         root.addChild(results)
 
         self.tree.addTopLevelItem(root)
@@ -3876,9 +3901,23 @@ class MainWindow(QMainWindow):
         self._start_analysis()
 
     def _start_analysis(self) -> None:
+        active_tag = self.project.active_analysis_tag
+        settings = self.project.analyses.get(active_tag)
+        if settings is None:
+            QMessageBox.information(
+                self,
+                "Run",
+                "Create an Analysis Settings object and set it Active first.",
+            )
+            return
+
         script_text = self.script.toPlainText()
         if not script_text.strip():
-            QMessageBox.information(self, "Run", "The generated script is empty.")
+            QMessageBox.information(
+                self,
+                "Run",
+                "The generated script is empty.",
+            )
             return
 
         fd, path = tempfile.mkstemp(
@@ -3890,12 +3929,36 @@ class MainWindow(QMainWindow):
         Path(path).write_text(script_text, encoding="utf-8")
         self._analysis_script_path = path
 
+        result_fd, result_path = tempfile.mkstemp(
+            prefix="openseespy_studio_result_",
+            suffix=".json",
+            text=True,
+        )
+        os.close(result_fd)
+        self._analysis_result_path = result_path
+
+        self._job_counter += 1
+        job = JobRecord(
+            job_id=self._job_counter,
+            analysis_tag=settings.tag,
+            analysis_name=settings.name,
+            analysis_type=settings.analysis_type,
+        )
+        job.start()
+        self._jobs[job.job_id] = job
+        self._current_job_id = job.job_id
+        self._analysis_stop_requested = False
+        self.results_panel.add_or_update_job(job)
+        self._refresh_tree()
+
         process = QProcess(self)
         process.setProgram(sys.executable)
         process.setArguments([
             "-m",
             "openseespy_studio.solver_worker",
             path,
+            "--result-file",
+            result_path,
         ])
         process.setProcessChannelMode(QProcess.SeparateChannels)
         process.readyReadStandardOutput.connect(self._read_analysis_stdout)
@@ -3905,9 +3968,12 @@ class MainWindow(QMainWindow):
         self._analysis_process = process
 
         self.console.appendPlainText(
-            f">> Starting analysis worker with {Path(sys.executable).name}..."
+            f">> Job {job.job_id}: starting {settings.analysis_type} "
+            f"analysis with {Path(sys.executable).name}..."
         )
-        self.status_message.setText("Analysis running...")
+        self.status_message.setText(
+            f"Job {job.job_id} running: {settings.analysis_type}"
+        )
         self.actions["run"].setText("Stop")
         self.actions["run"].setToolTip("Stop running analysis")
         process.start()
@@ -3917,6 +3983,7 @@ class MainWindow(QMainWindow):
         if process is None or process.state() == QProcess.NotRunning:
             return
 
+        self._analysis_stop_requested = True
         self.console.appendPlainText(">> Stopping analysis worker...")
         self.status_message.setText("Stopping analysis...")
         process.terminate()
@@ -3962,20 +4029,58 @@ class MainWindow(QMainWindow):
             f"\n>> Analysis worker process error: {process.errorString()}"
         )
 
+    def _read_worker_result(self) -> tuple[dict[str, object], str]:
+        path = self._analysis_result_path
+        if not path:
+            return {}, ""
+        try:
+            text = Path(path).read_text(encoding="utf-8").strip()
+            if not text:
+                return {}, ""
+            payload = json.loads(text)
+            if not isinstance(payload, dict):
+                return {}, ""
+            results = payload.get("results", {})
+            error = str(payload.get("error", "") or "")
+            return (
+                dict(results) if isinstance(results, dict) else {},
+                error,
+            )
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return {}, ""
+
     def _analysis_finished(self, exit_code: int, exit_status) -> None:
         crashed = exit_status == QProcess.CrashExit
-        if crashed:
+        result, worker_error = self._read_worker_result()
+        job = (
+            self._jobs.get(self._current_job_id)
+            if self._current_job_id is not None
+            else None
+        )
+
+        if self._analysis_stop_requested:
+            status = "Stopped"
+            message = "Stopped by user"
+            self.console.appendPlainText("\n>> Analysis worker stopped.")
+            self.status_message.setText("Analysis stopped")
+        elif crashed:
+            status = "Crashed"
+            message = worker_error.splitlines()[-1] if worker_error else "Worker crashed"
             self.console.appendPlainText(
                 f"\n>> Analysis worker crashed (exit code {exit_code}). "
                 "The Studio GUI remains available."
             )
             self.status_message.setText("Analysis worker crashed")
         elif exit_code == 0:
+            status = "Completed"
+            message = "Results captured" if result else "Completed; no result data"
             self.console.appendPlainText(
                 "\n>> Analysis worker completed successfully."
             )
             self.status_message.setText("Analysis completed")
         else:
+            status = "Failed"
+            message = worker_error.splitlines()[-1] if worker_error else f"Exit code {exit_code}"
             self.console.appendPlainText(
                 f"\n>> Analysis worker exited with code {exit_code}."
             )
@@ -3983,19 +4088,77 @@ class MainWindow(QMainWindow):
                 f"Analysis failed (exit code {exit_code})"
             )
 
+        if job is not None:
+            job.finish(
+                status,
+                exit_code=exit_code,
+                message=message,
+                results=result,
+            )
+            self.results_panel.add_or_update_job(job)
+
+        if result:
+            self._last_result = result
+            self.results_panel.set_result(result)
+            analysis_type = str(result.get("analysis", {}).get("type", ""))
+            if analysis_type == "Modal":
+                modes = result.get("modes", {})
+                if isinstance(modes, dict) and modes:
+                    first_mode = min(int(key) for key in modes)
+                    self.viewport.show_mode_shape(
+                        result,
+                        first_mode,
+                        scale=1.0,
+                    )
+            elif result.get("final"):
+                self.viewport.show_deformed_shape(result, scale=10.0)
+
         self.actions["run"].setText("Run")
         self.actions["run"].setToolTip("Run model")
-        self._cleanup_analysis_script()
         self._analysis_process = None
+        self._analysis_stop_requested = False
+        self._current_job_id = None
+        self._cleanup_analysis_files()
+        self._refresh_tree()
 
-    def _cleanup_analysis_script(self) -> None:
-        path = self._analysis_script_path
+    def _show_deformation_result(self, scale: float) -> None:
+        if not self._last_result:
+            self.status_message.setText("No analysis result available")
+            return
+        self.viewport.show_deformed_shape(
+            self._last_result,
+            scale=float(scale),
+        )
+        self.status_message.setText(
+            f"Showing deformed shape · scale {float(scale):g}"
+        )
+
+    def _show_mode_shape_result(self, mode: int, scale: float) -> None:
+        if not self._last_result:
+            self.status_message.setText("No modal result available")
+            return
+        self.viewport.show_mode_shape(
+            self._last_result,
+            int(mode),
+            scale=float(scale),
+        )
+        self.status_message.setText(
+            f"Showing mode {int(mode)} · scale {float(scale):g}"
+        )
+
+    def _cleanup_analysis_files(self) -> None:
+        paths = (
+            self._analysis_script_path,
+            self._analysis_result_path,
+        )
         self._analysis_script_path = None
-        if path:
-            try:
-                Path(path).unlink(missing_ok=True)
-            except OSError:
-                pass
+        self._analysis_result_path = None
+        for path in paths:
+            if path:
+                try:
+                    Path(path).unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def closeEvent(self, event) -> None:
         if not self._maybe_save_changes():
@@ -4005,7 +4168,7 @@ class MainWindow(QMainWindow):
         if process is not None and process.state() != QProcess.NotRunning:
             process.kill()
             process.waitForFinished(1000)
-        self._cleanup_analysis_script()
+        self._cleanup_analysis_files()
         super().closeEvent(event)
 
     def _not_implemented(self) -> None:

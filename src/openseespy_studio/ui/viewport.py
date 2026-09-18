@@ -69,6 +69,7 @@ class ModelViewport(QWidget):
         self._interaction_tool = "select"
         self._box_origin: QPoint | None = None
         self._rubber_band: QRubberBand | None = None
+        self._result_overlay_active = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -1046,6 +1047,161 @@ class ModelViewport(QWidget):
                 )
 
         self.plotter.render()
+
+    def clear_result_overlay(self) -> None:
+        for name in ("result-overlay", "result-nodes"):
+            self._remove_overlay(name)
+        self._result_overlay_active = False
+        self.plotter.render()
+
+    def _show_vector_overlay(
+        self,
+        vectors: dict[str, object],
+        *,
+        scale: float,
+        label: str,
+    ) -> None:
+        if self._model is None or not self._model.elements:
+            return
+
+        self.clear_result_overlay()
+        points: list[tuple[float, float, float]] = []
+        lines: list[int] = []
+        magnitudes: list[float] = []
+
+        def displaced(tag: int):
+            node = self._model.nodes[tag]
+            raw = vectors.get(str(tag), vectors.get(tag, (0.0, 0.0, 0.0)))
+            values = list(raw) if raw is not None else []
+            while len(values) < 3:
+                values.append(0.0)
+            dx, dy, dz = (float(values[0]), float(values[1]), float(values[2]))
+            xyz = (
+                node.xyz[0] + scale * dx,
+                node.xyz[1] + scale * dy,
+                node.xyz[2] + scale * dz,
+            )
+            magnitude = math.sqrt(dx * dx + dy * dy + dz * dz)
+            return xyz, magnitude
+
+        for tag in sorted(self._visible_element_tags()):
+            element = self._model.elements[tag]
+            if element.i not in self._model.nodes or element.j not in self._model.nodes:
+                continue
+            p1, m1 = displaced(element.i)
+            p2, m2 = displaced(element.j)
+            index = len(points)
+            points.extend((p1, p2))
+            magnitudes.extend((m1, m2))
+            lines.extend((2, index, index + 1))
+
+        if not points:
+            return
+
+        mesh = pv.PolyData(np.asarray(points, dtype=float))
+        mesh.lines = np.asarray(lines, dtype=np.int64)
+        mesh.point_data["magnitude"] = np.asarray(magnitudes, dtype=float)
+        self.plotter.add_mesh(
+            mesh,
+            name="result-overlay",
+            scalars="magnitude",
+            cmap="turbo",
+            line_width=5,
+            render_lines_as_tubes=True,
+            pickable=False,
+            scalar_bar_args={"title": label},
+        )
+
+        result_nodes = sorted(self._visible_node_tags())
+        node_points = []
+        node_magnitudes = []
+        for tag in result_nodes:
+            point, magnitude = displaced(tag)
+            node_points.append(point)
+            node_magnitudes.append(magnitude)
+        if node_points:
+            node_mesh = pv.PolyData(np.asarray(node_points, dtype=float))
+            node_mesh.point_data["magnitude"] = np.asarray(
+                node_magnitudes,
+                dtype=float,
+            )
+            self.plotter.add_mesh(
+                node_mesh,
+                name="result-nodes",
+                scalars="magnitude",
+                cmap="turbo",
+                render_points_as_spheres=True,
+                point_size=7,
+                pickable=False,
+                show_scalar_bar=False,
+            )
+
+        self._result_overlay_active = True
+        self.plotter.render()
+
+    def show_deformed_shape(
+        self,
+        result: dict[str, object],
+        *,
+        scale: float = 1.0,
+    ) -> None:
+        final = result.get("final", {}) if isinstance(result, dict) else {}
+        vectors = (
+            final.get("node_displacements", {})
+            if isinstance(final, dict)
+            else {}
+        )
+        if not isinstance(vectors, dict) or not vectors:
+            self.clear_result_overlay()
+            return
+        self._show_vector_overlay(
+            vectors,
+            scale=float(scale),
+            label="Displacement magnitude",
+        )
+
+    def show_mode_shape(
+        self,
+        result: dict[str, object],
+        mode: int,
+        *,
+        scale: float = 1.0,
+    ) -> None:
+        modes = result.get("modes", {}) if isinstance(result, dict) else {}
+        mode_data = modes.get(str(int(mode)), {}) if isinstance(modes, dict) else {}
+        vectors = (
+            mode_data.get("vectors", {})
+            if isinstance(mode_data, dict)
+            else {}
+        )
+        if not isinstance(vectors, dict) or not vectors:
+            self.clear_result_overlay()
+            return
+
+        max_component = max(
+            (
+                abs(float(value))
+                for vector in vectors.values()
+                for value in list(vector)[:3]
+            ),
+            default=0.0,
+        )
+        auto_scale = float(scale)
+        if max_component > 1.0e-15 and self._model is not None:
+            low, high = self._model.bounds()
+            span = max(
+                high[0] - low[0],
+                high[1] - low[1],
+                high[2] - low[2],
+                1.0,
+            )
+            auto_scale *= 0.12 * span / max_component
+
+        self._show_vector_overlay(
+            vectors,
+            scale=auto_scale,
+            label=f"Mode {int(mode)} amplitude",
+        )
 
     def zoom_to_selection(self, nodes: set[int], elements: set[int]) -> None:
         if self._model is None:

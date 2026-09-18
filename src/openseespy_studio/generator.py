@@ -228,14 +228,63 @@ def nodal_load_to_openseespy(load: NodalLoadData) -> str:
     return f"ops.load({load.node_tag}, {values})"
 
 
-def analysis_to_openseespy(settings: AnalysisSettingsData) -> list[str]:
-    lines=[f"# Active analysis {settings.tag}: {settings.name}"]
-    lines.append(f"ops.constraints('{settings.constraints_handler}')")
-    lines.append(f"ops.numberer('{settings.numberer}')")
-    lines.append(f"ops.system('{settings.system}')")
+def analysis_to_openseespy(
+    settings: AnalysisSettingsData,
+    *,
+    node_tags: list[int] | None = None,
+    element_tags: list[int] | None = None,
+    support_node_tags: list[int] | None = None,
+    monitor_node: int | None = None,
+) -> list[str]:
+    node_tags = list(node_tags or [])
+    element_tags = list(element_tags or [])
+    support_node_tags = list(support_node_tags or [])
+    monitor_node = int(monitor_node or (node_tags[0] if node_tags else 1))
 
-    if settings.analysis_type=="Modal":
-        lines.append(f"_studio_eigenvalues = ops.eigen({settings.num_modes})")
+    lines = [
+        f"# Active analysis {settings.tag}: {settings.name}",
+        "_studio_results = {",
+        "    'schema_version': 1,",
+        "    'analysis': {",
+        f"        'tag': {settings.tag},",
+        f"        'name': {settings.name!r},",
+        f"        'type': {settings.analysis_type!r},",
+        "    },",
+        "    'final': {},",
+        "    'history': {'time': [], 'monitor_node': "
+        f"{monitor_node}, 'displacement': [], 'base_shear': []}},",
+        "    'modes': {},",
+        "}",
+        f"_studio_node_tags = {node_tags!r}",
+        f"_studio_element_tags = {element_tags!r}",
+        f"_studio_support_node_tags = {support_node_tags!r}",
+        f"_studio_monitor_node = {monitor_node}",
+        f"ops.constraints('{settings.constraints_handler}')",
+        f"ops.numberer('{settings.numberer}')",
+        f"ops.system('{settings.system}')",
+    ]
+
+    if settings.analysis_type == "Modal":
+        lines.append(
+            f"_studio_eigenvalues = ops.eigen({settings.num_modes})"
+        )
+        lines.append("if not isinstance(_studio_eigenvalues, (list, tuple)):")
+        lines.append("    _studio_eigenvalues = [_studio_eigenvalues]")
+        lines.append("for _studio_mode, _studio_lambda in enumerate(_studio_eigenvalues, start=1):")
+        lines.append("    _studio_vectors = {}")
+        lines.append("    for _studio_node in _studio_node_tags:")
+        lines.append(
+            "        _studio_vectors[str(_studio_node)] = "
+            "[float(v) for v in ops.nodeEigenvector(_studio_node, _studio_mode)]"
+        )
+        lines.append(
+            "    _studio_results['modes'][str(_studio_mode)] = "
+            "{'eigenvalue': float(_studio_lambda), 'vectors': _studio_vectors}"
+        )
+        lines.append(
+            "_studio_results['eigenvalues'] = "
+            "[float(v) for v in _studio_eigenvalues]"
+        )
         lines.append("print('Eigenvalues:', _studio_eigenvalues)")
         return lines
 
@@ -245,33 +294,38 @@ def analysis_to_openseespy(settings: AnalysisSettingsData) -> list[str]:
     )
     lines.append(f"ops.algorithm('{settings.algorithm}')")
 
-    if settings.analysis_type=="Static":
-        lines.append(f"ops.integrator('LoadControl', {settings.load_increment:g})")
-        analyze_call="ops.analyze(1)"
-        analysis_kind="Static"
-    elif settings.analysis_type=="Pushover":
+    if settings.analysis_type == "Static":
+        lines.append(
+            f"ops.integrator('LoadControl', {settings.load_increment:g})"
+        )
+        analyze_call = "ops.analyze(1)"
+        analysis_kind = "Static"
+    elif settings.analysis_type == "Pushover":
         lines.append(
             f"ops.integrator('DisplacementControl', {settings.control_node}, "
             f"{settings.control_dof}, {settings.displacement_increment:g})"
         )
-        analyze_call="ops.analyze(1)"
-        analysis_kind="Static"
-    elif settings.analysis_type=="Transient":
+        analyze_call = "ops.analyze(1)"
+        analysis_kind = "Static"
+    elif settings.analysis_type == "Transient":
         lines.append(
             f"ops.integrator('Newmark', {settings.gamma:g}, {settings.beta:g})"
         )
-        analyze_call=f"ops.analyze(1, {settings.dt:g})"
-        analysis_kind="Transient"
+        analyze_call = f"ops.analyze(1, {settings.dt:g})"
+        analysis_kind = "Transient"
     else:
-        raise ValueError(f"Unsupported analysis type: {settings.analysis_type}")
+        raise ValueError(
+            f"Unsupported analysis type: {settings.analysis_type}"
+        )
 
     lines.append(f"ops.analysis('{analysis_kind}')")
     lines.append(f"for _studio_step in range({settings.steps}):")
     lines.append(f"    _studio_ok = {analyze_call}")
     if settings.recovery:
-        fallbacks=[
-            alg for alg in ("NewtonLineSearch","ModifiedNewton","Newton")
-            if alg != settings.algorithm
+        fallbacks = [
+            algorithm
+            for algorithm in ("NewtonLineSearch", "ModifiedNewton", "Newton")
+            if algorithm != settings.algorithm
         ]
         lines.append("    if _studio_ok != 0:")
         lines.append(f"        for _studio_alg in {fallbacks!r}:")
@@ -286,11 +340,53 @@ def analysis_to_openseespy(settings: AnalysisSettingsData) -> list[str]:
         "f'Analysis failed at step {_studio_step + 1}')"
     )
     lines.append(
-        "print('Analysis completed:', "
-        f"'{settings.analysis_type}', {settings.steps}, 'step(s)')"
+        "    _studio_results['history']['time'].append(float(ops.getTime()))"
     )
-    return lines
+    lines.append(
+        "    _studio_results['history']['displacement'].append("
+        "[float(v) for v in ops.nodeDisp(_studio_monitor_node)])"
+    )
+    lines.append("    if _studio_support_node_tags:")
+    lines.append("        ops.reactions()")
+    lines.append("        _studio_base = 0.0")
+    lines.append("        for _studio_support in _studio_support_node_tags:")
+    lines.append(
+        f"            _studio_base += float(ops.nodeReaction("
+        f"_studio_support, {settings.control_dof}))"
+    )
+    lines.append(
+        "        _studio_results['history']['base_shear'].append(_studio_base)"
+    )
+    lines.append("    else:")
+    lines.append(
+        "        _studio_results['history']['base_shear'].append(0.0)"
+    )
 
+    lines.extend([
+        "ops.reactions()",
+        "_studio_final_disp = {}",
+        "_studio_final_reaction = {}",
+        "for _studio_node in _studio_node_tags:",
+        "    _studio_final_disp[str(_studio_node)] = "
+        "[float(v) for v in ops.nodeDisp(_studio_node)]",
+        "    _studio_final_reaction[str(_studio_node)] = "
+        "[float(v) for v in ops.nodeReaction(_studio_node)]",
+        "_studio_element_forces = {}",
+        "for _studio_element in _studio_element_tags:",
+        "    try:",
+        "        _studio_element_forces[str(_studio_element)] = "
+        "[float(v) for v in ops.eleForce(_studio_element)]",
+        "    except Exception:",
+        "        _studio_element_forces[str(_studio_element)] = []",
+        "_studio_results['final'] = {",
+        "    'node_displacements': _studio_final_disp,",
+        "    'node_reactions': _studio_final_reaction,",
+        "    'element_forces': _studio_element_forces,",
+        "}",
+        "print('Analysis completed:', "
+        f"{settings.analysis_type!r}, {settings.steps}, 'step(s)')",
+    ])
+    return lines
 
 def transformation_to_openseespy(
     transformation: TransformationData,
@@ -456,7 +552,29 @@ def to_openseespy(
 
     if analyses and active_analysis_tag in analyses:
         lines.extend(["", "# Analysis settings"])
-        lines.extend(analysis_to_openseespy(analyses[active_analysis_tag]))
+        active = analyses[active_analysis_tag]
+        monitor_node = (
+            active.control_node
+            if active.control_node in model.nodes
+            else min(model.nodes, default=1)
+        )
+        result_element_tags = sorted(
+            set(model.elements) | set((connections or {}).keys())
+        )
+        support_node_tags = sorted(
+            tag
+            for tag, node in model.nodes.items()
+            if any(node.fixity)
+        )
+        lines.extend(
+            analysis_to_openseespy(
+                active,
+                node_tags=sorted(model.nodes),
+                element_tags=result_element_tags,
+                support_node_tags=support_node_tags,
+                monitor_node=monitor_node,
+            )
+        )
 
     lines.extend(["", "print('Model generated by OpenSeesPy Studio MVP')"])
     return "\n".join(lines) + "\n"
