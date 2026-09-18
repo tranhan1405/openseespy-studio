@@ -4,6 +4,7 @@ import sys
 
 from openseespy_studio.runtime import (
     build_worker_pythonpath,
+    opensees_python_requirement,
     studio_source_root,
 )
 
@@ -48,3 +49,13 @@ def test_worker_module_imports_from_fresh_subprocess(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert "openseespy_studio.solver_worker" in result.stdout
+
+
+def test_windows_runtime_rejects_python_311():
+    message = opensees_python_requirement("win32", (3, 11))
+    assert message is not None
+    assert "Python 3.12" in message
+
+
+def test_windows_runtime_accepts_python_312():
+    assert opensees_python_requirement("win32", (3, 12)) is None

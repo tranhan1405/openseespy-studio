@@ -44,7 +44,7 @@ from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..jobs import JobRecord
 from ..model import StructuralModel, classify_fixity
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, SectionData, SelectionSetData, TimeSeriesData, TransformationData
-from ..runtime import build_worker_pythonpath
+from ..runtime import build_worker_pythonpath, probe_opensees_runtime
 from .analysis_dialog import AnalysisDialog
 from .code_editor import CodeEditor
 from .connection_dialog import ConnectionDialog
@@ -3935,6 +3935,34 @@ class MainWindow(QMainWindow):
                 "The generated script is empty.",
             )
             return
+
+        runtime_ok, runtime_detail = probe_opensees_runtime(
+            sys.executable
+        )
+        if not runtime_ok:
+            self.console.appendPlainText(
+                ">> OpenSeesPy runtime check FAILED"
+            )
+            for line in runtime_detail.splitlines():
+                self.console.appendPlainText(">> " + line)
+            self.status_message.setText(
+                "OpenSeesPy runtime unavailable"
+            )
+            QMessageBox.critical(
+                self,
+                "OpenSeesPy Runtime",
+                "OpenSeesPy cannot start in the current Python environment.\n\n"
+                + runtime_detail
+                + "\n\nOn Windows, use the Studio Python 3.12 environment "
+                  "and reinstall the project dependencies.",
+            )
+            return
+
+        self.console.appendPlainText(
+            ">> OpenSeesPy runtime check OK"
+        )
+        for line in runtime_detail.splitlines():
+            self.console.appendPlainText(">> " + line)
 
         fd, path = tempfile.mkstemp(
             prefix="openseespy_studio_",

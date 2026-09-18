@@ -35,16 +35,36 @@ The internal model is the source of truth. The GUI does not directly edit Python
 
 ## Install
 
-Python 3.10+ is recommended.
+### Windows
 
-```bash
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
+OpenSeesPy Studio targets **64-bit Python 3.12** on Windows. The current
+OpenSeesPy Windows binary package requires Python 3.12.
+
+Conda setup:
+
+```powershell
+conda create -n openseespy-studio python=3.12 -y
+conda activate openseespy-studio
 
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install -e .
 ```
+
+Verify the solver runtime before launching Studio:
+
+```powershell
+python -c "import openseespy.opensees as ops; print('OpenSeesPy OK')"
+```
+
+Then run:
+
+```powershell
+python run.py
+```
+
+If upgrading an older Studio environment that used Python 3.11, recreate the
+environment with Python 3.12 rather than reusing the old OpenSeesPy binary
+installation.
 
 ## Run
 
