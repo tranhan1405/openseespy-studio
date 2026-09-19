@@ -11,18 +11,28 @@ def _types(analysis_type: str) -> set[str]:
     }
 
 
-def test_modal_catalog_only_exposes_mode_shape():
+def test_modal_catalog_exposes_mode_shape_and_motion():
     choices = result_choices_for_analysis("Modal")
+    types = {choice.result_type for choice in choices}
 
-    assert len(choices) == 1
-    assert choices[0].result_type == "ModeShape"
-    assert choices[0].category == "Mode Results"
+    assert types == {"ModeShape", "Motion"}
+    assert any(
+        choice.result_type == "ModeShape"
+        and choice.category == "Mode Results"
+        for choice in choices
+    )
+    assert any(
+        choice.result_type == "Motion"
+        and choice.category == "Motion"
+        for choice in choices
+    )
 
 
 def test_pushover_catalog_includes_capacity_curve_and_common_results():
     types = _types("Pushover")
 
     assert "DeformedShape" in types
+    assert "Motion" in types
     assert "MemberForce" in types
     assert "FiberStress" in types
     assert "TimeHistory" in types
@@ -45,6 +55,7 @@ def test_static_and_transient_catalogs_exclude_specialized_curves():
         assert "PushoverCurve" not in types
         assert "CyclicHysteresis" not in types
         assert "TimeHistory" in types
+        assert "Motion" in types
         assert "Convergence" in types
 
 
