@@ -39,9 +39,20 @@ def test_pushover_generator():
 
 def test_transient_generator():
     a=AnalysisSettingsData(1,"EQ","Transient",steps=200,dt=0.005,gamma=0.5,beta=0.25)
-    text="\n".join(analysis_to_openseespy(a))
+    text="\n".join(
+        analysis_to_openseespy(
+            a,
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
     assert "ops.integrator('Newmark', 0.5, 0.25)" in text
     assert "ops.analyze(1, 0.005)" in text
+    assert "ops.reactions('-dynamic', '-rayleigh')" in text
+    assert "'base_reactions': []" in text
+    assert "'disp': [], 'vel': [], 'accel': [], 'reaction': []" in text
+    assert "ops.nodeVel(_studio_node)" in text
+    assert "ops.nodeAccel(_studio_node)" in text
 
 
 def test_modal_generator():
