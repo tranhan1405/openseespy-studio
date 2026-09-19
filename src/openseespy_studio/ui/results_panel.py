@@ -1230,8 +1230,14 @@ class ResultsPanel(QWidget):
     def finish_live_convergence(self, status: str) -> None:
         if self._live_convergence_step <= 0:
             return
+        final_status = str(status)
+        if (
+            final_status == "CONVERGED"
+            and len(self._live_convergence_attempts) > 1
+        ):
+            final_status = "RECOVERED"
         self.live_convergence_status.setText(
-            f"{status} · Step {self._live_convergence_step}/"
+            f"{final_status} · Step {self._live_convergence_step}/"
             f"{self._live_convergence_total}"
         )
 
