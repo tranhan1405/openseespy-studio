@@ -95,6 +95,8 @@ class ModelViewport(QWidget):
         self._node_actor = None
         self._node_tags: list[int] = []
         self._element_actor_data: dict[str, tuple[object, np.ndarray]] = {}
+        self._undeformed_element_actors: list[object] = []
+        self._undeformed_model_visible = True
         self._left_press_pos: tuple[int, int] | None = None
         self._right_press_pos: tuple[int, int] | None = None
         self._nav_mode: str | None = None
@@ -843,6 +845,8 @@ class ModelViewport(QWidget):
         self._node_actor = None
         self._node_tags = []
         self._element_actor_data.clear()
+        self._undeformed_element_actors.clear()
+        self._undeformed_model_visible = True
 
         if self._model is None or not self._model.nodes:
             self.plotter.render()
@@ -878,6 +882,7 @@ class ModelViewport(QWidget):
             )
             tags = np.asarray(mesh.cell_data["element_tag"], dtype=np.int64)
             self._element_actor_data[self._actor_key(actor)] = (mesh, tags)
+            self._undeformed_element_actors.append(actor)
             self._cell_picker.AddPickList(actor)
 
         self._point_picker.InitializePickList()
@@ -1862,6 +1867,58 @@ class ModelViewport(QWidget):
         if render:
             self.plotter.render()
 
+    def set_undeformed_model_visible(
+        self,
+        visible: bool,
+        *,
+        render: bool = True,
+    ) -> None:
+        """Show/hide the original structural frame under result overlays."""
+        visible = bool(visible)
+        self._undeformed_model_visible = visible
+
+        for actor in list(self._undeformed_element_actors):
+            try:
+                actor.SetVisibility(1 if visible else 0)
+            except Exception:
+                continue
+
+        if self._node_actor is not None:
+            try:
+                self._node_actor.SetVisibility(1 if visible else 0)
+            except Exception:
+                pass
+
+        if visible:
+            self._update_highlight_overlays(render=False)
+        else:
+            for name in (
+                "selection-elements",
+                "selection-nodes",
+                "hover-element",
+                "hover-node",
+            ):
+                self._remove_overlay(name)
+
+        if render:
+            self.plotter.render()
+
+    @staticmethod
+    def _normalized_deformation_display_mode(mode: str) -> str:
+        value = str(mode or "deformed_only").strip().lower()
+        aliases = {
+            "deformed": "deformed_only",
+            "deformed only": "deformed_only",
+            "undeformed": "undeformed_only",
+            "undeformed only": "undeformed_only",
+            "both": "both",
+            "undeformed + deformed": "both",
+        }
+        value = aliases.get(value, value)
+        if value not in {"deformed_only", "both", "undeformed_only"}:
+            return "deformed_only"
+        return value
+
     def clear_result_overlay(self, *, render: bool = True) -> None:
         for name in (
             "result-overlay",
@@ -1883,6 +1940,7 @@ class ModelViewport(QWidget):
         self._motion_element_node_tags = []
         self._motion_node_tags = []
         self._motion_topology_key = None
+        self.set_undeformed_model_visible(True, render=False)
         if render:
             self.plotter.render()
 
@@ -2799,10 +2857,19 @@ class ModelViewport(QWidget):
         result: dict[str, object],
         *,
         scale: float = 1.0,
+        display_mode: str = "deformed_only",
         node_tags: set[int] | None = None,
         element_tags: set[int] | None = None,
         cache_key: object | None = None,
     ) -> None:
+        display_mode = self._normalized_deformation_display_mode(
+            display_mode
+        )
+        if display_mode == "undeformed_only":
+            self.clear_result_overlay(render=False)
+            self.set_undeformed_model_visible(True, render=True)
+            return
+
         final = result.get("final", {}) if isinstance(result, dict) else {}
         vectors = (
             final.get("node_displacements", {})
@@ -2827,6 +2894,10 @@ class ModelViewport(QWidget):
             element_tags=element_tags,
             view_cache_key=view_key,
         )
+        self.set_undeformed_model_visible(
+            display_mode == "both",
+            render=True,
+        )
 
     def show_mode_shape(
         self,
@@ -2834,10 +2905,19 @@ class ModelViewport(QWidget):
         mode: int,
         *,
         scale: float = 1.0,
+        display_mode: str = "deformed_only",
         node_tags: set[int] | None = None,
         element_tags: set[int] | None = None,
         cache_key: object | None = None,
     ) -> None:
+        display_mode = self._normalized_deformation_display_mode(
+            display_mode
+        )
+        if display_mode == "undeformed_only":
+            self.clear_result_overlay(render=False)
+            self.set_undeformed_model_visible(True, render=True)
+            return
+
         view_key = self._result_view_key(
             cache_key,
             "mode-shape",
@@ -2886,6 +2966,10 @@ class ModelViewport(QWidget):
             node_tags=node_tags,
             element_tags=element_tags,
             view_cache_key=view_key,
+        )
+        self.set_undeformed_model_visible(
+            display_mode == "both",
+            render=True,
         )
 
     def zoom_to_selection(self, nodes: set[int], elements: set[int]) -> None:

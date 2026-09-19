@@ -640,8 +640,8 @@ class CompactResultTabs(QTabWidget):
 
 
 class ResultsPanel(QWidget):
-    deformation_requested = Signal(float)
-    mode_shape_requested = Signal(int, float)
+    deformation_requested = Signal(float, str)
+    mode_shape_requested = Signal(int, float, str)
     motion_frame_requested = Signal(object, float, bool, float, str)
     clear_overlay_requested = Signal()
     member_force_requested = Signal(str, float)
@@ -763,6 +763,13 @@ class ResultsPanel(QWidget):
                 self.deformation_scale.setValue(float(scale))
             except (TypeError, ValueError):
                 pass
+            display_mode = str(
+                options.get("display_mode", "deformed_only")
+            )
+            index = self.deformation_display.findData(display_mode)
+            self.deformation_display.setCurrentIndex(
+                index if index >= 0 else 0
+            )
             self._select_tab("Deformation")
             return
 
@@ -872,6 +879,13 @@ class ResultsPanel(QWidget):
                     self.mode_scale.setValue(float(scale))
                 except (TypeError, ValueError):
                     pass
+            display_mode = str(
+                options.get("display_mode", "deformed_only")
+            )
+            index = self.mode_display.findData(display_mode)
+            self.mode_display.setCurrentIndex(
+                index if index >= 0 else 0
+            )
             self._select_tab("Mode Shape")
             return
         if kind == "Motion":
@@ -1073,21 +1087,42 @@ class ResultsPanel(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         row = QHBoxLayout()
+        row.addWidget(QLabel("Display:"))
+        self.deformation_display = QComboBox()
+        self.deformation_display.addItem(
+            "Deformed",
+            "deformed_only",
+        )
+        self.deformation_display.addItem(
+            "Both",
+            "both",
+        )
+        self.deformation_display.addItem(
+            "Undeformed",
+            "undeformed_only",
+        )
+        self.deformation_display.setToolTip(
+            "Hide the original frame to inspect the deformed shape without "
+            "the undeformed model obscuring it."
+        )
+        row.addWidget(self.deformation_display)
+
         row.addWidget(QLabel("Scale:"))
         self.deformation_scale = QDoubleSpinBox()
         self.deformation_scale.setRange(0.01, 1.0e6)
         self.deformation_scale.setDecimals(3)
         self.deformation_scale.setValue(10.0)
         row.addWidget(self.deformation_scale)
-        show = QPushButton("Show Deformed")
+        self.deformation_show_button = QPushButton("Show")
         clear = QPushButton("Clear")
-        show.clicked.connect(
+        self.deformation_show_button.clicked.connect(
             lambda: self.deformation_requested.emit(
-                self.deformation_scale.value()
+                self.deformation_scale.value(),
+                str(self.deformation_display.currentData()),
             )
         )
         clear.clicked.connect(self.clear_overlay_requested.emit)
-        row.addWidget(show)
+        row.addWidget(self.deformation_show_button)
         row.addWidget(clear)
         row.addStretch(1)
         layout.addLayout(row)
@@ -1107,14 +1142,26 @@ class ResultsPanel(QWidget):
             self._update_mode_summary
         )
         row.addWidget(self.mode_combo)
+
+        row.addWidget(QLabel("Display:"))
+        self.mode_display = QComboBox()
+        self.mode_display.addItem("Deformed", "deformed_only")
+        self.mode_display.addItem("Both", "both")
+        self.mode_display.addItem("Undeformed", "undeformed_only")
+        self.mode_display.setToolTip(
+            "Choose whether the undeformed frame remains visible behind "
+            "the mode shape."
+        )
+        row.addWidget(self.mode_display)
+
         row.addWidget(QLabel("Scale:"))
         self.mode_scale = QDoubleSpinBox()
         self.mode_scale.setRange(0.01, 1.0e6)
         self.mode_scale.setValue(1.0)
         row.addWidget(self.mode_scale)
-        show = QPushButton("Show Mode")
-        show.clicked.connect(self._emit_mode)
-        row.addWidget(show)
+        self.mode_show_button = QPushButton("Show Mode")
+        self.mode_show_button.clicked.connect(self._emit_mode)
+        row.addWidget(self.mode_show_button)
         row.addStretch(1)
         layout.addLayout(row)
 
@@ -2052,7 +2099,11 @@ class ResultsPanel(QWidget):
         mode = self.mode_combo.currentData()
         if mode is None:
             return
-        self.mode_shape_requested.emit(int(mode), self.mode_scale.value())
+        self.mode_shape_requested.emit(
+            int(mode),
+            self.mode_scale.value(),
+            str(self.mode_display.currentData()),
+        )
 
     def _refresh_live_convergence_plots(self) -> None:
         self.convergence_overview_plot.set_trace(
