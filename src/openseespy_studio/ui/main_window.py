@@ -48,6 +48,7 @@ from ..jobs import JobRecord
 from ..live_convergence import parse_opensees_convergence_line
 from ..model import StructuralModel, classify_fixity
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
+from ..result_catalog import result_choices_for_analysis
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData
 from ..runtime import build_worker_pythonpath, probe_opensees_runtime
 from ..validation import ValidationIssue, validate_project
@@ -1791,6 +1792,15 @@ class MainWindow(QMainWindow):
             item.setExpanded(True)
             analysis.addChild(item)
 
+            settings_item = QTreeWidgetItem(["Analysis Settings"])
+            settings_item.setIcon(0, studio_icon("analysis"))
+            settings_item.setData(
+                0,
+                Qt.UserRole,
+                ("analysis_settings", tag),
+            )
+            item.addChild(settings_item)
+
             solution_results = self.project.solution_results_for_analysis(tag)
             solution = QTreeWidgetItem([
                 f"Solution ({len(solution_results)})"
@@ -1864,7 +1874,8 @@ class MainWindow(QMainWindow):
         for job_id in sorted(self._jobs, reverse=True):
             job = self._jobs[job_id]
             item = QTreeWidgetItem([
-                f"Job {job_id} · {job.analysis_type} · {job.status}"
+                f"Job {job_id} · {job.analysis_name} "
+                f"({job.analysis_type}) · {job.status}"
             ])
             item.setIcon(0, studio_icon("results"))
             item.setData(0, Qt.UserRole, ("job", job_id))
@@ -1929,6 +1940,8 @@ class MainWindow(QMainWindow):
             elif kind == "element_load":
                 element_load_tag = int(tag)
             elif kind == "analysis":
+                analysis_tag = int(tag)
+            elif kind == "analysis_settings":
                 analysis_tag = int(tag)
             elif kind == "recorder":
                 recorder_tag = int(tag)
@@ -4371,10 +4384,17 @@ class MainWindow(QMainWindow):
         self.properties_panel.set_properties("Constraint", rows)
 
     def _create_analysis(self) -> None:
+        self._create_analysis_of_type(None)
+
+    def _create_analysis_of_type(
+        self,
+        analysis_type: str | None,
+    ) -> None:
         default_node = min(self.model.nodes, default=1)
         dialog = AnalysisDialog(
             next_tag=self.project.next_analysis_tag(),
             default_node=default_node,
+            analysis_type=analysis_type,
             parent=self,
         )
         if not dialog.exec():
@@ -4694,77 +4714,14 @@ class MainWindow(QMainWindow):
         if result is None:
             return
 
-        kind = result_object.result_type
-        options = dict(result_object.settings)
-        options["_node_scope"] = list(result_object.node_scope)
-        options["_element_scope"] = list(result_object.element_scope)
-        self.results_panel.show_solution_result(kind, options)
-        self.results_dock.show()
-        self.results_dock.raise_()
-
-        if result_object.node_scope:
-            self.selection.set_selection(
-                nodes=set(result_object.node_scope),
-                elements=set(result_object.element_scope),
-            )
-        elif result_object.element_scope:
-            self.selection.set_selection(
-                nodes=set(),
-                elements=set(result_object.element_scope),
-            )
-
-        if kind == "DeformedShape":
-            self.viewport.show_deformed_shape(
-                result,
-                scale=float(options.get("scale", 10.0)),
-                node_tags=set(result_object.node_scope) or None,
-                element_tags=set(result_object.element_scope) or None,
-            )
-        elif kind in {"NodalDisplacement", "NodalReaction"}:
-            quantity = (
-                "Reaction"
-                if kind == "NodalReaction"
-                else "Displacement"
-            )
-            component = str(
-                options.get(
-                    "component",
-                    "FX" if quantity == "Reaction" else "|U|",
-                )
-            )
-            self.viewport.show_node_contour(
-                result,
-                quantity,
-                component,
-                node_tags=set(result_object.node_scope) or None,
-                element_tags=set(result_object.element_scope) or None,
-            )
-        elif kind == "MemberForce":
-            self.viewport.show_member_force_diagram(
-                result,
-                self.project.transformations,
-                str(options.get("component", "Mz")),
-                scale=float(options.get("scale", 1.0)),
-                element_tags=set(result_object.element_scope) or None,
-            )
-        elif kind == "HingeState":
-            self.viewport.show_hinge_states(
-                result,
-                element_tags=set(result_object.element_scope) or None,
-            )
-        elif kind == "ModeShape":
-            modes = result.get("modes", {})
-            mode = int(options.get("mode", 1))
-            if isinstance(modes, dict) and str(mode) not in modes and modes:
-                mode = min(int(key) for key in modes)
-            self.viewport.show_mode_shape(
-                result,
-                mode,
-                scale=float(options.get("scale", 1.0)),
-                node_tags=set(result_object.node_scope) or None,
-                element_tags=set(result_object.element_scope) or None,
-            )
-
+        self._render_result_data(
+            result,
+            result_object.result_type,
+            dict(result_object.settings),
+            node_scope=set(result_object.node_scope),
+            element_scope=set(result_object.element_scope),
+            restore_scope_selection=True,
+        )
         self.status_message.setText(
             f"Evaluated result: {result_object.name}"
         )
@@ -5020,6 +4977,256 @@ class MainWindow(QMainWindow):
         self._record_project_change(f"Create named selection {name}", before)
         self.status_message.setText(f"Created named selection: {name}")
 
+    def _populate_result_choice_menu(
+        self,
+        parent_menu: QMenu,
+        analysis_type: str,
+        callback,
+    ) -> None:
+        categories: dict[str, QMenu] = {}
+        for choice in result_choices_for_analysis(analysis_type):
+            submenu = categories.get(choice.category)
+            if submenu is None:
+                submenu = parent_menu.addMenu(choice.category)
+                categories[choice.category] = submenu
+            action = submenu.addAction(choice.label)
+            action.triggered.connect(
+                lambda checked=False, ch=choice: callback(
+                    ch.result_type,
+                    ch.name,
+                    dict(ch.settings),
+                )
+            )
+
+    def _render_result_data(
+        self,
+        result: dict[str, object],
+        result_type: str,
+        settings: dict[str, object] | None = None,
+        *,
+        node_scope: set[int] | None = None,
+        element_scope: set[int] | None = None,
+        restore_scope_selection: bool = False,
+    ) -> None:
+        payload = dict(result or {})
+        if not payload:
+            self.status_message.setText("No result data available")
+            return
+
+        options = dict(settings or {})
+        nodes = set(node_scope or ())
+        elements = set(element_scope or ())
+        options["_node_scope"] = sorted(nodes)
+        options["_element_scope"] = sorted(elements)
+
+        self._last_result = payload
+        self.results_panel.set_result(payload)
+        self.results_panel.show_solution_result(result_type, options)
+        self.results_dock.show()
+        self.results_dock.raise_()
+
+        if restore_scope_selection and (nodes or elements):
+            self.selection.set_selection(
+                nodes=nodes,
+                elements=elements,
+            )
+
+        if result_type == "DeformedShape":
+            self.viewport.show_deformed_shape(
+                payload,
+                scale=float(options.get("scale", 10.0)),
+                node_tags=nodes or None,
+                element_tags=elements or None,
+            )
+        elif result_type in {"NodalDisplacement", "NodalReaction"}:
+            quantity = (
+                "Reaction"
+                if result_type == "NodalReaction"
+                else "Displacement"
+            )
+            component = str(
+                options.get(
+                    "component",
+                    "FX" if quantity == "Reaction" else "|U|",
+                )
+            )
+            self.viewport.show_node_contour(
+                payload,
+                quantity,
+                component,
+                node_tags=nodes or None,
+                element_tags=elements or None,
+            )
+        elif result_type == "MemberForce":
+            self.viewport.show_member_force_diagram(
+                payload,
+                self.project.transformations,
+                str(options.get("component", "Mz")),
+                scale=float(options.get("scale", 1.0)),
+                element_tags=elements or None,
+            )
+        elif result_type == "HingeState":
+            self.viewport.show_hinge_states(
+                payload,
+                element_tags=elements or None,
+            )
+        elif result_type == "ModeShape":
+            modes = payload.get("modes", {})
+            mode = int(options.get("mode", 1))
+            if isinstance(modes, dict) and str(mode) not in modes and modes:
+                mode = min(int(key) for key in modes)
+            self.viewport.show_mode_shape(
+                payload,
+                mode,
+                scale=float(options.get("scale", 1.0)),
+                node_tags=nodes or None,
+                element_tags=elements or None,
+            )
+
+    def _show_job_properties(self, job_id: int) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None:
+            return
+        self.properties_panel.set_properties(
+            f"Job {job.job_id}",
+            [
+                ("Analysis", job.analysis_name),
+                ("Type", job.analysis_type),
+                ("Status", job.status),
+                ("Progress", f"{job.progress_percent:.1f}%"),
+                ("Algorithm", job.current_algorithm or "-"),
+                ("Iterations", job.iterations),
+                ("Result data", "Available" if job.results else "Not available"),
+                ("Message", job.message or "-"),
+            ],
+        )
+
+    def _activate_job_result(self, job_id: int) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None or not job.results:
+            self.status_message.setText(
+                f"Job {job_id} has no captured result data."
+            )
+            return
+        self._last_result = dict(job.results)
+        self.results_panel.set_result(self._last_result)
+        self.results_panel.show_jobs()
+        self.results_dock.show()
+        self.results_dock.raise_()
+        self._show_job_properties(job.job_id)
+        self.status_message.setText(
+            f"Job {job.job_id} is the active quick-plot result source."
+        )
+
+    def _quick_plot_job_result(
+        self,
+        job_id: int,
+        result_type: str,
+        name: str,
+        settings: dict[str, object],
+    ) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None or not job.results:
+            self.status_message.setText(
+                f"Job {job_id} has no captured result data."
+            )
+            return
+        self._active_solution_result_tag = None
+        self._render_result_data(
+            dict(job.results),
+            result_type,
+            settings,
+        )
+        self.properties_panel.set_properties(
+            f"Quick Plot · {name}",
+            [
+                ("Job", job.job_id),
+                ("Analysis", job.analysis_name),
+                ("Type", job.analysis_type),
+                ("Plot", name),
+                ("Persistence", "Temporary"),
+                ("Save", "Use Job → Add Plot to Solution"),
+            ],
+        )
+        self.status_message.setText(
+            f"Job {job.job_id} · quick plot: {name}"
+        )
+
+    def _add_job_plot_to_solution(
+        self,
+        job_id: int,
+        result_type: str,
+        name: str,
+        settings: dict[str, object],
+    ) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None or job.analysis_tag is None:
+            return
+        if job.analysis_tag not in self.project.analyses:
+            QMessageBox.warning(
+                self,
+                "Add Plot to Solution",
+                "The analysis used by this job no longer exists.",
+            )
+            return
+
+        before = self.project.to_dict()
+        result_object = SolutionResultData(
+            tag=self.project.next_solution_result_tag(),
+            analysis_tag=int(job.analysis_tag),
+            name=str(name),
+            result_type=str(result_type),
+            settings=dict(settings),
+        )
+        try:
+            self.project.add_solution_result(result_object)
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Add Plot to Solution",
+                str(exc),
+            )
+            return
+
+        self._record_project_change(
+            f"Add Job {job.job_id} plot to Solution",
+            before,
+        )
+        self._refresh_tree()
+        if job.results:
+            self._render_result_data(
+                dict(job.results),
+                result_type,
+                settings,
+            )
+        self._show_solution_result_properties(result_object.tag)
+        self.status_message.setText(
+            f"Added {name} to Solution for {job.analysis_name}. "
+            "Future Evaluate uses the latest job for that analysis."
+        )
+
+    def _export_job_result_json(self, job_id: int) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None or not job.results:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Job Results",
+            f"job_{job.job_id}_results.json",
+            "JSON files (*.json);;All files (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".json"):
+            path += ".json"
+        Path(path).write_text(
+            json.dumps(job.results, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        self.status_message.setText(
+            f"Exported Job {job.job_id} results to {Path(path).name}"
+        )
+
     def _show_tree_context_menu(self, position) -> None:
         item = self.tree.itemAt(position)
         if item is None:
@@ -5120,17 +5327,33 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "analyses_root":
+            insert_menu = menu.addMenu("Insert")
+            for analysis_type in (
+                "Static",
+                "Pushover",
+                "Cyclic",
+                "Transient",
+                "Modal",
+            ):
+                action = insert_menu.addAction(
+                    f"{analysis_type} Analysis"
+                )
+                action.triggered.connect(
+                    lambda checked=False, kind=analysis_type:
+                    self._create_analysis_of_type(kind)
+                )
+            menu.addSeparator()
             action = menu.addAction("New Analysis...")
             action.triggered.connect(self._create_analysis)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
-        if kind == "analysis":
+        if kind in {"analysis", "analysis_settings"}:
             tag = int(value)
             active = menu.addAction("Set Active")
             active.setEnabled(tag != self.project.active_analysis_tag)
             active.triggered.connect(lambda: self._set_active_analysis(tag))
-            edit = menu.addAction("Edit...")
+            edit = menu.addAction("Edit Analysis Settings...")
             edit.triggered.connect(lambda: self._edit_analysis(tag))
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_analysis(tag))
@@ -5140,148 +5363,22 @@ class MainWindow(QMainWindow):
         if kind == "solution_root":
             analysis_tag = int(value)
             analysis_settings = self.project.analyses.get(analysis_tag)
-            insert_menu = menu.addMenu("Insert")
-
-            deformation = insert_menu.addMenu("Deformation")
-            action = deformation.addAction("Deformed Shape")
-            action.triggered.connect(
-                lambda: self._insert_solution_result(
-                    analysis_tag,
-                    "DeformedShape",
-                    "Deformed Shape",
-                    {"scale": 10.0},
-                )
-            )
-
-            displacement = insert_menu.addMenu("Nodal Displacement")
-            for label, component in (
-                ("Total Deformation", "|U|"),
-                ("Directional UX", "UX"),
-                ("Directional UY", "UY"),
-                ("Directional UZ", "UZ"),
-            ):
-                action = displacement.addAction(label)
-                action.triggered.connect(
-                    lambda checked=False, n=label, comp=component:
-                    self._insert_solution_result(
-                        analysis_tag,
-                        "NodalDisplacement",
-                        n,
-                        {"component": comp},
-                    )
-                )
-
-            reaction = insert_menu.addMenu("Nodal Reaction")
-            for component in ("FX", "FY", "FZ", "MX", "MY", "MZ"):
-                action = reaction.addAction(f"Reaction {component}")
-                action.triggered.connect(
-                    lambda checked=False, comp=component:
-                    self._insert_solution_result(
-                        analysis_tag,
-                        "NodalReaction",
-                        f"Reaction {comp}",
-                        {"component": comp},
-                    )
-                )
-
-            member = insert_menu.addMenu("Member Forces")
-            for component in ("N", "Vy", "Vz", "T", "My", "Mz"):
-                action = member.addAction(component)
-                action.triggered.connect(
-                    lambda checked=False, comp=component:
-                    self._insert_solution_result(
-                        analysis_tag,
-                        "MemberForce",
-                        f"Member Force {comp}",
-                        {"component": comp, "scale": 1.0},
-                    )
-                )
-
-            nonlinear = insert_menu.addMenu("Nonlinear Results")
-            action = nonlinear.addAction("Fiber Stress")
-            action.triggered.connect(
-                lambda: self._insert_solution_result(
-                    analysis_tag,
-                    "FiberStress",
-                    "Fiber Stress",
-                    {"quantity": "Stress"},
-                )
-            )
-            action = nonlinear.addAction("Fiber Strain")
-            action.triggered.connect(
-                lambda: self._insert_solution_result(
-                    analysis_tag,
-                    "FiberStrain",
-                    "Fiber Strain",
-                    {"quantity": "Strain"},
-                )
-            )
-            action = nonlinear.addAction("Hinge / Yield State")
-            action.triggered.connect(
-                lambda: self._insert_solution_result(
-                    analysis_tag,
-                    "HingeState",
-                    "Hinge / Yield State",
-                    {},
-                )
-            )
-
-            history = insert_menu.addMenu("Charts / History")
             analysis_type = (
                 analysis_settings.analysis_type
                 if analysis_settings is not None
                 else ""
             )
-            if analysis_type == "Pushover":
-                action = history.addAction("Pushover Capacity Curve")
-                action.triggered.connect(
-                    lambda: self._insert_solution_result(
-                        analysis_tag,
-                        "PushoverCurve",
-                        "Pushover Capacity Curve",
-                        {},
-                    )
-                )
-            if analysis_type == "Cyclic":
-                action = history.addAction("Cyclic Hysteresis")
-                action.triggered.connect(
-                    lambda: self._insert_solution_result(
-                        analysis_tag,
-                        "CyclicHysteresis",
-                        "Cyclic Hysteresis",
-                        {},
-                    )
-                )
-            if analysis_type == "Modal":
-                action = history.addAction("Mode Shape")
-                action.triggered.connect(
-                    lambda: self._insert_solution_result(
-                        analysis_tag,
-                        "ModeShape",
-                        "Mode Shape 1",
-                        {"mode": 1, "scale": 1.0},
-                    )
-                )
-            else:
-                action = history.addAction("Response History")
-                action.triggered.connect(
-                    lambda: self._insert_solution_result(
-                        analysis_tag,
-                        "TimeHistory",
-                        "Response History",
-                        {},
-                    )
-                )
-
-            solver = insert_menu.addMenu("Solver Results")
-            action = solver.addAction("Convergence History")
-            action.triggered.connect(
-                lambda: self._insert_solution_result(
+            insert_menu = menu.addMenu("Insert")
+            self._populate_result_choice_menu(
+                insert_menu,
+                analysis_type,
+                lambda result_type, name, settings:
+                self._insert_solution_result(
                     analysis_tag,
-                    "Convergence",
-                    "Convergence History",
-                    {},
-                )
+                    result_type,
+                    name,
+                    settings,
+                ),
             )
 
             menu.addSeparator()
@@ -5330,6 +5427,74 @@ class MainWindow(QMainWindow):
                     self.console_dock.show(),
                     self.console_dock.raise_(),
                 )
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "jobs_root":
+            show_jobs = menu.addAction("Show Job Manager")
+            show_jobs.triggered.connect(
+                lambda: (
+                    self.results_panel.show_jobs(),
+                    self.results_dock.show(),
+                    self.results_dock.raise_(),
+                )
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "job":
+            job_id = int(value)
+            job = self._jobs.get(job_id)
+
+            activate = menu.addAction("Set as Active Result Source")
+            activate.setEnabled(bool(job and job.results))
+            activate.triggered.connect(
+                lambda: self._activate_job_result(job_id)
+            )
+
+            plot_menu = menu.addMenu("Plot")
+            plot_menu.setEnabled(bool(job and job.results))
+            if job is not None:
+                self._populate_result_choice_menu(
+                    plot_menu,
+                    job.analysis_type,
+                    lambda result_type, name, settings:
+                    self._quick_plot_job_result(
+                        job_id,
+                        result_type,
+                        name,
+                        settings,
+                    ),
+                )
+
+            add_menu = menu.addMenu("Add Plot to Solution")
+            add_menu.setEnabled(
+                bool(
+                    job
+                    and job.results
+                    and job.analysis_tag is not None
+                    and job.analysis_tag in self.project.analyses
+                )
+            )
+            if job is not None:
+                self._populate_result_choice_menu(
+                    add_menu,
+                    job.analysis_type,
+                    lambda result_type, name, settings:
+                    self._add_job_plot_to_solution(
+                        job_id,
+                        result_type,
+                        name,
+                        settings,
+                    ),
+                )
+
+            menu.addSeparator()
+            export = menu.addAction("Export Results JSON...")
+            export.setEnabled(bool(job and job.results))
+            export.triggered.connect(
+                lambda: self._export_job_result_json(job_id)
             )
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
@@ -5538,8 +5703,10 @@ class MainWindow(QMainWindow):
             self._edit_nodal_load(int(value))
         elif kind == "element_load":
             self._edit_element_load(int(value))
-        elif kind == "analysis":
+        elif kind in {"analysis", "analysis_settings"}:
             self._edit_analysis(int(value))
+        elif kind == "job":
+            self._activate_job_result(int(value))
         elif kind == "recorder":
             self._edit_recorder(int(value))
 
@@ -6506,10 +6673,12 @@ class MainWindow(QMainWindow):
 
     def _select_job_result(self, job_id: int) -> None:
         job = self._jobs.get(int(job_id))
-        if job is None or not job.results:
+        if job is None:
             return
-        self._last_result = dict(job.results)
-        self.results_panel.set_result(self._last_result)
+        if job.results:
+            self._last_result = dict(job.results)
+            self.results_panel.set_result(self._last_result)
+        self._show_job_properties(job.job_id)
         self.status_message.setText(
             f"Selected Job {job.job_id}: {job.analysis_name}"
         )
