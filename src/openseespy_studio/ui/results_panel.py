@@ -4,7 +4,7 @@ import csv
 import math
 from typing import Any
 
-from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtCore import QPointF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QProgressBar,
+    QSizePolicy,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -486,6 +487,23 @@ class FiberResponsePlot(QWidget):
         super().mousePressEvent(event)
 
 
+class CompactResultTabs(QTabWidget):
+    """Tab stack whose hidden pages cannot force a large dock width."""
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(80, 80)
+
+    def sizeHint(self) -> QSize:
+        current = self.currentWidget()
+        if current is None:
+            return QSize(320, 240)
+        hint = current.sizeHint()
+        return QSize(
+            min(max(240, hint.width()), 420),
+            min(max(180, hint.height()), 520),
+        )
+
+
 class ResultsPanel(QWidget):
     deformation_requested = Signal(float)
     mode_shape_requested = Signal(int, float)
@@ -509,9 +527,20 @@ class ResultsPanel(QWidget):
         root.setContentsMargins(6, 5, 6, 5)
         root.setSpacing(4)
 
-        self.tabs = QTabWidget()
+        self.setMinimumSize(0, 0)
+        self.setSizePolicy(
+            QSizePolicy.Ignored,
+            QSizePolicy.Expanding,
+        )
+
+        self.tabs = CompactResultTabs()
         self.tabs.setDocumentMode(True)
         self.tabs.tabBar().hide()
+        self.tabs.setMinimumSize(0, 0)
+        self.tabs.setSizePolicy(
+            QSizePolicy.Ignored,
+            QSizePolicy.Expanding,
+        )
         root.addWidget(self.tabs, 1)
 
         self._build_jobs_tab()
@@ -525,6 +554,32 @@ class ResultsPanel(QWidget):
         self._build_pushover_tab()
         self._build_cyclic_tab()
         self._build_history_tab()
+
+        # QTabWidget normally derives its minimum from every hidden page.
+        # Results pages contain wide tables, so without relaxing these hints
+        # the surrounding QDockWidget behaves as though it were fixed-width.
+        for index in range(self.tabs.count()):
+            page = self.tabs.widget(index)
+            if page is not None:
+                page.setMinimumSize(0, 0)
+                page.setSizePolicy(
+                    QSizePolicy.Ignored,
+                    QSizePolicy.Expanding,
+                )
+        for table in self.findChildren(QTableWidget):
+            table.setMinimumSize(0, 0)
+            table.setSizePolicy(
+                QSizePolicy.Ignored,
+                QSizePolicy.Expanding,
+            )
+            table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(80, 80)
+
+    def sizeHint(self) -> QSize:
+        return QSize(360, 300)
 
     def _select_tab(self, title: str) -> None:
         for index in range(self.tabs.count()):

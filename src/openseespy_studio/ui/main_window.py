@@ -1075,7 +1075,7 @@ class MainWindow(QMainWindow):
         results_dock = QDockWidget("Results Viewer", self)
         results_dock.setObjectName("ResultsDock")
         results_dock.setAllowedAreas(Qt.BottomDockWidgetArea)
-        results_dock.setMinimumWidth(160)
+        results_dock.setMinimumWidth(80)
         self.results_panel = ResultsPanel()
         self.results_panel.setMinimumWidth(0)
         self.results_panel.setSizePolicy(
