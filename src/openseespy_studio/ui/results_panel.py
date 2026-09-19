@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from typing import Any
 
 from PySide6.QtCore import QPointF, Qt, Signal
@@ -8,6 +9,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -22,7 +24,12 @@ from PySide6.QtWidgets import (
 )
 
 from ..jobs import JobRecord
-from ..postprocess import component_end_resultants, pushover_capacity_curve
+from ..postprocess import (
+    component_end_resultants,
+    pushover_capacity_curve,
+    time_history_node_tags,
+    time_history_series,
+)
 
 
 class TimeHistoryPlot(QWidget):
@@ -336,26 +343,54 @@ class ResultsPanel(QWidget):
     def _build_history_tab(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
+
         row = QHBoxLayout()
-        self.history_label = QLabel("Monitor node: -")
-        row.addWidget(self.history_label)
-        row.addWidget(QLabel("Quantity:"))
-        self.history_quantity = QComboBox()
-        self.history_quantity.addItems(["Monitor displacement", "Base shear"])
-        self.history_quantity.currentTextChanged.connect(
+        row.addWidget(QLabel("Node:"))
+        self.history_node = QComboBox()
+        self.history_node.currentIndexChanged.connect(
             self._update_history_plot
         )
+        row.addWidget(self.history_node)
+
+        row.addWidget(QLabel("Quantity:"))
+        self.history_quantity = QComboBox()
+        self.history_quantity.addItems(
+            [
+                "Displacement",
+                "Velocity",
+                "Acceleration",
+                "Reaction",
+                "Base shear",
+            ]
+        )
+        self.history_quantity.currentTextChanged.connect(
+            self._update_history_controls
+        )
         row.addWidget(self.history_quantity)
+
         row.addWidget(QLabel("DOF:"))
         self.history_dof = QComboBox()
-        self.history_dof.addItems(["UX", "UY", "UZ", "RX", "RY", "RZ"])
-        self.history_dof.currentIndexChanged.connect(self._update_history_plot)
+        self.history_dof.currentIndexChanged.connect(
+            self._update_history_plot
+        )
         row.addWidget(self.history_dof)
+
+        export = QPushButton("Export CSV")
+        export.clicked.connect(self._export_history_csv)
+        row.addWidget(export)
         row.addStretch(1)
         layout.addLayout(row)
+
+        self.history_label = QLabel(
+            "Run a non-modal analysis to populate time-history data."
+        )
+        self.history_label.setWordWrap(True)
+        layout.addWidget(self.history_label)
+
         self.history_plot = TimeHistoryPlot()
         layout.addWidget(self.history_plot, 1)
         self.tabs.addTab(page, "Time History")
+        self._update_history_controls()
 
     def _element_clicked(self, row: int, column: int) -> None:
         item = self.element_table.item(row, 0)
@@ -398,7 +433,10 @@ class ResultsPanel(QWidget):
             "Vpeak: -   u@Vpeak: -   ufinal: -"
         )
         self.pushover_plot.set_series([], [])
-        self.history_label.setText("Monitor node: -")
+        self.history_node.clear()
+        self.history_label.setText(
+            "Run a non-modal analysis to populate time-history data."
+        )
         self.history_plot.set_series([], [])
 
     def _emit_mode(self) -> None:
@@ -484,6 +522,7 @@ class ResultsPanel(QWidget):
 
         self._populate_node_table()
         self._populate_element_table()
+        self._populate_history_nodes()
         self._update_pushover_plot()
         self._update_history_plot()
 
@@ -677,25 +716,142 @@ class ResultsPanel(QWidget):
         )
         self.pushover_plot.set_series(x, y)
 
-    def _update_history_plot(self) -> None:
-        history = self._result.get("history", {})
-        time = [float(value) for value in history.get("time", [])]
-        self.history_label.setText(
-            f"Monitor node: {history.get('monitor_node', '-')}"
-        )
+    def _populate_history_nodes(self) -> None:
+        previous = self.history_node.currentData()
+        tags = time_history_node_tags(self._result)
+        self.history_node.blockSignals(True)
+        self.history_node.clear()
+        for tag in tags:
+            self.history_node.addItem(str(tag), int(tag))
+        if previous is not None:
+            index = self.history_node.findData(previous)
+            if index >= 0:
+                self.history_node.setCurrentIndex(index)
+        self.history_node.blockSignals(False)
 
-        if self.history_quantity.currentText() == "Base shear":
-            self.history_dof.setEnabled(False)
-            values = [
-                float(value)
-                for value in history.get("base_shear", [])
-            ]
+    def _update_history_controls(self) -> None:
+        quantity = self.history_quantity.currentText()
+        labels = {
+            "Displacement": ["UX", "UY", "UZ", "RX", "RY", "RZ"],
+            "Velocity": ["VX", "VY", "VZ", "WX", "WY", "WZ"],
+            "Acceleration": ["AX", "AY", "AZ", "AlphaX", "AlphaY", "AlphaZ"],
+            "Reaction": ["FX", "FY", "FZ", "MX", "MY", "MZ"],
+            "Base shear": ["X", "Y", "Z"],
+        }.get(quantity, ["DOF 1"])
+
+        previous_index = max(self.history_dof.currentIndex(), 0)
+        self.history_dof.blockSignals(True)
+        self.history_dof.clear()
+        self.history_dof.addItems(labels)
+        self.history_dof.setCurrentIndex(
+            min(previous_index, len(labels) - 1)
+        )
+        self.history_dof.blockSignals(False)
+        self.history_node.setEnabled(quantity != "Base shear")
+        self._update_history_plot()
+
+    def _history_selection(
+        self,
+    ) -> tuple[list[float], list[float], str, int | None, int]:
+        quantity = self.history_quantity.currentText()
+        node_data = self.history_node.currentData()
+        node_tag = int(node_data) if node_data is not None else None
+        dof = self.history_dof.currentIndex() + 1
+        time, values = time_history_series(
+            self._result,
+            quantity,
+            node_tag=node_tag,
+            dof=dof,
+        )
+        return time, values, quantity, node_tag, dof
+
+    def _update_history_plot(self) -> None:
+        time, values, quantity, node_tag, dof = self._history_selection()
+        dof_label = self.history_dof.currentText() or f"DOF {dof}"
+
+        if time and values:
+            peak_index = max(
+                range(len(values)),
+                key=lambda index: abs(values[index]),
+            )
+            target = (
+                "Base"
+                if quantity == "Base shear"
+                else f"Node {node_tag}"
+            )
+            note = (
+                f"{target} · {quantity} {dof_label} · "
+                f"Points: {len(values)} · "
+                f"Peak: {values[peak_index]:.6g} at t={time[peak_index]:.6g} · "
+                f"Final: {values[-1]:.6g}"
+            )
+            if quantity == "Base shear":
+                note += " · sign = -Σ support reactions"
+            elif quantity == "Acceleration":
+                note += (
+                    " · OpenSees nodal acceleration "
+                    "(UniformExcitation response is relative)"
+                )
+            self.history_label.setText(note)
         else:
-            self.history_dof.setEnabled(True)
-            rows = history.get("displacement", [])
-            index = self.history_dof.currentIndex()
-            values = [
-                float(row[index]) if index < len(row) else 0.0
-                for row in rows
-            ]
+            target = (
+                "base"
+                if quantity == "Base shear"
+                else (
+                    f"node {node_tag}"
+                    if node_tag is not None
+                    else "selected node"
+                )
+            )
+            self.history_label.setText(
+                f"No {quantity.lower()} history is available for {target} "
+                f"at {dof_label}."
+            )
+
         self.history_plot.set_series(time, values)
+
+    def _export_history_csv(self) -> None:
+        time, values, quantity, node_tag, dof = self._history_selection()
+        if not time or not values:
+            self.history_label.setText(
+                "No plotted time-history data is available to export."
+            )
+            return
+
+        dof_label = self.history_dof.currentText() or f"DOF{dof}"
+        target = (
+            "base"
+            if quantity == "Base shear"
+            else f"node_{node_tag}"
+        )
+        safe_quantity = quantity.lower().replace(" ", "_")
+        suggested = (
+            f"{target}_{safe_quantity}_{dof_label.lower()}.csv"
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Time History",
+            suggested,
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+
+        with open(path, "w", newline="", encoding="utf-8") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(
+                [
+                    "time",
+                    (
+                        f"{quantity} {dof_label}"
+                        if node_tag is None
+                        else f"Node {node_tag} {quantity} {dof_label}"
+                    ),
+                ]
+            )
+            writer.writerows(zip(time, values))
+        self.history_label.setText(
+            f"Exported {len(values)} time-history point(s) to {path}"
+        )
