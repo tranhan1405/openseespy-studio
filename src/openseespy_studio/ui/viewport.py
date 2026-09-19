@@ -4,7 +4,7 @@ import math
 from collections import OrderedDict
 
 import numpy as np
-from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
