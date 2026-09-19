@@ -1121,6 +1121,10 @@ class AnalysisSettingsData:
             raise ValueError("Adaptive easy-iteration threshold must be positive.")
         if self.adaptive_growth_after < 1:
             raise ValueError("Adaptive growth-after count must be positive.")
+        if self.adaptive_step and self.analysis_type == "Static" and abs(self.load_increment) <= 1.0e-30:
+            raise ValueError("Adaptive static analysis needs a nonzero load increment.")
+        if self.adaptive_step and self.analysis_type == "Pushover" and abs(self.displacement_increment) <= 1.0e-30:
+            raise ValueError("Adaptive pushover needs a nonzero displacement increment.")
         if self.analysis_type == "Cyclic":
             if not self.cyclic_targets:
                 raise ValueError("Cyclic analysis needs at least one displacement target.")
