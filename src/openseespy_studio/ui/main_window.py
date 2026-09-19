@@ -48,7 +48,10 @@ from ..jobs import JobRecord
 from ..live_convergence import parse_opensees_convergence_line
 from ..model import StructuralModel, classify_fixity
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
-from ..result_catalog import result_choices_for_analysis
+from ..result_catalog import (
+    convergence_result_label,
+    result_choices_for_analysis,
+)
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData
 from ..runtime import build_worker_pythonpath, probe_opensees_runtime
 from ..validation import ValidationIssue, validate_project
@@ -1911,7 +1914,9 @@ class MainWindow(QMainWindow):
             )
             information.addChild(solver_output)
 
-            convergence = QTreeWidgetItem(["Convergence Monitor"])
+            convergence = QTreeWidgetItem([
+                convergence_result_label(settings.test)
+            ])
             convergence.setIcon(0, studio_icon("results"))
             convergence.setData(
                 0,
@@ -5061,9 +5066,14 @@ class MainWindow(QMainWindow):
         parent_menu: QMenu,
         analysis_type: str,
         callback,
+        *,
+        convergence_test: str | None = None,
     ) -> None:
         categories: dict[str, QMenu] = {}
-        for choice in result_choices_for_analysis(analysis_type):
+        for choice in result_choices_for_analysis(
+            analysis_type,
+            convergence_test,
+        ):
             submenu = categories.get(choice.category)
             if submenu is None:
                 submenu = parent_menu.addMenu(choice.category)
@@ -5486,6 +5496,11 @@ class MainWindow(QMainWindow):
                     result_type,
                     name,
                     settings,
+                ),
+                convergence_test=(
+                    analysis_settings.test
+                    if analysis_settings is not None
+                    else None
                 ),
             )
 
