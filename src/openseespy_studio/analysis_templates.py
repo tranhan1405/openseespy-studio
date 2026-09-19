@@ -420,6 +420,12 @@ def build_modal_template(
     )
     result_specs = [
         (
+            "Mode Motion",
+            "Motion",
+            {"mode": 1, "scale": 1.0, "auto_scale": True},
+        )
+    ] + [
+        (
             f"Mode Shape {mode}",
             "ModeShape",
             {"mode": mode, "scale": 1.0},
@@ -491,6 +497,7 @@ def build_pushover_template(
         tag,
         [
             ("Pushover Capacity Curve", "PushoverCurve", {}),
+            ("Motion", "Motion", {"scale": 1.0, "auto_scale": True}),
             ("Deformed Shape", "DeformedShape", {"scale": 10.0}),
             ("Hinge / Yield State", "HingeState", {}),
             ("Member Force Mz", "MemberForce", {"component": "Mz", "scale": 1.0}),
@@ -554,6 +561,7 @@ def build_cyclic_template(
         tag,
         [
             ("Cyclic Hysteresis", "CyclicHysteresis", {}),
+            ("Motion", "Motion", {"scale": 1.0, "auto_scale": True}),
             ("Deformed Shape", "DeformedShape", {"scale": 10.0}),
             ("Hinge / Yield State", "HingeState", {}),
             ("Member Force Mz", "MemberForce", {"component": "Mz", "scale": 1.0}),
@@ -713,6 +721,7 @@ def build_nlth_multi_template(
             ),
         ])
     result_specs.extend([
+        ("Motion", "Motion", {"scale": 1.0, "auto_scale": True}),
         ("Deformed Shape", "DeformedShape", {"scale": 10.0}),
         ("Hinge / Yield State", "HingeState", {}),
         ("Member Force Mz", "MemberForce", {"component": "Mz", "scale": 1.0}),
