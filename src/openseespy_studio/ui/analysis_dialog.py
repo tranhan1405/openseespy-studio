@@ -15,7 +15,7 @@ class AnalysisDialog(QDialog):
         root=QVBoxLayout(self); form=QFormLayout()
         self.tag=QSpinBox(); self.tag.setRange(1,2147483647); self.tag.setValue(analysis.tag if analysis else next_tag)
         self.name=QLineEdit(analysis.name if analysis else f"Analysis {next_tag}")
-        self.kind=QComboBox(); self.kind.addItems(["Static","Pushover","Transient","Modal"]); self.kind.setCurrentText(analysis.analysis_type if analysis else "Static")
+        self.kind=QComboBox(); self.kind.addItems(["Static","Pushover","Cyclic","Transient","Modal"]); self.kind.setCurrentText(analysis.analysis_type if analysis else "Static")
         self.constraints=QComboBox(); self.constraints.addItems(["Transformation","Plain"]); self.constraints.setCurrentText(analysis.constraints_handler if analysis else "Transformation")
         self.numberer=QComboBox(); self.numberer.addItems(["RCM","Plain"]); self.numberer.setCurrentText(analysis.numberer if analysis else "RCM")
         self.system=QComboBox(); self.system.addItems(["UmfPack","BandGeneral","ProfileSPD"]); self.system.setCurrentText(analysis.system if analysis else "UmfPack")
@@ -32,6 +32,28 @@ class AnalysisDialog(QDialog):
             i=self.control_dof.findData(analysis.control_dof)
             if i>=0:self.control_dof.setCurrentIndex(i)
         self.disp_inc=fs(analysis.displacement_increment if analysis else 0.001,-1e20,1e20)
+        cyclic_values=(
+            analysis.cyclic_targets
+            if analysis
+            else [0.005,-0.005,0.01,-0.01,0.0]
+        )
+        self.cyclic_targets=QLineEdit(
+            ", ".join(f"{value:g}" for value in cyclic_values)
+        )
+        self.cyclic_targets.setPlaceholderText(
+            "e.g. 0.005, -0.005, 0.01, -0.01, 0"
+        )
+        self.cyclic_targets.setToolTip(
+            "Absolute control-displacement targets, visited in order."
+        )
+        self.cyclic_inc=fs(
+            analysis.cyclic_increment if analysis else 0.001,
+            1e-12,
+            1e20,
+        )
+        self.cyclic_inc.setToolTip(
+            "Maximum absolute displacement increment used to subdivide each branch."
+        )
         self.dt=fs(analysis.dt if analysis else 0.01,1e-12,1e20)
         self.gamma=fs(analysis.gamma if analysis else 0.5)
         self.beta=fs(analysis.beta if analysis else 0.25)
@@ -43,7 +65,7 @@ class AnalysisDialog(QDialog):
             "Opens a separate PowerShell window that mirrors the live solver log. "
             "The Studio worker still runs in its isolated process."
         )
-        fields=(("Tag",self.tag),("Name",self.name),("Analysis type",self.kind),("Constraints",self.constraints),("Numberer",self.numberer),("System",self.system),("Test",self.test),("Tolerance",self.tol),("Max iterations",self.max_iter),("Algorithm",self.algorithm),("Steps",self.steps),("Load increment",self.load_inc),("Control node",self.control_node),("Control DOF",self.control_dof),("Disp. increment",self.disp_inc),("Time step dt",self.dt),("Newmark gamma",self.gamma),("Newmark beta",self.beta),("Number of modes",self.modes))
+        fields=(("Tag",self.tag),("Name",self.name),("Analysis type",self.kind),("Constraints",self.constraints),("Numberer",self.numberer),("System",self.system),("Test",self.test),("Tolerance",self.tol),("Max iterations",self.max_iter),("Algorithm",self.algorithm),("Steps",self.steps),("Load increment",self.load_inc),("Control node",self.control_node),("Control DOF",self.control_dof),("Disp. increment",self.disp_inc),("Cyclic targets",self.cyclic_targets),("Cyclic max increment",self.cyclic_inc),("Time step dt",self.dt),("Newmark gamma",self.gamma),("Newmark beta",self.beta),("Number of modes",self.modes))
         for label,w in fields: form.addRow(label+":",w)
         form.addRow("Recovery:",self.recovery)
         form.addRow("External terminal:",self.external_console)
@@ -51,11 +73,22 @@ class AnalysisDialog(QDialog):
         b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); root.addWidget(b)
         self.kind.currentTextChanged.connect(self._sync); self._sync(self.kind.currentText())
     def _sync(self,kind):
-        modal=kind=="Modal"; transient=kind=="Transient"; push=kind=="Pushover"; static=kind=="Static"
+        modal=kind=="Modal"; transient=kind=="Transient"; push=kind=="Pushover"; cyclic=kind=="Cyclic"; static=kind=="Static"
         for w in (self.test,self.tol,self.max_iter,self.algorithm,self.steps,self.recovery): w.setEnabled(not modal)
-        self.load_inc.setEnabled(static); self.control_node.setEnabled(push); self.control_dof.setEnabled(push); self.disp_inc.setEnabled(push)
+        self.steps.setEnabled(not modal and not cyclic)
+        self.load_inc.setEnabled(static)
+        self.control_node.setEnabled(push or cyclic)
+        self.control_dof.setEnabled(push or cyclic)
+        self.disp_inc.setEnabled(push)
+        self.cyclic_targets.setEnabled(cyclic)
+        self.cyclic_inc.setEnabled(cyclic)
         self.dt.setEnabled(transient); self.gamma.setEnabled(transient); self.beta.setEnabled(transient); self.modes.setEnabled(modal)
     def data(self):
+        cyclic_targets=[]
+        for raw in self.cyclic_targets.text().replace(";", ",").split(","):
+            value=raw.strip()
+            if value:
+                cyclic_targets.append(float(value))
         return AnalysisSettingsData(
             tag=self.tag.value(),name=self.name.text().strip() or f"Analysis {self.tag.value()}",
             analysis_type=self.kind.currentText(),constraints_handler=self.constraints.currentText(),
@@ -63,6 +96,7 @@ class AnalysisDialog(QDialog):
             tolerance=self.tol.value(),max_iterations=self.max_iter.value(),algorithm=self.algorithm.currentText(),
             steps=self.steps.value(),load_increment=self.load_inc.value(),control_node=self.control_node.value(),
             control_dof=int(self.control_dof.currentData()),displacement_increment=self.disp_inc.value(),
+            cyclic_targets=cyclic_targets,cyclic_increment=self.cyclic_inc.value(),
             dt=self.dt.value(),gamma=self.gamma.value(),beta=self.beta.value(),num_modes=self.modes.value(),
             recovery=self.recovery.isChecked(),
             show_external_console=self.external_console.isChecked()
