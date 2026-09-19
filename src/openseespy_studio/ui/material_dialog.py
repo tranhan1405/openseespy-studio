@@ -283,6 +283,9 @@ class MaterialDialog(QDialog):
         root.addWidget(buttons)
 
         self._parameter_widgets: dict[str, QWidget] = {}
+        # Backward-compatible handle used by engineering-unit tests and a few
+        # internal callers; switch parameters live only in _parameter_widgets.
+        self._parameter_spins: dict[str, QDoubleSpinBox] = {}
         self._initial_material = material
         self._frp_jacket_group: QGroupBox | None = None
         self._frp_ultimate_group: QGroupBox | None = None
@@ -303,6 +306,7 @@ class MaterialDialog(QDialog):
         while self.parameter_form.rowCount():
             self.parameter_form.removeRow(0)
         self._parameter_widgets.clear()
+        self._parameter_spins.clear()
         self._frp_jacket_group = None
         self._frp_ultimate_group = None
 
@@ -379,6 +383,7 @@ class MaterialDialog(QDialog):
         spin.setValue(self._initial_value(material_type, key))
         spin.valueChanged.connect(self._parameter_changed)
         self._parameter_widgets[key] = spin
+        self._parameter_spins[key] = spin
         return spin
 
     def _widget_value(self, key: str) -> float:
