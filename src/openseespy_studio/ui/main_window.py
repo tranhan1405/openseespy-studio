@@ -5250,25 +5250,6 @@ class MainWindow(QMainWindow):
                 return analysis.test
         return None
 
-    def _unique_solution_result_name(
-        self,
-        analysis_tag: int,
-        base_name: str,
-    ) -> str:
-        existing = {
-            result.name
-            for result in self.project.solution_results_for_analysis(
-                analysis_tag
-            )
-        }
-        name = str(base_name)
-        if name not in existing:
-            return name
-        suffix = 2
-        while f"{name} {suffix}" in existing:
-            suffix += 1
-        return f"{name} {suffix}"
-
     def _select_tree_payload(self, kind: str, value: object) -> None:
         root = self.tree.invisibleRootItem()
 
@@ -5313,7 +5294,7 @@ class MainWindow(QMainWindow):
                 ("Algorithm", job.current_algorithm or "-"),
                 ("Iterations", job.iterations),
                 ("Convergence test", self._job_convergence_test(job) or "-"),
-                ("Saved plots", len(job.plots)),
+                ("Plots", len(job.plots)),
                 ("Result data", "Available" if job.results else "Not available"),
                 ("Message", job.message or "-"),
             ],
