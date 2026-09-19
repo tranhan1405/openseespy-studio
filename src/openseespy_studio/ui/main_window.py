@@ -6202,6 +6202,197 @@ class MainWindow(QMainWindow):
         kind, value = payload
         menu = QMenu(self)
 
+        if kind == "model_root":
+            menu.addAction(self.actions["check_model"])
+            menu.addAction(self.actions["run"])
+            menu.addSeparator()
+            show_all = menu.addAction("Show All")
+            show_all.triggered.connect(self._show_all)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "geometry_root":
+            node_action = menu.addAction("New Node...")
+            node_action.triggered.connect(self._create_node)
+            element_action = menu.addAction("New Element...")
+            element_action.triggered.connect(self._create_element)
+            grid_action = menu.addAction("Create Frame Grid...")
+            grid_action.triggered.connect(self._show_frame_grid)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "nodes_root":
+            create = menu.addAction("New Node...")
+            create.triggered.connect(self._create_node)
+            select_all = menu.addAction("Select All Nodes")
+            select_all.setEnabled(bool(self.model.nodes))
+            select_all.triggered.connect(self._select_all_tree_nodes)
+            menu.addSeparator()
+            menu.addAction(self.actions["show_node_numbers"])
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "lines_root":
+            create = menu.addAction("New Line / Element...")
+            create.triggered.connect(self._create_element)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "frame_grids_root":
+            create = menu.addAction("Create / Edit Frame Grid...")
+            create.triggered.connect(self._show_frame_grid)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "elements_root":
+            create = menu.addAction("New Element...")
+            create.triggered.connect(self._create_element)
+            select_all = menu.addAction("Select All Elements")
+            select_all.setEnabled(bool(self.model.elements))
+            select_all.triggered.connect(self._select_all_tree_elements)
+            menu.addSeparator()
+            menu.addAction(self.actions["show_element_numbers"])
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "element_type_group":
+            element_type = str(value)
+            tags = {
+                tag
+                for tag, element in self.model.elements.items()
+                if element.element_type == element_type
+            }
+            select_all = menu.addAction(
+                f"Select All {element_type} ({len(tags)})"
+            )
+            select_all.setEnabled(bool(tags))
+            select_all.triggered.connect(
+                lambda checked=False, t=element_type:
+                self._select_all_tree_elements(t)
+            )
+            menu.addSeparator()
+            formulation = menu.addAction("Element Formulation...")
+            formulation.setEnabled(bool(tags))
+            formulation.triggered.connect(
+                lambda checked=False, t=element_type: (
+                    self._select_all_tree_elements(t),
+                    self._set_element_formulation(),
+                )
+            )
+            assign = menu.addMenu("Assign")
+            assign.setEnabled(bool(tags))
+            section = assign.addAction("Section...")
+            section.triggered.connect(
+                lambda checked=False, t=element_type: (
+                    self._select_all_tree_elements(t),
+                    self._assign_section_to_selection(),
+                )
+            )
+            transformation = assign.addAction("Transformation...")
+            transformation.triggered.connect(
+                lambda checked=False, t=element_type: (
+                    self._select_all_tree_elements(t),
+                    self._assign_transformation_to_selection(),
+                )
+            )
+            beam_load = menu.addAction("Create Beam Load...")
+            beam_load.setEnabled(bool(tags))
+            beam_load.triggered.connect(
+                lambda checked=False, t=element_type: (
+                    self._select_all_tree_elements(t),
+                    self._create_element_load(),
+                )
+            )
+            menu.addSeparator()
+            named = menu.addAction("Create Named Selection")
+            named.setEnabled(bool(tags))
+            named.triggered.connect(
+                lambda checked=False, t=element_type: (
+                    self._select_all_tree_elements(t),
+                    self._create_named_selection(),
+                )
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "named_sets_root":
+            create = menu.addAction("Create from Current Selection...")
+            create.setEnabled(
+                bool(self.selection.nodes or self.selection.elements)
+            )
+            create.triggered.connect(self._create_named_selection)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "boundary_root":
+            constrained = {
+                tag
+                for tag, node in self.model.nodes.items()
+                if any(node.fixity)
+            }
+            select_all = menu.addAction(
+                f"Select All Supported Nodes ({len(constrained)})"
+            )
+            select_all.setEnabled(bool(constrained))
+            select_all.triggered.connect(
+                lambda: self.selection.set_selection(nodes=constrained)
+            )
+            menu.addSeparator()
+            apply_support = menu.addAction(
+                "Apply / Edit Support on Current Selection..."
+            )
+            apply_support.setEnabled(bool(self.selection.nodes))
+            apply_support.triggered.connect(self._apply_restraint)
+            clear_support = menu.addAction(
+                "Clear Support on Current Selection"
+            )
+            clear_support.setEnabled(bool(self.selection.nodes))
+            clear_support.triggered.connect(self._clear_restraint)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "boundary_group":
+            support_type = str(value)
+            tags = {
+                tag
+                for tag, node in self.model.nodes.items()
+                if any(node.fixity)
+                and classify_fixity(node.fixity) == support_type
+            }
+            select_all = menu.addAction(
+                f"Select {support_type} Nodes ({len(tags)})"
+            )
+            select_all.setEnabled(bool(tags))
+            select_all.triggered.connect(
+                lambda checked=False, s=support_type:
+                self._select_boundary_group(s)
+            )
+            zoom = menu.addAction("Zoom to Group")
+            zoom.setEnabled(bool(tags))
+            zoom.triggered.connect(
+                lambda checked=False, s=support_type: (
+                    self._select_boundary_group(s),
+                    self._zoom_selection(),
+                )
+            )
+            menu.addSeparator()
+            clear = menu.addAction("Clear These Supports")
+            clear.setEnabled(bool(tags))
+            clear.triggered.connect(
+                lambda checked=False, s=support_type: (
+                    self._select_boundary_group(s),
+                    self._clear_restraint(),
+                )
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "connection_group":
+            create = menu.addAction("New Connection / Spring...")
+            create.triggered.connect(self._create_connection)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
         if kind == "node":
             tag = int(value)
             if tag not in self.selection.nodes:
