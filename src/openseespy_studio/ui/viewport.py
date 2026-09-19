@@ -1050,7 +1050,7 @@ class ModelViewport(QWidget):
 
         self.plotter.render()
 
-    def clear_result_overlay(self) -> None:
+    def clear_result_overlay(self, *, render: bool = True) -> None:
         for name in (
             "result-overlay",
             "result-nodes",
@@ -1063,7 +1063,8 @@ class ModelViewport(QWidget):
         ):
             self._remove_overlay(name)
         self._result_overlay_active = False
-        self.plotter.render()
+        if render:
+            self.plotter.render()
 
     def _show_vector_overlay(
         self,
@@ -1077,7 +1078,7 @@ class ModelViewport(QWidget):
         if self._model is None or not self._model.elements:
             return
 
-        self.clear_result_overlay()
+        self.clear_result_overlay(render=False)
         points: list[tuple[float, float, float]] = []
         lines: list[int] = []
         magnitudes: list[float] = []
@@ -1137,6 +1138,7 @@ class ModelViewport(QWidget):
                 render_lines_as_tubes=True,
                 pickable=False,
                 scalar_bar_args={"title": label},
+                render=False,
             )
 
         result_node_tags = set(self._visible_node_tags())
@@ -1174,6 +1176,7 @@ class ModelViewport(QWidget):
                 point_size=7,
                 pickable=False,
                 show_scalar_bar=False,
+                render=False,
             )
 
         self._result_overlay_active = True
@@ -1286,7 +1289,7 @@ class ModelViewport(QWidget):
             if max_abs > 1.0e-15:
                 clim = (-max_abs, max_abs)
 
-        self.clear_result_overlay()
+        self.clear_result_overlay(render=False)
 
         scalar_name = "nodal_result"
         scalar_bar_args = {
@@ -1305,6 +1308,7 @@ class ModelViewport(QWidget):
                 "render_lines_as_tubes": True,
                 "pickable": False,
                 "scalar_bar_args": scalar_bar_args,
+                "render": False,
             }
             if clim is not None:
                 mesh_kwargs["clim"] = clim
@@ -1325,6 +1329,7 @@ class ModelViewport(QWidget):
                 "pickable": False,
                 "show_scalar_bar": not bool(points),
                 "scalar_bar_args": scalar_bar_args,
+                "render": False,
             }
             if clim is not None:
                 node_kwargs["clim"] = clim
@@ -1413,7 +1418,7 @@ class ModelViewport(QWidget):
             self.clear_result_overlay()
             return
 
-        self.clear_result_overlay()
+        self.clear_result_overlay(render=False)
         state_cmap = [
             "#8fa2b5",
             "#e7b34c",
@@ -1443,6 +1448,7 @@ class ModelViewport(QWidget):
                     "2 Yielding · 3 Plastic/Crushing"
                 )
             },
+            render=False,
         )
 
         if state_points:
@@ -1463,6 +1469,7 @@ class ModelViewport(QWidget):
                 point_size=13,
                 pickable=False,
                 show_scalar_bar=False,
+                render=False,
             )
 
         self._result_overlay_active = True
@@ -1658,7 +1665,7 @@ class ModelViewport(QWidget):
             self.clear_result_overlay()
             return
 
-        self.clear_result_overlay()
+        self.clear_result_overlay(render=False)
 
         mesh = pv.PolyData(
             np.asarray(diagram_points, dtype=float)
@@ -1679,6 +1686,7 @@ class ModelViewport(QWidget):
             scalar_bar_args={
                 "title": f"{component} · local member resultant"
             },
+            render=False,
         )
 
         if connector_points:
@@ -1697,6 +1705,7 @@ class ModelViewport(QWidget):
                 opacity=0.6,
                 pickable=False,
                 show_scalar_bar=False,
+                render=False,
             )
 
         self._result_overlay_active = True
