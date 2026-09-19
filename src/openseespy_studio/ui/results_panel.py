@@ -31,7 +31,6 @@ from PySide6.QtWidgets import (
 from ..jobs import JobRecord
 from ..postprocess import (
     component_end_resultants,
-    convergence_series,
     convergence_steps,
     convergence_trace,
     convergence_summary,
@@ -1974,8 +1973,8 @@ class ResultsPanel(QWidget):
 
         if not rows:
             self.convergence_table.setRowCount(0)
-            self.convergence_iterations_plot.set_series([], [])
-            self.convergence_norm_plot.set_series([], [])
+            self.convergence_overview_plot.clear()
+            self.convergence_coordinate_plot.clear()
             self.convergence_info.setText(
                 "No iterative convergence history is available for this "
                 "result."
@@ -2087,16 +2086,18 @@ class ResultsPanel(QWidget):
                     item,
                 )
 
-        x_iter, y_iter = convergence_series(
-            self._result,
-            "iterations",
+        trace = convergence_trace(self._result)
+        self.convergence_overview_plot.set_trace(
+            list(trace.get("iteration", [])),
+            list(trace.get("norm", [])),
+            criterion=trace.get("criterion"),
+            cutbacks=list(trace.get("cutbacks", [])),
+            converged=list(trace.get("converged", [])),
         )
-        x_norm, y_norm = convergence_series(
-            self._result,
-            "norm",
+        self.convergence_coordinate_plot.set_series(
+            list(trace.get("coordinate_iteration", [])),
+            list(trace.get("coordinate", [])),
         )
-        self.convergence_iterations_plot.set_series(x_iter, y_iter)
-        self.convergence_norm_plot.set_series(x_norm, y_norm)
 
     def _convergence_row_clicked(self, row: int, column: int) -> None:
         item = self.convergence_table.item(row, 0)
@@ -2116,48 +2117,9 @@ class ResultsPanel(QWidget):
             return
 
         attempts = record.get("attempts", [])
-        if isinstance(attempts, list):
-            plot_attempts: list[dict[str, Any]] = []
-            for attempt in attempts:
-                if not isinstance(attempt, dict):
-                    continue
-                history = attempt.get("norm_history", [])
-                values = []
-                if isinstance(history, (list, tuple)):
-                    for iteration, raw_norm in enumerate(history, start=1):
-                        try:
-                            norm = float(raw_norm)
-                        except (TypeError, ValueError):
-                            continue
-                        if math.isfinite(norm):
-                            values.append((iteration, norm))
-                algorithm_label = str(
-                    attempt.get("algorithm", "-")
-                )
-                if attempt.get("increment") is not None:
-                    try:
-                        algorithm_label += (
-                            f" · Δ={float(attempt.get('increment')):.6g}"
-                        )
-                    except (TypeError, ValueError):
-                        pass
-                plot_attempts.append({
-                    "algorithm": algorithm_label,
-                    "values": values,
-                })
-            convergence = self._result.get("convergence", {})
-            tolerance = (
-                convergence.get("tolerance")
-                if isinstance(convergence, dict)
-                else None
-            )
-            self.live_convergence_plot.set_attempts(
-                plot_attempts,
-                tolerance,
-            )
-            self.live_convergence_status.setText(
-                f"POST-RUN · Selected step {step}"
-            )
+        self.live_convergence_status.setText(
+            f"POST-RUN · Selected step {step}"
+        )
         if not isinstance(attempts, list) or not attempts:
             self.convergence_attempt_info.setText(
                 f"Step {step}: no attempt details available."
