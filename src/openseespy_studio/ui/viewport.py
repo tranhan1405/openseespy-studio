@@ -1158,10 +1158,6 @@ class ModelViewport(QWidget):
             "display-element-numbers",
             "display-nodal-load-arrows",
             "display-nodal-load-labels",
-            "display-prescribed-displacement-arrows",
-            "display-prescribed-displacement-rotation-arcs",
-            "display-prescribed-displacement-rotation-heads",
-            "display-prescribed-displacement-labels",
             "display-element-load-arrows",
             "display-element-load-labels",
             "display-prescribed-displacement-arrows",
@@ -1534,15 +1530,16 @@ class ModelViewport(QWidget):
                         arrows.append(arrow)
                 unit = length_unit
             else:
-                radius = max(base_length * 0.48, span * 0.035)
-                rotation_records.append(
-                    (
-                        point,
-                        axis,
-                        1.0 if value >= 0.0 else -1.0,
-                        radius,
+                if abs(value) > 1.0e-15:
+                    radius = max(base_length * 0.48, span * 0.035)
+                    rotation_records.append(
+                        (
+                            point,
+                            axis,
+                            1.0 if value >= 0.0 else -1.0,
+                            radius,
+                        )
                     )
-                )
                 unit = "rad"
 
             label_points.append(point)
@@ -1821,6 +1818,10 @@ class ModelViewport(QWidget):
             "display-nodal-load-labels",
             "display-element-load-arrows",
             "display-element-load-labels",
+            "display-prescribed-displacement-arrows",
+            "display-prescribed-displacement-rotation-arcs",
+            "display-prescribed-displacement-rotation-heads",
+            "display-prescribed-displacement-labels",
         ):
             self._remove_overlay(name)
 
