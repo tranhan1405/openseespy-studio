@@ -321,6 +321,9 @@ def build_pushover_template(
         control_node=int(control_node),
         control_dof=int(control_dof),
         displacement_increment=increment,
+        preload_gravity=True,
+        gravity_steps=10,
+        deferred_pattern_tags=[patterns[0].tag],
         **_solver_kwargs(solver_preset),
     )
     component = {1: "FX", 2: "FY", 3: "FZ"}[int(control_dof)]
@@ -382,6 +385,9 @@ def build_cyclic_template(
         control_dof=int(control_dof),
         cyclic_targets=targets,
         cyclic_increment=max_increment,
+        preload_gravity=True,
+        gravity_steps=10,
+        deferred_pattern_tags=[patterns[0].tag],
         **_solver_kwargs(solver_preset),
     )
     results = _result_objects(
@@ -487,6 +493,9 @@ def build_nlth_template(
         rayleigh_damping_ratio=float(damping_ratio),
         rayleigh_mode_i=int(damping_mode_i),
         rayleigh_mode_j=int(damping_mode_j),
+        preload_gravity=True,
+        gravity_steps=10,
+        deferred_pattern_tags=[pattern.tag],
         **_solver_kwargs(solver_preset),
     )
     results = _result_objects(
