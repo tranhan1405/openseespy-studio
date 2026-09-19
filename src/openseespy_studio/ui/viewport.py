@@ -2434,11 +2434,7 @@ class ModelViewport(QWidget):
         visible_nodes = tuple(sorted(self._visible_node_tags()))
         topology_key = (visible_elements, visible_nodes)
 
-        if (
-            self._motion_topology_key != topology_key
-            or self._motion_element_mesh is None
-            or self._motion_node_mesh is None
-        ):
+        if self._motion_topology_key != topology_key:
             self.clear_result_overlay(render=False)
 
             element_points: list[tuple[float, float, float]] = []
