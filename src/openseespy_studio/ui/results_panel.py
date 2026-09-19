@@ -1403,7 +1403,8 @@ class ResultsPanel(QWidget):
         layout.addWidget(self.cyclic_info)
 
         self.cyclic_metrics = QLabel(
-            "Peak |u|: -   Peak |V|: -   Hysteretic energy: -"
+            "Peak |u|: -   +Vpeak: -   -Vpeak: -   "
+            "Hysteretic energy: -   Closed cycles: -"
         )
         self.cyclic_metrics.setWordWrap(True)
         layout.addWidget(self.cyclic_metrics)
@@ -1413,9 +1414,16 @@ class ResultsPanel(QWidget):
         )
         layout.addWidget(self.cyclic_plot, 1)
 
-        self.cyclic_reversal_table = QTableWidget(0, 4)
+        self.cyclic_reversal_table = QTableWidget(0, 6)
         self.cyclic_reversal_table.setHorizontalHeaderLabels(
-            ["Reversal", "u", "V", "|Ksec|"]
+            [
+                "Reversal",
+                "u",
+                "V",
+                "|Ksec|",
+                "Strength / 1st",
+                "Ksec / 1st",
+            ]
         )
         self.cyclic_reversal_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeToContents
@@ -1931,7 +1939,8 @@ class ResultsPanel(QWidget):
             "control displacement."
         )
         self.cyclic_metrics.setText(
-            "Peak |u|: -   Peak |V|: -   Hysteretic energy: -"
+            "Peak |u|: -   +Vpeak: -   -Vpeak: -   "
+            "Hysteretic energy: -   Closed cycles: -"
         )
         self.history_node.clear()
         self.history_label.setText(
@@ -3113,7 +3122,8 @@ class ResultsPanel(QWidget):
                     "Run or select a Cyclic analysis to view hysteresis."
                 )
             self.cyclic_metrics.setText(
-                "Peak |u|: -   Peak |V|: -   Hysteretic energy: -"
+                "Peak |u|: -   +Vpeak: -   -Vpeak: -   "
+                "Hysteretic energy: -   Closed cycles: -"
             )
             self.cyclic_plot.set_series([], [])
             self.cyclic_reversal_table.setRowCount(0)
@@ -3143,8 +3153,12 @@ class ResultsPanel(QWidget):
 
         self.cyclic_metrics.setText(
             f"Peak |u|: {float(metrics['max_abs_displacement']):.6g}   "
-            f"Peak |V|: {float(metrics['max_abs_force']):.6g}   "
-            f"Hysteretic energy: {energy_text}"
+            f"+Vpeak: {float(metrics.get('peak_positive_force', 0.0)):.6g}   "
+            f"-Vpeak: {float(metrics.get('peak_negative_force', 0.0)):.6g}   "
+            f"Hysteretic energy: {energy_text}   "
+            f"Closed cycles: {int(metrics.get('closed_cycle_count', 0))}   "
+            f"Residual u: "
+            f"{float(metrics.get('residual_displacement', 0.0)):.6g}"
         )
         self.cyclic_plot.set_series(x, y)
 
@@ -3161,11 +3175,27 @@ class ResultsPanel(QWidget):
                 if stiffness is not None and math.isfinite(float(stiffness))
                 else "-"
             )
+            strength_ratio = reversal.get("strength_ratio")
+            stiffness_ratio = reversal.get("stiffness_ratio")
+            strength_ratio_text = (
+                f"{float(strength_ratio):.4f}"
+                if strength_ratio is not None
+                and math.isfinite(float(strength_ratio))
+                else "-"
+            )
+            stiffness_ratio_text = (
+                f"{float(stiffness_ratio):.4f}"
+                if stiffness_ratio is not None
+                and math.isfinite(float(stiffness_ratio))
+                else "-"
+            )
             values = [
                 str(row + 1),
                 f"{float(reversal.get('displacement', 0.0)):.6g}",
                 f"{float(reversal.get('force', 0.0)):.6g}",
                 stiffness_text,
+                strength_ratio_text,
+                stiffness_ratio_text,
             ]
             for column, value in enumerate(values):
                 self.cyclic_reversal_table.setItem(

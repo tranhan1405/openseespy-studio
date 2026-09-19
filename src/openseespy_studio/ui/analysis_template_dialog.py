@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -33,6 +34,7 @@ from ..analysis_templates import (
     infer_height_axis,
     lateral_load_weights,
     parse_cyclic_protocol_text,
+    parse_cyclic_targets_text,
     parse_node_weight_text,
     structure_reference_height,
 )
@@ -59,6 +61,71 @@ def _double(
     widget.setValue(float(value))
     widget.setKeyboardTracking(False)
     return widget
+
+
+class CyclicProtocolPreview(QWidget):
+    """Compact displacement/drift target-path preview."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._targets: list[float] = []
+        self.setMinimumHeight(120)
+
+    def set_targets(self, targets: list[float]) -> None:
+        self._targets = [0.0] + [float(value) for value in targets]
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#ffffff"))
+
+        if len(self._targets) < 2:
+            painter.setPen(QColor("#718195"))
+            painter.drawText(
+                self.rect(),
+                Qt.AlignCenter,
+                "No valid cyclic protocol",
+            )
+            return
+
+        left, right = 36.0, max(37.0, float(self.width()) - 10.0)
+        top, bottom = 10.0, max(11.0, float(self.height()) - 24.0)
+        max_abs = max(abs(value) for value in self._targets)
+        max_abs = max(max_abs, 1.0e-12)
+        count = max(1, len(self._targets) - 1)
+
+        zero_y = 0.5 * (top + bottom)
+        painter.setPen(QPen(QColor("#c7d0da"), 1))
+        painter.drawLine(QPointF(left, zero_y), QPointF(right, zero_y))
+        painter.drawLine(QPointF(left, top), QPointF(left, bottom))
+
+        points: list[QPointF] = []
+        for index, value in enumerate(self._targets):
+            x = left + (right - left) * index / count
+            y = zero_y - 0.5 * (bottom - top) * value / max_abs
+            points.append(QPointF(x, y))
+
+        painter.setPen(QPen(QColor("#2f80ed"), 2))
+        for first, second in zip(points, points[1:]):
+            painter.drawLine(first, second)
+
+        painter.setPen(QColor("#718195"))
+        painter.drawText(
+            4,
+            int(top + 12),
+            f"+{max_abs:g}",
+        )
+        painter.drawText(
+            4,
+            int(bottom),
+            f"-{max_abs:g}",
+        )
+        painter.drawText(
+            int(max(left, right - 55)),
+            int(self.height() - 5),
+            "target",
+        )
 
 
 class AnalysisTemplateDialog(QDialog):
@@ -120,7 +187,10 @@ class AnalysisTemplateDialog(QDialog):
         self.control_node.setRange(1, 2_147_483_647)
         self.control_node.setValue(int(default_node))
         self.direction = QComboBox()
-        for dof, name in ((1, "X / UX"), (2, "Y / UY"), (3, "Z / UZ")):
+        directions = [(1, "X / UX"), (2, "Y / UY")]
+        if self.project is None or int(self.project.model.ndm) >= 3:
+            directions.append((3, "Z / UZ"))
+        for dof, name in directions:
             self.direction.addItem(name, dof)
 
         top.addRow("Template:", self.template)
@@ -161,6 +231,8 @@ class AnalysisTemplateDialog(QDialog):
         self._initializing = False
         self._sync_template(self.template.currentText())
         self._update_pushover_preview()
+        self._update_cyclic_preview()
+        self._update_cyclic_load_preview()
 
     def _build_pushover_page(self) -> QWidget:
         page = QWidget()
@@ -342,31 +414,91 @@ class AnalysisTemplateDialog(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
 
-        form = QFormLayout()
-        self.cyclic_increment = _double(0.001, 1.0e-12)
-        self.cyclic_distribution = QComboBox()
-        self.cyclic_distribution.addItems(
-            ["Uniform", "Triangular", "Mass proportional"]
+        protocol_group = QGroupBox("Control & loading protocol")
+        protocol_form = QFormLayout(protocol_group)
+
+        self.cyclic_control_info = QLabel(
+            "Displacement-controlled: prescribed displacement/drift is the "
+            "input; base shear / reaction force is the structural response."
         )
-        form.addRow(
-            f"Maximum branch increment [{self.unit_system.length}]:",
+        self.cyclic_control_info.setWordWrap(True)
+        self.cyclic_control_info.setObjectName("Muted")
+
+        self.cyclic_protocol_mode = QComboBox()
+        self.cyclic_protocol_mode.addItem(
+            "Amplitude + cycles",
+            "amplitude_cycles",
+        )
+        self.cyclic_protocol_mode.addItem(
+            "Absolute targets",
+            "absolute_targets",
+        )
+
+        self.cyclic_protocol_unit = QComboBox()
+        self.cyclic_protocol_unit.addItems(
+            ["Displacement", "Drift ratio [%]"]
+        )
+
+        self.cyclic_height_axis = QComboBox()
+        for axis, label in ((1, "X"), (2, "Y"), (3, "Z")):
+            self.cyclic_height_axis.addItem(label, axis)
+        default_axis = (
+            infer_height_axis(self.project)
+            if self.project is not None
+            else 3
+        )
+        self.cyclic_height_axis.setCurrentIndex(
+            max(0, self.cyclic_height_axis.findData(default_axis))
+        )
+
+        self.cyclic_auto_height = QCheckBox(
+            "Auto from control node to model base"
+        )
+        self.cyclic_auto_height.setChecked(self.project is not None)
+        self.cyclic_reference_height = _double(
+            1.0, 1.0e-12, 1.0e20
+        )
+        self.cyclic_increment = _double(0.001, 1.0e-12)
+        self.cyclic_return_zero = QCheckBox(
+            "Return to zero after the final amplitude block"
+        )
+        self.cyclic_return_zero.setChecked(True)
+
+        protocol_form.addRow(self.cyclic_control_info)
+        protocol_form.addRow(
+            "Protocol definition:",
+            self.cyclic_protocol_mode,
+        )
+        protocol_form.addRow(
+            "Protocol quantity:",
+            self.cyclic_protocol_unit,
+        )
+        protocol_form.addRow("Height axis:", self.cyclic_height_axis)
+        protocol_form.addRow(
+            "Reference height:",
+            self.cyclic_auto_height,
+        )
+        protocol_form.addRow(
+            f"Height [{self.unit_system.length}]:",
+            self.cyclic_reference_height,
+        )
+        protocol_form.addRow(
+            f"Maximum solver increment [{self.unit_system.length}]:",
             self.cyclic_increment,
         )
-        form.addRow("Reference load distribution:", self.cyclic_distribution)
-        layout.addLayout(form)
+        protocol_form.addRow(self.cyclic_return_zero)
+        layout.addWidget(protocol_group)
 
         layout.addWidget(QLabel("Loading protocol:"))
         self.protocol = QTableWidget(4, 2)
-        self.protocol.setHorizontalHeaderLabels(
-            [
-                f"Amplitude [{self.unit_system.length}]",
-                "Cycles",
-            ]
-        )
         defaults = ((0.005, 2), (0.010, 2), (0.020, 2), (0.040, 2))
         for row, (amplitude, cycles) in enumerate(defaults):
-            self.protocol.setItem(row, 0, QTableWidgetItem(f"{amplitude:g}"))
-            self.protocol.setItem(row, 1, QTableWidgetItem(str(cycles)))
+            self.protocol.setItem(
+                row, 0, QTableWidgetItem(f"{amplitude:g}")
+            )
+            self.protocol.setItem(
+                row, 1, QTableWidgetItem(str(cycles))
+            )
         self.protocol.itemChanged.connect(self._update_cyclic_preview)
         layout.addWidget(self.protocol)
 
@@ -385,13 +517,139 @@ class AnalysisTemplateDialog(QDialog):
 
         self.protocol_preview = QLabel()
         self.protocol_preview.setWordWrap(True)
+        self.protocol_preview.setObjectName("Muted")
         layout.addWidget(self.protocol_preview)
+        self.cyclic_protocol_plot = CyclicProtocolPreview()
+        layout.addWidget(self.cyclic_protocol_plot)
 
-        self.cyclic_increment.valueChanged.connect(self._update_summary)
+        load_group = QGroupBox("Reference lateral loading")
+        load_form = QFormLayout(load_group)
+
+        self.cyclic_load_source = QComboBox()
+        self.cyclic_load_source.addItem(
+            "Auto-generate reference pattern",
+            None,
+        )
+        if self.project is not None:
+            for tag in sorted(self.project.load_patterns):
+                pattern = self.project.load_patterns[tag]
+                if pattern.pattern_type == "Plain":
+                    self.cyclic_load_source.addItem(
+                        f"Existing {tag} - {pattern.name}",
+                        int(tag),
+                    )
+
+        self.cyclic_distribution = QComboBox()
+        self.cyclic_distribution.addItems(
+            [
+                "Uniform",
+                "Triangular",
+                "Mass proportional",
+                "First-mode proportional",
+                "Custom",
+            ]
+        )
+        self.cyclic_mode = QSpinBox()
+        self.cyclic_mode.setRange(1, 1000)
+        self.cyclic_mode.setValue(1)
+        self.cyclic_custom = QPlainTextEdit()
+        self.cyclic_custom.setPlaceholderText(
+            "Custom node weights, one per line:\n"
+            "101, 0.20\n102, 0.35\n103, 0.45"
+        )
+        self.cyclic_custom.setMaximumHeight(92)
+        self.cyclic_load_preview = QLabel()
+        self.cyclic_load_preview.setWordWrap(True)
+        self.cyclic_load_preview.setObjectName("Muted")
+
+        load_form.addRow("Load source:", self.cyclic_load_source)
+        load_form.addRow(
+            "Reference load distribution:",
+            self.cyclic_distribution,
+        )
+        load_form.addRow("Mode number:", self.cyclic_mode)
+        load_form.addRow("Custom node weights:", self.cyclic_custom)
+        load_form.addRow("Preview:", self.cyclic_load_preview)
+        layout.addWidget(load_group)
+
+        gravity_group = QGroupBox("Gravity / staged loading")
+        gravity_form = QFormLayout(gravity_group)
+        self.cyclic_preload_gravity = QCheckBox(
+            "Preload existing Plain patterns and hold with loadConst"
+        )
+        self.cyclic_preload_gravity.setChecked(True)
+        self.cyclic_gravity_steps = QSpinBox()
+        self.cyclic_gravity_steps.setRange(1, 100000)
+        self.cyclic_gravity_steps.setValue(10)
+        gravity_note = QLabel(
+            "The cyclic driving pattern is excluded from the gravity stage. "
+            "Other existing Plain patterns are preloaded first."
+        )
+        gravity_note.setWordWrap(True)
+        gravity_note.setObjectName("Muted")
+        gravity_form.addRow(self.cyclic_preload_gravity)
+        gravity_form.addRow("Gravity steps:", self.cyclic_gravity_steps)
+        gravity_form.addRow(gravity_note)
+        layout.addWidget(gravity_group)
+
+        self.cyclic_protocol_mode.currentIndexChanged.connect(
+            self._sync_cyclic_protocol_mode
+        )
+        self.cyclic_protocol_unit.currentTextChanged.connect(
+            self._sync_cyclic_protocol_unit
+        )
+        self.cyclic_height_axis.currentIndexChanged.connect(
+            self._refresh_cyclic_reference_height
+        )
+        self.cyclic_height_axis.currentIndexChanged.connect(
+            self._update_cyclic_load_preview
+        )
+        self.cyclic_auto_height.toggled.connect(
+            self._refresh_cyclic_reference_height
+        )
+        self.cyclic_reference_height.valueChanged.connect(
+            self._update_cyclic_preview
+        )
+        self.cyclic_increment.valueChanged.connect(
+            self._update_cyclic_preview
+        )
+        self.cyclic_return_zero.toggled.connect(
+            self._update_cyclic_preview
+        )
+
+        self.cyclic_load_source.currentIndexChanged.connect(
+            self._sync_cyclic_load_source
+        )
         self.cyclic_distribution.currentTextChanged.connect(
+            self._sync_cyclic_distribution
+        )
+        self.cyclic_mode.valueChanged.connect(
+            self._update_cyclic_load_preview
+        )
+        self.cyclic_custom.textChanged.connect(
+            self._update_cyclic_load_preview
+        )
+        self.cyclic_preload_gravity.toggled.connect(
+            self._sync_cyclic_gravity
+        )
+        self.cyclic_gravity_steps.valueChanged.connect(
             self._update_summary
         )
-        self._update_cyclic_preview()
+        self.control_node.valueChanged.connect(
+            self._refresh_cyclic_reference_height
+        )
+        self.control_node.valueChanged.connect(
+            self._update_cyclic_load_preview
+        )
+        self.direction.currentIndexChanged.connect(
+            self._update_cyclic_load_preview
+        )
+
+        self._sync_cyclic_protocol_mode()
+        self._sync_cyclic_protocol_unit()
+        self._refresh_cyclic_reference_height()
+        self._sync_cyclic_load_source()
+        self._sync_cyclic_gravity()
         return page
 
     def _build_nlth_page(self) -> QWidget:
@@ -742,6 +1000,168 @@ class AnalysisTemplateDialog(QDialog):
             self.push_load_preview.setText(f"Preview: {exc}")
         self._update_summary()
 
+    def _sync_cyclic_protocol_mode(self, *_args) -> None:
+        absolute = (
+            self.cyclic_protocol_mode.currentData() == "absolute_targets"
+        )
+        self.protocol.setColumnHidden(1, absolute)
+        self.cyclic_return_zero.setEnabled(not absolute)
+        self._sync_cyclic_protocol_unit()
+        self._update_cyclic_preview()
+
+    def _sync_cyclic_protocol_unit(self, *_args) -> None:
+        drift = self.cyclic_protocol_unit.currentText() == "Drift ratio [%]"
+        absolute = (
+            self.cyclic_protocol_mode.currentData() == "absolute_targets"
+        )
+        if drift:
+            first = "Target drift [%]" if absolute else "Amplitude drift [%]"
+        else:
+            first = (
+                f"Target [{self.unit_system.length}]"
+                if absolute
+                else f"Amplitude [{self.unit_system.length}]"
+            )
+        self.protocol.setHorizontalHeaderLabels([first, "Cycles"])
+        self.cyclic_height_axis.setEnabled(
+            drift
+            or (
+                self.cyclic_load_source.currentData() is None
+                and self.cyclic_distribution.currentText() == "Triangular"
+            )
+        )
+        self.cyclic_auto_height.setEnabled(
+            drift and self.project is not None
+        )
+        self.cyclic_reference_height.setEnabled(
+            drift and not self.cyclic_auto_height.isChecked()
+        )
+        self._refresh_cyclic_reference_height()
+        self._update_cyclic_preview()
+
+    def _refresh_cyclic_reference_height(self, *_args) -> None:
+        drift = self.cyclic_protocol_unit.currentText() == "Drift ratio [%]"
+        use_auto = (
+            drift
+            and self.cyclic_auto_height.isChecked()
+            and self.project is not None
+        )
+        self.cyclic_reference_height.setEnabled(
+            drift and not use_auto
+        )
+        if use_auto:
+            try:
+                height = structure_reference_height(
+                    self.project,
+                    control_node=self.control_node.value(),
+                    height_axis=int(self.cyclic_height_axis.currentData()),
+                )
+            except ValueError:
+                height = None
+            if height is not None:
+                self.cyclic_reference_height.blockSignals(True)
+                self.cyclic_reference_height.setValue(height)
+                self.cyclic_reference_height.blockSignals(False)
+        self._update_cyclic_preview()
+
+    def _sync_cyclic_load_source(self, *_args) -> None:
+        automatic = self.cyclic_load_source.currentData() is None
+        self.cyclic_distribution.setEnabled(automatic)
+        self._sync_cyclic_distribution(
+            self.cyclic_distribution.currentText()
+        )
+        self._update_cyclic_load_preview()
+
+    def _sync_cyclic_distribution(self, kind: str) -> None:
+        automatic = self.cyclic_load_source.currentData() is None
+        first_mode = automatic and str(kind) == "First-mode proportional"
+        custom = automatic and str(kind) == "Custom"
+        self.cyclic_mode.setEnabled(first_mode)
+        self.cyclic_custom.setEnabled(custom)
+        self.cyclic_height_axis.setEnabled(
+            self.cyclic_protocol_unit.currentText() == "Drift ratio [%]"
+            or (automatic and str(kind) == "Triangular")
+        )
+        self._update_cyclic_load_preview()
+
+    def _sync_cyclic_gravity(self, *_args) -> None:
+        self.cyclic_gravity_steps.setEnabled(
+            self.cyclic_preload_gravity.isChecked()
+        )
+        self._update_summary()
+
+    def _update_cyclic_load_preview(self, *_args) -> None:
+        if self._initializing:
+            return
+        driver_tag = self.cyclic_load_source.currentData()
+        if driver_tag is not None:
+            if self.project is None:
+                self.cyclic_load_preview.setText(
+                    f"Existing Plain pattern {driver_tag}."
+                )
+            else:
+                nodal_count = sum(
+                    1
+                    for load in self.project.nodal_loads.values()
+                    if load.pattern_tag == int(driver_tag)
+                )
+                self.cyclic_load_preview.setText(
+                    f"Existing Plain pattern {driver_tag} · "
+                    f"{nodal_count} nodal load(s) · no new reference "
+                    "pattern will be created."
+                )
+            self._update_summary()
+            return
+
+        distribution = self.cyclic_distribution.currentText()
+        if distribution == "First-mode proportional":
+            self.cyclic_load_preview.setText(
+                f"Mode {self.cyclic_mode.value()} weights will be taken from "
+                "the latest compatible Modal job when the template is created."
+            )
+            self._update_summary()
+            return
+        if self.project is None:
+            self.cyclic_load_preview.setText(
+                f"{distribution} normalized reference loading."
+            )
+            self._update_summary()
+            return
+
+        try:
+            custom = (
+                parse_node_weight_text(self.cyclic_custom.toPlainText())
+                if distribution == "Custom"
+                else None
+            )
+            weights = lateral_load_weights(
+                self.project,
+                dof=int(self.direction.currentData()),
+                distribution=distribution,
+                custom_weights=custom,
+                height_axis=int(self.cyclic_height_axis.currentData()),
+            )
+            axis = int(self.cyclic_height_axis.currentData()) - 1
+            ordered = sorted(
+                weights.items(),
+                key=lambda item: (
+                    self.project.model.nodes[item[0]].xyz[axis],
+                    item[0],
+                ),
+            )
+            shown = ", ".join(
+                f"N{tag}={weight:.3g}"
+                for tag, weight in ordered[:10]
+            )
+            if len(ordered) > 10:
+                shown += ", ..."
+            self.cyclic_load_preview.setText(
+                f"{len(weights)} active node(s), Σ|w|=1 · {shown}"
+            )
+        except (TypeError, ValueError) as exc:
+            self.cyclic_load_preview.setText(f"Preview: {exc}")
+        self._update_summary()
+
     def _import_protocol(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -753,25 +1173,42 @@ class AnalysisTemplateDialog(QDialog):
             return
         try:
             text = Path(path).read_text(encoding="utf-8", errors="ignore")
-            rows = parse_cyclic_protocol_text(text)
+            absolute = (
+                self.cyclic_protocol_mode.currentData()
+                == "absolute_targets"
+            )
+            data = (
+                parse_cyclic_targets_text(text)
+                if absolute
+                else parse_cyclic_protocol_text(text)
+            )
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "Cyclic Protocol", str(exc))
             return
 
         self.protocol.blockSignals(True)
         try:
-            self.protocol.setRowCount(len(rows))
-            for row, (amplitude, cycles) in enumerate(rows):
-                self.protocol.setItem(
-                    row,
-                    0,
-                    QTableWidgetItem(f"{amplitude:g}"),
-                )
-                self.protocol.setItem(
-                    row,
-                    1,
-                    QTableWidgetItem(str(cycles)),
-                )
+            self.protocol.setRowCount(len(data))
+            if absolute:
+                for row, target in enumerate(data):
+                    self.protocol.setItem(
+                        row,
+                        0,
+                        QTableWidgetItem(f"{float(target):g}"),
+                    )
+                    self.protocol.setItem(row, 1, QTableWidgetItem(""))
+            else:
+                for row, (amplitude, cycles) in enumerate(data):
+                    self.protocol.setItem(
+                        row,
+                        0,
+                        QTableWidgetItem(f"{amplitude:g}"),
+                    )
+                    self.protocol.setItem(
+                        row,
+                        1,
+                        QTableWidgetItem(str(cycles)),
+                    )
         finally:
             self.protocol.blockSignals(False)
         self._update_cyclic_preview()
@@ -792,17 +1229,79 @@ class AnalysisTemplateDialog(QDialog):
             rows.append((amplitude, cycles))
         return rows
 
+    def _protocol_absolute_targets(self) -> list[float]:
+        targets: list[float] = []
+        for row in range(self.protocol.rowCount()):
+            item = self.protocol.item(row, 0)
+            if item is None or not item.text().strip():
+                continue
+            targets.append(float(item.text()))
+        if not targets:
+            raise ValueError("Cyclic protocol needs at least one target.")
+        return targets
+
+    def _cyclic_raw_targets(self) -> list[float]:
+        if self.cyclic_protocol_mode.currentData() == "absolute_targets":
+            return self._protocol_absolute_targets()
+        return expand_cyclic_protocol(
+            self._protocol_rows(),
+            finish_at_zero=self.cyclic_return_zero.isChecked(),
+        )
+
+    def _cyclic_displacement_targets(self) -> list[float]:
+        targets = self._cyclic_raw_targets()
+        if self.cyclic_protocol_unit.currentText() == "Drift ratio [%]":
+            scale = 0.01 * self.cyclic_reference_height.value()
+            return [value * scale for value in targets]
+        return targets
+
     def _update_cyclic_preview(self, *_args) -> None:
+        if self._initializing:
+            return
         try:
-            targets = expand_cyclic_protocol(self._protocol_rows())
+            raw_targets = self._cyclic_raw_targets()
+            targets = self._cyclic_displacement_targets()
+            increment = self.cyclic_increment.value()
+            if increment <= 0.0:
+                raise ValueError(
+                    "Maximum solver increment must be positive."
+                )
+            solver_steps = 0
+            current = 0.0
+            for target in targets:
+                delta = float(target) - current
+                if abs(delta) > 1.0e-15:
+                    solver_steps += max(
+                        1,
+                        int(abs(delta) / increment + 0.999999999),
+                    )
+                current = float(target)
         except (TypeError, ValueError) as exc:
             self.protocol_preview.setText(f"Protocol: {exc}")
+            self.cyclic_protocol_plot.set_targets([])
+            self._update_summary()
             return
-        short = ", ".join(f"{value:g}" for value in targets[:12])
-        if len(targets) > 12:
+
+        self.cyclic_protocol_plot.set_targets(raw_targets)
+        short = ", ".join(f"{value:g}" for value in raw_targets[:12])
+        if len(raw_targets) > 12:
             short += ", ..."
+        unit_note = (
+            "%"
+            if self.cyclic_protocol_unit.currentText() == "Drift ratio [%]"
+            else self.unit_system.length
+        )
+        max_abs = max((abs(value) for value in raw_targets), default=0.0)
+        return_zero = (
+            "yes"
+            if raw_targets and abs(raw_targets[-1]) <= 1.0e-15
+            else "no"
+        )
         self.protocol_preview.setText(
-            f"{len(targets)} absolute targets: {short}"
+            f"{len(raw_targets)} reversal/target point(s) · "
+            f"max |target|={max_abs:g} {unit_note} · "
+            f"{solver_steps} solver increment(s) · "
+            f"return to zero: {return_zero}. Targets: {short}"
         )
         self._update_summary()
 
@@ -814,11 +1313,19 @@ class AnalysisTemplateDialog(QDialog):
             item = self.protocol.item(row - 1, 0)
             if item is not None:
                 try:
-                    previous = abs(float(item.text())) * 2.0
+                    previous = abs(float(item.text()))
                 except ValueError:
                     pass
-        self.protocol.setItem(row, 0, QTableWidgetItem(f"{previous:g}"))
-        self.protocol.setItem(row, 1, QTableWidgetItem("2"))
+        if self.cyclic_protocol_mode.currentData() == "absolute_targets":
+            value = previous * -1.0 if row % 2 else previous
+            if abs(value) <= 1.0e-15:
+                value = 0.01
+            self.protocol.setItem(row, 0, QTableWidgetItem(f"{value:g}"))
+            self.protocol.setItem(row, 1, QTableWidgetItem(""))
+        else:
+            value = previous * 2.0 if row else 0.01
+            self.protocol.setItem(row, 0, QTableWidgetItem(f"{value:g}"))
+            self.protocol.setItem(row, 1, QTableWidgetItem("2"))
 
     def _remove_protocol_row(self) -> None:
         rows = sorted(
@@ -1042,12 +1549,32 @@ class AnalysisTemplateDialog(QDialog):
             )
         elif kind == "Cyclic":
             try:
-                count = len(expand_cyclic_protocol(self._protocol_rows()))
+                raw_targets = self._cyclic_raw_targets()
+                targets = self._cyclic_displacement_targets()
+                count = len(targets)
+                peak = max((abs(value) for value in raw_targets), default=0.0)
             except (TypeError, ValueError):
                 count = 0
+                peak = 0.0
+            driver_tag = self.cyclic_load_source.currentData()
+            loading = (
+                f"existing pattern {driver_tag}"
+                if driver_tag is not None
+                else self.cyclic_distribution.currentText()
+            )
+            quantity = (
+                f"drift, max {peak:g}%"
+                if self.cyclic_protocol_unit.currentText() == "Drift ratio [%]"
+                else f"displacement, max {peak:g} {self.unit_system.length}"
+            )
+            gravity = (
+                f"gravity {self.cyclic_gravity_steps.value()} steps"
+                if self.cyclic_preload_gravity.isChecked()
+                else "gravity preload OFF"
+            )
             text = (
-                f"Cyclic · {count} target(s) · "
-                f"{self.cyclic_distribution.currentText()} reference loading · "
+                f"Cyclic · displacement-controlled · {count} target(s) · "
+                f"{quantity} · {loading} loading · {gravity} · "
                 f"{self.solver.currentText()} solver"
             )
         else:
@@ -1118,9 +1645,31 @@ class AnalysisTemplateDialog(QDialog):
         elif kind == "Cyclic":
             base.update(
                 {
+                    "control_mode": "Displacement",
+                    "protocol_mode": self.cyclic_protocol_mode.currentData(),
+                    "protocol_unit": self.cyclic_protocol_unit.currentText(),
                     "protocol_rows": self._protocol_rows(),
+                    "protocol_targets": self._cyclic_displacement_targets(),
+                    "raw_protocol_targets": self._cyclic_raw_targets(),
+                    "finish_at_zero": self.cyclic_return_zero.isChecked(),
+                    "reference_height": self.cyclic_reference_height.value(),
+                    "height_axis": int(self.cyclic_height_axis.currentData()),
                     "max_increment": self.cyclic_increment.value(),
+                    "driver_pattern_tag": self.cyclic_load_source.currentData(),
                     "distribution": self.cyclic_distribution.currentText(),
+                    "mode_number": self.cyclic_mode.value(),
+                    "custom_weights": (
+                        parse_node_weight_text(
+                            self.cyclic_custom.toPlainText()
+                        )
+                        if (
+                            self.cyclic_load_source.currentData() is None
+                            and self.cyclic_distribution.currentText() == "Custom"
+                        )
+                        else None
+                    ),
+                    "preload_gravity": self.cyclic_preload_gravity.isChecked(),
+                    "gravity_steps": self.cyclic_gravity_steps.value(),
                 }
             )
         else:
@@ -1175,7 +1724,22 @@ class AnalysisTemplateDialog(QDialog):
                         "Pushover reference height must be positive."
                     )
             if request["template"] == "Cyclic":
-                expand_cyclic_protocol(request["protocol_rows"])
+                targets = [float(value) for value in request["protocol_targets"]]
+                if not targets:
+                    raise ValueError(
+                        "Cyclic protocol needs at least one target."
+                    )
+                if float(request["max_increment"]) <= 0.0:
+                    raise ValueError(
+                        "Cyclic maximum solver increment must be positive."
+                    )
+                if (
+                    request["protocol_unit"] == "Drift ratio [%]"
+                    and float(request["reference_height"]) <= 0.0
+                ):
+                    raise ValueError(
+                        "Cyclic reference height must be positive."
+                    )
             if (
                 request["template"] == "Nonlinear Time History"
                 and request["damping_ratio"] > 0.0

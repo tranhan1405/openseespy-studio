@@ -139,6 +139,37 @@ def parse_cyclic_protocol_text(
     return rows
 
 
+def parse_cyclic_targets_text(
+    text: str,
+    *,
+    column: int = 1,
+) -> list[float]:
+    """Read absolute cyclic displacement/drift targets from TXT/CSV content."""
+    column = int(column)
+    if column < 1:
+        raise ValueError("Target column is 1-based and must be positive.")
+
+    targets: list[float] = []
+    for raw_line in str(text).splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", "//", "%")):
+            continue
+        tokens = line.replace(",", " ").replace(";", " ").split()
+        if len(tokens) < column:
+            continue
+        try:
+            value = float(tokens[column - 1])
+        except ValueError:
+            # Allow a heading such as "Target".
+            continue
+        if not math.isfinite(value):
+            raise ValueError("Cyclic target values must be finite.")
+        targets.append(value)
+    if not targets:
+        raise ValueError("Protocol file contains no cyclic targets.")
+    return targets
+
+
 def parse_node_weight_text(text: str) -> dict[int, float]:
     """Read custom lateral-load weights as node,weight pairs."""
     result: dict[int, float] = {}
@@ -609,24 +640,72 @@ def build_cyclic_template(
     name: str,
     control_node: int,
     control_dof: int,
-    protocol_rows: Iterable[tuple[float, int]],
+    protocol_rows: Iterable[tuple[float, int]] | None = None,
+    protocol_targets: Iterable[float] | None = None,
     max_increment: float,
     distribution: str = "Uniform",
+    distribution_weights: dict[int, float] | None = None,
+    height_axis: int = 3,
+    driver_pattern_tag: int | None = None,
+    preload_gravity: bool = True,
+    gravity_steps: int = 10,
+    finish_at_zero: bool = True,
     solver_preset: str = "Robust",
 ) -> AnalysisTemplatePlan:
     if int(control_node) not in project.model.nodes:
         raise ValueError(f"Control node {control_node} does not exist.")
-    targets = expand_cyclic_protocol(protocol_rows)
+
+    if protocol_targets is not None:
+        targets = [float(value) for value in protocol_targets]
+        if not targets:
+            raise ValueError("Cyclic protocol needs at least one target.")
+        if any(not math.isfinite(value) for value in targets):
+            raise ValueError("Cyclic targets must be finite.")
+        if all(abs(value) <= 1.0e-15 for value in targets):
+            raise ValueError(
+                "Cyclic protocol needs at least one nonzero target."
+            )
+    else:
+        targets = expand_cyclic_protocol(
+            list(protocol_rows or []),
+            finish_at_zero=bool(finish_at_zero),
+        )
+
     max_increment = abs(float(max_increment))
     if max_increment <= 0.0:
         raise ValueError("Cyclic max increment must be positive.")
+    gravity_steps = int(gravity_steps)
+    if gravity_steps < 1:
+        raise ValueError("Gravity preload steps must be at least 1.")
 
-    series, patterns, loads = _reference_lateral_loading(
-        project,
-        dof=int(control_dof),
-        distribution=distribution,
-        prefix="Cyclic",
-    )
+    driver_description = f"{distribution} reference pattern"
+    if driver_pattern_tag is None:
+        series, patterns, loads = _reference_lateral_loading(
+            project,
+            dof=int(control_dof),
+            distribution=distribution,
+            prefix="Cyclic",
+            custom_weights=distribution_weights,
+            height_axis=int(height_axis),
+        )
+        deferred_pattern_tag = patterns[0].tag
+    else:
+        driver_pattern_tag = int(driver_pattern_tag)
+        pattern = project.load_patterns.get(driver_pattern_tag)
+        if pattern is None:
+            raise ValueError(
+                f"Cyclic driving pattern {driver_pattern_tag} does not exist."
+            )
+        if pattern.pattern_type != "Plain":
+            raise ValueError(
+                "Cyclic driving pattern must be a Plain load pattern."
+            )
+        series, patterns, loads = [], [], []
+        deferred_pattern_tag = driver_pattern_tag
+        driver_description = (
+            f"existing pattern {driver_pattern_tag} ({pattern.name})"
+        )
+
     tag = project.next_analysis_tag()
     analysis = AnalysisSettingsData(
         tag=tag,
@@ -636,11 +715,12 @@ def build_cyclic_template(
         control_dof=int(control_dof),
         cyclic_targets=targets,
         cyclic_increment=max_increment,
-        preload_gravity=True,
-        gravity_steps=10,
-        deferred_pattern_tags=[patterns[0].tag],
+        preload_gravity=bool(preload_gravity),
+        gravity_steps=gravity_steps,
+        deferred_pattern_tags=[deferred_pattern_tag],
         **_solver_kwargs(solver_preset),
     )
+    component = {1: "FX", 2: "FY", 3: "FZ"}[int(control_dof)]
     results = _result_objects(
         project,
         tag,
@@ -650,6 +730,7 @@ def build_cyclic_template(
             ("Deformed Shape", "DeformedShape", {"scale": 10.0}),
             ("Hinge / Yield State", "HingeState", {}),
             ("Member Force Mz", "MemberForce", {"component": "Mz", "scale": 1.0}),
+            (f"Reaction {component}", "NodalReaction", {"component": component}),
             ("Convergence", "Convergence", {"test": analysis.test}),
         ],
     )
@@ -661,7 +742,7 @@ def build_cyclic_template(
         results=results,
         summary=(
             f"Cyclic · {len(targets)} target(s) · "
-            f"{distribution} reference pattern"
+            f"{driver_description}"
         ),
     )
 
