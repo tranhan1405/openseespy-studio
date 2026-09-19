@@ -7,9 +7,17 @@ from openseespy_studio.analysis_templates import (
     expand_cyclic_protocol,
     parse_ground_motion_text,
 )
-from openseespy_studio.generator import analysis_to_openseespy
+from openseespy_studio.generator import (
+    analysis_to_openseespy,
+    to_openseespy,
+)
 from openseespy_studio.model import StructuralModel
-from openseespy_studio.project import ProjectDatabase
+from openseespy_studio.project import (
+    LoadPatternData,
+    NodalLoadData,
+    ProjectDatabase,
+    TimeSeriesData,
+)
 
 
 def project_with_two_storeys():
@@ -62,6 +70,10 @@ def test_pushover_template_creates_normalized_lateral_pattern_and_results():
     assert plan.analysis.steps == 12
     assert math.isclose(plan.analysis.displacement_increment, 0.01)
     assert plan.analysis.adaptive_step is True
+    assert plan.analysis.preload_gravity is True
+    assert plan.analysis.deferred_pattern_tags == [
+        plan.load_patterns[0].tag
+    ]
     assert len(plan.time_series) == 1
     assert len(plan.load_patterns) == 1
     assert plan.load_patterns[0].pattern_type == "Plain"
@@ -189,3 +201,92 @@ def test_rayleigh_settings_round_trip_and_generator():
     )
     assert "_studio_damping_eigs = ops.eigen(3)" in text
     assert "ops.rayleigh(_studio_alpha_m, 0.0, 0.0, _studio_beta_k)" in text
+
+
+def test_template_sequence_preloads_existing_plain_pattern_before_driver():
+    project = project_with_two_storeys()
+    gravity_series = TimeSeriesData(
+        1,
+        "Gravity",
+        "Linear",
+        factor=1.0,
+    )
+    gravity_pattern = LoadPatternData(
+        1,
+        "Gravity",
+        "Plain",
+        time_series_tag=1,
+    )
+    gravity_load = NodalLoadData(
+        1,
+        "Gravity load",
+        1,
+        3,
+        (0.0, 0.0, -1.0, 0.0, 0.0, 0.0),
+    )
+    project.add_time_series(gravity_series)
+    project.add_load_pattern(gravity_pattern)
+    project.add_nodal_load(gravity_load)
+
+    plan = build_pushover_template(
+        project,
+        name="Staged Push",
+        control_node=3,
+        control_dof=1,
+        target_displacement=0.02,
+        max_increment=0.002,
+        distribution="Uniform",
+    )
+    for series in plan.time_series:
+        project.add_time_series(series)
+    for pattern in plan.load_patterns:
+        project.add_load_pattern(pattern)
+    for load in plan.nodal_loads:
+        project.add_nodal_load(load)
+    project.add_analysis(plan.analysis)
+    project.set_active_analysis(plan.analysis.tag)
+
+    script = to_openseespy(
+        project.model,
+        time_series=project.time_series,
+        load_patterns=project.load_patterns,
+        nodal_loads=project.nodal_loads,
+        analyses=project.analyses,
+        active_analysis_tag=project.active_analysis_tag,
+        units=project.units,
+    )
+
+    driver_tag = plan.load_patterns[0].tag
+    gravity_pos = script.index("# Template sequence: gravity")
+    hold_pos = script.index("ops.loadConst('-time', 0.0)")
+    driver_pos = script.index(
+        f"ops.pattern('Plain', {driver_tag}, "
+    )
+    main_analysis_pos = script.index(
+        f"# Active analysis {plan.analysis.tag}:"
+    )
+    assert gravity_pos < hold_pos < driver_pos < main_analysis_pos
+
+
+def test_generator_rejects_missing_deferred_pattern():
+    project = project_with_two_storeys()
+    plan = build_pushover_template(
+        project,
+        name="Missing driver",
+        control_node=3,
+        control_dof=1,
+        target_displacement=0.01,
+        max_increment=0.001,
+    )
+    project.add_analysis(plan.analysis)
+
+    try:
+        to_openseespy(
+            project.model,
+            analyses=project.analyses,
+            active_analysis_tag=plan.analysis.tag,
+        )
+    except ValueError as exc:
+        assert "missing driving load pattern" in str(exc)
+    else:
+        raise AssertionError("Expected missing driving-pattern validation")
