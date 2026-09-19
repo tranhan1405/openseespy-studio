@@ -6,7 +6,7 @@ import os
 import sys
 import tempfile
 
-from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, QSize, Qt
+from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QCursor, QFont, QKeySequence, QPainter, QPen, QShortcut, QTextCursor, QUndoStack
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QMenu,
@@ -559,8 +560,14 @@ class FrameGridPanel(QWidget):
 
 
 class PropertiesPanel(QWidget):
+    solution_result_apply = Signal(int, object)
+    solution_result_evaluate = Signal(int, object)
+    solution_scope_from_selection = Signal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._solution_result_tag: int | None = None
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 6)
         layout.setSpacing(3)
@@ -579,19 +586,311 @@ class PropertiesPanel(QWidget):
         self.table.setColumnWidth(0, 112)
         layout.addWidget(self.table, 1)
 
+        self.result_editor = QWidget()
+        result_layout = QVBoxLayout(self.result_editor)
+        result_layout.setContentsMargins(0, 0, 0, 0)
+        result_layout.setSpacing(5)
+
+        self.result_form = QFormLayout()
+        self.result_name = QLineEdit()
+        self.result_analysis = QLineEdit()
+        self.result_analysis.setReadOnly(True)
+        self.result_type = QLineEdit()
+        self.result_type.setReadOnly(True)
+        self.result_data_source = QComboBox()
+        self.result_data_source.addItem("Latest Job", "latest")
+        self.result_frame = QComboBox()
+        self.result_frame.setEnabled(False)
+
+        self.result_node_scope = QLineEdit()
+        self.result_node_scope.setPlaceholderText("All nodes")
+        self.result_element_scope = QLineEdit()
+        self.result_element_scope.setPlaceholderText("All elements")
+        self.result_use_selection = QPushButton("Use Current Selection")
+        self.result_use_selection.clicked.connect(
+            self._request_current_selection
+        )
+
+        self.result_component = QComboBox()
+        self.result_scale = QDoubleSpinBox()
+        self.result_scale.setDecimals(6)
+        self.result_scale.setRange(1.0e-6, 1.0e9)
+        self.result_scale.setValue(1.0)
+
+        self.result_mode = QSpinBox()
+        self.result_mode.setRange(1, 100000)
+
+        self.result_history_node = QSpinBox()
+        self.result_history_node.setRange(1, 2147483647)
+        self.result_history_quantity = QComboBox()
+        self.result_history_quantity.addItems(
+            [
+                "Displacement",
+                "Velocity",
+                "Acceleration",
+                "Reaction",
+                "Base shear",
+            ]
+        )
+        self.result_history_dof = QSpinBox()
+        self.result_history_dof.setRange(1, 6)
+
+        self.result_fiber_section = QSpinBox()
+        self.result_fiber_section.setRange(1, 100000)
+
+        rows = (
+            ("Name", self.result_name),
+            ("Analysis", self.result_analysis),
+            ("Result Type", self.result_type),
+            ("Data Source", self.result_data_source),
+            ("Frame", self.result_frame),
+            ("Node Scope", self.result_node_scope),
+            ("Element Scope", self.result_element_scope),
+            ("Scope", self.result_use_selection),
+            ("Component", self.result_component),
+            ("Scale", self.result_scale),
+            ("Mode", self.result_mode),
+            ("History Node", self.result_history_node),
+            ("History Quantity", self.result_history_quantity),
+            ("History DOF", self.result_history_dof),
+            ("Section / IP", self.result_fiber_section),
+        )
+        for label, widget in rows:
+            self.result_form.addRow(label + ":", widget)
+        result_layout.addLayout(self.result_form)
+        result_layout.addStretch(1)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        self.result_apply_button = QPushButton("Apply")
+        self.result_evaluate_button = QPushButton("Evaluate")
+        self.result_apply_button.clicked.connect(
+            self._emit_solution_result_apply
+        )
+        self.result_evaluate_button.clicked.connect(
+            self._emit_solution_result_evaluate
+        )
+        button_row.addWidget(self.result_apply_button)
+        button_row.addWidget(self.result_evaluate_button)
+        result_layout.addLayout(button_row)
+
+        layout.addWidget(self.result_editor, 1)
+        self.result_editor.hide()
+
         row = QHBoxLayout()
         row.addStretch(1)
-        apply_button = QPushButton("Apply")
-        apply_button.setEnabled(False)
-        row.addWidget(apply_button)
+        self.apply_button = QPushButton("Apply")
+        self.apply_button.setEnabled(False)
+        row.addWidget(self.apply_button)
         layout.addLayout(row)
 
+        self._result_optional_widgets = (
+            self.result_component,
+            self.result_scale,
+            self.result_mode,
+            self.result_history_node,
+            self.result_history_quantity,
+            self.result_history_dof,
+            self.result_fiber_section,
+        )
+
+    def _set_form_row_visible(self, widget: QWidget, visible: bool) -> None:
+        widget.setVisible(bool(visible))
+        label = self.result_form.labelForField(widget)
+        if label is not None:
+            label.setVisible(bool(visible))
+
     def set_properties(self, title: str, rows: list[tuple[str, object]]) -> None:
+        self._solution_result_tag = None
+        self.result_editor.hide()
+        self.table.show()
+        self.apply_button.show()
         self.entity_label.setText(title)
         self.table.setRowCount(len(rows))
         for index, (key, value) in enumerate(rows):
             self.table.setItem(index, 0, QTableWidgetItem(str(key)))
             self.table.setItem(index, 1, QTableWidgetItem(str(value)))
+
+    def set_solution_result(
+        self,
+        result: SolutionResultData,
+        *,
+        analysis_name: str,
+    ) -> None:
+        self._solution_result_tag = int(result.tag)
+        self.table.hide()
+        self.apply_button.hide()
+        self.result_editor.show()
+        self.entity_label.setText(result.name)
+
+        self.result_name.setText(result.name)
+        self.result_analysis.setText(str(analysis_name))
+        self.result_type.setText(result.result_type)
+        self.result_node_scope.setText(
+            ", ".join(map(str, result.node_scope))
+        )
+        self.result_element_scope.setText(
+            ", ".join(map(str, result.element_scope))
+        )
+
+        for widget in self._result_optional_widgets:
+            self._set_form_row_visible(widget, False)
+
+        kind = result.result_type
+        options = dict(result.settings)
+
+        if kind in {
+            "DeformedShape",
+            "NodalDisplacement",
+            "NodalReaction",
+            "MemberForce",
+            "FiberStress",
+            "FiberStrain",
+            "HingeState",
+        }:
+            self.result_frame.clear()
+            self.result_frame.addItem("Final", "final")
+        elif kind == "ModeShape":
+            self.result_frame.clear()
+            self.result_frame.addItem("Mode", "mode")
+        else:
+            self.result_frame.clear()
+            self.result_frame.addItem("All Frames", "all")
+
+        component_options: list[str] = []
+        if kind == "NodalDisplacement":
+            component_options = [
+                "|U|", "UX", "UY", "UZ", "|R|", "RX", "RY", "RZ"
+            ]
+        elif kind == "NodalReaction":
+            component_options = [
+                "|F|", "FX", "FY", "FZ", "|M|", "MX", "MY", "MZ"
+            ]
+        elif kind == "MemberForce":
+            component_options = ["N", "Vy", "Vz", "T", "My", "Mz"]
+
+        if component_options:
+            self._set_form_row_visible(self.result_component, True)
+            self.result_component.clear()
+            self.result_component.addItems(component_options)
+            component = str(
+                options.get("component", component_options[0])
+            )
+            index = self.result_component.findText(component)
+            self.result_component.setCurrentIndex(
+                index if index >= 0 else 0
+            )
+
+        if kind in {"DeformedShape", "MemberForce", "ModeShape"}:
+            self._set_form_row_visible(self.result_scale, True)
+            try:
+                self.result_scale.setValue(
+                    float(options.get(
+                        "scale",
+                        10.0 if kind == "DeformedShape" else 1.0,
+                    ))
+                )
+            except (TypeError, ValueError):
+                self.result_scale.setValue(1.0)
+
+        if kind == "ModeShape":
+            self._set_form_row_visible(self.result_mode, True)
+            self.result_mode.setValue(
+                max(1, int(options.get("mode", 1)))
+            )
+
+        if kind == "TimeHistory":
+            for widget in (
+                self.result_history_node,
+                self.result_history_quantity,
+                self.result_history_dof,
+            ):
+                self._set_form_row_visible(widget, True)
+            self.result_history_node.setValue(
+                max(1, int(options.get("node", 1)))
+            )
+            quantity = str(options.get("quantity", "Displacement"))
+            index = self.result_history_quantity.findText(quantity)
+            self.result_history_quantity.setCurrentIndex(
+                index if index >= 0 else 0
+            )
+            self.result_history_dof.setValue(
+                max(1, min(6, int(options.get("dof", 1))))
+            )
+
+        if kind in {"FiberStress", "FiberStrain"}:
+            self._set_form_row_visible(
+                self.result_fiber_section,
+                True,
+            )
+            self.result_fiber_section.setValue(
+                max(1, int(options.get("section", 1)))
+            )
+
+    def set_solution_scope(
+        self,
+        nodes: set[int],
+        elements: set[int],
+    ) -> None:
+        self.result_node_scope.setText(
+            ", ".join(map(str, sorted(nodes)))
+        )
+        self.result_element_scope.setText(
+            ", ".join(map(str, sorted(elements)))
+        )
+
+    def _request_current_selection(self) -> None:
+        if self._solution_result_tag is not None:
+            self.solution_scope_from_selection.emit(
+                self._solution_result_tag
+            )
+
+    def _solution_payload(self) -> dict[str, object]:
+        kind = self.result_type.text()
+        settings: dict[str, object] = {}
+
+        if kind in {
+            "NodalDisplacement",
+            "NodalReaction",
+            "MemberForce",
+        }:
+            settings["component"] = self.result_component.currentText()
+        if kind in {"DeformedShape", "MemberForce", "ModeShape"}:
+            settings["scale"] = self.result_scale.value()
+        if kind == "ModeShape":
+            settings["mode"] = self.result_mode.value()
+        if kind == "TimeHistory":
+            settings.update({
+                "node": self.result_history_node.value(),
+                "quantity": self.result_history_quantity.currentText(),
+                "dof": self.result_history_dof.value(),
+            })
+        if kind in {"FiberStress", "FiberStrain"}:
+            settings["section"] = self.result_fiber_section.value()
+            settings["quantity"] = (
+                "Stress" if kind == "FiberStress" else "Strain"
+            )
+
+        return {
+            "name": self.result_name.text().strip(),
+            "node_scope": self.result_node_scope.text().strip(),
+            "element_scope": self.result_element_scope.text().strip(),
+            "settings": settings,
+        }
+
+    def _emit_solution_result_apply(self) -> None:
+        if self._solution_result_tag is not None:
+            self.solution_result_apply.emit(
+                self._solution_result_tag,
+                self._solution_payload(),
+            )
+
+    def _emit_solution_result_evaluate(self) -> None:
+        if self._solution_result_tag is not None:
+            self.solution_result_evaluate.emit(
+                self._solution_result_tag,
+                self._solution_payload(),
+            )
 
 
 class MainWindow(QMainWindow):
@@ -635,6 +934,7 @@ class MainWindow(QMainWindow):
             "enabled": False,
         }
         self._last_result: dict[str, object] = {}
+        self._active_solution_result_tag: int | None = None
         self._dirty = False
         self._job_ui_timer = QTimer(self)
         self._job_ui_timer.setInterval(1000)
@@ -699,6 +999,15 @@ class MainWindow(QMainWindow):
         dock.setMinimumWidth(245)
 
         self.properties_panel = PropertiesPanel()
+        self.properties_panel.solution_result_apply.connect(
+            self._apply_solution_result_details
+        )
+        self.properties_panel.solution_result_evaluate.connect(
+            self._evaluate_solution_result_details
+        )
+        self.properties_panel.solution_scope_from_selection.connect(
+            self._use_current_selection_for_solution_result
+        )
         dock.setWidget(self.properties_panel)
 
         self.splitDockWidget(self.model_tree_dock, dock, Qt.Vertical)
@@ -1585,11 +1894,13 @@ class MainWindow(QMainWindow):
         job_id: int | None = None
         show_jobs_root = False
 
+        selected_payload_kinds: set[str] = set()
         for item in self.tree.selectedItems():
             payload = item.data(0, Qt.UserRole)
             if not payload:
                 continue
             kind, tag = payload
+            selected_payload_kinds.add(str(kind))
             if kind == "node":
                 nodes.add(tag)
             elif kind == "element":
@@ -1633,6 +1944,15 @@ class MainWindow(QMainWindow):
                 job_id = int(tag)
             elif kind == "jobs_root":
                 show_jobs_root = True
+
+        if (
+            solution_result_tag is None
+            and "solution_root" not in selected_payload_kinds
+            and "solution_information" not in selected_payload_kinds
+            and "solution_convergence" not in selected_payload_kinds
+            and "solver_output" not in selected_payload_kinds
+        ):
+            self._active_solution_result_tag = None
 
         self.selection.set_selection(nodes=nodes, elements=elements)
         if material_tag is not None:
@@ -1802,6 +2122,17 @@ class MainWindow(QMainWindow):
             self.tree.scrollToItem(first_item)
 
         total = len(nodes) + len(elements)
+        if (
+            self._active_solution_result_tag is not None
+            and self._active_solution_result_tag
+            in self.project.solution_results
+        ):
+            self.status_message.setText(
+                f"Selection for result scope: "
+                f"{len(nodes)} node(s), {len(elements)} element(s)"
+            )
+            return
+
         if total == 1:
             if nodes:
                 self._show_entity_properties("node", next(iter(nodes)))
@@ -4214,31 +4545,122 @@ class MainWindow(QMainWindow):
         result = self.project.solution_results.get(int(tag))
         if result is None:
             return
-        settings = self.project.analyses.get(result.analysis_tag)
-        option_text = ", ".join(
-            f"{key}={value}"
-            for key, value in sorted(result.settings.items())
-        ) or "-"
-        self.properties_panel.set_properties(
-            result.name,
-            [
-                ("Tag", result.tag),
-                (
-                    "Analysis",
-                    settings.name if settings else result.analysis_tag,
-                ),
-                ("Result type", result.result_type),
-                (
-                    "Node scope",
-                    ", ".join(map(str, result.node_scope)) or "All",
-                ),
-                (
-                    "Element scope",
-                    ", ".join(map(str, result.element_scope)) or "All",
-                ),
-                ("Settings", option_text),
-                ("Data", "Latest job for analysis"),
-            ],
+        self._active_solution_result_tag = int(tag)
+        analysis = self.project.analyses.get(result.analysis_tag)
+        self.properties_panel.set_solution_result(
+            result,
+            analysis_name=(
+                analysis.name
+                if analysis is not None
+                else f"Analysis {result.analysis_tag}"
+            ),
+        )
+
+    def _solution_result_from_payload(
+        self,
+        tag: int,
+        payload: object,
+    ) -> SolutionResultData:
+        current = self.project.solution_results.get(int(tag))
+        if current is None:
+            raise ValueError(
+                f"Solution result tag {tag} does not exist."
+            )
+        data = dict(payload) if isinstance(payload, dict) else {}
+        name = str(data.get("name", "")).strip() or current.name
+
+        raw_nodes = str(data.get("node_scope", "") or "").strip()
+        raw_elements = str(
+            data.get("element_scope", "") or ""
+        ).strip()
+        node_scope = sorted(
+            parse_tag_expression(raw_nodes)
+            if raw_nodes
+            else set()
+        )
+        element_scope = sorted(
+            parse_tag_expression(raw_elements)
+            if raw_elements
+            else set()
+        )
+        settings = (
+            dict(data.get("settings", {}))
+            if isinstance(data.get("settings", {}), dict)
+            else {}
+        )
+        return SolutionResultData(
+            tag=current.tag,
+            analysis_tag=current.analysis_tag,
+            name=name,
+            result_type=current.result_type,
+            node_scope=node_scope,
+            element_scope=element_scope,
+            settings=settings,
+        )
+
+    def _apply_solution_result_details(
+        self,
+        tag: int,
+        payload: object,
+    ) -> None:
+        before = self.project.to_dict()
+        try:
+            updated = self._solution_result_from_payload(tag, payload)
+            self.project.update_solution_result(tag, updated)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Solution Result",
+                str(exc),
+            )
+            return
+        self._record_project_change(
+            f"Edit solution result {updated.name}",
+            before,
+        )
+        self._refresh_tree()
+        self._show_solution_result_properties(updated.tag)
+        self.status_message.setText(
+            f"Updated result: {updated.name}"
+        )
+
+    def _evaluate_solution_result_details(
+        self,
+        tag: int,
+        payload: object,
+    ) -> None:
+        before = self.project.to_dict()
+        try:
+            updated = self._solution_result_from_payload(tag, payload)
+            self.project.update_solution_result(tag, updated)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Solution Result",
+                str(exc),
+            )
+            return
+        self._record_project_change(
+            f"Edit and evaluate solution result {updated.name}",
+            before,
+        )
+        self._refresh_tree()
+        self._evaluate_solution_result(updated.tag)
+        self._show_solution_result_properties(updated.tag)
+
+    def _use_current_selection_for_solution_result(
+        self,
+        tag: int,
+    ) -> None:
+        if int(tag) not in self.project.solution_results:
+            return
+        self.properties_panel.set_solution_scope(
+            set(self.selection.nodes),
+            set(self.selection.elements),
+        )
+        self.status_message.setText(
+            "Result scope updated from current selection; "
+            "click Apply or Evaluate to save."
         )
 
     def _load_analysis_result(
@@ -4274,6 +4696,8 @@ class MainWindow(QMainWindow):
 
         kind = result_object.result_type
         options = dict(result_object.settings)
+        options["_node_scope"] = list(result_object.node_scope)
+        options["_element_scope"] = list(result_object.element_scope)
         self.results_panel.show_solution_result(kind, options)
         self.results_dock.show()
         self.results_dock.raise_()
@@ -4293,6 +4717,8 @@ class MainWindow(QMainWindow):
             self.viewport.show_deformed_shape(
                 result,
                 scale=float(options.get("scale", 10.0)),
+                node_tags=set(result_object.node_scope) or None,
+                element_tags=set(result_object.element_scope) or None,
             )
         elif kind in {"NodalDisplacement", "NodalReaction"}:
             quantity = (
@@ -4310,6 +4736,8 @@ class MainWindow(QMainWindow):
                 result,
                 quantity,
                 component,
+                node_tags=set(result_object.node_scope) or None,
+                element_tags=set(result_object.element_scope) or None,
             )
         elif kind == "MemberForce":
             self.viewport.show_member_force_diagram(
@@ -4317,9 +4745,13 @@ class MainWindow(QMainWindow):
                 self.project.transformations,
                 str(options.get("component", "Mz")),
                 scale=float(options.get("scale", 1.0)),
+                element_tags=set(result_object.element_scope) or None,
             )
         elif kind == "HingeState":
-            self.viewport.show_hinge_states(result)
+            self.viewport.show_hinge_states(
+                result,
+                element_tags=set(result_object.element_scope) or None,
+            )
         elif kind == "ModeShape":
             modes = result.get("modes", {})
             mode = int(options.get("mode", 1))
@@ -4329,11 +4761,14 @@ class MainWindow(QMainWindow):
                 result,
                 mode,
                 scale=float(options.get("scale", 1.0)),
+                node_tags=set(result_object.node_scope) or None,
+                element_tags=set(result_object.element_scope) or None,
             )
 
         self.status_message.setText(
             f"Evaluated result: {result_object.name}"
         )
+        self._show_solution_result_properties(result_object.tag)
 
     def _evaluate_all_solution_results(self, analysis_tag: int) -> None:
         objects = self.project.solution_results_for_analysis(analysis_tag)
@@ -6065,6 +6500,7 @@ class MainWindow(QMainWindow):
             "enabled": False,
         }
         self._last_result = {}
+        self._active_solution_result_tag = None
         self.viewport.clear_result_overlay()
         self.results_panel.clear_all()
 

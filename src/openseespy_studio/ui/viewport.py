@@ -1071,6 +1071,8 @@ class ModelViewport(QWidget):
         *,
         scale: float,
         label: str,
+        node_tags: set[int] | None = None,
+        element_tags: set[int] | None = None,
     ) -> None:
         if self._model is None or not self._model.elements:
             return
@@ -1095,7 +1097,20 @@ class ModelViewport(QWidget):
             magnitude = math.sqrt(dx * dx + dy * dy + dz * dz)
             return xyz, magnitude
 
-        for tag in sorted(self._visible_element_tags()):
+        visible_elements = set(self._visible_element_tags())
+        if element_tags:
+            visible_elements.intersection_update(element_tags)
+        elif node_tags:
+            visible_elements = {
+                tag
+                for tag in visible_elements
+                if (
+                    self._model.elements[tag].i in node_tags
+                    and self._model.elements[tag].j in node_tags
+                )
+            }
+
+        for tag in sorted(visible_elements):
             element = self._model.elements[tag]
             if element.i not in self._model.nodes or element.j not in self._model.nodes:
                 continue
@@ -1106,30 +1121,44 @@ class ModelViewport(QWidget):
             magnitudes.extend((m1, m2))
             lines.extend((2, index, index + 1))
 
-        if not points:
-            return
+        if points:
+            mesh = pv.PolyData(np.asarray(points, dtype=float))
+            mesh.lines = np.asarray(lines, dtype=np.int64)
+            mesh.point_data["magnitude"] = np.asarray(
+                magnitudes,
+                dtype=float,
+            )
+            self.plotter.add_mesh(
+                mesh,
+                name="result-overlay",
+                scalars="magnitude",
+                cmap="turbo",
+                line_width=5,
+                render_lines_as_tubes=True,
+                pickable=False,
+                scalar_bar_args={"title": label},
+            )
 
-        mesh = pv.PolyData(np.asarray(points, dtype=float))
-        mesh.lines = np.asarray(lines, dtype=np.int64)
-        mesh.point_data["magnitude"] = np.asarray(magnitudes, dtype=float)
-        self.plotter.add_mesh(
-            mesh,
-            name="result-overlay",
-            scalars="magnitude",
-            cmap="turbo",
-            line_width=5,
-            render_lines_as_tubes=True,
-            pickable=False,
-            scalar_bar_args={"title": label},
-        )
-
-        result_nodes = sorted(self._visible_node_tags())
+        result_node_tags = set(self._visible_node_tags())
+        if node_tags:
+            result_node_tags.intersection_update(node_tags)
+        elif element_tags:
+            scoped_nodes: set[int] = set()
+            for tag in element_tags:
+                element = self._model.elements.get(tag)
+                if element is not None:
+                    scoped_nodes.update((element.i, element.j))
+            result_node_tags.intersection_update(scoped_nodes)
+        result_nodes = sorted(result_node_tags)
         node_points = []
         node_magnitudes = []
         for tag in result_nodes:
             point, magnitude = displaced(tag)
             node_points.append(point)
             node_magnitudes.append(magnitude)
+        if not points and not node_points:
+            return
+
         if node_points:
             node_mesh = pv.PolyData(np.asarray(node_points, dtype=float))
             node_mesh.point_data["magnitude"] = np.asarray(
@@ -1155,6 +1184,9 @@ class ModelViewport(QWidget):
         result: dict[str, object],
         quantity: str,
         component: str,
+        *,
+        node_tags: set[int] | None = None,
+        element_tags: set[int] | None = None,
     ) -> None:
         """Show a nodal displacement or reaction scalar on the frame mesh."""
         if self._model is None:
@@ -1190,7 +1222,20 @@ class ModelViewport(QWidget):
         lines: list[int] = []
         scalars: list[float] = []
 
-        for tag in sorted(self._visible_element_tags()):
+        visible_elements = set(self._visible_element_tags())
+        if element_tags:
+            visible_elements.intersection_update(element_tags)
+        elif node_tags:
+            visible_elements = {
+                tag
+                for tag in visible_elements
+                if (
+                    self._model.elements[tag].i in node_tags
+                    and self._model.elements[tag].j in node_tags
+                )
+            }
+
+        for tag in sorted(visible_elements):
             element = self._model.elements.get(tag)
             if element is None:
                 continue
@@ -1209,7 +1254,18 @@ class ModelViewport(QWidget):
 
         node_points: list[tuple[float, float, float]] = []
         node_scalars: list[float] = []
-        for tag in sorted(self._visible_node_tags()):
+        visible_nodes = set(self._visible_node_tags())
+        if node_tags:
+            visible_nodes.intersection_update(node_tags)
+        elif element_tags:
+            scoped_nodes: set[int] = set()
+            for element_tag in element_tags:
+                element = self._model.elements.get(element_tag)
+                if element is not None:
+                    scoped_nodes.update((element.i, element.j))
+            visible_nodes.intersection_update(scoped_nodes)
+
+        for tag in sorted(visible_nodes):
             node = self._model.nodes.get(tag)
             value = value_for(tag)
             if node is None or value is None:
@@ -1280,6 +1336,8 @@ class ModelViewport(QWidget):
     def show_hinge_states(
         self,
         result: dict[str, object],
+        *,
+        element_tags: set[int] | None = None,
     ) -> None:
         """Show fiber-derived section state severity on nonlinear members."""
         if self._model is None:
@@ -1301,7 +1359,11 @@ class ModelViewport(QWidget):
         state_points: list[np.ndarray] = []
         state_severity: list[float] = []
 
-        for tag in sorted(self._visible_element_tags()):
+        visible_elements = set(self._visible_element_tags())
+        if element_tags:
+            visible_elements.intersection_update(element_tags)
+
+        for tag in sorted(visible_elements):
             payload = summary.get(str(tag), summary.get(tag))
             element = self._model.elements.get(tag)
             if not isinstance(payload, dict) or element is None:
@@ -1413,6 +1475,7 @@ class ModelViewport(QWidget):
         component: str,
         *,
         scale: float = 1.0,
+        element_tags: set[int] | None = None,
     ) -> None:
         if self._model is None or not self._model.elements:
             return
@@ -1434,7 +1497,10 @@ class ModelViewport(QWidget):
             diagrams = {}
 
         available: dict[int, tuple[list[float], list[float]]] = {}
-        for tag in self._visible_element_tags():
+        visible_elements = set(self._visible_element_tags())
+        if element_tags:
+            visible_elements.intersection_update(element_tags)
+        for tag in visible_elements:
             by_component = diagrams.get(str(tag), diagrams.get(tag, {}))
             diagram = (
                 by_component.get(component, {})
@@ -1641,6 +1707,8 @@ class ModelViewport(QWidget):
         result: dict[str, object],
         *,
         scale: float = 1.0,
+        node_tags: set[int] | None = None,
+        element_tags: set[int] | None = None,
     ) -> None:
         final = result.get("final", {}) if isinstance(result, dict) else {}
         vectors = (
@@ -1655,6 +1723,8 @@ class ModelViewport(QWidget):
             vectors,
             scale=float(scale),
             label="Displacement magnitude",
+            node_tags=node_tags,
+            element_tags=element_tags,
         )
 
     def show_mode_shape(
@@ -1663,6 +1733,8 @@ class ModelViewport(QWidget):
         mode: int,
         *,
         scale: float = 1.0,
+        node_tags: set[int] | None = None,
+        element_tags: set[int] | None = None,
     ) -> None:
         modes = result.get("modes", {}) if isinstance(result, dict) else {}
         mode_data = modes.get(str(int(mode)), {}) if isinstance(modes, dict) else {}

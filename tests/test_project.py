@@ -147,3 +147,58 @@ def test_solution_result_scope_validation():
         assert "missing element" in str(exc)
     else:
         raise AssertionError("Expected solution result scope validation")
+
+
+
+def test_solution_result_details_settings_update_and_round_trip():
+    project = build_project()
+    project.add_analysis(
+        AnalysisSettingsData(
+            1,
+            "History",
+            "Transient",
+            steps=20,
+            dt=0.01,
+        )
+    )
+    project.add_solution_result(
+        SolutionResultData(
+            1,
+            1,
+            "Node 2 UX History",
+            "TimeHistory",
+            node_scope=[2],
+            settings={
+                "node": 2,
+                "quantity": "Displacement",
+                "dof": 1,
+            },
+        )
+    )
+
+    updated = SolutionResultData(
+        1,
+        1,
+        "Node 2 UY History",
+        "TimeHistory",
+        node_scope=[2],
+        element_scope=[10],
+        settings={
+            "node": 2,
+            "quantity": "Displacement",
+            "dof": 2,
+        },
+    )
+    project.update_solution_result(1, updated)
+
+    restored = ProjectDatabase.from_dict(project.to_dict())
+    result = restored.solution_results[1]
+
+    assert result.name == "Node 2 UY History"
+    assert result.node_scope == [2]
+    assert result.element_scope == [10]
+    assert result.settings == {
+        "node": 2,
+        "quantity": "Displacement",
+        "dof": 2,
+    }
