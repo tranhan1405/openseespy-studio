@@ -1,0 +1,190 @@
+from __future__ import annotations
+
+import pytest
+
+from openseespy_studio.project import (
+    LoadPatternData,
+    NodalLoadData,
+    ProjectDatabase,
+    SectionData,
+    TimeSeriesData,
+)
+from openseespy_studio.test_column import (
+    TestColumnSpec,
+    build_test_column,
+)
+
+
+def project_with_section() -> ProjectDatabase:
+    project = ProjectDatabase()
+    project.add_section(
+        SectionData(
+            tag=1,
+            name="Test section",
+            section_type="Elastic",
+        )
+    )
+    return project
+
+
+def test_default_test_column_builds_vertical_planar_cantilever():
+    project = project_with_section()
+    result = build_test_column(
+        project,
+        TestColumnSpec(
+            height=3.0,
+            num_elements=1,
+            axis=3,
+            lateral_direction=1,
+            planar=True,
+            section_tag=1,
+        ),
+    )
+
+    assert project.model.ndm == 3
+    assert project.model.ndf == 6
+    assert result.node_tags == [1, 2]
+    assert result.element_tags == [1]
+    assert project.model.nodes[1].xyz == pytest.approx((0.0, 0.0, 0.0))
+    assert project.model.nodes[2].xyz == pytest.approx((0.0, 0.0, 3.0))
+    assert project.model.nodes[1].fixity == (1, 1, 1, 1, 1, 1)
+    assert project.model.nodes[2].fixity == (0, 1, 0, 1, 0, 1)
+
+    element = project.model.elements[1]
+    assert element.group == "test-column"
+    assert element.element_type == "forceBeamColumn"
+    assert element.section_tag == 1
+    assert element.integration_type == "Lobatto"
+    assert element.integration_points == 5
+
+    transformation = project.transformations[result.transformation_tag]
+    assert transformation.transformation_type == "PDelta"
+    assert transformation.vecxz == pytest.approx((1.0, 0.0, 0.0))
+
+
+def test_test_column_can_divide_member_into_multiple_elements():
+    project = project_with_section()
+    result = build_test_column(
+        project,
+        TestColumnSpec(
+            height=4.0,
+            num_elements=4,
+            section_tag=1,
+        ),
+    )
+
+    assert result.node_tags == [1, 2, 3, 4, 5]
+    assert result.element_tags == [1, 2, 3, 4]
+    assert [project.model.nodes[tag].xyz[2] for tag in result.node_tags] == (
+        pytest.approx([0.0, 1.0, 2.0, 3.0, 4.0])
+    )
+
+
+def test_test_column_creates_separate_axial_and_lateral_patterns():
+    project = project_with_section()
+    result = build_test_column(
+        project,
+        TestColumnSpec(
+            height=3.0,
+            section_tag=1,
+            axial_load=200.0,
+            lateral_reference_load=1.0,
+        ),
+    )
+
+    assert result.axial_pattern_tag is not None
+    assert result.lateral_pattern_tag is not None
+    assert result.axial_pattern_tag != result.lateral_pattern_tag
+
+    axial = next(
+        load
+        for load in project.nodal_loads.values()
+        if load.pattern_tag == result.axial_pattern_tag
+    )
+    lateral = next(
+        load
+        for load in project.nodal_loads.values()
+        if load.pattern_tag == result.lateral_pattern_tag
+    )
+    assert axial.node_tag == result.top_node
+    assert axial.values == pytest.approx((0.0, 0.0, -200.0, 0.0, 0.0, 0.0))
+    assert lateral.values == pytest.approx((1.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+
+
+def test_test_column_top_mass_and_prescribed_displacement():
+    project = project_with_section()
+    result = build_test_column(
+        project,
+        TestColumnSpec(
+            section_tag=1,
+            top_mass=2.5,
+            top_mass_directions=(1, 2),
+            prescribed_displacement=0.02,
+        ),
+    )
+
+    assert project.model.nodes[result.top_node].mass == pytest.approx(
+        (2.5, 2.5, 0.0, 0.0, 0.0, 0.0)
+    )
+    assert result.prescribed_pattern_tag is not None
+    displacement = next(iter(project.prescribed_displacements.values()))
+    assert displacement.node_tag == result.top_node
+    assert displacement.dof == 1
+    assert displacement.value == pytest.approx(0.02)
+
+
+def test_standalone_test_column_clears_old_model_linked_objects():
+    project = project_with_section()
+    project.model.add_node(20, 9.0, 9.0, 9.0)
+    project.add_time_series(TimeSeriesData(10, "Old", "Linear"))
+    project.add_load_pattern(LoadPatternData(10, "Old", "Plain", 10))
+    project.add_nodal_load(
+        NodalLoadData(
+            10,
+            "Old load",
+            10,
+            20,
+            (1.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        )
+    )
+
+    result = build_test_column(
+        project,
+        TestColumnSpec(section_tag=1, replace_geometry=True),
+    )
+
+    assert set(project.model.nodes) == set(result.node_tags)
+    assert 20 not in project.model.nodes
+    assert 10 not in project.load_patterns
+    assert 10 not in project.nodal_loads
+    assert project.time_series == {}
+
+
+def test_append_test_column_rejects_true_2d_backend():
+    project = project_with_section()
+    project.model.ndm = 2
+    project.model.ndf = 3
+
+    with pytest.raises(ValueError, match="3D/6DOF"):
+        build_test_column(
+            project,
+            TestColumnSpec(
+                section_tag=1,
+                replace_geometry=False,
+            ),
+        )
+
+
+def test_planar_direction_must_differ_from_column_axis():
+    project = project_with_section()
+
+    with pytest.raises(ValueError, match="differ"):
+        build_test_column(
+            project,
+            TestColumnSpec(
+                axis=3,
+                lateral_direction=3,
+                planar=True,
+                section_tag=1,
+            ),
+        )
