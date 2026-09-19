@@ -32,6 +32,9 @@ def test_pushover_generator():
     a=AnalysisSettingsData(1,"Push","Pushover",steps=100,control_node=2,control_dof=1,displacement_increment=0.002)
     text="\n".join(analysis_to_openseespy(a))
     assert "ops.integrator('DisplacementControl', 2, 1, 0.002)" in text
+    assert "'control_node': 2" in text
+    assert "'control_dof': 1" in text
+    assert "'monitor_node': 2, 'control_dof': 1" in text
 
 
 def test_transient_generator():
