@@ -661,6 +661,10 @@ def build_cyclic_template(
             raise ValueError("Cyclic protocol needs at least one target.")
         if any(not math.isfinite(value) for value in targets):
             raise ValueError("Cyclic targets must be finite.")
+        if all(abs(value) <= 1.0e-15 for value in targets):
+            raise ValueError(
+                "Cyclic protocol needs at least one nonzero target."
+            )
     else:
         targets = expand_cyclic_protocol(
             list(protocol_rows or []),
