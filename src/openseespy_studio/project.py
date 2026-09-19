@@ -1298,6 +1298,7 @@ SOLUTION_RESULT_TYPES = {
     "CyclicHysteresis",
     "TimeHistory",
     "ModeShape",
+    "Motion",
     "Convergence",
 }
 
