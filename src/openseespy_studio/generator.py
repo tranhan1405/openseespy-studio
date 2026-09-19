@@ -6,7 +6,7 @@ import math
 from .beam_loads import resolve_self_weight_local
 from .units import UnitSystem
 from .model import StructuralModel
-from .project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NodalLoadData, RecorderData, SectionData, TimeSeriesData, TransformationData
+from .project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SectionData, TimeSeriesData, TransformationData
 
 
 @dataclass(slots=True)
@@ -400,6 +400,15 @@ def nodal_load_to_openseespy(load: NodalLoadData) -> str:
     return f"ops.load({load.node_tag}, {values})"
 
 
+def prescribed_displacement_to_openseespy(
+    displacement: PrescribedDisplacementData,
+) -> str:
+    return (
+        f"ops.sp({displacement.node_tag}, {displacement.dof}, "
+        f"{displacement.value:g})"
+    )
+
+
 def element_load_to_openseespy(
     load: ElementLoadData,
     model: StructuralModel,
@@ -441,6 +450,7 @@ def load_pattern_block_to_openseespy(
     pattern: LoadPatternData,
     *,
     nodal_loads: list[NodalLoadData] | None = None,
+    prescribed_displacements: list[PrescribedDisplacementData] | None = None,
     element_loads: list[ElementLoadData] | None = None,
     model: StructuralModel,
     sections: dict[int, SectionData] | None = None,
@@ -455,6 +465,17 @@ def load_pattern_block_to_openseespy(
     for load in sorted(nodal_loads or [], key=lambda item: item.tag):
         lines.append(f"# Nodal load {load.tag}: {load.name}")
         lines.append(nodal_load_to_openseespy(load))
+    for displacement in sorted(
+        prescribed_displacements or [],
+        key=lambda item: item.tag,
+    ):
+        lines.append(
+            "# Prescribed displacement "
+            f"{displacement.tag}: {displacement.name}"
+        )
+        lines.append(
+            prescribed_displacement_to_openseespy(displacement)
+        )
     for load in sorted(element_loads or [], key=lambda item: item.tag):
         lines.append(f"# Element load {load.tag}: {load.name}")
         lines.append(
@@ -1595,6 +1616,7 @@ def to_openseespy(
     analyses: dict[int, AnalysisSettingsData] | None = None,
     active_analysis_tag: int | None = None,
     element_loads: dict[int, ElementLoadData] | None = None,
+    prescribed_displacements: dict[int, PrescribedDisplacementData] | None = None,
     recorders: dict[int, RecorderData] | None = None,
     units: dict[str, str] | None = None,
 ) -> str:
@@ -1803,6 +1825,13 @@ def to_openseespy(
     for load in (element_loads or {}).values():
         element_by_pattern.setdefault(load.pattern_tag, []).append(load)
 
+    displacement_by_pattern: dict[int, list[PrescribedDisplacementData]] = {}
+    for displacement in (prescribed_displacements or {}).values():
+        displacement_by_pattern.setdefault(
+            displacement.pattern_tag,
+            [],
+        ).append(displacement)
+
     if load_patterns:
         lines.extend(["", "# Load patterns"])
         for tag in sorted(load_patterns):
@@ -1813,6 +1842,10 @@ def to_openseespy(
                 load_pattern_block_to_openseespy(
                     pattern,
                     nodal_loads=nodal_by_pattern.get(tag, []),
+                    prescribed_displacements=displacement_by_pattern.get(
+                        tag,
+                        [],
+                    ),
                     element_loads=element_by_pattern.get(tag, []),
                     model=model,
                     sections=sections,
@@ -1882,6 +1915,10 @@ def to_openseespy(
                     load_pattern_block_to_openseespy(
                         pattern,
                         nodal_loads=nodal_by_pattern.get(
+                            deferred_tag,
+                            [],
+                        ),
+                        prescribed_displacements=displacement_by_pattern.get(
                             deferred_tag,
                             [],
                         ),
