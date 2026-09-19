@@ -73,6 +73,7 @@ class ModelViewport(QWidget):
             "element_numbers": False,
             "nodal_loads": False,
             "element_loads": False,
+            "load_values": False,
         }
         self._selection_filter = "all"
         self._selected_nodes: set[int] = set()
@@ -615,7 +616,7 @@ class ModelViewport(QWidget):
         if units is not None:
             self._units = dict(units)
         if refresh:
-            self._update_display_overlays()
+            self._refresh_load_overlays()
 
     def set_display_option(self, name: str, enabled: bool) -> None:
         if name not in self._display_options:
@@ -624,7 +625,7 @@ class ModelViewport(QWidget):
         if self._display_options[name] == enabled:
             return
         self._display_options[name] = enabled
-        self._update_display_overlays()
+        self._update_display_option(name)
 
     def display_option(self, name: str) -> bool:
         return bool(self._display_options.get(name, False))
@@ -995,7 +996,7 @@ class ModelViewport(QWidget):
 
         self._update_highlight_overlays()
         self._update_display_overlays(render=False)
-        self.set_view(self._current_view)
+        self.set_view(self._current_view, render=False)
         if reset_camera:
             self.plotter.reset_camera()
             self.plotter.camera.zoom(1.28)
@@ -1155,12 +1156,7 @@ class ModelViewport(QWidget):
         )
 
     @staticmethod
-    def _arrow_to_point(
-        point,
-        vector,
-        *,
-        length: float,
-    ):
+    def _arrow_record(point, vector, *, length: float):
         direction = np.asarray(vector, dtype=float)
         norm = float(np.linalg.norm(direction))
         if norm <= 1.0e-15:
@@ -1168,13 +1164,39 @@ class ModelViewport(QWidget):
         unit = direction / norm
         target = np.asarray(point, dtype=float)
         start = target - unit * float(length)
-        return pv.Arrow(
-            start=start,
-            direction=unit,
-            scale=float(length),
+        return start, unit, float(length)
+
+    def _batched_arrow_mesh(self, records):
+        if not records:
+            return None
+        points = np.asarray(
+            [record[0] for record in records],
+            dtype=float,
+        )
+        vectors = np.asarray(
+            [record[1] for record in records],
+            dtype=float,
+        )
+        scales = np.asarray(
+            [record[2] for record in records],
+            dtype=float,
+        )
+        pdata = pv.PolyData(points)
+        pdata.point_data["vectors"] = vectors
+        pdata.point_data["scale"] = scales
+        source = pv.Arrow(
+            start=(0.0, 0.0, 0.0),
+            direction=(1.0, 0.0, 0.0),
+            scale=1.0,
             tip_length=0.26,
             tip_radius=0.12,
             shaft_radius=0.035,
+        )
+        return pdata.glyph(
+            orient="vectors",
+            scale="scale",
+            factor=1.0,
+            geom=source,
         )
 
     def _add_annotation_labels(
@@ -1287,7 +1309,7 @@ class ModelViewport(QWidget):
                     if max_force > 1.0e-15
                     else 1.0
                 )
-                arrow = self._arrow_to_point(
+                arrow = self._arrow_record(
                     point,
                     force,
                     length=base_length * (0.45 + 0.55 * ratio),
@@ -1308,22 +1330,24 @@ class ModelViewport(QWidget):
                 label_points.append(point)
                 labels.append("\n".join(parts))
 
-        if arrows:
+        arrow_mesh = self._batched_arrow_mesh(arrows)
+        if arrow_mesh is not None:
             self.plotter.add_mesh(
-                pv.merge(arrows, merge_points=False),
+                arrow_mesh,
                 name="display-nodal-load-arrows",
                 color="#d62828",
                 smooth_shading=False,
                 pickable=False,
                 render=False,
             )
-        self._add_annotation_labels(
-            label_points,
-            labels,
-            name="display-nodal-load-labels",
-            text_color="#a71919",
-            font_size=10,
-        )
+        if self._display_options["load_values"]:
+            self._add_annotation_labels(
+                label_points,
+                labels,
+                name="display-nodal-load-labels",
+                text_color="#a71919",
+                font_size=10,
+            )
 
     def _element_load_global_vector(
         self,
@@ -1422,7 +1446,7 @@ class ModelViewport(QWidget):
                 positions = (0.18, 0.39, 0.61, 0.82)
                 for position in positions:
                     point = p_i + float(position) * member
-                    arrow = self._arrow_to_point(
+                    arrow = self._arrow_record(
                         point,
                         vector,
                         length=arrow_length,
@@ -1434,7 +1458,7 @@ class ModelViewport(QWidget):
             else:
                 position = min(max(float(load.x_over_l), 0.0), 1.0)
                 label_point = p_i + position * member
-                arrow = self._arrow_to_point(
+                arrow = self._arrow_record(
                     label_point,
                     vector,
                     length=arrow_length,
@@ -1464,22 +1488,89 @@ class ModelViewport(QWidget):
             label_points.append(label_point)
             labels.append(title)
 
-        if arrows:
+        arrow_mesh = self._batched_arrow_mesh(arrows)
+        if arrow_mesh is not None:
             self.plotter.add_mesh(
-                pv.merge(arrows, merge_points=False),
+                arrow_mesh,
                 name="display-element-load-arrows",
                 color="#c2185b",
                 smooth_shading=False,
                 pickable=False,
                 render=False,
             )
-        self._add_annotation_labels(
-            label_points,
-            labels,
-            name="display-element-load-labels",
-            text_color="#9b164a",
-            font_size=10,
-        )
+        if self._display_options["load_values"]:
+            self._add_annotation_labels(
+                label_points,
+                labels,
+                name="display-element-load-labels",
+                text_color="#9b164a",
+                font_size=10,
+            )
+
+    def _update_display_option(
+        self,
+        name: str,
+        *,
+        render: bool = True,
+    ) -> None:
+        actor_names = {
+            "node_numbers": ("display-node-numbers",),
+            "element_numbers": ("display-element-numbers",),
+            "nodal_loads": (
+                "display-nodal-load-arrows",
+                "display-nodal-load-labels",
+            ),
+            "element_loads": (
+                "display-element-load-arrows",
+                "display-element-load-labels",
+            ),
+            "load_values": (
+                "display-nodal-load-labels",
+                "display-element-load-labels",
+            ),
+        }
+        for actor_name in actor_names[name]:
+            self._remove_overlay(actor_name)
+
+        if self._model is None or not self._model.nodes:
+            if render:
+                self.plotter.render()
+            return
+
+        if name == "node_numbers" and self._display_options[name]:
+            self._draw_node_numbers()
+        elif name == "element_numbers" and self._display_options[name]:
+            self._draw_element_numbers()
+        elif name == "nodal_loads" and self._display_options[name]:
+            self._draw_nodal_loads()
+        elif name == "element_loads" and self._display_options[name]:
+            self._draw_element_loads()
+        elif name == "load_values" and self._display_options[name]:
+            if self._display_options["nodal_loads"]:
+                self._draw_nodal_loads()
+            if self._display_options["element_loads"]:
+                self._draw_element_loads()
+
+        if render:
+            self.plotter.render()
+
+    def _refresh_load_overlays(self, *, render: bool = True) -> None:
+        for name in (
+            "display-nodal-load-arrows",
+            "display-nodal-load-labels",
+            "display-element-load-arrows",
+            "display-element-load-labels",
+        ):
+            self._remove_overlay(name)
+
+        if self._model is not None and self._model.nodes:
+            if self._display_options["nodal_loads"]:
+                self._draw_nodal_loads()
+            if self._display_options["element_loads"]:
+                self._draw_element_loads()
+
+        if render:
+            self.plotter.render()
 
     def _update_display_overlays(self, *, render: bool = True) -> None:
         self._clear_display_overlays()
@@ -2420,7 +2511,7 @@ class ModelViewport(QWidget):
         self.plotter.renderer.reset_camera(bounds=bounds)
         self.plotter.render()
 
-    def set_view(self, view: str) -> None:
+    def set_view(self, view: str, *, render: bool = True) -> None:
         self._current_view = view
         function = {
             "iso": self.plotter.view_isometric,
@@ -2429,7 +2520,8 @@ class ModelViewport(QWidget):
             "yz": self.plotter.view_yz,
         }[view]
         function()
-        self.plotter.render()
+        if render:
+            self.plotter.render()
 
         for button in self.view_group.buttons():
             button.setChecked(button.property("view_name") == view)
