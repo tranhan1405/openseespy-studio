@@ -131,3 +131,34 @@ def test_full_script_contains_sections():
     assert "# Sections" in script
     assert "ops.section('Fiber', 1" in script
     assert "ops.fiber(0, 0, 0.0001, 1)" in script
+
+
+def test_section_display_geometry_round_trip():
+    section = SectionData(
+        tag=7,
+        name="IPE-like",
+        section_type="Elastic",
+        parameters={
+            "E": 2.0e11,
+            "A": 0.01,
+            "Iz": 1.0e-4,
+            "Iy": 2.0e-5,
+            "G": 7.7e10,
+            "J": 1.0e-6,
+        },
+        display_geometry={
+            "shape": "I",
+            "dimensions": {
+                "height": 0.30,
+                "flange_width": 0.15,
+                "flange_thickness": 0.01,
+                "web_width": 0.007,
+            },
+        },
+    )
+
+    restored = SectionData.from_dict(section.to_dict())
+
+    assert restored.display_geometry["shape"] == "I"
+    assert restored.display_geometry["dimensions"]["height"] == 0.30
+    assert restored.display_geometry["dimensions"]["web_width"] == 0.007

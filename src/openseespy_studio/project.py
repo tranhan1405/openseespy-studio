@@ -11,7 +11,7 @@ from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 23
+PROJECT_FORMAT_VERSION = 24
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -459,6 +459,7 @@ class SectionData:
     fibers: list[FiberData] = field(default_factory=list)
     material_tag: int | None = None
     fiber_components: list[FiberComponentData] = field(default_factory=list)
+    display_geometry: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.tag = int(self.tag)
@@ -489,6 +490,26 @@ class SectionData:
         )
         if self.section_type != "Elastic":
             self.material_tag = None
+
+        raw_geometry = (
+            self.display_geometry
+            if isinstance(self.display_geometry, dict)
+            else {}
+        )
+        shape = str(raw_geometry.get("shape", "") or "").strip()
+        raw_dimensions = raw_geometry.get("dimensions", {})
+        dimensions: dict[str, float] = {}
+        if isinstance(raw_dimensions, dict):
+            for key, value in raw_dimensions.items():
+                try:
+                    dimensions[str(key)] = float(value)
+                except (TypeError, ValueError):
+                    continue
+        self.display_geometry = (
+            {"shape": shape, "dimensions": dimensions}
+            if shape and dimensions
+            else {}
+        )
 
     def compiled_fibers(self) -> list[FiberData]:
         if self.section_type != "Fiber":
@@ -555,6 +576,14 @@ class SectionData:
                 for component in self.fiber_components
             ],
             "material_tag": self.material_tag,
+            "display_geometry": {
+                "shape": str(self.display_geometry.get("shape", "")),
+                "dimensions": dict(
+                    self.display_geometry.get("dimensions", {})
+                ),
+            }
+            if self.display_geometry
+            else {},
         }
 
     @classmethod
@@ -578,6 +607,7 @@ class SectionData:
                 for item in data.get("fiber_components", [])
             ],
             material_tag=data.get("material_tag"),
+            display_geometry=dict(data.get("display_geometry", {})),
         )
 
 

@@ -856,6 +856,20 @@ class PropertiesPanel(QWidget):
             "Undeformed only",
             "undeformed_only",
         )
+        self.result_representation = QComboBox()
+        self.result_representation.addItem(
+            "Actual Section",
+            "actual_section",
+        )
+        self.result_representation.addItem("Tube", "tube")
+        self.result_representation.addItem(
+            "Centerline",
+            "centerline",
+        )
+        self.result_smooth_curvature = QCheckBox(
+            "Smooth member curvature"
+        )
+        self.result_smooth_curvature.setChecked(True)
         self.result_scale = QDoubleSpinBox()
         self.result_scale.setDecimals(6)
         self.result_scale.setRange(1.0e-6, 1.0e9)
@@ -893,6 +907,8 @@ class PropertiesPanel(QWidget):
             ("Scope", self.result_use_selection),
             ("Component", self.result_component),
             ("Display", self.result_display),
+            ("Representation", self.result_representation),
+            ("Curvature", self.result_smooth_curvature),
             ("Scale", self.result_scale),
             ("Mode", self.result_mode),
             ("History Node", self.result_history_node),
@@ -932,6 +948,8 @@ class PropertiesPanel(QWidget):
         self._result_optional_widgets = (
             self.result_component,
             self.result_display,
+            self.result_representation,
+            self.result_smooth_curvature,
             self.result_scale,
             self.result_mode,
             self.result_history_node,
@@ -1044,12 +1062,32 @@ class PropertiesPanel(QWidget):
 
         if kind in {"DeformedShape", "ModeShape"}:
             self._set_form_row_visible(self.result_display, True)
+            self._set_form_row_visible(
+                self.result_representation,
+                True,
+            )
+            self._set_form_row_visible(
+                self.result_smooth_curvature,
+                True,
+            )
             display_mode = str(
                 options.get("display_mode", "deformed_only")
             )
             index = self.result_display.findData(display_mode)
             self.result_display.setCurrentIndex(
                 index if index >= 0 else 0
+            )
+            representation = str(
+                options.get("representation", "actual_section")
+            )
+            index = self.result_representation.findData(
+                representation
+            )
+            self.result_representation.setCurrentIndex(
+                index if index >= 0 else 0
+            )
+            self.result_smooth_curvature.setChecked(
+                bool(options.get("smooth_curvature", True))
             )
 
         if kind == "ModeShape" or (
@@ -1121,6 +1159,12 @@ class PropertiesPanel(QWidget):
         if kind in {"DeformedShape", "ModeShape"}:
             settings["display_mode"] = str(
                 self.result_display.currentData()
+            )
+            settings["representation"] = str(
+                self.result_representation.currentData()
+            )
+            settings["smooth_curvature"] = (
+                self.result_smooth_curvature.isChecked()
             )
         if kind == "ModeShape":
             settings["mode"] = self.result_mode.value()
@@ -2253,10 +2297,21 @@ class MainWindow(QMainWindow):
                 int(mode_number),
                 scale,
                 mode,
+                str(
+                    self.results_panel.mode_representation.currentData()
+                ),
+                self.results_panel.mode_smooth.isChecked(),
             )
         else:
             self.results_panel.deformation_scale.setValue(scale)
-            self._show_deformation_result(scale, mode)
+            self._show_deformation_result(
+                scale,
+                mode,
+                str(
+                    self.results_panel.deformation_representation.currentData()
+                ),
+                self.results_panel.deformation_smooth.isChecked(),
+            )
 
     def _apply_result_ribbon_scale(self) -> None:
         if self._syncing_result_display_controls:
@@ -7248,6 +7303,12 @@ class MainWindow(QMainWindow):
                 display_mode=str(
                     options.get("display_mode", "deformed_only")
                 ),
+                representation=str(
+                    options.get("representation", "actual_section")
+                ),
+                smooth_curvature=bool(
+                    options.get("smooth_curvature", True)
+                ),
                 node_tags=nodes or None,
                 element_tags=elements or None,
                 cache_key=result_cache_key,
@@ -7298,6 +7359,12 @@ class MainWindow(QMainWindow):
                 scale=float(options.get("scale", 1.0)),
                 display_mode=str(
                     options.get("display_mode", "deformed_only")
+                ),
+                representation=str(
+                    options.get("representation", "actual_section")
+                ),
+                smooth_curvature=bool(
+                    options.get("smooth_curvature", True)
                 ),
                 node_tags=nodes or None,
                 element_tags=elements or None,
@@ -9683,6 +9750,8 @@ class MainWindow(QMainWindow):
         self,
         scale: float,
         display_mode: str,
+        representation: str,
+        smooth_curvature: bool,
     ) -> None:
         if not self._last_result:
             self.status_message.setText("No analysis result available")
@@ -9691,6 +9760,8 @@ class MainWindow(QMainWindow):
             self._last_result,
             scale=float(scale),
             display_mode=str(display_mode),
+            representation=str(representation),
+            smooth_curvature=bool(smooth_curvature),
             cache_key=self._last_result_cache_key,
         )
         label = {
@@ -9698,13 +9769,19 @@ class MainWindow(QMainWindow):
             "both": "undeformed + deformed",
             "undeformed_only": "undeformed only",
         }.get(str(display_mode), "deformed only")
+        representation_label = {
+            "actual_section": "actual section",
+            "tube": "tube",
+            "centerline": "centerline",
+        }.get(str(representation), "actual section")
         self._sync_result_ribbon_controls(
             "deformation",
             str(display_mode),
             float(scale),
         )
         self.status_message.setText(
-            f"Showing {label} · scale {float(scale):g}"
+            f"Showing {label} · {representation_label} · "
+            f"scale {float(scale):g}"
         )
 
     def _show_motion_frame_result(
@@ -9795,6 +9872,8 @@ class MainWindow(QMainWindow):
         mode: int,
         scale: float,
         display_mode: str,
+        representation: str,
+        smooth_curvature: bool,
     ) -> None:
         if not self._last_result:
             self.status_message.setText("No modal result available")
@@ -9804,6 +9883,8 @@ class MainWindow(QMainWindow):
             int(mode),
             scale=float(scale),
             display_mode=str(display_mode),
+            representation=str(representation),
+            smooth_curvature=bool(smooth_curvature),
             cache_key=self._last_result_cache_key,
         )
         label = {
@@ -9811,6 +9892,11 @@ class MainWindow(QMainWindow):
             "both": "undeformed + deformed",
             "undeformed_only": "undeformed only",
         }.get(str(display_mode), "deformed only")
+        representation_label = {
+            "actual_section": "actual section",
+            "tube": "tube",
+            "centerline": "centerline",
+        }.get(str(representation), "actual section")
         self._sync_result_ribbon_controls(
             "mode",
             str(display_mode),
@@ -9818,7 +9904,7 @@ class MainWindow(QMainWindow):
         )
         self.status_message.setText(
             f"Showing mode {int(mode)} · {label} · "
-            f"scale {float(scale):g}"
+            f"{representation_label} · scale {float(scale):g}"
         )
 
     def _cleanup_analysis_files(self) -> None:

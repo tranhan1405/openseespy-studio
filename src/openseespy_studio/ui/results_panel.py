@@ -640,8 +640,8 @@ class CompactResultTabs(QTabWidget):
 
 
 class ResultsPanel(QWidget):
-    deformation_requested = Signal(float, str)
-    mode_shape_requested = Signal(int, float, str)
+    deformation_requested = Signal(float, str, str, bool)
+    mode_shape_requested = Signal(int, float, str, str, bool)
     motion_frame_requested = Signal(object, float, bool, float, str)
     clear_overlay_requested = Signal()
     member_force_requested = Signal(str, float)
@@ -770,6 +770,18 @@ class ResultsPanel(QWidget):
             self.deformation_display.setCurrentIndex(
                 index if index >= 0 else 0
             )
+            representation = str(
+                options.get("representation", "actual_section")
+            )
+            index = self.deformation_representation.findData(
+                representation
+            )
+            self.deformation_representation.setCurrentIndex(
+                index if index >= 0 else 0
+            )
+            self.deformation_smooth.setChecked(
+                bool(options.get("smooth_curvature", True))
+            )
             self._select_tab("Deformation")
             return
 
@@ -885,6 +897,16 @@ class ResultsPanel(QWidget):
             index = self.mode_display.findData(display_mode)
             self.mode_display.setCurrentIndex(
                 index if index >= 0 else 0
+            )
+            representation = str(
+                options.get("representation", "actual_section")
+            )
+            index = self.mode_representation.findData(representation)
+            self.mode_representation.setCurrentIndex(
+                index if index >= 0 else 0
+            )
+            self.mode_smooth.setChecked(
+                bool(options.get("smooth_curvature", True))
             )
             self._select_tab("Mode Shape")
             return
@@ -1119,6 +1141,8 @@ class ResultsPanel(QWidget):
             lambda: self.deformation_requested.emit(
                 self.deformation_scale.value(),
                 str(self.deformation_display.currentData()),
+                str(self.deformation_representation.currentData()),
+                self.deformation_smooth.isChecked(),
             )
         )
         clear.clicked.connect(self.clear_overlay_requested.emit)
@@ -1126,6 +1150,34 @@ class ResultsPanel(QWidget):
         row.addWidget(clear)
         row.addStretch(1)
         layout.addLayout(row)
+
+        geometry_row = QHBoxLayout()
+        geometry_row.addWidget(QLabel("Representation:"))
+        self.deformation_representation = QComboBox()
+        self.deformation_representation.addItem(
+            "Actual Section",
+            "actual_section",
+        )
+        self.deformation_representation.addItem("Tube", "tube")
+        self.deformation_representation.addItem(
+            "Centerline",
+            "centerline",
+        )
+        self.deformation_representation.setToolTip(
+            "Actual Section sweeps stored section geometry along the deformed "
+            "member. Members without display geometry fall back to Tube."
+        )
+        geometry_row.addWidget(self.deformation_representation)
+        self.deformation_smooth = QCheckBox("Smooth member curvature")
+        self.deformation_smooth.setChecked(True)
+        self.deformation_smooth.setToolTip(
+            "Use nodal rotations with cubic beam interpolation instead of "
+            "joining displaced end nodes with a straight segment."
+        )
+        geometry_row.addWidget(self.deformation_smooth)
+        geometry_row.addStretch(1)
+        layout.addLayout(geometry_row)
+
         self.deformation_info = QLabel("Run a non-modal analysis to view deformation.")
         self.deformation_info.setWordWrap(True)
         layout.addWidget(self.deformation_info)
@@ -1164,6 +1216,19 @@ class ResultsPanel(QWidget):
         row.addWidget(self.mode_show_button)
         row.addStretch(1)
         layout.addLayout(row)
+
+        geometry_row = QHBoxLayout()
+        geometry_row.addWidget(QLabel("Representation:"))
+        self.mode_representation = QComboBox()
+        self.mode_representation.addItem("Actual Section", "actual_section")
+        self.mode_representation.addItem("Tube", "tube")
+        self.mode_representation.addItem("Centerline", "centerline")
+        geometry_row.addWidget(self.mode_representation)
+        self.mode_smooth = QCheckBox("Smooth member curvature")
+        self.mode_smooth.setChecked(True)
+        geometry_row.addWidget(self.mode_smooth)
+        geometry_row.addStretch(1)
+        layout.addLayout(geometry_row)
 
         self.mode_info = QLabel(
             "Run a Modal analysis to populate mode shapes."
@@ -2103,6 +2168,8 @@ class ResultsPanel(QWidget):
             int(mode),
             self.mode_scale.value(),
             str(self.mode_display.currentData()),
+            str(self.mode_representation.currentData()),
+            self.mode_smooth.isChecked(),
         )
 
     def _refresh_live_convergence_plots(self) -> None:

@@ -28,6 +28,7 @@ except ImportError:
     vtkPointPicker = None
 
 from ..beam_loads import element_local_axes, resolve_self_weight_local
+from ..deformed_geometry import build_swept_member_geometry
 from ..model import StructuralModel, classify_fixity
 from ..postprocess import component_end_resultants, nodal_result_scalar
 from ..project import (
@@ -1919,9 +1920,26 @@ class ModelViewport(QWidget):
             return "deformed_only"
         return value
 
+    @staticmethod
+    def _normalized_deformation_representation(value: str) -> str:
+        representation = str(value or "actual_section").strip().lower()
+        aliases = {
+            "actual": "actual_section",
+            "section": "actual_section",
+            "extruded": "actual_section",
+            "extruded section": "actual_section",
+            "actual section": "actual_section",
+            "line": "centerline",
+        }
+        representation = aliases.get(representation, representation)
+        if representation not in {"actual_section", "tube", "centerline"}:
+            return "actual_section"
+        return representation
+
     def clear_result_overlay(self, *, render: bool = True) -> None:
         for name in (
             "result-overlay",
+            "result-section-surface",
             "result-nodes",
             "result-force-diagram",
             "result-force-connectors",
@@ -2010,6 +2028,9 @@ class ModelViewport(QWidget):
         *,
         scale: float,
         label: str,
+        representation: str = "actual_section",
+        smooth_curvature: bool = True,
+        stations: int = 17,
         node_tags: set[int] | None = None,
         element_tags: set[int] | None = None,
         view_cache_key: object | None = None,
@@ -2019,19 +2040,38 @@ class ModelViewport(QWidget):
         if self._show_cached_result_view(view_cache_key):
             return
 
+        representation = self._normalized_deformation_representation(
+            representation
+        )
         self.clear_result_overlay(render=False)
         entries: list[tuple[object, dict[str, object]]] = []
         points: list[tuple[float, float, float]] = []
         lines: list[int] = []
         magnitudes: list[float] = []
+        surface_meshes: list[object] = []
+
+        def raw_vector(tag: int) -> object:
+            return vectors.get(
+                str(tag),
+                vectors.get(tag, (0.0, 0.0, 0.0)),
+            )
 
         def displaced(tag: int):
             node = self._model.nodes[tag]
-            raw = vectors.get(str(tag), vectors.get(tag, (0.0, 0.0, 0.0)))
+            raw = raw_vector(tag)
             values = list(raw) if raw is not None else []
             while len(values) < 3:
                 values.append(0.0)
-            dx, dy, dz = (float(values[0]), float(values[1]), float(values[2]))
+            if self._model.ndm == 2:
+                dx = float(values[0])
+                dy = float(values[1])
+                dz = 0.0
+            else:
+                dx, dy, dz = (
+                    float(values[0]),
+                    float(values[1]),
+                    float(values[2]),
+                )
             xyz = (
                 node.xyz[0] + scale * dx,
                 node.xyz[1] + scale * dy,
@@ -2055,14 +2095,85 @@ class ModelViewport(QWidget):
 
         for tag in sorted(visible_elements):
             element = self._model.elements[tag]
-            if element.i not in self._model.nodes or element.j not in self._model.nodes:
+            if (
+                element.i not in self._model.nodes
+                or element.j not in self._model.nodes
+            ):
                 continue
+
+            rendered_surface = False
+            if representation == "actual_section":
+                section = (
+                    self._sections.get(element.section_tag)
+                    if element.section_tag is not None
+                    else None
+                )
+                transformation = (
+                    self._transformations.get(element.transf_tag)
+                    if element.transf_tag is not None
+                    else None
+                )
+                if section is not None and transformation is not None:
+                    try:
+                        _, local_y, local_z = element_local_axes(
+                            self._model,
+                            element,
+                            transformation,
+                        )
+                        geometry = build_swept_member_geometry(
+                            section,
+                            self._model.nodes[element.i].xyz,
+                            self._model.nodes[element.j].xyz,
+                            local_y,
+                            local_z,
+                            raw_vector(element.i),
+                            raw_vector(element.j),
+                            ndm=self._model.ndm,
+                            scale=float(scale),
+                            stations=max(3, int(stations)),
+                            smooth=bool(smooth_curvature),
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        geometry = None
+
+                    if geometry is not None:
+                        surface = pv.PolyData(geometry.points)
+                        surface.faces = geometry.faces
+                        surface.point_data["magnitude"] = geometry.magnitudes
+                        surface_meshes.append(surface)
+                        rendered_surface = True
+
+            if rendered_surface:
+                continue
+
             p1, m1 = displaced(element.i)
             p2, m2 = displaced(element.j)
             index = len(points)
             points.extend((p1, p2))
             magnitudes.extend((m1, m2))
             lines.extend((2, index, index + 1))
+
+        if surface_meshes:
+            surface_mesh = (
+                surface_meshes[0]
+                if len(surface_meshes) == 1
+                else pv.merge(surface_meshes, merge_points=False)
+            )
+            surface_kwargs = {
+                "name": "result-section-surface",
+                "scalars": "magnitude",
+                "cmap": "turbo",
+                "smooth_shading": False,
+                "show_edges": False,
+                "pickable": False,
+                "scalar_bar_args": {"title": label},
+            }
+            self.plotter.add_mesh(
+                surface_mesh,
+                **surface_kwargs,
+                render=False,
+            )
+            entries.append((surface_mesh, surface_kwargs))
 
         if points:
             mesh = pv.PolyData(np.asarray(points, dtype=float))
@@ -2075,9 +2186,10 @@ class ModelViewport(QWidget):
                 "name": "result-overlay",
                 "scalars": "magnitude",
                 "cmap": "turbo",
-                "line_width": 5,
-                "render_lines_as_tubes": True,
+                "line_width": 5 if representation != "centerline" else 3,
+                "render_lines_as_tubes": representation != "centerline",
                 "pickable": False,
+                "show_scalar_bar": not bool(surface_meshes),
                 "scalar_bar_args": {"title": label},
             }
             self.plotter.add_mesh(
@@ -2104,7 +2216,7 @@ class ModelViewport(QWidget):
             point, magnitude = displaced(tag)
             node_points.append(point)
             node_magnitudes.append(magnitude)
-        if not points and not node_points:
+        if not points and not surface_meshes and not node_points:
             return
 
         if node_points:
@@ -2858,6 +2970,8 @@ class ModelViewport(QWidget):
         *,
         scale: float = 1.0,
         display_mode: str = "deformed_only",
+        representation: str = "actual_section",
+        smooth_curvature: bool = True,
         node_tags: set[int] | None = None,
         element_tags: set[int] | None = None,
         cache_key: object | None = None,
@@ -2883,6 +2997,8 @@ class ModelViewport(QWidget):
             cache_key,
             "deformed-shape",
             float(scale),
+            self._normalized_deformation_representation(representation),
+            bool(smooth_curvature),
             self._result_scope_key(node_tags),
             self._result_scope_key(element_tags),
         )
@@ -2890,6 +3006,8 @@ class ModelViewport(QWidget):
             vectors,
             scale=float(scale),
             label="Displacement magnitude",
+            representation=representation,
+            smooth_curvature=bool(smooth_curvature),
             node_tags=node_tags,
             element_tags=element_tags,
             view_cache_key=view_key,
@@ -2906,6 +3024,8 @@ class ModelViewport(QWidget):
         *,
         scale: float = 1.0,
         display_mode: str = "deformed_only",
+        representation: str = "actual_section",
+        smooth_curvature: bool = True,
         node_tags: set[int] | None = None,
         element_tags: set[int] | None = None,
         cache_key: object | None = None,
@@ -2923,6 +3043,8 @@ class ModelViewport(QWidget):
             "mode-shape",
             int(mode),
             float(scale),
+            self._normalized_deformation_representation(representation),
+            bool(smooth_curvature),
             self._result_scope_key(node_tags),
             self._result_scope_key(element_tags),
         )
@@ -2963,6 +3085,8 @@ class ModelViewport(QWidget):
             vectors,
             scale=auto_scale,
             label=f"Mode {int(mode)} amplitude",
+            representation=representation,
+            smooth_curvature=bool(smooth_curvature),
             node_tags=node_tags,
             element_tags=element_tags,
             view_cache_key=view_key,
