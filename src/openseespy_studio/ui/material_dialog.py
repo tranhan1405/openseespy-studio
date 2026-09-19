@@ -21,6 +21,18 @@ from ..project import (
 )
 
 
+PA_PER_MPA = 1.0e6
+STRESS_PARAMETER_KEYS = {
+    "E",
+    "Fy",
+    "E0",
+    "fpc",
+    "fpcu",
+    "ft",
+    "Ets",
+}
+
+
 class MaterialDialog(QDialog):
     def __init__(self, material: MaterialData | None = None, *, next_tag: int = 1, parent=None):
         super().__init__(parent)
@@ -122,28 +134,26 @@ class MaterialDialog(QDialog):
         )
 
         for key in MATERIAL_PARAMETER_ORDER[material_type]:
+            is_stress = key in STRESS_PARAMETER_KEYS
             spin = QDoubleSpinBox()
-            spin.setDecimals(10)
+            spin.setDecimals(6 if is_stress else 10)
             spin.setRange(-1.0e20, 1.0e20)
-            spin.setSingleStep(0.01)
-            spin.setValue(
-                float(
-                    previous.get(
-                        key,
-                        initial_parameters.get(key, defaults[key]),
-                    )
+            spin.setSingleStep(1.0 if is_stress else 0.01)
+
+            if key in previous:
+                display_value = previous[key]
+            else:
+                stored_value = float(
+                    initial_parameters.get(key, defaults[key])
                 )
-            )
-            stress_keys = {
-                "E",
-                "Fy",
-                "E0",
-                "fpc",
-                "fpcu",
-                "ft",
-                "Ets",
-            }
-            label = f"{key} [Pa]:" if key in stress_keys else f"{key}:"
+                display_value = (
+                    stored_value / PA_PER_MPA
+                    if is_stress
+                    else stored_value
+                )
+            spin.setValue(display_value)
+
+            label = f"{key} [MPa]:" if is_stress else f"{key}:"
             self.parameter_form.addRow(label, spin)
             self._parameter_spins[key] = spin
 
@@ -154,7 +164,11 @@ class MaterialDialog(QDialog):
             name=self.name.text().strip() or f"Material {self.tag.value()}",
             material_type=material_type,
             parameters={
-                key: self._parameter_spins[key].value()
+                key: (
+                    self._parameter_spins[key].value() * PA_PER_MPA
+                    if key in STRESS_PARAMETER_KEYS
+                    else self._parameter_spins[key].value()
+                )
                 for key in MATERIAL_PARAMETER_ORDER[material_type]
             },
             poisson_ratio=self.poisson_ratio.value(),

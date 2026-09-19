@@ -4571,11 +4571,29 @@ class MainWindow(QMainWindow):
             ("Type", material.material_type),
             ("Poisson ratio", f"{material.poisson_ratio:g}"),
             ("Density", f"{material.density:g}"),
-            ("Elastic E", f"{material.elastic_modulus():g}"),
-            ("Elastic G", f"{material.shear_modulus():g}"),
+            (
+                "Elastic E [MPa]",
+                f"{material.elastic_modulus() / 1.0e6:g}",
+            ),
+            (
+                "Elastic G [MPa]",
+                f"{material.shear_modulus() / 1.0e6:g}",
+            ),
         ]
+        stress_keys = {
+            "E",
+            "Fy",
+            "E0",
+            "fpc",
+            "fpcu",
+            "ft",
+            "Ets",
+        }
         rows.extend(
-            (key, f"{value:g}")
+            (
+                f"{key} [MPa]" if key in stress_keys else key,
+                f"{value / 1.0e6:g}" if key in stress_keys else f"{value:g}",
+            )
             for key, value in material.parameters.items()
         )
         self.properties_panel.set_properties("Material", rows)
@@ -4732,8 +4750,12 @@ class MainWindow(QMainWindow):
 
             for key in ("A", "Iz", "Iy", "J"):
                 rows.append((key, f"{resolved[key]:g}"))
-            rows.append(("Resolved E", f"{resolved['E']:g}"))
-            rows.append(("Resolved G", f"{resolved['G']:g}"))
+            rows.append(
+                ("Resolved E [MPa]", f"{resolved['E'] / 1.0e6:g}")
+            )
+            rows.append(
+                ("Resolved G [MPa]", f"{resolved['G'] / 1.0e6:g}")
+            )
             if section.material_tag is not None:
                 material = self.project.materials.get(section.material_tag)
                 if material is not None:
