@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -243,17 +244,17 @@ class TestColumnWizard(QDialog):
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QScrollArea.NoFrame)
+        self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setWidget(body)
         root.addWidget(self.scroll, 1)
 
-        buttons = QDialogButtonBox(
+        self.buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
-        buttons.button(QDialogButtonBox.Ok).setText("Create Specimen")
-        buttons.accepted.connect(self._accept)
-        buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
+        self.buttons.button(QDialogButtonBox.Ok).setText("Create Specimen")
+        self.buttons.accepted.connect(self._accept)
+        self.buttons.rejected.connect(self.reject)
+        root.addWidget(self.buttons)
 
         self.preset.currentTextChanged.connect(self._apply_preset)
         self.axis.currentIndexChanged.connect(self._axis_changed)
