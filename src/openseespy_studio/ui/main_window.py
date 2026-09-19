@@ -1365,7 +1365,7 @@ class MainWindow(QMainWindow):
             self._select_result_element
         )
         self.results_panel.clear_overlay_requested.connect(
-            self.viewport.clear_result_overlay
+            self._clear_result_display
         )
         self.results_panel.job_selected.connect(self._select_job_result)
         self._active_result_display_kind: str | None = None
@@ -2156,13 +2156,15 @@ class MainWindow(QMainWindow):
             "result_deformed",
             "result_both",
             "result_undeformed",
-            "fit_result",
         ):
             action = self.actions.get(key)
             if action is not None:
                 action.setEnabled(enabled)
         if hasattr(self, "result_scale_ribbon"):
             self.result_scale_ribbon.setEnabled(enabled)
+        fit = self.actions.get("fit_result")
+        if fit is not None:
+            fit.setEnabled(bool(self._last_result))
 
     def _sync_result_ribbon_controls(
         self,
@@ -2287,6 +2289,9 @@ class MainWindow(QMainWindow):
         self.viewport.clear_result_overlay()
         self._active_result_display_kind = None
         self._set_result_display_controls_enabled(False)
+        fit_action = self.actions.get("fit_result")
+        if fit_action is not None:
+            fit_action.setEnabled(bool(self._last_result))
         self.status_message.setText("Result overlay cleared")
 
     def _show_results_manager(self) -> None:
@@ -7203,6 +7208,9 @@ class MainWindow(QMainWindow):
 
         self._last_result = payload
         self._last_result_cache_key = result_cache_key
+        fit_action = self.actions.get("fit_result")
+        if fit_action is not None:
+            fit_action.setEnabled(True)
         self.results_panel.set_result(
             payload,
             cache_key=result_cache_key,
