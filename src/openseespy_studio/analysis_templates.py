@@ -59,6 +59,14 @@ SOLVER_PRESETS: dict[str, dict[str, object]] = {
 
 
 @dataclass(slots=True)
+class GroundMotionComponentSpec:
+    direction: int
+    values: list[float]
+    scale_factor: float = 1.0
+    name: str = ""
+
+
+@dataclass(slots=True)
 class AnalysisTemplatePlan:
     analysis: AnalysisSettingsData
     time_series: list[TimeSeriesData] = field(default_factory=list)
@@ -89,6 +97,74 @@ def expand_cyclic_protocol(
     if not targets:
         raise ValueError("Cyclic protocol needs at least one row.")
     return targets
+
+
+def parse_cyclic_protocol_text(
+    text: str,
+    *,
+    amplitude_column: int = 1,
+    cycles_column: int = 2,
+) -> list[tuple[float, int]]:
+    """Read amplitude/cycle rows from CSV/TXT protocol data."""
+    amplitude_column = int(amplitude_column)
+    cycles_column = int(cycles_column)
+    if amplitude_column < 1 or cycles_column < 1:
+        raise ValueError("Protocol columns are 1-based and must be positive.")
+
+    rows: list[tuple[float, int]] = []
+    required = max(amplitude_column, cycles_column)
+    for raw_line in str(text).splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", "//", "%")):
+            continue
+        tokens = line.replace(",", " ").replace(";", " ").split()
+        if len(tokens) < required:
+            continue
+        try:
+            amplitude = float(tokens[amplitude_column - 1])
+            cycles_value = float(tokens[cycles_column - 1])
+        except ValueError:
+            # Allow a header row such as "Amplitude,Cycles".
+            continue
+        cycles = int(round(cycles_value))
+        if not math.isclose(cycles_value, cycles, abs_tol=1.0e-9):
+            raise ValueError("Protocol cycle counts must be integers.")
+        if abs(amplitude) <= 1.0e-15:
+            raise ValueError("Protocol amplitudes must be nonzero.")
+        if cycles < 1:
+            raise ValueError("Protocol cycle counts must be at least 1.")
+        rows.append((abs(amplitude), cycles))
+    if not rows:
+        raise ValueError("Protocol file contains no amplitude/cycle rows.")
+    return rows
+
+
+def parse_node_weight_text(text: str) -> dict[int, float]:
+    """Read custom lateral-load weights as node,weight pairs."""
+    result: dict[int, float] = {}
+    for line_number, raw_line in enumerate(str(text).splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith(("#", "//", "%")):
+            continue
+        tokens = line.replace(",", " ").replace(";", " ").split()
+        if len(tokens) < 2:
+            continue
+        try:
+            node = int(tokens[0])
+            weight = float(tokens[1])
+        except ValueError as exc:
+            raise ValueError(
+                f"Custom distribution line {line_number} must be "
+                "'node, weight'."
+            ) from exc
+        if node <= 0:
+            raise ValueError("Custom distribution node tags must be positive.")
+        if abs(weight) <= 1.0e-15:
+            continue
+        result[node] = weight
+    if not result:
+        raise ValueError("Custom distribution contains no nonzero weights.")
+    return result
 
 
 def parse_ground_motion_text(
@@ -183,6 +259,7 @@ def lateral_load_weights(
     *,
     dof: int,
     distribution: str,
+    custom_weights: dict[int, float] | None = None,
 ) -> dict[int, float]:
     tags = _active_lateral_nodes(project, dof)
     kind = str(distribution)
@@ -212,10 +289,29 @@ def lateral_load_weights(
         }
         if sum(raw.values()) <= 1.0e-15:
             raw = {tag: 1.0 for tag in tags}
+    elif kind in {"First-mode proportional", "Custom"}:
+        supplied = dict(custom_weights or {})
+        unknown = sorted(set(supplied) - set(project.model.nodes))
+        if unknown:
+            raise ValueError(
+                "Lateral-load weights reference missing node(s): "
+                + ", ".join(map(str, unknown))
+            )
+        raw = {
+            tag: float(supplied.get(tag, 0.0))
+            for tag in tags
+            if abs(float(supplied.get(tag, 0.0))) > 1.0e-15
+        }
+        if not raw:
+            raise ValueError(
+                f"{kind} loading needs at least one nonzero active-node weight."
+            )
     else:
         raise ValueError(f"Unsupported lateral-load distribution: {kind}")
 
-    total = sum(raw.values())
+    total = sum(abs(value) for value in raw.values())
+    if total <= 1.0e-15:
+        raise ValueError("Lateral-load distribution has zero total weight.")
     return {tag: value / total for tag, value in raw.items()}
 
 
@@ -225,11 +321,13 @@ def _reference_lateral_loading(
     dof: int,
     distribution: str,
     prefix: str,
+    custom_weights: dict[int, float] | None = None,
 ) -> tuple[list[TimeSeriesData], list[LoadPatternData], list[NodalLoadData]]:
     weights = lateral_load_weights(
         project,
         dof=dof,
         distribution=distribution,
+        custom_weights=custom_weights,
     )
     series_tag = _next_tag(project.time_series)
     pattern_tag = _next_tag(project.load_patterns)
@@ -293,6 +391,7 @@ def build_pushover_template(
     target_displacement: float,
     max_increment: float,
     distribution: str = "Triangular",
+    distribution_weights: dict[int, float] | None = None,
     solver_preset: str = "Robust",
 ) -> AnalysisTemplatePlan:
     if int(control_node) not in project.model.nodes:
@@ -311,6 +410,7 @@ def build_pushover_template(
         dof=int(control_dof),
         distribution=distribution,
         prefix="Pushover",
+        custom_weights=distribution_weights,
     )
     tag = project.next_analysis_tag()
     analysis = AnalysisSettingsData(
@@ -431,6 +531,149 @@ def _acceleration_to_model_units(
     return UnitSystem.from_mapping(units).acceleration_from_m_per_s2(si)
 
 
+def build_nlth_multi_template(
+    project: ProjectDatabase,
+    *,
+    name: str,
+    components: Iterable[GroundMotionComponentSpec],
+    dt: float,
+    input_unit: str,
+    monitor_node: int,
+    monitor_dof: int,
+    damping_ratio: float = 0.05,
+    damping_mode_i: int = 1,
+    damping_mode_j: int = 3,
+    solver_preset: str = "Robust",
+) -> AnalysisTemplatePlan:
+    specs = list(components)
+    if not specs:
+        raise ValueError("NLTH needs at least one ground-motion component.")
+    dt = float(dt)
+    if dt <= 0.0:
+        raise ValueError("Ground-motion dt must be positive.")
+    if int(monitor_node) not in project.model.nodes:
+        raise ValueError(f"Monitor node {monitor_node} does not exist.")
+    if int(monitor_dof) not in (1, 2, 3):
+        raise ValueError("NLTH monitor DOF must be X, Y or Z.")
+
+    directions = [int(spec.direction) for spec in specs]
+    if any(direction not in (1, 2, 3) for direction in directions):
+        raise ValueError("NLTH components must use X, Y or Z excitation.")
+    if len(set(directions)) != len(directions):
+        raise ValueError("NLTH excitation directions must be unique.")
+
+    next_series = _next_tag(project.time_series)
+    next_pattern = _next_tag(project.load_patterns)
+    time_series: list[TimeSeriesData] = []
+    patterns: list[LoadPatternData] = []
+    max_points = 0
+    axis_name = {1: "X", 2: "Y", 3: "Z"}
+
+    for offset, spec in enumerate(specs):
+        raw = [float(value) for value in spec.values]
+        if not raw:
+            raise ValueError(
+                f"Ground-motion component {axis_name[int(spec.direction)]} "
+                "is empty."
+            )
+        converted = [
+            _acceleration_to_model_units(
+                value,
+                input_unit,
+                project.units,
+            )
+            for value in raw
+        ]
+        direction = int(spec.direction)
+        label = str(spec.name).strip() or axis_name[direction]
+        series_tag = next_series + offset
+        pattern_tag = next_pattern + offset
+        time_series.append(
+            TimeSeriesData(
+                tag=series_tag,
+                name=f"{name} {label} Ground Motion",
+                series_type="Path",
+                factor=float(spec.scale_factor),
+                dt=dt,
+                values=converted,
+            )
+        )
+        patterns.append(
+            LoadPatternData(
+                tag=pattern_tag,
+                name=f"{name} {label} Uniform Excitation",
+                pattern_type="UniformExcitation",
+                time_series_tag=series_tag,
+                direction=direction,
+                factor=1.0,
+            )
+        )
+        max_points = max(max_points, len(converted))
+
+    tag = project.next_analysis_tag()
+    analysis = AnalysisSettingsData(
+        tag=tag,
+        name=str(name).strip() or f"NLTH {tag}",
+        analysis_type="Transient",
+        steps=max_points,
+        control_node=int(monitor_node),
+        control_dof=int(monitor_dof),
+        dt=dt,
+        gamma=0.5,
+        beta=0.25,
+        rayleigh_damping_ratio=float(damping_ratio),
+        rayleigh_mode_i=int(damping_mode_i),
+        rayleigh_mode_j=int(damping_mode_j),
+        preload_gravity=True,
+        gravity_steps=10,
+        deferred_pattern_tags=[pattern.tag for pattern in patterns],
+        **_solver_kwargs(solver_preset),
+    )
+
+    result_specs: list[tuple[str, str, dict[str, object]]] = []
+    for direction in directions:
+        axis = axis_name[direction]
+        result_specs.extend([
+            (
+                f"Acceleration History {axis}",
+                "TimeHistory",
+                {
+                    "node": int(monitor_node),
+                    "quantity": "Acceleration",
+                    "dof": direction,
+                },
+            ),
+            (
+                f"Displacement History {axis}",
+                "TimeHistory",
+                {
+                    "node": int(monitor_node),
+                    "quantity": "Displacement",
+                    "dof": direction,
+                },
+            ),
+        ])
+    result_specs.extend([
+        ("Deformed Shape", "DeformedShape", {"scale": 10.0}),
+        ("Hinge / Yield State", "HingeState", {}),
+        ("Member Force Mz", "MemberForce", {"component": "Mz", "scale": 1.0}),
+        ("Convergence", "Convergence", {"test": analysis.test}),
+    ])
+    results = _result_objects(project, tag, result_specs)
+
+    component_text = "+".join(axis_name[direction] for direction in directions)
+    return AnalysisTemplatePlan(
+        analysis=analysis,
+        time_series=time_series,
+        load_patterns=patterns,
+        results=results,
+        summary=(
+            f"NLTH {component_text} · {max_points} analysis step(s) · "
+            f"dt={dt:g} s · {input_unit}"
+        ),
+    )
+
+
 def build_nlth_template(
     project: ProjectDatabase,
     *,
@@ -446,93 +689,27 @@ def build_nlth_template(
     damping_mode_j: int = 3,
     solver_preset: str = "Robust",
 ) -> AnalysisTemplatePlan:
-    raw = [float(value) for value in ground_motion_values]
-    if not raw:
-        raise ValueError("Ground-motion record is empty.")
-    dt = float(dt)
-    if dt <= 0.0:
-        raise ValueError("Ground-motion dt must be positive.")
-    if int(direction) not in (1, 2, 3):
-        raise ValueError("NLTH template supports X, Y or Z excitation.")
-    if int(monitor_node) not in project.model.nodes:
-        raise ValueError(f"Monitor node {monitor_node} does not exist.")
-
-    converted = [
-        _acceleration_to_model_units(value, input_unit, project.units)
-        for value in raw
-    ]
-    series_tag = _next_tag(project.time_series)
-    pattern_tag = _next_tag(project.load_patterns)
-    series = TimeSeriesData(
-        tag=series_tag,
-        name=f"{name} Ground Motion",
-        series_type="Path",
-        factor=float(scale_factor),
-        dt=dt,
-        values=converted,
-    )
-    pattern = LoadPatternData(
-        tag=pattern_tag,
-        name=f"{name} Uniform Excitation",
-        pattern_type="UniformExcitation",
-        time_series_tag=series_tag,
-        direction=int(direction),
-        factor=1.0,
-    )
-    tag = project.next_analysis_tag()
-    analysis = AnalysisSettingsData(
-        tag=tag,
-        name=str(name).strip() or f"NLTH {tag}",
-        analysis_type="Transient",
-        steps=len(converted),
-        control_node=int(monitor_node),
-        control_dof=int(direction),
-        dt=dt,
-        gamma=0.5,
-        beta=0.25,
-        rayleigh_damping_ratio=float(damping_ratio),
-        rayleigh_mode_i=int(damping_mode_i),
-        rayleigh_mode_j=int(damping_mode_j),
-        preload_gravity=True,
-        gravity_steps=10,
-        deferred_pattern_tags=[pattern.tag],
-        **_solver_kwargs(solver_preset),
-    )
-    results = _result_objects(
+    """Backward-compatible one-component NLTH template."""
+    return build_nlth_multi_template(
         project,
-        tag,
-        [
-            (
-                "Acceleration History",
-                "TimeHistory",
-                {
-                    "node": int(monitor_node),
-                    "quantity": "Acceleration",
-                    "dof": int(direction),
-                },
-            ),
-            (
-                "Displacement History",
-                "TimeHistory",
-                {
-                    "node": int(monitor_node),
-                    "quantity": "Displacement",
-                    "dof": int(direction),
-                },
-            ),
-            ("Deformed Shape", "DeformedShape", {"scale": 10.0}),
-            ("Hinge / Yield State", "HingeState", {}),
-            ("Member Force Mz", "MemberForce", {"component": "Mz", "scale": 1.0}),
-            ("Convergence", "Convergence", {"test": analysis.test}),
+        name=name,
+        components=[
+            GroundMotionComponentSpec(
+                direction=int(direction),
+                values=[float(value) for value in ground_motion_values],
+                scale_factor=float(scale_factor),
+                name={1: "X", 2: "Y", 3: "Z"}.get(
+                    int(direction),
+                    str(direction),
+                ),
+            )
         ],
-    )
-    return AnalysisTemplatePlan(
-        analysis=analysis,
-        time_series=[series],
-        load_patterns=[pattern],
-        results=results,
-        summary=(
-            f"NLTH · {len(converted)} point(s) · dt={dt:g} s · "
-            f"{input_unit} × {float(scale_factor):g}"
-        ),
+        dt=dt,
+        input_unit=input_unit,
+        monitor_node=monitor_node,
+        monitor_dof=int(direction),
+        damping_ratio=damping_ratio,
+        damping_mode_i=damping_mode_i,
+        damping_mode_j=damping_mode_j,
+        solver_preset=solver_preset,
     )
