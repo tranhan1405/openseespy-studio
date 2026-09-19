@@ -5827,7 +5827,10 @@ class MainWindow(QMainWindow):
             ),
         ]
         if settings.analysis_type == "Modal":
-            rows.append(("Modes", settings.num_modes))
+            rows.extend([
+                ("Modes", settings.num_modes),
+                ("Eigen solver", settings.eigen_solver),
+            ])
         else:
             rows.extend([
                 ("Test", settings.test), ("Tolerance", f"{settings.tolerance:g}"),
@@ -7744,7 +7747,7 @@ class MainWindow(QMainWindow):
             0,
             total,
             algorithm=(
-                "Eigen"
+                settings.eigen_solver
                 if settings.analysis_type == "Modal"
                 else settings.algorithm
             ),
