@@ -1412,9 +1412,24 @@ class AnalysisTemplateDialog(QDialog):
             self.protocol.removeRow(row)
         self._update_cyclic_preview()
 
+    def _clear_auto_loaded_ground_motions(self) -> None:
+        changed = False
+        for direction in self._nlth_directions:
+            if not self._ground_motion_builtin_keys.get(direction):
+                continue
+            self._ground_motion_builtin_keys[direction] = ""
+            self._ground_motion_values[direction] = []
+            self._ground_motion_formats[direction] = ""
+            self.gm_files[direction].clear()
+            self.gm_scales[direction].setValue(1.0)
+            changed = True
+        if changed:
+            self._refresh_all_ground_motion_previews()
+
     def _record_library_changed(self, *_args) -> None:
         key = str(self.gm_library.currentData() or "custom")
         preset = record_preset(key)
+        self._clear_auto_loaded_ground_motions()
         if preset.key == "custom":
             self.gm_library_info.setText(
                 "Custom / Local Record · Browse a local file for at least "
