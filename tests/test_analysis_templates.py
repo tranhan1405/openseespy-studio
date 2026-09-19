@@ -11,12 +11,14 @@ from openseespy_studio.analysis_templates import (
     infer_height_axis,
     lateral_load_weights,
     parse_cyclic_protocol_text,
+    parse_cyclic_targets_text,
     parse_ground_motion_text,
     parse_node_weight_text,
     structure_reference_height,
 )
 from openseespy_studio.generator import (
     analysis_to_openseespy,
+    cyclic_displacement_steps,
     to_openseespy,
 )
 from openseespy_studio.model import StructuralModel
@@ -197,6 +199,112 @@ def test_cyclic_template_uses_protocol_builder_targets():
         for result in plan.results
     )
 
+
+
+
+def test_parse_cyclic_absolute_targets_accepts_header_and_signed_values():
+    targets = parse_cyclic_targets_text(
+        "Target\n0.005\n-0.003\n0.010\n0\n"
+    )
+    assert targets == [0.005, -0.003, 0.01, 0.0]
+
+
+def test_cyclic_displacement_steps_hits_every_reversal_exactly():
+    targets = [0.01, -0.01, 0.02, -0.02, 0.0]
+    increments = cyclic_displacement_steps(targets, 0.006)
+
+    current = 0.0
+    reached = []
+    step_index = 0
+    for target in targets:
+        while (
+            step_index < len(increments)
+            and abs(current - target) > 1.0e-12
+        ):
+            current += increments[step_index]
+            step_index += 1
+            if abs(current - target) <= 1.0e-12:
+                reached.append(current)
+                break
+
+    assert reached == pytest.approx(targets)
+    assert all(abs(value) <= 0.006 + 1.0e-12 for value in increments)
+
+
+def test_cyclic_template_supports_existing_driver_and_gravity_options():
+    project = project_with_two_storeys()
+    series = TimeSeriesData(
+        20,
+        "Cyclic driver series",
+        "Linear",
+        factor=1.0,
+    )
+    pattern = LoadPatternData(
+        20,
+        "Cyclic driver",
+        "Plain",
+        time_series_tag=20,
+    )
+    load = NodalLoadData(
+        20,
+        "Cyclic top load",
+        20,
+        3,
+        (1.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    )
+    project.add_time_series(series)
+    project.add_load_pattern(pattern)
+    project.add_nodal_load(load)
+
+    plan = build_cyclic_template(
+        project,
+        name="Cyclic reuse",
+        control_node=3,
+        control_dof=1,
+        protocol_targets=[0.01, -0.005, 0.02, 0.0],
+        max_increment=0.002,
+        driver_pattern_tag=20,
+        preload_gravity=False,
+        gravity_steps=30,
+    )
+
+    assert plan.analysis.cyclic_targets == [0.01, -0.005, 0.02, 0.0]
+    assert plan.analysis.deferred_pattern_tags == [20]
+    assert plan.analysis.preload_gravity is False
+    assert plan.analysis.gravity_steps == 30
+    assert plan.time_series == []
+    assert plan.load_patterns == []
+    assert plan.nodal_loads == []
+    assert any(
+        result.result_type == "NodalReaction"
+        for result in plan.results
+    )
+
+
+def test_cyclic_triangular_loading_respects_2d_height_axis():
+    model = StructuralModel("cyclic-2d", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 3.0, 0.0)
+    model.add_node(3, 0.0, 6.0, 0.0)
+    model.set_fixity(1, (1, 1, 1))
+    project = ProjectDatabase(model=model)
+
+    plan = build_cyclic_template(
+        project,
+        name="2D cyclic",
+        control_node=3,
+        control_dof=1,
+        protocol_targets=[0.01, -0.01, 0.0],
+        max_increment=0.002,
+        distribution="Triangular",
+        height_axis=2,
+    )
+    forces = {
+        load.node_tag: load.values[0]
+        for load in plan.nodal_loads
+    }
+    assert forces[3] > forces[2] > 0.0
+    assert math.isclose(sum(forces.values()), 1.0)
 
 def test_nlth_template_converts_g_and_creates_uniform_excitation():
     project = project_with_two_storeys()
