@@ -5353,12 +5353,23 @@ class MainWindow(QMainWindow):
             return
 
         default_node = default_control_node(self.project)
-        dialog = AnalysisTemplateDialog(
-            default_node=default_node,
-            units=self.project.units,
-            initial_template=str(initial_template),
-            parent=self,
-        )
+        try:
+            dialog = AnalysisTemplateDialog(
+                default_node=default_node,
+                units=self.project.units,
+                initial_template=str(initial_template),
+                parent=self,
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Analysis Template",
+                (
+                    "The analysis template dialog could not be opened.\n\n"
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            )
+            return
         if not dialog.exec():
             return
 
