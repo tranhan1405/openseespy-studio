@@ -10,12 +10,30 @@ def fs(value,low=-1e20,high=1e20):
     w=QDoubleSpinBox(); w.setDecimals(10); w.setRange(low,high); w.setValue(float(value)); return w
 
 class AnalysisDialog(QDialog):
-    def __init__(self, analysis=None, *, next_tag=1, default_node=1, parent=None):
+    def __init__(
+        self,
+        analysis=None,
+        *,
+        next_tag=1,
+        default_node=1,
+        analysis_type=None,
+        parent=None,
+    ):
         super().__init__(parent); self.setWindowTitle("Analysis Settings"); self.setModal(True); self.resize(430,520)
         root=QVBoxLayout(self); form=QFormLayout()
         self.tag=QSpinBox(); self.tag.setRange(1,2147483647); self.tag.setValue(analysis.tag if analysis else next_tag)
-        self.name=QLineEdit(analysis.name if analysis else f"Analysis {next_tag}")
-        self.kind=QComboBox(); self.kind.addItems(["Static","Pushover","Cyclic","Transient","Modal"]); self.kind.setCurrentText(analysis.analysis_type if analysis else "Static")
+        default_kind = (
+            analysis.analysis_type
+            if analysis
+            else str(analysis_type or "Static")
+        )
+        default_name = (
+            analysis.name
+            if analysis
+            else f"{default_kind} {next_tag}"
+        )
+        self.name=QLineEdit(default_name)
+        self.kind=QComboBox(); self.kind.addItems(["Static","Pushover","Cyclic","Transient","Modal"]); self.kind.setCurrentText(default_kind)
         self.constraints=QComboBox(); self.constraints.addItems(["Transformation","Plain"]); self.constraints.setCurrentText(analysis.constraints_handler if analysis else "Transformation")
         self.numberer=QComboBox(); self.numberer.addItems(["RCM","Plain"]); self.numberer.setCurrentText(analysis.numberer if analysis else "RCM")
         self.system=QComboBox(); self.system.addItems(["UmfPack","BandGeneral","ProfileSPD"]); self.system.setCurrentText(analysis.system if analysis else "UmfPack")
