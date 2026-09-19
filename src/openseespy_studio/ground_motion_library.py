@@ -230,6 +230,26 @@ def pga_in_g(values: list[float], input_unit: str) -> float:
     raise ValueError(f"Unsupported acceleration unit: {input_unit}")
 
 
+def common_scale_factor_for_target_pga(
+    component_values: list[list[float]],
+    input_unit: str,
+    target_pga_g: float,
+) -> float:
+    """Scale all components by one factor so the strongest reaches target PGA."""
+    target = float(target_pga_g)
+    if target <= 0.0:
+        raise ValueError("Target PGA must be positive.")
+    raw_peaks = [
+        pga_in_g(values, input_unit)
+        for values in component_values
+        if values
+    ]
+    raw = max(raw_peaks, default=0.0)
+    if raw <= 1.0e-15 or not math.isfinite(raw):
+        raise ValueError("Ground-motion PGA is zero or invalid.")
+    return target / raw
+
+
 def scale_factor_for_target_pga(
     values: list[float],
     input_unit: str,
