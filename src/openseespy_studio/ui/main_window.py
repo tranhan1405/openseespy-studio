@@ -5494,6 +5494,74 @@ class MainWindow(QMainWindow):
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
+        if kind == "jobs_root":
+            show_jobs = menu.addAction("Show Job Manager")
+            show_jobs.triggered.connect(
+                lambda: (
+                    self.results_panel.show_jobs(),
+                    self.results_dock.show(),
+                    self.results_dock.raise_(),
+                )
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "job":
+            job_id = int(value)
+            job = self._jobs.get(job_id)
+
+            activate = menu.addAction("Set as Active Result Source")
+            activate.setEnabled(bool(job and job.results))
+            activate.triggered.connect(
+                lambda: self._activate_job_result(job_id)
+            )
+
+            plot_menu = menu.addMenu("Plot")
+            plot_menu.setEnabled(bool(job and job.results))
+            if job is not None:
+                self._populate_result_choice_menu(
+                    plot_menu,
+                    job.analysis_type,
+                    lambda result_type, name, settings:
+                    self._quick_plot_job_result(
+                        job_id,
+                        result_type,
+                        name,
+                        settings,
+                    ),
+                )
+
+            add_menu = menu.addMenu("Add Plot to Solution")
+            add_menu.setEnabled(
+                bool(
+                    job
+                    and job.results
+                    and job.analysis_tag is not None
+                    and job.analysis_tag in self.project.analyses
+                )
+            )
+            if job is not None:
+                self._populate_result_choice_menu(
+                    add_menu,
+                    job.analysis_type,
+                    lambda result_type, name, settings:
+                    self._add_job_plot_to_solution(
+                        job_id,
+                        result_type,
+                        name,
+                        settings,
+                    ),
+                )
+
+            menu.addSeparator()
+            export = menu.addAction("Export Results JSON...")
+            export.setEnabled(bool(job and job.results))
+            export.triggered.connect(
+                lambda: self._export_job_result_json(job_id)
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
         if kind == "recorders_root":
             action = menu.addAction("New Recorder...")
             action.triggered.connect(self._create_recorder)
