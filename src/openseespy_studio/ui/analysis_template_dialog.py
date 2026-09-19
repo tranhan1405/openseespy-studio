@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QStackedWidget,
     QTableWidget,
@@ -69,7 +70,8 @@ class AnalysisTemplateDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Analysis Template")
         self.setModal(True)
-        self.resize(620, 610)
+        self.setSizeGripEnabled(True)
+        self.resize(640, 620)
         self._initializing = True
 
         self.unit_system = UnitSystem.from_mapping(units)
@@ -86,13 +88,16 @@ class AnalysisTemplateDialog(QDialog):
 
         root = QVBoxLayout(self)
 
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+
         intro = QLabel(
             "Create a ready-to-run analysis workflow. Studio will add the "
             "analysis settings, required excitation/reference load objects, "
             "and a useful default Result set."
         )
         intro.setWordWrap(True)
-        root.addWidget(intro)
+        body_layout.addWidget(intro)
 
         top = QFormLayout()
         self.template = QComboBox()
@@ -116,19 +121,24 @@ class AnalysisTemplateDialog(QDialog):
         top.addRow("Solver strategy:", self.solver)
         top.addRow("Control / monitor node:", self.control_node)
         top.addRow("Direction:", self.direction)
-        root.addLayout(top)
+        body_layout.addLayout(top)
 
         self.pages = QStackedWidget()
         self.pages.addWidget(self._build_pushover_page())
         self.pages.addWidget(self._build_cyclic_page())
         self.pages.addWidget(self._build_nlth_page())
         self.pages.addWidget(self._build_modal_page())
-        root.addWidget(self.pages, 1)
+        body_layout.addWidget(self.pages)
 
         self.summary = QLabel()
         self.summary.setWordWrap(True)
         self.summary.setObjectName("Muted")
-        root.addWidget(self.summary)
+        body_layout.addWidget(self.summary)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setWidget(body)
+        root.addWidget(self.scroll, 1)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
