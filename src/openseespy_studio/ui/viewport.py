@@ -1121,22 +1121,23 @@ class ModelViewport(QWidget):
             magnitudes.extend((m1, m2))
             lines.extend((2, index, index + 1))
 
-        if not points:
-            return
-
-        mesh = pv.PolyData(np.asarray(points, dtype=float))
-        mesh.lines = np.asarray(lines, dtype=np.int64)
-        mesh.point_data["magnitude"] = np.asarray(magnitudes, dtype=float)
-        self.plotter.add_mesh(
-            mesh,
-            name="result-overlay",
-            scalars="magnitude",
-            cmap="turbo",
-            line_width=5,
-            render_lines_as_tubes=True,
-            pickable=False,
-            scalar_bar_args={"title": label},
-        )
+        if points:
+            mesh = pv.PolyData(np.asarray(points, dtype=float))
+            mesh.lines = np.asarray(lines, dtype=np.int64)
+            mesh.point_data["magnitude"] = np.asarray(
+                magnitudes,
+                dtype=float,
+            )
+            self.plotter.add_mesh(
+                mesh,
+                name="result-overlay",
+                scalars="magnitude",
+                cmap="turbo",
+                line_width=5,
+                render_lines_as_tubes=True,
+                pickable=False,
+                scalar_bar_args={"title": label},
+            )
 
         result_node_tags = set(self._visible_node_tags())
         if node_tags:
@@ -1155,6 +1156,9 @@ class ModelViewport(QWidget):
             point, magnitude = displaced(tag)
             node_points.append(point)
             node_magnitudes.append(magnitude)
+        if not points and not node_points:
+            return
+
         if node_points:
             node_mesh = pv.PolyData(np.asarray(node_points, dtype=float))
             node_mesh.point_data["magnitude"] = np.asarray(
