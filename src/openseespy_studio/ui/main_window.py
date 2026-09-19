@@ -5915,6 +5915,7 @@ class MainWindow(QMainWindow):
             initial_node_i=node_i,
             initial_node_j=node_j,
             default_to_ground=to_ground,
+            units=self.project.units,
             parent=self,
         )
         if not dialog.exec():
@@ -5922,8 +5923,13 @@ class MainWindow(QMainWindow):
 
         before = self.project.to_dict()
         created_ground = None
+        added_material_tags: list[int] = []
         try:
             spec = dialog.spec()
+            for pending_material in spec.get("pending_materials", []):
+                self.project.add_material(pending_material)
+                added_material_tags.append(pending_material.tag)
+
             node_j = int(spec["node_j"])
             if spec["to_ground"]:
                 created_ground = self.project.create_ground_node(
@@ -5947,6 +5953,8 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             if created_ground is not None:
                 self.model.remove_node(created_ground, cascade=True)
+            for material_tag in reversed(added_material_tags):
+                self.project.remove_material(material_tag)
             QMessageBox.warning(self, "Connection Editor", str(exc))
             return
 
@@ -5968,6 +5976,7 @@ class MainWindow(QMainWindow):
         dialog = ConnectionDialog(
             self.project.materials,
             connection=connection,
+            units=self.project.units,
             parent=self,
         )
         if not dialog.exec():
@@ -5976,8 +5985,13 @@ class MainWindow(QMainWindow):
         before = self.project.to_dict()
         old_ground = connection.generated_ground_node
         created_ground = None
+        added_material_tags: list[int] = []
         try:
             spec = dialog.spec()
+            for pending_material in spec.get("pending_materials", []):
+                self.project.add_material(pending_material)
+                added_material_tags.append(pending_material.tag)
+
             requested_ground = bool(spec["to_ground"])
             node_j = int(spec["node_j"])
 
@@ -6029,6 +6043,8 @@ class MainWindow(QMainWindow):
                 and created_ground in self.model.nodes
             ):
                 self.model.remove_node(created_ground, cascade=True)
+            for material_tag in reversed(added_material_tags):
+                self.project.remove_material(material_tag)
             QMessageBox.warning(self, "Connection Editor", str(exc))
             return
 
