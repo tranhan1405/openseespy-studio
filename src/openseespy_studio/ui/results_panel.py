@@ -27,6 +27,8 @@ from PySide6.QtWidgets import (
 from ..jobs import JobRecord
 from ..postprocess import (
     component_end_resultants,
+    cyclic_hysteresis_curve,
+    cyclic_hysteresis_metrics,
     fiber_response_element_tags,
     fiber_response_range,
     fiber_response_sections,
@@ -327,6 +329,7 @@ class ResultsPanel(QWidget):
         self._build_fiber_tab()
         self._build_hinge_tab()
         self._build_pushover_tab()
+        self._build_cyclic_tab()
         self._build_history_tab()
 
     def _build_jobs_tab(self) -> None:
@@ -637,6 +640,46 @@ class ResultsPanel(QWidget):
         layout.addWidget(self.pushover_plot, 1)
         self.tabs.addTab(page, "Pushover Curve")
 
+    def _build_cyclic_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        self.cyclic_info = QLabel(
+            "Run a Cyclic analysis to plot applied base shear versus "
+            "control displacement."
+        )
+        self.cyclic_info.setWordWrap(True)
+        layout.addWidget(self.cyclic_info)
+
+        self.cyclic_metrics = QLabel(
+            "Peak |u|: -   Peak |V|: -   Hysteretic energy: -"
+        )
+        self.cyclic_metrics.setWordWrap(True)
+        layout.addWidget(self.cyclic_metrics)
+
+        self.cyclic_plot = TimeHistoryPlot(
+            empty_message="No cyclic hysteresis data"
+        )
+        layout.addWidget(self.cyclic_plot, 1)
+
+        self.cyclic_reversal_table = QTableWidget(0, 4)
+        self.cyclic_reversal_table.setHorizontalHeaderLabels(
+            ["Reversal", "u", "V", "|Ksec|"]
+        )
+        self.cyclic_reversal_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.cyclic_reversal_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.cyclic_reversal_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        layout.addWidget(self.cyclic_reversal_table)
+
+        self.tabs.addTab(page, "Cyclic Hysteresis")
+
     def _build_history_tab(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -745,6 +788,15 @@ class ResultsPanel(QWidget):
             "Vpeak: -   u@Vpeak: -   ufinal: -"
         )
         self.pushover_plot.set_series([], [])
+        self.cyclic_plot.set_series([], [])
+        self.cyclic_reversal_table.setRowCount(0)
+        self.cyclic_info.setText(
+            "Run a Cyclic analysis to plot applied base shear versus "
+            "control displacement."
+        )
+        self.cyclic_metrics.setText(
+            "Peak |u|: -   Peak |V|: -   Hysteretic energy: -"
+        )
         self.history_node.clear()
         self.history_label.setText(
             "Run a non-modal analysis to populate time-history data."
@@ -838,6 +890,7 @@ class ResultsPanel(QWidget):
         self._populate_hinge_table()
         self._populate_history_nodes()
         self._update_pushover_plot()
+        self._update_cyclic_plot()
         self._update_history_plot()
 
     def _populate_node_table(self) -> None:
@@ -1245,6 +1298,88 @@ class ResultsPanel(QWidget):
             dof=dof,
         )
         return time, values, quantity, node_tag, dof
+
+    def _update_cyclic_plot(self) -> None:
+        x, y, control_node, control_dof = cyclic_hysteresis_curve(
+            self._result
+        )
+        if not x or not y:
+            analysis = self._result.get("analysis", {})
+            analysis_type = (
+                str(analysis.get("type", ""))
+                if isinstance(analysis, dict)
+                else ""
+            )
+            if analysis_type == "Cyclic":
+                self.cyclic_info.setText(
+                    "Cyclic result is present, but no complete "
+                    "control-displacement/base-shear history is available."
+                )
+            else:
+                self.cyclic_info.setText(
+                    "Run or select a Cyclic analysis to view hysteresis."
+                )
+            self.cyclic_metrics.setText(
+                "Peak |u|: -   Peak |V|: -   Hysteretic energy: -"
+            )
+            self.cyclic_plot.set_series([], [])
+            self.cyclic_reversal_table.setRowCount(0)
+            return
+
+        metrics = cyclic_hysteresis_metrics(x, y)
+        dof_names = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+        dof_name = (
+            dof_names[control_dof - 1]
+            if control_dof in range(1, 7)
+            else f"DOF {control_dof}"
+        )
+        self.cyclic_info.setText(
+            f"Control node {control_node if control_node is not None else '-'} "
+            f"· {dof_name} · X = control displacement · "
+            "Y = applied base shear (-Σ support reactions)"
+        )
+
+        energy = metrics.get("dissipated_energy")
+        if energy is None:
+            energy_text = (
+                f"path work={abs(float(metrics.get('signed_work', 0.0))):.6g} "
+                "(protocol not closed)"
+            )
+        else:
+            energy_text = f"{float(energy):.6g}"
+
+        self.cyclic_metrics.setText(
+            f"Peak |u|: {float(metrics['max_abs_displacement']):.6g}   "
+            f"Peak |V|: {float(metrics['max_abs_force']):.6g}   "
+            f"Hysteretic energy: {energy_text}"
+        )
+        self.cyclic_plot.set_series(x, y)
+
+        reversals = metrics.get("reversals", [])
+        if not isinstance(reversals, list):
+            reversals = []
+        self.cyclic_reversal_table.setRowCount(len(reversals))
+        for row, reversal in enumerate(reversals, start=0):
+            if not isinstance(reversal, dict):
+                continue
+            stiffness = reversal.get("secant_stiffness")
+            stiffness_text = (
+                f"{float(stiffness):.6g}"
+                if stiffness is not None and math.isfinite(float(stiffness))
+                else "-"
+            )
+            values = [
+                str(row + 1),
+                f"{float(reversal.get('displacement', 0.0)):.6g}",
+                f"{float(reversal.get('force', 0.0)):.6g}",
+                stiffness_text,
+            ]
+            for column, value in enumerate(values):
+                self.cyclic_reversal_table.setItem(
+                    row,
+                    column,
+                    QTableWidgetItem(value),
+                )
 
     def _update_history_plot(self) -> None:
         time, values, quantity, node_tag, dof = self._history_selection()
