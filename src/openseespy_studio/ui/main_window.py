@@ -934,6 +934,7 @@ class MainWindow(QMainWindow):
             "enabled": False,
         }
         self._last_result: dict[str, object] = {}
+        self._active_solution_result_tag: int | None = None
         self._dirty = False
         self._job_ui_timer = QTimer(self)
         self._job_ui_timer.setInterval(1000)
@@ -1893,11 +1894,13 @@ class MainWindow(QMainWindow):
         job_id: int | None = None
         show_jobs_root = False
 
+        selected_payload_kinds: set[str] = set()
         for item in self.tree.selectedItems():
             payload = item.data(0, Qt.UserRole)
             if not payload:
                 continue
             kind, tag = payload
+            selected_payload_kinds.add(str(kind))
             if kind == "node":
                 nodes.add(tag)
             elif kind == "element":
@@ -1941,6 +1944,15 @@ class MainWindow(QMainWindow):
                 job_id = int(tag)
             elif kind == "jobs_root":
                 show_jobs_root = True
+
+        if (
+            solution_result_tag is None
+            and "solution_root" not in selected_payload_kinds
+            and "solution_information" not in selected_payload_kinds
+            and "solution_convergence" not in selected_payload_kinds
+            and "solver_output" not in selected_payload_kinds
+        ):
+            self._active_solution_result_tag = None
 
         self.selection.set_selection(nodes=nodes, elements=elements)
         if material_tag is not None:
@@ -2110,6 +2122,17 @@ class MainWindow(QMainWindow):
             self.tree.scrollToItem(first_item)
 
         total = len(nodes) + len(elements)
+        if (
+            self._active_solution_result_tag is not None
+            and self._active_solution_result_tag
+            in self.project.solution_results
+        ):
+            self.status_message.setText(
+                f"Selection for result scope: "
+                f"{len(nodes)} node(s), {len(elements)} element(s)"
+            )
+            return
+
         if total == 1:
             if nodes:
                 self._show_entity_properties("node", next(iter(nodes)))
@@ -4522,6 +4545,7 @@ class MainWindow(QMainWindow):
         result = self.project.solution_results.get(int(tag))
         if result is None:
             return
+        self._active_solution_result_tag = int(tag)
         analysis = self.project.analyses.get(result.analysis_tag)
         self.properties_panel.set_solution_result(
             result,
@@ -6476,6 +6500,7 @@ class MainWindow(QMainWindow):
             "enabled": False,
         }
         self._last_result = {}
+        self._active_solution_result_tag = None
         self.viewport.clear_result_overlay()
         self.results_panel.clear_all()
 
