@@ -103,6 +103,11 @@ class ModelViewport(QWidget):
             list[tuple[object, dict[str, object]]],
         ] = OrderedDict()
         self._result_view_cache_limit = 18
+        self._motion_element_mesh = None
+        self._motion_node_mesh = None
+        self._motion_element_node_tags: list[int] = []
+        self._motion_node_tags: list[int] = []
+        self._motion_topology_key: object | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -1620,10 +1625,17 @@ class ModelViewport(QWidget):
             "result-contour-nodes",
             "result-hinge-members",
             "result-hinge-points",
+            "motion-overlay",
+            "motion-nodes",
         ):
             self._remove_overlay(name)
         self._result_overlay_active = False
         self._active_result_view_key = None
+        self._motion_element_mesh = None
+        self._motion_node_mesh = None
+        self._motion_element_node_tags = []
+        self._motion_node_tags = []
+        self._motion_topology_key = None
         if render:
             self.plotter.render()
 
@@ -2404,6 +2416,139 @@ class ModelViewport(QWidget):
 
         self._remember_result_view(view_key, entries)
         self._result_overlay_active = True
+        self.plotter.render()
+
+    def show_motion_frame(
+        self,
+        vectors: dict[str, object],
+        *,
+        scale: float = 1.0,
+        auto_scale: bool = True,
+        reference_magnitude: float = 0.0,
+    ) -> None:
+        """Update a persistent deformation overlay for animation playback."""
+        if self._model is None or not self._model.nodes:
+            return
+
+        visible_elements = tuple(sorted(self._visible_element_tags()))
+        visible_nodes = tuple(sorted(self._visible_node_tags()))
+        topology_key = (visible_elements, visible_nodes)
+
+        if (
+            self._motion_topology_key != topology_key
+            or self._motion_element_mesh is None
+            or self._motion_node_mesh is None
+        ):
+            self.clear_result_overlay(render=False)
+
+            element_points: list[tuple[float, float, float]] = []
+            element_lines: list[int] = []
+            element_node_tags: list[int] = []
+            for element_tag in visible_elements:
+                element = self._model.elements.get(element_tag)
+                if element is None:
+                    continue
+                if (
+                    element.i not in self._model.nodes
+                    or element.j not in self._model.nodes
+                ):
+                    continue
+                index = len(element_points)
+                element_points.extend(
+                    (
+                        self._model.nodes[element.i].xyz,
+                        self._model.nodes[element.j].xyz,
+                    )
+                )
+                element_node_tags.extend((element.i, element.j))
+                element_lines.extend((2, index, index + 1))
+
+            if element_points:
+                mesh = pv.PolyData(
+                    np.asarray(element_points, dtype=float)
+                )
+                mesh.lines = np.asarray(element_lines, dtype=np.int64)
+                self.plotter.add_mesh(
+                    mesh,
+                    name="motion-overlay",
+                    color="#d94848",
+                    line_width=5,
+                    render_lines_as_tubes=True,
+                    pickable=False,
+                    render=False,
+                )
+                self._motion_element_mesh = mesh
+                self._motion_element_node_tags = element_node_tags
+
+            node_points = [
+                self._model.nodes[tag].xyz
+                for tag in visible_nodes
+                if tag in self._model.nodes
+            ]
+            node_tags = [
+                tag for tag in visible_nodes if tag in self._model.nodes
+            ]
+            if node_points:
+                node_mesh = pv.PolyData(
+                    np.asarray(node_points, dtype=float)
+                )
+                self.plotter.add_mesh(
+                    node_mesh,
+                    name="motion-nodes",
+                    color="#d94848",
+                    render_points_as_spheres=True,
+                    point_size=7,
+                    pickable=False,
+                    render=False,
+                )
+                self._motion_node_mesh = node_mesh
+                self._motion_node_tags = node_tags
+
+            self._motion_topology_key = topology_key
+
+        effective_scale = float(scale)
+        reference = abs(float(reference_magnitude))
+        if auto_scale and reference > 1.0e-15:
+            low, high = self._model.bounds()
+            span = max(
+                high[0] - low[0],
+                high[1] - low[1],
+                high[2] - low[2],
+                1.0,
+            )
+            effective_scale *= 0.12 * span / reference
+
+        def displaced(tag: int) -> tuple[float, float, float]:
+            node = self._model.nodes[tag]
+            raw = vectors.get(
+                str(tag),
+                vectors.get(tag, (0.0, 0.0, 0.0)),
+            )
+            values = list(raw) if raw is not None else []
+            while len(values) < 3:
+                values.append(0.0)
+            return (
+                node.xyz[0] + effective_scale * float(values[0]),
+                node.xyz[1] + effective_scale * float(values[1]),
+                node.xyz[2] + effective_scale * float(values[2]),
+            )
+
+        if self._motion_element_mesh is not None:
+            self._motion_element_mesh.points = np.asarray(
+                [
+                    displaced(tag)
+                    for tag in self._motion_element_node_tags
+                ],
+                dtype=float,
+            )
+        if self._motion_node_mesh is not None:
+            self._motion_node_mesh.points = np.asarray(
+                [displaced(tag) for tag in self._motion_node_tags],
+                dtype=float,
+            )
+
+        self._result_overlay_active = True
+        self._active_result_view_key = None
         self.plotter.render()
 
     def show_deformed_shape(
