@@ -1497,7 +1497,14 @@ class MainWindow(QMainWindow):
                 "Beam Loads",
                 "load",
                 "element_loads",
-                "Show applied beam/column load vectors and values",
+                "Show applied beam/column load vectors",
+            ),
+            (
+                "show_load_values",
+                "Load Values",
+                "plot",
+                "load_values",
+                "Show numeric values for visible applied loads",
             ),
         ):
             self._make_action(
@@ -1680,6 +1687,7 @@ class MainWindow(QMainWindow):
                 "show_element_numbers",
                 "show_nodal_loads",
                 "show_element_loads",
+                "show_load_values",
             ),
         )
         display_page.finish()
