@@ -2069,19 +2069,19 @@ class MainWindow(QMainWindow):
 
         self.model_representation_combo = QComboBox()
         self.model_representation_combo.setFixedWidth(132)
+        self.model_representation_combo.addItem("Tube", "tube")
         self.model_representation_combo.addItem(
             "Actual Section",
             "actual_section",
         )
-        self.model_representation_combo.addItem("Tube", "tube")
         self.model_representation_combo.addItem(
             "Centerline",
             "centerline",
         )
         self.model_representation_combo.setToolTip(
-            "Model-view member representation. Actual Section uses the "
-            "stored section geometry and falls back to Tube when geometry "
-            "is unavailable."
+            "Model-view member representation. Tube is the lightweight "
+            "default; use Actual Section to inspect real section size and "
+            "orientation, or Centerline for the simplest view."
         )
         self.model_representation_combo.currentIndexChanged.connect(
             lambda _index: self.viewport.set_model_representation(
