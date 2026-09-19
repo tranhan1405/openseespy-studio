@@ -5040,6 +5040,256 @@ class MainWindow(QMainWindow):
         self._record_project_change(f"Create named selection {name}", before)
         self.status_message.setText(f"Created named selection: {name}")
 
+    def _populate_result_choice_menu(
+        self,
+        parent_menu: QMenu,
+        analysis_type: str,
+        callback,
+    ) -> None:
+        categories: dict[str, QMenu] = {}
+        for choice in result_choices_for_analysis(analysis_type):
+            submenu = categories.get(choice.category)
+            if submenu is None:
+                submenu = parent_menu.addMenu(choice.category)
+                categories[choice.category] = submenu
+            action = submenu.addAction(choice.label)
+            action.triggered.connect(
+                lambda checked=False, ch=choice: callback(
+                    ch.result_type,
+                    ch.name,
+                    dict(ch.settings),
+                )
+            )
+
+    def _render_result_data(
+        self,
+        result: dict[str, object],
+        result_type: str,
+        settings: dict[str, object] | None = None,
+        *,
+        node_scope: set[int] | None = None,
+        element_scope: set[int] | None = None,
+        restore_scope_selection: bool = False,
+    ) -> None:
+        payload = dict(result or {})
+        if not payload:
+            self.status_message.setText("No result data available")
+            return
+
+        options = dict(settings or {})
+        nodes = set(node_scope or ())
+        elements = set(element_scope or ())
+        options["_node_scope"] = sorted(nodes)
+        options["_element_scope"] = sorted(elements)
+
+        self._last_result = payload
+        self.results_panel.set_result(payload)
+        self.results_panel.show_solution_result(result_type, options)
+        self.results_dock.show()
+        self.results_dock.raise_()
+
+        if restore_scope_selection and (nodes or elements):
+            self.selection.set_selection(
+                nodes=nodes,
+                elements=elements,
+            )
+
+        if result_type == "DeformedShape":
+            self.viewport.show_deformed_shape(
+                payload,
+                scale=float(options.get("scale", 10.0)),
+                node_tags=nodes or None,
+                element_tags=elements or None,
+            )
+        elif result_type in {"NodalDisplacement", "NodalReaction"}:
+            quantity = (
+                "Reaction"
+                if result_type == "NodalReaction"
+                else "Displacement"
+            )
+            component = str(
+                options.get(
+                    "component",
+                    "FX" if quantity == "Reaction" else "|U|",
+                )
+            )
+            self.viewport.show_node_contour(
+                payload,
+                quantity,
+                component,
+                node_tags=nodes or None,
+                element_tags=elements or None,
+            )
+        elif result_type == "MemberForce":
+            self.viewport.show_member_force_diagram(
+                payload,
+                self.project.transformations,
+                str(options.get("component", "Mz")),
+                scale=float(options.get("scale", 1.0)),
+                element_tags=elements or None,
+            )
+        elif result_type == "HingeState":
+            self.viewport.show_hinge_states(
+                payload,
+                element_tags=elements or None,
+            )
+        elif result_type == "ModeShape":
+            modes = payload.get("modes", {})
+            mode = int(options.get("mode", 1))
+            if isinstance(modes, dict) and str(mode) not in modes and modes:
+                mode = min(int(key) for key in modes)
+            self.viewport.show_mode_shape(
+                payload,
+                mode,
+                scale=float(options.get("scale", 1.0)),
+                node_tags=nodes or None,
+                element_tags=elements or None,
+            )
+
+    def _show_job_properties(self, job_id: int) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None:
+            return
+        self.properties_panel.set_properties(
+            f"Job {job.job_id}",
+            [
+                ("Analysis", job.analysis_name),
+                ("Type", job.analysis_type),
+                ("Status", job.status),
+                ("Progress", f"{job.progress_percent:.1f}%"),
+                ("Algorithm", job.current_algorithm or "-"),
+                ("Iterations", job.iterations),
+                ("Result data", "Available" if job.results else "Not available"),
+                ("Message", job.message or "-"),
+            ],
+        )
+
+    def _activate_job_result(self, job_id: int) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None or not job.results:
+            self.status_message.setText(
+                f"Job {job_id} has no captured result data."
+            )
+            return
+        self._last_result = dict(job.results)
+        self.results_panel.set_result(self._last_result)
+        self.results_panel.show_jobs()
+        self.results_dock.show()
+        self.results_dock.raise_()
+        self._show_job_properties(job.job_id)
+        self.status_message.setText(
+            f"Job {job.job_id} is the active quick-plot result source."
+        )
+
+    def _quick_plot_job_result(
+        self,
+        job_id: int,
+        result_type: str,
+        name: str,
+        settings: dict[str, object],
+    ) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None or not job.results:
+            self.status_message.setText(
+                f"Job {job_id} has no captured result data."
+            )
+            return
+        self._active_solution_result_tag = None
+        self._render_result_data(
+            dict(job.results),
+            result_type,
+            settings,
+        )
+        self.properties_panel.set_properties(
+            f"Quick Plot · {name}",
+            [
+                ("Job", job.job_id),
+                ("Analysis", job.analysis_name),
+                ("Type", job.analysis_type),
+                ("Plot", name),
+                ("Persistence", "Temporary"),
+                ("Save", "Use Job → Add Plot to Solution"),
+            ],
+        )
+        self.status_message.setText(
+            f"Job {job.job_id} · quick plot: {name}"
+        )
+
+    def _add_job_plot_to_solution(
+        self,
+        job_id: int,
+        result_type: str,
+        name: str,
+        settings: dict[str, object],
+    ) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None or job.analysis_tag is None:
+            return
+        if job.analysis_tag not in self.project.analyses:
+            QMessageBox.warning(
+                self,
+                "Add Plot to Solution",
+                "The analysis used by this job no longer exists.",
+            )
+            return
+
+        before = self.project.to_dict()
+        result_object = SolutionResultData(
+            tag=self.project.next_solution_result_tag(),
+            analysis_tag=int(job.analysis_tag),
+            name=str(name),
+            result_type=str(result_type),
+            settings=dict(settings),
+        )
+        try:
+            self.project.add_solution_result(result_object)
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Add Plot to Solution",
+                str(exc),
+            )
+            return
+
+        self._record_project_change(
+            f"Add Job {job.job_id} plot to Solution",
+            before,
+        )
+        self._refresh_tree()
+        if job.results:
+            self._render_result_data(
+                dict(job.results),
+                result_type,
+                settings,
+            )
+        self._show_solution_result_properties(result_object.tag)
+        self.status_message.setText(
+            f"Added {name} to Solution for {job.analysis_name}. "
+            "Future Evaluate uses the latest job for that analysis."
+        )
+
+    def _export_job_result_json(self, job_id: int) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None or not job.results:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Job Results",
+            f"job_{job.job_id}_results.json",
+            "JSON files (*.json);;All files (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".json"):
+            path += ".json"
+        Path(path).write_text(
+            json.dumps(job.results, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        self.status_message.setText(
+            f"Exported Job {job.job_id} results to {Path(path).name}"
+        )
+
     def _show_tree_context_menu(self, position) -> None:
         item = self.tree.itemAt(position)
         if item is None:
