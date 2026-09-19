@@ -71,7 +71,7 @@ def test_material_generator_lines():
     line = material_to_openseespy(steel)
 
     assert "Steel02" in line
-    assert "3.55e+08" in line
+    assert "355000" in line
     assert line.startswith("ops.uniaxialMaterial")
 
 
@@ -90,7 +90,7 @@ def test_full_script_contains_project_materials():
     script = to_openseespy(model, {1: material})
 
     assert "# Materials" in script
-    assert "ops.uniaxialMaterial('Elastic', 1, 2e+11)" in script
+    assert "ops.uniaxialMaterial('Elastic', 1, 2e+08)" in script
 
 
 def test_v1_empty_material_dictionary_still_loads():
@@ -102,3 +102,27 @@ def test_v1_empty_material_dictionary_still_loads():
     restored = ProjectDatabase.from_dict(data)
 
     assert restored.materials == {}
+
+
+def test_material_generator_can_use_n_m_s_without_stress_scaling():
+    steel = MaterialData(
+        tag=5,
+        name="Steel SI",
+        material_type="Steel02",
+        parameters={
+            "Fy": 355e6,
+            "E0": 200e9,
+            "b": 0.01,
+            "R0": 20.0,
+            "cR1": 0.925,
+            "cR2": 0.15,
+        },
+    )
+
+    line = material_to_openseespy(
+        steel,
+        {"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert "3.55e+08" in line
+    assert "2e+11" in line

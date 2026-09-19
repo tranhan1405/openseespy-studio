@@ -6,6 +6,7 @@ from typing import Iterable
 
 from .beam_loads import resolve_self_weight_local
 from .project import AnalysisSettingsData, ProjectDatabase
+from .units import UnitSystem
 
 
 FRAME_ELEMENT_TYPES = {
@@ -448,6 +449,7 @@ def _element_load_checks(
                     project.sections,
                     project.materials,
                     project.transformations,
+                    project.units,
                 )
             except ValueError as exc:
                 issues.append(
@@ -541,6 +543,21 @@ def validate_project(
     analysis: AnalysisSettingsData | None = None,
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
+
+    try:
+        UnitSystem.from_mapping(project.units)
+    except ValueError as exc:
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Units",
+                str(exc),
+                suggestion=(
+                    "Use a supported consistent model unit system before "
+                    "running the analysis."
+                ),
+            )
+        )
 
     if not project.model.nodes:
         issues.append(

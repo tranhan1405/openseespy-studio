@@ -103,8 +103,8 @@ def test_section_generator_uses_linked_material_properties():
 
     line = section_to_openseespy(section, {1: material})[0]
 
-    assert "2.1e+11" in line
-    assert "8.07692e+10" in line
+    assert "2.1e+08" in line
+    assert "8.07692e+07" in line
     assert "0.02" in line
 
 
@@ -123,8 +123,8 @@ def test_element_generator_uses_linked_section_material_properties():
         sections={10: section},
     )
 
-    assert "2.1e+11" in script
-    assert "8.07692e+10" in script
+    assert "2.1e+08" in script
+    assert "8.07692e+07" in script
 
 
 def test_legacy_elastic_section_without_material_remains_manual():

@@ -70,7 +70,7 @@ class MaterialDialog(QDialog):
         )
 
         form.addRow("Poisson ratio ν:", self.poisson_ratio)
-        form.addRow("Density:", self.density)
+        form.addRow("Density ρ [kg/m³]:", self.density)
         root.addLayout(form)
 
         scroll = QScrollArea()
@@ -134,7 +134,17 @@ class MaterialDialog(QDialog):
                     )
                 )
             )
-            self.parameter_form.addRow(f"{key}:", spin)
+            stress_keys = {
+                "E",
+                "Fy",
+                "E0",
+                "fpc",
+                "fpcu",
+                "ft",
+                "Ets",
+            }
+            label = f"{key} [Pa]:" if key in stress_keys else f"{key}:"
+            self.parameter_form.addRow(label, spin)
             self._parameter_spins[key] = spin
 
     def material_data(self) -> MaterialData:

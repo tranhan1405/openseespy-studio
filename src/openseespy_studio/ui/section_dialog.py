@@ -44,6 +44,7 @@ from ..section_visualization import (
     equivalent_fiber_radius,
     section_preview_bounds,
 )
+from ..units import UnitSystem
 from ..project import (
     FiberComponentData,
     FiberData,
@@ -1132,8 +1133,9 @@ class SectionShapeSketchWidget(QWidget):
 class ElasticGeometryDialog(QDialog):
     SHAPES = ("Rectangle", "Circle", "Hollow Circle", "T", "I")
 
-    def __init__(self, parent=None):
+    def __init__(self, *, units=None, parent=None):
         super().__init__(parent)
+        self.unit_system = UnitSystem.from_mapping(units)
         self.setWindowTitle("Elastic Section Geometry")
         self.setModal(True)
         self.resize(760, 470)
@@ -1165,13 +1167,14 @@ class ElasticGeometryDialog(QDialog):
             form.addRow(label_widget, spin)
             spin.valueChanged.connect(self._update_preview)
 
-        add_field("height", "Height H (local y):", 0.50)
-        add_field("width", "Width B (local z):", 0.40)
-        add_field("outer_diameter", "Outer diameter Do:", 0.50)
-        add_field("inner_diameter", "Inner diameter Di:", 0.30)
-        add_field("flange_width", "Flange width Bf:", 0.60)
-        add_field("flange_thickness", "Flange thickness tf:", 0.12)
-        add_field("web_width", "Web width bw:", 0.20)
+        lu = self.unit_system.length
+        add_field("height", f"Height H (local y) [{lu}]:", 0.50)
+        add_field("width", f"Width B (local z) [{lu}]:", 0.40)
+        add_field("outer_diameter", f"Outer diameter Do [{lu}]:", 0.50)
+        add_field("inner_diameter", f"Inner diameter Di [{lu}]:", 0.30)
+        add_field("flange_width", f"Flange width Bf [{lu}]:", 0.60)
+        add_field("flange_thickness", f"Flange thickness tf [{lu}]:", 0.12)
+        add_field("web_width", f"Web width bw [{lu}]:", 0.20)
 
         self.result_label = QLabel()
         self.result_label.setWordWrap(True)
@@ -1277,10 +1280,13 @@ class ShapeTemplateDialog(QDialog):
         self,
         materials: dict[int, MaterialData],
         shape: str,
+        *,
+        units=None,
         parent=None,
     ):
         super().__init__(parent)
         self.materials = materials
+        self.unit_system = UnitSystem.from_mapping(units)
         self.shape = str(shape).upper()
         if self.shape not in {"RECTANGLE", "CIRCLE", "T", "I"}:
             raise ValueError(f"Unsupported section template: {shape}")
@@ -1318,25 +1324,34 @@ class ShapeTemplateDialog(QDialog):
         if self.shape == "RECTANGLE":
             self.height = _float_spin(0.50, low=1.0e-9)
             self.width = _float_spin(0.40, low=1.0e-9)
-            form.addRow("Height H (local y):", self.height)
-            form.addRow("Width B (local z):", self.width)
+            lu = self.unit_system.length
+            form.addRow(f"Height H (local y) [{lu}]:", self.height)
+            form.addRow(f"Width B (local z) [{lu}]:", self.width)
         elif self.shape == "CIRCLE":
             self.outer_diameter = _float_spin(0.50, low=1.0e-9)
             self.inner_diameter = _float_spin(0.0, low=0.0)
-            form.addRow("Outer diameter Do:", self.outer_diameter)
-            form.addRow("Inner diameter Di (0 = solid):", self.inner_diameter)
+            lu = self.unit_system.length
+            form.addRow(f"Outer diameter Do [{lu}]:", self.outer_diameter)
+            form.addRow(
+                f"Inner diameter Di [{lu}] (0 = solid):",
+                self.inner_diameter,
+            )
         else:
             self.height = _float_spin(0.60, low=1.0e-9)
             self.flange_width = _float_spin(0.60, low=1.0e-9)
             self.flange_thickness = _float_spin(0.15, low=1.0e-9)
             self.web_width = _float_spin(0.25, low=1.0e-9)
-            form.addRow("Total height H (local y):", self.height)
-            form.addRow("Flange width Bf (local z):", self.flange_width)
-            form.addRow("Flange thickness tf:", self.flange_thickness)
-            form.addRow("Web width bw:", self.web_width)
+            lu = self.unit_system.length
+            form.addRow(f"Total height H (local y) [{lu}]:", self.height)
+            form.addRow(f"Flange width Bf (local z) [{lu}]:", self.flange_width)
+            form.addRow(f"Flange thickness tf [{lu}]:", self.flange_thickness)
+            form.addRow(f"Web width bw [{lu}]:", self.web_width)
 
         self.cover = _float_spin(0.04, low=0.0)
-        form.addRow("Concrete cover c:", self.cover)
+        form.addRow(
+            f"Concrete cover c [{self.unit_system.length}]:",
+            self.cover,
+        )
 
         self.core_material = QComboBox()
         self.cover_material = QComboBox()
@@ -1369,7 +1384,10 @@ class ShapeTemplateDialog(QDialog):
                 )
             self.bar_diameter = _float_spin(0.02, low=1.0e-9)
             form.addRow("Rebar material:", self.rebar_material)
-            form.addRow("Bar diameter:", self.bar_diameter)
+            form.addRow(
+                f"Bar diameter [{self.unit_system.length}]:",
+                self.bar_diameter,
+            )
 
             if self.shape == "RECTANGLE":
                 self.bars_top = _nonnegative_int(4, 100)
@@ -1574,6 +1592,7 @@ class SectionDialog(QDialog):
         section: SectionData | None = None,
         *,
         next_tag: int = 1,
+        units=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -1581,6 +1600,7 @@ class SectionDialog(QDialog):
         self.setModal(True)
         self.resize(1040, 700)
         self.materials = materials
+        self.unit_system = UnitSystem.from_mapping(units)
         self._initial_section = section
         self._components = [
             FiberComponentData.from_dict(component.to_dict())
@@ -1684,7 +1704,16 @@ class SectionDialog(QDialog):
                 else SECTION_DEFAULTS["Elastic"][key]
             )
             spin = _float_spin(initial)
-            form.addRow(f"{key}:", spin)
+            lu = self.unit_system.length
+            labels = {
+                "E": "E [Pa]:",
+                "G": "G [Pa]:",
+                "A": f"A [{lu}²]:",
+                "Iy": f"Iy [{lu}⁴]:",
+                "Iz": f"Iz [{lu}⁴]:",
+                "J": f"J [{lu}⁴]:",
+            }
+            form.addRow(labels.get(key, f"{key}:"), spin)
             self.elastic_spins[key] = spin
 
         self.elastic_material.currentIndexChanged.connect(
@@ -1711,7 +1740,11 @@ class SectionDialog(QDialog):
         )
         self.gj = _float_spin(gj_value, low=0.0)
         self.gj.valueChanged.connect(self._update_fiber_outputs)
-        gj_form.addRow("Torsional stiffness GJ:", self.gj)
+        gj_form.addRow(
+            f"Torsional stiffness GJ "
+            f"[{self.unit_system.force}·{self.unit_system.length}²]:",
+            self.gj,
+        )
         root.addLayout(gj_form)
 
         self.fiber_tabs = QTabWidget()
@@ -1899,7 +1932,10 @@ class SectionDialog(QDialog):
         return page
 
     def _apply_elastic_geometry_template(self) -> None:
-        dialog = ElasticGeometryDialog(parent=self)
+        dialog = ElasticGeometryDialog(
+            units=self.unit_system.as_mapping(),
+            parent=self,
+        )
         if not dialog.exec():
             return
         props = dialog.properties()
@@ -2067,6 +2103,7 @@ class SectionDialog(QDialog):
         dialog = ShapeTemplateDialog(
             self.materials,
             shape,
+            units=self.unit_system.as_mapping(),
             parent=self,
         )
         if not dialog.exec():
@@ -2234,8 +2271,9 @@ class SectionDialog(QDialog):
             f"Components: {len(section.fiber_components)}   ·   "
             f"Manual fibers: {len(section.fibers)}   ·   "
             f"Compiled fibers: {len(fibers)}   ·   "
-            f"Area: {total_area:.6g}   ·   "
-            f"Centroid (y,z): ({cy:.6g}, {cz:.6g})"
+            f"Area: {total_area:.6g} {self.unit_system.length}²   ·   "
+            f"Centroid (y,z): ({cy:.6g}, {cz:.6g}) "
+            f"{self.unit_system.length}"
         )
 
         issues = validate_fiber_section_geometry(
@@ -2272,7 +2310,11 @@ class SectionDialog(QDialog):
                 "Validation: geometry checks passed."
             )
         try:
-            lines = section_to_openseespy(section, self.materials)
+            lines = section_to_openseespy(
+                section,
+                self.materials,
+                self.unit_system.as_mapping(),
+            )
             self.generated_code.setPlainText("\n".join(lines))
         except ValueError as exc:
             self.generated_code.setPlainText(f"# {exc}")

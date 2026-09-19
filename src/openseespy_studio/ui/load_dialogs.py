@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..project import ElementLoadData, LoadPatternData, NodalLoadData, TimeSeriesData
+from ..units import UnitSystem
 
 
 def _spin(value=0.0, low=-1e20, high=1e20):
@@ -14,12 +15,19 @@ def _spin(value=0.0, low=-1e20, high=1e20):
 
 class MassDialog(QDialog):
     labels=("MX","MY","MZ","MRX","MRY","MRZ")
-    def __init__(self, initial=None, parent=None):
+    def __init__(self, initial=None, *, units=None, parent=None):
         super().__init__(parent); self.setWindowTitle("Nodal Mass"); self.setModal(True)
         root=QVBoxLayout(self); form=QFormLayout()
+        unit_system=UnitSystem.from_mapping(units)
         vals=tuple(initial or (0.0,)*6); self.spins=[]
-        for label,val in zip(self.labels, vals):
-            s=_spin(val,0.0,1e20); form.addRow(label+":",s); self.spins.append(s)
+        for index,(label,val) in enumerate(zip(self.labels, vals)):
+            s=_spin(val,0.0,1e20)
+            unit_label=(
+                unit_system.mass_label
+                if index < 3
+                else f"{unit_system.mass_label}·{unit_system.length}²"
+            )
+            form.addRow(f"{label} [{unit_label}]:",s); self.spins.append(s)
         root.addLayout(form)
         b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); root.addWidget(b)
     def values(self): return tuple(s.value() for s in self.spins)
@@ -91,8 +99,9 @@ class LoadPatternDialog(QDialog):
 
 class NodalLoadDialog(QDialog):
     labels=("FX","FY","FZ","MX","MY","MZ")
-    def __init__(self, patterns, load=None, *, next_tag=1, node_tag=1, parent=None):
+    def __init__(self, patterns, load=None, *, next_tag=1, node_tag=1, units=None, parent=None):
         super().__init__(parent); self.setWindowTitle("Nodal Load Editor"); self.setModal(True)
+        self.unit_system=UnitSystem.from_mapping(units)
         root=QVBoxLayout(self); form=QFormLayout()
         self.tag=QSpinBox(); self.tag.setRange(1,2147483647); self.tag.setValue(load.tag if load else next_tag)
         self.name=QLineEdit(load.name if load else f"Nodal Load {next_tag}")
@@ -106,8 +115,14 @@ class NodalLoadDialog(QDialog):
         self.node=QSpinBox(); self.node.setRange(1,2147483647); self.node.setValue(load.node_tag if load else node_tag)
         form.addRow("Tag:",self.tag); form.addRow("Name:",self.name); form.addRow("Plain pattern:",self.pattern); form.addRow("Node:",self.node)
         vals=load.values if load else (0.0,)*6; self.spins=[]
-        for label,val in zip(self.labels,vals):
-            s=_spin(val); form.addRow(label+":",s); self.spins.append(s)
+        for index,(label,val) in enumerate(zip(self.labels,vals)):
+            s=_spin(val)
+            unit_label=(
+                self.unit_system.force
+                if index < 3
+                else f"{self.unit_system.force}·{self.unit_system.length}"
+            )
+            form.addRow(f"{label} [{unit_label}]:",s); self.spins.append(s)
         root.addLayout(form)
         b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self._accept); b.rejected.connect(self.reject); root.addWidget(b)
     def data(self):
@@ -128,12 +143,14 @@ class ElementLoadDialog(QDialog):
         *,
         next_tag=1,
         element_tag=1,
+        units=None,
         parent=None,
     ):
         super().__init__(parent)
         self.setWindowTitle("Beam / Element Load Editor")
         self.setModal(True)
-        self.resize(470, 480)
+        self.resize(500, 500)
+        self.unit_system = UnitSystem.from_mapping(units)
 
         root = QVBoxLayout(self)
         form = QFormLayout()
@@ -183,9 +200,10 @@ class ElementLoadDialog(QDialog):
         self.wx = _spin(load.wx if load else 0.0)
         self.wy = _spin(load.wy if load else 0.0)
         self.wz = _spin(load.wz if load else 0.0)
-        form.addRow("Uniform Wx (local x):", self.wx)
-        form.addRow("Uniform Wy (local y):", self.wy)
-        form.addRow("Uniform Wz (local z):", self.wz)
+        line_unit = self.unit_system.line_load_label
+        form.addRow(f"Uniform Wx (local x) [{line_unit}]:", self.wx)
+        form.addRow(f"Uniform Wy (local y) [{line_unit}]:", self.wy)
+        form.addRow(f"Uniform Wz (local z) [{line_unit}]:", self.wz)
 
         self.px = _spin(load.px if load else 0.0)
         self.py = _spin(load.py if load else 0.0)
@@ -195,9 +213,10 @@ class ElementLoadDialog(QDialog):
             0.0,
             1.0,
         )
-        form.addRow("Point Px (local x):", self.px)
-        form.addRow("Point Py (local y):", self.py)
-        form.addRow("Point Pz (local z):", self.pz)
+        force_unit = self.unit_system.force
+        form.addRow(f"Point Px (local x) [{force_unit}]:", self.px)
+        form.addRow(f"Point Py (local y) [{force_unit}]:", self.py)
+        form.addRow(f"Point Pz (local z) [{force_unit}]:", self.pz)
         form.addRow("Location x/L:", self.x_over_l)
 
         gravity = load.gravity if load else (0.0, 0.0, -9.81)
@@ -209,16 +228,17 @@ class ElementLoadDialog(QDialog):
             0.0,
             1.0e20,
         )
-        form.addRow("Gravity GX:", self.gx)
-        form.addRow("Gravity GY:", self.gy)
-        form.addRow("Gravity GZ:", self.gz)
-        form.addRow("Density override:", self.density)
+        form.addRow("Gravity GX [m/s²]:", self.gx)
+        form.addRow("Gravity GY [m/s²]:", self.gy)
+        form.addRow("Gravity GZ [m/s²]:", self.gz)
+        form.addRow("Density override [kg/m³]:", self.density)
 
         root.addLayout(form)
         note = QLabel(
             "Self Weight: density override = 0 uses the linked material "
-            "density. With SI inputs, density [kg/m³] × A [m²] × gravity "
-            "[m/s²] gives line load [N/m]."
+            "density. Density [kg/m³] and gravity [m/s²] are physical SI "
+            "inputs; Studio converts them automatically and generates "
+            f"self-weight in [{self.unit_system.line_load_label}]."
         )
         note.setWordWrap(True)
         root.addWidget(note)

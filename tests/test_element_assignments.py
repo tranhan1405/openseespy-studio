@@ -98,7 +98,7 @@ def test_generator_uses_assigned_elastic_section_and_transformation():
     assert "ops.geomTransf('PDelta', 4, 0, 1, 0)" in script
     assert (
         "ops.element('elasticBeamColumn', 1, 1, 2, "
-        "0.025, 2.1e+11, 8e+10, 6e-05, 7e-05, 9e-05, 4)"
+        "0.025, 2.1e+08, 8e+07, 6e-05, 7e-05, 9e-05, 4)"
         in script
     )
 

@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from .model import StructuralModel
+from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 13
+PROJECT_FORMAT_VERSION = 14
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -1149,11 +1150,7 @@ class ProjectDatabase:
     active_analysis_tag: int | None = None
 
     units: dict[str, str] = field(
-        default_factory=lambda: {
-            "length": "m",
-            "force": "kN",
-            "time": "s",
-        }
+        default_factory=lambda: dict(DEFAULT_PROJECT_UNITS)
     )
 
     def next_material_tag(self) -> int:
@@ -2002,13 +1999,15 @@ class ProjectDatabase:
                 if data.get("active_analysis_tag") is not None
                 else None
             ),
-            units={
-                str(key): str(value)
-                for key, value in data.get(
-                    "units",
-                    {"length": "m", "force": "kN", "time": "s"},
-                ).items()
-            },
+            units=normalize_project_units(
+                {
+                    str(key): str(value)
+                    for key, value in data.get(
+                        "units",
+                        DEFAULT_PROJECT_UNITS,
+                    ).items()
+                }
+            ),
         )
 
     def save(self, path: str | Path) -> None:

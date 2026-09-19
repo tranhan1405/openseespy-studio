@@ -210,7 +210,7 @@ def test_self_weight_horizontal_beam_projects_global_z_to_local_z():
     )
 
     assert text == (
-        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', 0, -2000, 0)"
+        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', 0, -2, 0)"
     )
 
 
@@ -228,7 +228,7 @@ def test_self_weight_vertical_column_projects_global_z_to_local_x():
     )
 
     assert text == (
-        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', 0, 0, -2000)"
+        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', 0, 0, -2)"
     )
 
 
@@ -269,7 +269,7 @@ def test_self_weight_density_override_works_without_linked_material():
     )
 
     assert text == (
-        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', 0, -500, 0)"
+        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', 0, -0.5, 0)"
     )
 
 
@@ -319,3 +319,33 @@ def test_prune_element_load_after_element_delete():
     project.model.remove_element(1)
 
     assert project.prune_element_loads()==[1]
+
+
+def test_self_weight_can_generate_n_per_m_for_n_m_s_project():
+    model,sections,materials,transformations,load=(
+        _self_weight_model_and_data(vertical=False)
+    )
+
+    text=element_load_to_openseespy(
+        load,
+        model,
+        sections,
+        materials,
+        transformations,
+        {"length":"m","force":"N","time":"s"},
+    )
+
+    assert text == (
+        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', 0, -2000, 0)"
+    )
+
+
+def test_generated_script_declares_consistent_project_units():
+    model=model_with_nodes()
+    script=to_openseespy(
+        model,
+        units={"length":"m","force":"kN","time":"s"},
+    )
+
+    assert "# Consistent model units: m, kN, s" in script
+    assert "Material stress/modulus inputs are stored in Pa" in script

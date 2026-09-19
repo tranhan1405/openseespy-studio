@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .beam_loads import resolve_self_weight_local
+from .units import UnitSystem
 from .model import StructuralModel
 from .project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NodalLoadData, SectionData, TimeSeriesData, TransformationData
 
@@ -91,25 +92,52 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
             model.set_fixity(node_at[(i, j, 0)], (1, 1, 1, 1, 1, 1))
 
 
-def material_to_openseespy(material: MaterialData) -> str:
+def material_to_openseespy(
+    material: MaterialData,
+    units: dict[str, str] | None = None,
+) -> str:
     p = material.parameters
+    unit_system = UnitSystem.from_mapping(units)
+
     if material.material_type == "Elastic":
-        return f"ops.uniaxialMaterial('Elastic', {material.tag}, {p['E']:g})"
+        e = unit_system.stress_from_pa(p["E"])
+        return f"ops.uniaxialMaterial('Elastic', {material.tag}, {e:g})"
+
     if material.material_type == "Steel02":
+        fy = unit_system.stress_from_pa(p["Fy"])
+        e0 = unit_system.stress_from_pa(p["E0"])
         return (
             "ops.uniaxialMaterial('Steel02', "
-            f"{material.tag}, {p['Fy']:g}, {p['E0']:g}, {p['b']:g}, "
+            f"{material.tag}, {fy:g}, {e0:g}, {p['b']:g}, "
             f"{p['R0']:g}, {p['cR1']:g}, {p['cR2']:g})"
         )
+
     if material.material_type == "Concrete02":
+        fpc = unit_system.stress_from_pa(p["fpc"])
+        fpcu = unit_system.stress_from_pa(p["fpcu"])
+        ft = unit_system.stress_from_pa(p["ft"])
+        ets = unit_system.stress_from_pa(p["Ets"])
         return (
             "ops.uniaxialMaterial('Concrete02', "
-            f"{material.tag}, {p['fpc']:g}, {p['epsc0']:g}, "
-            f"{p['fpcu']:g}, {p['epsU']:g}, {p['lambda']:g}, "
-            f"{p['ft']:g}, {p['Ets']:g})"
+            f"{material.tag}, {fpc:g}, {p['epsc0']:g}, "
+            f"{fpcu:g}, {p['epsU']:g}, {p['lambda']:g}, "
+            f"{ft:g}, {ets:g})"
         )
+
     raise ValueError(f"Unsupported material type: {material.material_type}")
 
+
+def elastic_section_parameters_in_model_units(
+    section: SectionData,
+    materials: dict[int, MaterialData] | None = None,
+    units: dict[str, str] | None = None,
+) -> dict[str, float]:
+    p = section.resolved_elastic_parameters(materials)
+    result = dict(p)
+    unit_system = UnitSystem.from_mapping(units)
+    result["E"] = unit_system.stress_from_pa(p["E"])
+    result["G"] = unit_system.stress_from_pa(p["G"])
+    return result
 
 def fiber_component_to_openseespy(
     component: FiberComponentData,
@@ -184,9 +212,14 @@ def fiber_component_to_openseespy(
 def section_to_openseespy(
     section: SectionData,
     materials: dict[int, MaterialData] | None = None,
+    units: dict[str, str] | None = None,
 ) -> list[str]:
     p = (
-        section.resolved_elastic_parameters(materials)
+        elastic_section_parameters_in_model_units(
+            section,
+            materials,
+            units,
+        )
         if section.section_type == "Elastic"
         else section.parameters
     )
@@ -311,6 +344,7 @@ def element_load_to_openseespy(
     sections: dict[int, SectionData] | None = None,
     materials: dict[int, MaterialData] | None = None,
     transformations: dict[int, TransformationData] | None = None,
+    units: dict[str, str] | None = None,
 ) -> str:
     if load.load_type == "Uniform":
         wx, wy, wz = load.wx, load.wy, load.wz
@@ -327,6 +361,7 @@ def element_load_to_openseespy(
             sections or {},
             materials or {},
             transformations or {},
+            units,
         )
     else:
         raise ValueError(
@@ -628,6 +663,7 @@ def to_openseespy(
     analyses: dict[int, AnalysisSettingsData] | None = None,
     active_analysis_tag: int | None = None,
     element_loads: dict[int, ElementLoadData] | None = None,
+    units: dict[str, str] | None = None,
 ) -> str:
     lines: list[str] = [
         "import json",
@@ -635,6 +671,13 @@ def to_openseespy(
         "",
         "ops.wipe()",
         f"ops.model('basic', '-ndm', {model.ndm}, '-ndf', {model.ndf})",
+        "",
+        "# Consistent model units: "
+        + f"{UnitSystem.from_mapping(units).length}, "
+        + f"{UnitSystem.from_mapping(units).force}, "
+        + f"{UnitSystem.from_mapping(units).time}",
+        "# Material stress/modulus inputs are stored in Pa and converted here.",
+        "# Material density inputs are stored in kg/m^3.",
         "",
         "# Nodes",
     ]
@@ -669,13 +712,13 @@ def to_openseespy(
     if materials:
         lines.extend(["", "# Materials"])
         for tag in sorted(materials):
-            lines.append(material_to_openseespy(materials[tag]))
+            lines.append(material_to_openseespy(materials[tag], units))
 
     if sections:
         lines.extend(["", "# Sections"])
         for tag in sorted(sections):
             lines.extend(
-                section_to_openseespy(sections[tag], materials)
+                section_to_openseespy(sections[tag], materials, units)
             )
 
     if transformations:
@@ -685,16 +728,6 @@ def to_openseespy(
                 transformation_to_openseespy(transformations[tag])
             )
 
-    lines.extend([
-        "",
-        "# Placeholder elastic properties for MVP visualization",
-        "A = 0.02",
-        "E = 2.0e11",
-        "G = 7.6923e10",
-        "J = 8.0e-5",
-        "Iy = 8.0e-5",
-        "Iz = 8.0e-5",
-    ])
     lines.extend([
         "",
         "# Elements",
@@ -741,7 +774,11 @@ def to_openseespy(
                     "element not generated."
                 )
                 continue
-            p = assigned_section.resolved_elastic_parameters(materials)
+            p = elastic_section_parameters_in_model_units(
+                assigned_section,
+                materials,
+                units,
+            )
             args = (
                 "ops.element('elasticBeamColumn', "
                 f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
@@ -840,6 +877,7 @@ def to_openseespy(
                             sections,
                             materials,
                             transformations,
+                            units,
                         )
                     )
 

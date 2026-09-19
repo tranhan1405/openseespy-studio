@@ -30,6 +30,8 @@ def _tag_spin(value: int = 1) -> QSpinBox:
     return spin
 
 
+from ..units import UnitSystem
+
 class _BaseDialog(QDialog):
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
@@ -132,9 +134,11 @@ class ElementFormulationDialog(_BaseDialog):
         force_tolerance: float = 1.0e-12,
         mass_per_length: float = 0.0,
         consistent_mass: bool = False,
+        units=None,
         parent=None,
     ):
         super().__init__("Element Formulation", parent)
+        self.unit_system = UnitSystem.from_mapping(units)
 
         self.element_type = QComboBox()
         self.element_type.addItems([
@@ -176,7 +180,10 @@ class ElementFormulationDialog(_BaseDialog):
         self.form.addRow("Integration points:", self.integration_points)
         self.form.addRow("Force max iterations:", self.force_max_iter)
         self.form.addRow("Force tolerance:", self.force_tolerance)
-        self.form.addRow("Mass / length:", self.mass_per_length)
+        self.form.addRow(
+            f"Mass / length [{self.unit_system.mass_per_length_label}]:",
+            self.mass_per_length,
+        )
         self.form.addRow("", self.consistent_mass)
 
         note = QLabel(

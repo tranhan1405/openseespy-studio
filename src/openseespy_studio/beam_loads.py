@@ -9,6 +9,7 @@ from .project import (
     SectionData,
     TransformationData,
 )
+from .units import UnitSystem
 
 
 Vec3 = tuple[float, float, float]
@@ -66,6 +67,7 @@ def resolve_self_weight_local(
     sections: dict[int, SectionData],
     materials: dict[int, MaterialData],
     transformations: dict[int, TransformationData],
+    units: dict[str, str] | None = None,
 ) -> tuple[float, float, float]:
     element = model.elements.get(load.element_tag)
     if element is None:
@@ -122,8 +124,13 @@ def resolve_self_weight_local(
         )
 
     area = float(section.parameters["A"])
+    unit_system = UnitSystem.from_mapping(units)
     global_line_load = tuple(
-        density * area * component
+        unit_system.line_force_from_density_area_gravity(
+            density,
+            area,
+            unit_system.acceleration_from_m_per_s2(component),
+        )
         for component in load.gravity
     )
     local_x, local_y, local_z = element_local_axes(

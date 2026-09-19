@@ -48,6 +48,7 @@ from ..model import StructuralModel, classify_fixity
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, SectionData, SelectionSetData, TimeSeriesData, TransformationData
 from ..runtime import build_worker_pythonpath, probe_opensees_runtime
 from ..validation import ValidationIssue, validate_project
+from ..units import UnitSystem
 from .analysis_dialog import AnalysisDialog
 from .code_editor import CodeEditor
 from .connection_dialog import ConnectionDialog
@@ -1007,7 +1008,7 @@ class MainWindow(QMainWindow):
 
     def _build_status_bar(self) -> None:
         self.status_message = QLabel("Ready")
-        self.status_units = QLabel("Units: m, kN, s")
+        self.status_units = QLabel("Units: m, kN, s · mass t")
         self.status_view = QLabel("View: 3D")
         self.status_navigation = QLabel(
             "MMB Rotate · Ctrl+MMB Pan · Shift+MMB Zoom · Wheel Zoom"
@@ -1146,6 +1147,7 @@ class MainWindow(QMainWindow):
                 self.project.analyses,
                 self.project.active_analysis_tag,
                 element_loads=self.project.element_loads,
+                units=self.project.units,
             )
         )
         self._selection_changed(self.selection.snapshot())
@@ -1158,9 +1160,10 @@ class MainWindow(QMainWindow):
             f"Nodes: {len(self.model.nodes)}   Elements: {len(self.model.elements)}"
         )
         units = self.project.units
+        unit_system = UnitSystem.from_mapping(units)
         self.status_units.setText(
-            f"Units: {units.get('length', 'm')}, "
-            f"{units.get('force', 'kN')}, {units.get('time', 's')}"
+            f"Units: {unit_system.length}, {unit_system.force}, "
+            f"{unit_system.time} · mass {unit_system.mass_label}"
         )
 
     def _refresh_tree(self) -> None:
@@ -1961,7 +1964,11 @@ class MainWindow(QMainWindow):
             if tag in self.model.nodes
         }
         initial = next(iter(masses)) if len(masses) == 1 else None
-        dialog = MassDialog(initial=initial, parent=self)
+        dialog = MassDialog(
+            initial=initial,
+            units=self.project.units,
+            parent=self,
+        )
         if not dialog.exec():
             return
         before = self.project.to_dict()
@@ -2151,6 +2158,7 @@ class MainWindow(QMainWindow):
             plain,
             next_tag=self.project.next_nodal_load_tag(),
             node_tag=node_tag,
+            units=self.project.units,
             parent=self,
         )
         if not dialog.exec():
@@ -2198,7 +2206,10 @@ class MainWindow(QMainWindow):
             if pattern.pattern_type == "Plain"
         }
         dialog = NodalLoadDialog(
-            plain, load=load, parent=self
+            plain,
+            load=load,
+            units=self.project.units,
+            parent=self,
         )
         if not dialog.exec():
             return
@@ -2260,6 +2271,7 @@ class MainWindow(QMainWindow):
             plain,
             next_tag=self.project.next_element_load_tag(),
             element_tag=selected[0],
+            units=self.project.units,
             parent=self,
         )
         if not dialog.exec():
@@ -2327,6 +2339,7 @@ class MainWindow(QMainWindow):
         dialog = ElementLoadDialog(
             plain,
             load=load,
+            units=self.project.units,
             parent=self,
         )
         if not dialog.exec():
@@ -2499,6 +2512,7 @@ class MainWindow(QMainWindow):
                 if same_integration
                 else False
             ),
+            units=self.project.units,
             parent=self,
         )
         if not dialog.exec():
@@ -3228,6 +3242,7 @@ class MainWindow(QMainWindow):
         dialog = SectionDialog(
             self.project.materials,
             next_tag=self.project.next_section_tag(),
+            units=self.project.units,
             parent=self,
         )
         if not dialog.exec():
@@ -3258,6 +3273,7 @@ class MainWindow(QMainWindow):
         dialog = SectionDialog(
             self.project.materials,
             section=section,
+            units=self.project.units,
             parent=self,
         )
         if not dialog.exec():
