@@ -57,6 +57,33 @@ MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     ),
 }
 
+MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
+    "Elastic": {"E": "stress"},
+    "Steel01": {"Fy": "stress", "E0": "stress"},
+    "Steel02": {"Fy": "stress", "E0": "stress"},
+    "ReinforcingSteel": {
+        "fy": "stress", "fu": "stress", "Es": "stress", "Esh": "stress",
+    },
+    "Concrete01": {"fpc": "stress", "fpcu": "stress"},
+    "Concrete02": {
+        "fpc": "stress", "fpcu": "stress", "ft": "stress", "Ets": "stress",
+    },
+    "Concrete04": {
+        "fc": "stress", "Ec": "stress", "fct": "stress",
+    },
+    "Hysteretic": {},
+    "Pinching4": {},
+    "Bond_SP01": {
+        "Fy": "stress", "Fu": "stress", "Sy": "length", "Su": "length",
+    },
+    "ElasticPPGap": {},
+    "FRPConfinedConcrete02": {
+        "fc0": "stress", "Ec": "stress", "tfrp": "length",
+        "Efrp": "stress", "R": "length", "fcu": "stress",
+        "ft": "stress", "Ets": "stress",
+    },
+}
+
 MATERIAL_ENGINEERING_DEFAULTS: dict[str, dict[str, float]] = {
     name: {
         "poisson_ratio": 0.2 if "Concrete" in name else 0.3,

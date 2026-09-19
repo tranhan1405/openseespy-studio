@@ -225,10 +225,12 @@ def material_to_openseespy(
         return f"ops.uniaxialMaterial('Pinching4', {material.tag}, {args}, {dmg_type!r})"
 
     if material.material_type == "Bond_SP01":
+        sy = unit_system.length_from_m(p["Sy"])
+        su = unit_system.length_from_m(p["Su"])
         return (
             "ops.uniaxialMaterial('Bond_SP01', "
-            f"{material.tag}, {stress(p['Fy']):g}, {p['Sy']:g}, "
-            f"{stress(p['Fu']):g}, {p['Su']:g}, {p['b']:g}, {p['R']:g})"
+            f"{material.tag}, {stress(p['Fy']):g}, {sy:g}, "
+            f"{stress(p['Fu']):g}, {su:g}, {p['b']:g}, {p['R']:g})"
         )
 
     if material.material_type == "ElasticPPGap":
@@ -240,6 +242,17 @@ def material_to_openseespy(
         )
 
     if material.material_type == "FRPConfinedConcrete02":
+        if not (
+            unit_system.length == "mm"
+            and unit_system.force == "N"
+        ):
+            raise ValueError(
+                "FRPConfinedConcrete02 is unit-sensitive and Studio "
+                "currently supports it only with project units mm - N - s "
+                "(stress in MPa), matching the OpenSees SI metric convention."
+            )
+        tfrp = unit_system.length_from_m(p["tfrp"])
+        radius = unit_system.length_from_m(p["R"])
         common = (
             f"ops.uniaxialMaterial('FRPConfinedConcrete02', {material.tag}, "
             f"{stress(p['fc0']):g}, {stress(p['Ec']):g}, {p['ec0']:g}, "
@@ -247,8 +260,8 @@ def material_to_openseespy(
         if p["mode"] < 0.5:
             return (
                 common
-                + f"'-JacketC', {p['tfrp']:g}, {stress(p['Efrp']):g}, "
-                + f"{p['erup']:g}, {p['R']:g}, {stress(p['ft']):g}, "
+                + f"'-JacketC', {tfrp:g}, {stress(p['Efrp']):g}, "
+                + f"{p['erup']:g}, {radius:g}, {stress(p['ft']):g}, "
                 + f"{stress(p['Ets']):g}, 1)"
             )
         return (

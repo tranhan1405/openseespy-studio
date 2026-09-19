@@ -520,6 +520,49 @@ class FiberPreviewWidget(QWidget):
             painter.drawText(QPointF(x + 17.0, y), label)
             y += 18.0
 
+    def _frp_confined_patch_present(self) -> bool:
+        if self._section is None:
+            return False
+        for component in self._section.fiber_components:
+            if component.component_type not in {"RectPatch", "CircPatch"}:
+                continue
+            material = self._materials.get(component.material_tag)
+            if (
+                material is not None
+                and material.material_type == "FRPConfinedConcrete02"
+            ):
+                return True
+        return False
+
+    def _draw_frp_jacket(
+        self,
+        painter: QPainter,
+        bounds: tuple[float, float, float, float],
+    ) -> None:
+        if not self._frp_confined_patch_present():
+            return
+        y_min, y_max, z_min, z_max = bounds
+        top_left = self._map_point(y_max, z_max)
+        bottom_right = self._map_point(y_min, z_min)
+        rect = QRectF(top_left, bottom_right).normalized().adjusted(
+            -7.0, -7.0, 7.0, 7.0
+        )
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor("#8e44ad"), 4.0))
+        shape = ""
+        if self._section is not None:
+            shape = str(self._section.display_geometry.get("shape", "")).upper()
+        if shape in {"CIRCLE", "HOLLOW_CIRCLE"}:
+            painter.drawEllipse(rect)
+        else:
+            painter.drawRoundedRect(rect, 5.0, 5.0)
+
+        painter.setPen(QColor("#7b2f91"))
+        painter.drawText(
+            QPointF(rect.left(), max(16.0, rect.top() - 7.0)),
+            "FRP jacket / confined concrete",
+        )
+
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -598,6 +641,8 @@ class FiberPreviewWidget(QWidget):
                 self._draw_rect_patch(painter, component)
             elif component.component_type == "CircPatch":
                 self._draw_circ_patch(painter, component)
+
+        self._draw_frp_jacket(painter, bounds)
 
         for component in self._section.fiber_components:
             self._draw_rebar_component(painter, component)
@@ -1944,6 +1989,71 @@ class SectionDialog(QDialog):
 
         self.fiber_tabs.addTab(self.builder_page, "Builder")
 
+        self.frp_page = QWidget()
+        frp_layout = QVBoxLayout(self.frp_page)
+        frp_intro = QLabel(
+            "FRP retrofit is represented through the concrete constitutive law. "
+            "Studio does not create a duplicate column element or a separate "
+            "longitudinal FRP fiber layer for a transverse wrap."
+        )
+        frp_intro.setWordWrap(True)
+        frp_intro.setStyleSheet(
+            "padding: 7px; background: #eef4fb; color: #40566c;"
+        )
+        frp_layout.addWidget(frp_intro)
+
+        frp_form = QFormLayout()
+        self.frp_material_combo = QComboBox()
+        for material_tag in sorted(self.materials):
+            material = self.materials[material_tag]
+            if material.material_type == "FRPConfinedConcrete02":
+                mode = (
+                    "JacketC"
+                    if material.parameters.get("mode", 0.0) < 0.5
+                    else "Ultimate"
+                )
+                self.frp_material_combo.addItem(
+                    f"{material_tag} - {material.name} ({mode})",
+                    material_tag,
+                )
+        if self.frp_material_combo.count() == 0:
+            self.frp_material_combo.addItem(
+                "Create an FRPConfinedConcrete02 material first",
+                None,
+            )
+        frp_form.addRow("FRP-confined concrete:", self.frp_material_combo)
+        frp_layout.addLayout(frp_form)
+
+        frp_buttons = QHBoxLayout()
+        self.frp_apply_selected = QPushButton(
+            "Apply to Selected Concrete Patch"
+        )
+        self.frp_apply_all = QPushButton(
+            "Apply to All Concrete Patches"
+        )
+        self.frp_apply_selected.clicked.connect(
+            self._apply_frp_to_selected_patch
+        )
+        self.frp_apply_all.clicked.connect(
+            self._apply_frp_to_all_patches
+        )
+        enabled = self.frp_material_combo.currentData() is not None
+        self.frp_apply_selected.setEnabled(enabled)
+        self.frp_apply_all.setEnabled(enabled)
+        frp_buttons.addWidget(self.frp_apply_selected)
+        frp_buttons.addWidget(self.frp_apply_all)
+        frp_buttons.addStretch(1)
+        frp_layout.addLayout(frp_buttons)
+
+        self.frp_status = QLabel()
+        self.frp_status.setWordWrap(True)
+        self.frp_status.setStyleSheet(
+            "padding: 7px; background: #f5f7f9; color: #526578;"
+        )
+        frp_layout.addWidget(self.frp_status)
+        frp_layout.addStretch(1)
+        self.fiber_tabs.addTab(self.frp_page, "FRP Retrofit")
+
         table_page = QWidget()
         table_layout = QVBoxLayout(table_page)
         hint = QLabel(
@@ -2158,6 +2268,119 @@ class SectionDialog(QDialog):
                 min(max(current, 0), len(self._components) - 1)
             )
 
+    def _selected_frp_material(self) -> MaterialData | None:
+        if not hasattr(self, "frp_material_combo"):
+            return None
+        tag = self.frp_material_combo.currentData()
+        if tag is None:
+            return None
+        return self.materials.get(int(tag))
+
+    def _frp_target_is_valid(
+        self,
+        material: MaterialData,
+        components: list[FiberComponentData],
+    ) -> bool:
+        if material.parameters.get("mode", 0.0) >= 0.5:
+            return True
+        shape = str(self._display_geometry.get("shape", "")).upper()
+        circular_section = shape in {"CIRCLE", "HOLLOW_CIRCLE"}
+        circular_patches = all(
+            component.component_type == "CircPatch"
+            for component in components
+        )
+        if circular_section and circular_patches:
+            return True
+        QMessageBox.warning(
+            self,
+            "FRP Retrofit",
+            "FRPConfinedConcrete02 JacketC is the circular-jacket input mode. "
+            "For rectangular, T, I, or a rectangular patch, create/use an "
+            "FRPConfinedConcrete02 material in Ultimate mode with the "
+            "confined fcu/ecu supplied by your chosen FRP confinement model.",
+        )
+        return False
+
+    def _apply_frp_to_selected_patch(self) -> None:
+        material = self._selected_frp_material()
+        if material is None:
+            return
+        index = self.component_list.currentRow()
+        if index < 0 or index >= len(self._components):
+            QMessageBox.information(
+                self,
+                "FRP Retrofit",
+                "Select a concrete RectPatch or CircPatch in the Builder first.",
+            )
+            return
+        component = self._components[index]
+        if component.component_type not in {"RectPatch", "CircPatch"}:
+            QMessageBox.information(
+                self,
+                "FRP Retrofit",
+                "The selected component is not a concrete patch.",
+            )
+            return
+        if not self._frp_target_is_valid(material, [component]):
+            return
+        component.material_tag = material.tag
+        self._refresh_component_list()
+        self.component_list.setCurrentRow(index)
+        self._update_fiber_outputs()
+
+    def _apply_frp_to_all_patches(self) -> None:
+        material = self._selected_frp_material()
+        if material is None:
+            return
+        patches = [
+            component
+            for component in self._components
+            if component.component_type in {"RectPatch", "CircPatch"}
+        ]
+        if not patches:
+            QMessageBox.information(
+                self,
+                "FRP Retrofit",
+                "This Fiber section has no concrete patch components.",
+            )
+            return
+        if not self._frp_target_is_valid(material, patches):
+            return
+        for component in patches:
+            component.material_tag = material.tag
+        self._refresh_component_list()
+        self._update_fiber_outputs()
+
+    def _refresh_frp_status(self) -> None:
+        if not hasattr(self, "frp_status"):
+            return
+        confined = []
+        for index, component in enumerate(self._components):
+            if component.component_type not in {"RectPatch", "CircPatch"}:
+                continue
+            material = self.materials.get(component.material_tag)
+            if (
+                material is not None
+                and material.material_type == "FRPConfinedConcrete02"
+            ):
+                confined.append(
+                    f"{index + 1}: {component.name} → Mat {material.tag}"
+                )
+        if confined:
+            self.frp_status.setText(
+                "FRP-confined patch assignment:\n" + "\n".join(confined)
+            )
+            self.frp_status.setStyleSheet(
+                "padding: 7px; background: #f3eafb; color: #6f2b80;"
+            )
+        else:
+            self.frp_status.setText(
+                "No concrete patch currently uses FRPConfinedConcrete02."
+            )
+            self.frp_status.setStyleSheet(
+                "padding: 7px; background: #f5f7f9; color: #526578;"
+            )
+
     def _apply_shape_template(self, shape: str) -> None:
         if not self.materials:
             QMessageBox.information(
@@ -2327,6 +2550,16 @@ class SectionDialog(QDialog):
                 FiberComponentData.from_dict(component.to_dict())
                 for component in self._components
             ],
+            display_geometry=(
+                {
+                    "shape": str(self._display_geometry.get("shape", "")),
+                    "dimensions": dict(
+                        self._display_geometry.get("dimensions", {})
+                    ),
+                }
+                if self._display_geometry
+                else {}
+            ),
         )
 
     def _update_fiber_outputs(self, *args) -> None:
@@ -2339,6 +2572,7 @@ class SectionDialog(QDialog):
             return
 
         self.preview.set_section(section, self.materials)
+        self._refresh_frp_status()
         total_area, (cy, cz) = section.fiber_area_and_centroid()
         self.fiber_stats.setText(
             f"Components: {len(section.fiber_components)}   ·   "

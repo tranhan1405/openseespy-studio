@@ -111,6 +111,14 @@ class UnitSystem:
     def mass_per_length_label(self) -> str:
         return f"{self.mass_label}/{self.length}"
 
+    def length_from_m(self, value_m: float) -> float:
+        """Convert SI metres to the active model length unit."""
+        return float(value_m) / self.length_to_m
+
+    def length_to_m_value(self, value: float) -> float:
+        """Convert a value in the active model length unit to SI metres."""
+        return float(value) * self.length_to_m
+
     def stress_from_pa(self, value_pa: float) -> float:
         """Convert Pa=N/m² to model force/length²."""
         return (
