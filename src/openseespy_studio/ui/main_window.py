@@ -3322,6 +3322,28 @@ class MainWindow(QMainWindow):
             return
 
         fixity = dialog.fixity()
+        conflicts = []
+        for displacement in self.project.prescribed_displacements.values():
+            if displacement.node_tag not in node_tags:
+                continue
+            dof_index = displacement.dof - 1
+            if (
+                0 <= dof_index < len(fixity)
+                and bool(fixity[dof_index])
+            ):
+                conflicts.append(
+                    f"Node {displacement.node_tag} "
+                    f"{('UX','UY','UZ','RX','RY','RZ')[dof_index]}"
+                )
+        if conflicts:
+            QMessageBox.warning(
+                self,
+                "Support / Restraint",
+                "Cannot restrain DOF(s) that already have a prescribed "
+                "displacement:\n" + ", ".join(conflicts),
+            )
+            return
+
         before = self.project.to_dict()
         updated = self.model.set_fixity_many(node_tags, fixity)
         support_type = classify_fixity(fixity)
