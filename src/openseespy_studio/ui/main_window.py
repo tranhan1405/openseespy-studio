@@ -1326,6 +1326,17 @@ class MainWindow(QMainWindow):
         menus["Analysis"].addAction(self.actions["run"])
         menus["Results"].addAction(self.actions["plot"])
 
+        menus["Window"].addAction(self.model_tree_dock.toggleViewAction())
+        menus["Window"].addAction(self.properties_dock.toggleViewAction())
+        menus["Window"].addAction(self.script_dock.toggleViewAction())
+        menus["Window"].addAction(self.console_dock.toggleViewAction())
+        menus["Window"].addAction(self.results_dock.toggleViewAction())
+        menus["Window"].addAction(self.create_dock.toggleViewAction())
+        menus["Window"].addSeparator()
+        reset_layout = QAction("Reset Dock Layout", self)
+        reset_layout.triggered.connect(self._reset_dock_layout)
+        menus["Window"].addAction(reset_layout)
+
         ribbon = QToolBar("Ribbon", self)
         ribbon.setObjectName("Ribbon")
         ribbon.setMovable(False)
@@ -1416,6 +1427,19 @@ class MainWindow(QMainWindow):
             [560, 300, 320],
             Qt.Horizontal,
         )
+
+    def _reset_dock_layout(self) -> None:
+        self.model_tree_dock.show()
+        self.properties_dock.show()
+        self.script_dock.show()
+        self.console_dock.show()
+        self.create_dock.show()
+        self.results_dock.setVisible(bool(self._jobs))
+        self._results_dock_sized_once = False
+        self._size_initial_docks()
+        if self.results_dock.isVisible():
+            self._results_dock_visibility_changed(True)
+        self.status_message.setText("Dock layout reset")
 
     def _create_default_model(self) -> None:
         spec = FrameGridSpec(nx=4, ny=3, nz=3)
@@ -6066,6 +6090,8 @@ class MainWindow(QMainWindow):
         self._analysis_stop_requested = False
         self.results_panel.add_or_update_job(job)
         self.results_panel.show_jobs()
+        self.results_dock.show()
+        self.results_dock.raise_()
         self._refresh_tree()
 
         self._append_analysis_log(
