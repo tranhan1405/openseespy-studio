@@ -22,14 +22,20 @@ from PySide6.QtWidgets import (
 )
 
 from ..jobs import JobRecord
-from ..postprocess import component_end_resultants
+from ..postprocess import component_end_resultants, pushover_capacity_curve
 
 
 class TimeHistoryPlot(QWidget):
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        empty_message: str = "No time-history data",
+    ):
         super().__init__(parent)
         self._x: list[float] = []
         self._y: list[float] = []
+        self._empty_message = str(empty_message)
         self.setMinimumHeight(140)
 
     def set_series(self, x: list[float], y: list[float]) -> None:
@@ -44,7 +50,7 @@ class TimeHistoryPlot(QWidget):
 
         if len(self._x) < 2 or len(self._y) < 2:
             painter.setPen(QColor("#718195"))
-            painter.drawText(self.rect(), Qt.AlignCenter, "No time-history data")
+            painter.drawText(self.rect(), Qt.AlignCenter, self._empty_message)
             return
 
         margin_left, margin_right = 48, 14
@@ -112,6 +118,7 @@ class ResultsPanel(QWidget):
         self._build_mode_tab()
         self._build_node_tab()
         self._build_element_tab()
+        self._build_pushover_tab()
         self._build_history_tab()
 
     def _build_jobs_tab(self) -> None:
@@ -302,6 +309,30 @@ class ResultsPanel(QWidget):
         layout.addWidget(self.element_table)
         self.tabs.addTab(page, "Member Forces")
 
+    def _build_pushover_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        self.pushover_info = QLabel(
+            "Run a Pushover analysis to plot applied base shear versus "
+            "control-node displacement."
+        )
+        self.pushover_info.setWordWrap(True)
+        layout.addWidget(self.pushover_info)
+
+        self.pushover_metrics = QLabel(
+            "Vpeak: -   u@Vpeak: -   ufinal: -"
+        )
+        self.pushover_metrics.setWordWrap(True)
+        layout.addWidget(self.pushover_metrics)
+
+        self.pushover_plot = TimeHistoryPlot(
+            empty_message="No pushover capacity-curve data"
+        )
+        layout.addWidget(self.pushover_plot, 1)
+        self.tabs.addTab(page, "Pushover Curve")
+
     def _build_history_tab(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -359,6 +390,14 @@ class ResultsPanel(QWidget):
             "Run a non-modal analysis to view deformation."
         )
         self.mode_info.setText("Run a Modal analysis to populate mode shapes.")
+        self.pushover_info.setText(
+            "Run a Pushover analysis to plot applied base shear versus "
+            "control-node displacement."
+        )
+        self.pushover_metrics.setText(
+            "Vpeak: -   u@Vpeak: -   ufinal: -"
+        )
+        self.pushover_plot.set_series([], [])
         self.history_label.setText("Monitor node: -")
         self.history_plot.set_series([], [])
 
@@ -445,6 +484,7 @@ class ResultsPanel(QWidget):
 
         self._populate_node_table()
         self._populate_element_table()
+        self._update_pushover_plot()
         self._update_history_plot()
 
     def _populate_node_table(self) -> None:
@@ -586,6 +626,56 @@ class ResultsPanel(QWidget):
             self.element_info.setText(
                 "No local member-force result is available for this job."
             )
+
+    def _update_pushover_plot(self) -> None:
+        x, y, control_node, control_dof = pushover_capacity_curve(
+            self._result
+        )
+        if not x or not y:
+            analysis = self._result.get("analysis", {})
+            analysis_type = (
+                str(analysis.get("type", ""))
+                if isinstance(analysis, dict)
+                else ""
+            )
+            if analysis_type == "Pushover":
+                self.pushover_info.setText(
+                    "Pushover result is present, but no complete "
+                    "control-displacement/base-shear history is available."
+                )
+            else:
+                self.pushover_info.setText(
+                    "Run or select a Pushover analysis to view the "
+                    "capacity curve."
+                )
+            self.pushover_metrics.setText(
+                "Vpeak: -   u@Vpeak: -   ufinal: -"
+            )
+            self.pushover_plot.set_series([], [])
+            return
+
+        dof_names = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+        dof_name = (
+            dof_names[control_dof - 1]
+            if control_dof in range(1, 7)
+            else f"DOF {control_dof}"
+        )
+        peak_index = max(
+            range(len(y)),
+            key=lambda index: abs(y[index]),
+        )
+        self.pushover_info.setText(
+            f"Control node {control_node if control_node is not None else '-'} "
+            f"· {dof_name} · X = control displacement · "
+            "Y = applied base shear (-Σ support reactions)"
+        )
+        self.pushover_metrics.setText(
+            f"Points: {len(x)}   "
+            f"Vpeak: {y[peak_index]:.6g}   "
+            f"u@Vpeak: {x[peak_index]:.6g}   "
+            f"ufinal: {x[-1]:.6g}"
+        )
+        self.pushover_plot.set_series(x, y)
 
     def _update_history_plot(self) -> None:
         history = self._result.get("history", {})
