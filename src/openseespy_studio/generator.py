@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from .beam_loads import resolve_self_weight_local
 from .units import UnitSystem
 from .model import StructuralModel
-from .project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NodalLoadData, SectionData, TimeSeriesData, TransformationData
+from .project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NodalLoadData, RecorderData, SectionData, TimeSeriesData, TransformationData
 
 
 @dataclass(slots=True)
@@ -373,6 +373,49 @@ def element_load_to_openseespy(
         f"{load.element_tag}, '-type', '-beamUniform', "
         f"{wy:g}, {wz:g}, {wx:g})"
     )
+
+
+def recorder_to_openseespy(recorder: RecorderData) -> list[str]:
+    """Generate one native OpenSees recorder command."""
+    path = recorder.file_name
+    lines = [
+        f"os.makedirs(os.path.dirname({path!r}) or '.', exist_ok=True)"
+    ]
+    time_args = ", '-time'" if recorder.include_time else ""
+    targets = ", ".join(str(tag) for tag in recorder.target_tags)
+
+    if recorder.recorder_type == "Node":
+        dofs = ", ".join(str(dof) for dof in recorder.dofs)
+        lines.append(
+            "ops.recorder('Node', '-file', "
+            f"{path!r}{time_args}, '-node', {targets}, "
+            f"'-dof', {dofs}, {recorder.response!r})"
+        )
+        return lines
+
+    prefix = (
+        "ops.recorder('Element', '-file', "
+        f"{path!r}{time_args}, '-ele', {targets}"
+    )
+    if recorder.recorder_type == "Element":
+        lines.append(prefix + f", {recorder.response!r})")
+        return lines
+    if recorder.recorder_type == "Section":
+        lines.append(
+            prefix
+            + f", 'section', {recorder.section_number}, "
+            + f"{recorder.response!r})"
+        )
+        return lines
+
+    fiber_args = (
+        f", 'section', {recorder.section_number}, 'fiber', "
+        f"{recorder.fiber_y:g}, {recorder.fiber_z:g}"
+    )
+    if recorder.material_tag is not None:
+        fiber_args += f", {recorder.material_tag}"
+    lines.append(prefix + fiber_args + f", {recorder.response!r})")
+    return lines
 
 
 def analysis_to_openseespy(
@@ -769,10 +812,12 @@ def to_openseespy(
     analyses: dict[int, AnalysisSettingsData] | None = None,
     active_analysis_tag: int | None = None,
     element_loads: dict[int, ElementLoadData] | None = None,
+    recorders: dict[int, RecorderData] | None = None,
     units: dict[str, str] | None = None,
 ) -> str:
     lines: list[str] = [
         "import json",
+        "import os",
         "import openseespy.opensees as ops",
         "",
         "ops.wipe()",
@@ -986,6 +1031,15 @@ def to_openseespy(
                             units,
                         )
                     )
+
+    if recorders:
+        lines.extend(["", "# Recorders"])
+        for tag in sorted(recorders):
+            recorder = recorders[tag]
+            lines.append(
+                f"# Recorder {recorder.tag}: {recorder.name}"
+            )
+            lines.extend(recorder_to_openseespy(recorder))
 
     if analyses and active_analysis_tag in analyses:
         lines.extend(["", "# Analysis settings"])
