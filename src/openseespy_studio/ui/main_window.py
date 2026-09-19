@@ -6109,6 +6109,88 @@ class MainWindow(QMainWindow):
             f"Exported Job {job.job_id} results to {Path(path).name}"
         )
 
+    def _select_all_tree_nodes(self) -> None:
+        self.selection.set_selection(nodes=set(self.model.nodes))
+
+    def _select_all_tree_elements(
+        self,
+        element_type: str | None = None,
+    ) -> None:
+        tags = {
+            tag
+            for tag, element in self.model.elements.items()
+            if element_type is None
+            or element.element_type == str(element_type)
+        }
+        self.selection.set_selection(elements=tags)
+
+    def _select_boundary_group(self, support_type: str) -> None:
+        tags = {
+            tag
+            for tag, node in self.model.nodes.items()
+            if any(node.fixity)
+            and classify_fixity(node.fixity) == str(support_type)
+        }
+        self.selection.set_selection(nodes=tags)
+
+    def _rename_job_plot(self, job_id: int, plot_id: int) -> None:
+        job = self._jobs.get(int(job_id))
+        plot = job.plot(plot_id) if job is not None else None
+        if job is None or plot is None:
+            return
+        old_name = str(plot.get("name", f"Result {plot_id}"))
+        name, ok = QInputDialog.getText(
+            self,
+            "Rename Result",
+            "Name:",
+            text=old_name,
+        )
+        name = name.strip()
+        if not ok or not name or name == old_name:
+            return
+        existing = {
+            str(item.get("name", ""))
+            for item in job.plots
+            if isinstance(item, dict)
+            and int(item.get("plot_id", 0) or 0) != int(plot_id)
+        }
+        if name in existing:
+            QMessageBox.warning(
+                self,
+                "Rename Result",
+                f"A result named '{name}' already exists under this Job.",
+            )
+            return
+        plot["name"] = name
+        self._refresh_tree()
+        self._select_tree_payload("job_plot", (job.job_id, int(plot_id)))
+        self.status_message.setText(
+            f"Job {job.job_id} · renamed result to {name}"
+        )
+
+    def _duplicate_job_plot(self, job_id: int, plot_id: int) -> None:
+        job = self._jobs.get(int(job_id))
+        plot = job.plot(plot_id) if job is not None else None
+        if job is None or plot is None:
+            return
+        duplicate = job.add_plot(
+            name=f"{plot.get('name', f'Result {plot_id}')} Copy",
+            result_type=str(plot.get("result_type", "")),
+            settings=dict(plot.get("settings", {})),
+            node_scope=list(plot.get("node_scope", [])),
+            element_scope=list(plot.get("element_scope", [])),
+        )
+        new_plot_id = int(duplicate["plot_id"])
+        self._refresh_tree()
+        self._select_tree_payload(
+            "job_plot",
+            (job.job_id, new_plot_id),
+        )
+        self._show_job_plot(job.job_id, new_plot_id)
+        self.status_message.setText(
+            f"Job {job.job_id} · duplicated result: {duplicate['name']}"
+        )
+
     def _show_tree_context_menu(self, position) -> None:
         item = self.tree.itemAt(position)
         if item is None:
