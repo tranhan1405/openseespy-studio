@@ -1221,6 +1221,7 @@ class ModelViewport(QWidget):
         name: str,
         text_color: str,
         font_size: int = 11,
+        always_visible: bool = False,
     ) -> None:
         if not points:
             return
@@ -1232,7 +1233,7 @@ class ModelViewport(QWidget):
             text_color=text_color,
             shape=None,
             show_points=False,
-            always_visible=False,
+            always_visible=bool(always_visible),
             pickable=False,
             render=False,
         )
@@ -1247,6 +1248,7 @@ class ModelViewport(QWidget):
             name="display-node-numbers",
             text_color="#0b5cad",
             font_size=10,
+            always_visible=True,
         )
 
     def _draw_element_numbers(self) -> None:
@@ -1275,6 +1277,7 @@ class ModelViewport(QWidget):
             name="display-element-numbers",
             text_color="#7a3d00",
             font_size=10,
+            always_visible=True,
         )
 
     def _draw_nodal_loads(self) -> None:
