@@ -5390,17 +5390,33 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "analyses_root":
+            insert_menu = menu.addMenu("Insert")
+            for analysis_type in (
+                "Static",
+                "Pushover",
+                "Cyclic",
+                "Transient",
+                "Modal",
+            ):
+                action = insert_menu.addAction(
+                    f"{analysis_type} Analysis"
+                )
+                action.triggered.connect(
+                    lambda checked=False, kind=analysis_type:
+                    self._create_analysis_of_type(kind)
+                )
+            menu.addSeparator()
             action = menu.addAction("New Analysis...")
             action.triggered.connect(self._create_analysis)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
-        if kind == "analysis":
+        if kind in {"analysis", "analysis_settings"}:
             tag = int(value)
             active = menu.addAction("Set Active")
             active.setEnabled(tag != self.project.active_analysis_tag)
             active.triggered.connect(lambda: self._set_active_analysis(tag))
-            edit = menu.addAction("Edit...")
+            edit = menu.addAction("Edit Analysis Settings...")
             edit.triggered.connect(lambda: self._edit_analysis(tag))
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_analysis(tag))
@@ -5410,148 +5426,22 @@ class MainWindow(QMainWindow):
         if kind == "solution_root":
             analysis_tag = int(value)
             analysis_settings = self.project.analyses.get(analysis_tag)
-            insert_menu = menu.addMenu("Insert")
-
-            deformation = insert_menu.addMenu("Deformation")
-            action = deformation.addAction("Deformed Shape")
-            action.triggered.connect(
-                lambda: self._insert_solution_result(
-                    analysis_tag,
-                    "DeformedShape",
-                    "Deformed Shape",
-                    {"scale": 10.0},
-                )
-            )
-
-            displacement = insert_menu.addMenu("Nodal Displacement")
-            for label, component in (
-                ("Total Deformation", "|U|"),
-                ("Directional UX", "UX"),
-                ("Directional UY", "UY"),
-                ("Directional UZ", "UZ"),
-            ):
-                action = displacement.addAction(label)
-                action.triggered.connect(
-                    lambda checked=False, n=label, comp=component:
-                    self._insert_solution_result(
-                        analysis_tag,
-                        "NodalDisplacement",
-                        n,
-                        {"component": comp},
-                    )
-                )
-
-            reaction = insert_menu.addMenu("Nodal Reaction")
-            for component in ("FX", "FY", "FZ", "MX", "MY", "MZ"):
-                action = reaction.addAction(f"Reaction {component}")
-                action.triggered.connect(
-                    lambda checked=False, comp=component:
-                    self._insert_solution_result(
-                        analysis_tag,
-                        "NodalReaction",
-                        f"Reaction {comp}",
-                        {"component": comp},
-                    )
-                )
-
-            member = insert_menu.addMenu("Member Forces")
-            for component in ("N", "Vy", "Vz", "T", "My", "Mz"):
-                action = member.addAction(component)
-                action.triggered.connect(
-                    lambda checked=False, comp=component:
-                    self._insert_solution_result(
-                        analysis_tag,
-                        "MemberForce",
-                        f"Member Force {comp}",
-                        {"component": comp, "scale": 1.0},
-                    )
-                )
-
-            nonlinear = insert_menu.addMenu("Nonlinear Results")
-            action = nonlinear.addAction("Fiber Stress")
-            action.triggered.connect(
-                lambda: self._insert_solution_result(
-                    analysis_tag,
-                    "FiberStress",
-                    "Fiber Stress",
-                    {"quantity": "Stress"},
-                )
-            )
-            action = nonlinear.addAction("Fiber Strain")
-            action.triggered.connect(
-                lambda: self._insert_solution_result(
-                    analysis_tag,
-                    "FiberStrain",
-                    "Fiber Strain",
-                    {"quantity": "Strain"},
-                )
-            )
-            action = nonlinear.addAction("Hinge / Yield State")
-            action.triggered.connect(
-                lambda: self._insert_solution_result(
-                    analysis_tag,
-                    "HingeState",
-                    "Hinge / Yield State",
-                    {},
-                )
-            )
-
-            history = insert_menu.addMenu("Charts / History")
             analysis_type = (
                 analysis_settings.analysis_type
                 if analysis_settings is not None
                 else ""
             )
-            if analysis_type == "Pushover":
-                action = history.addAction("Pushover Capacity Curve")
-                action.triggered.connect(
-                    lambda: self._insert_solution_result(
-                        analysis_tag,
-                        "PushoverCurve",
-                        "Pushover Capacity Curve",
-                        {},
-                    )
-                )
-            if analysis_type == "Cyclic":
-                action = history.addAction("Cyclic Hysteresis")
-                action.triggered.connect(
-                    lambda: self._insert_solution_result(
-                        analysis_tag,
-                        "CyclicHysteresis",
-                        "Cyclic Hysteresis",
-                        {},
-                    )
-                )
-            if analysis_type == "Modal":
-                action = history.addAction("Mode Shape")
-                action.triggered.connect(
-                    lambda: self._insert_solution_result(
-                        analysis_tag,
-                        "ModeShape",
-                        "Mode Shape 1",
-                        {"mode": 1, "scale": 1.0},
-                    )
-                )
-            else:
-                action = history.addAction("Response History")
-                action.triggered.connect(
-                    lambda: self._insert_solution_result(
-                        analysis_tag,
-                        "TimeHistory",
-                        "Response History",
-                        {},
-                    )
-                )
-
-            solver = insert_menu.addMenu("Solver Results")
-            action = solver.addAction("Convergence History")
-            action.triggered.connect(
-                lambda: self._insert_solution_result(
+            insert_menu = menu.addMenu("Insert")
+            self._populate_result_choice_menu(
+                insert_menu,
+                analysis_type,
+                lambda result_type, name, settings:
+                self._insert_solution_result(
                     analysis_tag,
-                    "Convergence",
-                    "Convergence History",
-                    {},
-                )
+                    result_type,
+                    name,
+                    settings,
+                ),
             )
 
             menu.addSeparator()
