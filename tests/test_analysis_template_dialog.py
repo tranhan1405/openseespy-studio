@@ -64,3 +64,31 @@ def test_analysis_settings_dialog_can_shrink_and_scroll(qapp):
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+@pytest.mark.parametrize(
+    "template_name",
+    ["Modal", "Pushover", "Cyclic", "Nonlinear Time History"],
+)
+def test_analysis_template_dialog_can_shrink_and_scroll(
+    qapp,
+    template_name: str,
+):
+    dialog = AnalysisTemplateDialog(
+        default_node=1,
+        units={"length": "m", "force": "kN", "time": "s"},
+        initial_template=template_name,
+    )
+    try:
+        dialog.show()
+        qapp.processEvents()
+        dialog.resize(460, 340)
+        qapp.processEvents()
+
+        assert dialog.height() <= 360
+        assert dialog.scroll.widgetResizable() is True
+        assert dialog.scroll.verticalScrollBar().maximum() > 0
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
