@@ -3647,6 +3647,177 @@ class MainWindow(QMainWindow):
         rows.extend((label, f"{value:g}") for label, value in zip(labels, load.values))
         self.properties_panel.set_properties("Nodal Load", rows)
 
+    def _create_prescribed_displacement(self) -> None:
+        plain = {
+            tag: pattern
+            for tag, pattern in self.project.load_patterns.items()
+            if pattern.pattern_type == "Plain"
+        }
+        if not plain:
+            QMessageBox.information(
+                self,
+                "Prescribed Displacement",
+                "Create a Plain load pattern first.",
+            )
+            return
+
+        selected = sorted(self.selection.nodes)
+        node_tag = (
+            selected[0]
+            if selected
+            else min(self.model.nodes, default=1)
+        )
+        dialog = PrescribedDisplacementDialog(
+            plain,
+            next_tag=self.project.next_prescribed_displacement_tag(),
+            node_tag=node_tag,
+            ndf=self.model.ndf,
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        template = dialog.data()
+        targets = selected or [template.node_tag]
+        before = self.project.to_dict()
+        created: list[int] = []
+        next_tag = template.tag
+        try:
+            for target_node in targets:
+                while next_tag in self.project.prescribed_displacements:
+                    next_tag += 1
+                displacement = PrescribedDisplacementData(
+                    tag=next_tag,
+                    name=(
+                        f"{template.name} - Node {target_node}"
+                        if len(targets) > 1
+                        else template.name
+                    ),
+                    pattern_tag=template.pattern_tag,
+                    node_tag=target_node,
+                    dof=template.dof,
+                    value=template.value,
+                )
+                self.project.add_prescribed_displacement(displacement)
+                created.append(displacement.tag)
+                next_tag += 1
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "Prescribed Displacement Editor",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+
+        self._refresh_project_metadata(
+            f"Created {len(created)} prescribed displacement(s)"
+        )
+        self._record_project_change(
+            "Create prescribed displacement(s)",
+            before,
+        )
+
+    def _edit_prescribed_displacement(self, tag: int) -> None:
+        displacement = self.project.prescribed_displacements.get(tag)
+        if displacement is None:
+            return
+        plain = {
+            key: pattern
+            for key, pattern in self.project.load_patterns.items()
+            if pattern.pattern_type == "Plain"
+        }
+        dialog = PrescribedDisplacementDialog(
+            plain,
+            displacement=displacement,
+            ndf=self.model.ndf,
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            updated = dialog.data()
+            self.project.update_prescribed_displacement(tag, updated)
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Prescribed Displacement Editor",
+                str(exc),
+            )
+            return
+        self._refresh_project_metadata(
+            f"Updated prescribed displacement {updated.tag}"
+        )
+        self._show_prescribed_displacement_properties(updated.tag)
+        self._record_project_change(
+            f"Edit prescribed displacement {tag}",
+            before,
+        )
+
+    def _delete_prescribed_displacement(self, tag: int) -> None:
+        if tag not in self.project.prescribed_displacements:
+            return
+        before = self.project.to_dict()
+        self.project.remove_prescribed_displacement(tag)
+        self._refresh_project_metadata(
+            f"Deleted prescribed displacement {tag}"
+        )
+        self._record_project_change(
+            f"Delete prescribed displacement {tag}",
+            before,
+        )
+
+    def _show_prescribed_displacement_properties(
+        self,
+        tag: int,
+    ) -> None:
+        displacement = self.project.prescribed_displacements.get(tag)
+        if displacement is None:
+            return
+        dof_label = ("UX", "UY", "UZ", "RX", "RY", "RZ")[
+            displacement.dof - 1
+        ]
+        unit_system = UnitSystem.from_mapping(self.project.units)
+        unit = unit_system.length if displacement.dof <= 3 else "rad"
+        pattern = self.project.load_patterns.get(
+            displacement.pattern_tag
+        )
+        series = (
+            self.project.time_series.get(pattern.time_series_tag)
+            if pattern is not None
+            else None
+        )
+        rows = [
+            ("Tag", displacement.tag),
+            ("Name", displacement.name),
+            ("Pattern", displacement.pattern_tag),
+            (
+                "Time Series",
+                (
+                    f"{series.tag} - {series.name}"
+                    if series is not None
+                    else "-"
+                ),
+            ),
+            ("Node", displacement.node_tag),
+            ("DOF", f"{dof_label} ({displacement.dof})"),
+            ("Value", f"{displacement.value:g} {unit}"),
+            (
+                "Behavior",
+                "Value × Plain-pattern Time Series factor",
+            ),
+        ]
+        self.properties_panel.set_properties(
+            "Prescribed Displacement",
+            rows,
+        )
+
     def _create_element_load(self) -> None:
         plain = {
             tag: pattern
