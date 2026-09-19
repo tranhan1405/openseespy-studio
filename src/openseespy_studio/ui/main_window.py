@@ -2204,22 +2204,7 @@ class MainWindow(QMainWindow):
         try:
             spec = dialog.data()
             if spec.replace_geometry:
-                # A standalone specimen must not inherit model-linked objects
-                # from an older geometry that happens to reuse the same tags.
                 self.selection.clear()
-                self.project.selection_sets.clear()
-                self.project.constraints.clear()
-                self.project.connections.clear()
-                self.project.time_series.clear()
-                self.project.load_patterns.clear()
-                self.project.nodal_loads.clear()
-                self.project.prescribed_displacements.clear()
-                self.project.element_loads.clear()
-                self.project.mass_sources.clear()
-                self.project.analyses.clear()
-                self.project.recorders.clear()
-                self.project.solution_results.clear()
-                self.project.active_analysis_tag = None
                 self._reset_runtime_results()
 
             result = build_test_column(
