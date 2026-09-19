@@ -164,6 +164,138 @@ TIME_HISTORY_NODE_KEYS: dict[str, str] = {
 }
 
 
+def cyclic_hysteresis_curve(
+    result: dict[str, Any] | None,
+) -> tuple[list[float], list[float], int | None, int | None]:
+    """Return control displacement and applied base shear for Cyclic analysis."""
+    if not isinstance(result, dict):
+        return [], [], None, None
+    analysis = result.get("analysis", {})
+    history = result.get("history", {})
+    if not isinstance(analysis, dict) or not isinstance(history, dict):
+        return [], [], None, None
+    if str(analysis.get("type", "")) != "Cyclic":
+        return [], [], None, None
+
+    try:
+        node = int(history.get("monitor_node", analysis.get("control_node")))
+    except (TypeError, ValueError):
+        node = None
+    try:
+        dof = int(history.get("control_dof", analysis.get("control_dof", 1)))
+    except (TypeError, ValueError):
+        dof = 1
+    if dof not in range(1, 7):
+        dof = 1
+
+    rows = history.get("displacement", [])
+    shear = history.get("base_shear", [])
+    if not isinstance(rows, (list, tuple)) or not isinstance(shear, (list, tuple)):
+        return [], [], node, dof
+
+    x: list[float] = [0.0]
+    y: list[float] = [0.0]
+    index = dof - 1
+    for row, raw_shear in zip(rows, shear):
+        if not isinstance(row, (list, tuple)) or len(row) <= index:
+            continue
+        try:
+            displacement = float(row[index])
+            base_shear = -float(raw_shear)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(displacement) and math.isfinite(base_shear):
+            x.append(displacement)
+            y.append(base_shear)
+    if len(x) == 1:
+        return [], [], node, dof
+    return x, y, node, dof
+
+
+def cyclic_reversal_points(
+    displacement: Sequence[float],
+    force: Sequence[float],
+) -> list[dict[str, float]]:
+    """Return displacement reversals and their secant stiffness."""
+    count = min(len(displacement), len(force))
+    if count < 3:
+        return []
+
+    x = [float(value) for value in displacement[:count]]
+    y = [float(value) for value in force[:count]]
+    reversals: list[dict[str, float]] = []
+
+    previous_sign = 0
+    for index in range(1, count):
+        delta = x[index] - x[index - 1]
+        sign = 1 if delta > 1.0e-15 else -1 if delta < -1.0e-15 else 0
+        if sign == 0:
+            continue
+        if previous_sign and sign != previous_sign:
+            peak_index = index - 1
+            u = x[peak_index]
+            v = y[peak_index]
+            stiffness = abs(v / u) if abs(u) > 1.0e-15 else math.nan
+            reversals.append({
+                "index": float(peak_index),
+                "displacement": u,
+                "force": v,
+                "secant_stiffness": stiffness,
+            })
+        previous_sign = sign
+
+    if count >= 2:
+        u = x[-1]
+        v = y[-1]
+        if abs(u) > 1.0e-15:
+            stiffness = abs(v / u)
+            if not reversals or int(reversals[-1]["index"]) != count - 1:
+                reversals.append({
+                    "index": float(count - 1),
+                    "displacement": u,
+                    "force": v,
+                    "secant_stiffness": stiffness,
+                })
+    return reversals
+
+
+def cyclic_hysteresis_metrics(
+    displacement: Sequence[float],
+    force: Sequence[float],
+) -> dict[str, Any]:
+    """Summarize a cyclic force-displacement path."""
+    count = min(len(displacement), len(force))
+    if count < 2:
+        return {
+            "signed_work": 0.0,
+            "dissipated_energy": None,
+            "closed_path": False,
+            "max_abs_displacement": 0.0,
+            "max_abs_force": 0.0,
+            "reversals": [],
+        }
+
+    x = [float(value) for value in displacement[:count]]
+    y = [float(value) for value in force[:count]]
+    signed_work = sum(
+        0.5 * (y[index] + y[index - 1]) * (x[index] - x[index - 1])
+        for index in range(1, count)
+    )
+    max_abs_displacement = max(abs(value) for value in x)
+    max_abs_force = max(abs(value) for value in y)
+    tolerance = max(max_abs_displacement, 1.0) * 1.0e-8
+    closed_path = abs(x[-1] - x[0]) <= tolerance
+
+    return {
+        "signed_work": signed_work,
+        "dissipated_energy": abs(signed_work) if closed_path else None,
+        "closed_path": closed_path,
+        "max_abs_displacement": max_abs_displacement,
+        "max_abs_force": max_abs_force,
+        "reversals": cyclic_reversal_points(x, y),
+    }
+
+
 def time_history_node_tags(
     result: dict[str, Any] | None,
 ) -> list[int]:
