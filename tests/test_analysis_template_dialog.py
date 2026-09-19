@@ -570,3 +570,27 @@ def test_nlth_template_can_select_project_mass_source(qapp):
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+
+def test_mass_source_dialog_2d_defaults_to_global_y_and_free_translations(qapp):
+    from openseespy_studio.ui.mass_source_dialog import MassSourceDialog
+
+    model = StructuralModel("mass-source-2d", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 3.0, 0.0)
+    model.set_fixity(1, (1, 1, 1))
+    project = ProjectDatabase(model=model)
+
+    dialog = MassSourceDialog(project, next_tag=1)
+    try:
+        assert dialog.gravity_axis.currentData() == 2
+        assert set(dialog.direction_checks) == {1, 2}
+        assert all(
+            check.isChecked()
+            for check in dialog.direction_checks.values()
+        )
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
