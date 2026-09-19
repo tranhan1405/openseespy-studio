@@ -1473,6 +1473,11 @@ class ResultsPanel(QWidget):
         self.motion_play.toggled.connect(self._toggle_motion_playback)
         transport.addWidget(self.motion_play)
 
+        clear = QPushButton("Clear")
+        clear.clicked.connect(self.stop_motion)
+        clear.clicked.connect(self.clear_overlay_requested.emit)
+        transport.addWidget(clear)
+
         next_button = QPushButton("▶")
         next_button.setToolTip("Next motion frame")
         next_button.clicked.connect(lambda: self._step_motion(1))
@@ -1662,6 +1667,15 @@ class ResultsPanel(QWidget):
                 interval = 40
         self._motion_timer.setInterval(interval)
 
+    def stop_motion(self) -> None:
+        self._motion_timer.stop()
+        if hasattr(self, "motion_play"):
+            self.motion_play.blockSignals(True)
+            self.motion_play.setChecked(False)
+            self.motion_play.setText("▶ Play")
+            self.motion_play.blockSignals(False)
+        self._sync_motion_markers(None)
+
     def _toggle_motion_playback(self, checked: bool) -> None:
         if checked:
             if (
@@ -1673,8 +1687,19 @@ class ResultsPanel(QWidget):
                 self.motion_play.blockSignals(False)
                 return
             self.motion_play.setText("❚❚ Pause")
+            speed = max(0.01, self._motion_speed_value())
+            interval = max(16, int(round(40.0 / speed)))
+            if self._motion_info.transient_dt is not None:
+                dt = float(self._motion_info.transient_dt)
+                if dt > 0.0 and dt / speed > 0.04:
+                    interval = max(
+                        16,
+                        int(round(1000.0 * dt / speed)),
+                    )
+                else:
+                    interval = 40
+            self._motion_timer.setInterval(interval)
             self._motion_timer.start()
-            self._update_motion_timer()
         else:
             self._motion_timer.stop()
             self.motion_play.setText("▶ Play")
@@ -1825,12 +1850,7 @@ class ResultsPanel(QWidget):
             self.job_selected.emit(int(job_id))
 
     def clear_all(self) -> None:
-        self._motion_timer.stop()
-        if hasattr(self, "motion_play"):
-            self.motion_play.blockSignals(True)
-            self.motion_play.setChecked(False)
-            self.motion_play.setText("▶ Play")
-            self.motion_play.blockSignals(False)
+        self.stop_motion()
         self._result = {}
         self._result_cache_key = None
         self._node_table_cache.clear()
