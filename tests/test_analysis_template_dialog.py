@@ -7,6 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication
 
+from openseespy_studio.ui.analysis_dialog import AnalysisDialog
 from openseespy_studio.ui.analysis_template_dialog import AnalysisTemplateDialog
 
 
@@ -42,6 +43,23 @@ def test_analysis_template_dialog_opens_for_every_template(
         assert dialog.template.currentText() == template_name
         assert dialog.pages.currentIndex() == page_index
         assert dialog.summary.text().strip()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_analysis_settings_dialog_can_shrink_and_scroll(qapp):
+    dialog = AnalysisDialog(next_tag=1, default_node=1)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        dialog.resize(420, 320)
+        qapp.processEvents()
+
+        assert dialog.height() <= 340
+        assert dialog.scroll.widgetResizable() is True
+        assert dialog.scroll.verticalScrollBar().maximum() > 0
     finally:
         dialog.close()
         dialog.deleteLater()
