@@ -5448,14 +5448,39 @@ class MainWindow(QMainWindow):
                     solver_preset=str(request["solver_preset"]),
                 )
             elif kind == "Cyclic":
+                distribution = str(request["distribution"])
+                distribution_weights = request.get("custom_weights")
+                if (
+                    request["driver_pattern_tag"] is None
+                    and distribution == "First-mode proportional"
+                ):
+                    distribution_weights = self._first_mode_lateral_weights(
+                        mode=int(request["mode_number"]),
+                        dof=int(request["control_dof"]),
+                        control_node=int(request["control_node"]),
+                    )
                 plan = build_cyclic_template(
                     self.project,
                     name=str(request["name"]),
                     control_node=int(request["control_node"]),
                     control_dof=int(request["control_dof"]),
-                    protocol_rows=list(request["protocol_rows"]),
+                    protocol_targets=list(request["protocol_targets"]),
                     max_increment=float(request["max_increment"]),
-                    distribution=str(request["distribution"]),
+                    distribution=distribution,
+                    distribution_weights=(
+                        dict(distribution_weights)
+                        if isinstance(distribution_weights, dict)
+                        else None
+                    ),
+                    height_axis=int(request["height_axis"]),
+                    driver_pattern_tag=(
+                        int(request["driver_pattern_tag"])
+                        if request["driver_pattern_tag"] is not None
+                        else None
+                    ),
+                    preload_gravity=bool(request["preload_gravity"]),
+                    gravity_steps=int(request["gravity_steps"]),
+                    finish_at_zero=bool(request["finish_at_zero"]),
                     solver_preset=str(request["solver_preset"]),
                 )
             else:
