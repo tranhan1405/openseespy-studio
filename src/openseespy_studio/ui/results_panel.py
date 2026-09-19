@@ -1503,8 +1503,18 @@ class ResultsPanel(QWidget):
                             continue
                         if math.isfinite(norm):
                             values.append((iteration, norm))
+                algorithm_label = str(
+                    attempt.get("algorithm", "-")
+                )
+                if attempt.get("increment") is not None:
+                    try:
+                        algorithm_label += (
+                            f" · Δ={float(attempt.get('increment')):.6g}"
+                        )
+                    except (TypeError, ValueError):
+                        pass
                 plot_attempts.append({
-                    "algorithm": str(attempt.get("algorithm", "-")),
+                    "algorithm": algorithm_label,
                     "values": values,
                 })
             convergence = self._result.get("convergence", {})
