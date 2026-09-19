@@ -1,5 +1,7 @@
 import math
 
+import pytest
+
 from openseespy_studio.analysis_templates import (
     GroundMotionComponentSpec,
     build_cyclic_template,
