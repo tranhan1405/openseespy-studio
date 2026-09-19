@@ -63,6 +63,8 @@ class RecorderDialog(QDialog):
         self.recorder_type.addItems(["Node", "Element", "Section", "Fiber"])
         if recorder is not None:
             self.recorder_type.setCurrentText(recorder.recorder_type)
+        elif initial_element_tags and not initial_node_tags:
+            self.recorder_type.setCurrentText("Element")
         form.addRow("Type:", self.recorder_type)
 
         if recorder is not None:
