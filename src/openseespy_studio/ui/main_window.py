@@ -5900,14 +5900,6 @@ class MainWindow(QMainWindow):
                 "Create at least one node first.",
             )
             return
-        if not self.project.materials:
-            QMessageBox.information(
-                self,
-                "Connection Editor",
-                "Create at least one uniaxial material first.",
-            )
-            return
-
         node_i, node_j, to_ground = self._connection_dialog_defaults()
         dialog = ConnectionDialog(
             self.project.materials,
