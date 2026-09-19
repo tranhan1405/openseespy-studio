@@ -10,6 +10,7 @@ from openseespy_studio.deformed_geometry import (
     deformed_member_frames,
     geometry_contours,
     infer_fiber_display_geometry,
+    section_axis_strength_labels,
 )
 from openseespy_studio.project import (
     FiberComponentData,
@@ -195,3 +196,39 @@ def test_arbitrary_rectangular_fiber_patches_do_not_fake_a_rectangle():
         ],
     )
     assert infer_fiber_display_geometry(section) == {}
+
+
+def test_section_axis_strength_labels_identify_major_axis():
+    section = SectionData(
+        tag=11,
+        name="Rectangular elastic",
+        section_type="Elastic",
+        parameters={
+            "E": 30.0e9,
+            "A": 0.15,
+            "Iz": 0.003125,
+            "Iy": 0.001125,
+            "G": 12.0e9,
+            "J": 0.001,
+        },
+    )
+    y_label, z_label = section_axis_strength_labels(section)
+    assert y_label == "y · Iy weak"
+    assert z_label == "z · Iz strong"
+
+
+def test_section_axis_strength_labels_keep_symmetric_axes_neutral():
+    section = SectionData(
+        tag=12,
+        name="Circular elastic",
+        section_type="Elastic",
+        parameters={
+            "E": 30.0e9,
+            "A": 0.125,
+            "Iz": 0.001,
+            "Iy": 0.001,
+            "G": 12.0e9,
+            "J": 0.002,
+        },
+    )
+    assert section_axis_strength_labels(section) == ("y · Iy", "z · Iz")
