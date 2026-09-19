@@ -412,31 +412,91 @@ class AnalysisTemplateDialog(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
 
-        form = QFormLayout()
-        self.cyclic_increment = _double(0.001, 1.0e-12)
-        self.cyclic_distribution = QComboBox()
-        self.cyclic_distribution.addItems(
-            ["Uniform", "Triangular", "Mass proportional"]
+        protocol_group = QGroupBox("Control & loading protocol")
+        protocol_form = QFormLayout(protocol_group)
+
+        self.cyclic_control_info = QLabel(
+            "Displacement-controlled: prescribed displacement/drift is the "
+            "input; base shear / reaction force is the structural response."
         )
-        form.addRow(
-            f"Maximum branch increment [{self.unit_system.length}]:",
+        self.cyclic_control_info.setWordWrap(True)
+        self.cyclic_control_info.setObjectName("Muted")
+
+        self.cyclic_protocol_mode = QComboBox()
+        self.cyclic_protocol_mode.addItem(
+            "Amplitude + cycles",
+            "amplitude_cycles",
+        )
+        self.cyclic_protocol_mode.addItem(
+            "Absolute targets",
+            "absolute_targets",
+        )
+
+        self.cyclic_protocol_unit = QComboBox()
+        self.cyclic_protocol_unit.addItems(
+            ["Displacement", "Drift ratio [%]"]
+        )
+
+        self.cyclic_height_axis = QComboBox()
+        for axis, label in ((1, "X"), (2, "Y"), (3, "Z")):
+            self.cyclic_height_axis.addItem(label, axis)
+        default_axis = (
+            infer_height_axis(self.project)
+            if self.project is not None
+            else 3
+        )
+        self.cyclic_height_axis.setCurrentIndex(
+            max(0, self.cyclic_height_axis.findData(default_axis))
+        )
+
+        self.cyclic_auto_height = QCheckBox(
+            "Auto from control node to model base"
+        )
+        self.cyclic_auto_height.setChecked(self.project is not None)
+        self.cyclic_reference_height = _double(
+            1.0, 1.0e-12, 1.0e20
+        )
+        self.cyclic_increment = _double(0.001, 1.0e-12)
+        self.cyclic_return_zero = QCheckBox(
+            "Return to zero after the final amplitude block"
+        )
+        self.cyclic_return_zero.setChecked(True)
+
+        protocol_form.addRow(self.cyclic_control_info)
+        protocol_form.addRow(
+            "Protocol definition:",
+            self.cyclic_protocol_mode,
+        )
+        protocol_form.addRow(
+            "Protocol quantity:",
+            self.cyclic_protocol_unit,
+        )
+        protocol_form.addRow("Height axis:", self.cyclic_height_axis)
+        protocol_form.addRow(
+            "Reference height:",
+            self.cyclic_auto_height,
+        )
+        protocol_form.addRow(
+            f"Height [{self.unit_system.length}]:",
+            self.cyclic_reference_height,
+        )
+        protocol_form.addRow(
+            f"Maximum solver increment [{self.unit_system.length}]:",
             self.cyclic_increment,
         )
-        form.addRow("Reference load distribution:", self.cyclic_distribution)
-        layout.addLayout(form)
+        protocol_form.addRow(self.cyclic_return_zero)
+        layout.addWidget(protocol_group)
 
         layout.addWidget(QLabel("Loading protocol:"))
         self.protocol = QTableWidget(4, 2)
-        self.protocol.setHorizontalHeaderLabels(
-            [
-                f"Amplitude [{self.unit_system.length}]",
-                "Cycles",
-            ]
-        )
         defaults = ((0.005, 2), (0.010, 2), (0.020, 2), (0.040, 2))
         for row, (amplitude, cycles) in enumerate(defaults):
-            self.protocol.setItem(row, 0, QTableWidgetItem(f"{amplitude:g}"))
-            self.protocol.setItem(row, 1, QTableWidgetItem(str(cycles)))
+            self.protocol.setItem(
+                row, 0, QTableWidgetItem(f"{amplitude:g}")
+            )
+            self.protocol.setItem(
+                row, 1, QTableWidgetItem(str(cycles))
+            )
         self.protocol.itemChanged.connect(self._update_cyclic_preview)
         layout.addWidget(self.protocol)
 
@@ -455,13 +515,139 @@ class AnalysisTemplateDialog(QDialog):
 
         self.protocol_preview = QLabel()
         self.protocol_preview.setWordWrap(True)
+        self.protocol_preview.setObjectName("Muted")
         layout.addWidget(self.protocol_preview)
+        self.cyclic_protocol_plot = CyclicProtocolPreview()
+        layout.addWidget(self.cyclic_protocol_plot)
 
-        self.cyclic_increment.valueChanged.connect(self._update_summary)
+        load_group = QGroupBox("Reference lateral loading")
+        load_form = QFormLayout(load_group)
+
+        self.cyclic_load_source = QComboBox()
+        self.cyclic_load_source.addItem(
+            "Auto-generate reference pattern",
+            None,
+        )
+        if self.project is not None:
+            for tag in sorted(self.project.load_patterns):
+                pattern = self.project.load_patterns[tag]
+                if pattern.pattern_type == "Plain":
+                    self.cyclic_load_source.addItem(
+                        f"Existing {tag} - {pattern.name}",
+                        int(tag),
+                    )
+
+        self.cyclic_distribution = QComboBox()
+        self.cyclic_distribution.addItems(
+            [
+                "Uniform",
+                "Triangular",
+                "Mass proportional",
+                "First-mode proportional",
+                "Custom",
+            ]
+        )
+        self.cyclic_mode = QSpinBox()
+        self.cyclic_mode.setRange(1, 1000)
+        self.cyclic_mode.setValue(1)
+        self.cyclic_custom = QPlainTextEdit()
+        self.cyclic_custom.setPlaceholderText(
+            "Custom node weights, one per line:\n"
+            "101, 0.20\n102, 0.35\n103, 0.45"
+        )
+        self.cyclic_custom.setMaximumHeight(92)
+        self.cyclic_load_preview = QLabel()
+        self.cyclic_load_preview.setWordWrap(True)
+        self.cyclic_load_preview.setObjectName("Muted")
+
+        load_form.addRow("Load source:", self.cyclic_load_source)
+        load_form.addRow(
+            "Reference load distribution:",
+            self.cyclic_distribution,
+        )
+        load_form.addRow("Mode number:", self.cyclic_mode)
+        load_form.addRow("Custom node weights:", self.cyclic_custom)
+        load_form.addRow("Preview:", self.cyclic_load_preview)
+        layout.addWidget(load_group)
+
+        gravity_group = QGroupBox("Gravity / staged loading")
+        gravity_form = QFormLayout(gravity_group)
+        self.cyclic_preload_gravity = QCheckBox(
+            "Preload existing Plain patterns and hold with loadConst"
+        )
+        self.cyclic_preload_gravity.setChecked(True)
+        self.cyclic_gravity_steps = QSpinBox()
+        self.cyclic_gravity_steps.setRange(1, 100000)
+        self.cyclic_gravity_steps.setValue(10)
+        gravity_note = QLabel(
+            "The cyclic driving pattern is excluded from the gravity stage. "
+            "Other existing Plain patterns are preloaded first."
+        )
+        gravity_note.setWordWrap(True)
+        gravity_note.setObjectName("Muted")
+        gravity_form.addRow(self.cyclic_preload_gravity)
+        gravity_form.addRow("Gravity steps:", self.cyclic_gravity_steps)
+        gravity_form.addRow(gravity_note)
+        layout.addWidget(gravity_group)
+
+        self.cyclic_protocol_mode.currentIndexChanged.connect(
+            self._sync_cyclic_protocol_mode
+        )
+        self.cyclic_protocol_unit.currentTextChanged.connect(
+            self._sync_cyclic_protocol_unit
+        )
+        self.cyclic_height_axis.currentIndexChanged.connect(
+            self._refresh_cyclic_reference_height
+        )
+        self.cyclic_height_axis.currentIndexChanged.connect(
+            self._update_cyclic_load_preview
+        )
+        self.cyclic_auto_height.toggled.connect(
+            self._refresh_cyclic_reference_height
+        )
+        self.cyclic_reference_height.valueChanged.connect(
+            self._update_cyclic_preview
+        )
+        self.cyclic_increment.valueChanged.connect(
+            self._update_cyclic_preview
+        )
+        self.cyclic_return_zero.toggled.connect(
+            self._update_cyclic_preview
+        )
+
+        self.cyclic_load_source.currentIndexChanged.connect(
+            self._sync_cyclic_load_source
+        )
         self.cyclic_distribution.currentTextChanged.connect(
+            self._sync_cyclic_distribution
+        )
+        self.cyclic_mode.valueChanged.connect(
+            self._update_cyclic_load_preview
+        )
+        self.cyclic_custom.textChanged.connect(
+            self._update_cyclic_load_preview
+        )
+        self.cyclic_preload_gravity.toggled.connect(
+            self._sync_cyclic_gravity
+        )
+        self.cyclic_gravity_steps.valueChanged.connect(
             self._update_summary
         )
-        self._update_cyclic_preview()
+        self.control_node.valueChanged.connect(
+            self._refresh_cyclic_reference_height
+        )
+        self.control_node.valueChanged.connect(
+            self._update_cyclic_load_preview
+        )
+        self.direction.currentIndexChanged.connect(
+            self._update_cyclic_load_preview
+        )
+
+        self._sync_cyclic_protocol_mode()
+        self._sync_cyclic_protocol_unit()
+        self._refresh_cyclic_reference_height()
+        self._sync_cyclic_load_source()
+        self._sync_cyclic_gravity()
         return page
 
     def _build_nlth_page(self) -> QWidget:
