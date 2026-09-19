@@ -7,12 +7,15 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from ..project import ProjectDatabase
@@ -54,26 +57,31 @@ class TestColumnWizard(QDialog):
         self.units = UnitSystem.from_mapping(project.units)
         self.setWindowTitle("Quick 1D Column / Test Specimen")
         self.setModal(True)
-        self.resize(650, 720)
+        self.setSizeGripEnabled(True)
+        self.resize(650, 620)
 
         root = QVBoxLayout(self)
+
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(8, 8, 8, 8)
 
         intro = QLabel(
             "Create a single-line column specimen for experimental validation, "
             "cyclic/pushover studies, section tests, or simple dynamic models."
         )
         intro.setWordWrap(True)
-        root.addWidget(intro)
+        body_layout.addWidget(intro)
 
         preset_form = QFormLayout()
         self.preset = QComboBox()
         self.preset.addItems(self.PRESETS)
         preset_form.addRow("Preset:", self.preset)
-        root.addLayout(preset_form)
+        body_layout.addLayout(preset_form)
 
         geometry_group = QGroupBox("Geometry & formulation")
         geometry = QFormLayout(geometry_group)
-        self.height = _double(3.0, 1.0e-6, 1.0e9)
+        self.column_height = _double(3.0, 1.0e-6, 1.0e9)
         self.elements = QSpinBox()
         self.elements.setRange(1, 200)
         self.elements.setValue(1)
@@ -129,7 +137,7 @@ class TestColumnWizard(QDialog):
 
         geometry.addRow(
             f"Column height [{self.units.length}]:",
-            self.height,
+            self.column_height,
         )
         geometry.addRow("Number of elements:", self.elements)
         geometry.addRow("Column axis:", self.axis)
@@ -140,7 +148,7 @@ class TestColumnWizard(QDialog):
         geometry.addRow("Beam integration:", self.integration)
         geometry.addRow("Integration points:", self.integration_points)
         geometry.addRow("Geometric transformation:", self.transformation)
-        root.addWidget(geometry_group)
+        body_layout.addWidget(geometry_group)
 
         boundary_group = QGroupBox("Boundary")
         boundary = QFormLayout(boundary_group)
@@ -150,7 +158,7 @@ class TestColumnWizard(QDialog):
         self.top_support.addItems(["Free", "Pinned", "Fixed"])
         boundary.addRow("Base:", self.base_support)
         boundary.addRow("Top:", self.top_support)
-        root.addWidget(boundary_group)
+        body_layout.addWidget(boundary_group)
 
         loading_group = QGroupBox("Optional test setup")
         loading = QFormLayout(loading_group)
@@ -204,7 +212,7 @@ class TestColumnWizard(QDialog):
         mass_dir_row.addStretch(1)
         loading.addRow("", mass_dir_widget)
 
-        root.addWidget(loading_group)
+        body_layout.addWidget(loading_group)
 
         options_group = QGroupBox("Creation")
         options = QFormLayout(options_group)
@@ -213,12 +221,12 @@ class TestColumnWizard(QDialog):
         )
         self.replace_geometry.setChecked(True)
         options.addRow(self.replace_geometry)
-        root.addWidget(options_group)
+        body_layout.addWidget(options_group)
 
         self.preview = QLabel()
         self.preview.setWordWrap(True)
         self.preview.setObjectName("Muted")
-        root.addWidget(self.preview)
+        body_layout.addWidget(self.preview)
 
         note = QLabel(
             "Axial, lateral-reference, and prescribed-displacement actions "
@@ -230,21 +238,29 @@ class TestColumnWizard(QDialog):
         )
         note.setWordWrap(True)
         note.setObjectName("Muted")
-        root.addWidget(note)
+        body_layout.addWidget(note)
 
-        buttons = QDialogButtonBox(
+        body_layout.addStretch(1)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setWidget(body)
+        root.addWidget(self.scroll, 1)
+
+        self.buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
-        buttons.button(QDialogButtonBox.Ok).setText("Create Specimen")
-        buttons.accepted.connect(self._accept)
-        buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
+        self.buttons.button(QDialogButtonBox.Ok).setText("Create Specimen")
+        self.buttons.accepted.connect(self._accept)
+        self.buttons.rejected.connect(self.reject)
+        root.addWidget(self.buttons)
 
         self.preset.currentTextChanged.connect(self._apply_preset)
         self.axis.currentIndexChanged.connect(self._axis_changed)
         self.lateral.currentIndexChanged.connect(self._update_preview)
         self.planar.toggled.connect(self._update_preview)
-        self.height.valueChanged.connect(self._update_preview)
+        self.column_height.valueChanged.connect(self._update_preview)
         self.elements.valueChanged.connect(self._update_preview)
         self.element_type.currentTextChanged.connect(self._sync_formulation)
         for toggle in (
@@ -334,7 +350,7 @@ class TestColumnWizard(QDialog):
         if self.use_mass.isChecked():
             options.append("top mass")
         self.preview.setText(
-            f"Preview: 1D {axis}-axis column · {self.height.value():g} "
+            f"Preview: 1D {axis}-axis column · {self.column_height.value():g} "
             f"{self.units.length} · {self.elements.value()} element(s) · "
             f"lateral {lateral} · "
             f"{'planar' if self.planar.isChecked() else '3D'} · "
@@ -379,7 +395,7 @@ class TestColumnWizard(QDialog):
             )
 
         return TestColumnSpec(
-            height=self.height.value(),
+            height=self.column_height.value(),
             num_elements=self.elements.value(),
             axis=axis,
             lateral_direction=lateral,

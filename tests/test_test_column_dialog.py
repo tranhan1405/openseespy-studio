@@ -75,3 +75,22 @@ def test_test_column_wizard_auto_changes_lateral_axis(qapp):
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+
+def test_test_column_wizard_can_shrink_and_scroll(qapp):
+    dialog = TestColumnWizard(ProjectDatabase())
+    try:
+        dialog.show()
+        qapp.processEvents()
+        dialog.resize(460, 340)
+        qapp.processEvents()
+
+        assert dialog.height() <= 360
+        assert dialog.scroll.widgetResizable() is True
+        assert dialog.scroll.verticalScrollBar().maximum() > 0
+        assert dialog.buttons.isVisible() is True
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
