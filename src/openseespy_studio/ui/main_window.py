@@ -410,6 +410,9 @@ class RibbonGroup(QWidget):
         button = QToolButton()
         button.setObjectName("RibbonSmallButton")
         button.setDefaultAction(action)
+        ribbon_text = action.property("ribbonText")
+        if ribbon_text:
+            button.setText(str(ribbon_text))
         button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         button.setIconSize(QSize(16, 16))
         button.setAutoRaise(True)
@@ -1529,6 +1532,10 @@ class MainWindow(QMainWindow):
             "load",
             self._create_prescribed_displacement,
             "Create an imposed nodal displacement in a Plain load pattern",
+        )
+        self.actions["prescribed_displacement"].setProperty(
+            "ribbonText",
+            "Prescr. Disp.",
         )
         self._make_action("beam_load", "Beam Load...", "load", self._create_element_load, "Create uniform, point, or self-weight beam load")
         self._make_action("analysis_setup", "Analysis Setup...", "analysis", self._create_analysis, "Create analysis settings")
