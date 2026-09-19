@@ -113,3 +113,32 @@ def test_test_norm_history_is_trimmed_to_used_iterations():
     assert "_all_norms = [float(v) for v in (ops.testNorms() or [])]" in text
     assert "_used = max(0, min(_iterations, len(_all_norms)))" in text
     assert "_norms = _all_norms[:_used]" in text
+
+
+def test_adaptive_generator_emits_cutback_growth_and_substep_events():
+    settings = AnalysisSettingsData(
+        30,
+        "Adaptive",
+        "Pushover",
+        steps=5,
+        control_node=2,
+        displacement_increment=0.004,
+        adaptive_step=True,
+        live_convergence=True,
+    )
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            settings,
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
+
+    assert "_studio_emit('cutback'" in text
+    assert "_studio_emit('grow'" in text
+    assert "_studio_emit('adaptive_substep'" in text
+    assert "adaptive_step=True" in text
+    assert "'adaptive': True" in text
+    assert "'total_iterations': _studio_total_iterations" in text
+    compile(text, "<adaptive-live-events>", "exec")
