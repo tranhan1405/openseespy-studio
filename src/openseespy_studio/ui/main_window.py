@@ -1323,6 +1323,13 @@ class MainWindow(QMainWindow):
         self._make_action("line", "Line", "element", self._create_element, "Create element")
         self._make_action("frame", "Frame", "element", self._create_element, "Create frame element")
         self._make_action("grid", "Grid", "grid", self._show_frame_grid, "Create frame grid")
+        self._make_action(
+            "frame_2d",
+            "2D Frame",
+            "grid",
+            self._show_frame_grid_2d,
+            "Quick-create a planar X-Z frame with automatic out-of-plane restraints",
+        )
         self._make_action("extrude", "Extrude", "copy", self._not_implemented, "Extrude geometry")
 
         modify_callbacks = {
@@ -1484,7 +1491,8 @@ class MainWindow(QMainWindow):
         menus["Model"].addAction(self.actions["element_formulation"])
         menus["Geometry"].addActions([
             self.actions["node"], self.actions["line"], self.actions["frame"],
-            self.actions["grid"], self.actions["extrude"],
+            self.actions["grid"], self.actions["frame_2d"],
+            self.actions["extrude"],
         ])
         menus["View"].addActions([
             self.actions["xy"], self.actions["yz"], self.actions["xz"], self.actions["iso"],
@@ -1660,7 +1668,7 @@ class MainWindow(QMainWindow):
             home,
             "Geometry",
             large=("grid",),
-            small=("node", "line", "frame", "extrude"),
+            small=("frame_2d", "node", "line", "frame", "extrude"),
         )
         add_group(
             home,
@@ -2018,6 +2026,11 @@ class MainWindow(QMainWindow):
         self.create_dock.show()
         self.create_dock.raise_()
 
+    def _show_frame_grid_2d(self) -> None:
+        self.frame_grid_panel.set_planar_2d(True)
+        self._show_frame_grid()
+        self.viewport.set_view("xz")
+
     def _generate_frame_grid(self, spec: FrameGridSpec) -> None:
         before = self.project.to_dict()
         self.selection.clear()
@@ -2044,13 +2057,24 @@ class MainWindow(QMainWindow):
                 for item in created_transformations
             )
             message = (
-                f"Generated {spec.nx} × {spec.ny} bay, "
-                f"{spec.nz}-storey frame · created {names}"
+                (
+                    f"Generated 2D {spec.nx}-bay, {spec.nz}-storey frame"
+                    if spec.planar_2d
+                    else (
+                        f"Generated {spec.nx} × {spec.ny} bay, "
+                        f"{spec.nz}-storey frame"
+                    )
+                )
+                + f" · created {names}"
             )
         else:
             message = (
-                f"Generated {spec.nx} × {spec.ny} bay, "
-                f"{spec.nz}-storey frame"
+                f"Generated 2D {spec.nx}-bay, {spec.nz}-storey frame"
+                if spec.planar_2d
+                else (
+                    f"Generated {spec.nx} × {spec.ny} bay, "
+                    f"{spec.nz}-storey frame"
+                )
             )
 
         self._refresh_all(message)
@@ -2060,7 +2084,12 @@ class MainWindow(QMainWindow):
             column_transf_tag=spec.column_transf_tag,
             beam_transf_tag=spec.beam_transf_tag,
         )
-        self._record_project_change("Generate frame grid", before)
+        self._record_project_change(
+            "Generate 2D frame" if spec.planar_2d else "Generate frame grid",
+            before,
+        )
+        if spec.planar_2d:
+            self.viewport.set_view("xz")
 
     def _sync_viewport_display_data(
         self,
