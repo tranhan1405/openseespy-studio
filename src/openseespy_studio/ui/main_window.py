@@ -463,6 +463,26 @@ class FrameGridPanel(QWidget):
         title.setObjectName("PanelTitle")
         layout.addWidget(title)
 
+        dimension_form = QFormLayout()
+        self.dimension = QComboBox()
+        self.dimension.addItem("3D Frame Grid", "3D")
+        self.dimension.addItem("2D Frame (X-Z)", "2D")
+        self.dimension.setToolTip(
+            "2D Frame creates one X-Z plane and automatically restrains "
+            "UY, RX and RZ at every node so the current 3D-compatible "
+            "Studio backend behaves as a planar frame."
+        )
+        dimension_form.addRow("Frame type:", self.dimension)
+        layout.addLayout(dimension_form)
+
+        self.planar_note = QLabel(
+            "2D mode: one X-Z frame plane; out-of-plane DOFs are "
+            "restrained automatically."
+        )
+        self.planar_note.setWordWrap(True)
+        self.planar_note.setObjectName("Muted")
+        layout.addWidget(self.planar_note)
+
         mode_row = QHBoxLayout()
         self.rectangular = QPushButton("Rectangular Grid")
         self.rectangular.setCheckable(True)
@@ -504,6 +524,14 @@ class FrameGridPanel(QWidget):
         self.beams.setChecked(True)
         layout.addWidget(self.columns)
         layout.addWidget(self.beams)
+
+        self.planar_base_support = QComboBox()
+        self.planar_base_support.addItems(["Fixed", "Pinned"])
+        base_form = QFormLayout()
+        base_form.addRow("2D base support:", self.planar_base_support)
+        base_widget = QWidget()
+        base_widget.setLayout(base_form)
+        layout.addWidget(base_widget)
 
         self.column_section = QComboBox()
         self.beam_section = QComboBox()
@@ -548,6 +576,25 @@ class FrameGridPanel(QWidget):
         buttons.addWidget(generate)
         buttons.addWidget(close)
         root.addLayout(buttons)
+
+        self.dimension.currentIndexChanged.connect(
+            self._sync_dimension_mode
+        )
+        self._sync_dimension_mode()
+
+    def set_planar_2d(self, enabled: bool) -> None:
+        index = self.dimension.findData("2D" if enabled else "3D")
+        if index >= 0:
+            self.dimension.setCurrentIndex(index)
+        self._sync_dimension_mode()
+
+    def _sync_dimension_mode(self, *_args) -> None:
+        planar = self.dimension.currentData() == "2D"
+        self.ny.setEnabled(not planar)
+        self.dy.setEnabled(not planar)
+        self.planar_base_support.setEnabled(planar)
+        self.planar_note.setVisible(planar)
+        self.circular.setEnabled(False)
 
     @staticmethod
     def _separator() -> QFrame:
@@ -673,11 +720,16 @@ class FrameGridPanel(QWidget):
             start_element_tag=self.element_tag.value(),
             create_columns=self.columns.isChecked(),
             create_beams_x=self.beams.isChecked(),
-            create_beams_y=self.beams.isChecked(),
+            create_beams_y=(
+                self.beams.isChecked()
+                and self.dimension.currentData() != "2D"
+            ),
             column_section_tag=self.column_section.currentData(),
             beam_section_tag=self.beam_section.currentData(),
             column_transf_tag=self.column_transformation.currentData(),
             beam_transf_tag=self.beam_transformation.currentData(),
+            planar_2d=self.dimension.currentData() == "2D",
+            planar_base_support=self.planar_base_support.currentText(),
         ))
 
 
@@ -1271,6 +1323,13 @@ class MainWindow(QMainWindow):
         self._make_action("line", "Line", "element", self._create_element, "Create element")
         self._make_action("frame", "Frame", "element", self._create_element, "Create frame element")
         self._make_action("grid", "Grid", "grid", self._show_frame_grid, "Create frame grid")
+        self._make_action(
+            "frame_2d",
+            "2D Frame",
+            "grid",
+            self._show_frame_grid_2d,
+            "Quick-create a planar X-Z frame with automatic out-of-plane restraints",
+        )
         self._make_action("extrude", "Extrude", "copy", self._not_implemented, "Extrude geometry")
 
         modify_callbacks = {
@@ -1432,7 +1491,8 @@ class MainWindow(QMainWindow):
         menus["Model"].addAction(self.actions["element_formulation"])
         menus["Geometry"].addActions([
             self.actions["node"], self.actions["line"], self.actions["frame"],
-            self.actions["grid"], self.actions["extrude"],
+            self.actions["grid"], self.actions["frame_2d"],
+            self.actions["extrude"],
         ])
         menus["View"].addActions([
             self.actions["xy"], self.actions["yz"], self.actions["xz"], self.actions["iso"],
@@ -1608,7 +1668,7 @@ class MainWindow(QMainWindow):
             home,
             "Geometry",
             large=("grid",),
-            small=("node", "line", "frame", "extrude"),
+            small=("frame_2d", "node", "line", "frame", "extrude"),
         )
         add_group(
             home,
@@ -1966,6 +2026,11 @@ class MainWindow(QMainWindow):
         self.create_dock.show()
         self.create_dock.raise_()
 
+    def _show_frame_grid_2d(self) -> None:
+        self.frame_grid_panel.set_planar_2d(True)
+        self._show_frame_grid()
+        self.viewport.set_view("xz")
+
     def _generate_frame_grid(self, spec: FrameGridSpec) -> None:
         before = self.project.to_dict()
         self.selection.clear()
@@ -1992,13 +2057,24 @@ class MainWindow(QMainWindow):
                 for item in created_transformations
             )
             message = (
-                f"Generated {spec.nx} × {spec.ny} bay, "
-                f"{spec.nz}-storey frame · created {names}"
+                (
+                    f"Generated 2D {spec.nx}-bay, {spec.nz}-storey frame"
+                    if spec.planar_2d
+                    else (
+                        f"Generated {spec.nx} × {spec.ny} bay, "
+                        f"{spec.nz}-storey frame"
+                    )
+                )
+                + f" · created {names}"
             )
         else:
             message = (
-                f"Generated {spec.nx} × {spec.ny} bay, "
-                f"{spec.nz}-storey frame"
+                f"Generated 2D {spec.nx}-bay, {spec.nz}-storey frame"
+                if spec.planar_2d
+                else (
+                    f"Generated {spec.nx} × {spec.ny} bay, "
+                    f"{spec.nz}-storey frame"
+                )
             )
 
         self._refresh_all(message)
@@ -2008,7 +2084,12 @@ class MainWindow(QMainWindow):
             column_transf_tag=spec.column_transf_tag,
             beam_transf_tag=spec.beam_transf_tag,
         )
-        self._record_project_change("Generate frame grid", before)
+        self._record_project_change(
+            "Generate 2D frame" if spec.planar_2d else "Generate frame grid",
+            before,
+        )
+        if spec.planar_2d:
+            self.viewport.set_view("xz")
 
     def _sync_viewport_display_data(
         self,
@@ -6489,7 +6570,10 @@ class MainWindow(QMainWindow):
             node_action.triggered.connect(self._create_node)
             element_action = menu.addAction("New Element...")
             element_action.triggered.connect(self._create_element)
-            grid_action = menu.addAction("Create Frame Grid...")
+            menu.addSeparator()
+            quick_2d = menu.addAction("Quick 2D Frame...")
+            quick_2d.triggered.connect(self._show_frame_grid_2d)
+            grid_action = menu.addAction("Create 3D / Frame Grid...")
             grid_action.triggered.connect(self._show_frame_grid)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
@@ -6512,6 +6596,8 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "frame_grids_root":
+            quick_2d = menu.addAction("Quick 2D Frame...")
+            quick_2d.triggered.connect(self._show_frame_grid_2d)
             create = menu.addAction("Create / Edit Frame Grid...")
             create.triggered.connect(self._show_frame_grid)
             menu.exec(self.tree.viewport().mapToGlobal(position))
