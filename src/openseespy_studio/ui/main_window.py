@@ -5900,14 +5900,6 @@ class MainWindow(QMainWindow):
                 "Create at least one node first.",
             )
             return
-        if not self.project.materials:
-            QMessageBox.information(
-                self,
-                "Connection Editor",
-                "Create at least one uniaxial material first.",
-            )
-            return
-
         node_i, node_j, to_ground = self._connection_dialog_defaults()
         dialog = ConnectionDialog(
             self.project.materials,
@@ -5927,8 +5919,13 @@ class MainWindow(QMainWindow):
 
         before = self.project.to_dict()
         created_ground = None
+        added_material_tags: list[int] = []
         try:
             spec = dialog.spec()
+            for pending_material in spec.get("pending_materials", []):
+                self.project.add_material(pending_material)
+                added_material_tags.append(pending_material.tag)
+
             node_j = int(spec["node_j"])
             if spec["to_ground"]:
                 created_ground = self.project.create_ground_node(
@@ -5952,6 +5949,8 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             if created_ground is not None:
                 self.model.remove_node(created_ground, cascade=True)
+            for material_tag in reversed(added_material_tags):
+                self.project.remove_material(material_tag)
             QMessageBox.warning(self, "Connection Editor", str(exc))
             return
 
@@ -5986,8 +5985,13 @@ class MainWindow(QMainWindow):
         before = self.project.to_dict()
         old_ground = connection.generated_ground_node
         created_ground = None
+        added_material_tags: list[int] = []
         try:
             spec = dialog.spec()
+            for pending_material in spec.get("pending_materials", []):
+                self.project.add_material(pending_material)
+                added_material_tags.append(pending_material.tag)
+
             requested_ground = bool(spec["to_ground"])
             node_j = int(spec["node_j"])
 
@@ -6039,6 +6043,8 @@ class MainWindow(QMainWindow):
                 and created_ground in self.model.nodes
             ):
                 self.model.remove_node(created_ground, cascade=True)
+            for material_tag in reversed(added_material_tags):
+                self.project.remove_material(material_tag)
             QMessageBox.warning(self, "Connection Editor", str(exc))
             return
 
@@ -6079,14 +6085,24 @@ class MainWindow(QMainWindow):
         if connection is None:
             return
 
+        from ..material_chain import describe_material_chain
+
         dof_labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")
         material_text = []
         for dof in sorted(connection.materials_by_dof):
             material_tag = connection.materials_by_dof[dof]
             material = self.project.materials.get(material_tag)
             name = material.name if material is not None else "missing"
+            chain = describe_material_chain(
+                material_tag,
+                self.project.materials,
+            )
+            chain_text = " → ".join(
+                item.material_type for item in chain
+            )
+            suffix = f" [{chain_text}]" if len(chain) > 1 else ""
             material_text.append(
-                f"{dof_labels[dof - 1]} → {material_tag} - {name}"
+                f"{dof_labels[dof - 1]} → {material_tag} - {name}{suffix}"
             )
 
         rows: list[tuple[str, object]] = [

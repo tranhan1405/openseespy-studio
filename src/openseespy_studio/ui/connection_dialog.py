@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..project import ConnectionData, MaterialData
+from .material_chain_dialog import MaterialChainDialog
 from .material_test_dialog import MaterialTestDialog
 
 
@@ -185,6 +186,7 @@ class ConnectionDialog(QDialog):
         self.setModal(True)
         self.resize(760, 720)
         self.materials = dict(materials)
+        self.pending_materials: list[MaterialData] = []
         self.node_positions = dict(node_positions or {})
         self.units = dict(units or {})
 
@@ -194,7 +196,8 @@ class ConnectionDialog(QDialog):
             "Research spring/interface builder. Assign one UniaxialMaterial "
             "per active local DOF; nonlinear materials such as Pinching4, "
             "Bond_SP01, Fatigue, MinMax, Parallel and Series can be tested "
-            "directly before assignment."
+            "directly before assignment. Use Chain... on any DOF to build "
+            "Steel02 → Fatigue → MinMax in one research workflow."
         )
         intro.setWordWrap(True)
         intro.setStyleSheet(
@@ -294,6 +297,7 @@ class ConnectionDialog(QDialog):
         self.material_combos: list[QComboBox] = []
         self.material_type_labels: list[QLabel] = []
         self.test_buttons: list[QPushButton] = []
+        self.chain_buttons: list[QPushButton] = []
 
         for dof, (label, meaning) in enumerate(self.DOF_LABELS, start=1):
             row = QHBoxLayout()
@@ -310,11 +314,18 @@ class ConnectionDialog(QDialog):
             type_label.setStyleSheet("color: #526578;")
             test_button = QPushButton("Test...")
             test_button.setMaximumWidth(72)
+            chain_button = QPushButton("Chain...")
+            chain_button.setMaximumWidth(76)
+            chain_button.setToolTip(
+                "Build a Steel02 → Fatigue → MinMax research chain "
+                "and assign its outer material to this DOF."
+            )
 
             row.addWidget(check)
             row.addWidget(combo, 1)
             row.addWidget(type_label)
             row.addWidget(test_button)
+            row.addWidget(chain_button)
 
             holder = QWidget()
             holder.setLayout(row)
@@ -327,6 +338,7 @@ class ConnectionDialog(QDialog):
             self.material_combos.append(combo)
             self.material_type_labels.append(type_label)
             self.test_buttons.append(test_button)
+            self.chain_buttons.append(chain_button)
 
             check.toggled.connect(
                 lambda checked, index=dof - 1: self._sync_dof_row(
@@ -339,6 +351,9 @@ class ConnectionDialog(QDialog):
             )
             test_button.clicked.connect(
                 lambda _checked=False, index=dof - 1: self._test_dof_material(index)
+            )
+            chain_button.clicked.connect(
+                lambda _checked=False, index=dof - 1: self._build_dof_chain(index)
             )
 
         dof_layout.addWidget(dof_group)
@@ -464,6 +479,89 @@ class ConnectionDialog(QDialog):
             if material is not None and material.material_type in preferred_types:
                 combo.setCurrentIndex(index)
                 return
+
+    def _refresh_material_combos(
+        self,
+        *,
+        select_row: int | None = None,
+        select_material_tag: int | None = None,
+    ) -> None:
+        pending_tags = {material.tag for material in self.pending_materials}
+        for row, combo in enumerate(self.material_combos):
+            previous = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            for tag in sorted(self.materials):
+                material = self.materials[tag]
+                suffix = " · pending" if tag in pending_tags else ""
+                combo.addItem(
+                    f"{tag} - {material.name}{suffix}",
+                    tag,
+                )
+            wanted = (
+                select_material_tag
+                if select_row == row and select_material_tag is not None
+                else previous
+            )
+            index = combo.findData(wanted)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+            combo.blockSignals(False)
+            self._sync_material_type(row)
+
+    def _build_dof_chain(self, index: int) -> None:
+        label = self.DOF_LABELS[index][0]
+        dialog = MaterialChainDialog(
+            self.materials,
+            units=self.units,
+            target_dof_label=label,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        result = dialog.chain_result()
+        for material in result.materials:
+            self.materials[material.tag] = material
+            self.pending_materials.append(material)
+
+        self._refresh_material_combos(
+            select_row=index,
+            select_material_tag=result.final_tag,
+        )
+        self.dof_checks[index].setChecked(True)
+        self.connection_type.setCurrentText("zeroLength")
+        self._sync_material_type(index)
+
+    def _pending_materials_in_use(
+        self,
+        materials_by_dof: dict[int, int],
+    ) -> list[MaterialData]:
+        pending = {material.tag: material for material in self.pending_materials}
+        needed: set[int] = set()
+
+        def collect(tag: int) -> None:
+            if tag in needed or tag not in pending:
+                return
+            needed.add(tag)
+            material = pending[tag]
+            if (
+                material.material_type in {"MinMax", "Fatigue"}
+                and material.base_material_tag is not None
+            ):
+                collect(material.base_material_tag)
+            elif material.material_type in {"Parallel", "Series"}:
+                for dependency in material.material_tags:
+                    collect(dependency)
+
+        for material_tag in materials_by_dof.values():
+            collect(material_tag)
+
+        return [
+            material
+            for material in self.pending_materials
+            if material.tag in needed
+        ]
 
     def _sync_dof_row(self, index: int, checked: bool) -> None:
         self.material_combos[index].setEnabled(bool(checked))
@@ -710,6 +808,9 @@ class ConnectionDialog(QDialog):
             "orient_x": x,
             "orient_y": y,
             "do_rayleigh": self.do_rayleigh.isChecked(),
+            "pending_materials": self._pending_materials_in_use(
+                materials_by_dof
+            ),
         }
 
     def _validate_and_accept(self) -> None:
