@@ -103,6 +103,8 @@ class ModelViewport(QWidget):
         self._element_actor_data: dict[str, tuple[object, np.ndarray]] = {}
         self._annotation_label_actors: dict[str, object] = {}
         self._undeformed_element_actors: list[object] = []
+        self._navigation_proxy_actor = None
+        self._navigation_lod_enabled = False
         self._undeformed_model_visible = True
         self._left_press_pos: tuple[int, int] | None = None
         self._right_press_pos: tuple[int, int] | None = None
@@ -134,6 +136,15 @@ class ModelViewport(QWidget):
         self._id_label_restore_timer.timeout.connect(
             self._restore_id_labels_after_navigation
         )
+
+        # Hover picking is surprisingly expensive on large VTK meshes.  Keep
+        # only the latest pointer position and pick at a modest cadence instead
+        # of once for every MouseMove event.
+        self._hover_pick_timer = QTimer(self)
+        self._hover_pick_timer.setSingleShot(True)
+        self._hover_pick_timer.timeout.connect(self._perform_pending_hover_pick)
+        self._pending_hover_vtk_pos: tuple[int, int] | None = None
+        self._last_hover_pick_pos: tuple[int, int] | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -289,9 +300,13 @@ class ModelViewport(QWidget):
             self._nav_mode = "rotate"
         self._nav_last_pos = pos
         self._hover_ref = None
+        self._hover_pick_timer.stop()
+        self._pending_hover_vtk_pos = None
         self._id_label_restore_timer.stop()
         self._set_id_labels_visible(False, render=False)
-        self._update_highlight_overlays()
+        self._remove_overlay("hover-element")
+        self._remove_overlay("hover-node")
+        self._set_navigation_lod(True, render=True)
 
     def _navigate(self, pos: tuple[float, float]) -> None:
         if self._nav_mode is None or self._nav_last_pos is None:
@@ -359,6 +374,7 @@ class ModelViewport(QWidget):
         if delta_y == 0:
             return
         self._set_id_labels_visible(False, render=False)
+        self._set_navigation_lod(True, render=False)
         steps = delta_y / 120.0
         factor = math.pow(1.12, steps)
         self.plotter.camera.Zoom(factor)
@@ -367,10 +383,36 @@ class ModelViewport(QWidget):
         # only after the user pauses zooming.
         self._id_label_restore_timer.start()
 
-    def _update_hover_from_qt(self, event) -> None:
-        if event.buttons() != Qt.NoButton:
+    def _hover_pick_interval_ms(self) -> int:
+        if self._model is None:
+            return 45
+        count = len(self._model.elements)
+        if count >= 3000:
+            return 100
+        if count >= 1000:
+            return 70
+        return 40
+
+    def _schedule_hover_from_qt(self, event) -> None:
+        if event.buttons() != Qt.NoButton or self._nav_mode is not None:
             return
-        entity = self.pick_entity(*self._vtk_position_from_qt(event))
+        vtk_pos = self._vtk_position_from_qt(event)
+        if self._last_hover_pick_pos is not None:
+            dx = vtk_pos[0] - self._last_hover_pick_pos[0]
+            dy = vtk_pos[1] - self._last_hover_pick_pos[1]
+            if dx * dx + dy * dy < 9:
+                return
+        self._pending_hover_vtk_pos = vtk_pos
+        if not self._hover_pick_timer.isActive():
+            self._hover_pick_timer.start(self._hover_pick_interval_ms())
+
+    def _perform_pending_hover_pick(self) -> None:
+        if self._pending_hover_vtk_pos is None or self._nav_mode is not None:
+            return
+        vtk_pos = self._pending_hover_vtk_pos
+        self._pending_hover_vtk_pos = None
+        self._last_hover_pick_pos = vtk_pos
+        entity = self.pick_entity(*vtk_pos)
         if entity == self._hover_ref:
             return
         self._hover_ref = entity
@@ -446,7 +488,7 @@ class ModelViewport(QWidget):
                 return True
 
             if event.buttons() == Qt.NoButton:
-                self._update_hover_from_qt(event)
+                self._schedule_hover_from_qt(event)
                 return False
 
             # Consume left/right dragging so VTK cannot interpret it as camera motion.
@@ -460,6 +502,7 @@ class ModelViewport(QWidget):
                 self._nav_mode = None
                 self._nav_last_pos = None
                 self._id_label_restore_timer.stop()
+                self._set_navigation_lod(False, render=False)
                 self._set_id_labels_visible(True, render=True)
                 return True
 
@@ -831,28 +874,108 @@ class ModelViewport(QWidget):
             )
 
     @staticmethod
-    def _member_mesh(start, end, half_width):
-        dx = end[0] - start[0]
-        dy = end[1] - start[1]
-        dz = end[2] - start[2]
-        length = math.sqrt(dx * dx + dy * dy + dz * dz)
-        if length <= 1e-12:
+    def _batched_centerline_mesh(model: StructuralModel, tags) -> object | None:
+        """Build many frame centerlines as one PolyData object."""
+        points: list[tuple[float, float, float]] = []
+        lines: list[int] = []
+        cell_tags: list[int] = []
+        for tag in tags:
+            element = model.elements.get(int(tag))
+            if element is None:
+                continue
+            node_i = model.nodes.get(element.i)
+            node_j = model.nodes.get(element.j)
+            if node_i is None or node_j is None:
+                continue
+            index = len(points)
+            points.extend((node_i.xyz, node_j.xyz))
+            lines.extend((2, index, index + 1))
+            cell_tags.append(int(tag))
+        if not points:
             return None
+        mesh = pv.PolyData(np.asarray(points, dtype=float))
+        mesh.lines = np.asarray(lines, dtype=np.int64)
+        mesh.cell_data["element_tag"] = np.asarray(cell_tags, dtype=np.int64)
+        return mesh
 
-        center = (
-            (start[0] + end[0]) * 0.5,
-            (start[1] + end[1]) * 0.5,
-            (start[2] + end[2]) * 0.5,
+    @staticmethod
+    def _batched_tube_mesh(
+        model: StructuralModel,
+        tags,
+        half_width: float,
+    ) -> object | None:
+        """Build square-prism members directly, avoiding thousands of filters."""
+        points: list[np.ndarray] = []
+        faces: list[int] = []
+        cell_tags: list[int] = []
+
+        for tag in tags:
+            element = model.elements.get(int(tag))
+            if element is None:
+                continue
+            node_i = model.nodes.get(element.i)
+            node_j = model.nodes.get(element.j)
+            if node_i is None or node_j is None:
+                continue
+
+            start = np.asarray(node_i.xyz, dtype=float)
+            end = np.asarray(node_j.xyz, dtype=float)
+            axis = end - start
+            length = float(np.linalg.norm(axis))
+            if length <= 1.0e-12:
+                continue
+            axis /= length
+
+            # Pick a stable reference that is not parallel to the member.
+            reference = (
+                np.asarray((0.0, 0.0, 1.0), dtype=float)
+                if abs(float(axis[2])) < 0.90
+                else np.asarray((0.0, 1.0, 0.0), dtype=float)
+            )
+            local_y = np.cross(axis, reference)
+            norm_y = float(np.linalg.norm(local_y))
+            if norm_y <= 1.0e-12:
+                reference = np.asarray((1.0, 0.0, 0.0), dtype=float)
+                local_y = np.cross(axis, reference)
+                norm_y = float(np.linalg.norm(local_y))
+                if norm_y <= 1.0e-12:
+                    continue
+            local_y /= norm_y
+            local_z = np.cross(axis, local_y)
+            local_z /= max(float(np.linalg.norm(local_z)), 1.0e-12)
+
+            w = float(half_width)
+            offsets = (
+                local_y * w + local_z * w,
+                -local_y * w + local_z * w,
+                -local_y * w - local_z * w,
+                local_y * w - local_z * w,
+            )
+            base = len(points)
+            points.extend([start + offset for offset in offsets])
+            points.extend([end + offset for offset in offsets])
+
+            quads = (
+                (0, 3, 2, 1),
+                (4, 5, 6, 7),
+                (0, 1, 5, 4),
+                (1, 2, 6, 5),
+                (2, 3, 7, 6),
+                (3, 0, 4, 7),
+            )
+            for quad in quads:
+                faces.extend((4, *(base + index for index in quad)))
+                cell_tags.append(int(tag))
+
+        if not points:
+            return None
+        mesh = pv.PolyData(
+            np.asarray(points, dtype=float),
+            faces=np.asarray(faces, dtype=np.int64),
+            deep=True,
         )
-        direction = (dx / length, dy / length, dz / length)
-        return pv.Cylinder(
-            center=center,
-            direction=direction,
-            radius=half_width,
-            height=length,
-            resolution=4,
-            capping=True,
-        )
+        mesh.cell_data["element_tag"] = np.asarray(cell_tags, dtype=np.int64)
+        return mesh
 
     @staticmethod
     def _surface_mesh_from_swept_geometry(geometry):
@@ -926,46 +1049,86 @@ class ModelViewport(QWidget):
     def _combined_element_meshes(self, visible_tags: set[int], span: float):
         if self._model is None:
             return {}
-        groups: dict[str, list[object]] = {"column": [], "beam": []}
-        beam_size = max(span * 0.010, 0.08)
-        column_size = max(span * 0.0115, 0.09)
+
         representation = self._normalized_model_representation(
             self._model_representation
         )
+        beam_tags = [
+            tag
+            for tag in visible_tags
+            if self._model.elements[tag].group != "column"
+        ]
+        column_tags = [
+            tag
+            for tag in visible_tags
+            if self._model.elements[tag].group == "column"
+        ]
+
+        if representation == "centerline":
+            combined = {}
+            for name, tags in (("column", column_tags), ("beam", beam_tags)):
+                mesh = self._batched_centerline_mesh(self._model, tags)
+                if mesh is not None:
+                    combined[name] = mesh
+            return combined
+
+        if representation == "tube":
+            beam_size = max(span * 0.010, 0.08)
+            column_size = max(span * 0.0115, 0.09)
+            combined = {}
+            column_mesh = self._batched_tube_mesh(
+                self._model,
+                column_tags,
+                column_size,
+            )
+            beam_mesh = self._batched_tube_mesh(
+                self._model,
+                beam_tags,
+                beam_size,
+            )
+            if column_mesh is not None:
+                combined["column"] = column_mesh
+            if beam_mesh is not None:
+                combined["beam"] = beam_mesh
+            return combined
+
+        # Actual-section view remains geometry-driven. Members without enough
+        # section/transformation data fall back to a lightweight square tube.
+        groups: dict[str, list[object]] = {"column": [], "beam": []}
+        beam_size = max(span * 0.010, 0.08)
+        column_size = max(span * 0.0115, 0.09)
+        fallback: dict[str, list[int]] = {"column": [], "beam": []}
 
         for tag in visible_tags:
             element = self._model.elements[tag]
-            start = self._model.nodes[element.i].xyz
-            end = self._model.nodes[element.j].xyz
-            is_column = element.group == "column"
-            mesh = None
-
-            if representation == "actual_section":
-                mesh = self._actual_section_member_mesh(element)
-
-            if mesh is None and representation == "centerline":
-                mesh = pv.Line(start, end)
-
+            group = "column" if element.group == "column" else "beam"
+            mesh = self._actual_section_member_mesh(element)
             if mesh is None:
-                mesh = self._member_mesh(
-                    start,
-                    end,
-                    column_size if is_column else beam_size,
-                )
-
-            if mesh is None:
+                fallback[group].append(tag)
                 continue
             mesh.cell_data["element_tag"] = np.full(
                 mesh.n_cells,
                 tag,
                 dtype=np.int64,
             )
-            groups["column" if is_column else "beam"].append(mesh)
+            groups[group].append(mesh)
 
         combined = {}
         for name, meshes in groups.items():
-            if meshes:
-                combined[name] = pv.merge(meshes, merge_points=False)
+            parts = list(meshes)
+            fallback_mesh = self._batched_tube_mesh(
+                self._model,
+                fallback[name],
+                column_size if name == "column" else beam_size,
+            )
+            if fallback_mesh is not None:
+                parts.append(fallback_mesh)
+            if parts:
+                combined[name] = (
+                    parts[0]
+                    if len(parts) == 1
+                    else pv.merge(parts, merge_points=False)
+                )
         return combined
 
     def draw_model(
@@ -997,6 +1160,8 @@ class ModelViewport(QWidget):
         self._node_tags = []
         self._element_actor_data.clear()
         self._undeformed_element_actors.clear()
+        self._navigation_proxy_actor = None
+        self._navigation_lod_enabled = False
         self._undeformed_model_visible = True
 
         if self._model is None or not self._model.nodes:
@@ -1016,6 +1181,30 @@ class ModelViewport(QWidget):
         visible_elements = self._visible_element_tags()
         group_meshes = self._combined_element_meshes(visible_elements, span)
         group_colors = {"column": "#687d90", "beam": "#74889b"}
+
+        # For large models keep a single, cheap centerline actor ready for
+        # rotate/pan/zoom.  The detailed tube/section geometry is hidden only
+        # while the camera is moving.
+        self._navigation_lod_enabled = len(visible_elements) >= 700
+        if self._navigation_lod_enabled:
+            proxy_mesh = self._batched_centerline_mesh(
+                self._model,
+                sorted(visible_elements),
+            )
+            if proxy_mesh is not None:
+                self._navigation_proxy_actor = self.plotter.add_mesh(
+                    proxy_mesh,
+                    name="navigation-lod-centerline",
+                    color="#65798b",
+                    line_width=1,
+                    render_lines_as_tubes=False,
+                    pickable=False,
+                    render=False,
+                )
+                try:
+                    self._navigation_proxy_actor.SetVisibility(0)
+                except Exception:
+                    pass
 
         self._cell_picker.InitializePickList()
         self._cell_picker.PickFromListOn()
@@ -1220,6 +1409,47 @@ class ModelViewport(QWidget):
         except Exception:
             pass
 
+    def _set_navigation_lod(
+        self,
+        active: bool,
+        *,
+        render: bool = False,
+    ) -> None:
+        """Switch large models to a cheap centerline preview while navigating."""
+        if not self._navigation_lod_enabled or self._navigation_proxy_actor is None:
+            return
+
+        detailed_visible = bool(
+            (not active) and self._undeformed_model_visible
+        )
+        for actor in self._undeformed_element_actors:
+            try:
+                actor.SetVisibility(1 if detailed_visible else 0)
+            except Exception:
+                continue
+        if self._node_actor is not None:
+            try:
+                self._node_actor.SetVisibility(1 if detailed_visible else 0)
+            except Exception:
+                pass
+        try:
+            self._navigation_proxy_actor.SetVisibility(
+                1 if active and self._undeformed_model_visible else 0
+            )
+        except Exception:
+            pass
+
+        # All point-label mappers are expensive during camera motion, not just
+        # node/element IDs. Restore their previous presence after navigation.
+        for actor in self._annotation_label_actors.values():
+            try:
+                actor.SetVisibility(0 if active else 1)
+            except Exception:
+                continue
+
+        if render:
+            self.plotter.render()
+
     def _set_id_labels_visible(
         self,
         visible: bool,
@@ -1247,6 +1477,7 @@ class ModelViewport(QWidget):
             self.plotter.render()
 
     def _restore_id_labels_after_navigation(self) -> None:
+        self._set_navigation_lod(False, render=False)
         self._set_id_labels_visible(True, render=True)
 
     def _element_overlay_mesh(self, tags: set[int]):
