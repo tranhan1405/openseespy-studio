@@ -190,6 +190,23 @@ def _axis_vector(
     return tuple(values)
 
 
+def _clear_model_linked_data(project: ProjectDatabase) -> None:
+    """Clear objects that would otherwise be accidentally rebound by tag."""
+    project.selection_sets.clear()
+    project.constraints.clear()
+    project.connections.clear()
+    project.time_series.clear()
+    project.load_patterns.clear()
+    project.nodal_loads.clear()
+    project.prescribed_displacements.clear()
+    project.element_loads.clear()
+    project.mass_sources.clear()
+    project.analyses.clear()
+    project.recorders.clear()
+    project.solution_results.clear()
+    project.active_analysis_tag = None
+
+
 def build_test_column(
     project: ProjectDatabase,
     spec: TestColumnSpec,
@@ -236,7 +253,15 @@ def build_test_column(
         raise ValueError("Top-mass directions must be UX, UY, or UZ.")
 
     if spec.replace_geometry:
+        _clear_model_linked_data(project)
         project.model.clear()
+        project.model.ndm = 3
+        project.model.ndf = 6
+    elif int(project.model.ndm) != 3 or int(project.model.ndf) != 6:
+        raise ValueError(
+            "Appending a Quick 1D Column currently requires a 3D/6DOF "
+            "Studio model. Use standalone/replace mode for other models."
+        )
 
     model: StructuralModel = project.model
     node_tag = model.next_node_tag()
