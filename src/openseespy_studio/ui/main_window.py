@@ -1527,10 +1527,40 @@ class MainWindow(QMainWindow):
         self._make_action("analysis_setup", "Analysis Setup...", "analysis", self._create_analysis, "Create analysis settings")
         self._make_action(
             "analysis_template",
-            "Templates",
+            "Templates...",
             "analysis",
-            self._create_analysis_template,
-            "Create Pushover, Cyclic, or nonlinear time-history workflow",
+            lambda checked=False: self._create_analysis_template("Pushover"),
+            "Open analysis templates",
+        )
+        self._make_action(
+            "modal_template",
+            "Modal",
+            "analysis",
+            lambda checked=False: self._create_analysis_template("Modal"),
+            "Create a Modal analysis template",
+        )
+        self._make_action(
+            "pushover_template",
+            "Pushover",
+            "analysis",
+            lambda checked=False: self._create_analysis_template("Pushover"),
+            "Create a nonlinear Pushover template",
+        )
+        self._make_action(
+            "cyclic_template",
+            "Cyclic",
+            "analysis",
+            lambda checked=False: self._create_analysis_template("Cyclic"),
+            "Create a cyclic displacement-control template",
+        )
+        self._make_action(
+            "nlth_template",
+            "NLTH",
+            "analysis",
+            lambda checked=False: self._create_analysis_template(
+                "Nonlinear Time History"
+            ),
+            "Create a nonlinear time-history earthquake template",
         )
         self._make_action("check_model", "Check Model", "analysis", self._check_model, "Validate the model before analysis")
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
@@ -1573,7 +1603,11 @@ class MainWindow(QMainWindow):
         menus["Loads"].addAction(self.actions["load_pattern"])
         menus["Loads"].addAction(self.actions["nodal_load"])
         menus["Loads"].addAction(self.actions["beam_load"])
-        menus["Analysis"].addAction(self.actions["analysis_template"])
+        template_menu = menus["Analysis"].addMenu("Templates")
+        template_menu.addAction(self.actions["modal_template"])
+        template_menu.addAction(self.actions["pushover_template"])
+        template_menu.addAction(self.actions["cyclic_template"])
+        template_menu.addAction(self.actions["nlth_template"])
         menus["Analysis"].addAction(self.actions["analysis_setup"])
         menus["Analysis"].addAction(self.actions["check_model"])
         menus["Analysis"].addAction(self.actions["run"])
@@ -1777,6 +1811,12 @@ class MainWindow(QMainWindow):
             analysis_page,
             "Templates",
             large=("analysis_template",),
+            small=(
+                "modal_template",
+                "pushover_template",
+                "cyclic_template",
+                "nlth_template",
+            ),
         )
         add_group(
             analysis_page,
