@@ -4820,7 +4820,10 @@ class MainWindow(QMainWindow):
             return None
         result = dict(job.results)
         self._last_result = result
-        self.results_panel.set_result(result)
+        self.results_panel.set_result(
+            result,
+            cache_key=("job", job.job_id),
+        )
         return result
 
     def _show_solution_convergence(self, analysis_tag: int) -> None:
@@ -4839,6 +4842,9 @@ class MainWindow(QMainWindow):
         if result is None:
             return
 
+        source_job = self._latest_job_for_analysis(
+            result_object.analysis_tag
+        )
         self._render_result_data(
             result,
             result_object.result_type,
@@ -4846,6 +4852,11 @@ class MainWindow(QMainWindow):
             node_scope=set(result_object.node_scope),
             element_scope=set(result_object.element_scope),
             restore_scope_selection=True,
+            result_cache_key=(
+                ("job", source_job.job_id)
+                if source_job is not None
+                else None
+            ),
         )
         self.status_message.setText(
             f"Evaluated result: {result_object.name}"
@@ -5236,6 +5247,7 @@ class MainWindow(QMainWindow):
         node_scope: set[int] | None = None,
         element_scope: set[int] | None = None,
         restore_scope_selection: bool = False,
+        result_cache_key: object | None = None,
     ) -> None:
         payload = dict(result or {})
         if not payload:
@@ -5249,7 +5261,10 @@ class MainWindow(QMainWindow):
         options["_element_scope"] = sorted(elements)
 
         self._last_result = payload
-        self.results_panel.set_result(payload)
+        self.results_panel.set_result(
+            payload,
+            cache_key=result_cache_key,
+        )
         self.results_panel.show_solution_result(result_type, options)
         self.results_dock.show()
         self.results_dock.raise_()
@@ -5420,7 +5435,10 @@ class MainWindow(QMainWindow):
             )
             return
         self._last_result = dict(job.results)
-        self.results_panel.set_result(self._last_result)
+        self.results_panel.set_result(
+            self._last_result,
+            cache_key=("job", job.job_id),
+        )
         self._show_job_properties(job.job_id)
         self.status_message.setText(
             f"Job {job.job_id} is the active quick-plot result source. "
@@ -5459,6 +5477,7 @@ class MainWindow(QMainWindow):
             node_scope=node_scope,
             element_scope=element_scope,
             restore_scope_selection=True,
+            result_cache_key=("job", job.job_id),
         )
         self.properties_panel.set_properties(
             str(plot.get("name", f"Result {plot_id}")),
@@ -6998,7 +7017,14 @@ class MainWindow(QMainWindow):
 
         if result:
             self._last_result = result
-            self.results_panel.set_result(result)
+            self.results_panel.set_result(
+                result,
+                cache_key=(
+                    ("job", job.job_id)
+                    if job is not None
+                    else None
+                ),
+            )
             analysis_type = str(result.get("analysis", {}).get("type", ""))
             if analysis_type == "Modal":
                 modes = result.get("modes", {})
@@ -7047,7 +7073,10 @@ class MainWindow(QMainWindow):
             return
         if job.results:
             self._last_result = dict(job.results)
-            self.results_panel.set_result(self._last_result)
+            self.results_panel.set_result(
+                self._last_result,
+                cache_key=("job", job.job_id),
+            )
         self._show_job_properties(job.job_id)
         self.status_message.setText(
             f"Selected Job {job.job_id}: {job.analysis_name}"
