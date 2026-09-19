@@ -5612,11 +5612,6 @@ class MainWindow(QMainWindow):
                     ("Max increment", f"{settings.cyclic_increment:g}"),
                     ("Expanded steps", len(expanded)),
                 ])
-            elif settings.analysis_type == "Transient":
-                rows.extend([
-                    ("dt", f"{settings.dt:g}"), ("gamma", f"{settings.gamma:g}"),
-                    ("beta", f"{settings.beta:g}"),
-                ])
         self.properties_panel.set_properties("Analysis Settings", rows)
 
     def _create_recorder(self) -> None:
