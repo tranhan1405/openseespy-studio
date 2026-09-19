@@ -57,6 +57,21 @@ def test_parse_ground_motion_text_accepts_csv_and_comments():
     assert parse_ground_motion_text(text, column=2) == [0.10, -0.20, 0.30]
 
 
+def test_triangular_distribution_loads_first_free_floor_from_model_base():
+    project = project_with_two_storeys()
+    weights = lateral_load_weights(
+        project,
+        dof=1,
+        distribution="Triangular",
+    )
+
+    assert set(weights) == {2, 3}
+    assert weights[2] > 0.0
+    assert weights[3] > weights[2]
+    assert math.isclose(weights[2], 1.0 / 3.0)
+    assert math.isclose(weights[3], 2.0 / 3.0)
+
+
 def test_pushover_template_creates_normalized_lateral_pattern_and_results():
     project = project_with_two_storeys()
     plan = build_pushover_template(
