@@ -26,21 +26,41 @@ class FrameGridSpec:
     beam_section_tag: int | None = None
     column_transf_tag: int | None = None
     beam_transf_tag: int | None = None
+    planar_2d: bool = False
+    base_support: str = "Fixed"
 
 
 def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
-    """Create a regular 3-D frame grid.
+    """Create a regular 3-D grid or a planar X-Z frame.
 
-    nx/ny are bay counts, nz is storey count. Ground-level nodes are included.
+    Planar mode keeps the Studio 3-D/6-DOF solver representation but
+    restrains UY, RX and RZ at non-base nodes. The frame therefore behaves
+    as a planar 2-D frame while remaining compatible with existing sections,
+    loads and post-processing.
     """
+    if spec.nx < 1 or spec.nz < 1:
+        raise ValueError("Frame grid needs at least one bay and one storey.")
+    if not spec.planar_2d and spec.ny < 1:
+        raise ValueError("3-D frame grid needs at least one Y-direction bay.")
+    if spec.base_support not in {"Fixed", "Pinned"}:
+        raise ValueError("Base support must be Fixed or Pinned.")
+
     model.clear()
+    model.ndm = 3
+    model.ndf = 6
     node_tag = spec.start_node_tag
     node_at: dict[tuple[int, int, int], int] = {}
 
+    y_bays = 0 if spec.planar_2d else spec.ny
     for k in range(spec.nz + 1):
-        for j in range(spec.ny + 1):
+        for j in range(y_bays + 1):
             for i in range(spec.nx + 1):
-                model.add_node(node_tag, i * spec.dx, j * spec.dy, k * spec.dz)
+                model.add_node(
+                    node_tag,
+                    i * spec.dx,
+                    j * spec.dy,
+                    k * spec.dz,
+                )
                 node_at[(i, j, k)] = node_tag
                 node_tag += 1
 
@@ -48,7 +68,7 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
 
     if spec.create_columns:
         for k in range(spec.nz):
-            for j in range(spec.ny + 1):
+            for j in range(y_bays + 1):
                 for i in range(spec.nx + 1):
                     model.add_element(
                         ele_tag,
@@ -62,7 +82,7 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
 
     if spec.create_beams_x:
         for k in range(1, spec.nz + 1):
-            for j in range(spec.ny + 1):
+            for j in range(y_bays + 1):
                 for i in range(spec.nx):
                     model.add_element(
                         ele_tag,
@@ -74,9 +94,9 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                     )
                     ele_tag += 1
 
-    if spec.create_beams_y:
+    if spec.create_beams_y and not spec.planar_2d:
         for k in range(1, spec.nz + 1):
-            for j in range(spec.ny):
+            for j in range(y_bays):
                 for i in range(spec.nx + 1):
                     model.add_element(
                         ele_tag,
@@ -88,9 +108,25 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                     )
                     ele_tag += 1
 
-    for j in range(spec.ny + 1):
+    if spec.planar_2d:
+        # X-Z plane: in-plane DOFs are UX, UZ and RY.
+        planar_fixity = (0, 1, 0, 1, 0, 1)
+        for k in range(1, spec.nz + 1):
+            for i in range(spec.nx + 1):
+                model.set_fixity(node_at[(i, 0, k)], planar_fixity)
+
+    base_fixity = (
+        (1, 1, 1, 1, 1, 1)
+        if spec.base_support == "Fixed"
+        else (
+            (1, 1, 1, 1, 0, 1)
+            if spec.planar_2d
+            else (1, 1, 1, 0, 0, 0)
+        )
+    )
+    for j in range(y_bays + 1):
         for i in range(spec.nx + 1):
-            model.set_fixity(node_at[(i, j, 0)], (1, 1, 1, 1, 1, 1))
+            model.set_fixity(node_at[(i, j, 0)], base_fixity)
 
 
 def material_to_openseespy(
