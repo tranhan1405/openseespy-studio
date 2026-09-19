@@ -4,12 +4,14 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -26,6 +28,7 @@ from PySide6.QtWidgets import (
 from ..analysis_templates import (
     SOLVER_PRESETS,
     expand_cyclic_protocol,
+    parse_cyclic_protocol_text,
     parse_ground_motion_text,
 )
 from ..units import UnitSystem
@@ -62,7 +65,11 @@ class AnalysisTemplateDialog(QDialog):
         self.resize(620, 610)
 
         self.unit_system = UnitSystem.from_mapping(units)
-        self._ground_motion_values: list[float] = []
+        self._ground_motion_values: dict[int, list[float]] = {
+            1: [],
+            2: [],
+            3: [],
+        }
 
         root = QVBoxLayout(self)
 
@@ -130,7 +137,17 @@ class AnalysisTemplateDialog(QDialog):
         self.push_increment = _double(0.001, 1.0e-12)
         self.push_distribution = QComboBox()
         self.push_distribution.addItems(
-            ["Triangular", "Uniform", "Mass proportional"]
+            [
+                "Triangular",
+                "Uniform",
+                "Mass proportional",
+                "First-mode approximation",
+                "Custom",
+            ]
+        )
+        self.push_custom = QLineEdit()
+        self.push_custom.setPlaceholderText(
+            "node:weight, e.g. 11:1, 21:2, 31:3"
         )
         form.addRow(
             f"Target displacement [{self.unit_system.length}]:",
@@ -141,6 +158,7 @@ class AnalysisTemplateDialog(QDialog):
             self.push_increment,
         )
         form.addRow("Reference load distribution:", self.push_distribution)
+        form.addRow("Custom node weights:", self.push_custom)
 
         note = QLabel(
             "Studio creates a normalized lateral reference pattern and uses "
@@ -153,11 +171,18 @@ class AnalysisTemplateDialog(QDialog):
             self.push_target,
             self.push_increment,
             self.push_distribution,
+            self.push_custom,
         ):
             if hasattr(widget, "valueChanged"):
                 widget.valueChanged.connect(self._update_summary)
             if hasattr(widget, "currentTextChanged"):
                 widget.currentTextChanged.connect(self._update_summary)
+            if hasattr(widget, "textChanged"):
+                widget.textChanged.connect(self._update_summary)
+        self.push_distribution.currentTextChanged.connect(
+            self._sync_custom_weight_fields
+        )
+        self._sync_custom_weight_fields()
         return page
 
     def _build_cyclic_page(self) -> QWidget:
@@ -168,13 +193,24 @@ class AnalysisTemplateDialog(QDialog):
         self.cyclic_increment = _double(0.001, 1.0e-12)
         self.cyclic_distribution = QComboBox()
         self.cyclic_distribution.addItems(
-            ["Uniform", "Triangular", "Mass proportional"]
+            [
+                "Uniform",
+                "Triangular",
+                "Mass proportional",
+                "First-mode approximation",
+                "Custom",
+            ]
+        )
+        self.cyclic_custom = QLineEdit()
+        self.cyclic_custom.setPlaceholderText(
+            "node:weight, optional custom reference pattern"
         )
         form.addRow(
             f"Maximum branch increment [{self.unit_system.length}]:",
             self.cyclic_increment,
         )
         form.addRow("Reference load distribution:", self.cyclic_distribution)
+        form.addRow("Custom node weights:", self.cyclic_custom)
         layout.addLayout(form)
 
         layout.addWidget(QLabel("Loading protocol:"))
@@ -195,10 +231,13 @@ class AnalysisTemplateDialog(QDialog):
         row = QHBoxLayout()
         add = QPushButton("Add Row")
         remove = QPushButton("Remove Row")
+        import_csv = QPushButton("Import CSV/TXT...")
         add.clicked.connect(self._add_protocol_row)
         remove.clicked.connect(self._remove_protocol_row)
+        import_csv.clicked.connect(self._import_protocol)
         row.addWidget(add)
         row.addWidget(remove)
+        row.addWidget(import_csv)
         row.addStretch(1)
         layout.addLayout(row)
 
@@ -210,6 +249,10 @@ class AnalysisTemplateDialog(QDialog):
         self.cyclic_distribution.currentTextChanged.connect(
             self._update_summary
         )
+        self.cyclic_distribution.currentTextChanged.connect(
+            self._sync_custom_weight_fields
+        )
+        self.cyclic_custom.textChanged.connect(self._update_summary)
         self._update_cyclic_preview()
         return page
 
