@@ -505,7 +505,7 @@ def build_nlth_template(
                     "dof": int(direction),
                 },
             ),
-            ("Maximum Deformed Shape", "DeformedShape", {"scale": 10.0}),
+            ("Deformed Shape", "DeformedShape", {"scale": 10.0}),
             ("Hinge / Yield State", "HingeState", {}),
             ("Member Force Mz", "MemberForce", {"component": "Mz", "scale": 1.0}),
             ("Convergence", "Convergence", {"test": analysis.test}),
