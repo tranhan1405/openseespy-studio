@@ -4017,6 +4017,10 @@ class MainWindow(QMainWindow):
                 ("Algorithm", settings.algorithm), ("Steps", settings.steps),
                 ("Recovery", "On" if settings.recovery else "Off"),
                 (
+                    "Live convergence",
+                    "On" if settings.live_convergence else "Off",
+                ),
+                (
                     "External terminal",
                     "On" if settings.show_external_console else "Off",
                 ),
