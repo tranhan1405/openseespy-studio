@@ -608,6 +608,7 @@ def analysis_to_openseespy(
         f"        'rayleigh_damping_ratio': {settings.rayleigh_damping_ratio:g},",
         f"        'rayleigh_mode_i': {settings.rayleigh_mode_i},",
         f"        'rayleigh_mode_j': {settings.rayleigh_mode_j},",
+        f"        'eigen_solver': {settings.eigen_solver!r},",
         "    },",
         "    'final': {},",
         "    'convergence': {",
@@ -657,7 +658,10 @@ def analysis_to_openseespy(
         )
         lines.extend([
             "# Rayleigh damping from two modal frequencies",
-            f"_studio_damping_eigs = ops.eigen({max_mode})",
+            (
+                f"_studio_damping_eigs = ops.eigen("
+                f"{settings.eigen_solver!r}, {max_mode})"
+            ),
             "if not isinstance(_studio_damping_eigs, (list, tuple)):",
             "    _studio_damping_eigs = [_studio_damping_eigs]",
             (
@@ -689,36 +693,107 @@ def analysis_to_openseespy(
     if settings.analysis_type == "Modal":
         lines.append(
             f"_studio_emit('start', total={settings.num_modes}, "
-            f"analysis_type='Modal', algorithm='Eigen')"
+            f"analysis_type='Modal', algorithm={settings.eigen_solver!r})"
         )
         lines.append(
-            f"_studio_eigenvalues = ops.eigen({settings.num_modes})"
+            f"_studio_eigenvalues = ops.eigen("
+            f"{settings.eigen_solver!r}, {settings.num_modes})"
         )
         lines.append("if not isinstance(_studio_eigenvalues, (list, tuple)):")
         lines.append("    _studio_eigenvalues = [_studio_eigenvalues]")
+        lines.extend([
+            "_studio_total_lumped_mass = {}",
+            "for _studio_dof in (1, 2, 3):",
+            "    _studio_mass_total = 0.0",
+            "    for _studio_node in _studio_node_tags:",
+            "        try:",
+            "            _studio_mass_total += max(",
+            "                0.0, float(ops.nodeMass(_studio_node, _studio_dof))",
+            "            )",
+            "        except Exception:",
+            "            pass",
+            "    _studio_total_lumped_mass[str(_studio_dof)] = _studio_mass_total",
+            "_studio_results['modal_summary'] = {",
+            f"    'eigen_solver': {settings.eigen_solver!r},",
+            "    'total_lumped_mass': dict(_studio_total_lumped_mass),",
+            "}",
+        ])
         lines.append(
             "for _studio_mode, _studio_lambda in "
             "enumerate(_studio_eigenvalues, start=1):"
         )
-        lines.append("    _studio_vectors = {}")
-        lines.append("    for _studio_node in _studio_node_tags:")
-        lines.append(
-            "        _studio_vectors[str(_studio_node)] = "
-            "[float(v) for v in "
-            "ops.nodeEigenvector(_studio_node, _studio_mode)]"
-        )
-        lines.append(
-            "    _studio_results['modes'][str(_studio_mode)] = "
-            "{'eigenvalue': float(_studio_lambda), "
-            "'vectors': _studio_vectors}"
-        )
+        lines.extend([
+            "    _studio_lambda = float(_studio_lambda)",
+            "    _studio_omega = math.sqrt(max(_studio_lambda, 0.0))",
+            (
+                "    _studio_frequency = "
+                "_studio_omega / (2.0 * math.pi) "
+                "if _studio_omega > 0.0 else None"
+            ),
+            (
+                "    _studio_period = "
+                "(2.0 * math.pi / _studio_omega) "
+                "if _studio_omega > 0.0 else None"
+            ),
+            "    _studio_vectors = {}",
+            "    for _studio_node in _studio_node_tags:",
+            "        _studio_vectors[str(_studio_node)] = [",
+            "            float(v) for v in",
+            "            ops.nodeEigenvector(_studio_node, _studio_mode)",
+            "        ]",
+            "    _studio_participation = {}",
+            "    for _studio_dof in (1, 2, 3):",
+            "        _studio_num = 0.0",
+            "        _studio_den = 0.0",
+            "        for _studio_node in _studio_node_tags:",
+            "            try:",
+            "                _studio_mass = max(",
+            "                    0.0, float(ops.nodeMass(_studio_node, _studio_dof))",
+            "                )",
+            "            except Exception:",
+            "                _studio_mass = 0.0",
+            "            _studio_vector = _studio_vectors.get(str(_studio_node), [])",
+            "            _studio_phi = (",
+            "                float(_studio_vector[_studio_dof - 1])",
+            "                if len(_studio_vector) >= _studio_dof",
+            "                else 0.0",
+            "            )",
+            "            _studio_num += _studio_mass * _studio_phi",
+            "            _studio_den += _studio_mass * _studio_phi * _studio_phi",
+            "        _studio_gamma = (",
+            "            _studio_num / _studio_den",
+            "            if _studio_den > 0.0 else 0.0",
+            "        )",
+            "        _studio_effective_mass = (",
+            "            (_studio_num * _studio_num) / _studio_den",
+            "            if _studio_den > 0.0 else 0.0",
+            "        )",
+            "        _studio_total_mass = _studio_total_lumped_mass[str(_studio_dof)]",
+            "        _studio_mass_ratio = (",
+            "            _studio_effective_mass / _studio_total_mass",
+            "            if _studio_total_mass > 0.0 else 0.0",
+            "        )",
+            "        _studio_participation[str(_studio_dof)] = {",
+            "            'factor': float(_studio_gamma),",
+            "            'effective_mass': float(_studio_effective_mass),",
+            "            'mass_ratio': float(_studio_mass_ratio),",
+            "        }",
+            "    _studio_results['modes'][str(_studio_mode)] = {",
+            "        'eigenvalue': _studio_lambda,",
+            "        'omega_rad_s': float(_studio_omega),",
+            "        'frequency_hz': _studio_frequency,",
+            "        'period_s': _studio_period,",
+            "        'vectors': _studio_vectors,",
+            "        'participation': _studio_participation,",
+            "    }",
+        ])
         lines.append(
             "    _studio_emit('progress', step=_studio_mode, "
             f"total={settings.num_modes}, "
             f"percent=100.0 * _studio_mode / {settings.num_modes}, "
-            "algorithm='Eigen', iterations=0, "
+            f"algorithm={settings.eigen_solver!r}, iterations=0, "
             "time=0.0, monitor=0.0, base_shear=0.0, "
-            "eigenvalue=float(_studio_lambda))"
+            "eigenvalue=_studio_lambda)"
         )
         lines.append(
             "_studio_results['eigenvalues'] = "
