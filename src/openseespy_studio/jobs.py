@@ -22,6 +22,7 @@ class JobRecord:
     current_algorithm: str = ""
     iterations: int = 0
     results: dict[str, Any] = field(default_factory=dict)
+    plots: list[dict[str, Any]] = field(default_factory=list)
 
     def start(self) -> None:
         self.status = "Running"
@@ -80,6 +81,73 @@ class JobRecord:
             self.progress_percent = 100.0
         if results is not None:
             self.results = dict(results)
+
+    def next_plot_id(self) -> int:
+        return max(
+            (
+                int(plot.get("plot_id", 0) or 0)
+                for plot in self.plots
+                if isinstance(plot, dict)
+            ),
+            default=0,
+        ) + 1
+
+    def add_plot(
+        self,
+        *,
+        name: str,
+        result_type: str,
+        settings: dict[str, Any] | None = None,
+        node_scope: list[int] | None = None,
+        element_scope: list[int] | None = None,
+    ) -> dict[str, Any]:
+        base_name = str(name).strip() or "Result"
+        existing = {
+            str(plot.get("name", ""))
+            for plot in self.plots
+            if isinstance(plot, dict)
+        }
+        unique_name = base_name
+        suffix = 2
+        while unique_name in existing:
+            unique_name = f"{base_name} {suffix}"
+            suffix += 1
+
+        plot = {
+            "plot_id": self.next_plot_id(),
+            "name": unique_name,
+            "result_type": str(result_type),
+            "settings": dict(settings or {}),
+            "node_scope": sorted(
+                {int(tag) for tag in (node_scope or [])}
+            ),
+            "element_scope": sorted(
+                {int(tag) for tag in (element_scope or [])}
+            ),
+        }
+        self.plots.append(plot)
+        return plot
+
+    def plot(self, plot_id: int) -> dict[str, Any] | None:
+        target = int(plot_id)
+        for plot in self.plots:
+            if (
+                isinstance(plot, dict)
+                and int(plot.get("plot_id", 0) or 0) == target
+            ):
+                return plot
+        return None
+
+    def remove_plot(self, plot_id: int) -> None:
+        target = int(plot_id)
+        self.plots = [
+            plot
+            for plot in self.plots
+            if not (
+                isinstance(plot, dict)
+                and int(plot.get("plot_id", 0) or 0) == target
+            )
+        ]
 
     @property
     def elapsed_seconds(self) -> float:

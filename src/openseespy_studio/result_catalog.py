@@ -13,7 +13,22 @@ class ResultChoice:
     settings: dict[str, Any] = field(default_factory=dict)
 
 
-def result_choices_for_analysis(analysis_type: str) -> list[ResultChoice]:
+def convergence_result_label(test: str | None) -> str:
+    key = str(test or "").strip()
+    labels = {
+        "NormUnbalance": "Force / Residual Convergence",
+        "NormDispIncr": "Displacement Increment Convergence",
+        "EnergyIncr": "Energy Increment Convergence",
+    }
+    if key in labels:
+        return labels[key]
+    return f"{key} Convergence" if key else "Convergence History"
+
+
+def result_choices_for_analysis(
+    analysis_type: str,
+    convergence_test: str | None = None,
+) -> list[ResultChoice]:
     """Return the shared result catalog for Solution and Job menus."""
     kind = str(analysis_type)
     if kind == "Modal":
@@ -130,13 +145,14 @@ def result_choices_for_analysis(analysis_type: str) -> list[ResultChoice]:
             {},
         )
     )
+    convergence_name = convergence_result_label(convergence_test)
     choices.append(
         ResultChoice(
             "Solver Results",
-            "Convergence History",
+            convergence_name,
             "Convergence",
-            "Convergence History",
-            {},
+            convergence_name,
+            {"test": str(convergence_test or "")},
         )
     )
 

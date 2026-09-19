@@ -48,7 +48,10 @@ from ..jobs import JobRecord
 from ..live_convergence import parse_opensees_convergence_line
 from ..model import StructuralModel, classify_fixity
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
-from ..result_catalog import result_choices_for_analysis
+from ..result_catalog import (
+    convergence_result_label,
+    result_choices_for_analysis,
+)
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData
 from ..runtime import build_worker_pythonpath, probe_opensees_runtime
 from ..validation import ValidationIssue, validate_project
@@ -1911,7 +1914,9 @@ class MainWindow(QMainWindow):
             )
             information.addChild(solver_output)
 
-            convergence = QTreeWidgetItem(["Convergence Monitor"])
+            convergence = QTreeWidgetItem([
+                convergence_result_label(settings.test)
+            ])
             convergence.setIcon(0, studio_icon("results"))
             convergence.setData(
                 0,
@@ -1961,7 +1966,25 @@ class MainWindow(QMainWindow):
             ])
             item.setIcon(0, studio_icon("results"))
             item.setData(0, Qt.UserRole, ("job", job_id))
+            item.setExpanded(True)
             results.addChild(item)
+
+            for plot in job.plots:
+                if not isinstance(plot, dict):
+                    continue
+                plot_id = int(plot.get("plot_id", 0) or 0)
+                if plot_id <= 0:
+                    continue
+                plot_item = QTreeWidgetItem([
+                    str(plot.get("name", f"Result {plot_id}"))
+                ])
+                plot_item.setIcon(0, studio_icon("results"))
+                plot_item.setData(
+                    0,
+                    Qt.UserRole,
+                    ("job_plot", (job_id, plot_id)),
+                )
+                item.addChild(plot_item)
         root.addChild(results)
 
         self.tree.addTopLevelItem(root)
@@ -1985,6 +2008,7 @@ class MainWindow(QMainWindow):
         solver_output_tag: int | None = None
         solution_convergence_tag: int | None = None
         job_id: int | None = None
+        job_plot_ref: tuple[int, int] | None = None
         show_jobs_root = False
 
         selected_payload_kinds: set[str] = set()
@@ -2037,6 +2061,11 @@ class MainWindow(QMainWindow):
                 solution_convergence_tag = int(tag)
             elif kind == "job":
                 job_id = int(tag)
+            elif kind == "job_plot":
+                try:
+                    job_plot_ref = (int(tag[0]), int(tag[1]))
+                except (TypeError, ValueError, IndexError):
+                    job_plot_ref = None
             elif kind == "jobs_root":
                 show_jobs_root = True
 
@@ -2076,9 +2105,15 @@ class MainWindow(QMainWindow):
             self._show_solution_result_properties(solution_result_tag)
             self._evaluate_solution_result(solution_result_tag)
         elif solution_convergence_tag is not None:
+            analysis = self.project.analyses.get(
+                solution_convergence_tag
+            )
+            convergence_name = convergence_result_label(
+                analysis.test if analysis is not None else None
+            )
             self._show_solution_information(
                 solution_convergence_tag,
-                "Convergence Monitor",
+                convergence_name,
             )
             self._show_solution_convergence(solution_convergence_tag)
         elif solver_output_tag is not None:
@@ -2092,6 +2127,11 @@ class MainWindow(QMainWindow):
             self._show_solution_information(
                 solution_information_tag,
                 "Solution Information",
+            )
+        elif job_plot_ref is not None:
+            self._show_job_plot(
+                job_plot_ref[0],
+                job_plot_ref[1],
             )
         elif job_id is not None:
             self._select_job_result(job_id)
@@ -5061,9 +5101,14 @@ class MainWindow(QMainWindow):
         parent_menu: QMenu,
         analysis_type: str,
         callback,
+        *,
+        convergence_test: str | None = None,
     ) -> None:
         categories: dict[str, QMenu] = {}
-        for choice in result_choices_for_analysis(analysis_type):
+        for choice in result_choices_for_analysis(
+            analysis_type,
+            convergence_test,
+        ):
             submenu = categories.get(choice.category)
             if submenu is None:
                 submenu = parent_menu.addMenu(choice.category)
@@ -5193,6 +5238,55 @@ class MainWindow(QMainWindow):
             ],
         )
 
+    def _job_convergence_test(self, job: JobRecord | None) -> str | None:
+        if job is None:
+            return None
+        convergence = (
+            job.results.get("convergence", {})
+            if isinstance(job.results, dict)
+            else {}
+        )
+        if isinstance(convergence, dict):
+            test = str(convergence.get("test", "") or "").strip()
+            if test:
+                return test
+        if job.analysis_tag is not None:
+            analysis = self.project.analyses.get(int(job.analysis_tag))
+            if analysis is not None:
+                return analysis.test
+        return None
+
+    def _select_tree_payload(self, kind: str, value: object) -> None:
+        root = self.tree.invisibleRootItem()
+
+        def visit(item: QTreeWidgetItem) -> QTreeWidgetItem | None:
+            payload = item.data(0, Qt.UserRole)
+            if (
+                isinstance(payload, tuple)
+                and len(payload) == 2
+                and payload[0] == kind
+                and payload[1] == value
+            ):
+                return item
+            for index in range(item.childCount()):
+                found = visit(item.child(index))
+                if found is not None:
+                    return found
+            return None
+
+        for index in range(root.childCount()):
+            found = visit(root.child(index))
+            if found is not None:
+                self.tree.clearSelection()
+                self.tree.setCurrentItem(found)
+                found.setSelected(True)
+                parent = found.parent()
+                while parent is not None:
+                    parent.setExpanded(True)
+                    parent = parent.parent()
+                self.tree.scrollToItem(found)
+                return
+
     def _show_job_properties(self, job_id: int) -> None:
         job = self._jobs.get(int(job_id))
         if job is None:
@@ -5206,6 +5300,8 @@ class MainWindow(QMainWindow):
                 ("Progress", f"{job.progress_percent:.1f}%"),
                 ("Algorithm", job.current_algorithm or "-"),
                 ("Iterations", job.iterations),
+                ("Convergence test", self._job_convergence_test(job) or "-"),
+                ("Plots", len(job.plots)),
                 ("Result data", "Available" if job.results else "Not available"),
                 ("Message", job.message or "-"),
             ],
@@ -5226,6 +5322,87 @@ class MainWindow(QMainWindow):
             "Right-click the Job → Plot to open a result view."
         )
 
+    def _show_job_plot(
+        self,
+        job_id: int,
+        plot_id: int,
+    ) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None or not job.results:
+            self.status_message.setText(
+                f"Job {job_id} has no captured result data."
+            )
+            return
+        plot = job.plot(plot_id)
+        if plot is None:
+            return
+
+        settings = dict(plot.get("settings", {}))
+        node_scope = {
+            int(tag)
+            for tag in plot.get("node_scope", [])
+        }
+        element_scope = {
+            int(tag)
+            for tag in plot.get("element_scope", [])
+        }
+        self._active_solution_result_tag = None
+        self._render_result_data(
+            dict(job.results),
+            str(plot.get("result_type", "")),
+            settings,
+            node_scope=node_scope,
+            element_scope=element_scope,
+            restore_scope_selection=True,
+        )
+        self.properties_panel.set_properties(
+            str(plot.get("name", f"Result {plot_id}")),
+            [
+                ("Job", job.job_id),
+                ("Analysis", job.analysis_name),
+                ("Type", job.analysis_type),
+                (
+                    "Result Type",
+                    str(plot.get("result_type", "-")),
+                ),
+                (
+                    "Node Scope",
+                    ", ".join(map(str, sorted(node_scope))) or "All",
+                ),
+                (
+                    "Element Scope",
+                    ", ".join(map(str, sorted(element_scope))) or "All",
+                ),
+                (
+                    "Convergence Test",
+                    self._job_convergence_test(job) or "-",
+                ),
+            ],
+        )
+        self.status_message.setText(
+            f"Job {job.job_id} · "
+            f"{plot.get('name', f'Result {plot_id}')}"
+        )
+
+    def _delete_job_plot(
+        self,
+        job_id: int,
+        plot_id: int,
+    ) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None:
+            return
+        plot = job.plot(plot_id)
+        if plot is None:
+            return
+        name = str(plot.get("name", f"Result {plot_id}"))
+        job.remove_plot(plot_id)
+        self.viewport.clear_result_overlay()
+        self._refresh_tree()
+        self.status_message.setText(
+            f"Removed Job {job.job_id} result: {name}"
+        )
+
     def _quick_plot_job_result(
         self,
         job_id: int,
@@ -5239,78 +5416,24 @@ class MainWindow(QMainWindow):
                 f"Job {job_id} has no captured result data."
             )
             return
-        self._active_solution_result_tag = None
-        self._render_result_data(
-            dict(job.results),
-            result_type,
-            settings,
-        )
-        self.properties_panel.set_properties(
-            f"Quick Plot · {name}",
-            [
-                ("Job", job.job_id),
-                ("Analysis", job.analysis_name),
-                ("Type", job.analysis_type),
-                ("Plot", name),
-                ("Persistence", "Temporary"),
-                ("Save", "Use Job → Add Plot to Solution"),
-            ],
-        )
-        self.status_message.setText(
-            f"Job {job.job_id} · quick plot: {name}"
-        )
 
-    def _add_job_plot_to_solution(
-        self,
-        job_id: int,
-        result_type: str,
-        name: str,
-        settings: dict[str, object],
-    ) -> None:
-        job = self._jobs.get(int(job_id))
-        if job is None or job.analysis_tag is None:
-            return
-        if job.analysis_tag not in self.project.analyses:
-            QMessageBox.warning(
-                self,
-                "Add Plot to Solution",
-                "The analysis used by this job no longer exists.",
-            )
-            return
-
-        before = self.project.to_dict()
-        result_object = SolutionResultData(
-            tag=self.project.next_solution_result_tag(),
-            analysis_tag=int(job.analysis_tag),
+        plot = job.add_plot(
             name=str(name),
             result_type=str(result_type),
             settings=dict(settings),
+            node_scope=sorted(self.selection.nodes),
+            element_scope=sorted(self.selection.elements),
         )
-        try:
-            self.project.add_solution_result(result_object)
-        except ValueError as exc:
-            QMessageBox.warning(
-                self,
-                "Add Plot to Solution",
-                str(exc),
-            )
-            return
+        plot_id = int(plot["plot_id"])
 
-        self._record_project_change(
-            f"Add Job {job.job_id} plot to Solution",
-            before,
-        )
         self._refresh_tree()
-        if job.results:
-            self._render_result_data(
-                dict(job.results),
-                result_type,
-                settings,
-            )
-        self._show_solution_result_properties(result_object.tag)
+        self._select_tree_payload(
+            "job_plot",
+            (job.job_id, plot_id),
+        )
+        self._show_job_plot(job.job_id, plot_id)
         self.status_message.setText(
-            f"Added {name} to Solution for {job.analysis_name}. "
-            "Future Evaluate uses the latest job for that analysis."
+            f"Job {job.job_id} · added result: {plot['name']}"
         )
 
     def _export_job_result_json(self, job_id: int) -> None:
@@ -5487,6 +5610,11 @@ class MainWindow(QMainWindow):
                     name,
                     settings,
                 ),
+                convergence_test=(
+                    analysis_settings.test
+                    if analysis_settings is not None
+                    else None
+                ),
             )
 
             menu.addSeparator()
@@ -5521,7 +5649,11 @@ class MainWindow(QMainWindow):
 
         if kind == "solution_convergence":
             analysis_tag = int(value)
-            evaluate = menu.addAction("Open Convergence Monitor")
+            analysis = self.project.analyses.get(analysis_tag)
+            label = convergence_result_label(
+                analysis.test if analysis is not None else None
+            )
+            evaluate = menu.addAction(f"Open {label}")
             evaluate.triggered.connect(
                 lambda: self._show_solution_convergence(analysis_tag)
             )
@@ -5574,28 +5706,7 @@ class MainWindow(QMainWindow):
                         name,
                         settings,
                     ),
-                )
-
-            add_menu = menu.addMenu("Add Plot to Solution")
-            add_menu.setEnabled(
-                bool(
-                    job
-                    and job.results
-                    and job.analysis_tag is not None
-                    and job.analysis_tag in self.project.analyses
-                )
-            )
-            if job is not None:
-                self._populate_result_choice_menu(
-                    add_menu,
-                    job.analysis_type,
-                    lambda result_type, name, settings:
-                    self._add_job_plot_to_solution(
-                        job_id,
-                        result_type,
-                        name,
-                        settings,
-                    ),
+                    convergence_test=self._job_convergence_test(job),
                 )
 
             menu.addSeparator()
@@ -5603,6 +5714,29 @@ class MainWindow(QMainWindow):
             export.setEnabled(bool(job and job.results))
             export.triggered.connect(
                 lambda: self._export_job_result_json(job_id)
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "job_plot":
+            try:
+                job_id = int(value[0])
+                plot_id = int(value[1])
+            except (TypeError, ValueError, IndexError):
+                return
+            job = self._jobs.get(job_id)
+            plot = job.plot(plot_id) if job is not None else None
+            if plot is None:
+                return
+
+            show = menu.addAction("Show")
+            show.triggered.connect(
+                lambda: self._show_job_plot(job_id, plot_id)
+            )
+            menu.addSeparator()
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(
+                lambda: self._delete_job_plot(job_id, plot_id)
             )
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
