@@ -255,17 +255,24 @@ def _active_lateral_nodes(project: ProjectDatabase, dof: int) -> list[int]:
 
 
 def infer_height_axis(project: ProjectDatabase) -> int:
-    """Return a sensible vertical coordinate axis for common 2D/3D frames."""
-    if int(project.model.ndm) == 2:
-        spans = [
-            max((node.xyz[index] for node in project.model.nodes.values()), default=0.0)
-            - min((node.xyz[index] for node in project.model.nodes.values()), default=0.0)
-            for index in range(3)
-        ]
-        if spans[1] > 1.0e-12:
-            return 2
-        if spans[2] > 1.0e-12:
-            return 3
+    """Return a sensible vertical coordinate axis for common frame layouts."""
+    spans = [
+        max(
+            (node.xyz[index] for node in project.model.nodes.values()),
+            default=0.0,
+        )
+        - min(
+            (node.xyz[index] for node in project.model.nodes.values()),
+            default=0.0,
+        )
+        for index in range(3)
+    ]
+    if spans[2] > 1.0e-12:
+        return 3
+    if spans[1] > 1.0e-12:
+        return 2
+    if spans[0] > 1.0e-12:
+        return 1
     return 3
 
 
@@ -315,11 +322,10 @@ def lateral_load_weights(
         axis = int(height_axis) - 1
         if axis not in (0, 1, 2):
             raise ValueError("Height axis must be X, Y or Z.")
-        height_values = [
-            float(project.model.nodes[tag].xyz[axis])
-            for tag in tags
-        ]
-        h0 = min(height_values)
+        h0 = min(
+            float(node.xyz[axis])
+            for node in project.model.nodes.values()
+        )
         raw = {
             tag: max(
                 float(project.model.nodes[tag].xyz[axis]) - h0,
