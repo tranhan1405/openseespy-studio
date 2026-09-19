@@ -407,14 +407,14 @@ def test_modal_template_creates_mode_results_and_checks_mass():
     assert plan.analysis.num_modes == 4
     assert plan.analysis.eigen_solver == "-fullGenLapack"
     assert plan.analysis.live_convergence is False
-    assert len(plan.results) == 4
-    assert [result.result_type for result in plan.results] == [
-        "ModeShape",
-        "ModeShape",
-        "ModeShape",
-        "ModeShape",
+    assert len(plan.results) == 5
+    assert plan.results[0].result_type == "Motion"
+    mode_results = [
+        result
+        for result in plan.results
+        if result.result_type == "ModeShape"
     ]
-    assert [result.settings["mode"] for result in plan.results] == [
+    assert [result.settings["mode"] for result in mode_results] == [
         1,
         2,
         3,

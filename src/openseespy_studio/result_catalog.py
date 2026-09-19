@@ -39,7 +39,14 @@ def result_choices_for_analysis(
                 "ModeShape",
                 "Mode Shape 1",
                 {"mode": 1, "scale": 1.0},
-            )
+            ),
+            ResultChoice(
+                "Motion",
+                "Mode Animation",
+                "Motion",
+                "Mode Motion",
+                {"mode": 1, "scale": 1.0, "auto_scale": True},
+            ),
         ]
 
     choices: list[ResultChoice] = [
@@ -49,6 +56,13 @@ def result_choices_for_analysis(
             "DeformedShape",
             "Deformed Shape",
             {"scale": 10.0},
+        ),
+        ResultChoice(
+            "Motion",
+            "Deformation Animation",
+            "Motion",
+            "Motion",
+            {"scale": 1.0, "auto_scale": True},
         ),
     ]
 

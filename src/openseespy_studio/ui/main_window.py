@@ -793,6 +793,7 @@ class PropertiesPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._solution_result_tag: int | None = None
+        self._solution_result_auto_scale = True
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 6)
@@ -964,6 +965,9 @@ class PropertiesPanel(QWidget):
 
         kind = result.result_type
         options = dict(result.settings)
+        self._solution_result_auto_scale = bool(
+            options.get("auto_scale", True)
+        )
 
         if kind in {
             "DeformedShape",
@@ -1007,7 +1011,7 @@ class PropertiesPanel(QWidget):
                 index if index >= 0 else 0
             )
 
-        if kind in {"DeformedShape", "MemberForce", "ModeShape"}:
+        if kind in {"DeformedShape", "MemberForce", "ModeShape", "Motion"}:
             self._set_form_row_visible(self.result_scale, True)
             try:
                 self.result_scale.setValue(
@@ -1019,7 +1023,9 @@ class PropertiesPanel(QWidget):
             except (TypeError, ValueError):
                 self.result_scale.setValue(1.0)
 
-        if kind == "ModeShape":
+        if kind == "ModeShape" or (
+            kind == "Motion" and "mode" in options
+        ):
             self._set_form_row_visible(self.result_mode, True)
             self.result_mode.setValue(
                 max(1, int(options.get("mode", 1)))
@@ -1081,10 +1087,14 @@ class PropertiesPanel(QWidget):
             "MemberForce",
         }:
             settings["component"] = self.result_component.currentText()
-        if kind in {"DeformedShape", "MemberForce", "ModeShape"}:
+        if kind in {"DeformedShape", "MemberForce", "ModeShape", "Motion"}:
             settings["scale"] = self.result_scale.value()
         if kind == "ModeShape":
             settings["mode"] = self.result_mode.value()
+        if kind == "Motion":
+            settings["auto_scale"] = self._solution_result_auto_scale
+            if self.result_mode.isVisible():
+                settings["mode"] = self.result_mode.value()
         if kind == "TimeHistory":
             settings.update({
                 "node": self.result_history_node.value(),
@@ -1305,6 +1315,9 @@ class MainWindow(QMainWindow):
         )
         self.results_panel.mode_shape_requested.connect(
             self._show_mode_shape_result
+        )
+        self.results_panel.motion_frame_requested.connect(
+            self._show_motion_frame_result
         )
         self.results_panel.member_force_requested.connect(
             self._show_member_force_result
@@ -1588,7 +1601,7 @@ class MainWindow(QMainWindow):
             "clear_result",
             "Clear Result",
             "delete",
-            self.viewport.clear_result_overlay,
+            self._clear_result_display,
             "Clear the active result overlay",
         )
         self._make_action(
@@ -1934,6 +1947,12 @@ class MainWindow(QMainWindow):
             f"{new_units['time']}"
         )
         self._record_project_change("Change model units", before)
+
+    def _clear_result_display(self) -> None:
+        if hasattr(self, "results_panel"):
+            self.results_panel.stop_motion()
+        self.viewport.clear_result_overlay()
+        self.status_message.setText("Result overlay cleared")
 
     def _show_results_manager(self) -> None:
         self.results_panel.show_jobs()
@@ -8470,6 +8489,25 @@ class MainWindow(QMainWindow):
         self.status_message.setText(
             f"Showing deformed shape · scale {float(scale):g}"
         )
+
+    def _show_motion_frame_result(
+        self,
+        vectors: object,
+        scale: float,
+        auto_scale: bool,
+        reference_magnitude: float,
+        label: str,
+    ) -> None:
+        if not isinstance(vectors, dict) or not vectors:
+            self.status_message.setText("No motion frame data available")
+            return
+        self.viewport.show_motion_frame(
+            vectors,
+            scale=float(scale),
+            auto_scale=bool(auto_scale),
+            reference_magnitude=float(reference_magnitude),
+        )
+        self.status_message.setText(str(label))
 
     def _show_node_contour_result(
         self,
