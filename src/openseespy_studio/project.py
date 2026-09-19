@@ -942,6 +942,21 @@ class ConnectionData:
             raise ValueError("Connection local X vector cannot be zero.")
         if sum(v * v for v in self.orient_y) <= 1.0e-24:
             raise ValueError("Connection local Y vector cannot be zero.")
+        cross = (
+            self.orient_x[1] * self.orient_y[2]
+            - self.orient_x[2] * self.orient_y[1],
+            self.orient_x[2] * self.orient_y[0]
+            - self.orient_x[0] * self.orient_y[2],
+            self.orient_x[0] * self.orient_y[1]
+            - self.orient_x[1] * self.orient_y[0],
+        )
+        nx = math.sqrt(sum(value * value for value in self.orient_x))
+        ny = math.sqrt(sum(value * value for value in self.orient_y))
+        nc = math.sqrt(sum(value * value for value in cross))
+        if nc / (nx * ny) <= 1.0e-8:
+            raise ValueError(
+                "Connection local X and Y-plane vectors cannot be parallel."
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return {
