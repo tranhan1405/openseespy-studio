@@ -31,6 +31,9 @@ def test_analysis_generator_emits_live_progress_and_convergence_events():
     assert "_studio_emit('recovered'" in text
     assert "ops.testIter()" in text
     assert "ops.testNorms()" in text
+    assert "ops.test('NormDispIncr', 1e-08, 50, 1)" in text
+    assert "_studio_emit('step_start'" in text
+    assert "'norm_history': list(_studio_norm_history)" in text
     assert "base_shear=_studio_base" in text
 
 
