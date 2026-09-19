@@ -834,6 +834,39 @@ class ModelViewport(QWidget):
             capping=True,
         )
 
+    @staticmethod
+    def _surface_mesh_from_swept_geometry(geometry):
+        points = np.asarray(geometry.points, dtype=float)
+        faces = np.asarray(geometry.faces, dtype=np.int64)
+
+        if points.ndim != 2 or points.shape[1] != 3 or not len(points):
+            return None
+        if not np.all(np.isfinite(points)):
+            return None
+        if faces.ndim != 1 or not len(faces) or len(faces) % 5 != 0:
+            return None
+
+        records = faces.reshape((-1, 5))
+        if not np.all(records[:, 0] == 4):
+            return None
+        connectivity = records[:, 1:]
+        if connectivity.size == 0:
+            return None
+        if int(connectivity.min()) < 0 or int(connectivity.max()) >= len(points):
+            return None
+
+        # Own the NumPy buffers inside VTK.  A shallow faces assignment can
+        # leave VTK referencing temporary connectivity memory, which may later
+        # surface as absurd vtkIdList allocation requests after interaction.
+        try:
+            return pv.PolyData(
+                np.ascontiguousarray(points),
+                faces=np.ascontiguousarray(faces),
+                deep=True,
+            )
+        except (TypeError, ValueError):
+            return None
+
     def _actual_section_member_mesh(self, element):
         if self._model is None:
             return None
@@ -868,9 +901,7 @@ class ModelViewport(QWidget):
             geometry = None
         if geometry is None:
             return None
-        mesh = pv.PolyData(geometry.points)
-        mesh.faces = geometry.faces
-        return mesh
+        return self._surface_mesh_from_swept_geometry(geometry)
 
     def _combined_element_meshes(self, visible_tags: set[int], span: float):
         if self._model is None:
@@ -2343,11 +2374,16 @@ class ModelViewport(QWidget):
                         geometry = None
 
                     if geometry is not None:
-                        surface = pv.PolyData(geometry.points)
-                        surface.faces = geometry.faces
-                        surface.point_data["magnitude"] = geometry.magnitudes
-                        surface_meshes.append(surface)
-                        rendered_surface = True
+                        surface = self._surface_mesh_from_swept_geometry(
+                            geometry
+                        )
+                        if surface is not None:
+                            surface.point_data["magnitude"] = np.asarray(
+                                geometry.magnitudes,
+                                dtype=float,
+                            )
+                            surface_meshes.append(surface)
+                            rendered_surface = True
 
             if rendered_surface:
                 continue
