@@ -102,7 +102,12 @@ def test_research_material_library_generates_supported_commands():
             material_type,
             parameters=MATERIAL_DEFAULTS[material_type],
         )
-        command = material_to_openseespy(material)
+        units = (
+            {"length": "mm", "force": "N", "time": "s"}
+            if material_type == "FRPConfinedConcrete02"
+            else None
+        )
+        command = material_to_openseespy(material, units)
         assert f"ops.uniaxialMaterial('{material_type}', {tag}," in command
 
     frp = MaterialData(
@@ -111,7 +116,13 @@ def test_research_material_library_generates_supported_commands():
         "FRPConfinedConcrete02",
         parameters=MATERIAL_DEFAULTS["FRPConfinedConcrete02"],
     )
-    assert "'-JacketC'" in material_to_openseespy(frp)
+    frp_command = material_to_openseespy(
+        frp,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+    assert "'-JacketC'" in frp_command
+    assert ", 0.334," in frp_command
+    assert ", 200," in frp_command
 
     pinching = MaterialData(
         201,
@@ -131,6 +142,42 @@ def test_frp_confined_concrete02_supports_ultimate_mode():
         "FRPConfinedConcrete02",
         parameters=parameters,
     )
-    command = material_to_openseespy(material)
+    command = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
     assert "'-Ultimate'" in command
     assert "'-JacketC'" not in command
+
+
+def test_frp_confined_concrete02_rejects_incompatible_project_units():
+    material = MaterialData(
+        203,
+        "FRP Jacket",
+        "FRPConfinedConcrete02",
+        parameters=MATERIAL_DEFAULTS["FRPConfinedConcrete02"],
+    )
+    try:
+        material_to_openseespy(
+            material,
+            {"length": "m", "force": "kN", "time": "s"},
+        )
+    except ValueError as exc:
+        assert "mm - N - s" in str(exc)
+    else:
+        raise AssertionError("Expected FRP unit-system validation")
+
+
+def test_bond_sp01_slip_converts_from_si_storage_to_model_length():
+    material = MaterialData(
+        204,
+        "Bond",
+        "Bond_SP01",
+        parameters=MATERIAL_DEFAULTS["Bond_SP01"],
+    )
+    command = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+    assert ", 1," in command
+    assert ", 10," in command
