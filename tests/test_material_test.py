@@ -40,8 +40,8 @@ def test_symmetric_cyclic_targets_and_history():
     history = material_test_history(spec)
     assert history[0] == 0.0
     assert math.isclose(history[-1], 0.0)
-    assert max(history) == 0.04
-    assert min(history) == -0.04
+    assert math.isclose(max(history), 0.04)
+    assert math.isclose(min(history), -0.04)
     assert len(history) == 1 + 5 * 4
 
 
