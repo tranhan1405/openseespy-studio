@@ -4672,6 +4672,8 @@ class MainWindow(QMainWindow):
 
         kind = result_object.result_type
         options = dict(result_object.settings)
+        options["_node_scope"] = list(result_object.node_scope)
+        options["_element_scope"] = list(result_object.element_scope)
         self.results_panel.show_solution_result(kind, options)
         self.results_dock.show()
         self.results_dock.raise_()
