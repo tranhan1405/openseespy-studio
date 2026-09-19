@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QStackedWidget,
@@ -26,7 +27,9 @@ from PySide6.QtWidgets import (
 from ..analysis_templates import (
     SOLVER_PRESETS,
     expand_cyclic_protocol,
+    parse_cyclic_protocol_text,
     parse_ground_motion_text,
+    parse_node_weight_text,
 )
 from ..units import UnitSystem
 
@@ -62,7 +65,11 @@ class AnalysisTemplateDialog(QDialog):
         self.resize(620, 610)
 
         self.unit_system = UnitSystem.from_mapping(units)
-        self._ground_motion_values: list[float] = []
+        self._ground_motion_values: dict[int, list[float]] = {
+            1: [],
+            2: [],
+            3: [],
+        }
 
         root = QVBoxLayout(self)
 
@@ -130,8 +137,23 @@ class AnalysisTemplateDialog(QDialog):
         self.push_increment = _double(0.001, 1.0e-12)
         self.push_distribution = QComboBox()
         self.push_distribution.addItems(
-            ["Triangular", "Uniform", "Mass proportional"]
+            [
+                "Triangular",
+                "Uniform",
+                "Mass proportional",
+                "First-mode proportional",
+                "Custom",
+            ]
         )
+        self.push_mode = QSpinBox()
+        self.push_mode.setRange(1, 1000)
+        self.push_mode.setValue(1)
+        self.push_custom = QPlainTextEdit()
+        self.push_custom.setPlaceholderText(
+            "Custom node weights, one per line:\n"
+            "101, 0.20\n102, 0.35\n103, 0.45"
+        )
+        self.push_custom.setMaximumHeight(92)
         form.addRow(
             f"Target displacement [{self.unit_system.length}]:",
             self.push_target,
@@ -141,6 +163,8 @@ class AnalysisTemplateDialog(QDialog):
             self.push_increment,
         )
         form.addRow("Reference load distribution:", self.push_distribution)
+        form.addRow("Mode number:", self.push_mode)
+        form.addRow("Custom node weights:", self.push_custom)
 
         note = QLabel(
             "Studio creates a normalized lateral reference pattern and uses "
@@ -153,11 +177,19 @@ class AnalysisTemplateDialog(QDialog):
             self.push_target,
             self.push_increment,
             self.push_distribution,
+            self.push_mode,
         ):
             if hasattr(widget, "valueChanged"):
                 widget.valueChanged.connect(self._update_summary)
             if hasattr(widget, "currentTextChanged"):
                 widget.currentTextChanged.connect(self._update_summary)
+        self.push_distribution.currentTextChanged.connect(
+            self._sync_pushover_distribution
+        )
+        self.push_custom.textChanged.connect(self._update_summary)
+        self._sync_pushover_distribution(
+            self.push_distribution.currentText()
+        )
         return page
 
     def _build_cyclic_page(self) -> QWidget:
@@ -195,10 +227,13 @@ class AnalysisTemplateDialog(QDialog):
         row = QHBoxLayout()
         add = QPushButton("Add Row")
         remove = QPushButton("Remove Row")
+        import_protocol = QPushButton("Import CSV/TXT...")
         add.clicked.connect(self._add_protocol_row)
         remove.clicked.connect(self._remove_protocol_row)
+        import_protocol.clicked.connect(self._import_protocol)
         row.addWidget(add)
         row.addWidget(remove)
+        row.addWidget(import_protocol)
         row.addStretch(1)
         layout.addLayout(row)
 
@@ -216,27 +251,53 @@ class AnalysisTemplateDialog(QDialog):
     def _build_nlth_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        form = QFormLayout()
 
-        file_row = QWidget()
-        file_layout = QHBoxLayout(file_row)
-        file_layout.setContentsMargins(0, 0, 0, 0)
-        self.gm_file = QLineEdit()
-        self.gm_file.setReadOnly(True)
-        browse = QPushButton("Browse...")
-        browse.clicked.connect(self._browse_ground_motion)
-        file_layout.addWidget(self.gm_file, 1)
-        file_layout.addWidget(browse)
-        form.addRow("Ground-motion file:", file_row)
-
+        shared = QFormLayout()
         self.gm_column = QSpinBox()
         self.gm_column.setRange(1, 100)
         self.gm_column.setValue(1)
-        self.gm_column.valueChanged.connect(self._reload_ground_motion)
         self.gm_dt = _double(0.01, 1.0e-12)
         self.gm_unit = QComboBox()
         self.gm_unit.addItems(["g", "m/s²", "cm/s²"])
-        self.gm_scale = _double(1.0)
+        shared.addRow("Acceleration column:", self.gm_column)
+        shared.addRow("Record dt [s]:", self.gm_dt)
+        shared.addRow("Input acceleration unit:", self.gm_unit)
+        layout.addLayout(shared)
+
+        self.gm_files: dict[int, QLineEdit] = {}
+        self.gm_scales: dict[int, QDoubleSpinBox] = {}
+        self.gm_previews: dict[int, QLabel] = {}
+        axes = {1: "X", 2: "Y", 3: "Z"}
+
+        for direction in (1, 2, 3):
+            axis = axes[direction]
+            form = QFormLayout()
+            file_row = QWidget()
+            file_layout = QHBoxLayout(file_row)
+            file_layout.setContentsMargins(0, 0, 0, 0)
+            edit = QLineEdit()
+            edit.setReadOnly(True)
+            browse = QPushButton(f"Browse {axis}...")
+            browse.clicked.connect(
+                lambda checked=False, d=direction:
+                self._browse_ground_motion(d)
+            )
+            file_layout.addWidget(edit, 1)
+            file_layout.addWidget(browse)
+            scale = _double(1.0)
+            preview = QLabel(f"{axis}: not assigned")
+            preview.setWordWrap(True)
+            preview.setObjectName("Muted")
+            self.gm_files[direction] = edit
+            self.gm_scales[direction] = scale
+            self.gm_previews[direction] = preview
+            form.addRow(f"{axis} record:", file_row)
+            form.addRow(f"{axis} scale:", scale)
+            form.addRow("", preview)
+            layout.addLayout(form)
+            scale.valueChanged.connect(self._update_summary)
+
+        damping = QFormLayout()
         self.damping_ratio = _double(0.05, 0.0, 0.999999, 5)
         self.damping_mode_i = QSpinBox()
         self.damping_mode_i.setRange(1, 1000)
@@ -244,39 +305,27 @@ class AnalysisTemplateDialog(QDialog):
         self.damping_mode_j = QSpinBox()
         self.damping_mode_j.setRange(1, 1000)
         self.damping_mode_j.setValue(3)
-
-        form.addRow("Acceleration column:", self.gm_column)
-        form.addRow("Record dt [s]:", self.gm_dt)
-        form.addRow("Input acceleration unit:", self.gm_unit)
-        form.addRow("Scale factor:", self.gm_scale)
-        form.addRow("Rayleigh damping ratio:", self.damping_ratio)
-        form.addRow("Rayleigh mode i:", self.damping_mode_i)
-        form.addRow("Rayleigh mode j:", self.damping_mode_j)
-        layout.addLayout(form)
-
-        self.gm_preview = QLabel(
-            "Choose a TXT/CSV/DAT ground-motion file."
-        )
-        self.gm_preview.setWordWrap(True)
-        layout.addWidget(self.gm_preview)
+        damping.addRow("Rayleigh damping ratio:", self.damping_ratio)
+        damping.addRow("Rayleigh mode i:", self.damping_mode_i)
+        damping.addRow("Rayleigh mode j:", self.damping_mode_j)
+        layout.addLayout(damping)
 
         note = QLabel(
-            "The imported acceleration is converted into the current model "
-            f"acceleration unit [{self.unit_system.acceleration_label}]. "
-            "Studio creates a Path TimeSeries and UniformExcitation pattern."
+            "Assign one, two, or three components. All components use the "
+            "common dt/column/unit above; each component has its own scale. "
+            "Studio creates one Path TimeSeries + UniformExcitation per axis."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
 
-        for widget in (
-            self.gm_dt,
-            self.gm_scale,
-            self.damping_ratio,
-            self.damping_mode_i,
-            self.damping_mode_j,
-        ):
-            widget.valueChanged.connect(self._update_summary)
+        self.gm_column.valueChanged.connect(
+            self._reload_all_ground_motions
+        )
+        self.gm_dt.valueChanged.connect(self._update_summary)
         self.gm_unit.currentTextChanged.connect(self._update_summary)
+        self.damping_ratio.valueChanged.connect(self._update_summary)
+        self.damping_mode_i.valueChanged.connect(self._update_summary)
+        self.damping_mode_j.valueChanged.connect(self._update_summary)
         return page
 
     def _sync_template(self, kind: str) -> None:
@@ -302,6 +351,47 @@ class AnalysisTemplateDialog(QDialog):
                 }[index]
             )
         self._update_summary()
+
+    def _sync_pushover_distribution(self, kind: str) -> None:
+        first_mode = str(kind) == "First-mode proportional"
+        custom = str(kind) == "Custom"
+        self.push_mode.setEnabled(first_mode)
+        self.push_custom.setEnabled(custom)
+        self._update_summary()
+
+    def _import_protocol(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Cyclic Protocol",
+            "",
+            "Protocol (*.csv *.txt *.dat);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            text = Path(path).read_text(encoding="utf-8", errors="ignore")
+            rows = parse_cyclic_protocol_text(text)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Cyclic Protocol", str(exc))
+            return
+
+        self.protocol.blockSignals(True)
+        try:
+            self.protocol.setRowCount(len(rows))
+            for row, (amplitude, cycles) in enumerate(rows):
+                self.protocol.setItem(
+                    row,
+                    0,
+                    QTableWidgetItem(f"{amplitude:g}"),
+                )
+                self.protocol.setItem(
+                    row,
+                    1,
+                    QTableWidgetItem(str(cycles)),
+                )
+        finally:
+            self.protocol.blockSignals(False)
+        self._update_cyclic_preview()
 
     def _protocol_rows(self) -> list[tuple[float, int]]:
         rows: list[tuple[float, int]] = []
@@ -358,22 +448,27 @@ class AnalysisTemplateDialog(QDialog):
             self.protocol.removeRow(row)
         self._update_cyclic_preview()
 
-    def _browse_ground_motion(self) -> None:
+    def _browse_ground_motion(self, direction: int) -> None:
+        axis = {1: "X", 2: "Y", 3: "Z"}[int(direction)]
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Ground Motion",
+            f"Select {axis} Ground Motion",
             "",
             "Ground motion (*.txt *.dat *.csv);;All files (*)",
         )
         if not path:
             return
-        self.gm_file.setText(path)
-        self._reload_ground_motion()
+        self.gm_files[int(direction)].setText(path)
+        self._reload_ground_motion(int(direction))
 
-    def _reload_ground_motion(self, *_args) -> None:
-        path = self.gm_file.text().strip()
+    def _reload_ground_motion(self, direction: int) -> None:
+        direction = int(direction)
+        path = self.gm_files[direction].text().strip()
+        axis = {1: "X", 2: "Y", 3: "Z"}[direction]
         if not path:
-            self._ground_motion_values = []
+            self._ground_motion_values[direction] = []
+            self.gm_previews[direction].setText(f"{axis}: not assigned")
+            self._update_summary()
             return
         try:
             text = Path(path).read_text(encoding="utf-8", errors="ignore")
@@ -382,17 +477,26 @@ class AnalysisTemplateDialog(QDialog):
                 column=self.gm_column.value(),
             )
         except (OSError, ValueError) as exc:
-            self._ground_motion_values = []
-            self.gm_preview.setText(f"Cannot read record: {exc}")
+            self._ground_motion_values[direction] = []
+            self.gm_previews[direction].setText(
+                f"{axis}: cannot read record: {exc}"
+            )
+            self._update_summary()
             return
-        self._ground_motion_values = values
+
+        self._ground_motion_values[direction] = values
         pga = max((abs(value) for value in values), default=0.0)
         duration = max(0, len(values) - 1) * self.gm_dt.value()
-        self.gm_preview.setText(
-            f"{len(values)} points · duration ≈ {duration:g} s · "
+        self.gm_previews[direction].setText(
+            f"{axis}: {len(values)} points · duration ≈ {duration:g} s · "
             f"raw PGA = {pga:g} {self.gm_unit.currentText()}"
         )
         self._update_summary()
+
+    def _reload_all_ground_motions(self, *_args) -> None:
+        for direction in (1, 2, 3):
+            if self.gm_files[direction].text().strip():
+                self._reload_ground_motion(direction)
 
     def _update_summary(self, *_args) -> None:
         kind = self.template.currentText()
@@ -420,8 +524,21 @@ class AnalysisTemplateDialog(QDialog):
                 f"{self.solver.currentText()} solver"
             )
         else:
+            active = [
+                axis
+                for axis, direction in (("X", 1), ("Y", 2), ("Z", 3))
+                if self._ground_motion_values[direction]
+            ]
+            point_count = max(
+                (
+                    len(self._ground_motion_values[direction])
+                    for direction in (1, 2, 3)
+                ),
+                default=0,
+            )
             text = (
-                f"NLTH · {len(self._ground_motion_values)} point(s) · "
+                f"NLTH {'+'.join(active) if active else '-'} · "
+                f"{point_count} max point(s) · "
                 f"dt={self.gm_dt.value():g} s · "
                 f"ζ={self.damping_ratio.value():g} · "
                 f"{self.solver.currentText()} solver"
@@ -443,6 +560,14 @@ class AnalysisTemplateDialog(QDialog):
                     "target_displacement": self.push_target.value(),
                     "max_increment": self.push_increment.value(),
                     "distribution": self.push_distribution.currentText(),
+                    "mode_number": self.push_mode.value(),
+                    "custom_weights": (
+                        parse_node_weight_text(
+                            self.push_custom.toPlainText()
+                        )
+                        if self.push_distribution.currentText() == "Custom"
+                        else None
+                    ),
                 }
             )
         elif kind == "Cyclic":
@@ -454,22 +579,33 @@ class AnalysisTemplateDialog(QDialog):
                 }
             )
         else:
-            if not self._ground_motion_values:
-                raise ValueError("Choose a valid ground-motion file first.")
+            components = []
+            for direction in (1, 2, 3):
+                values = self._ground_motion_values[direction]
+                if not values:
+                    continue
+                components.append(
+                    {
+                        "direction": direction,
+                        "values": list(values),
+                        "scale_factor": self.gm_scales[direction].value(),
+                        "file": self.gm_files[direction].text().strip(),
+                    }
+                )
+            if not components:
+                raise ValueError(
+                    "Choose at least one valid X, Y, or Z ground-motion file."
+                )
             base.update(
                 {
-                    "ground_motion_values": list(
-                        self._ground_motion_values
-                    ),
+                    "components": components,
                     "dt": self.gm_dt.value(),
                     "input_unit": self.gm_unit.currentText(),
-                    "scale_factor": self.gm_scale.value(),
-                    "direction": int(self.direction.currentData()),
                     "monitor_node": self.control_node.value(),
+                    "monitor_dof": int(self.direction.currentData()),
                     "damping_ratio": self.damping_ratio.value(),
                     "damping_mode_i": self.damping_mode_i.value(),
                     "damping_mode_j": self.damping_mode_j.value(),
-                    "ground_motion_file": self.gm_file.text().strip(),
                 }
             )
         return base
