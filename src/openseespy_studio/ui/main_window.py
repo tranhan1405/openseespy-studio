@@ -4384,10 +4384,17 @@ class MainWindow(QMainWindow):
         self.properties_panel.set_properties("Constraint", rows)
 
     def _create_analysis(self) -> None:
+        self._create_analysis_of_type(None)
+
+    def _create_analysis_of_type(
+        self,
+        analysis_type: str | None,
+    ) -> None:
         default_node = min(self.model.nodes, default=1)
         dialog = AnalysisDialog(
             next_tag=self.project.next_analysis_tag(),
             default_node=default_node,
+            analysis_type=analysis_type,
             parent=self,
         )
         if not dialog.exec():
