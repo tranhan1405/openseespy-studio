@@ -5315,6 +5315,7 @@ class MainWindow(QMainWindow):
     def _create_material(self) -> None:
         dialog = MaterialDialog(
             next_tag=self.project.next_material_tag(),
+            units=self.project.units,
             parent=self,
         )
         if not dialog.exec():
@@ -5342,7 +5343,11 @@ class MainWindow(QMainWindow):
         if material is None:
             return
 
-        dialog = MaterialDialog(material=material, parent=self)
+        dialog = MaterialDialog(
+            material=material,
+            units=self.project.units,
+            parent=self,
+        )
         if not dialog.exec():
             return
 
@@ -5457,38 +5462,44 @@ class MainWindow(QMainWindow):
         material = self.project.materials.get(tag)
         if material is None:
             return
+
         rows: list[tuple[str, object]] = [
             ("Tag", material.tag),
             ("Name", material.name),
             ("Type", material.material_type),
             ("Poisson ratio", f"{material.poisson_ratio:g}"),
             ("Density", f"{material.density:g}"),
-            (
-                "Elastic E [MPa]",
-                f"{material.elastic_modulus() / 1.0e6:g}",
-            ),
-            (
-                "Elastic G [MPa]",
-                f"{material.shear_modulus() / 1.0e6:g}",
-            ),
         ]
-        stress_keys = {
-            "E",
-            "Fy",
-            "E0",
-            "fpc",
-            "fpcu",
-            "ft",
-            "Ets",
-        }
-        rows.extend(
-            (
-                f"{key} [MPa]" if key in stress_keys else key,
-                f"{value / 1.0e6:g}" if key in stress_keys else f"{value:g}",
-            )
-            for key, value in material.parameters.items()
-        )
+        try:
+            elastic_e = material.elastic_modulus()
+            elastic_g = material.shear_modulus()
+        except ValueError:
+            elastic_e = None
+            elastic_g = None
+        if elastic_e is not None:
+            rows.extend([
+                ("Elastic E [MPa]", f"{elastic_e / 1.0e6:g}"),
+                ("Elastic G [MPa]", f"{elastic_g / 1.0e6:g}"),
+            ])
+
+        from ..project import MATERIAL_PARAMETER_KINDS
+        unit_system = UnitSystem.from_mapping(self.project.units)
+        kinds = MATERIAL_PARAMETER_KINDS.get(material.material_type, {})
+        for key, value in material.parameters.items():
+            kind = kinds.get(key, "raw")
+            if kind == "stress":
+                label = f"{key} [MPa]"
+                display = value / 1.0e6
+            elif kind == "length":
+                label = f"{key} [{unit_system.length}]"
+                display = unit_system.length_from_m(value)
+            else:
+                label = key
+                display = value
+            rows.append((label, f"{display:g}"))
+
         self.properties_panel.set_properties("Material", rows)
+
 
     def _create_section(self) -> None:
         dialog = SectionDialog(
