@@ -28,8 +28,14 @@ from ..analysis_templates import (
     SOLVER_PRESETS,
     expand_cyclic_protocol,
     parse_cyclic_protocol_text,
-    parse_ground_motion_text,
     parse_node_weight_text,
+)
+from ..ground_motion_library import (
+    GROUND_MOTION_LIBRARY,
+    pga_in_g,
+    parse_ground_motion_record_text,
+    record_preset,
+    scale_factor_for_target_pga,
 )
 from ..units import UnitSystem
 
@@ -69,6 +75,11 @@ class AnalysisTemplateDialog(QDialog):
             1: [],
             2: [],
             3: [],
+        }
+        self._ground_motion_formats: dict[int, str] = {
+            1: "",
+            2: "",
+            3: "",
         }
 
         root = QVBoxLayout(self)
@@ -253,15 +264,46 @@ class AnalysisTemplateDialog(QDialog):
         layout = QVBoxLayout(page)
 
         shared = QFormLayout()
+        self.gm_library = QComboBox()
+        for preset in GROUND_MOTION_LIBRARY:
+            self.gm_library.addItem(preset.label, preset.key)
+
+        self.gm_library_info = QLabel()
+        self.gm_library_info.setWordWrap(True)
+        self.gm_library_info.setObjectName("Muted")
+
         self.gm_column = QSpinBox()
         self.gm_column.setRange(1, 100)
         self.gm_column.setValue(1)
+        self.gm_column.setToolTip(
+            "Used for TXT/CSV/DAT files. PEER AT2 automatically reads "
+            "all acceleration values after the NPTS/DT header."
+        )
         self.gm_dt = _double(0.01, 1.0e-12)
         self.gm_unit = QComboBox()
         self.gm_unit.addItems(["g", "m/s²", "cm/s²"])
+
+        self.gm_scale_mode = QComboBox()
+        self.gm_scale_mode.addItem("Direct factor", "factor")
+        self.gm_scale_mode.addItem(
+            "Target PGA per component",
+            "target_pga",
+        )
+        self.gm_target_pga = _double(0.35, 1.0e-6, 10.0, 5)
+        self.gm_target_pga.setSuffix(" g")
+        self.gm_target_pga.setToolTip(
+            "Each active component is independently scaled to this PGA. "
+            "Use Direct factor when component amplitude ratios must be "
+            "preserved."
+        )
+
+        shared.addRow("Record library:", self.gm_library)
+        shared.addRow("", self.gm_library_info)
         shared.addRow("Acceleration column:", self.gm_column)
         shared.addRow("Record dt [s]:", self.gm_dt)
         shared.addRow("Input acceleration unit:", self.gm_unit)
+        shared.addRow("Scaling:", self.gm_scale_mode)
+        shared.addRow("Target PGA:", self.gm_target_pga)
         layout.addLayout(shared)
 
         self.gm_files: dict[int, QLineEdit] = {}
@@ -295,7 +337,10 @@ class AnalysisTemplateDialog(QDialog):
             form.addRow(f"{axis} scale:", scale)
             form.addRow("", preview)
             layout.addLayout(form)
-            scale.valueChanged.connect(self._update_summary)
+            scale.valueChanged.connect(
+                lambda _value, d=direction:
+                self._refresh_ground_motion_preview(d)
+            )
 
         damping = QFormLayout()
         self.damping_ratio = _double(0.05, 0.0, 0.999999, 5)
@@ -311,21 +356,37 @@ class AnalysisTemplateDialog(QDialog):
         layout.addLayout(damping)
 
         note = QLabel(
-            "Assign one, two, or three components. All components use the "
-            "common dt/column/unit above; each component has its own scale. "
-            "Studio creates one Path TimeSeries + UniformExcitation per axis."
+            "Assign one, two, or three components. PEER AT2 files can "
+            "supply dt automatically. Studio creates one Path TimeSeries + "
+            "UniformExcitation per active axis."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
 
+        self.gm_library.currentIndexChanged.connect(
+            self._record_library_changed
+        )
         self.gm_column.valueChanged.connect(
             self._reload_all_ground_motions
         )
-        self.gm_dt.valueChanged.connect(self._update_summary)
-        self.gm_unit.currentTextChanged.connect(self._update_summary)
+        self.gm_dt.valueChanged.connect(
+            self._refresh_all_ground_motion_previews
+        )
+        self.gm_unit.currentTextChanged.connect(
+            self._ground_motion_unit_changed
+        )
+        self.gm_scale_mode.currentIndexChanged.connect(
+            self._sync_ground_motion_scale_mode
+        )
+        self.gm_target_pga.valueChanged.connect(
+            self._apply_target_pga_scaling
+        )
         self.damping_ratio.valueChanged.connect(self._update_summary)
         self.damping_mode_i.valueChanged.connect(self._update_summary)
         self.damping_mode_j.valueChanged.connect(self._update_summary)
+
+        self._record_library_changed()
+        self._sync_ground_motion_scale_mode()
         return page
 
     def _sync_template(self, kind: str) -> None:
@@ -448,13 +509,48 @@ class AnalysisTemplateDialog(QDialog):
             self.protocol.removeRow(row)
         self._update_cyclic_preview()
 
+    def _record_library_changed(self, *_args) -> None:
+        key = str(self.gm_library.currentData() or "custom")
+        preset = record_preset(key)
+        if preset.key == "custom":
+            self.gm_library_info.setText(preset.notes)
+        else:
+            year = f" ({preset.year})" if preset.year is not None else ""
+            self.gm_library_info.setText(
+                f"{preset.event}{year} · {preset.station} · "
+                f"Source: {preset.source}. {preset.notes}"
+            )
+            current = self.name.text().strip()
+            if not current or current.startswith("NLTH"):
+                self.name.setText(f"NLTH · {preset.label.split(' · ')[0]}")
+            # PEER acceleration AT2 files are normally supplied in g;
+            # imported AT2 headers can still override this explicitly.
+            self.gm_unit.setCurrentText("g")
+        self._update_summary()
+
+    def _sync_ground_motion_scale_mode(self, *_args) -> None:
+        target_mode = self.gm_scale_mode.currentData() == "target_pga"
+        self.gm_target_pga.setEnabled(target_mode)
+        for scale in self.gm_scales.values():
+            scale.setEnabled(not target_mode)
+        if target_mode:
+            self._apply_target_pga_scaling()
+        else:
+            self._refresh_all_ground_motion_previews()
+
+    def _ground_motion_unit_changed(self, *_args) -> None:
+        if self.gm_scale_mode.currentData() == "target_pga":
+            self._apply_target_pga_scaling()
+        else:
+            self._refresh_all_ground_motion_previews()
+
     def _browse_ground_motion(self, direction: int) -> None:
         axis = {1: "X", 2: "Y", 3: "Z"}[int(direction)]
         path, _ = QFileDialog.getOpenFileName(
             self,
             f"Select {axis} Ground Motion",
             "",
-            "Ground motion (*.txt *.dat *.csv);;All files (*)",
+            "Ground motion (*.at2 *.AT2 *.txt *.dat *.csv);;All files (*)",
         )
         if not path:
             return
@@ -467,36 +563,116 @@ class AnalysisTemplateDialog(QDialog):
         axis = {1: "X", 2: "Y", 3: "Z"}[direction]
         if not path:
             self._ground_motion_values[direction] = []
+            self._ground_motion_formats[direction] = ""
             self.gm_previews[direction].setText(f"{axis}: not assigned")
             self._update_summary()
             return
         try:
             text = Path(path).read_text(encoding="utf-8", errors="ignore")
-            values = parse_ground_motion_text(
+            parsed = parse_ground_motion_record_text(
                 text,
                 column=self.gm_column.value(),
+                filename=path,
             )
         except (OSError, ValueError) as exc:
             self._ground_motion_values[direction] = []
+            self._ground_motion_formats[direction] = ""
             self.gm_previews[direction].setText(
                 f"{axis}: cannot read record: {exc}"
             )
             self._update_summary()
             return
 
-        self._ground_motion_values[direction] = values
-        pga = max((abs(value) for value in values), default=0.0)
-        duration = max(0, len(values) - 1) * self.gm_dt.value()
-        self.gm_previews[direction].setText(
-            f"{axis}: {len(values)} points · duration ≈ {duration:g} s · "
-            f"raw PGA = {pga:g} {self.gm_unit.currentText()}"
-        )
+        if parsed.dt is not None:
+            other_active = any(
+                self._ground_motion_values[other]
+                for other in (1, 2, 3)
+                if other != direction
+            )
+            current_dt = self.gm_dt.value()
+            tolerance = max(1.0e-12, abs(current_dt) * 1.0e-6)
+            if (
+                other_active
+                and abs(parsed.dt - current_dt) > tolerance
+            ):
+                QMessageBox.warning(
+                    self,
+                    "Ground Motion",
+                    (
+                        f"{axis} record dt={parsed.dt:g} s does not match "
+                        f"the active component dt={current_dt:g} s."
+                    ),
+                )
+                return
+            self.gm_dt.setValue(parsed.dt)
+
+        if parsed.input_unit is not None:
+            self.gm_unit.setCurrentText(parsed.input_unit)
+
+        self._ground_motion_values[direction] = list(parsed.values)
+        self._ground_motion_formats[direction] = parsed.format
+
+        if self.gm_scale_mode.currentData() == "target_pga":
+            self._apply_target_pga_scaling()
+        else:
+            self._refresh_ground_motion_preview(direction)
         self._update_summary()
 
     def _reload_all_ground_motions(self, *_args) -> None:
         for direction in (1, 2, 3):
             if self.gm_files[direction].text().strip():
                 self._reload_ground_motion(direction)
+
+    def _apply_target_pga_scaling(self, *_args) -> None:
+        if self.gm_scale_mode.currentData() != "target_pga":
+            return
+        target = self.gm_target_pga.value()
+        input_unit = self.gm_unit.currentText()
+        for direction in (1, 2, 3):
+            values = self._ground_motion_values[direction]
+            if not values:
+                continue
+            try:
+                factor = scale_factor_for_target_pga(
+                    values,
+                    input_unit,
+                    target,
+                )
+            except ValueError:
+                continue
+            scale = self.gm_scales[direction]
+            scale.blockSignals(True)
+            try:
+                scale.setValue(factor)
+            finally:
+                scale.blockSignals(False)
+        self._refresh_all_ground_motion_previews()
+
+    def _refresh_ground_motion_preview(self, direction: int) -> None:
+        direction = int(direction)
+        axis = {1: "X", 2: "Y", 3: "Z"}[direction]
+        values = self._ground_motion_values[direction]
+        if not values:
+            self.gm_previews[direction].setText(f"{axis}: not assigned")
+            return
+        try:
+            raw_pga = pga_in_g(values, self.gm_unit.currentText())
+        except ValueError:
+            raw_pga = 0.0
+        factor = self.gm_scales[direction].value()
+        scaled_pga = raw_pga * abs(factor)
+        duration = max(0, len(values) - 1) * self.gm_dt.value()
+        format_name = self._ground_motion_formats[direction] or "record"
+        self.gm_previews[direction].setText(
+            f"{axis}: {len(values)} points · {format_name} · "
+            f"duration ≈ {duration:g} s · raw PGA={raw_pga:.4g} g · "
+            f"scale={factor:.4g} → {scaled_pga:.4g} g"
+        )
+        self._update_summary()
+
+    def _refresh_all_ground_motion_previews(self, *_args) -> None:
+        for direction in (1, 2, 3):
+            self._refresh_ground_motion_preview(direction)
 
     def _update_summary(self, *_args) -> None:
         kind = self.template.currentText()
