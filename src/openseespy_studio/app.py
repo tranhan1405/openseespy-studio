@@ -11,6 +11,7 @@ from .ui.main_window import MainWindow
 def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("OpenSeesPy Studio")
+    app.setApplicationVersion("0.1.0")
     app.setWindowIcon(app_icon())
     app.setStyle("Fusion")
     try:
