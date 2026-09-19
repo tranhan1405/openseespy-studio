@@ -27,10 +27,17 @@ except ImportError:
     vtkCellPicker = None
     vtkPointPicker = None
 
-from ..beam_loads import element_local_axes
+from ..beam_loads import element_local_axes, resolve_self_weight_local
 from ..model import StructuralModel, classify_fixity
 from ..postprocess import component_end_resultants, nodal_result_scalar
-from ..project import ConnectionData
+from ..project import (
+    ConnectionData,
+    ElementLoadData,
+    MaterialData,
+    NodalLoadData,
+    SectionData,
+    TransformationData,
+)
 from .icons import studio_icon
 
 
@@ -51,6 +58,22 @@ class ModelViewport(QWidget):
         self.setObjectName("ViewportRoot")
         self._model: StructuralModel | None = None
         self._connections: dict[int, ConnectionData] = {}
+        self._nodal_loads: dict[int, NodalLoadData] = {}
+        self._element_loads: dict[int, ElementLoadData] = {}
+        self._transformations: dict[int, TransformationData] = {}
+        self._sections: dict[int, SectionData] = {}
+        self._materials: dict[int, MaterialData] = {}
+        self._units: dict[str, str] = {
+            "length": "m",
+            "force": "kN",
+            "time": "s",
+        }
+        self._display_options = {
+            "node_numbers": False,
+            "element_numbers": False,
+            "nodal_loads": False,
+            "element_loads": False,
+        }
         self._selection_filter = "all"
         self._selected_nodes: set[int] = set()
         self._selected_elements: set[int] = set()
@@ -573,6 +596,39 @@ class ModelViewport(QWidget):
             zlabel="Z",
         )
 
+    def set_display_data(
+        self,
+        *,
+        nodal_loads: dict[int, NodalLoadData] | None = None,
+        element_loads: dict[int, ElementLoadData] | None = None,
+        transformations: dict[int, TransformationData] | None = None,
+        sections: dict[int, SectionData] | None = None,
+        materials: dict[int, MaterialData] | None = None,
+        units: dict[str, str] | None = None,
+        refresh: bool = True,
+    ) -> None:
+        self._nodal_loads = dict(nodal_loads or {})
+        self._element_loads = dict(element_loads or {})
+        self._transformations = dict(transformations or {})
+        self._sections = dict(sections or {})
+        self._materials = dict(materials or {})
+        if units is not None:
+            self._units = dict(units)
+        if refresh:
+            self._update_display_overlays()
+
+    def set_display_option(self, name: str, enabled: bool) -> None:
+        if name not in self._display_options:
+            raise ValueError(f"Unknown display option: {name}")
+        enabled = bool(enabled)
+        if self._display_options[name] == enabled:
+            return
+        self._display_options[name] = enabled
+        self._update_display_overlays()
+
+    def display_option(self, name: str) -> bool:
+        return bool(self._display_options.get(name, False))
+
     def set_model_info(
         self,
         name: str,
@@ -938,6 +994,7 @@ class ModelViewport(QWidget):
                 )
 
         self._update_highlight_overlays()
+        self._update_display_overlays(render=False)
         self.set_view(self._current_view)
         if reset_camera:
             self.plotter.reset_camera()
@@ -1061,6 +1118,385 @@ class ModelViewport(QWidget):
                 )
 
         self.plotter.render()
+
+    def _clear_display_overlays(self) -> None:
+        for name in (
+            "display-node-numbers",
+            "display-element-numbers",
+            "display-nodal-load-arrows",
+            "display-nodal-load-labels",
+            "display-element-load-arrows",
+            "display-element-load-labels",
+        ):
+            self._remove_overlay(name)
+
+    def _model_span(self) -> float:
+        if self._model is None or not self._model.nodes:
+            return 1.0
+        low, high = self._model.bounds()
+        return max(
+            high[0] - low[0],
+            high[1] - low[1],
+            high[2] - low[2],
+            1.0,
+        )
+
+    @staticmethod
+    def _vector_norm(vector) -> float:
+        values = np.asarray(vector, dtype=float)
+        return float(np.linalg.norm(values))
+
+    @staticmethod
+    def _format_vector(prefix: str, vector, unit: str) -> str:
+        values = tuple(float(value) for value in vector)
+        return (
+            f"{prefix}=({values[0]:.4g}, {values[1]:.4g}, "
+            f"{values[2]:.4g}) {unit}"
+        )
+
+    @staticmethod
+    def _arrow_to_point(
+        point,
+        vector,
+        *,
+        length: float,
+    ):
+        direction = np.asarray(vector, dtype=float)
+        norm = float(np.linalg.norm(direction))
+        if norm <= 1.0e-15:
+            return None
+        unit = direction / norm
+        target = np.asarray(point, dtype=float)
+        start = target - unit * float(length)
+        return pv.Arrow(
+            start=start,
+            direction=unit,
+            scale=float(length),
+            tip_length=0.26,
+            tip_radius=0.12,
+            shaft_radius=0.035,
+        )
+
+    def _add_annotation_labels(
+        self,
+        points,
+        labels,
+        *,
+        name: str,
+        text_color: str,
+        font_size: int = 11,
+    ) -> None:
+        if not points:
+            return
+        self.plotter.add_point_labels(
+            np.asarray(points, dtype=float),
+            [str(label) for label in labels],
+            name=name,
+            font_size=font_size,
+            text_color=text_color,
+            shape_color="#ffffff",
+            shape_opacity=0.72,
+            show_points=False,
+            always_visible=True,
+            pickable=False,
+            render=False,
+        )
+
+    def _draw_node_numbers(self) -> None:
+        if self._model is None:
+            return
+        tags = sorted(self._visible_node_tags())
+        self._add_annotation_labels(
+            [self._model.nodes[tag].xyz for tag in tags],
+            [str(tag) for tag in tags],
+            name="display-node-numbers",
+            text_color="#0b5cad",
+            font_size=10,
+        )
+
+    def _draw_element_numbers(self) -> None:
+        if self._model is None:
+            return
+        points = []
+        labels = []
+        for tag in sorted(self._visible_element_tags()):
+            element = self._model.elements.get(tag)
+            if element is None:
+                continue
+            node_i = self._model.nodes.get(element.i)
+            node_j = self._model.nodes.get(element.j)
+            if node_i is None or node_j is None:
+                continue
+            points.append(
+                tuple(
+                    (float(a) + float(b)) * 0.5
+                    for a, b in zip(node_i.xyz, node_j.xyz)
+                )
+            )
+            labels.append(str(tag))
+        self._add_annotation_labels(
+            points,
+            labels,
+            name="display-element-numbers",
+            text_color="#7a3d00",
+            font_size=10,
+        )
+
+    def _draw_nodal_loads(self) -> None:
+        if self._model is None or not self._nodal_loads:
+            return
+        visible_nodes = self._visible_node_tags()
+        candidates = [
+            load
+            for load in self._nodal_loads.values()
+            if load.node_tag in visible_nodes
+            and load.node_tag in self._model.nodes
+        ]
+        if not candidates:
+            return
+
+        max_force = max(
+            (
+                self._vector_norm(load.values[:3])
+                for load in candidates
+            ),
+            default=0.0,
+        )
+        span = self._model_span()
+        base_length = max(span * 0.10, 0.12)
+        arrows = []
+        label_points = []
+        labels = []
+        force_unit = str(self._units.get("force", ""))
+        moment_unit = (
+            f"{force_unit}·{self._units.get('length', '')}"
+        )
+
+        for load in candidates:
+            point = np.asarray(
+                self._model.nodes[load.node_tag].xyz,
+                dtype=float,
+            )
+            force = tuple(float(value) for value in load.values[:3])
+            moment = tuple(float(value) for value in load.values[3:6])
+            force_mag = self._vector_norm(force)
+            arrow = None
+            if force_mag > 1.0e-15:
+                ratio = (
+                    force_mag / max_force
+                    if max_force > 1.0e-15
+                    else 1.0
+                )
+                arrow = self._arrow_to_point(
+                    point,
+                    force,
+                    length=base_length * (0.45 + 0.55 * ratio),
+                )
+                if arrow is not None:
+                    arrows.append(arrow)
+
+            parts = [f"Node {load.node_tag}"]
+            if force_mag > 1.0e-15:
+                parts.append(
+                    self._format_vector("F", force, force_unit)
+                )
+            if self._vector_norm(moment) > 1.0e-15:
+                parts.append(
+                    self._format_vector("M", moment, moment_unit)
+                )
+            if len(parts) > 1:
+                label_points.append(point)
+                labels.append("\n".join(parts))
+
+        if arrows:
+            self.plotter.add_mesh(
+                pv.merge(arrows, merge_points=False),
+                name="display-nodal-load-arrows",
+                color="#d62828",
+                smooth_shading=False,
+                pickable=False,
+                render=False,
+            )
+        self._add_annotation_labels(
+            label_points,
+            labels,
+            name="display-nodal-load-labels",
+            text_color="#a71919",
+            font_size=10,
+        )
+
+    def _element_load_global_vector(
+        self,
+        load: ElementLoadData,
+    ) -> tuple[np.ndarray, str] | None:
+        if self._model is None:
+            return None
+        element = self._model.elements.get(load.element_tag)
+        if element is None or element.transf_tag is None:
+            return None
+        transformation = self._transformations.get(element.transf_tag)
+        if transformation is None:
+            return None
+        try:
+            local_x, local_y, local_z = element_local_axes(
+                self._model,
+                element,
+                transformation,
+            )
+            if load.load_type == "Uniform":
+                local = (load.wx, load.wy, load.wz)
+                prefix = "w"
+            elif load.load_type == "Point":
+                local = (load.px, load.py, load.pz)
+                prefix = "P"
+            else:
+                local = resolve_self_weight_local(
+                    load,
+                    self._model,
+                    self._sections,
+                    self._materials,
+                    self._transformations,
+                    self._units,
+                )
+                prefix = "w"
+        except ValueError:
+            return None
+
+        global_vector = (
+            np.asarray(local_x, dtype=float) * float(local[0])
+            + np.asarray(local_y, dtype=float) * float(local[1])
+            + np.asarray(local_z, dtype=float) * float(local[2])
+        )
+        return global_vector, prefix
+
+    def _draw_element_loads(self) -> None:
+        if self._model is None or not self._element_loads:
+            return
+        visible_elements = self._visible_element_tags()
+        entries = []
+        max_magnitude = 0.0
+        for load in self._element_loads.values():
+            if load.element_tag not in visible_elements:
+                continue
+            element = self._model.elements.get(load.element_tag)
+            if element is None:
+                continue
+            resolved = self._element_load_global_vector(load)
+            if resolved is None:
+                continue
+            vector, prefix = resolved
+            magnitude = self._vector_norm(vector)
+            max_magnitude = max(max_magnitude, magnitude)
+            entries.append((load, element, vector, prefix, magnitude))
+
+        if not entries:
+            return
+
+        span = self._model_span()
+        base_length = max(span * 0.085, 0.10)
+        arrows = []
+        label_points = []
+        labels = []
+        force_unit = str(self._units.get("force", ""))
+        line_unit = (
+            f"{force_unit}/{self._units.get('length', '')}"
+        )
+
+        for load, element, vector, prefix, magnitude in entries:
+            node_i = self._model.nodes.get(element.i)
+            node_j = self._model.nodes.get(element.j)
+            if node_i is None or node_j is None:
+                continue
+            p_i = np.asarray(node_i.xyz, dtype=float)
+            p_j = np.asarray(node_j.xyz, dtype=float)
+            member = p_j - p_i
+
+            ratio = (
+                magnitude / max_magnitude
+                if max_magnitude > 1.0e-15
+                else 1.0
+            )
+            arrow_length = base_length * (0.45 + 0.55 * ratio)
+
+            if load.load_type in {"Uniform", "SelfWeight"}:
+                positions = (0.18, 0.39, 0.61, 0.82)
+                for position in positions:
+                    point = p_i + float(position) * member
+                    arrow = self._arrow_to_point(
+                        point,
+                        vector,
+                        length=arrow_length,
+                    )
+                    if arrow is not None:
+                        arrows.append(arrow)
+                label_point = p_i + 0.5 * member
+                unit = line_unit
+            else:
+                position = min(max(float(load.x_over_l), 0.0), 1.0)
+                label_point = p_i + position * member
+                arrow = self._arrow_to_point(
+                    label_point,
+                    vector,
+                    length=arrow_length,
+                )
+                if arrow is not None:
+                    arrows.append(arrow)
+                unit = force_unit
+
+            local_vector = (
+                (load.wx, load.wy, load.wz)
+                if load.load_type == "Uniform"
+                else (load.px, load.py, load.pz)
+                if load.load_type == "Point"
+                else None
+            )
+            title = (
+                f"Elem {load.element_tag} · {load.load_type}"
+            )
+            if local_vector is not None:
+                title += "\n" + self._format_vector(
+                    f"{prefix}_local",
+                    local_vector,
+                    unit,
+                )
+            else:
+                title += "\nSelf weight"
+            label_points.append(label_point)
+            labels.append(title)
+
+        if arrows:
+            self.plotter.add_mesh(
+                pv.merge(arrows, merge_points=False),
+                name="display-element-load-arrows",
+                color="#c2185b",
+                smooth_shading=False,
+                pickable=False,
+                render=False,
+            )
+        self._add_annotation_labels(
+            label_points,
+            labels,
+            name="display-element-load-labels",
+            text_color="#9b164a",
+            font_size=10,
+        )
+
+    def _update_display_overlays(self, *, render: bool = True) -> None:
+        self._clear_display_overlays()
+        if self._model is None or not self._model.nodes:
+            if render:
+                self.plotter.render()
+            return
+        if self._display_options["node_numbers"]:
+            self._draw_node_numbers()
+        if self._display_options["element_numbers"]:
+            self._draw_element_numbers()
+        if self._display_options["nodal_loads"]:
+            self._draw_nodal_loads()
+        if self._display_options["element_loads"]:
+            self._draw_element_loads()
+        if render:
+            self.plotter.render()
 
     def clear_result_overlay(self, *, render: bool = True) -> None:
         for name in (
