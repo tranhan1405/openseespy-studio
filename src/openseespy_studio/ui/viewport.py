@@ -1875,8 +1875,8 @@ class ModelViewport(QWidget):
             )
             labels.extend(
                 (
-                    f"{tag}: {y_label}",
-                    f"{tag}: {z_label}",
+                    f"y  ·  {y_label.split('·', 1)[-1].strip().upper()}",
+                    f"z  ·  {z_label.split('·', 1)[-1].strip().upper()}",
                 )
             )
 
@@ -1884,9 +1884,9 @@ class ModelViewport(QWidget):
             label_points,
             labels,
             name="display-section-axis-labels",
-            text_color="#334155",
-            font_size=9,
-            always_visible=False,
+            text_color="#1f2937",
+            font_size=11,
+            always_visible=True,
         )
 
     def _draw_section_axes(self) -> None:
