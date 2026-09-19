@@ -1521,13 +1521,16 @@ class ModelViewport(QWidget):
                         else 1.0
                     )
                     signed_axis = axis * (1.0 if value >= 0.0 else -1.0)
-                    arrow = self._arrow_record(
-                        point,
-                        signed_axis,
-                        length=base_length * (0.55 + 0.45 * ratio),
+                    arrow_length = base_length * (
+                        0.55 + 0.45 * ratio
                     )
-                    if arrow is not None:
-                        arrows.append(arrow)
+                    arrows.append(
+                        (
+                            point,
+                            signed_axis,
+                            arrow_length,
+                        )
+                    )
                 unit = length_unit
             else:
                 if abs(value) > 1.0e-15:
