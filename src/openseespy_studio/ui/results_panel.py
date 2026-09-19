@@ -4,10 +4,11 @@ import csv
 import math
 from typing import Any
 
-from PySide6.QtCore import QPointF, QSize, Qt, Signal
+from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QProgressBar,
     QSizePolicy,
+    QSlider,
     QSpinBox,
     QSplitter,
     QTableWidget,
@@ -29,6 +31,11 @@ from PySide6.QtWidgets import (
 )
 
 from ..jobs import JobRecord
+from ..motion import (
+    available_modal_modes,
+    motion_frame,
+    motion_info,
+)
 from ..postprocess import (
     component_end_resultants,
     convergence_steps,
@@ -58,11 +65,23 @@ class TimeHistoryPlot(QWidget):
         self._x: list[float] = []
         self._y: list[float] = []
         self._empty_message = str(empty_message)
+        self._marker_index: int | None = None
         self.setMinimumHeight(140)
 
     def set_series(self, x: list[float], y: list[float]) -> None:
         self._x = list(x)
         self._y = list(y)
+        if (
+            self._marker_index is not None
+            and self._marker_index >= min(len(self._x), len(self._y))
+        ):
+            self._marker_index = None
+        self.update()
+
+    def set_marker(self, index: int | None) -> None:
+        self._marker_index = (
+            None if index is None else max(0, int(index))
+        )
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -106,6 +125,20 @@ class TimeHistoryPlot(QWidget):
             current = point(x, y)
             painter.drawLine(previous, current)
             previous = current
+
+        marker_index = self._marker_index
+        if (
+            marker_index is not None
+            and marker_index < len(self._x)
+            and marker_index < len(self._y)
+        ):
+            marker = point(
+                self._x[marker_index],
+                self._y[marker_index],
+            )
+            painter.setPen(QPen(QColor("#c62828"), 2))
+            painter.setBrush(QColor("#ffffff"))
+            painter.drawEllipse(marker, 5.0, 5.0)
 
         painter.setPen(QColor("#526579"))
         painter.drawText(4, top + 8, f"{ymax:.3g}")
