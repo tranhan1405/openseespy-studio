@@ -5,7 +5,7 @@ import math
 from typing import Any
 
 from PySide6.QtCore import QPointF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QAction, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -14,13 +14,16 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMenu,
     QPushButton,
     QProgressBar,
     QSizePolicy,
     QSpinBox,
+    QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -30,6 +33,7 @@ from ..postprocess import (
     component_end_resultants,
     convergence_series,
     convergence_steps,
+    convergence_trace,
     convergence_summary,
     cyclic_hysteresis_curve,
     cyclic_hysteresis_metrics,
@@ -292,6 +296,289 @@ class LiveConvergencePlot(QWidget):
             int(left),
             self.height() - 7,
             "Iterations / fallback attempts →",
+        )
+
+
+class ConvergenceOverviewPlot(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._x: list[float] = []
+        self._norm: list[float] = []
+        self._criterion: float | None = None
+        self._cutbacks: list[float] = []
+        self._converged: list[float] = []
+        self._show_norm = True
+        self._show_criterion = True
+        self._show_cutbacks = True
+        self._show_converged = True
+        self.setMinimumHeight(40)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
+
+    def set_trace(
+        self,
+        x: list[float],
+        norm: list[float],
+        *,
+        criterion: float | None,
+        cutbacks: list[float],
+        converged: list[float],
+    ) -> None:
+        self._x = list(x)
+        self._norm = list(norm)
+        self._criterion = criterion
+        self._cutbacks = list(cutbacks)
+        self._converged = list(converged)
+        self.update()
+
+    def clear(self) -> None:
+        self.set_trace(
+            [],
+            [],
+            criterion=None,
+            cutbacks=[],
+            converged=[],
+        )
+
+    def set_display_options(
+        self,
+        *,
+        norm: bool,
+        criterion: bool,
+        cutbacks: bool,
+        converged: bool,
+    ) -> None:
+        self._show_norm = bool(norm)
+        self._show_criterion = bool(criterion)
+        self._show_cutbacks = bool(cutbacks)
+        self._show_converged = bool(converged)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#ffffff"))
+
+        values = [
+            abs(float(value))
+            for value in self._norm
+            if math.isfinite(float(value)) and float(value) != 0.0
+        ]
+        if (
+            self._criterion is not None
+            and math.isfinite(float(self._criterion))
+            and float(self._criterion) > 0.0
+        ):
+            values.append(abs(float(self._criterion)))
+
+        if not self._x or not values:
+            painter.setPen(QColor("#718195"))
+            painter.drawText(
+                self.rect(),
+                Qt.AlignCenter,
+                "No convergence trace",
+            )
+            return
+
+        margin_left = 58.0
+        margin_right = 18.0
+        margin_top = 26.0
+        margin_bottom = 30.0
+        left = margin_left
+        right = max(left + 1.0, self.width() - margin_right)
+        top = margin_top
+        bottom = max(top + 1.0, self.height() - margin_bottom)
+
+        xmin = 1.0
+        xmax = max(max(self._x), 1.0)
+        if xmax <= xmin:
+            xmax = xmin + 1.0
+
+        log_values = [
+            math.log10(max(value, 1.0e-300))
+            for value in values
+        ]
+        log_min = min(log_values)
+        log_max = max(log_values)
+        if abs(log_max - log_min) < 1.0e-12:
+            log_min -= 1.0
+            log_max += 1.0
+        else:
+            pad = 0.08 * (log_max - log_min)
+            log_min -= pad
+            log_max += pad
+
+        def px(x: float) -> float:
+            return left + (x - xmin) / (xmax - xmin) * (right - left)
+
+        def py(value: float) -> float:
+            log_value = math.log10(max(abs(value), 1.0e-300))
+            return bottom - (
+                log_value - log_min
+            ) / (log_max - log_min) * (bottom - top)
+
+        painter.setPen(QPen(QColor("#c7d0da"), 1))
+        painter.drawLine(int(left), int(bottom), int(right), int(bottom))
+        painter.drawLine(int(left), int(top), int(left), int(bottom))
+
+        if self._show_cutbacks:
+            painter.setPen(QPen(QColor("#e74c3c"), 1, Qt.DashLine))
+            for x in self._cutbacks:
+                xx = px(float(x))
+                painter.drawLine(
+                    int(xx),
+                    int(top),
+                    int(xx),
+                    int(bottom),
+                )
+
+        if self._show_converged:
+            painter.setPen(QPen(QColor("#2ecc71"), 1, Qt.DashLine))
+            for x in self._converged:
+                xx = px(float(x))
+                painter.drawLine(
+                    int(xx),
+                    int(top),
+                    int(xx),
+                    int(bottom),
+                )
+
+        if self._show_criterion and self._criterion is not None:
+            criterion = abs(float(self._criterion))
+            if criterion > 0.0 and math.isfinite(criterion):
+                yy = py(criterion)
+                painter.setPen(QPen(QColor("#00bcd4"), 2))
+                painter.drawLine(
+                    int(left),
+                    int(yy),
+                    int(right),
+                    int(yy),
+                )
+
+        if self._show_norm:
+            painter.setPen(QPen(QColor("#d000d0"), 2))
+            painter.setBrush(QColor("#d000d0"))
+            previous: QPointF | None = None
+            for x, value in zip(self._x, self._norm):
+                if (
+                    not math.isfinite(float(value))
+                    or float(value) == 0.0
+                ):
+                    previous = None
+                    continue
+                current = QPointF(
+                    px(float(x)),
+                    py(float(value)),
+                )
+                if previous is not None:
+                    painter.drawLine(previous, current)
+                painter.drawEllipse(current, 2.2, 2.2)
+                previous = current
+
+        legend = []
+        if self._show_norm:
+            legend.append(("Convergence", QColor("#d000d0")))
+        if self._show_criterion and self._criterion is not None:
+            legend.append(("Criterion", QColor("#00bcd4")))
+        if self._show_cutbacks:
+            legend.append(("Cutback", QColor("#e74c3c")))
+        if self._show_converged:
+            legend.append(("Converged", QColor("#2ecc71")))
+        x_cursor = int(left + 4)
+        for label, color in legend:
+            painter.setPen(QPen(color, 2))
+            painter.drawLine(x_cursor, 12, x_cursor + 18, 12)
+            painter.setPen(QColor("#263746"))
+            painter.drawText(x_cursor + 23, 16, label)
+            x_cursor += 95
+
+        painter.setPen(QColor("#526579"))
+        painter.drawText(4, int(top + 8), f"1e{math.ceil(log_max):g}")
+        painter.drawText(4, int(bottom), f"1e{math.floor(log_min):g}")
+        painter.drawText(int(left), self.height() - 7, "1")
+        painter.drawText(
+            int(right - 44),
+            self.height() - 7,
+            f"{int(xmax)}",
+        )
+        painter.drawText(
+            int((left + right) / 2 - 55),
+            self.height() - 7,
+            "Cumulative iteration",
+        )
+
+
+class AnalysisCoordinatePlot(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._x: list[float] = []
+        self._y: list[float] = []
+        self.setMinimumHeight(34)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
+
+    def set_series(
+        self,
+        x: list[float],
+        y: list[float],
+    ) -> None:
+        self._x = list(x)
+        self._y = list(y)
+        self.update()
+
+    def clear(self) -> None:
+        self.set_series([], [])
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#ffffff"))
+        if len(self._x) < 2 or len(self._y) < 2:
+            painter.setPen(QColor("#718195"))
+            painter.drawText(
+                self.rect(),
+                Qt.AlignCenter,
+                "No analysis-coordinate history",
+            )
+            return
+
+        left = 58.0
+        right = max(left + 1.0, self.width() - 18.0)
+        top = 10.0
+        bottom = max(top + 1.0, self.height() - 26.0)
+        xmin = min(self._x)
+        xmax = max(self._x)
+        ymin = min(self._y)
+        ymax = max(self._y)
+        if abs(xmax - xmin) < 1.0e-15:
+            xmax = xmin + 1.0
+        if abs(ymax - ymin) < 1.0e-15:
+            pad = max(abs(ymax), 1.0) * 0.05
+            ymin -= pad
+            ymax += pad
+
+        def point(x: float, y: float) -> QPointF:
+            return QPointF(
+                left + (x - xmin) / (xmax - xmin) * (right - left),
+                bottom - (y - ymin) / (ymax - ymin) * (bottom - top),
+            )
+
+        painter.setPen(QPen(QColor("#c7d0da"), 1))
+        painter.drawLine(int(left), int(bottom), int(right), int(bottom))
+        painter.drawLine(int(left), int(top), int(left), int(bottom))
+
+        painter.setPen(QPen(QColor("#202020"), 2))
+        previous = point(self._x[0], self._y[0])
+        for x, y in zip(self._x[1:], self._y[1:]):
+            current = point(x, y)
+            painter.drawLine(previous, current)
+            previous = current
+
+        painter.setPen(QColor("#526579"))
+        painter.drawText(4, int(top + 8), f"{ymax:.3g}")
+        painter.drawText(4, int(bottom), f"{ymin:.3g}")
+        painter.drawText(
+            int((left + right) / 2 - 55),
+            self.height() - 6,
+            "Cumulative iteration",
         )
 
 
