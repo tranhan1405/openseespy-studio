@@ -1,6 +1,7 @@
 from openseespy_studio.ground_motion_library import (
     GROUND_MOTION_LIBRARY,
     common_scale_factor_for_target_pga,
+    load_bundled_ground_motion_record,
     parse_ground_motion_record_text,
     parse_peer_at2_text,
     pga_in_g,
@@ -97,3 +98,26 @@ def test_common_target_pga_scale_preserves_component_ratio():
     assert abs(factor - 0.8) < 1.0e-12
     assert abs(0.50 * factor - 0.40) < 1.0e-12
     assert abs(0.20 * factor - 0.16) < 1.0e-12
+
+
+
+def test_bundled_el_centro_record_loads_without_user_file():
+    record = load_bundled_ground_motion_record("el-centro-1940")
+    assert record.format == "PEER AT2"
+    assert record.npts == 1559
+    assert record.dt == 0.02
+    assert record.input_unit == "g"
+    assert len(record.values) == 1559
+    assert pga_in_g(record.values, "g") > 0.30
+
+
+def test_bundled_northridge_rinaldi_record_loads_without_user_file():
+    record = load_bundled_ground_motion_record(
+        "northridge-1994-rinaldi"
+    )
+    assert record.format == "SimCenter JSON"
+    assert record.npts == 1992
+    assert record.dt == 0.01
+    assert record.input_unit == "g"
+    assert len(record.values) == 1992
+    assert pga_in_g(record.values, "g") > 0.50
