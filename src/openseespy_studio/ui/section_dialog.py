@@ -45,6 +45,9 @@ from ..section_visualization import (
     section_preview_bounds,
 )
 from ..units import UnitSystem
+PA_PER_MPA = 1.0e6
+
+
 from ..project import (
     FiberComponentData,
     FiberData,
@@ -1703,11 +1706,19 @@ class SectionDialog(QDialog):
                 if section and section.section_type == "Elastic"
                 else SECTION_DEFAULTS["Elastic"][key]
             )
-            spin = _float_spin(initial)
+            display_value = (
+                initial / PA_PER_MPA
+                if key in {"E", "G"}
+                else initial
+            )
+            spin = _float_spin(display_value)
+            if key in {"E", "G"}:
+                spin.setDecimals(6)
+                spin.setSingleStep(100.0)
             lu = self.unit_system.length
             labels = {
-                "E": "E [Pa]:",
-                "G": "G [Pa]:",
+                "E": "E [MPa]:",
+                "G": "G [MPa]:",
                 "A": f"A [{lu}²]:",
                 "Iy": f"Iy [{lu}⁴]:",
                 "Iz": f"Iz [{lu}⁴]:",
@@ -1958,8 +1969,12 @@ class SectionDialog(QDialog):
         material = self.materials.get(int(material_tag))
         if material is None:
             return
-        self.elastic_spins["E"].setValue(material.elastic_modulus())
-        self.elastic_spins["G"].setValue(material.shear_modulus())
+        self.elastic_spins["E"].setValue(
+            material.elastic_modulus() / PA_PER_MPA
+        )
+        self.elastic_spins["G"].setValue(
+            material.shear_modulus() / PA_PER_MPA
+        )
 
     def _sync_page(self, section_type: str) -> None:
         self.stack.setCurrentIndex(
@@ -2379,7 +2394,11 @@ class SectionDialog(QDialog):
         section_type = self.section_type.currentText()
         if section_type == "Elastic":
             parameters = {
-                key: self.elastic_spins[key].value()
+                key: (
+                    self.elastic_spins[key].value() * PA_PER_MPA
+                    if key in {"E", "G"}
+                    else self.elastic_spins[key].value()
+                )
                 for key in SECTION_PARAMETER_ORDER["Elastic"]
             }
             fibers: list[FiberData] = []
