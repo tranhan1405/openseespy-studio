@@ -476,12 +476,17 @@ class FrameGridPanel(QWidget):
         layout.addLayout(dimension_form)
 
         self.planar_note = QLabel(
-            "2D mode: one X-Z frame plane; out-of-plane DOFs are "
-            "restrained automatically."
+            "2D mode: one X-Z frame plane; active structural DOFs are "
+            "UX, UZ and RY. UY, RX and RZ are restrained automatically."
         )
         self.planar_note.setWordWrap(True)
         self.planar_note.setObjectName("Muted")
         layout.addWidget(self.planar_note)
+
+        self.frame_preview = QLabel()
+        self.frame_preview.setWordWrap(True)
+        self.frame_preview.setObjectName("Muted")
+        layout.addWidget(self.frame_preview)
 
         mode_row = QHBoxLayout()
         self.rectangular = QPushButton("Rectangular Grid")
@@ -580,6 +585,17 @@ class FrameGridPanel(QWidget):
         self.dimension.currentIndexChanged.connect(
             self._sync_dimension_mode
         )
+        for widget in (
+            self.nx,
+            self.ny,
+            self.nz,
+            self.columns,
+            self.beams,
+        ):
+            if hasattr(widget, "valueChanged"):
+                widget.valueChanged.connect(self._update_frame_preview)
+            if hasattr(widget, "toggled"):
+                widget.toggled.connect(self._update_frame_preview)
         self._sync_dimension_mode()
 
     def set_planar_2d(self, enabled: bool) -> None:
@@ -595,6 +611,41 @@ class FrameGridPanel(QWidget):
         self.planar_base_support.setEnabled(planar)
         self.planar_note.setVisible(planar)
         self.circular.setEnabled(False)
+        self._update_frame_preview()
+
+    def _update_frame_preview(self, *_args) -> None:
+        planar = self.dimension.currentData() == "2D"
+        nx = self.nx.value()
+        ny = self.ny.value()
+        nz = self.nz.value()
+        if planar:
+            nodes = (nx + 1) * (nz + 1)
+            columns = nz * (nx + 1) if self.columns.isChecked() else 0
+            beams = nx * nz if self.beams.isChecked() else 0
+            self.frame_preview.setText(
+                f"Preview: 2D X-Z · {nodes} nodes · "
+                f"{columns + beams} elements "
+                f"({columns} columns + {beams} beams)"
+            )
+            return
+        nodes = (nx + 1) * (ny + 1) * (nz + 1)
+        columns = (
+            nz * (nx + 1) * (ny + 1)
+            if self.columns.isChecked()
+            else 0
+        )
+        beams = (
+            (
+                nx * (ny + 1) * nz
+                + ny * (nx + 1) * nz
+            )
+            if self.beams.isChecked()
+            else 0
+        )
+        self.frame_preview.setText(
+            f"Preview: 3D · {nodes} nodes · "
+            f"{columns + beams} elements"
+        )
 
     @staticmethod
     def _separator() -> QFrame:
@@ -2018,18 +2069,25 @@ class MainWindow(QMainWindow):
         self._set_dirty(False)
         self._refresh_all("New empty project")
 
-    def _show_frame_grid(self) -> None:
+    def _open_frame_grid(self, *, planar_2d: bool) -> None:
+        self.frame_grid_panel.set_planar_2d(planar_2d)
         self.frame_grid_panel.refresh_assignments(
             self.project.sections,
             self.project.transformations,
         )
+        self.create_dock.setWindowTitle(
+            "Quick 2D Frame" if planar_2d else "Create Frame Grid"
+        )
         self.create_dock.show()
         self.create_dock.raise_()
+        if planar_2d:
+            self.viewport.set_view("xz")
+
+    def _show_frame_grid(self) -> None:
+        self._open_frame_grid(planar_2d=False)
 
     def _show_frame_grid_2d(self) -> None:
-        self.frame_grid_panel.set_planar_2d(True)
-        self._show_frame_grid()
-        self.viewport.set_view("xz")
+        self._open_frame_grid(planar_2d=True)
 
     def _generate_frame_grid(self, spec: FrameGridSpec) -> None:
         before = self.project.to_dict()
