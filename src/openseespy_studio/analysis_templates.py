@@ -246,11 +246,10 @@ def lateral_load_weights(
     if kind == "Uniform":
         raw = {tag: 1.0 for tag in tags}
     elif kind == "Triangular":
-        z_values = [
-            float(project.model.nodes[tag].xyz[2])
-            for tag in tags
-        ]
-        z0 = min(z_values)
+        z0 = min(
+            float(node.xyz[2])
+            for node in project.model.nodes.values()
+        )
         raw = {
             tag: max(
                 float(project.model.nodes[tag].xyz[2]) - z0,
@@ -273,7 +272,10 @@ def lateral_load_weights(
             tag: float(project.model.nodes[tag].xyz[2])
             for tag in tags
         }
-        z0 = min(z_values.values())
+        z0 = min(
+            float(node.xyz[2])
+            for node in project.model.nodes.values()
+        )
         height = max(z_values.values()) - z0
         if height <= 1.0e-15:
             raw = {tag: 1.0 for tag in tags}
