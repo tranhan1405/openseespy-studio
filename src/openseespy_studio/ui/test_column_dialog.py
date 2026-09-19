@@ -81,7 +81,7 @@ class TestColumnWizard(QDialog):
 
         geometry_group = QGroupBox("Geometry & formulation")
         geometry = QFormLayout(geometry_group)
-        self.height = _double(3.0, 1.0e-6, 1.0e9)
+        self.column_height = _double(3.0, 1.0e-6, 1.0e9)
         self.elements = QSpinBox()
         self.elements.setRange(1, 200)
         self.elements.setValue(1)
@@ -137,7 +137,7 @@ class TestColumnWizard(QDialog):
 
         geometry.addRow(
             f"Column height [{self.units.length}]:",
-            self.height,
+            self.column_height,
         )
         geometry.addRow("Number of elements:", self.elements)
         geometry.addRow("Column axis:", self.axis)
@@ -260,7 +260,7 @@ class TestColumnWizard(QDialog):
         self.axis.currentIndexChanged.connect(self._axis_changed)
         self.lateral.currentIndexChanged.connect(self._update_preview)
         self.planar.toggled.connect(self._update_preview)
-        self.height.valueChanged.connect(self._update_preview)
+        self.column_height.valueChanged.connect(self._update_preview)
         self.elements.valueChanged.connect(self._update_preview)
         self.element_type.currentTextChanged.connect(self._sync_formulation)
         for toggle in (
@@ -350,7 +350,7 @@ class TestColumnWizard(QDialog):
         if self.use_mass.isChecked():
             options.append("top mass")
         self.preview.setText(
-            f"Preview: 1D {axis}-axis column · {self.height.value():g} "
+            f"Preview: 1D {axis}-axis column · {self.column_height.value():g} "
             f"{self.units.length} · {self.elements.value()} element(s) · "
             f"lateral {lateral} · "
             f"{'planar' if self.planar.isChecked() else '3D'} · "
@@ -395,7 +395,7 @@ class TestColumnWizard(QDialog):
             )
 
         return TestColumnSpec(
-            height=self.height.value(),
+            height=self.column_height.value(),
             num_elements=self.elements.value(),
             axis=axis,
             lateral_direction=lateral,
