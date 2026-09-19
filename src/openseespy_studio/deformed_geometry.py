@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from .project import SectionData
+from .section_geometry import section_geometry_properties
 
 
 @dataclass(frozen=True)
@@ -329,6 +330,17 @@ def section_axis_inertias(
         if iy < 0.0 or iz < 0.0:
             return None
         return iy, iz
+
+    display_geometry = section_display_geometry(section)
+    if display_geometry:
+        try:
+            properties = section_geometry_properties(
+                str(display_geometry["shape"]),
+                **dict(display_geometry["dimensions"]),
+            )
+            return float(properties.iy), float(properties.iz)
+        except (KeyError, TypeError, ValueError):
+            pass
 
     fibers = section.compiled_fibers()
     if not fibers:
