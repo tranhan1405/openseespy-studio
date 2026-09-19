@@ -278,3 +278,23 @@ def test_swept_quad_connectivity_stays_within_point_bounds():
     assert np.all(records[:, 0] == 4)
     assert int(records[:, 1:].min()) >= 0
     assert int(records[:, 1:].max()) < len(geometry.points)
+
+
+def test_fiber_i_section_display_geometry_reports_strong_weak_axes():
+    section = SectionData(
+        tag=14,
+        name="Fiber I",
+        section_type="Fiber",
+        display_geometry={
+            "shape": "I",
+            "dimensions": {
+                "height": 0.60,
+                "flange_width": 0.30,
+                "flange_thickness": 0.03,
+                "web_width": 0.02,
+            },
+        },
+    )
+    y_label, z_label = section_axis_strength_labels(section)
+    assert "weak" in y_label
+    assert "strong" in z_label
