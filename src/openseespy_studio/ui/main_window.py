@@ -1368,6 +1368,20 @@ class MainWindow(QMainWindow):
             self.viewport.clear_result_overlay
         )
         self.results_panel.job_selected.connect(self._select_job_result)
+        self._active_result_display_kind: str | None = None
+        self._syncing_result_display_controls = False
+        self.results_panel.deformation_display.currentIndexChanged.connect(
+            lambda _index: self._sync_result_ribbon_from_panel("deformation")
+        )
+        self.results_panel.deformation_scale.valueChanged.connect(
+            lambda _value: self._sync_result_ribbon_from_panel("deformation")
+        )
+        self.results_panel.mode_display.currentIndexChanged.connect(
+            lambda _index: self._sync_result_ribbon_from_panel("mode")
+        )
+        self.results_panel.mode_scale.valueChanged.connect(
+            lambda _value: self._sync_result_ribbon_from_panel("mode")
+        )
         results_dock.setWidget(self.results_panel)
         self.splitDockWidget(console_dock, results_dock, Qt.Horizontal)
 
@@ -1704,6 +1718,38 @@ class MainWindow(QMainWindow):
             self._clear_result_display,
             "Clear the active result overlay",
         )
+        for key, label, mode in (
+            ("result_deformed", "Deformed", "deformed_only"),
+            ("result_both", "Both", "both"),
+            ("result_undeformed", "Undeformed", "undeformed_only"),
+        ):
+            action = self._make_action(
+                key,
+                label,
+                "plot",
+                lambda checked=False, value=mode: (
+                    self._set_result_display_mode(value)
+                ),
+                (
+                    "Show only the deformed result"
+                    if mode == "deformed_only"
+                    else "Show undeformed and deformed shapes together"
+                    if mode == "both"
+                    else "Show only the undeformed model"
+                ),
+                checkable=True,
+            )
+            action.setProperty("resultDisplayMode", mode)
+            action.setEnabled(False)
+        self.actions["result_deformed"].setChecked(True)
+        self._make_action(
+            "fit_result",
+            "Fit Result",
+            "box",
+            self._fit_active_result,
+            "Fit the active result/model in the viewport",
+        )
+        self.actions["fit_result"].setEnabled(False)
         self._make_action(
             "solver_output_view",
             "Solver Output",
@@ -1920,6 +1966,20 @@ class MainWindow(QMainWindow):
         analysis_page.finish()
         self.ribbon_tabs.addTab(analysis_page, "Analysis")
 
+        self.result_scale_ribbon = QDoubleSpinBox()
+        self.result_scale_ribbon.setDecimals(3)
+        self.result_scale_ribbon.setRange(0.01, 1.0e6)
+        self.result_scale_ribbon.setValue(10.0)
+        self.result_scale_ribbon.setPrefix("Scale ")
+        self.result_scale_ribbon.setFixedWidth(94)
+        self.result_scale_ribbon.setToolTip(
+            "Display scale for the active Deformed Shape or Mode Shape"
+        )
+        self.result_scale_ribbon.setEnabled(False)
+        self.result_scale_ribbon.editingFinished.connect(
+            self._apply_result_ribbon_scale
+        )
+
         result_page = RibbonPage()
         add_group(
             result_page,
@@ -1935,9 +1995,19 @@ class MainWindow(QMainWindow):
         )
         add_group(
             result_page,
-            "Display",
-            large=("iso",),
-            small=("xy", "xz", "yz"),
+            "Result Display",
+            small=(
+                "result_deformed",
+                "result_both",
+                "result_undeformed",
+            ),
+            widgets=(self.result_scale_ribbon,),
+        )
+        add_group(
+            result_page,
+            "View",
+            large=("fit_result",),
+            small=("iso", "xy", "xz", "yz"),
         )
         result_page.finish()
         result_index = self.ribbon_tabs.addTab(result_page, "Result")
@@ -2077,10 +2147,146 @@ class MainWindow(QMainWindow):
         )
         self._record_project_change("Change model units", before)
 
+    def _set_result_display_controls_enabled(
+        self,
+        enabled: bool,
+    ) -> None:
+        enabled = bool(enabled)
+        for key in (
+            "result_deformed",
+            "result_both",
+            "result_undeformed",
+            "fit_result",
+        ):
+            action = self.actions.get(key)
+            if action is not None:
+                action.setEnabled(enabled)
+        if hasattr(self, "result_scale_ribbon"):
+            self.result_scale_ribbon.setEnabled(enabled)
+
+    def _sync_result_ribbon_controls(
+        self,
+        kind: str,
+        display_mode: str,
+        scale: float,
+    ) -> None:
+        if not hasattr(self, "result_scale_ribbon"):
+            return
+        self._active_result_display_kind = str(kind)
+        self._set_result_display_controls_enabled(True)
+        self._syncing_result_display_controls = True
+        try:
+            mode = str(display_mode)
+            for key in (
+                "result_deformed",
+                "result_both",
+                "result_undeformed",
+            ):
+                action = self.actions.get(key)
+                if action is None:
+                    continue
+                action.setChecked(
+                    str(action.property("resultDisplayMode")) == mode
+                )
+            self.result_scale_ribbon.setValue(float(scale))
+        finally:
+            self._syncing_result_display_controls = False
+
+    def _sync_result_ribbon_from_panel(self, kind: str) -> None:
+        if self._syncing_result_display_controls:
+            return
+        if str(kind) == "mode":
+            display = str(self.results_panel.mode_display.currentData())
+            scale = float(self.results_panel.mode_scale.value())
+        else:
+            display = str(
+                self.results_panel.deformation_display.currentData()
+            )
+            scale = float(self.results_panel.deformation_scale.value())
+        self._sync_result_ribbon_controls(kind, display, scale)
+
+    def _set_result_display_mode(self, display_mode: str) -> None:
+        if self._syncing_result_display_controls:
+            return
+        kind = self._active_result_display_kind
+        if kind not in {"deformation", "mode"} or not self._last_result:
+            self.status_message.setText(
+                "Open a Deformed Shape or Mode Shape result first"
+            )
+            self._set_result_display_controls_enabled(False)
+            return
+
+        mode = str(display_mode)
+        self._syncing_result_display_controls = True
+        try:
+            combo = (
+                self.results_panel.mode_display
+                if kind == "mode"
+                else self.results_panel.deformation_display
+            )
+            index = combo.findData(mode)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+            for key in (
+                "result_deformed",
+                "result_both",
+                "result_undeformed",
+            ):
+                action = self.actions.get(key)
+                if action is not None:
+                    action.setChecked(
+                        str(action.property("resultDisplayMode")) == mode
+                    )
+        finally:
+            self._syncing_result_display_controls = False
+
+        scale = float(self.result_scale_ribbon.value())
+        if kind == "mode":
+            mode_number = self.results_panel.mode_combo.currentData()
+            if mode_number is None:
+                self.status_message.setText("No mode shape is selected")
+                return
+            self.results_panel.mode_scale.setValue(scale)
+            self._show_mode_shape_result(
+                int(mode_number),
+                scale,
+                mode,
+            )
+        else:
+            self.results_panel.deformation_scale.setValue(scale)
+            self._show_deformation_result(scale, mode)
+
+    def _apply_result_ribbon_scale(self) -> None:
+        if self._syncing_result_display_controls:
+            return
+        kind = self._active_result_display_kind
+        if kind not in {"deformation", "mode"} or not self._last_result:
+            return
+        checked_mode = "deformed_only"
+        for key in (
+            "result_deformed",
+            "result_both",
+            "result_undeformed",
+        ):
+            action = self.actions.get(key)
+            if action is not None and action.isChecked():
+                checked_mode = str(
+                    action.property("resultDisplayMode")
+                    or "deformed_only"
+                )
+                break
+        self._set_result_display_mode(checked_mode)
+
+    def _fit_active_result(self) -> None:
+        self.viewport.fit_view()
+        self.status_message.setText("Fit active result")
+
     def _clear_result_display(self) -> None:
         if hasattr(self, "results_panel"):
             self.results_panel.stop_motion()
         self.viewport.clear_result_overlay()
+        self._active_result_display_kind = None
+        self._set_result_display_controls_enabled(False)
         self.status_message.setText("Result overlay cleared")
 
     def _show_results_manager(self) -> None:
@@ -7002,6 +7208,21 @@ class MainWindow(QMainWindow):
             cache_key=result_cache_key,
         )
         self.results_panel.show_solution_result(result_type, options)
+        if result_type == "DeformedShape":
+            self._sync_result_ribbon_controls(
+                "deformation",
+                str(options.get("display_mode", "deformed_only")),
+                float(options.get("scale", 10.0)),
+            )
+        elif result_type == "ModeShape":
+            self._sync_result_ribbon_controls(
+                "mode",
+                str(options.get("display_mode", "deformed_only")),
+                float(options.get("scale", 1.0)),
+            )
+        else:
+            self._active_result_display_kind = None
+            self._set_result_display_controls_enabled(False)
         if not self.results_dock.isVisible():
             self.results_dock.show()
             self.results_dock.raise_()
@@ -9469,6 +9690,11 @@ class MainWindow(QMainWindow):
             "both": "undeformed + deformed",
             "undeformed_only": "undeformed only",
         }.get(str(display_mode), "deformed only")
+        self._sync_result_ribbon_controls(
+            "deformation",
+            str(display_mode),
+            float(scale),
+        )
         self.status_message.setText(
             f"Showing {label} · scale {float(scale):g}"
         )
@@ -9577,6 +9803,11 @@ class MainWindow(QMainWindow):
             "both": "undeformed + deformed",
             "undeformed_only": "undeformed only",
         }.get(str(display_mode), "deformed only")
+        self._sync_result_ribbon_controls(
+            "mode",
+            str(display_mode),
+            float(scale),
+        )
         self.status_message.setText(
             f"Showing mode {int(mode)} · {label} · "
             f"scale {float(scale):g}"
