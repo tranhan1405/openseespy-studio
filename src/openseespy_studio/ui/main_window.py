@@ -4694,6 +4694,203 @@ class MainWindow(QMainWindow):
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
+        if kind == "solution_root":
+            analysis_tag = int(value)
+            analysis_settings = self.project.analyses.get(analysis_tag)
+            insert_menu = menu.addMenu("Insert")
+
+            deformation = insert_menu.addMenu("Deformation")
+            action = deformation.addAction("Deformed Shape")
+            action.triggered.connect(
+                lambda: self._insert_solution_result(
+                    analysis_tag,
+                    "DeformedShape",
+                    "Deformed Shape",
+                    {"scale": 10.0},
+                )
+            )
+
+            displacement = insert_menu.addMenu("Nodal Displacement")
+            for label, component in (
+                ("Total Deformation", "|U|"),
+                ("Directional UX", "UX"),
+                ("Directional UY", "UY"),
+                ("Directional UZ", "UZ"),
+            ):
+                action = displacement.addAction(label)
+                action.triggered.connect(
+                    lambda checked=False, n=label, comp=component:
+                    self._insert_solution_result(
+                        analysis_tag,
+                        "NodalDisplacement",
+                        n,
+                        {"component": comp},
+                    )
+                )
+
+            reaction = insert_menu.addMenu("Nodal Reaction")
+            for component in ("FX", "FY", "FZ", "MX", "MY", "MZ"):
+                action = reaction.addAction(f"Reaction {component}")
+                action.triggered.connect(
+                    lambda checked=False, comp=component:
+                    self._insert_solution_result(
+                        analysis_tag,
+                        "NodalReaction",
+                        f"Reaction {comp}",
+                        {"component": comp},
+                    )
+                )
+
+            member = insert_menu.addMenu("Member Forces")
+            for component in ("N", "Vy", "Vz", "T", "My", "Mz"):
+                action = member.addAction(component)
+                action.triggered.connect(
+                    lambda checked=False, comp=component:
+                    self._insert_solution_result(
+                        analysis_tag,
+                        "MemberForce",
+                        f"Member Force {comp}",
+                        {"component": comp, "scale": 1.0},
+                    )
+                )
+
+            nonlinear = insert_menu.addMenu("Nonlinear Results")
+            action = nonlinear.addAction("Fiber Stress")
+            action.triggered.connect(
+                lambda: self._insert_solution_result(
+                    analysis_tag,
+                    "FiberStress",
+                    "Fiber Stress",
+                    {"quantity": "Stress"},
+                )
+            )
+            action = nonlinear.addAction("Fiber Strain")
+            action.triggered.connect(
+                lambda: self._insert_solution_result(
+                    analysis_tag,
+                    "FiberStrain",
+                    "Fiber Strain",
+                    {"quantity": "Strain"},
+                )
+            )
+            action = nonlinear.addAction("Hinge / Yield State")
+            action.triggered.connect(
+                lambda: self._insert_solution_result(
+                    analysis_tag,
+                    "HingeState",
+                    "Hinge / Yield State",
+                    {},
+                )
+            )
+
+            history = insert_menu.addMenu("Charts / History")
+            analysis_type = (
+                analysis_settings.analysis_type
+                if analysis_settings is not None
+                else ""
+            )
+            if analysis_type == "Pushover":
+                action = history.addAction("Pushover Capacity Curve")
+                action.triggered.connect(
+                    lambda: self._insert_solution_result(
+                        analysis_tag,
+                        "PushoverCurve",
+                        "Pushover Capacity Curve",
+                        {},
+                    )
+                )
+            if analysis_type == "Cyclic":
+                action = history.addAction("Cyclic Hysteresis")
+                action.triggered.connect(
+                    lambda: self._insert_solution_result(
+                        analysis_tag,
+                        "CyclicHysteresis",
+                        "Cyclic Hysteresis",
+                        {},
+                    )
+                )
+            if analysis_type == "Modal":
+                action = history.addAction("Mode Shape")
+                action.triggered.connect(
+                    lambda: self._insert_solution_result(
+                        analysis_tag,
+                        "ModeShape",
+                        "Mode Shape 1",
+                        {"mode": 1, "scale": 1.0},
+                    )
+                )
+            else:
+                action = history.addAction("Response History")
+                action.triggered.connect(
+                    lambda: self._insert_solution_result(
+                        analysis_tag,
+                        "TimeHistory",
+                        "Response History",
+                        {},
+                    )
+                )
+
+            solver = insert_menu.addMenu("Solver Results")
+            action = solver.addAction("Convergence History")
+            action.triggered.connect(
+                lambda: self._insert_solution_result(
+                    analysis_tag,
+                    "Convergence",
+                    "Convergence History",
+                    {},
+                )
+            )
+
+            menu.addSeparator()
+            evaluate_all = menu.addAction("Evaluate All Results")
+            evaluate_all.triggered.connect(
+                lambda: self._evaluate_all_solution_results(analysis_tag)
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "solution_result":
+            tag = int(value)
+            evaluate = menu.addAction("Evaluate")
+            evaluate.triggered.connect(
+                lambda: self._evaluate_solution_result(tag)
+            )
+            duplicate = menu.addAction("Duplicate")
+            duplicate.triggered.connect(
+                lambda: self._duplicate_solution_result(tag)
+            )
+            rename = menu.addAction("Rename...")
+            rename.triggered.connect(
+                lambda: self._rename_solution_result(tag)
+            )
+            menu.addSeparator()
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(
+                lambda: self._delete_solution_result(tag)
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "solution_convergence":
+            analysis_tag = int(value)
+            evaluate = menu.addAction("Open Convergence Monitor")
+            evaluate.triggered.connect(
+                lambda: self._show_solution_convergence(analysis_tag)
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "solver_output":
+            show = menu.addAction("Show Solver Output")
+            show.triggered.connect(
+                lambda: (
+                    self.console_dock.show(),
+                    self.console_dock.raise_(),
+                )
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
         if kind == "recorders_root":
             action = menu.addAction("New Recorder...")
             action.triggered.connect(self._create_recorder)
