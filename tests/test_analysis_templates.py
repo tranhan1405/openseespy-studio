@@ -5,6 +5,8 @@ from openseespy_studio.analysis_templates import (
     build_nlth_template,
     build_pushover_template,
     expand_cyclic_protocol,
+    lateral_load_weights,
+    parse_cyclic_protocol_text,
     parse_ground_motion_text,
 )
 from openseespy_studio.generator import (
@@ -290,3 +292,81 @@ def test_generator_rejects_missing_deferred_pattern():
         assert "missing driving load pattern" in str(exc)
     else:
         raise AssertionError("Expected missing driving-pattern validation")
+
+
+
+def test_parse_cyclic_protocol_text_reads_amplitude_cycle_rows():
+    rows = parse_cyclic_protocol_text(
+        """
+# amplitude, cycles
+0.005, 2
+0.010, 3
+"""
+    )
+    assert rows == [(0.005, 2), (0.01, 3)]
+
+
+def test_custom_pushover_distribution_is_normalized_by_absolute_weight():
+    project = project_with_two_storeys()
+    weights = lateral_load_weights(
+        project,
+        dof=1,
+        distribution="Custom",
+        custom_weights={2: 1.0, 3: 3.0},
+    )
+    assert weights == {2: 0.25, 3: 0.75}
+
+
+def test_first_mode_approximation_increases_with_height():
+    project = project_with_two_storeys()
+    weights = lateral_load_weights(
+        project,
+        dof=1,
+        distribution="First-mode approximation",
+    )
+    assert set(weights) == {2, 3}
+    assert weights[3] > weights[2] > 0.0
+    assert math.isclose(sum(weights.values()), 1.0)
+
+
+def test_multi_component_nlth_creates_one_series_and_pattern_per_axis():
+    project = project_with_two_storeys()
+    plan = build_nlth_template(
+        project,
+        name="Bi-directional EQ",
+        dt=0.01,
+        monitor_node=3,
+        damping_ratio=0.05,
+        damping_mode_i=1,
+        damping_mode_j=3,
+        components=[
+            {
+                "direction": 1,
+                "label": "X",
+                "values": [0.0, 0.1, -0.1],
+                "input_unit": "g",
+                "scale_factor": 1.0,
+            },
+            {
+                "direction": 2,
+                "label": "Y",
+                "values": [0.0, 0.2],
+                "input_unit": "g",
+                "scale_factor": 0.8,
+            },
+        ],
+    )
+
+    assert len(plan.time_series) == 2
+    assert len(plan.load_patterns) == 2
+    assert [pattern.direction for pattern in plan.load_patterns] == [1, 2]
+    assert plan.analysis.steps == 3
+    assert plan.analysis.control_dof == 1
+    assert plan.analysis.deferred_pattern_tags == [
+        pattern.tag for pattern in plan.load_patterns
+    ]
+    names = {result.name for result in plan.results}
+    assert "Acceleration History X" in names
+    assert "Acceleration History Y" in names
+    assert "Displacement History X" in names
+    assert "Displacement History Y" in names
