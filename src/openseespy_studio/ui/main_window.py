@@ -1838,6 +1838,13 @@ class MainWindow(QMainWindow):
                 "Show prescribed/imposed nodal displacement symbols",
             ),
             (
+                "show_section_axes",
+                "Section Axes",
+                "transform",
+                "section_axes",
+                "Show local y/z section axes and strong/weak bending-axis labels",
+            ),
+            (
                 "show_load_values",
                 "Load Values",
                 "plot",
@@ -2060,12 +2067,40 @@ class MainWindow(QMainWindow):
             QColor("#1768ad"),
         )
 
+        self.model_representation_combo = QComboBox()
+        self.model_representation_combo.setFixedWidth(132)
+        self.model_representation_combo.addItem(
+            "Actual Section",
+            "actual_section",
+        )
+        self.model_representation_combo.addItem("Tube", "tube")
+        self.model_representation_combo.addItem(
+            "Centerline",
+            "centerline",
+        )
+        self.model_representation_combo.setToolTip(
+            "Model-view member representation. Actual Section uses the "
+            "stored section geometry and falls back to Tube when geometry "
+            "is unavailable."
+        )
+        self.model_representation_combo.currentIndexChanged.connect(
+            lambda _index: self.viewport.set_model_representation(
+                str(self.model_representation_combo.currentData())
+            )
+        )
+
         display_page = RibbonPage()
         add_group(
             display_page,
             "Views",
             large=("iso",),
             small=("xy", "xz", "yz"),
+        )
+        add_group(
+            display_page,
+            "Section View",
+            small=("show_section_axes",),
+            widgets=(self.model_representation_combo,),
         )
         add_group(
             display_page,
