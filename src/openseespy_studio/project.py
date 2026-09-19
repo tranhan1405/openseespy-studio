@@ -11,7 +11,7 @@ from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 20
+PROJECT_FORMAT_VERSION = 21
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -1076,6 +1076,7 @@ class AnalysisSettingsData:
     gravity_steps: int = 10
     deferred_pattern_tags: list[int] = field(default_factory=list)
     num_modes: int = 3
+    eigen_solver: str = "-genBandArpack"
     recovery: bool = True
     adaptive_step: bool = False
     adaptive_cutback_factor: float = 0.5
@@ -1104,7 +1105,9 @@ class AnalysisSettingsData:
         self.deferred_pattern_tags=sorted({
             int(tag) for tag in self.deferred_pattern_tags
         })
-        self.num_modes=int(self.num_modes); self.recovery=bool(self.recovery)
+        self.num_modes=int(self.num_modes)
+        self.eigen_solver=str(self.eigen_solver)
+        self.recovery=bool(self.recovery)
         self.adaptive_step=bool(self.adaptive_step)
         self.adaptive_cutback_factor=float(self.adaptive_cutback_factor)
         self.adaptive_min_factor=float(self.adaptive_min_factor)
@@ -1156,6 +1159,12 @@ class AnalysisSettingsData:
         if any(tag <= 0 for tag in self.deferred_pattern_tags):
             raise ValueError("Deferred load-pattern tags must be positive.")
         if self.num_modes<1: raise ValueError("Number of modes must be at least 1.")
+        if self.eigen_solver not in {
+            "-genBandArpack",
+            "-fullGenLapack",
+            "-symmBandLapack",
+        }:
+            raise ValueError("Unsupported eigen solver.")
 
     def to_dict(self) -> dict[str, Any]:
         return {key:getattr(self,key) for key in (
@@ -1165,7 +1174,7 @@ class AnalysisSettingsData:
             "cyclic_targets","cyclic_increment","dt","gamma","beta",
             "rayleigh_damping_ratio","rayleigh_mode_i","rayleigh_mode_j",
             "preload_gravity","gravity_steps","deferred_pattern_tags",
-            "num_modes","recovery","adaptive_step",
+            "num_modes","eigen_solver","recovery","adaptive_step",
             "adaptive_cutback_factor","adaptive_min_factor",
             "adaptive_growth_factor","adaptive_easy_iterations",
             "adaptive_growth_after","live_convergence","show_external_console"
