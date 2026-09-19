@@ -2594,6 +2594,28 @@ class MainWindow(QMainWindow):
                 load_item.setIcon(0, studio_icon("load"))
                 load_item.setData(0, Qt.UserRole, ("nodal_load", load.tag))
                 item.addChild(load_item)
+            for displacement_tag in sorted(
+                self.project.prescribed_displacements
+            ):
+                displacement = self.project.prescribed_displacements[
+                    displacement_tag
+                ]
+                if displacement.pattern_tag != tag:
+                    continue
+                dof_label = ("UX", "UY", "UZ", "RX", "RY", "RZ")[
+                    displacement.dof - 1
+                ]
+                displacement_item = QTreeWidgetItem([
+                    f"Prescribed {dof_label}: {displacement.name} "
+                    f"[{displacement.tag}] → Node {displacement.node_tag}"
+                ])
+                displacement_item.setIcon(0, studio_icon("load"))
+                displacement_item.setData(
+                    0,
+                    Qt.UserRole,
+                    ("prescribed_displacement", displacement.tag),
+                )
+                item.addChild(displacement_item)
             for load_tag in sorted(self.project.element_loads):
                 load = self.project.element_loads[load_tag]
                 if load.pattern_tag != tag:
@@ -2746,6 +2768,7 @@ class MainWindow(QMainWindow):
         time_series_tag: int | None = None
         load_pattern_tag: int | None = None
         nodal_load_tag: int | None = None
+        prescribed_displacement_tag: int | None = None
         element_load_tag: int | None = None
         analysis_tag: int | None = None
         recorder_tag: int | None = None
@@ -2789,6 +2812,8 @@ class MainWindow(QMainWindow):
                 load_pattern_tag = int(tag)
             elif kind == "nodal_load":
                 nodal_load_tag = int(tag)
+            elif kind == "prescribed_displacement":
+                prescribed_displacement_tag = int(tag)
             elif kind == "element_load":
                 element_load_tag = int(tag)
             elif kind == "analysis":
@@ -2855,6 +2880,10 @@ class MainWindow(QMainWindow):
             self._show_load_pattern_properties(load_pattern_tag)
         elif nodal_load_tag is not None:
             self._show_nodal_load_properties(nodal_load_tag)
+        elif prescribed_displacement_tag is not None:
+            self._show_prescribed_displacement_properties(
+                prescribed_displacement_tag
+            )
         elif element_load_tag is not None:
             self._show_element_load_properties(element_load_tag)
         elif analysis_tag is not None:
@@ -3200,6 +3229,13 @@ class MainWindow(QMainWindow):
         load_action = menu.addAction("Create Nodal Load...")
         load_action.setEnabled(bool(self.selection.nodes))
         load_action.triggered.connect(self._create_nodal_load)
+        displacement_action = menu.addAction(
+            "Create Prescribed Displacement..."
+        )
+        displacement_action.setEnabled(bool(self.selection.nodes))
+        displacement_action.triggered.connect(
+            self._create_prescribed_displacement
+        )
         beam_load_action = menu.addAction("Create Beam Load...")
         beam_load_action.setEnabled(bool(self.selection.elements))
         beam_load_action.triggered.connect(self._create_element_load)
@@ -3488,6 +3524,15 @@ class MainWindow(QMainWindow):
                 sum(
                     load.pattern_tag == tag
                     for load in self.project.nodal_loads.values()
+                ),
+            ))
+            rows.append((
+                "Prescribed Displacements",
+                sum(
+                    displacement.pattern_tag == tag
+                    for displacement in (
+                        self.project.prescribed_displacements.values()
+                    )
                 ),
             ))
             rows.append((
@@ -7431,6 +7476,12 @@ class MainWindow(QMainWindow):
             if pattern is not None and pattern.pattern_type == "Plain":
                 add_load = menu.addAction("Add Nodal Load...")
                 add_load.triggered.connect(self._create_nodal_load)
+                add_displacement = menu.addAction(
+                    "Add Prescribed Displacement..."
+                )
+                add_displacement.triggered.connect(
+                    self._create_prescribed_displacement
+                )
                 add_element_load = menu.addAction("Add Beam Load...")
                 add_element_load.triggered.connect(
                     self._create_element_load
@@ -7446,6 +7497,19 @@ class MainWindow(QMainWindow):
             edit.triggered.connect(lambda: self._edit_nodal_load(tag))
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_nodal_load(tag))
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "prescribed_displacement":
+            tag = int(value)
+            edit = menu.addAction("Edit...")
+            edit.triggered.connect(
+                lambda: self._edit_prescribed_displacement(tag)
+            )
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(
+                lambda: self._delete_prescribed_displacement(tag)
+            )
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
@@ -7581,6 +7645,8 @@ class MainWindow(QMainWindow):
             self._edit_load_pattern(int(value))
         elif kind == "nodal_load":
             self._edit_nodal_load(int(value))
+        elif kind == "prescribed_displacement":
+            self._edit_prescribed_displacement(int(value))
         elif kind == "element_load":
             self._edit_element_load(int(value))
         elif kind in {"analysis", "analysis_settings"}:
