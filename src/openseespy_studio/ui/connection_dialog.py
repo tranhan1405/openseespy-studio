@@ -411,6 +411,7 @@ class ConnectionDialog(QDialog):
                     if index >= 0:
                         self.material_combos[dof - 1].setCurrentIndex(index)
         elif self.materials:
+            self.preset.setCurrentIndex(1)
             self._apply_preset_index(1)
 
         self.to_ground.toggled.connect(self._sync_ground_state)
