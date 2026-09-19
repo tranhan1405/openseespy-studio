@@ -529,7 +529,7 @@ def analysis_to_openseespy(
         "    'history': {'time': [], 'monitor_node': "
         f"{monitor_node}, 'control_dof': {settings.control_dof}, "
         "'displacement': [], 'base_shear': [], "
-        "'base_reactions': [], 'nodes': {}}},",
+        "'base_reactions': [], 'nodes': {}}," ,
         "    'modes': {},",
         "}",
         f"_studio_node_tags = {node_tags!r}",
