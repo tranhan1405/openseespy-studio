@@ -41,6 +41,7 @@ from ..analysis_templates import (
 from ..ground_motion_library import (
     GROUND_MOTION_LIBRARY,
     common_scale_factor_for_target_pga,
+    load_bundled_ground_motion_record,
     pga_in_g,
     parse_ground_motion_record_text,
     record_preset,
@@ -156,6 +157,11 @@ class AnalysisTemplateDialog(QDialog):
             3: [],
         }
         self._ground_motion_formats: dict[int, str] = {
+            1: "",
+            2: "",
+            3: "",
+        }
+        self._ground_motion_builtin_keys: dict[int, str] = {
             1: "",
             2: "",
             3: "",
@@ -1406,30 +1412,120 @@ class AnalysisTemplateDialog(QDialog):
             self.protocol.removeRow(row)
         self._update_cyclic_preview()
 
+    def _clear_auto_loaded_ground_motions(self) -> None:
+        changed = False
+        for direction in self._nlth_directions:
+            if not self._ground_motion_builtin_keys.get(direction):
+                continue
+            self._ground_motion_builtin_keys[direction] = ""
+            self._ground_motion_values[direction] = []
+            self._ground_motion_formats[direction] = ""
+            self.gm_files[direction].clear()
+            self.gm_scales[direction].setValue(1.0)
+            changed = True
+        if changed:
+            self._refresh_all_ground_motion_previews()
+
     def _record_library_changed(self, *_args) -> None:
         key = str(self.gm_library.currentData() or "custom")
         preset = record_preset(key)
+        self._clear_auto_loaded_ground_motions()
         if preset.key == "custom":
-            self.gm_library_info.setText(preset.notes)
-        else:
-            year = f" ({preset.year})" if preset.year is not None else ""
             self.gm_library_info.setText(
-                f"{preset.event}{year} · {preset.station} · "
-                f"Source: {preset.source}. {preset.notes}"
+                "Custom / Local Record · Browse a local file for at least "
+                "one active direction."
             )
-            current = self.name.text().strip()
-            if not current or current.startswith("NLTH"):
-                self.name.setText(f"NLTH · {preset.label.split(' · ')[0]}")
-            # PEER acceleration AT2 files are normally supplied in g;
-            # imported AT2 headers can still override this explicitly.
-            self.gm_unit.setCurrentText("g")
+            self._update_summary()
+            return
+
+        year = f" ({preset.year})" if preset.year is not None else ""
+        availability = (
+            "Built-in record available and loaded automatically."
+            if preset.bundled_resource
+            else "Reference only; Browse a record file to use this preset."
+        )
+        self.gm_library_info.setText(
+            f"{preset.event}{year} · {preset.station} · "
+            f"Source: {preset.source}. {availability} {preset.notes}"
+        )
+        current = self.name.text().strip()
+        if not current or current.startswith("NLTH"):
+            self.name.setText(f"NLTH · {preset.label.split(' · ')[0]}")
+
+        if preset.bundled_resource:
+            direction = int(self.direction.currentData() or 1)
+            if direction not in self._nlth_directions:
+                direction = int(self._nlth_directions[0])
+            self._load_bundled_ground_motion(direction, key)
         self._update_summary()
+
+    def _load_bundled_ground_motion(
+        self,
+        direction: int,
+        key: str,
+    ) -> None:
+        direction = int(direction)
+        axis = {1: "X", 2: "Y", 3: "Z"}[direction]
+        preset = record_preset(key)
+        try:
+            parsed = load_bundled_ground_motion_record(key)
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Ground Motion Library",
+                str(exc),
+            )
+            return
+
+        if parsed.dt is not None:
+            other_active = any(
+                self._ground_motion_values[other]
+                for other in self._nlth_directions
+                if other != direction
+            )
+            current_dt = self.gm_dt.value()
+            tolerance = max(1.0e-12, abs(current_dt) * 1.0e-6)
+            if (
+                other_active
+                and abs(parsed.dt - current_dt) > tolerance
+            ):
+                QMessageBox.warning(
+                    self,
+                    "Ground Motion Library",
+                    (
+                        f"Built-in {axis} record dt={parsed.dt:g} s does not "
+                        f"match the active component dt={current_dt:g} s. "
+                        "Clear the other component or use records with the "
+                        "same dt."
+                    ),
+                )
+                return
+            self.gm_dt.setValue(parsed.dt)
+
+        if parsed.input_unit is not None:
+            self.gm_unit.setCurrentText(parsed.input_unit)
+        self._ground_motion_values[direction] = list(parsed.values)
+        self._ground_motion_formats[direction] = (
+            f"{parsed.format} · built-in"
+        )
+        self._ground_motion_builtin_keys[direction] = key
+        self.gm_files[direction].setText(
+            f"[Built-in] {preset.label}"
+        )
+        if self.gm_scale_mode.currentData() in {
+            "target_pga",
+            "target_common_pga",
+        }:
+            self._apply_target_pga_scaling()
+        else:
+            self._refresh_all_ground_motion_previews()
 
     def _clear_ground_motion(self, direction: int) -> None:
         direction = int(direction)
         if direction not in self._nlth_directions:
             return
         self.gm_files[direction].clear()
+        self._ground_motion_builtin_keys[direction] = ""
         self._ground_motion_values[direction] = []
         self._ground_motion_formats[direction] = ""
         self.gm_scales[direction].setValue(1.0)
@@ -1501,15 +1597,20 @@ class AnalysisTemplateDialog(QDialog):
             self,
             f"Select {axis} Ground Motion",
             "",
-            "Ground motion (*.at2 *.AT2 *.txt *.dat *.csv);;All files (*)",
+            "Ground motion (*.at2 *.AT2 *.txt *.dat *.csv *.json);;All files (*)",
         )
         if not path:
             return
+        self._ground_motion_builtin_keys[int(direction)] = ""
         self.gm_files[int(direction)].setText(path)
         self._reload_ground_motion(int(direction))
 
     def _reload_ground_motion(self, direction: int) -> None:
         direction = int(direction)
+        builtin_key = self._ground_motion_builtin_keys.get(direction, "")
+        if builtin_key:
+            self._load_bundled_ground_motion(direction, builtin_key)
+            return
         path = self.gm_files[direction].text().strip()
         axis = {1: "X", 2: "Y", 3: "Z"}[direction]
         if not path:
