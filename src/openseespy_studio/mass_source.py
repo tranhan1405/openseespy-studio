@@ -268,7 +268,8 @@ def apply_mass_source(
     directions = tuple(sorted(set(int(dof) for dof in source.directions)))
     if not directions:
         raise ValueError("Mass source needs at least one translational direction.")
-    if any(dof < 1 or dof > min(3, project.model.ndf) for dof in directions):
+    max_translational = min(3, int(project.model.ndm))
+    if any(dof < 1 or dof > max_translational for dof in directions):
         raise ValueError(
             "Mass-source directions must be valid translational model DOFs."
         )
