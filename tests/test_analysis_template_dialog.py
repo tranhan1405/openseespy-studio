@@ -401,3 +401,101 @@ def test_nlth_reference_only_preset_clears_previous_auto_record(qapp):
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+
+def test_nlth_plot_payload_uses_scaled_parsed_record(qapp):
+    model = StructuralModel("nlth-plot")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+
+    dialog = AnalysisTemplateDialog(
+        default_node=1,
+        units={"length": "m", "force": "kN", "time": "s"},
+        initial_template="Nonlinear Time History",
+        project=project,
+    )
+    try:
+        index = dialog.gm_library.findData("el-centro-1940")
+        dialog.gm_library.setCurrentIndex(index)
+        dialog.gm_scales[1].setValue(2.0)
+        qapp.processEvents()
+
+        assert dialog.gm_plot_buttons[1].isEnabled()
+        series, details = dialog._ground_motion_plot_payload(1)
+        assert len(series) == 2
+        raw = series[0][1]
+        scaled = series[1][1]
+        assert len(raw) == 1559
+        assert scaled[10] == pytest.approx(raw[10] * 2.0)
+        assert "NPTS=1559" in details
+        assert "scale=2" in details
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_nlth_active_component_plot_payload_overlays_scaled_axes(qapp):
+    model = StructuralModel("nlth-active-plot")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+
+    dialog = AnalysisTemplateDialog(
+        default_node=1,
+        units={"length": "m", "force": "kN", "time": "s"},
+        initial_template="Nonlinear Time History",
+        project=project,
+    )
+    try:
+        dialog._ground_motion_values[1] = [0.0, 0.1, -0.2]
+        dialog._ground_motion_values[2] = [0.0, 0.2, -0.1]
+        dialog.gm_scales[1].setValue(2.0)
+        dialog.gm_scales[2].setValue(0.5)
+        dialog._ground_motion_formats[1] = "test"
+        dialog._ground_motion_formats[2] = "test"
+        dialog._refresh_all_ground_motion_previews()
+        qapp.processEvents()
+
+        assert dialog.gm_plot_active.isEnabled()
+        series, details = dialog._active_ground_motion_plot_payload()
+        assert [label for label, _ in series] == [
+            "X scaled",
+            "Y scaled",
+        ]
+        assert series[0][1] == pytest.approx([0.0, 0.2, -0.4])
+        assert series[1][1] == pytest.approx([0.0, 0.1, -0.05])
+        assert "X:" in details
+        assert "Y:" in details
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_nlth_clear_disables_component_plot_button(qapp):
+    model = StructuralModel("nlth-clear-plot")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+
+    dialog = AnalysisTemplateDialog(
+        default_node=1,
+        units={"length": "m", "force": "kN", "time": "s"},
+        initial_template="Nonlinear Time History",
+        project=project,
+    )
+    try:
+        dialog.gm_library.setCurrentIndex(
+            dialog.gm_library.findData("el-centro-1940")
+        )
+        qapp.processEvents()
+        assert dialog.gm_plot_buttons[1].isEnabled()
+
+        dialog._clear_ground_motion(1)
+        qapp.processEvents()
+        assert not dialog.gm_plot_buttons[1].isEnabled()
+        assert not dialog.gm_plot_active.isEnabled()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
