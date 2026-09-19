@@ -2825,6 +2825,7 @@ class MainWindow(QMainWindow):
         nodal_load_tag: int | None = None
         prescribed_displacement_tag: int | None = None
         element_load_tag: int | None = None
+        mass_source_tag: int | None = None
         analysis_tag: int | None = None
         recorder_tag: int | None = None
         solution_result_tag: int | None = None
@@ -2871,6 +2872,8 @@ class MainWindow(QMainWindow):
                 prescribed_displacement_tag = int(tag)
             elif kind == "element_load":
                 element_load_tag = int(tag)
+            elif kind == "mass_source":
+                mass_source_tag = int(tag)
             elif kind == "analysis":
                 analysis_tag = int(tag)
             elif kind == "analysis_settings":
@@ -2941,6 +2944,8 @@ class MainWindow(QMainWindow):
             )
         elif element_load_tag is not None:
             self._show_element_load_properties(element_load_tag)
+        elif mass_source_tag is not None:
+            self._show_mass_source_properties(mass_source_tag)
         elif analysis_tag is not None:
             self._show_analysis_properties(analysis_tag)
         elif recorder_tag is not None:
@@ -5859,6 +5864,30 @@ class MainWindow(QMainWindow):
         try:
             request = dialog.request()
             kind = str(request["template"])
+
+            raw_mass_source = request.get("mass_source")
+            if isinstance(raw_mass_source, dict):
+                source = MassSourceData.from_dict(
+                    dict(raw_mass_source)
+                )
+                if source.tag in self.project.mass_sources:
+                    self.project.update_mass_source(
+                        source.tag,
+                        source,
+                    )
+                else:
+                    self.project.add_mass_source(source)
+                mass_summary = apply_mass_source(
+                    self.project,
+                    source,
+                )
+                if mass_summary.total_mass <= 1.0e-15:
+                    raise ValueError(
+                        "The configured Mass Source generated zero nodal "
+                        "mass. Check material density and selected load "
+                        "patterns/factors."
+                    )
+
             if kind == "Modal":
                 plan = build_modal_template(
                     self.project,
@@ -8266,6 +8295,8 @@ class MainWindow(QMainWindow):
             self._edit_prescribed_displacement(int(value))
         elif kind == "element_load":
             self._edit_element_load(int(value))
+        elif kind == "mass_source":
+            self._edit_mass_source(int(value))
         elif kind in {"analysis", "analysis_settings"}:
             self._edit_analysis(int(value))
         elif kind == "job":
