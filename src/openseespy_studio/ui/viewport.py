@@ -123,6 +123,17 @@ class ModelViewport(QWidget):
         self._motion_node_tags: list[int] = []
         self._motion_topology_key: object | None = None
 
+        # Point-label mappers are comparatively expensive while the camera is
+        # moving. Keep IDs visible at rest, but suspend only the node/element
+        # number actors during navigation and restore them as soon as the
+        # interaction ends.
+        self._id_label_restore_timer = QTimer(self)
+        self._id_label_restore_timer.setSingleShot(True)
+        self._id_label_restore_timer.setInterval(120)
+        self._id_label_restore_timer.timeout.connect(
+            self._restore_id_labels_after_navigation
+        )
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(4)
@@ -277,6 +288,8 @@ class ModelViewport(QWidget):
             self._nav_mode = "rotate"
         self._nav_last_pos = pos
         self._hover_ref = None
+        self._id_label_restore_timer.stop()
+        self._set_id_labels_visible(False, render=False)
         self._update_highlight_overlays()
 
     def _navigate(self, pos: tuple[float, float]) -> None:
@@ -344,10 +357,14 @@ class ModelViewport(QWidget):
     def _wheel_zoom(self, delta_y: int) -> None:
         if delta_y == 0:
             return
+        self._set_id_labels_visible(False, render=False)
         steps = delta_y / 120.0
         factor = math.pow(1.12, steps)
         self.plotter.camera.Zoom(factor)
         self.plotter.render()
+        # Restart the debounce on every wheel event so labels are restored
+        # only after the user pauses zooming.
+        self._id_label_restore_timer.start()
 
     def _update_hover_from_qt(self, event) -> None:
         if event.buttons() != Qt.NoButton:
@@ -441,6 +458,8 @@ class ModelViewport(QWidget):
             if event.button() == Qt.MiddleButton:
                 self._nav_mode = None
                 self._nav_last_pos = None
+                self._id_label_restore_timer.stop()
+                self._set_id_labels_visible(True, render=True)
                 return True
 
             if event.button() == Qt.LeftButton:
@@ -1198,6 +1217,33 @@ class ModelViewport(QWidget):
             self.plotter.remove_actor(name, reset_camera=False, render=False)
         except Exception:
             pass
+
+    def _set_id_labels_visible(
+        self,
+        visible: bool,
+        *,
+        render: bool = False,
+    ) -> None:
+        """Cheaply hide/show expensive node and element number labels."""
+        actors = getattr(self.plotter.renderer, "actors", {})
+        for option, name in (
+            ("node_numbers", "display-node-numbers"),
+            ("element_numbers", "display-element-numbers"),
+        ):
+            if visible and not self._display_options.get(option, False):
+                continue
+            actor = actors.get(name) if hasattr(actors, "get") else None
+            if actor is None:
+                continue
+            try:
+                actor.SetVisibility(1 if visible else 0)
+            except Exception:
+                continue
+        if render:
+            self.plotter.render()
+
+    def _restore_id_labels_after_navigation(self) -> None:
+        self._set_id_labels_visible(True, render=True)
 
     def _element_overlay_mesh(self, tags: set[int]):
         if not tags:
