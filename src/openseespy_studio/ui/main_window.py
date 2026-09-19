@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 from ..frame_setup import prepare_frame_grid
 from ..generator import FrameGridSpec, cyclic_displacement_steps, generate_frame_grid, to_openseespy
 from ..jobs import JobRecord
+from ..live_convergence import parse_opensees_convergence_line
 from ..model import StructuralModel, classify_fixity
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, TimeSeriesData, TransformationData
@@ -625,6 +626,13 @@ class MainWindow(QMainWindow):
         self._jobs: dict[int, JobRecord] = {}
         self._job_counter = 0
         self._current_job_id: int | None = None
+        self._live_convergence_context: dict[str, object] = {
+            "step": 0,
+            "total": 0,
+            "algorithm": "",
+            "test": "",
+            "tolerance": None,
+        }
         self._last_result: dict[str, object] = {}
         self._dirty = False
         self._job_ui_timer = QTimer(self)
@@ -5019,7 +5027,37 @@ class MainWindow(QMainWindow):
             return
 
         event = str(payload.get("event", ""))
-        if event == "progress":
+        if event == "start":
+            self._live_convergence_context = {
+                "step": 0,
+                "total": int(payload.get("total", 0) or 0),
+                "algorithm": str(payload.get("algorithm", "") or ""),
+                "test": str(payload.get("test", "") or ""),
+                "tolerance": payload.get("tolerance"),
+            }
+            if str(payload.get("analysis_type", "")) != "Modal":
+                self.results_panel.start_live_convergence(
+                    total=int(payload.get("total", 0) or 0),
+                    test=str(payload.get("test", "") or ""),
+                    tolerance=payload.get("tolerance"),
+                    algorithm=str(payload.get("algorithm", "") or ""),
+                )
+        elif event == "step_start":
+            self._live_convergence_context = {
+                "step": int(payload.get("step", 0) or 0),
+                "total": int(payload.get("total", 0) or 0),
+                "algorithm": str(payload.get("algorithm", "") or ""),
+                "test": str(payload.get("test", "") or ""),
+                "tolerance": payload.get("tolerance"),
+            }
+            self.results_panel.begin_live_convergence_step(
+                step=int(payload.get("step", 0) or 0),
+                total=int(payload.get("total", 0) or 0),
+                algorithm=str(payload.get("algorithm", "") or ""),
+                test=str(payload.get("test", "") or ""),
+                tolerance=payload.get("tolerance"),
+            )
+        elif event == "progress":
             step = int(payload.get("step", 0) or 0)
             total = int(payload.get("total", 0) or 0)
             algorithm = str(payload.get("algorithm", "") or "")
@@ -5040,25 +5078,36 @@ class MainWindow(QMainWindow):
                 f"Job {job.job_id} · {step}/{total} "
                 f"· {job.progress_percent:.1f}% · {message}"
             )
+            if "eigenvalue" not in payload:
+                self.results_panel.finish_live_convergence("CONVERGED")
         elif event == "convergence_failed":
             job.message = (
                 f"Step {payload.get('step')}: "
                 f"{payload.get('algorithm')} failed; recovering"
             )
+            self.results_panel.finish_live_convergence("RECOVERING")
         elif event == "fallback":
             job.message = (
                 f"Trying {payload.get('algorithm')} "
                 f"at step {payload.get('step')}"
+            )
+            self._live_convergence_context["algorithm"] = str(
+                payload.get("algorithm", "") or ""
+            )
+            self.results_panel.begin_live_convergence_attempt(
+                str(payload.get("algorithm", "") or "")
             )
         elif event == "recovered":
             job.message = (
                 f"Recovered with {payload.get('algorithm')} "
                 f"at step {payload.get('step')}"
             )
+            self.results_panel.finish_live_convergence("RECOVERED")
         elif event == "failed":
             job.message = (
                 f"Convergence failed at step {payload.get('step')}"
             )
+            self.results_panel.finish_live_convergence("FAILED")
 
         self.results_panel.add_or_update_job(job)
 
@@ -5072,6 +5121,19 @@ class MainWindow(QMainWindow):
             return
 
         display = line
+        parsed_convergence = parse_opensees_convergence_line(line)
+        if parsed_convergence is not None:
+            self.results_panel.append_live_convergence_iteration(
+                iteration=int(parsed_convergence.get("iteration", 0) or 0),
+                norm=float(parsed_convergence.get("norm", 0.0) or 0.0),
+                tolerance=parsed_convergence.get("tolerance"),
+                test=str(parsed_convergence.get("test", "") or ""),
+                algorithm=str(
+                    self._live_convergence_context.get("algorithm", "")
+                    or ""
+                ),
+            )
+
         prefix = "[STUDIO_EVENT] "
         if line.startswith(prefix):
             try:
@@ -5303,6 +5365,13 @@ class MainWindow(QMainWindow):
         self._jobs.clear()
         self._job_counter = 0
         self._current_job_id = None
+        self._live_convergence_context = {
+            "step": 0,
+            "total": 0,
+            "algorithm": "",
+            "test": "",
+            "tolerance": None,
+        }
         self._last_result = {}
         self.viewport.clear_result_overlay()
         self.results_panel.clear_all()
