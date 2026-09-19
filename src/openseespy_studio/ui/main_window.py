@@ -2094,12 +2094,9 @@ class MainWindow(QMainWindow):
                 "Solution Information",
             )
         elif job_id is not None:
-            self.results_panel.show_jobs()
             self._select_job_result(job_id)
         elif show_jobs_root:
-            self.results_panel.show_jobs()
-            self.results_dock.show()
-            self.results_dock.raise_()
+            self._show_jobs_summary()
 
     def _wire_selection(self) -> None:
         self.selection.changed.connect(self._selection_changed)
@@ -5165,6 +5162,37 @@ class MainWindow(QMainWindow):
                 element_tags=elements or None,
             )
 
+    def _show_jobs_summary(self) -> None:
+        completed = sum(
+            1 for job in self._jobs.values()
+            if job.status == "Completed"
+        )
+        running = sum(
+            1 for job in self._jobs.values()
+            if job.status == "Running"
+        )
+        failed = sum(
+            1 for job in self._jobs.values()
+            if job.status in {"Failed", "Crashed"}
+        )
+        self.properties_panel.set_properties(
+            "Results / Jobs",
+            [
+                ("Jobs", len(self._jobs)),
+                ("Running", running),
+                ("Completed", completed),
+                ("Failed / Crashed", failed),
+                (
+                    "Quick plot",
+                    "Right-click a Job → Plot",
+                ),
+                (
+                    "Job manager",
+                    "Right-click Results / Jobs → Show Job Manager",
+                ),
+            ],
+        )
+
     def _show_job_properties(self, job_id: int) -> None:
         job = self._jobs.get(int(job_id))
         if job is None:
@@ -5192,12 +5220,10 @@ class MainWindow(QMainWindow):
             return
         self._last_result = dict(job.results)
         self.results_panel.set_result(self._last_result)
-        self.results_panel.show_jobs()
-        self.results_dock.show()
-        self.results_dock.raise_()
         self._show_job_properties(job.job_id)
         self.status_message.setText(
-            f"Job {job.job_id} is the active quick-plot result source."
+            f"Job {job.job_id} is the active quick-plot result source. "
+            "Right-click the Job → Plot to open a result view."
         )
 
     def _quick_plot_job_result(
@@ -6089,9 +6115,6 @@ class MainWindow(QMainWindow):
         self._current_job_id = job.job_id
         self._analysis_stop_requested = False
         self.results_panel.add_or_update_job(job)
-        self.results_panel.show_jobs()
-        self.results_dock.show()
-        self.results_dock.raise_()
         self._refresh_tree()
 
         self._append_analysis_log(
