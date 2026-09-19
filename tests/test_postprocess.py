@@ -7,6 +7,7 @@ from openseespy_studio.postprocess import (
     equilibrium_component_samples,
     local_end_actions,
     member_end_resultants,
+    nodal_result_scalar,
     section_component_samples,
 )
 from openseespy_studio.project import (
@@ -15,6 +16,28 @@ from openseespy_studio.project import (
     TransformationData,
 )
 
+
+
+def test_nodal_result_scalar_keeps_force_and_moment_groups_separate():
+    values = [3.0, 4.0, 12.0, 0.1, 0.2, 0.2]
+
+    assert nodal_result_scalar(values, "UX") == 3.0
+    assert nodal_result_scalar(values, "FY") == 4.0
+    assert math.isclose(nodal_result_scalar(values, "|U|"), 13.0)
+    assert math.isclose(nodal_result_scalar(values, "|F|"), 13.0)
+    assert math.isclose(nodal_result_scalar(values, "|R|"), 0.3)
+    assert math.isclose(nodal_result_scalar(values, "|M|"), 0.3)
+
+
+def test_nodal_result_scalar_handles_short_vectors_and_bad_components():
+    assert nodal_result_scalar([1.0, 2.0, 3.0], "RZ") is None
+
+    try:
+        nodal_result_scalar([1.0] * 6, "Q")
+    except ValueError as exc:
+        assert "Unsupported nodal result component" in str(exc)
+    else:
+        raise AssertionError("Expected unsupported nodal component to fail")
 
 def _local_force_vector():
     return [
