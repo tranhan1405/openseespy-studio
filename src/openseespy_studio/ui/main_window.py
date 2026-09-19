@@ -1690,11 +1690,18 @@ class MainWindow(QMainWindow):
                 "Show applied beam/column load vectors",
             ),
             (
+                "show_prescribed_displacements",
+                "Prescr. Disp.",
+                "load",
+                "prescribed_displacements",
+                "Show prescribed/imposed nodal displacement symbols",
+            ),
+            (
                 "show_load_values",
                 "Load Values",
                 "plot",
                 "load_values",
-                "Show numeric values for visible applied loads",
+                "Show numeric values for visible loads and prescribed displacements",
             ),
         ):
             self._make_action(
@@ -1895,6 +1902,7 @@ class MainWindow(QMainWindow):
                 "show_element_numbers",
                 "show_nodal_loads",
                 "show_element_loads",
+                "show_prescribed_displacements",
                 "show_load_values",
             ),
         )
@@ -2239,6 +2247,9 @@ class MainWindow(QMainWindow):
     ) -> None:
         self.viewport.set_display_data(
             nodal_loads=self.project.nodal_loads,
+            prescribed_displacements=(
+                self.project.prescribed_displacements
+            ),
             element_loads=self.project.element_loads,
             transformations=self.project.transformations,
             sections=self.project.sections,
