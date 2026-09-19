@@ -866,7 +866,7 @@ class ResultsPanel(QWidget):
         self.convergence_display_button = QToolButton()
         self.convergence_display_button.setText("Display")
         self.convergence_display_button.setPopupMode(
-            QToolButton.InstantPopup
+            QToolButton.ToolButtonPopupMode.InstantPopup
         )
         display_menu = QMenu(self.convergence_display_button)
         self.convergence_display_actions: dict[str, QAction] = {}
@@ -1913,6 +1913,11 @@ class ResultsPanel(QWidget):
         self.convergence_coordinate_plot.set_series(
             list(trace.get("coordinate_iteration", [])),
             list(trace.get("coordinate", [])),
+        )
+        self.live_convergence_status.setText(
+            f"POST-RUN · {analysis_type or 'Analysis'} · "
+            f"{summary.get('test') or 'Convergence'} · "
+            f"{int(trace.get('total_iterations', 0) or 0)} cumulative iterations"
         )
 
     def _convergence_row_clicked(self, row: int, column: int) -> None:
