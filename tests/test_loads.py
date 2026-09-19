@@ -8,6 +8,7 @@ from openseespy_studio.generator import (
 )
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
+    AnalysisSettingsData,
     ElementLoadData,
     LoadPatternData,
     MaterialData,
@@ -235,6 +236,73 @@ def test_prune_prescribed_displacement_after_node_delete():
     project.model.remove_node(2,cascade=True)
 
     assert project.prune_prescribed_displacements()==[1]
+
+
+
+def test_pattern_with_prescribed_displacement_cannot_become_uniform_excitation():
+    project=ProjectDatabase(model=model_with_nodes())
+    project.add_time_series(TimeSeriesData(1,"Ramp","Linear"))
+    project.add_load_pattern(LoadPatternData(1,"Settlement","Plain",1))
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(
+            1,"Move X",1,2,1,0.01
+        )
+    )
+
+    try:
+        project.update_load_pattern(
+            1,
+            LoadPatternData(
+                1,
+                "Not a Plain pattern",
+                "UniformExcitation",
+                1,
+                1,
+            ),
+        )
+    except ValueError as exc:
+        assert "cannot be changed to UniformExcitation" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected dependency protection for prescribed displacement"
+        )
+
+
+def test_cyclic_driver_rejects_pattern_with_prescribed_displacement():
+    model=model_with_nodes()
+    ts={1:TimeSeriesData(1,"Linear","Linear")}
+    patterns={1:LoadPatternData(1,"Driver","Plain",1)}
+    displacements={
+        1:PrescribedDisplacementData(
+            1,"Move X",1,2,1,0.01
+        )
+    }
+    analysis=AnalysisSettingsData(
+        1,
+        "Cyclic",
+        analysis_type="Cyclic",
+        control_node=2,
+        control_dof=1,
+        cyclic_targets=[0.01,-0.01,0.0],
+        cyclic_increment=0.001,
+        deferred_pattern_tags=[1],
+    )
+
+    try:
+        to_openseespy(
+            model,
+            time_series=ts,
+            load_patterns=patterns,
+            prescribed_displacements=displacements,
+            analyses={1:analysis},
+            active_analysis_tag=1,
+        )
+    except ValueError as exc:
+        assert "cannot contain Prescribed Displacement" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected cyclic driver/prescribed-displacement rejection"
+        )
 
 def test_element_load_round_trip_and_project_validation():
     project=ProjectDatabase(model=model_with_nodes())
