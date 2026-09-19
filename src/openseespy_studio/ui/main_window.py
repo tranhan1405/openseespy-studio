@@ -4693,6 +4693,8 @@ class MainWindow(QMainWindow):
             self.viewport.show_deformed_shape(
                 result,
                 scale=float(options.get("scale", 10.0)),
+                node_tags=set(result_object.node_scope) or None,
+                element_tags=set(result_object.element_scope) or None,
             )
         elif kind in {"NodalDisplacement", "NodalReaction"}:
             quantity = (
@@ -4710,6 +4712,8 @@ class MainWindow(QMainWindow):
                 result,
                 quantity,
                 component,
+                node_tags=set(result_object.node_scope) or None,
+                element_tags=set(result_object.element_scope) or None,
             )
         elif kind == "MemberForce":
             self.viewport.show_member_force_diagram(
@@ -4717,9 +4721,13 @@ class MainWindow(QMainWindow):
                 self.project.transformations,
                 str(options.get("component", "Mz")),
                 scale=float(options.get("scale", 1.0)),
+                element_tags=set(result_object.element_scope) or None,
             )
         elif kind == "HingeState":
-            self.viewport.show_hinge_states(result)
+            self.viewport.show_hinge_states(
+                result,
+                element_tags=set(result_object.element_scope) or None,
+            )
         elif kind == "ModeShape":
             modes = result.get("modes", {})
             mode = int(options.get("mode", 1))
@@ -4729,6 +4737,8 @@ class MainWindow(QMainWindow):
                 result,
                 mode,
                 scale=float(options.get("scale", 1.0)),
+                node_tags=set(result_object.node_scope) or None,
+                element_tags=set(result_object.element_scope) or None,
             )
 
         self.status_message.setText(
