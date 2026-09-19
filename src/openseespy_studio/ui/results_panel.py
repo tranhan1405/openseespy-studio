@@ -874,6 +874,25 @@ class ResultsPanel(QWidget):
                     pass
             self._select_tab("Mode Shape")
             return
+        if kind == "Motion":
+            mode = options.get("mode")
+            if mode is not None:
+                index = self.motion_source.findData(int(mode))
+                if index >= 0:
+                    self.motion_source.setCurrentIndex(index)
+            scale = options.get("scale")
+            if scale is not None:
+                try:
+                    self.motion_scale.setValue(float(scale))
+                except (TypeError, ValueError):
+                    pass
+            if "auto_scale" in options:
+                self.motion_auto_scale.setChecked(
+                    bool(options.get("auto_scale"))
+                )
+            self._select_tab("Motion")
+            self._emit_current_motion_frame()
+            return
         if kind == "Convergence":
             self._select_tab("Convergence")
             return
@@ -1564,7 +1583,16 @@ class ResultsPanel(QWidget):
             analysis_type == "Modal"
             and self.motion_source.count() > 1
         )
-        self._emit_current_motion_frame()
+        self.motion_info_label.setText(
+            (
+                f"{analysis_type or 'Analysis'} motion available · "
+                f"{count} frame(s). Open or play Motion to display it."
+                if count > 0
+                else "No deformation history or modal vectors are "
+                "available for motion playback."
+            )
+        )
+        self._sync_motion_markers(None)
 
     def _motion_source_changed(self, *_args) -> None:
         self._motion_frame_index = 0
@@ -1795,6 +1823,12 @@ class ResultsPanel(QWidget):
             self.job_selected.emit(int(job_id))
 
     def clear_all(self) -> None:
+        self._motion_timer.stop()
+        if hasattr(self, "motion_play"):
+            self.motion_play.blockSignals(True)
+            self.motion_play.setChecked(False)
+            self.motion_play.setText("▶ Play")
+            self.motion_play.blockSignals(False)
         self._result = {}
         self._result_cache_key = None
         self._node_table_cache.clear()
@@ -2301,6 +2335,7 @@ class ResultsPanel(QWidget):
         self._update_pushover_plot()
         self._update_cyclic_plot()
         self._update_history_plot()
+        self._refresh_motion_controls()
         return True
 
     def _populate_convergence_dashboard(self) -> None:
