@@ -45,7 +45,7 @@ from ..frame_setup import prepare_frame_grid
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..jobs import JobRecord
 from ..model import StructuralModel, classify_fixity
-from ..postprocess import enrich_member_force_results
+from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, TimeSeriesData, TransformationData
 from ..runtime import build_worker_pythonpath, probe_opensees_runtime
 from ..validation import ValidationIssue, validate_project
@@ -747,6 +747,9 @@ class MainWindow(QMainWindow):
         )
         self.results_panel.node_contour_requested.connect(
             self._show_node_contour_result
+        )
+        self.results_panel.hinge_state_requested.connect(
+            self._show_hinge_state_result
         )
         self.results_panel.element_selected.connect(
             self._select_result_element
@@ -5228,6 +5231,10 @@ class MainWindow(QMainWindow):
                     self.project.transformations,
                     self.project.units,
                 )
+                result = enrich_fiber_state_results(
+                    result,
+                    self.project.materials,
+                )
             except ValueError as exc:
                 self._log(
                     "Member-force post-processing warning: "
@@ -5326,6 +5333,17 @@ class MainWindow(QMainWindow):
         self.viewport.zoom_to_selection(set(), {tag})
         self.status_message.setText(
             f"Selected result member {tag}"
+        )
+
+    def _show_hinge_state_result(self) -> None:
+        if not self._last_result:
+            self.status_message.setText(
+                "No fiber-state result available"
+            )
+            return
+        self.viewport.show_hinge_states(self._last_result)
+        self.status_message.setText(
+            "Showing fiber-based plastic hinge / limit states"
         )
 
     def _show_member_force_result(

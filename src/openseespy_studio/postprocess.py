@@ -403,6 +403,276 @@ def fiber_response_range(
     return min(values), max(values)
 
 
+FIBER_STATE_LABELS: dict[int, str] = {
+    0: "Elastic",
+    1: "Nonlinear / near yield",
+    2: "Yielding / softening",
+    3: "Plastic / crushing",
+}
+
+
+def classify_fiber_state(
+    fiber: dict[str, Any] | None,
+    materials: dict[int, MaterialData],
+) -> dict[str, Any]:
+    """Classify one fiber using material-specific strain limits.
+
+    The classification is intentionally diagnostic rather than a code-based
+    acceptance check. Steel02 uses yield strain Fy/E0. Concrete02 uses the
+    cracking strain ft/Ec, peak-compression strain epsc0, and ultimate
+    compression strain epsU.
+    """
+    if not isinstance(fiber, dict):
+        return {
+            "severity": -1,
+            "state": "Unknown",
+            "material_type": "Unknown",
+            "metric": None,
+        }
+
+    try:
+        material_tag = int(fiber.get("material_tag"))
+    except (TypeError, ValueError):
+        material_tag = 0
+    material = materials.get(material_tag)
+    if material is None:
+        return {
+            "severity": -1,
+            "state": "Unknown",
+            "material_tag": material_tag,
+            "material_type": "Unknown",
+            "metric": None,
+        }
+
+    try:
+        strain = float(fiber.get("strain"))
+    except (TypeError, ValueError):
+        strain = math.nan
+    if not math.isfinite(strain):
+        return {
+            "severity": -1,
+            "state": "Unknown",
+            "material_tag": material_tag,
+            "material_type": material.material_type,
+            "metric": None,
+        }
+
+    severity = 0
+    state = FIBER_STATE_LABELS[0]
+    metric: float | None = None
+    details: dict[str, Any] = {}
+
+    if material.material_type == "Steel02":
+        fy = abs(float(material.parameters["Fy"]))
+        e0 = abs(float(material.parameters["E0"]))
+        eps_y = fy / e0 if e0 > 1.0e-30 else math.inf
+        ratio = abs(strain) / eps_y if eps_y > 1.0e-30 else 0.0
+        metric = ratio
+        details["yield_strain"] = eps_y
+        details["strain_to_yield"] = ratio
+        if ratio >= 2.0:
+            severity = 3
+            state = "Plastic"
+        elif ratio >= 1.0:
+            severity = 2
+            state = "Yielding"
+        elif ratio >= 0.8:
+            severity = 1
+            state = "Near yield"
+
+    elif material.material_type == "Concrete02":
+        epsc0 = float(material.parameters["epsc0"])
+        eps_u = float(material.parameters["epsU"])
+        ft = max(float(material.parameters["ft"]), 0.0)
+        try:
+            ec = abs(float(material.elastic_modulus()))
+        except ValueError:
+            ec = 0.0
+        eps_cr = ft / ec if ec > 1.0e-30 else math.inf
+        details["cracking_strain"] = eps_cr
+        details["peak_compression_strain"] = epsc0
+        details["ultimate_compression_strain"] = eps_u
+
+        if strain < 0.0 and epsc0 < 0.0:
+            compression_ratio = abs(strain) / max(abs(epsc0), 1.0e-30)
+            metric = compression_ratio
+            if eps_u < 0.0 and strain <= eps_u:
+                severity = 3
+                state = "Crushing limit"
+            elif strain <= epsc0:
+                severity = 2
+                state = "Compression softening"
+            elif compression_ratio >= 0.8:
+                severity = 1
+                state = "Nonlinear compression"
+        elif strain > 0.0 and math.isfinite(eps_cr) and eps_cr > 0.0:
+            tension_ratio = strain / eps_cr
+            metric = tension_ratio
+            if tension_ratio >= 1.0:
+                severity = 1
+                state = "Tension cracked"
+
+    elif material.material_type == "Elastic":
+        metric = 0.0
+
+    return {
+        "severity": severity,
+        "state": state,
+        "material_tag": material_tag,
+        "material_type": material.material_type,
+        "strain": strain,
+        "stress": fiber.get("stress"),
+        "metric": metric,
+        **details,
+    }
+
+
+def enrich_fiber_state_results(
+    result: dict[str, Any],
+    materials: dict[int, MaterialData],
+) -> dict[str, Any]:
+    """Attach section/element state summaries derived from fiber responses."""
+    enriched = copy.deepcopy(result)
+    final = enriched.setdefault("final", {})
+    if not isinstance(final, dict):
+        return enriched
+
+    fiber_data = final.get("element_fiber_responses", {})
+    if not isinstance(fiber_data, dict):
+        return enriched
+
+    summary: dict[str, Any] = {}
+    for raw_tag, payload in fiber_data.items():
+        if not isinstance(payload, dict):
+            continue
+        sections = payload.get("sections", [])
+        if not isinstance(sections, list):
+            continue
+
+        section_rows: list[dict[str, Any]] = []
+        element_severity = -1
+        hinge_count = 0
+
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            fibers = section.get("fibers", [])
+            if not isinstance(fibers, list):
+                fibers = []
+
+            fiber_states: list[dict[str, Any]] = []
+            controlling: dict[str, Any] | None = None
+            section_severity = -1
+
+            for index, fiber in enumerate(fibers):
+                state = classify_fiber_state(
+                    fiber if isinstance(fiber, dict) else None,
+                    materials,
+                )
+                state = dict(state)
+                state["fiber_index"] = index
+                fiber_states.append(state)
+                severity = int(state.get("severity", -1))
+                if severity > section_severity:
+                    section_severity = severity
+                    controlling = {
+                        **state,
+                        "fiber_index": index,
+                        "y": (
+                            fiber.get("y")
+                            if isinstance(fiber, dict)
+                            else None
+                        ),
+                        "z": (
+                            fiber.get("z")
+                            if isinstance(fiber, dict)
+                            else None
+                        ),
+                    }
+
+            if section_severity < 0:
+                section_state = "Unknown"
+            else:
+                section_state = FIBER_STATE_LABELS.get(
+                    section_severity,
+                    "Unknown",
+                )
+            if section_severity >= 2:
+                hinge_count += 1
+            element_severity = max(element_severity, section_severity)
+
+            section_rows.append({
+                "number": section.get("number"),
+                "location": section.get("location"),
+                "severity": section_severity,
+                "state": section_state,
+                "controlling_fiber": controlling,
+                "fiber_states": fiber_states,
+            })
+
+        summary[str(raw_tag)] = {
+            "severity": element_severity,
+            "state": (
+                FIBER_STATE_LABELS.get(element_severity, "Unknown")
+                if element_severity >= 0
+                else "Unknown"
+            ),
+            "hinge_count": hinge_count,
+            "sections": section_rows,
+        }
+
+    final["fiber_state_summary"] = summary
+    return enriched
+
+
+def fiber_state_element_tags(
+    result: dict[str, Any] | None,
+) -> list[int]:
+    if not isinstance(result, dict):
+        return []
+    final = result.get("final", {})
+    if not isinstance(final, dict):
+        return []
+    summary = final.get("fiber_state_summary", {})
+    if not isinstance(summary, dict):
+        return []
+    tags: list[int] = []
+    for raw_tag, payload in summary.items():
+        if not isinstance(payload, dict):
+            continue
+        try:
+            tags.append(int(raw_tag))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(tags))
+
+
+def fiber_state_sections(
+    result: dict[str, Any] | None,
+    element_tag: int,
+) -> list[dict[str, Any]]:
+    if not isinstance(result, dict):
+        return []
+    final = result.get("final", {})
+    if not isinstance(final, dict):
+        return []
+    summary = final.get("fiber_state_summary", {})
+    if not isinstance(summary, dict):
+        return []
+    payload = summary.get(
+        str(int(element_tag)),
+        summary.get(int(element_tag), {}),
+    )
+    if not isinstance(payload, dict):
+        return []
+    sections = payload.get("sections", [])
+    return [
+        section
+        for section in sections
+        if isinstance(section, dict)
+    ] if isinstance(sections, list) else []
+
+
 def local_end_actions(
     values: Sequence[float],
 ) -> dict[str, tuple[float, float]]:

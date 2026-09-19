@@ -1058,6 +1058,8 @@ class ModelViewport(QWidget):
             "result-force-connectors",
             "result-contour",
             "result-contour-nodes",
+            "result-hinge-members",
+            "result-hinge-points",
         ):
             self._remove_overlay(name)
         self._result_overlay_active = False
@@ -1271,6 +1273,135 @@ class ModelViewport(QWidget):
             if clim is not None:
                 node_kwargs["clim"] = clim
             self.plotter.add_mesh(node_mesh, **node_kwargs)
+
+        self._result_overlay_active = True
+        self.plotter.render()
+
+    def show_hinge_states(
+        self,
+        result: dict[str, object],
+    ) -> None:
+        """Show fiber-derived section state severity on nonlinear members."""
+        if self._model is None:
+            return
+
+        final = result.get("final", {}) if isinstance(result, dict) else {}
+        summary = (
+            final.get("fiber_state_summary", {})
+            if isinstance(final, dict)
+            else {}
+        )
+        if not isinstance(summary, dict) or not summary:
+            self.clear_result_overlay()
+            return
+
+        member_points: list[tuple[float, float, float]] = []
+        member_lines: list[int] = []
+        member_severity: list[float] = []
+        state_points: list[np.ndarray] = []
+        state_severity: list[float] = []
+
+        for tag in sorted(self._visible_element_tags()):
+            payload = summary.get(str(tag), summary.get(tag))
+            element = self._model.elements.get(tag)
+            if not isinstance(payload, dict) or element is None:
+                continue
+            node_i = self._model.nodes.get(element.i)
+            node_j = self._model.nodes.get(element.j)
+            if node_i is None or node_j is None:
+                continue
+
+            try:
+                severity = int(payload.get("severity", -1))
+            except (TypeError, ValueError):
+                severity = -1
+            if severity < 0:
+                continue
+
+            p_i = np.asarray(node_i.xyz, dtype=float)
+            p_j = np.asarray(node_j.xyz, dtype=float)
+            member_vector = p_j - p_i
+            length = float(np.linalg.norm(member_vector))
+            if length <= 1.0e-15:
+                continue
+
+            index = len(member_points)
+            member_points.extend((tuple(p_i), tuple(p_j)))
+            member_lines.extend((2, index, index + 1))
+            member_severity.append(float(severity))
+
+            sections = payload.get("sections", [])
+            if not isinstance(sections, list):
+                continue
+            for section in sections:
+                if not isinstance(section, dict):
+                    continue
+                try:
+                    section_severity = int(section.get("severity", -1))
+                    location = float(section.get("location", 0.0))
+                except (TypeError, ValueError):
+                    continue
+                if section_severity < 1:
+                    continue
+                ratio = min(max(location / length, 0.0), 1.0)
+                state_points.append(p_i + ratio * member_vector)
+                state_severity.append(float(section_severity))
+
+        if not member_points:
+            self.clear_result_overlay()
+            return
+
+        self.clear_result_overlay()
+        state_cmap = [
+            "#8fa2b5",
+            "#e7b34c",
+            "#f07c36",
+            "#c0392b",
+        ]
+
+        member_mesh = pv.PolyData(np.asarray(member_points, dtype=float))
+        member_mesh.lines = np.asarray(member_lines, dtype=np.int64)
+        member_mesh.cell_data["state_severity"] = np.asarray(
+            member_severity,
+            dtype=float,
+        )
+        self.plotter.add_mesh(
+            member_mesh,
+            name="result-hinge-members",
+            scalars="state_severity",
+            preference="cell",
+            cmap=state_cmap,
+            clim=(-0.5, 3.5),
+            line_width=9,
+            render_lines_as_tubes=True,
+            pickable=False,
+            scalar_bar_args={
+                "title": (
+                    "Fiber state: 0 Elastic · 1 Nonlinear · "
+                    "2 Yielding · 3 Plastic/Crushing"
+                )
+            },
+        )
+
+        if state_points:
+            point_mesh = pv.PolyData(
+                np.asarray(state_points, dtype=float)
+            )
+            point_mesh.point_data["state_severity"] = np.asarray(
+                state_severity,
+                dtype=float,
+            )
+            self.plotter.add_mesh(
+                point_mesh,
+                name="result-hinge-points",
+                scalars="state_severity",
+                cmap=state_cmap,
+                clim=(-0.5, 3.5),
+                render_points_as_spheres=True,
+                point_size=13,
+                pickable=False,
+                show_scalar_bar=False,
+            )
 
         self._result_overlay_active = True
         self.plotter.render()
