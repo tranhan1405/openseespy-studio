@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import resources
+import json
 import math
 import re
 
@@ -14,6 +16,7 @@ class GroundMotionRecordPreset:
     station: str
     source: str
     notes: str = ""
+    bundled_resource: str = ""
 
 
 GROUND_MOTION_LIBRARY: tuple[GroundMotionRecordPreset, ...] = (
@@ -33,7 +36,8 @@ GROUND_MOTION_LIBRARY: tuple[GroundMotionRecordPreset, ...] = (
         year=1940,
         station="El Centro Array #9",
         source="PEER NGA-West2 / strong-motion archives",
-        notes="Classic benchmark record. Load the official component file rather than an embedded copy.",
+        notes="Classic benchmark record. Built-in NS component is ready to use.",
+        bundled_resource="resources/ground_motions/elCentro_1940_NS.at2",
     ),
     GroundMotionRecordPreset(
         key="loma-prieta-1989",
@@ -51,7 +55,11 @@ GROUND_MOTION_LIBRARY: tuple[GroundMotionRecordPreset, ...] = (
         year=1994,
         station="Rinaldi Receiving Station",
         source="PEER NGA-West2 / USGS strong-motion archives",
-        notes="Near-fault record frequently used in nonlinear response studies.",
+        notes="Near-fault benchmark. Built-in 228 component is ready to use.",
+        bundled_resource=(
+            "resources/ground_motions/"
+            "northridge_1994_rinaldi_228.json"
+        ),
     ),
     GroundMotionRecordPreset(
         key="kobe-1995-kjma",
@@ -108,6 +116,42 @@ def _floats(text: str) -> list[float]:
     return [float(match.group(0)) for match in _FLOAT_RE.finditer(text)]
 
 
+def parse_simcenter_json_text(text: str) -> GroundMotionParseResult:
+    """Parse a SimCenter-style JSON ground-motion resource."""
+    try:
+        payload = json.loads(str(text))
+    except json.JSONDecodeError as exc:
+        raise ValueError("Ground-motion JSON is invalid.") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Ground-motion JSON must contain an object.")
+
+    values = payload.get("accel_data")
+    if not isinstance(values, list) or not values:
+        raise ValueError("Ground-motion JSON contains no accel_data values.")
+    try:
+        accelerations = [float(value) for value in values]
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Ground-motion JSON acceleration values are invalid.") from exc
+
+    dt = payload.get("dT")
+    try:
+        dt_value = float(dt)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Ground-motion JSON dT is missing or invalid.") from exc
+    if dt_value <= 0.0:
+        raise ValueError("Ground-motion JSON dT must be positive.")
+
+    info = str(payload.get("info", "")).upper()
+    input_unit = "g" if "UNITS OF G" in info else None
+    return GroundMotionParseResult(
+        values=accelerations,
+        dt=dt_value,
+        input_unit=input_unit,
+        npts=len(accelerations),
+        format="SimCenter JSON",
+    )
+
+
 def parse_peer_at2_text(text: str) -> GroundMotionParseResult:
     """Parse a PEER-style AT2 file.
 
@@ -161,7 +205,15 @@ def parse_peer_at2_text(text: str) -> GroundMotionParseResult:
     values = values[:npts]
 
     upper_text = str(text).upper()
-    input_unit = "g" if "UNITS OF G" in upper_text else None
+    input_unit = (
+        "g"
+        if (
+            "UNITS OF G" in upper_text
+            or "UNITS ARE (G)" in upper_text
+            or "UNITS ARE G" in upper_text
+        )
+        else None
+    )
     return GroundMotionParseResult(
         values=values,
         dt=dt,
@@ -180,6 +232,11 @@ def parse_ground_motion_record_text(
     """Auto-detect PEER AT2, otherwise parse one numeric text/CSV column."""
     upper = str(text).upper()
     suffix = str(filename).lower().rsplit(".", 1)[-1] if "." in filename else ""
+    if suffix == "json" or (
+        str(text).lstrip().startswith("{")
+        and '"accel_data"' in str(text)
+    ):
+        return parse_simcenter_json_text(text)
     if suffix == "at2" or ("NPTS" in upper and "DT" in upper):
         return parse_peer_at2_text(text)
 
@@ -213,6 +270,30 @@ def parse_ground_motion_record_text(
     return GroundMotionParseResult(
         values=values,
         format="text/CSV",
+    )
+
+
+def load_bundled_ground_motion_record(
+    key: str,
+) -> GroundMotionParseResult:
+    """Load a packaged benchmark record by library key."""
+    preset = record_preset(key)
+    if not preset.bundled_resource:
+        raise ValueError(
+            f"{preset.label} is a reference preset and has no bundled record."
+        )
+    package_root = resources.files("openseespy_studio")
+    target = package_root.joinpath(preset.bundled_resource)
+    try:
+        text = target.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError) as exc:
+        raise ValueError(
+            f"Bundled ground-motion resource is unavailable: "
+            f"{preset.bundled_resource}"
+        ) from exc
+    return parse_ground_motion_record_text(
+        text,
+        filename=preset.bundled_resource,
     )
 
 
