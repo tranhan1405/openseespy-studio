@@ -1712,10 +1712,11 @@ class ResultsPanel(QWidget):
         if not hasattr(self, "motion_info_label"):
             return
         mode = self._motion_selected_mode()
-        self._motion_info = motion_info(
-            self._result,
-            mode=mode,
-        )
+        if self._motion_info is None:
+            self._motion_info = motion_info(
+                self._result,
+                mode=mode,
+            )
         count = int(self._motion_info.frame_count)
         if count <= 0:
             self.motion_counter.setText("0 / 0")
@@ -1734,6 +1735,7 @@ class ResultsPanel(QWidget):
             self._result,
             self._motion_frame_index,
             mode=mode,
+            info=self._motion_info,
         )
         self.motion_counter.setText(
             f"{frame.index + 1} / {frame.frame_count}"
