@@ -1547,12 +1547,32 @@ class AnalysisTemplateDialog(QDialog):
             )
         elif kind == "Cyclic":
             try:
-                count = len(expand_cyclic_protocol(self._protocol_rows()))
+                raw_targets = self._cyclic_raw_targets()
+                targets = self._cyclic_displacement_targets()
+                count = len(targets)
+                peak = max((abs(value) for value in raw_targets), default=0.0)
             except (TypeError, ValueError):
                 count = 0
+                peak = 0.0
+            driver_tag = self.cyclic_load_source.currentData()
+            loading = (
+                f"existing pattern {driver_tag}"
+                if driver_tag is not None
+                else self.cyclic_distribution.currentText()
+            )
+            quantity = (
+                f"drift, max {peak:g}%"
+                if self.cyclic_protocol_unit.currentText() == "Drift ratio [%]"
+                else f"displacement, max {peak:g} {self.unit_system.length}"
+            )
+            gravity = (
+                f"gravity {self.cyclic_gravity_steps.value()} steps"
+                if self.cyclic_preload_gravity.isChecked()
+                else "gravity preload OFF"
+            )
             text = (
-                f"Cyclic · {count} target(s) · "
-                f"{self.cyclic_distribution.currentText()} reference loading · "
+                f"Cyclic · displacement-controlled · {count} target(s) · "
+                f"{quantity} · {loading} loading · {gravity} · "
                 f"{self.solver.currentText()} solver"
             )
         else:
@@ -1623,9 +1643,31 @@ class AnalysisTemplateDialog(QDialog):
         elif kind == "Cyclic":
             base.update(
                 {
+                    "control_mode": "Displacement",
+                    "protocol_mode": self.cyclic_protocol_mode.currentData(),
+                    "protocol_unit": self.cyclic_protocol_unit.currentText(),
                     "protocol_rows": self._protocol_rows(),
+                    "protocol_targets": self._cyclic_displacement_targets(),
+                    "raw_protocol_targets": self._cyclic_raw_targets(),
+                    "finish_at_zero": self.cyclic_return_zero.isChecked(),
+                    "reference_height": self.cyclic_reference_height.value(),
+                    "height_axis": int(self.cyclic_height_axis.currentData()),
                     "max_increment": self.cyclic_increment.value(),
+                    "driver_pattern_tag": self.cyclic_load_source.currentData(),
                     "distribution": self.cyclic_distribution.currentText(),
+                    "mode_number": self.cyclic_mode.value(),
+                    "custom_weights": (
+                        parse_node_weight_text(
+                            self.cyclic_custom.toPlainText()
+                        )
+                        if (
+                            self.cyclic_load_source.currentData() is None
+                            and self.cyclic_distribution.currentText() == "Custom"
+                        )
+                        else None
+                    ),
+                    "preload_gravity": self.cyclic_preload_gravity.isChecked(),
+                    "gravity_steps": self.cyclic_gravity_steps.value(),
                 }
             )
         else:
@@ -1680,7 +1722,22 @@ class AnalysisTemplateDialog(QDialog):
                         "Pushover reference height must be positive."
                     )
             if request["template"] == "Cyclic":
-                expand_cyclic_protocol(request["protocol_rows"])
+                targets = [float(value) for value in request["protocol_targets"]]
+                if not targets:
+                    raise ValueError(
+                        "Cyclic protocol needs at least one target."
+                    )
+                if float(request["max_increment"]) <= 0.0:
+                    raise ValueError(
+                        "Cyclic maximum solver increment must be positive."
+                    )
+                if (
+                    request["protocol_unit"] == "Drift ratio [%]"
+                    and float(request["reference_height"]) <= 0.0
+                ):
+                    raise ValueError(
+                        "Cyclic reference height must be positive."
+                    )
             if (
                 request["template"] == "Nonlinear Time History"
                 and request["damping_ratio"] > 0.0
