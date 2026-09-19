@@ -1590,10 +1590,17 @@ class ResultsPanel(QWidget):
         self._live_convergence_total = 0
         self._live_convergence_test = ""
         self._live_convergence_tolerance = None
+        self._live_cumulative_iteration = 0
+        self._live_attempt_iteration = 0
+        self._live_trace_x = []
+        self._live_trace_norm = []
+        self._live_cutbacks = []
+        self._live_converged = []
+        self._live_coordinate_x = [0.0]
+        self._live_coordinate_y = [0.0]
         self.live_convergence_status.setText("Live monitor idle.")
-        self.live_convergence_plot.clear()
-        self.convergence_iterations_plot.set_series([], [])
-        self.convergence_norm_plot.set_series([], [])
+        self.convergence_overview_plot.clear()
+        self.convergence_coordinate_plot.clear()
         self.convergence_info.setText(
             "Run a non-modal analysis to inspect solver convergence."
         )
@@ -1657,6 +1664,19 @@ class ResultsPanel(QWidget):
             return
         self.mode_shape_requested.emit(int(mode), self.mode_scale.value())
 
+    def _refresh_live_convergence_plots(self) -> None:
+        self.convergence_overview_plot.set_trace(
+            self._live_trace_x,
+            self._live_trace_norm,
+            criterion=self._live_convergence_tolerance,
+            cutbacks=self._live_cutbacks,
+            converged=self._live_converged,
+        )
+        self.convergence_coordinate_plot.set_series(
+            self._live_coordinate_x,
+            self._live_coordinate_y,
+        )
+
     def start_live_convergence(
         self,
         *,
@@ -1667,11 +1687,19 @@ class ResultsPanel(QWidget):
     ) -> None:
         self._live_convergence_attempts = []
         self._live_convergence_step = 0
-        self.tabs.setCurrentWidget(self.convergence_page)
         self._live_convergence_total = int(total)
         self._live_convergence_test = str(test)
         self._live_convergence_tolerance = tolerance
-        self.live_convergence_plot.clear()
+        self._live_cumulative_iteration = 0
+        self._live_attempt_iteration = 0
+        self._live_trace_x = []
+        self._live_trace_norm = []
+        self._live_cutbacks = []
+        self._live_converged = []
+        self._live_coordinate_x = [0.0]
+        self._live_coordinate_y = [0.0]
+        self.tabs.setCurrentWidget(self.convergence_page)
+        self._refresh_live_convergence_plots()
         self.live_convergence_status.setText(
             f"RUNNING · {self._live_convergence_test or 'Convergence test'} "
             f"· primary {algorithm or '-'}"
@@ -1688,6 +1716,7 @@ class ResultsPanel(QWidget):
     ) -> None:
         self._live_convergence_step = int(step)
         self._live_convergence_total = int(total)
+        self._live_attempt_iteration = 0
         if test:
             self._live_convergence_test = str(test)
         if tolerance is not None:
@@ -1695,10 +1724,7 @@ class ResultsPanel(QWidget):
         self._live_convergence_attempts = [
             {"algorithm": str(algorithm), "values": []}
         ]
-        self.live_convergence_plot.set_attempts(
-            self._live_convergence_attempts,
-            self._live_convergence_tolerance,
-        )
+        self._refresh_live_convergence_plots()
         self.live_convergence_status.setText(
             f"RUNNING · Step {step}/{total} · {algorithm} · "
             f"{self._live_convergence_test or 'test'}"
@@ -1709,6 +1735,7 @@ class ResultsPanel(QWidget):
         algorithm: str,
     ) -> None:
         algorithm = str(algorithm)
+        self._live_attempt_iteration = 0
         if (
             self._live_convergence_attempts
             and self._live_convergence_attempts[-1].get("algorithm")
@@ -1718,10 +1745,6 @@ class ResultsPanel(QWidget):
             return
         self._live_convergence_attempts.append(
             {"algorithm": algorithm, "values": []}
-        )
-        self.live_convergence_plot.set_attempts(
-            self._live_convergence_attempts,
-            self._live_convergence_tolerance,
         )
         self.live_convergence_status.setText(
             f"RUNNING · Step {self._live_convergence_step}/"
@@ -1748,17 +1771,25 @@ class ResultsPanel(QWidget):
                     "values": [],
                 }
             )
+
         attempt = self._live_convergence_attempts[-1]
         values = attempt.setdefault("values", [])
-        point = (int(iteration), float(norm))
-        if values and int(values[-1][0]) == point[0]:
+        local_iteration = int(iteration)
+        point = (local_iteration, float(norm))
+        if values and int(values[-1][0]) == local_iteration:
             values[-1] = point
+            if self._live_trace_norm:
+                self._live_trace_norm[-1] = float(norm)
         else:
             values.append(point)
-        self.live_convergence_plot.set_attempts(
-            self._live_convergence_attempts,
-            self._live_convergence_tolerance,
-        )
+            self._live_cumulative_iteration += 1
+            self._live_trace_x.append(
+                float(self._live_cumulative_iteration)
+            )
+            self._live_trace_norm.append(float(norm))
+        self._live_attempt_iteration = local_iteration
+        self._refresh_live_convergence_plots()
+
         tol = self._live_convergence_tolerance
         status = (
             "CONVERGED"
@@ -1777,6 +1808,50 @@ class ResultsPanel(QWidget):
             )
         )
 
+    def mark_live_substep_converged(
+        self,
+        coordinate: float | None = None,
+    ) -> None:
+        if self._live_cumulative_iteration <= 0:
+            return
+        marker = float(self._live_cumulative_iteration)
+        if not self._live_converged or self._live_converged[-1] != marker:
+            self._live_converged.append(marker)
+        if coordinate is not None:
+            try:
+                value = float(coordinate)
+            except (TypeError, ValueError):
+                value = math.nan
+            if math.isfinite(value):
+                if (
+                    self._live_coordinate_x[-1] != marker
+                    or self._live_coordinate_y[-1] != value
+                ):
+                    self._live_coordinate_x.append(marker)
+                    self._live_coordinate_y.append(value)
+        self._refresh_live_convergence_plots()
+
+    def update_live_analysis_coordinate(
+        self,
+        coordinate: float | None,
+    ) -> None:
+        if coordinate is None or self._live_cumulative_iteration <= 0:
+            return
+        try:
+            value = float(coordinate)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(value):
+            return
+        marker = float(self._live_cumulative_iteration)
+        if (
+            self._live_coordinate_x[-1] != marker
+            or self._live_coordinate_y[-1] != value
+        ):
+            self._live_coordinate_x.append(marker)
+            self._live_coordinate_y.append(value)
+            self._refresh_live_convergence_plots()
+
     def set_live_convergence_message(self, message: str) -> None:
         self.live_convergence_status.setText(str(message))
 
@@ -1784,11 +1859,19 @@ class ResultsPanel(QWidget):
         if self._live_convergence_step <= 0:
             return
         final_status = str(status)
+        marker = float(self._live_cumulative_iteration)
+        if final_status == "CUTBACK" and marker > 0.0:
+            if not self._live_cutbacks or self._live_cutbacks[-1] != marker:
+                self._live_cutbacks.append(marker)
+        elif final_status in {"CONVERGED", "RECOVERED"} and marker > 0.0:
+            if not self._live_converged or self._live_converged[-1] != marker:
+                self._live_converged.append(marker)
         if (
             final_status == "CONVERGED"
             and len(self._live_convergence_attempts) > 1
         ):
             final_status = "RECOVERED"
+        self._refresh_live_convergence_plots()
         self.live_convergence_status.setText(
             f"{final_status} · Step {self._live_convergence_step}/"
             f"{self._live_convergence_total}"
