@@ -1591,7 +1591,7 @@ class MainWindow(QMainWindow):
             "clear_result",
             "Clear Result",
             "delete",
-            self.viewport.clear_result_overlay,
+            self._clear_result_display,
             "Clear the active result overlay",
         )
         self._make_action(
@@ -1937,6 +1937,12 @@ class MainWindow(QMainWindow):
             f"{new_units['time']}"
         )
         self._record_project_change("Change model units", before)
+
+    def _clear_result_display(self) -> None:
+        if hasattr(self, "results_panel"):
+            self.results_panel.stop_motion()
+        self.viewport.clear_result_overlay()
+        self.status_message.setText("Result overlay cleared")
 
     def _show_results_manager(self) -> None:
         self.results_panel.show_jobs()
