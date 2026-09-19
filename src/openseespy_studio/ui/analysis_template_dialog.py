@@ -231,6 +231,8 @@ class AnalysisTemplateDialog(QDialog):
         self._initializing = False
         self._sync_template(self.template.currentText())
         self._update_pushover_preview()
+        self._update_cyclic_preview()
+        self._update_cyclic_load_preview()
 
     def _build_pushover_page(self) -> QWidget:
         page = QWidget()
