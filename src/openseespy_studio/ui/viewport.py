@@ -973,8 +973,15 @@ class ModelViewport(QWidget):
                 mesh,
                 color=group_colors[group_name],
                 edge_color="#243b52",
-                show_edges=True,
-                line_width=1,
+                show_edges=(
+                    self._model_representation != "centerline"
+                ),
+                line_width=(
+                    3 if self._model_representation == "centerline" else 1
+                ),
+                render_lines_as_tubes=(
+                    self._model_representation == "centerline"
+                ),
                 smooth_shading=False,
                 pickable=True,
                 render=False,
@@ -1268,6 +1275,9 @@ class ModelViewport(QWidget):
             "display-prescribed-displacement-rotation-arcs",
             "display-prescribed-displacement-rotation-heads",
             "display-prescribed-displacement-labels",
+            "display-section-axis-y",
+            "display-section-axis-z",
+            "display-section-axis-labels",
         ):
             self._remove_overlay(name)
 
@@ -1743,6 +1753,94 @@ class ModelViewport(QWidget):
         )
         return global_vector, prefix
 
+    def _draw_section_axes(self) -> None:
+        if self._model is None:
+            return
+
+        axis_length = max(self._model_span() * 0.075, 0.10)
+        y_records = []
+        z_records = []
+        label_points = []
+        labels = []
+
+        for tag in sorted(self._visible_element_tags()):
+            element = self._model.elements.get(tag)
+            if element is None or element.transf_tag is None:
+                continue
+            transformation = self._transformations.get(element.transf_tag)
+            if transformation is None:
+                continue
+            node_i = self._model.nodes.get(element.i)
+            node_j = self._model.nodes.get(element.j)
+            if node_i is None or node_j is None:
+                continue
+            try:
+                _, local_y, local_z = element_local_axes(
+                    self._model,
+                    element,
+                    transformation,
+                )
+            except ValueError:
+                continue
+
+            center = np.asarray(
+                [
+                    0.5 * (float(a) + float(b))
+                    for a, b in zip(node_i.xyz, node_j.xyz)
+                ],
+                dtype=float,
+            )
+            y_axis = np.asarray(local_y, dtype=float)
+            z_axis = np.asarray(local_z, dtype=float)
+            y_records.append((center, y_axis, axis_length))
+            z_records.append((center, z_axis, axis_length))
+
+            section = (
+                self._sections.get(element.section_tag)
+                if element.section_tag is not None
+                else None
+            )
+            y_label, z_label = section_axis_strength_labels(
+                section,
+                self._materials,
+            )
+            label_points.extend(
+                (
+                    center + y_axis * axis_length * 1.08,
+                    center + z_axis * axis_length * 1.08,
+                )
+            )
+            labels.extend((y_label, z_label))
+
+        y_mesh = self._batched_arrow_mesh(y_records)
+        if y_mesh is not None:
+            self.plotter.add_mesh(
+                y_mesh,
+                name="display-section-axis-y",
+                color="#2e8b57",
+                smooth_shading=False,
+                pickable=False,
+                render=False,
+            )
+        z_mesh = self._batched_arrow_mesh(z_records)
+        if z_mesh is not None:
+            self.plotter.add_mesh(
+                z_mesh,
+                name="display-section-axis-z",
+                color="#4169e1",
+                smooth_shading=False,
+                pickable=False,
+                render=False,
+            )
+        self._add_annotation_labels(
+            label_points,
+            labels,
+            name="display-section-axis-labels",
+            text_color="#334155",
+            font_size=9,
+            always_visible=True,
+        )
+
     def _draw_element_loads(self) -> None:
         if self._model is None or not self._element_loads:
             return
@@ -1881,6 +1979,11 @@ class ModelViewport(QWidget):
                 "display-prescribed-displacement-rotation-heads",
                 "display-prescribed-displacement-labels",
             ),
+            "section_axes": (
+                "display-section-axis-y",
+                "display-section-axis-z",
+                "display-section-axis-labels",
+            ),
             "load_values": (
                 "display-nodal-load-labels",
                 "display-element-load-labels",
@@ -1908,6 +2011,8 @@ class ModelViewport(QWidget):
             and self._display_options[name]
         ):
             self._draw_prescribed_displacements()
+        elif name == "section_axes" and self._display_options[name]:
+            self._draw_section_axes()
         elif name == "load_values" and self._display_options[name]:
             if self._display_options["nodal_loads"]:
                 self._draw_nodal_loads()
@@ -1963,6 +2068,8 @@ class ModelViewport(QWidget):
             self._draw_element_loads()
         if self._display_options["prescribed_displacements"]:
             self._draw_prescribed_displacements()
+        if self._display_options["section_axes"]:
+            self._draw_section_axes()
         if render:
             self.plotter.render()
 
