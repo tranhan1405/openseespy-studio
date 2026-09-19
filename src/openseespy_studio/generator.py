@@ -631,7 +631,8 @@ def analysis_to_openseespy(
         f"_studio_emit('start', total={total_steps}, "
         f"analysis_type={settings.analysis_type!r}, "
         f"algorithm=_studio_primary_algorithm, "
-        f"test={settings.test!r}, tolerance={settings.tolerance:g})"
+        f"test={settings.test!r}, tolerance={settings.tolerance:g}, "
+        f"live_convergence={settings.live_convergence!r})"
     )
     lines.append(f"for _studio_step in range({total_steps}):")
     lines.append("    _studio_step_no = _studio_step + 1")
@@ -639,7 +640,8 @@ def analysis_to_openseespy(
     lines.append(
         "    _studio_emit('step_start', step=_studio_step_no, "
         f"total={total_steps}, algorithm=_studio_primary_algorithm, "
-        f"test={settings.test!r}, tolerance={settings.tolerance:g})"
+        f"test={settings.test!r}, tolerance={settings.tolerance:g}, "
+        f"live_convergence={settings.live_convergence!r})"
     )
     if settings.analysis_type == "Cyclic":
         lines.append(
