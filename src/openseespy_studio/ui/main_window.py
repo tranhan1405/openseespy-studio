@@ -47,7 +47,7 @@ from ..jobs import JobRecord
 from ..live_convergence import parse_opensees_convergence_line
 from ..model import StructuralModel, classify_fixity
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, TimeSeriesData, TransformationData
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData
 from ..runtime import build_worker_pythonpath, probe_opensees_runtime
 from ..validation import ValidationIssue, validate_project
 from ..units import UnitSystem
@@ -1479,7 +1479,56 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([f"{settings.analysis_type} [{tag}] {settings.name}{active}"])
             item.setIcon(0, studio_icon("analysis"))
             item.setData(0, Qt.UserRole, ("analysis", tag))
+            item.setExpanded(True)
             analysis.addChild(item)
+
+            solution_results = self.project.solution_results_for_analysis(tag)
+            solution = QTreeWidgetItem([
+                f"Solution ({len(solution_results)})"
+            ])
+            solution.setIcon(0, studio_icon("results"))
+            solution.setData(0, Qt.UserRole, ("solution_root", tag))
+            solution.setExpanded(True)
+            item.addChild(solution)
+
+            information = QTreeWidgetItem(["Solution Information"])
+            information.setIcon(0, studio_icon("results"))
+            information.setData(
+                0,
+                Qt.UserRole,
+                ("solution_information", tag),
+            )
+            information.setExpanded(True)
+            solution.addChild(information)
+
+            solver_output = QTreeWidgetItem(["Solver Output"])
+            solver_output.setIcon(0, studio_icon("results"))
+            solver_output.setData(
+                0,
+                Qt.UserRole,
+                ("solver_output", tag),
+            )
+            information.addChild(solver_output)
+
+            convergence = QTreeWidgetItem(["Convergence Monitor"])
+            convergence.setIcon(0, studio_icon("results"))
+            convergence.setData(
+                0,
+                Qt.UserRole,
+                ("solution_convergence", tag),
+            )
+            information.addChild(convergence)
+
+            for result in solution_results:
+                result_item = QTreeWidgetItem([result.name])
+                result_item.setIcon(0, studio_icon("results"))
+                result_item.setData(
+                    0,
+                    Qt.UserRole,
+                    ("solution_result", result.tag),
+                )
+                solution.addChild(result_item)
+
         recorders = QTreeWidgetItem([
             f"Recorders ({len(self.project.recorders)})"
         ])
@@ -1508,6 +1557,7 @@ class MainWindow(QMainWindow):
                 f"Job {job_id} · {job.analysis_type} · {job.status}"
             ])
             item.setIcon(0, studio_icon("results"))
+            item.setData(0, Qt.UserRole, ("job", job_id))
             results.addChild(item)
         root.addChild(results)
 
