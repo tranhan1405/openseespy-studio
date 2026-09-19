@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -95,7 +96,7 @@ class AnalysisTemplateDialog(QDialog):
         top = QFormLayout()
         self.template = QComboBox()
         self.template.addItems(
-            ["Pushover", "Cyclic", "Nonlinear Time History"]
+            ["Modal", "Pushover", "Cyclic", "Nonlinear Time History"]
         )
         self.template.setCurrentText(initial_template)
         self.name = QLineEdit()
@@ -120,6 +121,7 @@ class AnalysisTemplateDialog(QDialog):
         self.pages.addWidget(self._build_pushover_page())
         self.pages.addWidget(self._build_cyclic_page())
         self.pages.addWidget(self._build_nlth_page())
+        self.pages.addWidget(self._build_modal_page())
         root.addWidget(self.pages, 1)
 
         self.summary = QLabel()
@@ -389,11 +391,50 @@ class AnalysisTemplateDialog(QDialog):
         self._sync_ground_motion_scale_mode()
         return page
 
+    def _build_modal_page(self) -> QWidget:
+        page = QWidget()
+        form = QFormLayout(page)
+
+        self.modal_modes = QSpinBox()
+        self.modal_modes.setRange(1, 1000)
+        self.modal_modes.setValue(6)
+
+        self.modal_solver = QComboBox()
+        self.modal_solver.addItem("ARPACK · general / sparse", "-genBandArpack")
+        self.modal_solver.addItem("Full General LAPACK", "-fullGenLapack")
+        self.modal_solver.addItem(
+            "Symmetric Band LAPACK",
+            "-symmBandLapack",
+        )
+
+        self.modal_require_mass = QCheckBox(
+            "Require translational nodal mass before creating template"
+        )
+        self.modal_require_mass.setChecked(True)
+
+        form.addRow("Number of modes:", self.modal_modes)
+        form.addRow("Eigen solver:", self.modal_solver)
+        form.addRow("Mass check:", self.modal_require_mass)
+
+        note = QLabel(
+            "Studio creates one Mode Shape result object per requested mode. "
+            "The completed Modal Job stores eigenvalue, frequency, period, "
+            "mode vectors and lumped-nodal-mass participation data for UX/UY/UZ."
+        )
+        note.setWordWrap(True)
+        form.addRow(note)
+
+        self.modal_modes.valueChanged.connect(self._update_summary)
+        self.modal_solver.currentIndexChanged.connect(self._update_summary)
+        self.modal_require_mass.toggled.connect(self._update_summary)
+        return page
+
     def _sync_template(self, kind: str) -> None:
         index = {
             "Pushover": 0,
             "Cyclic": 1,
             "Nonlinear Time History": 2,
+            "Modal": 3,
         }[str(kind)]
         self.pages.setCurrentIndex(index)
         current = self.name.text().strip()
@@ -402,6 +443,7 @@ class AnalysisTemplateDialog(QDialog):
             or current.startswith("Pushover")
             or current.startswith("Cyclic")
             or current.startswith("NLTH")
+            or current.startswith("Modal")
         )
         if generic:
             self.name.setText(
@@ -409,8 +451,13 @@ class AnalysisTemplateDialog(QDialog):
                     0: "Pushover Template",
                     1: "Cyclic Template",
                     2: "NLTH Template",
+                    3: "Modal Template",
                 }[index]
             )
+        modal = str(kind) == "Modal"
+        self.solver.setEnabled(not modal)
+        self.control_node.setEnabled(not modal)
+        self.direction.setEnabled(not modal)
         self._update_summary()
 
     def _sync_pushover_distribution(self, kind: str) -> None:
@@ -676,7 +723,17 @@ class AnalysisTemplateDialog(QDialog):
 
     def _update_summary(self, *_args) -> None:
         kind = self.template.currentText()
-        if kind == "Pushover":
+        if kind == "Modal":
+            text = (
+                f"Modal · {self.modal_modes.value()} mode(s) · "
+                f"{self.modal_solver.currentData()} · "
+                + (
+                    "mass check ON"
+                    if self.modal_require_mass.isChecked()
+                    else "mass check OFF"
+                )
+            )
+        elif kind == "Pushover":
             target = self.push_target.value()
             increment = self.push_increment.value()
             steps = (
@@ -730,7 +787,15 @@ class AnalysisTemplateDialog(QDialog):
             "control_node": self.control_node.value(),
             "control_dof": int(self.direction.currentData()),
         }
-        if kind == "Pushover":
+        if kind == "Modal":
+            base.update(
+                {
+                    "num_modes": self.modal_modes.value(),
+                    "eigen_solver": str(self.modal_solver.currentData()),
+                    "require_nodal_mass": self.modal_require_mass.isChecked(),
+                }
+            )
+        elif kind == "Pushover":
             base.update(
                 {
                     "target_displacement": self.push_target.value(),
