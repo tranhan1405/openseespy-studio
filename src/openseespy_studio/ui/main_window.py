@@ -793,6 +793,7 @@ class PropertiesPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._solution_result_tag: int | None = None
+        self._solution_result_auto_scale = True
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 6)
@@ -964,6 +965,9 @@ class PropertiesPanel(QWidget):
 
         kind = result.result_type
         options = dict(result.settings)
+        self._solution_result_auto_scale = bool(
+            options.get("auto_scale", True)
+        )
 
         if kind in {
             "DeformedShape",
@@ -1007,7 +1011,7 @@ class PropertiesPanel(QWidget):
                 index if index >= 0 else 0
             )
 
-        if kind in {"DeformedShape", "MemberForce", "ModeShape"}:
+        if kind in {"DeformedShape", "MemberForce", "ModeShape", "Motion"}:
             self._set_form_row_visible(self.result_scale, True)
             try:
                 self.result_scale.setValue(
@@ -1019,7 +1023,9 @@ class PropertiesPanel(QWidget):
             except (TypeError, ValueError):
                 self.result_scale.setValue(1.0)
 
-        if kind == "ModeShape":
+        if kind == "ModeShape" or (
+            kind == "Motion" and "mode" in options
+        ):
             self._set_form_row_visible(self.result_mode, True)
             self.result_mode.setValue(
                 max(1, int(options.get("mode", 1)))
@@ -1081,10 +1087,14 @@ class PropertiesPanel(QWidget):
             "MemberForce",
         }:
             settings["component"] = self.result_component.currentText()
-        if kind in {"DeformedShape", "MemberForce", "ModeShape"}:
+        if kind in {"DeformedShape", "MemberForce", "ModeShape", "Motion"}:
             settings["scale"] = self.result_scale.value()
         if kind == "ModeShape":
             settings["mode"] = self.result_mode.value()
+        if kind == "Motion":
+            settings["auto_scale"] = self._solution_result_auto_scale
+            if self.result_mode.isVisible():
+                settings["mode"] = self.result_mode.value()
         if kind == "TimeHistory":
             settings.update({
                 "node": self.result_history_node.value(),
