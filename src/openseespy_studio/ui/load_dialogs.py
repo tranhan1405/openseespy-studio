@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QSpinBox, QVBoxLayout
 )
 
-from ..project import ElementLoadData, LoadPatternData, NodalLoadData, TimeSeriesData
+from ..project import ElementLoadData, LoadPatternData, NodalLoadData, PrescribedDisplacementData, TimeSeriesData
 from ..units import UnitSystem
 
 
@@ -133,6 +133,140 @@ class NodalLoadDialog(QDialog):
         except ValueError as e: QMessageBox.warning(self,"Nodal Load Editor",str(e)); return
         self.accept()
 
+
+
+class PrescribedDisplacementDialog(QDialog):
+    DOF_LABELS = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+
+    def __init__(
+        self,
+        patterns,
+        displacement=None,
+        *,
+        next_tag=1,
+        node_tag=1,
+        ndf=6,
+        units=None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Prescribed Displacement Editor")
+        self.setModal(True)
+        self.unit_system = UnitSystem.from_mapping(units)
+        self.ndf = max(1, min(6, int(ndf)))
+
+        root = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.tag = QSpinBox()
+        self.tag.setRange(1, 2147483647)
+        self.tag.setValue(
+            displacement.tag if displacement else next_tag
+        )
+
+        self.name = QLineEdit(
+            displacement.name
+            if displacement
+            else f"Prescribed Displacement {next_tag}"
+        )
+
+        self.pattern = QComboBox()
+        for tag in sorted(patterns):
+            pattern = patterns[tag]
+            if pattern.pattern_type == "Plain":
+                self.pattern.addItem(
+                    f"{tag} - {pattern.name}",
+                    tag,
+                )
+        if displacement:
+            index = self.pattern.findData(displacement.pattern_tag)
+            if index >= 0:
+                self.pattern.setCurrentIndex(index)
+
+        self.node = QSpinBox()
+        self.node.setRange(1, 2147483647)
+        self.node.setValue(
+            displacement.node_tag if displacement else node_tag
+        )
+
+        self.dof = QComboBox()
+        for dof, label in enumerate(self.DOF_LABELS[: self.ndf], start=1):
+            self.dof.addItem(f"{label} (DOF {dof})", dof)
+        if displacement:
+            index = self.dof.findData(displacement.dof)
+            if index >= 0:
+                self.dof.setCurrentIndex(index)
+
+        self.value = _spin(
+            displacement.value if displacement else 0.0
+        )
+        self.value_label = QLabel()
+
+        note = QLabel(
+            "This is an imposed nodal displacement inside a Plain load "
+            "pattern. Its value is multiplied by the selected Time Series. "
+            "It is different from the DisplacementControl integrator used by "
+            "Pushover and Cyclic templates."
+        )
+        note.setWordWrap(True)
+
+        form.addRow("Tag:", self.tag)
+        form.addRow("Name:", self.name)
+        form.addRow("Plain pattern:", self.pattern)
+        form.addRow("Node:", self.node)
+        form.addRow("DOF:", self.dof)
+        form.addRow(self.value_label, self.value)
+        root.addLayout(form)
+        root.addWidget(note)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+        self.dof.currentIndexChanged.connect(self._sync_value_label)
+        self._sync_value_label()
+
+    def _sync_value_label(self, *_args) -> None:
+        dof = int(self.dof.currentData() or 1)
+        if dof <= 3:
+            label = (
+                f"Value [{self.unit_system.length}]:"
+            )
+        else:
+            label = "Value [rad]:"
+        self.value_label.setText(label)
+
+    def data(self) -> PrescribedDisplacementData:
+        if self.pattern.currentData() is None:
+            raise ValueError("Create a Plain load pattern first.")
+        if self.dof.currentData() is None:
+            raise ValueError("Choose a valid displacement DOF.")
+        return PrescribedDisplacementData(
+            tag=self.tag.value(),
+            name=(
+                self.name.text().strip()
+                or f"Prescribed Displacement {self.tag.value()}"
+            ),
+            pattern_tag=int(self.pattern.currentData()),
+            node_tag=self.node.value(),
+            dof=int(self.dof.currentData()),
+            value=self.value.value(),
+        )
+
+    def _accept(self) -> None:
+        try:
+            self.data()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Prescribed Displacement Editor",
+                str(exc),
+            )
+            return
+        self.accept()
 
 
 class ElementLoadDialog(QDialog):

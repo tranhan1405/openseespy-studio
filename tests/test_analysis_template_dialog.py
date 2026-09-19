@@ -8,7 +8,12 @@ import pytest
 from PySide6.QtWidgets import QApplication, QTableWidgetItem
 
 from openseespy_studio.model import StructuralModel
-from openseespy_studio.project import ProjectDatabase
+from openseespy_studio.project import (
+    LoadPatternData,
+    PrescribedDisplacementData,
+    ProjectDatabase,
+    TimeSeriesData,
+)
 from openseespy_studio.ui.analysis_dialog import AnalysisDialog
 from openseespy_studio.ui.analysis_template_dialog import AnalysisTemplateDialog
 
@@ -199,6 +204,55 @@ def test_cyclic_dialog_absolute_targets_preserve_asymmetry(qapp):
             [0.005, -0.003, 0.010, 0.0]
         )
         assert request["protocol_mode"] == "absolute_targets"
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+
+def test_templates_exclude_prescribed_displacement_driver_patterns(qapp):
+    model = StructuralModel("template-driver-filter")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 3.0, 0.0)
+    project = ProjectDatabase(model=model)
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Settlement", "Plain", 1)
+    )
+    project.add_load_pattern(
+        LoadPatternData(2, "Lateral force shape", "Plain", 1)
+    )
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(
+            1,
+            "Move support",
+            1,
+            2,
+            1,
+            0.01,
+        )
+    )
+
+    dialog = AnalysisTemplateDialog(
+        default_node=2,
+        units={"length": "m", "force": "kN", "time": "s"},
+        initial_template="Pushover",
+        project=project,
+    )
+    try:
+        push_tags = [
+            dialog.push_load_source.itemData(index)
+            for index in range(dialog.push_load_source.count())
+        ]
+        cyclic_tags = [
+            dialog.cyclic_load_source.itemData(index)
+            for index in range(dialog.cyclic_load_source.count())
+        ]
+        assert 1 not in push_tags
+        assert 1 not in cyclic_tags
+        assert 2 in push_tags
+        assert 2 in cyclic_tags
     finally:
         dialog.close()
         dialog.deleteLater()

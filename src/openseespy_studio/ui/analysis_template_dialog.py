@@ -296,7 +296,13 @@ class AnalysisTemplateDialog(QDialog):
         if self.project is not None:
             for tag in sorted(self.project.load_patterns):
                 pattern = self.project.load_patterns[tag]
-                if pattern.pattern_type == "Plain":
+                has_prescribed = any(
+                    displacement.pattern_tag == tag
+                    for displacement in (
+                        self.project.prescribed_displacements.values()
+                    )
+                )
+                if pattern.pattern_type == "Plain" and not has_prescribed:
                     self.push_load_source.addItem(
                         f"Existing {tag} - {pattern.name}",
                         int(tag),
@@ -533,7 +539,13 @@ class AnalysisTemplateDialog(QDialog):
         if self.project is not None:
             for tag in sorted(self.project.load_patterns):
                 pattern = self.project.load_patterns[tag]
-                if pattern.pattern_type == "Plain":
+                has_prescribed = any(
+                    displacement.pattern_tag == tag
+                    for displacement in (
+                        self.project.prescribed_displacements.values()
+                    )
+                )
+                if pattern.pattern_type == "Plain" and not has_prescribed:
                     self.cyclic_load_source.addItem(
                         f"Existing {tag} - {pattern.name}",
                         int(tag),
