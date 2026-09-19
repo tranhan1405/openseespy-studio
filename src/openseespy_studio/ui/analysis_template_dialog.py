@@ -259,27 +259,65 @@ class AnalysisTemplateDialog(QDialog):
     def _build_nlth_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
+
+        component_title = QLabel("Ground-motion components")
+        component_title.setObjectName("SectionTitle")
+        layout.addWidget(component_title)
+
+        grid = QGridLayout()
+        for column, label in enumerate(
+            ("Use", "Axis", "File", "", "Column", "Scale")
+        ):
+            grid.addWidget(QLabel(label), 0, column)
+
+        self.gm_enabled: dict[int, QCheckBox] = {}
+        self.gm_files: dict[int, QLineEdit] = {}
+        self.gm_columns: dict[int, QSpinBox] = {}
+        self.gm_scales: dict[int, QDoubleSpinBox] = {}
+
+        for row, (direction, axis) in enumerate(
+            ((1, "X"), (2, "Y"), (3, "Z")),
+            start=1,
+        ):
+            enabled = QCheckBox()
+            enabled.setChecked(direction == 1)
+            file_edit = QLineEdit()
+            file_edit.setReadOnly(True)
+            browse = QPushButton("Browse...")
+            column_spin = QSpinBox()
+            column_spin.setRange(1, 100)
+            column_spin.setValue(1)
+            scale = _double(1.0)
+
+            self.gm_enabled[direction] = enabled
+            self.gm_files[direction] = file_edit
+            self.gm_columns[direction] = column_spin
+            self.gm_scales[direction] = scale
+
+            grid.addWidget(enabled, row, 0)
+            grid.addWidget(QLabel(axis), row, 1)
+            grid.addWidget(file_edit, row, 2)
+            grid.addWidget(browse, row, 3)
+            grid.addWidget(column_spin, row, 4)
+            grid.addWidget(scale, row, 5)
+
+            browse.clicked.connect(
+                lambda checked=False, d=direction:
+                self._browse_ground_motion(d)
+            )
+            column_spin.valueChanged.connect(
+                lambda _value, d=direction:
+                self._reload_ground_motion(d)
+            )
+            enabled.toggled.connect(self._update_summary)
+            scale.valueChanged.connect(self._update_summary)
+
+        layout.addLayout(grid)
+
         form = QFormLayout()
-
-        file_row = QWidget()
-        file_layout = QHBoxLayout(file_row)
-        file_layout.setContentsMargins(0, 0, 0, 0)
-        self.gm_file = QLineEdit()
-        self.gm_file.setReadOnly(True)
-        browse = QPushButton("Browse...")
-        browse.clicked.connect(self._browse_ground_motion)
-        file_layout.addWidget(self.gm_file, 1)
-        file_layout.addWidget(browse)
-        form.addRow("Ground-motion file:", file_row)
-
-        self.gm_column = QSpinBox()
-        self.gm_column.setRange(1, 100)
-        self.gm_column.setValue(1)
-        self.gm_column.valueChanged.connect(self._reload_ground_motion)
         self.gm_dt = _double(0.01, 1.0e-12)
         self.gm_unit = QComboBox()
         self.gm_unit.addItems(["g", "m/s²", "cm/s²"])
-        self.gm_scale = _double(1.0)
         self.damping_ratio = _double(0.05, 0.0, 0.999999, 5)
         self.damping_mode_i = QSpinBox()
         self.damping_mode_i.setRange(1, 1000)
@@ -288,38 +326,41 @@ class AnalysisTemplateDialog(QDialog):
         self.damping_mode_j.setRange(1, 1000)
         self.damping_mode_j.setValue(3)
 
-        form.addRow("Acceleration column:", self.gm_column)
         form.addRow("Record dt [s]:", self.gm_dt)
         form.addRow("Input acceleration unit:", self.gm_unit)
-        form.addRow("Scale factor:", self.gm_scale)
         form.addRow("Rayleigh damping ratio:", self.damping_ratio)
         form.addRow("Rayleigh mode i:", self.damping_mode_i)
         form.addRow("Rayleigh mode j:", self.damping_mode_j)
         layout.addLayout(form)
 
         self.gm_preview = QLabel(
-            "Choose a TXT/CSV/DAT ground-motion file."
+            "Enable X/Y/Z and choose one TXT/CSV/DAT record per component."
         )
         self.gm_preview.setWordWrap(True)
         layout.addWidget(self.gm_preview)
 
         note = QLabel(
-            "The imported acceleration is converted into the current model "
-            f"acceleration unit [{self.unit_system.acceleration_label}]. "
-            "Studio creates a Path TimeSeries and UniformExcitation pattern."
+            "All enabled components use the same dt and input unit. "
+            "Each component has its own column and scale factor. "
+            "Acceleration is converted to "
+            f"[{self.unit_system.acceleration_label}] before generation."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
 
         for widget in (
             self.gm_dt,
-            self.gm_scale,
             self.damping_ratio,
             self.damping_mode_i,
             self.damping_mode_j,
         ):
             widget.valueChanged.connect(self._update_summary)
-        self.gm_unit.currentTextChanged.connect(self._update_summary)
+        self.gm_dt.valueChanged.connect(
+            lambda _value: self._update_ground_motion_preview()
+        )
+        self.gm_unit.currentTextChanged.connect(
+            self._update_ground_motion_preview
+        )
         return page
 
     def _sync_template(self, kind: str) -> None:
@@ -329,6 +370,7 @@ class AnalysisTemplateDialog(QDialog):
             "Nonlinear Time History": 2,
         }[str(kind)]
         self.pages.setCurrentIndex(index)
+        self.direction.setEnabled(index != 2)
         current = self.name.text().strip()
         generic = (
             not current
@@ -361,6 +403,81 @@ class AnalysisTemplateDialog(QDialog):
             )
             rows.append((amplitude, cycles))
         return rows
+
+    @staticmethod
+    def _parse_custom_weights(text: str) -> dict[int, float]:
+        source = str(text).strip()
+        if not source:
+            return {}
+        weights: dict[int, float] = {}
+        for raw in source.replace(";", ",").split(","):
+            token = raw.strip()
+            if not token:
+                continue
+            separator = ":" if ":" in token else "=" if "=" in token else None
+            if separator is None:
+                raise ValueError(
+                    "Custom weights must use node:weight pairs."
+                )
+            tag_text, weight_text = token.split(separator, 1)
+            tag = int(tag_text.strip())
+            weight = float(weight_text.strip())
+            if tag <= 0:
+                raise ValueError("Custom node tags must be positive.")
+            weights[tag] = weight
+        if not weights:
+            raise ValueError("Custom distribution needs at least one weight.")
+        return weights
+
+    def _sync_custom_weight_fields(self, *_args) -> None:
+        if hasattr(self, "push_custom"):
+            self.push_custom.setEnabled(
+                self.push_distribution.currentText() == "Custom"
+            )
+        if hasattr(self, "cyclic_custom"):
+            self.cyclic_custom.setEnabled(
+                self.cyclic_distribution.currentText() == "Custom"
+            )
+
+    def _import_protocol(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Cyclic Protocol",
+            "",
+            "Protocol (*.csv *.txt *.dat);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            text = Path(path).read_text(
+                encoding="utf-8",
+                errors="ignore",
+            )
+            rows = parse_cyclic_protocol_text(text)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Cyclic Protocol",
+                str(exc),
+            )
+            return
+        self.protocol.blockSignals(True)
+        try:
+            self.protocol.setRowCount(len(rows))
+            for row, (amplitude, cycles) in enumerate(rows):
+                self.protocol.setItem(
+                    row,
+                    0,
+                    QTableWidgetItem(f"{amplitude:g}"),
+                )
+                self.protocol.setItem(
+                    row,
+                    1,
+                    QTableWidgetItem(str(cycles)),
+                )
+        finally:
+            self.protocol.blockSignals(False)
+        self._update_cyclic_preview()
 
     def _update_cyclic_preview(self, *_args) -> None:
         try:
@@ -401,41 +518,71 @@ class AnalysisTemplateDialog(QDialog):
             self.protocol.removeRow(row)
         self._update_cyclic_preview()
 
-    def _browse_ground_motion(self) -> None:
+    def _browse_ground_motion(self, direction: int) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Ground Motion",
+            f"Select Ground Motion { {1: 'X', 2: 'Y', 3: 'Z'}[int(direction)] }",
             "",
             "Ground motion (*.txt *.dat *.csv);;All files (*)",
         )
         if not path:
             return
-        self.gm_file.setText(path)
-        self._reload_ground_motion()
+        direction = int(direction)
+        self.gm_files[direction].setText(path)
+        self.gm_enabled[direction].setChecked(True)
+        self._reload_ground_motion(direction)
 
-    def _reload_ground_motion(self, *_args) -> None:
-        path = self.gm_file.text().strip()
+    def _reload_ground_motion(self, direction: int) -> None:
+        direction = int(direction)
+        path = self.gm_files[direction].text().strip()
         if not path:
-            self._ground_motion_values = []
+            self._ground_motion_values[direction] = []
+            self._update_ground_motion_preview()
             return
         try:
-            text = Path(path).read_text(encoding="utf-8", errors="ignore")
+            text = Path(path).read_text(
+                encoding="utf-8",
+                errors="ignore",
+            )
             values = parse_ground_motion_text(
                 text,
-                column=self.gm_column.value(),
+                column=self.gm_columns[direction].value(),
             )
         except (OSError, ValueError) as exc:
-            self._ground_motion_values = []
-            self.gm_preview.setText(f"Cannot read record: {exc}")
+            self._ground_motion_values[direction] = []
+            QMessageBox.warning(
+                self,
+                "Ground Motion",
+                f"{ {1: 'X', 2: 'Y', 3: 'Z'}[direction] }: {exc}",
+            )
+            self._update_ground_motion_preview()
             return
-        self._ground_motion_values = values
-        pga = max((abs(value) for value in values), default=0.0)
-        duration = max(0, len(values) - 1) * self.gm_dt.value()
+        self._ground_motion_values[direction] = values
+        self._update_ground_motion_preview()
+
+    def _update_ground_motion_preview(self, *_args) -> None:
+        details: list[str] = []
+        for direction, axis in ((1, "X"), (2, "Y"), (3, "Z")):
+            if not self.gm_enabled[direction].isChecked():
+                continue
+            values = self._ground_motion_values[direction]
+            if not values:
+                details.append(f"{axis}: no record")
+                continue
+            pga = max(abs(value) for value in values)
+            duration = max(0, len(values) - 1) * self.gm_dt.value()
+            details.append(
+                f"{axis}: {len(values)} pts, {duration:g} s, "
+                f"PGA={pga:g} {self.gm_unit.currentText()}, "
+                f"scale={self.gm_scales[direction].value():g}"
+            )
         self.gm_preview.setText(
-            f"{len(values)} points · duration ≈ {duration:g} s · "
-            f"raw PGA = {pga:g} {self.gm_unit.currentText()}"
+            " · ".join(details)
+            if details
+            else "Enable at least one excitation component."
         )
         self._update_summary()
+
 
     def _update_summary(self, *_args) -> None:
         kind = self.template.currentText()
