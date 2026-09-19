@@ -627,7 +627,8 @@ def analysis_to_openseespy(
     lines.append(
         f"_studio_emit('start', total={total_steps}, "
         f"analysis_type={settings.analysis_type!r}, "
-        f"algorithm=_studio_primary_algorithm)"
+        f"algorithm=_studio_primary_algorithm, "
+        f"test={settings.test!r}, tolerance={settings.tolerance:g})"
     )
     lines.append(f"for _studio_step in range({total_steps}):")
     lines.append("    _studio_step_no = _studio_step + 1")
