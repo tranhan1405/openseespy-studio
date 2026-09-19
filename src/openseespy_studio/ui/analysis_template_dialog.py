@@ -130,6 +130,176 @@ class CyclicProtocolPreview(QWidget):
         )
 
 
+class GroundMotionPlotWidget(QWidget):
+    """Lightweight acceleration-time preview without extra plotting deps."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._series: list[tuple[str, list[float]]] = []
+        self._dt = 0.01
+        self._unit = "g"
+        self.setMinimumSize(640, 300)
+
+    def set_data(
+        self,
+        series: list[tuple[str, list[float]]],
+        *,
+        dt: float,
+        unit: str,
+    ) -> None:
+        self._series = [
+            (str(label), [float(value) for value in values])
+            for label, values in series
+            if values
+        ]
+        self._dt = max(float(dt), 1.0e-15)
+        self._unit = str(unit)
+        self.update()
+
+    @property
+    def series_count(self) -> int:
+        return len(self._series)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#ffffff"))
+
+        if not self._series:
+            painter.setPen(QColor("#718195"))
+            painter.drawText(
+                self.rect(),
+                Qt.AlignCenter,
+                "No ground-motion data",
+            )
+            return
+
+        left = 62.0
+        right = max(left + 10.0, float(self.width()) - 18.0)
+        top = 24.0
+        bottom = max(top + 10.0, float(self.height()) - 42.0)
+
+        max_points = max(len(values) for _, values in self._series)
+        max_time = max(0.0, (max_points - 1) * self._dt)
+        max_abs = max(
+            (
+                abs(value)
+                for _, values in self._series
+                for value in values
+            ),
+            default=1.0,
+        )
+        max_abs = max(max_abs, 1.0e-12)
+
+        zero_y = 0.5 * (top + bottom)
+        painter.setPen(QPen(QColor("#d5dce5"), 1))
+        painter.drawLine(QPointF(left, zero_y), QPointF(right, zero_y))
+        painter.drawLine(QPointF(left, top), QPointF(left, bottom))
+
+        palette = (
+            QColor("#1565c0"),
+            QColor("#c62828"),
+            QColor("#2e7d32"),
+            QColor("#6a1b9a"),
+            QColor("#ef6c00"),
+            QColor("#455a64"),
+        )
+
+        for series_index, (label, values) in enumerate(self._series):
+            if len(values) < 2:
+                continue
+            pen = QPen(palette[series_index % len(palette)], 1.5)
+            painter.setPen(pen)
+
+            # Decimate only for painting; all statistics/use in OpenSees keep
+            # the full parsed record.
+            target_points = max(300, int(right - left) * 2)
+            stride = max(1, len(values) // target_points)
+            indices = list(range(0, len(values), stride))
+            if indices[-1] != len(values) - 1:
+                indices.append(len(values) - 1)
+
+            previous = None
+            for index in indices:
+                x = (
+                    left
+                    if max_points <= 1
+                    else left
+                    + (right - left) * index / max(1, max_points - 1)
+                )
+                y = zero_y - (
+                    0.46
+                    * (bottom - top)
+                    * float(values[index])
+                    / max_abs
+                )
+                point = QPointF(x, y)
+                if previous is not None:
+                    painter.drawLine(previous, point)
+                previous = point
+
+            legend_x = left + 8.0 + (series_index % 3) * 170.0
+            legend_y = top + 14.0 + (series_index // 3) * 18.0
+            painter.drawLine(
+                QPointF(legend_x, legend_y),
+                QPointF(legend_x + 18.0, legend_y),
+            )
+            painter.drawText(
+                QPointF(legend_x + 24.0, legend_y + 4.0),
+                label,
+            )
+
+        painter.setPen(QColor("#526273"))
+        painter.drawText(4, int(top + 5), f"+{max_abs:.4g}")
+        painter.drawText(8, int(zero_y + 4), "0")
+        painter.drawText(4, int(bottom), f"-{max_abs:.4g}")
+        painter.drawText(
+            int(left),
+            int(self.height() - 12),
+            "0 s",
+        )
+        painter.drawText(
+            int(max(left, right - 85)),
+            int(self.height() - 12),
+            f"{max_time:.4g} s",
+        )
+        painter.drawText(
+            int(left + 8),
+            int(top - 6),
+            f"Acceleration [{self._unit}]",
+        )
+
+
+class GroundMotionPreviewDialog(QDialog):
+    def __init__(
+        self,
+        *,
+        title: str,
+        series: list[tuple[str, list[float]]],
+        dt: float,
+        unit: str,
+        details: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(760, 460)
+        layout = QVBoxLayout(self)
+
+        self.plot = GroundMotionPlotWidget(self)
+        self.plot.set_data(series, dt=dt, unit=unit)
+        layout.addWidget(self.plot, 1)
+
+        info = QLabel(details)
+        info.setWordWrap(True)
+        info.setObjectName("Muted")
+        layout.addWidget(info)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+
 class AnalysisTemplateDialog(QDialog):
     """Wizard-like editor for common nonlinear analysis workflows."""
 
@@ -732,6 +902,7 @@ class AnalysisTemplateDialog(QDialog):
         self.gm_files: dict[int, QLineEdit] = {}
         self.gm_scales: dict[int, QDoubleSpinBox] = {}
         self.gm_previews: dict[int, QLabel] = {}
+        self.gm_plot_buttons: dict[int, QPushButton] = {}
         axes = {1: "X", 2: "Y", 3: "Z"}
 
         for direction in self._nlth_directions:
@@ -752,8 +923,18 @@ class AnalysisTemplateDialog(QDialog):
                 lambda checked=False, d=direction:
                 self._clear_ground_motion(d)
             )
+            plot = QPushButton(f"Plot {axis}")
+            plot.setEnabled(False)
+            plot.setToolTip(
+                f"Preview the parsed and scaled {axis} acceleration record."
+            )
+            plot.clicked.connect(
+                lambda checked=False, d=direction:
+                self._plot_ground_motion(d)
+            )
             file_layout.addWidget(edit, 1)
             file_layout.addWidget(browse)
+            file_layout.addWidget(plot)
             file_layout.addWidget(clear)
             scale = _double(1.0)
             preview = QLabel(f"{axis}: not assigned")
@@ -762,6 +943,7 @@ class AnalysisTemplateDialog(QDialog):
             self.gm_files[direction] = edit
             self.gm_scales[direction] = scale
             self.gm_previews[direction] = preview
+            self.gm_plot_buttons[direction] = plot
             form.addRow(f"{axis} record:", file_row)
             form.addRow(f"{axis} scale:", scale)
             form.addRow("", preview)
@@ -775,6 +957,16 @@ class AnalysisTemplateDialog(QDialog):
         self.gm_analysis_preview.setWordWrap(True)
         self.gm_analysis_preview.setObjectName("Muted")
         motion_layout.addWidget(self.gm_analysis_preview)
+
+        self.gm_plot_active = QPushButton("Plot Active Components")
+        self.gm_plot_active.setEnabled(False)
+        self.gm_plot_active.setToolTip(
+            "Overlay the scaled X/Y/Z records that will be sent to OpenSees."
+        )
+        self.gm_plot_active.clicked.connect(
+            self._plot_active_ground_motions
+        )
+        motion_layout.addWidget(self.gm_plot_active)
         layout.addWidget(motion_group)
 
         damping_group = QGroupBox("Damping")
@@ -1730,13 +1922,124 @@ class AnalysisTemplateDialog(QDialog):
                 scale.blockSignals(False)
         self._refresh_all_ground_motion_previews()
 
+    def _ground_motion_plot_payload(
+        self,
+        direction: int,
+    ) -> tuple[list[tuple[str, list[float]]], str]:
+        direction = int(direction)
+        axis = {1: "X", 2: "Y", 3: "Z"}[direction]
+        values = list(self._ground_motion_values[direction])
+        if not values:
+            raise ValueError(f"{axis} ground-motion record is not assigned.")
+
+        factor = float(self.gm_scales[direction].value())
+        scaled = [factor * value for value in values]
+        raw_pga = pga_in_g(values, self.gm_unit.currentText())
+        scaled_pga = raw_pga * abs(factor)
+        duration = max(0, len(values) - 1) * self.gm_dt.value()
+        source = self.gm_files[direction].text().strip() or "record"
+        format_name = self._ground_motion_formats[direction] or "record"
+
+        series: list[tuple[str, list[float]]] = [(f"{axis} raw", values)]
+        if abs(factor - 1.0) > 1.0e-12:
+            series.append((f"{axis} scaled", scaled))
+        else:
+            series = [(f"{axis} scaled", scaled)]
+
+        details = (
+            f"{source}\n"
+            f"{format_name} · dt={self.gm_dt.value():g} s · "
+            f"NPTS={len(values)} · duration≈{duration:g} s · "
+            f"raw PGA={raw_pga:.4g} g · scale={factor:.6g} · "
+            f"scaled PGA={scaled_pga:.4g} g"
+        )
+        return series, details
+
+    def _active_ground_motion_plot_payload(
+        self,
+    ) -> tuple[list[tuple[str, list[float]]], str]:
+        series: list[tuple[str, list[float]]] = []
+        details: list[str] = []
+        axes = {1: "X", 2: "Y", 3: "Z"}
+        for direction in self._nlth_directions:
+            values = self._ground_motion_values[direction]
+            if not values:
+                continue
+            factor = float(self.gm_scales[direction].value())
+            scaled = [factor * float(value) for value in values]
+            axis = axes[direction]
+            series.append((f"{axis} scaled", scaled))
+            raw_pga = pga_in_g(values, self.gm_unit.currentText())
+            details.append(
+                f"{axis}: NPTS={len(values)}, "
+                f"scale={factor:.6g}, "
+                f"PGA={raw_pga * abs(factor):.4g} g"
+            )
+        if not series:
+            raise ValueError("No active ground-motion component to plot.")
+
+        max_points = max(len(values) for _, values in series)
+        duration = max(0, max_points - 1) * self.gm_dt.value()
+        return (
+            series,
+            (
+                f"Scaled records used by OpenSees · "
+                f"dt={self.gm_dt.value():g} s · "
+                f"longest duration≈{duration:g} s\n"
+                + " · ".join(details)
+            ),
+        )
+
+    def _plot_ground_motion(self, direction: int) -> None:
+        try:
+            series, details = self._ground_motion_plot_payload(direction)
+        except ValueError as exc:
+            QMessageBox.information(
+                self,
+                "Ground Motion Preview",
+                str(exc),
+            )
+            return
+        axis = {1: "X", 2: "Y", 3: "Z"}[int(direction)]
+        dialog = GroundMotionPreviewDialog(
+            title=f"Ground Motion Preview · {axis}",
+            series=series,
+            dt=self.gm_dt.value(),
+            unit=self.gm_unit.currentText(),
+            details=details,
+            parent=self,
+        )
+        dialog.exec()
+
+    def _plot_active_ground_motions(self) -> None:
+        try:
+            series, details = self._active_ground_motion_plot_payload()
+        except ValueError as exc:
+            QMessageBox.information(
+                self,
+                "Ground Motion Preview",
+                str(exc),
+            )
+            return
+        dialog = GroundMotionPreviewDialog(
+            title="Ground Motion Preview · Active Components",
+            series=series,
+            dt=self.gm_dt.value(),
+            unit=self.gm_unit.currentText(),
+            details=details,
+            parent=self,
+        )
+        dialog.exec()
+
     def _refresh_ground_motion_preview(self, direction: int) -> None:
         direction = int(direction)
         axis = {1: "X", 2: "Y", 3: "Z"}[direction]
         values = self._ground_motion_values[direction]
         if not values:
             self.gm_previews[direction].setText(f"{axis}: not assigned")
+            self.gm_plot_buttons[direction].setEnabled(False)
             return
+        self.gm_plot_buttons[direction].setEnabled(True)
         try:
             raw_pga = pga_in_g(values, self.gm_unit.currentText())
         except ValueError:
@@ -1755,6 +2058,12 @@ class AnalysisTemplateDialog(QDialog):
     def _refresh_all_ground_motion_previews(self, *_args) -> None:
         for direction in self._nlth_directions:
             self._refresh_ground_motion_preview(direction)
+        self.gm_plot_active.setEnabled(
+            any(
+                self._ground_motion_values[direction]
+                for direction in self._nlth_directions
+            )
+        )
         self._update_ground_motion_analysis_preview()
 
     def _update_summary(self, *_args) -> None:
