@@ -104,6 +104,13 @@ class AnalysisDialog(QDialog):
             "e.g. 3  (driving lateral / excitation pattern)"
         )
         self.modes=QSpinBox(); self.modes.setRange(1,10000); self.modes.setValue(analysis.num_modes if analysis else 3)
+        self.eigen_solver=QComboBox()
+        self.eigen_solver.addItem("ARPACK · general / sparse", "-genBandArpack")
+        self.eigen_solver.addItem("Full General LAPACK", "-fullGenLapack")
+        self.eigen_solver.addItem("Symmetric Band LAPACK", "-symmBandLapack")
+        if analysis:
+            index=self.eigen_solver.findData(analysis.eigen_solver)
+            if index>=0:self.eigen_solver.setCurrentIndex(index)
         self.recovery=QCheckBox("Try NewtonLineSearch / ModifiedNewton / Newton on failed step"); self.recovery.setChecked(analysis.recovery if analysis else True)
         self.adaptive=QCheckBox("Adaptive step size / automatic cutback")
         self.adaptive.setChecked(analysis.adaptive_step if analysis else False)
@@ -146,7 +153,7 @@ class AnalysisDialog(QDialog):
             "Opens a separate PowerShell window that mirrors the live solver log. "
             "The Studio worker still runs in its isolated process."
         )
-        fields=(("Tag",self.tag),("Name",self.name),("Analysis type",self.kind),("Constraints",self.constraints),("Numberer",self.numberer),("System",self.system),("Test",self.test),("Tolerance",self.tol),("Max iterations",self.max_iter),("Algorithm",self.algorithm),("Steps",self.steps),("Load increment",self.load_inc),("Control node",self.control_node),("Control DOF",self.control_dof),("Disp. increment",self.disp_inc),("Cyclic targets",self.cyclic_targets),("Cyclic max increment",self.cyclic_inc),("Time step dt",self.dt),("Newmark gamma",self.gamma),("Newmark beta",self.beta),("Rayleigh damping ratio",self.damping_ratio),("Rayleigh mode i",self.damping_mode_i),("Rayleigh mode j",self.damping_mode_j),("Number of modes",self.modes))
+        fields=(("Tag",self.tag),("Name",self.name),("Analysis type",self.kind),("Constraints",self.constraints),("Numberer",self.numberer),("System",self.system),("Test",self.test),("Tolerance",self.tol),("Max iterations",self.max_iter),("Algorithm",self.algorithm),("Steps",self.steps),("Load increment",self.load_inc),("Control node",self.control_node),("Control DOF",self.control_dof),("Disp. increment",self.disp_inc),("Cyclic targets",self.cyclic_targets),("Cyclic max increment",self.cyclic_inc),("Time step dt",self.dt),("Newmark gamma",self.gamma),("Newmark beta",self.beta),("Rayleigh damping ratio",self.damping_ratio),("Rayleigh mode i",self.damping_mode_i),("Rayleigh mode j",self.damping_mode_j),("Number of modes",self.modes),("Eigen solver",self.eigen_solver))
         for label,w in fields: form.addRow(label+":",w)
         form.addRow("Gravity preload:",self.preload_gravity)
         form.addRow("Gravity preload steps:",self.gravity_steps)
@@ -184,6 +191,7 @@ class AnalysisDialog(QDialog):
         self.gravity_steps.setEnabled(staged and self.preload_gravity.isChecked())
         self.deferred_patterns.setEnabled(staged)
         self.modes.setEnabled(modal)
+        self.eigen_solver.setEnabled(modal)
     def data(self):
         cyclic_targets=[]
         for raw in self.cyclic_targets.text().replace(";", ",").split(","):
@@ -216,6 +224,7 @@ class AnalysisDialog(QDialog):
             gravity_steps=self.gravity_steps.value(),
             deferred_pattern_tags=deferred_pattern_tags,
             num_modes=self.modes.value(),
+            eigen_solver=str(self.eigen_solver.currentData()),
             recovery=self.recovery.isChecked(),
             adaptive_step=self.adaptive.isChecked(),
             adaptive_cutback_factor=self.cutback.value(),
