@@ -2064,6 +2064,8 @@ class MainWindow(QMainWindow):
             message = base_message
 
         self._refresh_all(message)
+        if spec.planar_2d:
+            self.viewport.set_view("xz")
         self.frame_grid_panel.set_assignment_tags(
             column_section_tag=spec.column_section_tag,
             beam_section_tag=spec.beam_section_tag,
