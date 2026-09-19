@@ -6259,7 +6259,9 @@ class MainWindow(QMainWindow):
             create.triggered.connect(self._create_element)
             select_all = menu.addAction("Select All Elements")
             select_all.setEnabled(bool(self.model.elements))
-            select_all.triggered.connect(self._select_all_tree_elements)
+            select_all.triggered.connect(
+                lambda: self._select_all_tree_elements()
+            )
             menu.addSeparator()
             menu.addAction(self.actions["show_element_numbers"])
             menu.exec(self.tree.viewport().mapToGlobal(position))
