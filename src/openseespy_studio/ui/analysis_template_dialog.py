@@ -130,6 +130,177 @@ class CyclicProtocolPreview(QWidget):
         )
 
 
+class GroundMotionPlotWidget(QWidget):
+    """Lightweight acceleration-time preview without extra plotting deps."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._series: list[tuple[str, list[float]]] = []
+        self._dt = 0.01
+        self._unit = "g"
+        self.setMinimumSize(640, 300)
+
+    def set_data(
+        self,
+        series: list[tuple[str, list[float]]],
+        *,
+        dt: float,
+        unit: str,
+    ) -> None:
+        self._series = [
+            (str(label), [float(value) for value in values])
+            for label, values in series
+            if values
+        ]
+        self._dt = max(float(dt), 1.0e-15)
+        self._unit = str(unit)
+        self.update()
+
+    @property
+    def series_count(self) -> int:
+        return len(self._series)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#ffffff"))
+
+        if not self._series:
+            painter.setPen(QColor("#718195"))
+            painter.drawText(
+                self.rect(),
+                Qt.AlignCenter,
+                "No ground-motion data",
+            )
+            return
+
+        left = 62.0
+        right = max(left + 10.0, float(self.width()) - 18.0)
+        top = 24.0
+        bottom = max(top + 10.0, float(self.height()) - 42.0)
+
+        max_points = max(len(values) for _, values in self._series)
+        max_time = max(0.0, (max_points - 1) * self._dt)
+        max_abs = max(
+            (
+                abs(value)
+                for _, values in self._series
+                for value in values
+            ),
+            default=1.0,
+        )
+        max_abs = max(max_abs, 1.0e-12)
+
+        zero_y = 0.5 * (top + bottom)
+        painter.setPen(QPen(QColor("#d5dce5"), 1))
+        painter.drawLine(QPointF(left, zero_y), QPointF(right, zero_y))
+        painter.drawLine(QPointF(left, top), QPointF(left, bottom))
+
+        palette = (
+            QColor("#1565c0"),
+            QColor("#c62828"),
+            QColor("#2e7d32"),
+            QColor("#6a1b9a"),
+            QColor("#ef6c00"),
+            QColor("#455a64"),
+        )
+
+        for series_index, (label, values) in enumerate(self._series):
+            if len(values) < 2:
+                continue
+            pen = QPen(palette[series_index % len(palette)], 1.5)
+            painter.setPen(pen)
+
+            # Decimate only for painting; all statistics/use in OpenSees keep
+            # the full parsed record.
+            target_points = max(300, int(right - left) * 2)
+            stride = max(1, len(values) // target_points)
+            indices = list(range(0, len(values), stride))
+            if indices[-1] != len(values) - 1:
+                indices.append(len(values) - 1)
+
+            previous = None
+            for index in indices:
+                x = (
+                    left
+                    if max_points <= 1
+                    else left
+                    + (right - left) * index / max(1, max_points - 1)
+                )
+                y = zero_y - (
+                    0.46
+                    * (bottom - top)
+                    * float(values[index])
+                    / max_abs
+                )
+                point = QPointF(x, y)
+                if previous is not None:
+                    painter.drawLine(previous, point)
+                previous = point
+
+            legend_x = left + 8.0 + (series_index % 3) * 170.0
+            legend_y = top + 14.0 + (series_index // 3) * 18.0
+            painter.drawLine(
+                QPointF(legend_x, legend_y),
+                QPointF(legend_x + 18.0, legend_y),
+            )
+            painter.drawText(
+                QPointF(legend_x + 24.0, legend_y + 4.0),
+                label,
+            )
+
+        painter.setPen(QColor("#526273"))
+        painter.drawText(4, int(top + 5), f"+{max_abs:.4g}")
+        painter.drawText(8, int(zero_y + 4), "0")
+        painter.drawText(4, int(bottom), f"-{max_abs:.4g}")
+        painter.drawText(
+            int(left),
+            int(self.height() - 12),
+            "0 s",
+        )
+        painter.drawText(
+            int(max(left, right - 85)),
+            int(self.height() - 12),
+            f"{max_time:.4g} s",
+        )
+        painter.drawText(
+            int(left + 8),
+            int(top - 6),
+            f"Acceleration [{self._unit}]",
+        )
+
+
+class GroundMotionPreviewDialog(QDialog):
+    def __init__(
+        self,
+        *,
+        title: str,
+        series: list[tuple[str, list[float]]],
+        dt: float,
+        unit: str,
+        details: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(760, 460)
+        layout = QVBoxLayout(self)
+
+        self.plot = GroundMotionPlotWidget(self)
+        self.plot.set_data(series, dt=dt, unit=unit)
+        layout.addWidget(self.plot, 1)
+
+        info = QLabel(details)
+        info.setWordWrap(True)
+        info.setObjectName("Muted")
+        layout.addWidget(info)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(self.reject)
+        buttons.clicked.connect(self.accept)
+        layout.addWidget(buttons)
+
+
 class AnalysisTemplateDialog(QDialog):
     """Wizard-like editor for common nonlinear analysis workflows."""
 
