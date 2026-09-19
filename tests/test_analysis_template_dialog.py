@@ -257,3 +257,85 @@ def test_templates_exclude_prescribed_displacement_driver_patterns(qapp):
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+
+def test_nlth_dialog_2d_only_offers_xy_ground_motion_components(qapp):
+    model = StructuralModel("nlth-dialog-2d", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 3.0, 0.0)
+    project = ProjectDatabase(model=model)
+
+    dialog = AnalysisTemplateDialog(
+        default_node=2,
+        units={"length": "m", "force": "kN", "time": "s"},
+        initial_template="Nonlinear Time History",
+        project=project,
+    )
+    try:
+        assert dialog._nlth_directions == (1, 2)
+        assert set(dialog.gm_files) == {1, 2}
+        assert 3 not in dialog.gm_files
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_nlth_dialog_common_pga_scaling_preserves_component_ratio(qapp):
+    model = StructuralModel("nlth-dialog-3d")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+
+    dialog = AnalysisTemplateDialog(
+        default_node=1,
+        units={"length": "m", "force": "kN", "time": "s"},
+        initial_template="Nonlinear Time History",
+        project=project,
+    )
+    try:
+        dialog._ground_motion_values[1] = [0.0, 0.5, -0.5]
+        dialog._ground_motion_values[2] = [0.0, 0.2, -0.2]
+        dialog.gm_unit.setCurrentText("g")
+        dialog.gm_scale_mode.setCurrentIndex(
+            dialog.gm_scale_mode.findData("target_common_pga")
+        )
+        dialog.gm_target_pga.setValue(0.4)
+        dialog._apply_target_pga_scaling()
+        qapp.processEvents()
+
+        assert dialog.gm_scales[1].value() == pytest.approx(0.8)
+        assert dialog.gm_scales[2].value() == pytest.approx(0.8)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_nlth_dialog_requests_mass_gravity_and_optional_damping(qapp):
+    model = StructuralModel("nlth-dialog-settings")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+
+    dialog = AnalysisTemplateDialog(
+        default_node=1,
+        units={"length": "m", "force": "kN", "time": "s"},
+        initial_template="Nonlinear Time History",
+        project=project,
+    )
+    try:
+        dialog._ground_motion_values[1] = [0.0, 0.1, 0.0]
+        dialog.nlth_preload_gravity.setChecked(False)
+        dialog.nlth_gravity_steps.setValue(20)
+        dialog.nlth_require_mass.setChecked(True)
+        dialog.nlth_use_damping.setChecked(False)
+        request = dialog.request()
+
+        assert request["preload_gravity"] is False
+        assert request["gravity_steps"] == 20
+        assert request["require_nodal_mass"] is True
+        assert request["damping_ratio"] == 0.0
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
