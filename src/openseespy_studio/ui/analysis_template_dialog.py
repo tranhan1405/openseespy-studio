@@ -40,6 +40,7 @@ from ..analysis_templates import (
 )
 from ..ground_motion_library import (
     GROUND_MOTION_LIBRARY,
+    common_scale_factor_for_target_pga,
     pga_in_g,
     parse_ground_motion_record_text,
     record_preset,
@@ -667,7 +668,14 @@ class AnalysisTemplateDialog(QDialog):
     def _build_nlth_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
+        self._nlth_directions = (
+            (1, 2, 3)
+            if self.project is None or int(self.project.model.ndm) >= 3
+            else (1, 2)
+        )
 
+        motion_group = QGroupBox("Ground motion & scaling")
+        motion_layout = QVBoxLayout(motion_group)
         shared = QFormLayout()
         self.gm_library = QComboBox()
         for preset in GROUND_MOTION_LIBRARY:
@@ -691,32 +699,36 @@ class AnalysisTemplateDialog(QDialog):
         self.gm_scale_mode = QComboBox()
         self.gm_scale_mode.addItem("Direct factor", "factor")
         self.gm_scale_mode.addItem(
-            "Target PGA per component",
+            "Target PGA · each component independently",
             "target_pga",
+        )
+        self.gm_scale_mode.addItem(
+            "Target PGA · common factor (preserve component ratios)",
+            "target_common_pga",
         )
         self.gm_target_pga = _double(0.35, 1.0e-6, 10.0, 5)
         self.gm_target_pga.setSuffix(" g")
         self.gm_target_pga.setToolTip(
-            "Each active component is independently scaled to this PGA. "
-            "Use Direct factor when component amplitude ratios must be "
-            "preserved."
+            "Independent target PGA scales each component separately. "
+            "Common-factor target PGA scales all active components by one "
+            "factor so the strongest component reaches the target."
         )
 
-        shared.addRow("Record library:", self.gm_library)
+        shared.addRow("Benchmark reference:", self.gm_library)
         shared.addRow("", self.gm_library_info)
         shared.addRow("Acceleration column:", self.gm_column)
         shared.addRow("Record dt [s]:", self.gm_dt)
         shared.addRow("Input acceleration unit:", self.gm_unit)
         shared.addRow("Scaling:", self.gm_scale_mode)
         shared.addRow("Target PGA:", self.gm_target_pga)
-        layout.addLayout(shared)
+        motion_layout.addLayout(shared)
 
         self.gm_files: dict[int, QLineEdit] = {}
         self.gm_scales: dict[int, QDoubleSpinBox] = {}
         self.gm_previews: dict[int, QLabel] = {}
         axes = {1: "X", 2: "Y", 3: "Z"}
 
-        for direction in (1, 2, 3):
+        for direction in self._nlth_directions:
             axis = axes[direction]
             form = QFormLayout()
             file_row = QWidget()
@@ -729,8 +741,14 @@ class AnalysisTemplateDialog(QDialog):
                 lambda checked=False, d=direction:
                 self._browse_ground_motion(d)
             )
+            clear = QPushButton("Clear")
+            clear.clicked.connect(
+                lambda checked=False, d=direction:
+                self._clear_ground_motion(d)
+            )
             file_layout.addWidget(edit, 1)
             file_layout.addWidget(browse)
+            file_layout.addWidget(clear)
             scale = _double(1.0)
             preview = QLabel(f"{axis}: not assigned")
             preview.setWordWrap(True)
@@ -741,13 +759,24 @@ class AnalysisTemplateDialog(QDialog):
             form.addRow(f"{axis} record:", file_row)
             form.addRow(f"{axis} scale:", scale)
             form.addRow("", preview)
-            layout.addLayout(form)
+            motion_layout.addLayout(form)
             scale.valueChanged.connect(
                 lambda _value, d=direction:
                 self._refresh_ground_motion_preview(d)
             )
 
-        damping = QFormLayout()
+        self.gm_analysis_preview = QLabel()
+        self.gm_analysis_preview.setWordWrap(True)
+        self.gm_analysis_preview.setObjectName("Muted")
+        motion_layout.addWidget(self.gm_analysis_preview)
+        layout.addWidget(motion_group)
+
+        damping_group = QGroupBox("Damping")
+        damping = QFormLayout(damping_group)
+        self.nlth_use_damping = QCheckBox(
+            "Use Rayleigh damping from two modal frequencies"
+        )
+        self.nlth_use_damping.setChecked(True)
         self.damping_ratio = _double(0.05, 0.0, 0.999999, 5)
         self.damping_mode_i = QSpinBox()
         self.damping_mode_i.setRange(1, 1000)
@@ -755,15 +784,36 @@ class AnalysisTemplateDialog(QDialog):
         self.damping_mode_j = QSpinBox()
         self.damping_mode_j.setRange(1, 1000)
         self.damping_mode_j.setValue(3)
+        damping.addRow(self.nlth_use_damping)
         damping.addRow("Rayleigh damping ratio:", self.damping_ratio)
         damping.addRow("Rayleigh mode i:", self.damping_mode_i)
         damping.addRow("Rayleigh mode j:", self.damping_mode_j)
-        layout.addLayout(damping)
+        layout.addWidget(damping_group)
+
+        stage_group = QGroupBox("Mass & gravity / staged loading")
+        stage = QFormLayout(stage_group)
+        self.nlth_require_mass = QCheckBox(
+            "Require positive nodal mass in every excitation direction"
+        )
+        self.nlth_require_mass.setChecked(True)
+        self.nlth_preload_gravity = QCheckBox(
+            "Preload existing Plain patterns and hold with loadConst"
+        )
+        self.nlth_preload_gravity.setChecked(True)
+        self.nlth_gravity_steps = QSpinBox()
+        self.nlth_gravity_steps.setRange(1, 100000)
+        self.nlth_gravity_steps.setValue(10)
+        stage.addRow("Mass check:", self.nlth_require_mass)
+        stage.addRow(self.nlth_preload_gravity)
+        stage.addRow("Gravity steps:", self.nlth_gravity_steps)
+        layout.addWidget(stage_group)
 
         note = QLabel(
-            "Assign one, two, or three components. PEER AT2 files can "
-            "supply dt automatically. Studio creates one Path TimeSeries + "
-            "UniformExcitation per active axis."
+            "Assign one, two, or three translational components (two for a "
+            "true 2D model). PEER AT2 can supply dt automatically. Studio "
+            "creates one Path TimeSeries + UniformExcitation per active axis. "
+            "OpenSees UniformExcitation nodal acceleration response is relative "
+            "to the moving support/ground."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -786,12 +836,18 @@ class AnalysisTemplateDialog(QDialog):
         self.gm_target_pga.valueChanged.connect(
             self._apply_target_pga_scaling
         )
+        self.nlth_use_damping.toggled.connect(self._sync_nlth_damping)
         self.damping_ratio.valueChanged.connect(self._update_summary)
         self.damping_mode_i.valueChanged.connect(self._update_summary)
         self.damping_mode_j.valueChanged.connect(self._update_summary)
+        self.nlth_preload_gravity.toggled.connect(self._sync_nlth_gravity)
+        self.nlth_gravity_steps.valueChanged.connect(self._update_summary)
+        self.nlth_require_mass.toggled.connect(self._update_summary)
 
         self._record_library_changed()
         self._sync_ground_motion_scale_mode()
+        self._sync_nlth_damping()
+        self._sync_nlth_gravity()
         return page
 
     def _build_modal_page(self) -> QWidget:
