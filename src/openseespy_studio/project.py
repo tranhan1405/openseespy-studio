@@ -1124,10 +1124,21 @@ class MassSourceData:
         self.tag = int(self.tag)
         self.name = str(self.name).strip() or f"Mass Source {self.tag}"
         self.include_self_mass = bool(self.include_self_mass)
-        self.load_factors = {
+        raw_load_factors = {
             int(tag): float(factor)
             for tag, factor in dict(self.load_factors).items()
-            if float(factor) > 0.0
+        }
+        if any(
+            not math.isfinite(factor) or factor < 0.0
+            for factor in raw_load_factors.values()
+        ):
+            raise ValueError(
+                "Mass source load factors must be finite and non-negative."
+            )
+        self.load_factors = {
+            tag: factor
+            for tag, factor in raw_load_factors.items()
+            if factor > 0.0
         }
         self.gravity_axis = int(self.gravity_axis)
         self.directions = tuple(
