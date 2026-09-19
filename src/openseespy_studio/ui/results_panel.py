@@ -576,6 +576,12 @@ class ResultsPanel(QWidget):
             index = self.element_quantity.findText(component)
             if index >= 0:
                 self.element_quantity.setCurrentIndex(index)
+            try:
+                self.member_force_scale.setValue(
+                    float(options.get("scale", 1.0))
+                )
+            except (TypeError, ValueError):
+                pass
             self._select_tab("Member Forces")
             return
 
@@ -583,6 +589,26 @@ class ResultsPanel(QWidget):
             self.fiber_quantity.setCurrentText(
                 "Stress" if kind == "FiberStress" else "Strain"
             )
+            element_scope = options.get("_element_scope", [])
+            if isinstance(element_scope, (list, tuple)) and element_scope:
+                try:
+                    element_tag = int(element_scope[0])
+                except (TypeError, ValueError):
+                    element_tag = None
+                if element_tag is not None:
+                    index = self.fiber_element.findData(element_tag)
+                    if index >= 0:
+                        self.fiber_element.setCurrentIndex(index)
+            section = options.get("section")
+            if section is not None:
+                try:
+                    section_number = int(section)
+                except (TypeError, ValueError):
+                    section_number = None
+                if section_number is not None:
+                    index = self.fiber_section.findData(section_number)
+                    if index >= 0:
+                        self.fiber_section.setCurrentIndex(index)
             self._select_tab("Fiber Response")
             return
 
@@ -596,6 +622,28 @@ class ResultsPanel(QWidget):
             self._select_tab("Cyclic Hysteresis")
             return
         if kind == "TimeHistory":
+            node = options.get("node")
+            if node is not None:
+                try:
+                    index = self.history_node.findData(int(node))
+                except (TypeError, ValueError):
+                    index = -1
+                if index >= 0:
+                    self.history_node.setCurrentIndex(index)
+            quantity = str(
+                options.get("quantity", "Displacement")
+            )
+            index = self.history_quantity.findText(quantity)
+            if index >= 0:
+                self.history_quantity.setCurrentIndex(index)
+            dof = options.get("dof")
+            if dof is not None:
+                try:
+                    index = self.history_dof.findData(int(dof))
+                except (TypeError, ValueError):
+                    index = -1
+                if index >= 0:
+                    self.history_dof.setCurrentIndex(index)
             self._select_tab("Time History")
             return
         if kind == "ModeShape":
