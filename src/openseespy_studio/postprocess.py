@@ -244,18 +244,6 @@ def cyclic_reversal_points(
             })
         previous_sign = sign
 
-    if count >= 2:
-        u = x[-1]
-        v = y[-1]
-        if abs(u) > 1.0e-15:
-            stiffness = abs(v / u)
-            if not reversals or int(reversals[-1]["index"]) != count - 1:
-                reversals.append({
-                    "index": float(count - 1),
-                    "displacement": u,
-                    "force": v,
-                    "secant_stiffness": stiffness,
-                })
     return reversals
 
 
