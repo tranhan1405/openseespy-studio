@@ -83,6 +83,14 @@ from .selection import SelectionManager, parse_tag_expression
 from .viewport import ModelViewport
 
 
+UNIT_PRESETS: tuple[tuple[str, dict[str, str]], ...] = (
+    ("m - kN - s", {"length": "m", "force": "kN", "time": "s"}),
+    ("m - N - s", {"length": "m", "force": "N", "time": "s"}),
+    ("mm - N - s", {"length": "mm", "force": "N", "time": "s"}),
+    ("mm - kN - s", {"length": "mm", "force": "kN", "time": "s"}),
+)
+
+
 APP_STYLE = """
 QMainWindow {
     background: #eef2f6;
@@ -1514,6 +1522,24 @@ class MainWindow(QMainWindow):
             "Edit",
             small=("undo", "redo"),
         )
+
+        self.unit_combo = QComboBox()
+        self.unit_combo.setFixedWidth(118)
+        self.unit_combo.setToolTip(
+            "OpenSees model unit convention. Existing numerical model "
+            "values are not automatically rescaled when this is changed."
+        )
+        for label, mapping in UNIT_PRESETS:
+            self.unit_combo.addItem(label, dict(mapping))
+        self.unit_combo.currentIndexChanged.connect(
+            self._change_project_units
+        )
+        add_group(
+            home,
+            "Units",
+            widgets=(self.unit_combo,),
+        )
+
         add_group(
             home,
             "Geometry",
@@ -1640,6 +1666,82 @@ class MainWindow(QMainWindow):
         brand = BrandWidget()
         brand.setMaximumWidth(185)
         ribbon.addWidget(brand)
+
+    def _unit_preset_index(self) -> int:
+        target = UnitSystem.from_mapping(self.project.units).as_mapping()
+        combo = getattr(self, "unit_combo", None)
+        if combo is None:
+            return -1
+        for index in range(combo.count()):
+            data = combo.itemData(index)
+            if isinstance(data, dict) and data == target:
+                return index
+        return -1
+
+    def _sync_unit_selector(self) -> None:
+        combo = getattr(self, "unit_combo", None)
+        if combo is None:
+            return
+        index = self._unit_preset_index()
+        if index < 0 or combo.currentIndex() == index:
+            return
+        combo.blockSignals(True)
+        try:
+            combo.setCurrentIndex(index)
+        finally:
+            combo.blockSignals(False)
+
+    def _change_project_units(self, index: int) -> None:
+        combo = getattr(self, "unit_combo", None)
+        if combo is None or index < 0:
+            return
+        raw = combo.itemData(index)
+        if not isinstance(raw, dict):
+            return
+
+        new_units = UnitSystem.from_mapping(raw).as_mapping()
+        old_units = UnitSystem.from_mapping(
+            self.project.units
+        ).as_mapping()
+        if new_units == old_units:
+            return
+
+        has_model_data = bool(
+            self.model.nodes
+            or self.model.elements
+            or self.project.nodal_loads
+            or self.project.element_loads
+            or self.project.sections
+        )
+        if has_model_data:
+            answer = QMessageBox.question(
+                self,
+                "Change Model Units",
+                (
+                    "Change the OpenSees model unit convention from "
+                    f"{old_units['length']} - {old_units['force']} - "
+                    f"{old_units['time']} to "
+                    f"{new_units['length']} - {new_units['force']} - "
+                    f"{new_units['time']}?\n\n"
+                    "Existing numerical geometry, section and load values "
+                    "will NOT be rescaled. Their physical interpretation "
+                    "will change."
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                self._sync_unit_selector()
+                return
+
+        before = self.project.to_dict()
+        self.project.units = dict(new_units)
+        self._refresh_project_metadata(
+            "Model units changed to "
+            f"{new_units['length']} - {new_units['force']} - "
+            f"{new_units['time']}"
+        )
+        self._record_project_change("Change model units", before)
 
     def _show_results_manager(self) -> None:
         self.results_panel.show_jobs()
@@ -1878,6 +1980,7 @@ class MainWindow(QMainWindow):
             f"Units: {unit_system.length}, {unit_system.force}, "
             f"{unit_system.time} · mass {unit_system.mass_label}"
         )
+        self._sync_unit_selector()
 
     def _refresh_tree(self) -> None:
         self.tree.clear()
