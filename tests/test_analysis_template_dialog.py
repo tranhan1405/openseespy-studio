@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QTableWidgetItem
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
     LoadPatternData,
+    MassSourceData,
     PrescribedDisplacementData,
     ProjectDatabase,
     TimeSeriesData,
@@ -495,6 +496,100 @@ def test_nlth_clear_disables_component_plot_button(qapp):
         qapp.processEvents()
         assert not dialog.gm_plot_buttons[1].isEnabled()
         assert not dialog.gm_plot_active.isEnabled()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+
+def test_modal_template_can_select_project_mass_source(qapp):
+    model = StructuralModel("modal-mass-source")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+    project.add_mass_source(
+        MassSourceData(
+            1,
+            "Seismic mass",
+            include_self_mass=True,
+            load_factors={},
+            gravity_axis=3,
+            directions=(1, 2),
+        )
+    )
+
+    dialog = AnalysisTemplateDialog(
+        default_node=1,
+        units=project.units,
+        initial_template="Modal",
+        project=project,
+    )
+    try:
+        assert dialog.modal_generate_mass.isChecked()
+        request = dialog.request()
+        assert request["mass_source"]["tag"] == 1
+        assert request["mass_source"]["name"] == "Seismic mass"
+        assert request["mass_source"]["directions"] == [1, 2]
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_nlth_template_can_select_project_mass_source(qapp):
+    model = StructuralModel("nlth-mass-source")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+    project.add_mass_source(
+        MassSourceData(
+            1,
+            "Seismic mass",
+            include_self_mass=False,
+            load_factors={},
+            gravity_axis=3,
+            directions=(1,),
+        )
+    )
+
+    dialog = AnalysisTemplateDialog(
+        default_node=1,
+        units=project.units,
+        initial_template="Nonlinear Time History",
+        project=project,
+    )
+    try:
+        dialog.gm_library.setCurrentIndex(
+            dialog.gm_library.findData("el-centro-1940")
+        )
+        qapp.processEvents()
+        assert dialog.nlth_generate_mass.isChecked()
+        request = dialog.request()
+        assert request["mass_source"]["tag"] == 1
+        assert request["mass_source"]["directions"] == [1]
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+
+def test_mass_source_dialog_2d_defaults_to_global_y_and_free_translations(qapp):
+    from openseespy_studio.ui.mass_source_dialog import MassSourceDialog
+
+    model = StructuralModel("mass-source-2d", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 3.0, 0.0)
+    model.set_fixity(1, (1, 1, 1))
+    project = ProjectDatabase(model=model)
+
+    dialog = MassSourceDialog(project, next_tag=1)
+    try:
+        assert dialog.gravity_axis.currentData() == 2
+        assert set(dialog.direction_checks) == {1, 2}
+        assert all(
+            check.isChecked()
+            for check in dialog.direction_checks.values()
+        )
     finally:
         dialog.close()
         dialog.deleteLater()

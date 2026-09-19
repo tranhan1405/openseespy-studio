@@ -47,8 +47,9 @@ from ..ground_motion_library import (
     record_preset,
     scale_factor_for_target_pga,
 )
-from ..project import ProjectDatabase
+from ..project import MassSourceData, ProjectDatabase
 from ..units import UnitSystem
+from .mass_source_dialog import MassSourceDialog
 
 
 def _double(
@@ -321,6 +322,7 @@ class AnalysisTemplateDialog(QDialog):
 
         self.unit_system = UnitSystem.from_mapping(units)
         self.project = project
+        self._template_mass_source_overrides: dict[str, MassSourceData] = {}
         self._ground_motion_values: dict[int, list[float]] = {
             1: [],
             2: [],
@@ -994,6 +996,27 @@ class AnalysisTemplateDialog(QDialog):
             "Require positive nodal mass in every excitation direction"
         )
         self.nlth_require_mass.setChecked(True)
+
+        self.nlth_generate_mass = QCheckBox(
+            "Generate / refresh nodal mass from Mass Source before NLTH"
+        )
+        self.nlth_generate_mass.setChecked(
+            bool(self.project is not None and self.project.mass_sources)
+        )
+        self.nlth_mass_source = QComboBox()
+        self._populate_template_mass_sources(self.nlth_mass_source)
+        self.nlth_mass_configure = QPushButton("Configure Mass Source...")
+        self.nlth_mass_configure.clicked.connect(
+            lambda checked=False: self._configure_template_mass_source(
+                "NLTH",
+                self.nlth_mass_source,
+                self.nlth_mass_info,
+            )
+        )
+        self.nlth_mass_info = QLabel()
+        self.nlth_mass_info.setWordWrap(True)
+        self.nlth_mass_info.setObjectName("Muted")
+
         self.nlth_preload_gravity = QCheckBox(
             "Preload existing Plain patterns and hold with loadConst"
         )
@@ -1002,6 +1025,10 @@ class AnalysisTemplateDialog(QDialog):
         self.nlth_gravity_steps.setRange(1, 100000)
         self.nlth_gravity_steps.setValue(10)
         stage.addRow("Mass check:", self.nlth_require_mass)
+        stage.addRow(self.nlth_generate_mass)
+        stage.addRow("Mass Source:", self.nlth_mass_source)
+        stage.addRow("", self.nlth_mass_configure)
+        stage.addRow("", self.nlth_mass_info)
         stage.addRow(self.nlth_preload_gravity)
         stage.addRow("Gravity steps:", self.nlth_gravity_steps)
         layout.addWidget(stage_group)
@@ -1041,11 +1068,18 @@ class AnalysisTemplateDialog(QDialog):
         self.nlth_preload_gravity.toggled.connect(self._sync_nlth_gravity)
         self.nlth_gravity_steps.valueChanged.connect(self._update_summary)
         self.nlth_require_mass.toggled.connect(self._update_summary)
+        self.nlth_generate_mass.toggled.connect(
+            self._sync_nlth_mass_source
+        )
+        self.nlth_mass_source.currentIndexChanged.connect(
+            self._sync_nlth_mass_source
+        )
 
         self._record_library_changed()
         self._sync_ground_motion_scale_mode()
         self._sync_nlth_damping()
         self._sync_nlth_gravity()
+        self._sync_nlth_mass_source()
         return page
 
     def _build_modal_page(self) -> QWidget:
@@ -1069,9 +1103,33 @@ class AnalysisTemplateDialog(QDialog):
         )
         self.modal_require_mass.setChecked(True)
 
+        self.modal_generate_mass = QCheckBox(
+            "Generate / refresh nodal mass from Mass Source before Modal"
+        )
+        self.modal_generate_mass.setChecked(
+            bool(self.project is not None and self.project.mass_sources)
+        )
+        self.modal_mass_source = QComboBox()
+        self._populate_template_mass_sources(self.modal_mass_source)
+        self.modal_mass_configure = QPushButton("Configure Mass Source...")
+        self.modal_mass_configure.clicked.connect(
+            lambda checked=False: self._configure_template_mass_source(
+                "Modal",
+                self.modal_mass_source,
+                self.modal_mass_info,
+            )
+        )
+        self.modal_mass_info = QLabel()
+        self.modal_mass_info.setWordWrap(True)
+        self.modal_mass_info.setObjectName("Muted")
+
         form.addRow("Number of modes:", self.modal_modes)
         form.addRow("Eigen solver:", self.modal_solver)
         form.addRow("Mass check:", self.modal_require_mass)
+        form.addRow(self.modal_generate_mass)
+        form.addRow("Mass Source:", self.modal_mass_source)
+        form.addRow("", self.modal_mass_configure)
+        form.addRow("", self.modal_mass_info)
 
         note = QLabel(
             "Studio creates one Mode Shape result object per requested mode. "
@@ -1084,7 +1142,161 @@ class AnalysisTemplateDialog(QDialog):
         self.modal_modes.valueChanged.connect(self._update_summary)
         self.modal_solver.currentIndexChanged.connect(self._update_summary)
         self.modal_require_mass.toggled.connect(self._update_summary)
+        self.modal_generate_mass.toggled.connect(
+            self._sync_modal_mass_source
+        )
+        self.modal_mass_source.currentIndexChanged.connect(
+            self._sync_modal_mass_source
+        )
+        self._sync_modal_mass_source()
         return page
+
+    def _populate_template_mass_sources(
+        self,
+        combo: QComboBox,
+    ) -> None:
+        combo.clear()
+        combo.addItem("Configure new Mass Source...", None)
+        if self.project is None:
+            return
+        for tag in sorted(self.project.mass_sources):
+            source = self.project.mass_sources[tag]
+            combo.addItem(f"{tag} - {source.name}", tag)
+        if combo.count() > 1:
+            combo.setCurrentIndex(1)
+
+    def _selected_template_mass_source(
+        self,
+        context: str,
+        combo: QComboBox,
+    ) -> MassSourceData | None:
+        override = self._template_mass_source_overrides.get(context)
+        selected_tag = combo.currentData()
+        if (
+            override is not None
+            and selected_tag is not None
+            and int(selected_tag) == override.tag
+        ):
+            return override
+        if self.project is None:
+            return None
+        tag = combo.currentData()
+        if tag is None:
+            return None
+        source = self.project.mass_sources.get(int(tag))
+        if source is None:
+            return None
+        return MassSourceData.from_dict(source.to_dict())
+
+    def _configure_template_mass_source(
+        self,
+        context: str,
+        combo: QComboBox,
+        label: QLabel,
+    ) -> None:
+        if self.project is None:
+            QMessageBox.information(
+                self,
+                "Mass Source",
+                "Open a project model before configuring a Mass Source.",
+            )
+            return
+        source = self._selected_template_mass_source(context, combo)
+        dialog = MassSourceDialog(
+            self.project,
+            source=source,
+            next_tag=self.project.next_mass_source_tag(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        configured = dialog.data()
+        self._template_mass_source_overrides[context] = configured
+        index = combo.findData(configured.tag)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+        else:
+            combo.insertItem(
+                0,
+                f"{configured.tag} - {configured.name} (configured)",
+                configured.tag,
+            )
+            combo.setCurrentIndex(0)
+        label.setText(
+            f"Configured: {configured.name} · self mass "
+            f"{'ON' if configured.include_self_mass else 'OFF'} · "
+            f"{len(configured.load_factors)} load pattern(s)."
+        )
+        self._update_summary()
+
+    def _sync_nlth_mass_source(self, *_args) -> None:
+        enabled = self.nlth_generate_mass.isChecked()
+        self.nlth_mass_source.setEnabled(enabled)
+        self.nlth_mass_configure.setEnabled(enabled)
+        if enabled and self._selected_template_mass_source(
+            "NLTH",
+            self.nlth_mass_source,
+        ) is None:
+            self.nlth_mass_info.setText(
+                "No Mass Source configured yet. Click Configure Mass Source."
+            )
+        elif enabled:
+            source = self._selected_template_mass_source(
+                "NLTH",
+                self.nlth_mass_source,
+            )
+            self.nlth_mass_info.setText(
+                f"Will regenerate mass from: {source.name}"
+                if source is not None
+                else ""
+            )
+        else:
+            self.nlth_mass_info.setText(
+                "Template will use the nodal/element mass already in the model."
+            )
+        self._update_summary()
+
+    def _sync_modal_mass_source(self, *_args) -> None:
+        enabled = self.modal_generate_mass.isChecked()
+        self.modal_mass_source.setEnabled(enabled)
+        self.modal_mass_configure.setEnabled(enabled)
+        if enabled and self._selected_template_mass_source(
+            "Modal",
+            self.modal_mass_source,
+        ) is None:
+            self.modal_mass_info.setText(
+                "No Mass Source configured yet. Click Configure Mass Source."
+            )
+        elif enabled:
+            source = self._selected_template_mass_source(
+                "Modal",
+                self.modal_mass_source,
+            )
+            self.modal_mass_info.setText(
+                f"Will regenerate mass from: {source.name}"
+                if source is not None
+                else ""
+            )
+        else:
+            self.modal_mass_info.setText(
+                "Template will use the nodal/element mass already in the model."
+            )
+        self._update_summary()
+
+    def _mass_source_request(
+        self,
+        context: str,
+        enabled: bool,
+        combo: QComboBox,
+    ) -> dict[str, object] | None:
+        if not enabled:
+            return None
+        source = self._selected_template_mass_source(context, combo)
+        if source is None:
+            raise ValueError(
+                "Mass generation is enabled, but no Mass Source is configured."
+            )
+        return source.to_dict()
 
     def _sync_template(self, kind: str) -> None:
         index = {
@@ -2079,6 +2291,11 @@ class AnalysisTemplateDialog(QDialog):
                     if self.modal_require_mass.isChecked()
                     else "mass check OFF"
                 )
+                + (
+                    " · Mass Source regenerate ON"
+                    if self.modal_generate_mass.isChecked()
+                    else " · use current model mass"
+                )
             )
         elif kind == "Pushover":
             target = self._pushover_target_displacement()
@@ -2171,11 +2388,16 @@ class AnalysisTemplateDialog(QDialog):
                 if self.nlth_require_mass.isChecked()
                 else "mass check OFF"
             )
+            mass_source = (
+                "Mass Source regenerate ON"
+                if self.nlth_generate_mass.isChecked()
+                else "use current model mass"
+            )
             text = (
                 f"NLTH {'+'.join(active) if active else '-'} · "
                 f"duration≈{duration:g} s · dt={self.gm_dt.value():g} s · "
                 f"{damping} · {gravity} · {mass_check} · "
-                f"{self.solver.currentText()} solver"
+                f"{mass_source} · {self.solver.currentText()} solver"
             )
         self.summary.setText(text)
 
@@ -2194,6 +2416,11 @@ class AnalysisTemplateDialog(QDialog):
                     "num_modes": self.modal_modes.value(),
                     "eigen_solver": str(self.modal_solver.currentData()),
                     "require_nodal_mass": self.modal_require_mass.isChecked(),
+                    "mass_source": self._mass_source_request(
+                        "Modal",
+                        self.modal_generate_mass.isChecked(),
+                        self.modal_mass_source,
+                    ),
                 }
             )
         elif kind == "Pushover":
@@ -2287,6 +2514,11 @@ class AnalysisTemplateDialog(QDialog):
                     "preload_gravity": self.nlth_preload_gravity.isChecked(),
                     "gravity_steps": self.nlth_gravity_steps.value(),
                     "require_nodal_mass": self.nlth_require_mass.isChecked(),
+                    "mass_source": self._mass_source_request(
+                        "NLTH",
+                        self.nlth_generate_mass.isChecked(),
+                        self.nlth_mass_source,
+                    ),
                 }
             )
         return base

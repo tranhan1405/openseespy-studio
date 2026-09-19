@@ -55,12 +55,13 @@ from ..generator import FrameGridSpec, cyclic_displacement_steps, generate_frame
 from ..jobs import JobRecord
 from ..live_convergence import parse_opensees_convergence_line
 from ..model import StructuralModel, classify_fixity
+from ..mass_source import apply_mass_source, evaluate_mass_source
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
 from ..result_catalog import (
     convergence_result_label,
     result_choices_for_analysis,
 )
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData
 from ..runtime import build_worker_pythonpath, probe_opensees_runtime
 from ..validation import ValidationIssue, validate_project
 from ..units import UnitSystem
@@ -81,6 +82,7 @@ from .geometry_dialogs import (
 from .history import ProjectSnapshotCommand
 from .load_dialogs import ElementLoadDialog, LoadPatternDialog, MassDialog, NodalLoadDialog, PrescribedDisplacementDialog, TimeSeriesDialog
 from .material_dialog import MaterialDialog
+from .mass_source_dialog import MassSourceDialog
 from .model_check_dialog import ModelCheckDialog
 from .recorder_dialog import RecorderDialog
 from .section_dialog import SectionDialog
@@ -1522,7 +1524,20 @@ class MainWindow(QMainWindow):
             self._create_connection,
             "Create zeroLength or twoNodeLink spring / link",
         )
-        self._make_action("mass", "Mass...", "load", self._assign_mass, "Assign nodal mass")
+        self._make_action(
+            "mass",
+            "Nodal Mass...",
+            "load",
+            self._assign_mass,
+            "Assign nodal mass manually",
+        )
+        self._make_action(
+            "mass_source",
+            "Mass Source...",
+            "load",
+            self._create_mass_source,
+            "Generate seismic mass from self mass and selected load patterns",
+        )
         self._make_action("time_series", "Time Series...", "timeseries", self._create_time_series, "Create time series")
         self._make_action("load_pattern", "Load Pattern...", "load", self._create_load_pattern, "Create load pattern or ground motion")
         self._make_action("nodal_load", "Nodal Load...", "load", self._create_nodal_load, "Create nodal load")
@@ -1613,6 +1628,7 @@ class MainWindow(QMainWindow):
         menus["Loads"].addAction(self.actions["connection"])
         menus["Loads"].addSeparator()
         menus["Loads"].addAction(self.actions["mass"])
+        menus["Loads"].addAction(self.actions["mass_source"])
         menus["Loads"].addAction(self.actions["time_series"])
         menus["Loads"].addAction(self.actions["load_pattern"])
         menus["Loads"].addAction(self.actions["nodal_load"])
@@ -1825,6 +1841,7 @@ class MainWindow(QMainWindow):
             large=("load_pattern",),
             small=(
                 "mass",
+                "mass_source",
                 "time_series",
                 "nodal_load",
                 "prescribed_displacement",
@@ -2580,6 +2597,26 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("node", tag))
             masses_root.addChild(item)
 
+        mass_sources_root = QTreeWidgetItem([
+            f"Mass Sources ({len(self.project.mass_sources)})"
+        ])
+        mass_sources_root.setIcon(0, studio_icon("load"))
+        mass_sources_root.setData(
+            0,
+            Qt.UserRole,
+            ("mass_sources_root", None),
+        )
+        mass_sources_root.setExpanded(True)
+        root.addChild(mass_sources_root)
+        for tag in sorted(self.project.mass_sources):
+            source = self.project.mass_sources[tag]
+            item = QTreeWidgetItem([
+                f"{source.name} [{tag}]"
+            ])
+            item.setIcon(0, studio_icon("load"))
+            item.setData(0, Qt.UserRole, ("mass_source", tag))
+            mass_sources_root.addChild(item)
+
         series_root = QTreeWidgetItem([f"Time Series ({len(self.project.time_series)})"])
         series_root.setIcon(0, studio_icon("timeseries"))
         series_root.setData(0, Qt.UserRole, ("time_series_root", None))
@@ -2788,6 +2825,7 @@ class MainWindow(QMainWindow):
         nodal_load_tag: int | None = None
         prescribed_displacement_tag: int | None = None
         element_load_tag: int | None = None
+        mass_source_tag: int | None = None
         analysis_tag: int | None = None
         recorder_tag: int | None = None
         solution_result_tag: int | None = None
@@ -2834,6 +2872,8 @@ class MainWindow(QMainWindow):
                 prescribed_displacement_tag = int(tag)
             elif kind == "element_load":
                 element_load_tag = int(tag)
+            elif kind == "mass_source":
+                mass_source_tag = int(tag)
             elif kind == "analysis":
                 analysis_tag = int(tag)
             elif kind == "analysis_settings":
@@ -2904,6 +2944,8 @@ class MainWindow(QMainWindow):
             )
         elif element_load_tag is not None:
             self._show_element_load_properties(element_load_tag)
+        elif mass_source_tag is not None:
+            self._show_mass_source_properties(mass_source_tag)
         elif analysis_tag is not None:
             self._show_analysis_properties(analysis_tag)
         elif recorder_tag is not None:
@@ -3426,6 +3468,155 @@ class MainWindow(QMainWindow):
             f"Cleared mass on {len(updated)} node(s)"
         )
         self._record_project_change("Clear nodal mass", before)
+
+    def _create_mass_source(self) -> None:
+        dialog = MassSourceDialog(
+            self.project,
+            next_tag=self.project.next_mass_source_tag(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            source = dialog.data()
+            self.project.add_mass_source(source)
+            summary = apply_mass_source(self.project, source)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Mass Source", str(exc))
+            self._refresh_all()
+            return
+        self._refresh_project_metadata(
+            f"Created mass source {source.tag}; "
+            f"generated mass {summary.total_mass:.6g}"
+        )
+        self._record_project_change(
+            f"Create mass source {source.tag}",
+            before,
+        )
+        self._refresh_tree()
+        self._show_mass_source_properties(source.tag)
+
+    def _edit_mass_source(self, tag: int) -> None:
+        source = self.project.mass_sources.get(int(tag))
+        if source is None:
+            return
+        dialog = MassSourceDialog(
+            self.project,
+            source=source,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated = dialog.data()
+            self.project.update_mass_source(tag, updated)
+            summary = apply_mass_source(self.project, updated)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Mass Source", str(exc))
+            self._refresh_all()
+            return
+        self._refresh_project_metadata(
+            f"Updated mass source {updated.tag}; "
+            f"generated mass {summary.total_mass:.6g}"
+        )
+        self._record_project_change(
+            f"Edit mass source {tag}",
+            before,
+        )
+        self._refresh_tree()
+        self._show_mass_source_properties(updated.tag)
+
+    def _apply_mass_source(self, tag: int) -> None:
+        source = self.project.mass_sources.get(int(tag))
+        if source is None:
+            return
+        before = self.project.to_dict()
+        try:
+            summary = apply_mass_source(self.project, source)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Mass Source", str(exc))
+            return
+        self._refresh_project_metadata(
+            f"Applied mass source {tag}; "
+            f"generated mass {summary.total_mass:.6g}"
+        )
+        self._record_project_change(
+            f"Apply mass source {tag}",
+            before,
+        )
+        self._refresh_tree()
+        self._show_mass_source_properties(tag)
+
+    def _delete_mass_source(self, tag: int) -> None:
+        source = self.project.mass_sources.get(int(tag))
+        if source is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete Mass Source",
+            (
+                f"Delete mass source '{source.name}'?\n\n"
+                "Current nodal mass values will be kept. They can be cleared "
+                "manually or replaced by another Mass Source."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        before = self.project.to_dict()
+        self.project.remove_mass_source(tag)
+        self._refresh_project_metadata(f"Deleted mass source {tag}")
+        self._record_project_change(
+            f"Delete mass source {tag}",
+            before,
+        )
+
+    def _show_mass_source_properties(self, tag: int) -> None:
+        source = self.project.mass_sources.get(int(tag))
+        if source is None:
+            return
+        try:
+            summary = evaluate_mass_source(self.project, source)
+            unit = UnitSystem.from_mapping(self.project.units).mass_label
+            total = f"{summary.total_mass:.6g} {unit}"
+            self_mass = f"{summary.self_mass:.6g} {unit}"
+            load_mass = f"{summary.load_mass:.6g} {unit}"
+        except ValueError as exc:
+            total = self_mass = load_mass = f"Error: {exc}"
+        patterns = ", ".join(
+            f"{pattern_tag}×{factor:g}"
+            for pattern_tag, factor in sorted(source.load_factors.items())
+        ) or "-"
+        dofs = ", ".join(
+            ("UX", "UY", "UZ")[dof - 1]
+            for dof in source.directions
+        )
+        axis = ("X", "Y", "Z")[source.gravity_axis - 1]
+        self.properties_panel.set_properties(
+            "Mass Source",
+            [
+                ("Tag", source.tag),
+                ("Name", source.name),
+                ("Self mass", "Yes" if source.include_self_mass else "No"),
+                ("Load patterns", patterns),
+                ("Gravity axis", axis),
+                ("Mass directions", dofs),
+                ("Generated total", total),
+                ("From self mass", self_mass),
+                ("From loads", load_mass),
+                (
+                    "Regeneration",
+                    "Replaces selected translational nodal mass components",
+                ),
+            ],
+        )
 
     def _create_time_series(self) -> None:
         dialog = TimeSeriesDialog(
@@ -5673,6 +5864,30 @@ class MainWindow(QMainWindow):
         try:
             request = dialog.request()
             kind = str(request["template"])
+
+            raw_mass_source = request.get("mass_source")
+            if isinstance(raw_mass_source, dict):
+                source = MassSourceData.from_dict(
+                    dict(raw_mass_source)
+                )
+                if source.tag in self.project.mass_sources:
+                    self.project.update_mass_source(
+                        source.tag,
+                        source,
+                    )
+                else:
+                    self.project.add_mass_source(source)
+                mass_summary = apply_mass_source(
+                    self.project,
+                    source,
+                )
+                if mass_summary.total_mass <= 1.0e-15:
+                    raise ValueError(
+                        "The configured Mass Source generated zero nodal "
+                        "mass. Check material density and selected load "
+                        "patterns/factors."
+                    )
+
             if kind == "Modal":
                 plan = build_modal_template(
                     self.project,
@@ -7842,6 +8057,34 @@ class MainWindow(QMainWindow):
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
+        if kind == "mass_sources_root":
+            action = menu.addAction("New Mass Source...")
+            action.triggered.connect(self._create_mass_source)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "mass_source":
+            tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_mass_source_properties(tag)
+            )
+            apply_action = menu.addAction("Apply / Regenerate Mass")
+            apply_action.triggered.connect(
+                lambda: self._apply_mass_source(tag)
+            )
+            edit = menu.addAction("Edit...")
+            edit.triggered.connect(
+                lambda: self._edit_mass_source(tag)
+            )
+            menu.addSeparator()
+            delete = menu.addAction("Delete Definition")
+            delete.triggered.connect(
+                lambda: self._delete_mass_source(tag)
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
         if kind == "masses_root":
             assign_action = menu.addAction("Assign to Current Node Selection...")
             assign_action.triggered.connect(self._assign_mass)
@@ -8052,6 +8295,8 @@ class MainWindow(QMainWindow):
             self._edit_prescribed_displacement(int(value))
         elif kind == "element_load":
             self._edit_element_load(int(value))
+        elif kind == "mass_source":
+            self._edit_mass_source(int(value))
         elif kind in {"analysis", "analysis_settings"}:
             self._edit_analysis(int(value))
         elif kind == "job":
