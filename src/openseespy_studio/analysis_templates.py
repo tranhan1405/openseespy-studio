@@ -267,11 +267,13 @@ def lateral_load_weights(
     if kind == "Uniform":
         raw = {tag: 1.0 for tag in tags}
     elif kind == "Triangular":
-        z_values = [
-            float(project.model.nodes[tag].xyz[2])
-            for tag in tags
-        ]
-        z0 = min(z_values)
+        # Reference the actual structural base, not the lowest active
+        # lateral-load node. Otherwise the first free floor receives zero
+        # lateral force when supported base nodes are excluded from tags.
+        z0 = min(
+            float(node.xyz[2])
+            for node in project.model.nodes.values()
+        )
         raw = {
             tag: max(
                 float(project.model.nodes[tag].xyz[2]) - z0,
