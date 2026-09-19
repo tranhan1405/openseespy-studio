@@ -487,14 +487,15 @@ def analysis_to_openseespy(
         "    except Exception:",
         "        _iterations = -1",
         "    try:",
-        "        _norms = ops.testNorms()",
+        "        _norms = [float(v) for v in (ops.testNorms() or [])]",
         "        _norm = float(_norms[-1]) if _norms else None",
         "    except Exception:",
+        "        _norms = []",
         "        _norm = None",
-        "    return _iterations, _norm",
+        "    return _iterations, _norm, _norms",
         "",
         "_studio_results = {",
-        "    'schema_version': 7,",
+        "    'schema_version': 8,",
         "    'analysis': {",
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
@@ -580,7 +581,7 @@ def analysis_to_openseespy(
 
     lines.append(
         f"ops.test('{settings.test}', {settings.tolerance:g}, "
-        f"{settings.max_iterations})"
+        f"{settings.max_iterations}, 1)"
     )
     lines.append(f"ops.algorithm('{settings.algorithm}')")
     lines.append(f"_studio_primary_algorithm = {settings.algorithm!r}")
@@ -631,6 +632,11 @@ def analysis_to_openseespy(
     lines.append(f"for _studio_step in range({total_steps}):")
     lines.append("    _studio_step_no = _studio_step + 1")
     lines.append("    _studio_attempts = []")
+    lines.append(
+        "    _studio_emit('step_start', step=_studio_step_no, "
+        f"total={total_steps}, algorithm=_studio_primary_algorithm, "
+        f"test={settings.test!r}, tolerance={settings.tolerance:g})"
+    )
     if settings.analysis_type == "Cyclic":
         lines.append(
             "    _studio_disp_increment = "
@@ -644,13 +650,15 @@ def analysis_to_openseespy(
     lines.append("    _studio_active_algorithm = _studio_primary_algorithm")
     lines.append(f"    _studio_ok = {analyze_call}")
     lines.append(
-        "    _studio_iterations, _studio_norm = _studio_test_state()"
+        "    _studio_iterations, _studio_norm, "
+        "_studio_norm_history = _studio_test_state()"
     )
     lines.append(
         "    _studio_attempts.append({"
         "'algorithm': _studio_active_algorithm, "
         "'iterations': _studio_iterations, "
         "'norm': _studio_norm, "
+        "'norm_history': list(_studio_norm_history), "
         "'code': int(_studio_ok), "
         "'success': bool(_studio_ok == 0)"
         "})"
@@ -681,8 +689,8 @@ def analysis_to_openseespy(
         lines.append("            ops.algorithm(_studio_alg)")
         lines.append(f"            _studio_ok = {analyze_call}")
         lines.append(
-            "            _studio_iterations, _studio_norm = "
-            "_studio_test_state()"
+            "            _studio_iterations, _studio_norm, "
+            "_studio_norm_history = _studio_test_state()"
         )
         lines.append(
             "            _studio_attempts.append({"
