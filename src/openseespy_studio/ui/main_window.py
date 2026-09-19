@@ -463,6 +463,26 @@ class FrameGridPanel(QWidget):
         title.setObjectName("PanelTitle")
         layout.addWidget(title)
 
+        dimension_form = QFormLayout()
+        self.dimension = QComboBox()
+        self.dimension.addItem("3D Frame Grid", "3D")
+        self.dimension.addItem("2D Frame (X-Z)", "2D")
+        self.dimension.setToolTip(
+            "2D Frame creates one X-Z plane and automatically restrains "
+            "UY, RX and RZ at every node so the current 3D-compatible "
+            "Studio backend behaves as a planar frame."
+        )
+        dimension_form.addRow("Frame type:", self.dimension)
+        layout.addLayout(dimension_form)
+
+        self.planar_note = QLabel(
+            "2D mode: one X-Z frame plane; out-of-plane DOFs are "
+            "restrained automatically."
+        )
+        self.planar_note.setWordWrap(True)
+        self.planar_note.setObjectName("Muted")
+        layout.addWidget(self.planar_note)
+
         mode_row = QHBoxLayout()
         self.rectangular = QPushButton("Rectangular Grid")
         self.rectangular.setCheckable(True)
@@ -504,6 +524,14 @@ class FrameGridPanel(QWidget):
         self.beams.setChecked(True)
         layout.addWidget(self.columns)
         layout.addWidget(self.beams)
+
+        self.planar_base_support = QComboBox()
+        self.planar_base_support.addItems(["Fixed", "Pinned"])
+        base_form = QFormLayout()
+        base_form.addRow("2D base support:", self.planar_base_support)
+        base_widget = QWidget()
+        base_widget.setLayout(base_form)
+        layout.addWidget(base_widget)
 
         self.column_section = QComboBox()
         self.beam_section = QComboBox()
@@ -548,6 +576,25 @@ class FrameGridPanel(QWidget):
         buttons.addWidget(generate)
         buttons.addWidget(close)
         root.addLayout(buttons)
+
+        self.dimension.currentIndexChanged.connect(
+            self._sync_dimension_mode
+        )
+        self._sync_dimension_mode()
+
+    def set_planar_2d(self, enabled: bool) -> None:
+        index = self.dimension.findData("2D" if enabled else "3D")
+        if index >= 0:
+            self.dimension.setCurrentIndex(index)
+        self._sync_dimension_mode()
+
+    def _sync_dimension_mode(self, *_args) -> None:
+        planar = self.dimension.currentData() == "2D"
+        self.ny.setEnabled(not planar)
+        self.dy.setEnabled(not planar)
+        self.planar_base_support.setEnabled(planar)
+        self.planar_note.setVisible(planar)
+        self.circular.setEnabled(False)
 
     @staticmethod
     def _separator() -> QFrame:
@@ -673,11 +720,16 @@ class FrameGridPanel(QWidget):
             start_element_tag=self.element_tag.value(),
             create_columns=self.columns.isChecked(),
             create_beams_x=self.beams.isChecked(),
-            create_beams_y=self.beams.isChecked(),
+            create_beams_y=(
+                self.beams.isChecked()
+                and self.dimension.currentData() != "2D"
+            ),
             column_section_tag=self.column_section.currentData(),
             beam_section_tag=self.beam_section.currentData(),
             column_transf_tag=self.column_transformation.currentData(),
             beam_transf_tag=self.beam_transformation.currentData(),
+            planar_2d=self.dimension.currentData() == "2D",
+            planar_base_support=self.planar_base_support.currentText(),
         ))
 
 
