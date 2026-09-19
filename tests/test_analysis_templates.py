@@ -8,10 +8,12 @@ from openseespy_studio.analysis_templates import (
     build_nlth_template,
     build_pushover_template,
     expand_cyclic_protocol,
+    infer_height_axis,
     lateral_load_weights,
     parse_cyclic_protocol_text,
     parse_ground_motion_text,
     parse_node_weight_text,
+    structure_reference_height,
 )
 from openseespy_studio.generator import (
     analysis_to_openseespy,
@@ -91,6 +93,80 @@ def test_pushover_template_creates_normalized_lateral_pattern_and_results():
     assert any(result.result_type == "PushoverCurve" for result in plan.results)
     assert any(result.result_type == "HingeState" for result in plan.results)
 
+
+
+def test_pushover_height_axis_supports_2d_xy_frames():
+    model = StructuralModel("2d-frame", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 3.0, 0.0)
+    model.add_node(3, 0.0, 6.0, 0.0)
+    model.set_fixity(1, (1, 1, 1, 1, 1, 1))
+    project = ProjectDatabase(model=model)
+
+    assert infer_height_axis(project) == 2
+    assert math.isclose(
+        structure_reference_height(
+            project,
+            control_node=3,
+            height_axis=2,
+        ),
+        6.0,
+    )
+
+    weights = lateral_load_weights(
+        project,
+        dof=1,
+        distribution="Triangular",
+        height_axis=2,
+    )
+    assert math.isclose(sum(weights.values()), 1.0)
+    assert weights[3] > weights[2]
+
+
+def test_pushover_template_can_reuse_existing_driver_pattern_and_gravity_options():
+    project = project_with_two_storeys()
+    series = TimeSeriesData(
+        10,
+        "Existing lateral series",
+        "Linear",
+        factor=1.0,
+    )
+    pattern = LoadPatternData(
+        10,
+        "Existing lateral",
+        "Plain",
+        time_series_tag=10,
+    )
+    load = NodalLoadData(
+        10,
+        "Existing lateral top",
+        10,
+        3,
+        (1.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    )
+    project.add_time_series(series)
+    project.add_load_pattern(pattern)
+    project.add_nodal_load(load)
+
+    plan = build_pushover_template(
+        project,
+        name="Reuse lateral",
+        control_node=3,
+        control_dof=1,
+        target_displacement=0.06,
+        max_increment=0.01,
+        driver_pattern_tag=10,
+        preload_gravity=False,
+        gravity_steps=25,
+    )
+
+    assert plan.time_series == []
+    assert plan.load_patterns == []
+    assert plan.nodal_loads == []
+    assert plan.analysis.deferred_pattern_tags == [10]
+    assert plan.analysis.preload_gravity is False
+    assert plan.analysis.gravity_steps == 25
+    assert "existing pattern 10" in plan.summary
 
 def test_cyclic_template_uses_protocol_builder_targets():
     project = project_with_two_storeys()
