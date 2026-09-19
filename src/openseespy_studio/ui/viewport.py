@@ -28,7 +28,10 @@ except ImportError:
     vtkPointPicker = None
 
 from ..beam_loads import element_local_axes, resolve_self_weight_local
-from ..deformed_geometry import build_swept_member_geometry
+from ..deformed_geometry import (
+    build_swept_member_geometry,
+    section_axis_strength_labels,
+)
 from ..model import StructuralModel, classify_fixity
 from ..postprocess import component_end_resultants, nodal_result_scalar
 from ..project import (
@@ -80,8 +83,10 @@ class ModelViewport(QWidget):
             "nodal_loads": False,
             "element_loads": False,
             "prescribed_displacements": False,
+            "section_axes": False,
             "load_values": True,
         }
+        self._model_representation = "actual_section"
         self._selection_filter = "all"
         self._selected_nodes: set[int] = set()
         self._selected_elements: set[int] = set()
@@ -611,6 +616,31 @@ class ModelViewport(QWidget):
             zlabel="Z",
         )
 
+    @staticmethod
+    def _normalized_model_representation(value: str) -> str:
+        representation = str(value or "actual_section").strip().lower()
+        aliases = {
+            "actual": "actual_section",
+            "actual section": "actual_section",
+            "section": "actual_section",
+            "line": "centerline",
+        }
+        representation = aliases.get(representation, representation)
+        if representation not in {"actual_section", "tube", "centerline"}:
+            return "actual_section"
+        return representation
+
+    def set_model_representation(self, value: str) -> None:
+        representation = self._normalized_model_representation(value)
+        if representation == self._model_representation:
+            return
+        self._model_representation = representation
+        if self._model is not None:
+            self._rebuild_visible_scene()
+
+    def model_representation(self) -> str:
+        return self._model_representation
+
     def set_display_data(
         self,
         *,
@@ -626,6 +656,11 @@ class ModelViewport(QWidget):
         units: dict[str, str] | None = None,
         refresh: bool = True,
     ) -> None:
+        geometry_changed = (
+            dict(transformations or {}) != self._transformations
+            or dict(sections or {}) != self._sections
+            or dict(materials or {}) != self._materials
+        )
         self._nodal_loads = dict(nodal_loads or {})
         self._prescribed_displacements = dict(
             prescribed_displacements or {}
@@ -637,7 +672,16 @@ class ModelViewport(QWidget):
         if units is not None:
             self._units = dict(units)
         if refresh:
-            self._refresh_load_overlays()
+            if (
+                geometry_changed
+                and self._model is not None
+                and self._model_representation == "actual_section"
+            ):
+                self._rebuild_visible_scene()
+            else:
+                self._refresh_load_overlays()
+                if geometry_changed and self._display_options["section_axes"]:
+                    self._update_display_option("section_axes")
 
     def set_display_option(self, name: str, enabled: bool) -> None:
         if name not in self._display_options:
@@ -790,26 +834,80 @@ class ModelViewport(QWidget):
             capping=True,
         )
 
+    def _actual_section_member_mesh(self, element):
+        if self._model is None:
+            return None
+        if element.section_tag is None or element.transf_tag is None:
+            return None
+        section = self._sections.get(element.section_tag)
+        transformation = self._transformations.get(element.transf_tag)
+        if section is None or transformation is None:
+            return None
+        try:
+            _, local_y, local_z = element_local_axes(
+                self._model,
+                element,
+                transformation,
+            )
+            zeros = (0.0,) * max(int(self._model.ndf), 3)
+            geometry = build_swept_member_geometry(
+                section,
+                self._model.nodes[element.i].xyz,
+                self._model.nodes[element.j].xyz,
+                local_y,
+                local_z,
+                zeros,
+                zeros,
+                ndm=self._model.ndm,
+                scale=1.0,
+                stations=3,
+                smooth=False,
+            )
+        except (KeyError, TypeError, ValueError):
+            geometry = None
+        if geometry is None:
+            return None
+        mesh = pv.PolyData(geometry.points)
+        mesh.faces = geometry.faces
+        return mesh
+
     def _combined_element_meshes(self, visible_tags: set[int], span: float):
         if self._model is None:
             return {}
         groups: dict[str, list[object]] = {"column": [], "beam": []}
         beam_size = max(span * 0.010, 0.08)
         column_size = max(span * 0.0115, 0.09)
+        representation = self._normalized_model_representation(
+            self._model_representation
+        )
 
         for tag in visible_tags:
             element = self._model.elements[tag]
             start = self._model.nodes[element.i].xyz
             end = self._model.nodes[element.j].xyz
             is_column = element.group == "column"
-            mesh = self._member_mesh(
-                start,
-                end,
-                column_size if is_column else beam_size,
-            )
+            mesh = None
+
+            if representation == "actual_section":
+                mesh = self._actual_section_member_mesh(element)
+
+            if mesh is None and representation == "centerline":
+                mesh = pv.Line(start, end)
+
+            if mesh is None:
+                mesh = self._member_mesh(
+                    start,
+                    end,
+                    column_size if is_column else beam_size,
+                )
+
             if mesh is None:
                 continue
-            mesh.cell_data["element_tag"] = np.full(mesh.n_cells, tag, dtype=np.int64)
+            mesh.cell_data["element_tag"] = np.full(
+                mesh.n_cells,
+                tag,
+                dtype=np.int64,
+            )
             groups["column" if is_column else "beam"].append(mesh)
 
         combined = {}
@@ -875,8 +973,15 @@ class ModelViewport(QWidget):
                 mesh,
                 color=group_colors[group_name],
                 edge_color="#243b52",
-                show_edges=True,
-                line_width=1,
+                show_edges=(
+                    self._model_representation != "centerline"
+                ),
+                line_width=(
+                    3 if self._model_representation == "centerline" else 1
+                ),
+                render_lines_as_tubes=(
+                    self._model_representation == "centerline"
+                ),
                 smooth_shading=False,
                 pickable=True,
                 render=False,
@@ -1170,6 +1275,9 @@ class ModelViewport(QWidget):
             "display-prescribed-displacement-rotation-arcs",
             "display-prescribed-displacement-rotation-heads",
             "display-prescribed-displacement-labels",
+            "display-section-axis-y",
+            "display-section-axis-z",
+            "display-section-axis-labels",
         ):
             self._remove_overlay(name)
 
@@ -1645,6 +1753,94 @@ class ModelViewport(QWidget):
         )
         return global_vector, prefix
 
+    def _draw_section_axes(self) -> None:
+        if self._model is None:
+            return
+
+        axis_length = max(self._model_span() * 0.075, 0.10)
+        y_records = []
+        z_records = []
+        label_points = []
+        labels = []
+
+        for tag in sorted(self._visible_element_tags()):
+            element = self._model.elements.get(tag)
+            if element is None or element.transf_tag is None:
+                continue
+            transformation = self._transformations.get(element.transf_tag)
+            if transformation is None:
+                continue
+            node_i = self._model.nodes.get(element.i)
+            node_j = self._model.nodes.get(element.j)
+            if node_i is None or node_j is None:
+                continue
+            try:
+                _, local_y, local_z = element_local_axes(
+                    self._model,
+                    element,
+                    transformation,
+                )
+            except ValueError:
+                continue
+
+            center = np.asarray(
+                [
+                    0.5 * (float(a) + float(b))
+                    for a, b in zip(node_i.xyz, node_j.xyz)
+                ],
+                dtype=float,
+            )
+            y_axis = np.asarray(local_y, dtype=float)
+            z_axis = np.asarray(local_z, dtype=float)
+            y_records.append((center, y_axis, axis_length))
+            z_records.append((center, z_axis, axis_length))
+
+            section = (
+                self._sections.get(element.section_tag)
+                if element.section_tag is not None
+                else None
+            )
+            y_label, z_label = section_axis_strength_labels(
+                section,
+                self._materials,
+            )
+            label_points.extend(
+                (
+                    center + y_axis * axis_length * 1.08,
+                    center + z_axis * axis_length * 1.08,
+                )
+            )
+            labels.extend((y_label, z_label))
+
+        y_mesh = self._batched_arrow_mesh(y_records)
+        if y_mesh is not None:
+            self.plotter.add_mesh(
+                y_mesh,
+                name="display-section-axis-y",
+                color="#2e8b57",
+                smooth_shading=False,
+                pickable=False,
+                render=False,
+            )
+        z_mesh = self._batched_arrow_mesh(z_records)
+        if z_mesh is not None:
+            self.plotter.add_mesh(
+                z_mesh,
+                name="display-section-axis-z",
+                color="#4169e1",
+                smooth_shading=False,
+                pickable=False,
+                render=False,
+            )
+        self._add_annotation_labels(
+            label_points,
+            labels,
+            name="display-section-axis-labels",
+            text_color="#334155",
+            font_size=9,
+            always_visible=True,
+        )
+
     def _draw_element_loads(self) -> None:
         if self._model is None or not self._element_loads:
             return
@@ -1783,6 +1979,11 @@ class ModelViewport(QWidget):
                 "display-prescribed-displacement-rotation-heads",
                 "display-prescribed-displacement-labels",
             ),
+            "section_axes": (
+                "display-section-axis-y",
+                "display-section-axis-z",
+                "display-section-axis-labels",
+            ),
             "load_values": (
                 "display-nodal-load-labels",
                 "display-element-load-labels",
@@ -1810,6 +2011,8 @@ class ModelViewport(QWidget):
             and self._display_options[name]
         ):
             self._draw_prescribed_displacements()
+        elif name == "section_axes" and self._display_options[name]:
+            self._draw_section_axes()
         elif name == "load_values" and self._display_options[name]:
             if self._display_options["nodal_loads"]:
                 self._draw_nodal_loads()
@@ -1865,6 +2068,8 @@ class ModelViewport(QWidget):
             self._draw_element_loads()
         if self._display_options["prescribed_displacements"]:
             self._draw_prescribed_displacements()
+        if self._display_options["section_axes"]:
+            self._draw_section_axes()
         if render:
             self.plotter.render()
 
