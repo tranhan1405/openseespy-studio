@@ -35,6 +35,7 @@ from ..project import (
     ElementLoadData,
     MaterialData,
     NodalLoadData,
+    PrescribedDisplacementData,
     SectionData,
     TransformationData,
 )
@@ -59,6 +60,10 @@ class ModelViewport(QWidget):
         self._model: StructuralModel | None = None
         self._connections: dict[int, ConnectionData] = {}
         self._nodal_loads: dict[int, NodalLoadData] = {}
+        self._prescribed_displacements: dict[
+            int,
+            PrescribedDisplacementData,
+        ] = {}
         self._element_loads: dict[int, ElementLoadData] = {}
         self._transformations: dict[int, TransformationData] = {}
         self._sections: dict[int, SectionData] = {}
@@ -73,6 +78,7 @@ class ModelViewport(QWidget):
             "element_numbers": False,
             "nodal_loads": False,
             "element_loads": False,
+            "prescribed_displacements": False,
             "load_values": True,
         }
         self._selection_filter = "all"
@@ -606,6 +612,10 @@ class ModelViewport(QWidget):
         self,
         *,
         nodal_loads: dict[int, NodalLoadData] | None = None,
+        prescribed_displacements: dict[
+            int,
+            PrescribedDisplacementData,
+        ] | None = None,
         element_loads: dict[int, ElementLoadData] | None = None,
         transformations: dict[int, TransformationData] | None = None,
         sections: dict[int, SectionData] | None = None,
@@ -614,6 +624,9 @@ class ModelViewport(QWidget):
         refresh: bool = True,
     ) -> None:
         self._nodal_loads = dict(nodal_loads or {})
+        self._prescribed_displacements = dict(
+            prescribed_displacements or {}
+        )
         self._element_loads = dict(element_loads or {})
         self._transformations = dict(transformations or {})
         self._sections = dict(sections or {})
@@ -1147,6 +1160,10 @@ class ModelViewport(QWidget):
             "display-nodal-load-labels",
             "display-element-load-arrows",
             "display-element-load-labels",
+            "display-prescribed-displacement-arrows",
+            "display-prescribed-displacement-rotation-arcs",
+            "display-prescribed-displacement-rotation-heads",
+            "display-prescribed-displacement-labels",
         ):
             self._remove_overlay(name)
 
@@ -1371,6 +1388,213 @@ class ModelViewport(QWidget):
                 always_visible=True,
             )
 
+    @staticmethod
+    def _prescribed_displacement_axis(dof: int) -> np.ndarray:
+        index = (int(dof) - 1) % 3
+        axis = np.zeros(3, dtype=float)
+        axis[index] = 1.0
+        return axis
+
+    @staticmethod
+    def _rotation_basis(axis: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        unit_axis = np.asarray(axis, dtype=float)
+        norm = float(np.linalg.norm(unit_axis))
+        if norm <= 1.0e-15:
+            unit_axis = np.asarray((0.0, 0.0, 1.0), dtype=float)
+        else:
+            unit_axis = unit_axis / norm
+
+        reference = (
+            np.asarray((0.0, 0.0, 1.0), dtype=float)
+            if abs(float(unit_axis[2])) < 0.9
+            else np.asarray((1.0, 0.0, 0.0), dtype=float)
+        )
+        basis_u = np.cross(unit_axis, reference)
+        basis_u /= max(float(np.linalg.norm(basis_u)), 1.0e-15)
+        basis_v = np.cross(unit_axis, basis_u)
+        basis_v /= max(float(np.linalg.norm(basis_v)), 1.0e-15)
+        return basis_u, basis_v
+
+    def _rotation_arc_mesh(self, records):
+        if not records:
+            return None, []
+        all_points: list[np.ndarray] = []
+        lines: list[int] = []
+        arrow_records = []
+        point_offset = 0
+
+        for center, axis, sign, radius in records:
+            basis_u, basis_v = self._rotation_basis(axis)
+            direction_sign = 1.0 if float(sign) >= 0.0 else -1.0
+            angles = np.linspace(
+                -0.75 * math.pi,
+                0.75 * math.pi,
+                25,
+            ) * direction_sign
+            arc_points = [
+                np.asarray(center, dtype=float)
+                + float(radius)
+                * (
+                    math.cos(float(angle)) * basis_u
+                    + math.sin(float(angle)) * basis_v
+                )
+                for angle in angles
+            ]
+            all_points.extend(arc_points)
+            lines.extend(
+                [
+                    len(arc_points),
+                    *range(point_offset, point_offset + len(arc_points)),
+                ]
+            )
+            point_offset += len(arc_points)
+
+            end = arc_points[-1]
+            angle = float(angles[-1])
+            tangent = direction_sign * (
+                -math.sin(angle) * basis_u
+                + math.cos(angle) * basis_v
+            )
+            tangent_norm = float(np.linalg.norm(tangent))
+            if tangent_norm > 1.0e-15:
+                tangent = tangent / tangent_norm
+                head_length = max(float(radius) * 0.42, 1.0e-6)
+                arrow_records.append(
+                    (
+                        end - tangent * head_length,
+                        tangent,
+                        head_length,
+                    )
+                )
+
+        mesh = pv.PolyData(np.asarray(all_points, dtype=float))
+        mesh.lines = np.asarray(lines, dtype=np.int64)
+        return mesh, arrow_records
+
+    def _draw_prescribed_displacements(self) -> None:
+        if self._model is None or not self._prescribed_displacements:
+            return
+
+        visible_nodes = self._visible_node_tags()
+        candidates = [
+            displacement
+            for displacement in self._prescribed_displacements.values()
+            if displacement.node_tag in visible_nodes
+            and displacement.node_tag in self._model.nodes
+        ]
+        if not candidates:
+            return
+
+        span = self._model_span()
+        base_length = max(span * 0.10, 0.12)
+        translational = [
+            displacement
+            for displacement in candidates
+            if displacement.dof <= 3
+        ]
+        max_translation = max(
+            (abs(float(item.value)) for item in translational),
+            default=0.0,
+        )
+
+        arrows = []
+        rotation_records = []
+        label_points = []
+        labels = []
+        length_unit = str(self._units.get("length", ""))
+        dof_labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+
+        for displacement in candidates:
+            point = np.asarray(
+                self._model.nodes[displacement.node_tag].xyz,
+                dtype=float,
+            )
+            value = float(displacement.value)
+            axis = self._prescribed_displacement_axis(displacement.dof)
+            dof_label = dof_labels[displacement.dof - 1]
+
+            if displacement.dof <= 3:
+                if abs(value) > 1.0e-15:
+                    ratio = (
+                        abs(value) / max_translation
+                        if max_translation > 1.0e-15
+                        else 1.0
+                    )
+                    signed_axis = axis * (1.0 if value >= 0.0 else -1.0)
+                    arrow_length = base_length * (
+                        0.55 + 0.45 * ratio
+                    )
+                    arrows.append(
+                        (
+                            point,
+                            signed_axis,
+                            arrow_length,
+                        )
+                    )
+                unit = length_unit
+            else:
+                if abs(value) > 1.0e-15:
+                    radius = max(base_length * 0.48, span * 0.035)
+                    rotation_records.append(
+                        (
+                            point,
+                            axis,
+                            1.0 if value >= 0.0 else -1.0,
+                            radius,
+                        )
+                    )
+                unit = "rad"
+
+            label_points.append(point)
+            labels.append(
+                f"Node {displacement.node_tag}\n"
+                f"{dof_label} = {value:+.4g} {unit}"
+            )
+
+        arrow_mesh = self._batched_arrow_mesh(arrows)
+        if arrow_mesh is not None:
+            self.plotter.add_mesh(
+                arrow_mesh,
+                name="display-prescribed-displacement-arrows",
+                color="#6a1b9a",
+                smooth_shading=False,
+                pickable=False,
+                render=False,
+            )
+
+        rotation_mesh, rotation_heads = self._rotation_arc_mesh(
+            rotation_records
+        )
+        if rotation_mesh is not None:
+            self.plotter.add_mesh(
+                rotation_mesh,
+                name="display-prescribed-displacement-rotation-arcs",
+                color="#7b1fa2",
+                line_width=4,
+                pickable=False,
+                render=False,
+            )
+        rotation_head_mesh = self._batched_arrow_mesh(rotation_heads)
+        if rotation_head_mesh is not None:
+            self.plotter.add_mesh(
+                rotation_head_mesh,
+                name="display-prescribed-displacement-rotation-heads",
+                color="#7b1fa2",
+                smooth_shading=False,
+                pickable=False,
+                render=False,
+            )
+
+        if self._display_options["load_values"]:
+            self._add_annotation_labels(
+                label_points,
+                labels,
+                name="display-prescribed-displacement-labels",
+                text_color="#5b1677",
+                font_size=10,
+                always_visible=True,
+            )
+
     def _element_load_global_vector(
         self,
         load: ElementLoadData,
@@ -1547,9 +1771,16 @@ class ModelViewport(QWidget):
                 "display-element-load-arrows",
                 "display-element-load-labels",
             ),
+            "prescribed_displacements": (
+                "display-prescribed-displacement-arrows",
+                "display-prescribed-displacement-rotation-arcs",
+                "display-prescribed-displacement-rotation-heads",
+                "display-prescribed-displacement-labels",
+            ),
             "load_values": (
                 "display-nodal-load-labels",
                 "display-element-load-labels",
+                "display-prescribed-displacement-labels",
             ),
         }
         for actor_name in actor_names[name]:
@@ -1568,11 +1799,18 @@ class ModelViewport(QWidget):
             self._draw_nodal_loads()
         elif name == "element_loads" and self._display_options[name]:
             self._draw_element_loads()
+        elif (
+            name == "prescribed_displacements"
+            and self._display_options[name]
+        ):
+            self._draw_prescribed_displacements()
         elif name == "load_values" and self._display_options[name]:
             if self._display_options["nodal_loads"]:
                 self._draw_nodal_loads()
             if self._display_options["element_loads"]:
                 self._draw_element_loads()
+            if self._display_options["prescribed_displacements"]:
+                self._draw_prescribed_displacements()
 
         if render:
             self.plotter.render()
@@ -1583,6 +1821,10 @@ class ModelViewport(QWidget):
             "display-nodal-load-labels",
             "display-element-load-arrows",
             "display-element-load-labels",
+            "display-prescribed-displacement-arrows",
+            "display-prescribed-displacement-rotation-arcs",
+            "display-prescribed-displacement-rotation-heads",
+            "display-prescribed-displacement-labels",
         ):
             self._remove_overlay(name)
 
@@ -1591,10 +1833,13 @@ class ModelViewport(QWidget):
                 self._draw_nodal_loads()
             if self._display_options["element_loads"]:
                 self._draw_element_loads()
+            if self._display_options["prescribed_displacements"]:
+                self._draw_prescribed_displacements()
 
         if render and (
             self._display_options["nodal_loads"]
             or self._display_options["element_loads"]
+            or self._display_options["prescribed_displacements"]
         ):
             self.plotter.render()
 
@@ -1612,6 +1857,8 @@ class ModelViewport(QWidget):
             self._draw_nodal_loads()
         if self._display_options["element_loads"]:
             self._draw_element_loads()
+        if self._display_options["prescribed_displacements"]:
+            self._draw_prescribed_displacements()
         if render:
             self.plotter.render()
 
