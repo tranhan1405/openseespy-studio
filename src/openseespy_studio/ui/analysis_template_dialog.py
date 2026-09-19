@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -33,6 +34,7 @@ from ..analysis_templates import (
     infer_height_axis,
     lateral_load_weights,
     parse_cyclic_protocol_text,
+    parse_cyclic_targets_text,
     parse_node_weight_text,
     structure_reference_height,
 )
@@ -59,6 +61,71 @@ def _double(
     widget.setValue(float(value))
     widget.setKeyboardTracking(False)
     return widget
+
+
+class CyclicProtocolPreview(QWidget):
+    """Compact displacement/drift target-path preview."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._targets: list[float] = []
+        self.setMinimumHeight(120)
+
+    def set_targets(self, targets: list[float]) -> None:
+        self._targets = [0.0] + [float(value) for value in targets]
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#ffffff"))
+
+        if len(self._targets) < 2:
+            painter.setPen(QColor("#718195"))
+            painter.drawText(
+                self.rect(),
+                Qt.AlignCenter,
+                "No valid cyclic protocol",
+            )
+            return
+
+        left, right = 36.0, max(37.0, float(self.width()) - 10.0)
+        top, bottom = 10.0, max(11.0, float(self.height()) - 24.0)
+        max_abs = max(abs(value) for value in self._targets)
+        max_abs = max(max_abs, 1.0e-12)
+        count = max(1, len(self._targets) - 1)
+
+        zero_y = 0.5 * (top + bottom)
+        painter.setPen(QPen(QColor("#c7d0da"), 1))
+        painter.drawLine(QPointF(left, zero_y), QPointF(right, zero_y))
+        painter.drawLine(QPointF(left, top), QPointF(left, bottom))
+
+        points: list[QPointF] = []
+        for index, value in enumerate(self._targets):
+            x = left + (right - left) * index / count
+            y = zero_y - 0.5 * (bottom - top) * value / max_abs
+            points.append(QPointF(x, y))
+
+        painter.setPen(QPen(QColor("#2f80ed"), 2))
+        for first, second in zip(points, points[1:]):
+            painter.drawLine(first, second)
+
+        painter.setPen(QColor("#718195"))
+        painter.drawText(
+            4,
+            int(top + 12),
+            f"+{max_abs:g}",
+        )
+        painter.drawText(
+            4,
+            int(bottom),
+            f"-{max_abs:g}",
+        )
+        painter.drawText(
+            int(max(left, right - 55)),
+            int(self.height() - 5),
+            "target",
+        )
 
 
 class AnalysisTemplateDialog(QDialog):
@@ -120,7 +187,10 @@ class AnalysisTemplateDialog(QDialog):
         self.control_node.setRange(1, 2_147_483_647)
         self.control_node.setValue(int(default_node))
         self.direction = QComboBox()
-        for dof, name in ((1, "X / UX"), (2, "Y / UY"), (3, "Z / UZ")):
+        directions = [(1, "X / UX"), (2, "Y / UY")]
+        if self.project is None or int(self.project.model.ndm) >= 3:
+            directions.append((3, "Z / UZ"))
+        for dof, name in directions:
             self.direction.addItem(name, dof)
 
         top.addRow("Template:", self.template)
