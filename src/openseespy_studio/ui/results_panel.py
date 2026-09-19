@@ -809,6 +809,14 @@ class ResultsPanel(QWidget):
         self._live_convergence_total = 0
         self._live_convergence_test = ""
         self._live_convergence_tolerance: float | None = None
+        self._live_cumulative_iteration = 0
+        self._live_attempt_iteration = 0
+        self._live_trace_x: list[float] = []
+        self._live_trace_norm: list[float] = []
+        self._live_cutbacks: list[float] = []
+        self._live_converged: list[float] = []
+        self._live_coordinate_x: list[float] = [0.0]
+        self._live_coordinate_y: list[float] = [0.0]
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 5, 6, 5)
@@ -1036,8 +1044,36 @@ class ResultsPanel(QWidget):
         self.convergence_page = page
         layout = QVBoxLayout(page)
         layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
 
         controls = QHBoxLayout()
+
+        self.convergence_display_button = QToolButton()
+        self.convergence_display_button.setText("Display")
+        self.convergence_display_button.setPopupMode(
+            QToolButton.InstantPopup
+        )
+        display_menu = QMenu(self.convergence_display_button)
+        self.convergence_display_actions: dict[str, QAction] = {}
+        for key, label, checked in (
+            ("norm", "Convergence Norm", True),
+            ("criterion", "Criterion", True),
+            ("cutbacks", "Cutback Markers", True),
+            ("converged", "Substep Converged", True),
+            ("coordinate", "Analysis Coordinate", True),
+            ("details", "Detailed History", False),
+        ):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(checked)
+            action.toggled.connect(
+                self._update_convergence_display_options
+            )
+            display_menu.addAction(action)
+            self.convergence_display_actions[key] = action
+        self.convergence_display_button.setMenu(display_menu)
+        controls.addWidget(self.convergence_display_button)
+
         export = QPushButton("Export CSV")
         export.clicked.connect(self._export_convergence_csv)
         controls.addWidget(export)
@@ -1050,34 +1086,40 @@ class ResultsPanel(QWidget):
         self.live_convergence_status.setWordWrap(True)
         layout.addWidget(self.live_convergence_status)
 
-        self.live_convergence_plot = LiveConvergencePlot()
-        layout.addWidget(self.live_convergence_plot)
+        self.convergence_plot_splitter = QSplitter(Qt.Vertical)
+        self.convergence_plot_splitter.setChildrenCollapsible(True)
+        self.convergence_plot_splitter.setMinimumSize(0, 0)
+
+        self.convergence_overview_plot = ConvergenceOverviewPlot()
+        self.convergence_plot_splitter.addWidget(
+            self.convergence_overview_plot
+        )
+
+        self.convergence_coordinate_plot = AnalysisCoordinatePlot()
+        self.convergence_plot_splitter.addWidget(
+            self.convergence_coordinate_plot
+        )
+        self.convergence_plot_splitter.setStretchFactor(0, 4)
+        self.convergence_plot_splitter.setStretchFactor(1, 1)
+        self.convergence_plot_splitter.setSizes([240, 70])
+        layout.addWidget(self.convergence_plot_splitter, 1)
+
+        self.convergence_details_widget = QWidget()
+        details_layout = QVBoxLayout(self.convergence_details_widget)
+        details_layout.setContentsMargins(0, 2, 0, 0)
+        details_layout.setSpacing(3)
 
         self.convergence_info = QLabel(
             "Run a non-modal analysis to inspect solver convergence."
         )
         self.convergence_info.setWordWrap(True)
-        layout.addWidget(self.convergence_info)
+        details_layout.addWidget(self.convergence_info)
 
         self.convergence_summary_label = QLabel(
             "Steps: -   Recovered: -   Failed: -   Max iterations: -"
         )
         self.convergence_summary_label.setWordWrap(True)
-        layout.addWidget(self.convergence_summary_label)
-
-        layout.addWidget(QLabel("Iterations by step"))
-        self.convergence_iterations_plot = TimeHistoryPlot(
-            empty_message="No convergence iteration data"
-        )
-        self.convergence_iterations_plot.setMinimumHeight(110)
-        layout.addWidget(self.convergence_iterations_plot)
-
-        layout.addWidget(QLabel("Final convergence norm by step"))
-        self.convergence_norm_plot = TimeHistoryPlot(
-            empty_message="No convergence norm data"
-        )
-        self.convergence_norm_plot.setMinimumHeight(110)
-        layout.addWidget(self.convergence_norm_plot)
+        details_layout.addWidget(self.convergence_summary_label)
 
         self.convergence_table = QTableWidget(0, 10)
         self.convergence_table.setHorizontalHeaderLabels(
@@ -1112,15 +1154,37 @@ class ResultsPanel(QWidget):
         self.convergence_table.cellClicked.connect(
             self._convergence_row_clicked
         )
-        layout.addWidget(self.convergence_table, 1)
+        self.convergence_table.setMinimumSize(0, 0)
+        details_layout.addWidget(self.convergence_table, 1)
 
         self.convergence_attempt_info = QLabel(
             "Select a step to inspect primary/fallback attempts."
         )
         self.convergence_attempt_info.setWordWrap(True)
-        layout.addWidget(self.convergence_attempt_info)
+        details_layout.addWidget(self.convergence_attempt_info)
+
+        self.convergence_details_widget.hide()
+        layout.addWidget(self.convergence_details_widget, 1)
 
         self.tabs.addTab(page, "Convergence")
+        self._update_convergence_display_options()
+
+    def _update_convergence_display_options(self) -> None:
+        actions = getattr(self, "convergence_display_actions", {})
+        if not actions:
+            return
+        self.convergence_overview_plot.set_display_options(
+            norm=actions["norm"].isChecked(),
+            criterion=actions["criterion"].isChecked(),
+            cutbacks=actions["cutbacks"].isChecked(),
+            converged=actions["converged"].isChecked(),
+        )
+        self.convergence_coordinate_plot.setVisible(
+            actions["coordinate"].isChecked()
+        )
+        self.convergence_details_widget.setVisible(
+            actions["details"].isChecked()
+        )
 
     def _build_deformation_tab(self) -> None:
         page = QWidget()
