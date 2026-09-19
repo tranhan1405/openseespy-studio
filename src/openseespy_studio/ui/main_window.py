@@ -6133,6 +6133,16 @@ class MainWindow(QMainWindow):
         }
         self.selection.set_selection(nodes=tags)
 
+    def _run_analysis_from_tree(self, tag: int) -> None:
+        if (
+            self._analysis_process is not None
+            and self._analysis_process.state() != QProcess.NotRunning
+        ):
+            return
+        if int(tag) != self.project.active_analysis_tag:
+            self._set_active_analysis(int(tag))
+        self._start_analysis()
+
     def _rename_job_plot(self, job_id: int, plot_id: int) -> None:
         job = self._jobs.get(int(job_id))
         plot = job.plot(plot_id) if job is not None else None
@@ -6589,6 +6599,15 @@ class MainWindow(QMainWindow):
             active = menu.addAction("Set Active")
             active.setEnabled(tag != self.project.active_analysis_tag)
             active.triggered.connect(lambda: self._set_active_analysis(tag))
+            run = menu.addAction("Run This Analysis")
+            run.setEnabled(
+                self._analysis_process is None
+                or self._analysis_process.state() == QProcess.NotRunning
+            )
+            run.triggered.connect(
+                lambda: self._run_analysis_from_tree(tag)
+            )
+            menu.addSeparator()
             edit = menu.addAction("Edit Analysis Settings...")
             edit.triggered.connect(lambda: self._edit_analysis(tag))
             delete = menu.addAction("Delete")
@@ -6648,6 +6667,30 @@ class MainWindow(QMainWindow):
             delete = menu.addAction("Delete")
             delete.triggered.connect(
                 lambda: self._delete_solution_result(tag)
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "solution_information":
+            analysis_tag = int(value)
+            solver_output = menu.addAction("Show Solver Output")
+            solver_output.triggered.connect(
+                lambda: (
+                    self._show_solution_information(
+                        analysis_tag,
+                        "Solver Output",
+                    ),
+                    self.console_dock.show(),
+                    self.console_dock.raise_(),
+                )
+            )
+            analysis = self.project.analyses.get(analysis_tag)
+            label = convergence_result_label(
+                analysis.test if analysis is not None else None
+            )
+            convergence = menu.addAction(f"Open {label}")
+            convergence.triggered.connect(
+                lambda: self._show_solution_convergence(analysis_tag)
             )
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
@@ -6737,6 +6780,14 @@ class MainWindow(QMainWindow):
             show = menu.addAction("Show")
             show.triggered.connect(
                 lambda: self._show_job_plot(job_id, plot_id)
+            )
+            rename = menu.addAction("Rename...")
+            rename.triggered.connect(
+                lambda: self._rename_job_plot(job_id, plot_id)
+            )
+            duplicate = menu.addAction("Duplicate")
+            duplicate.triggered.connect(
+                lambda: self._duplicate_job_plot(job_id, plot_id)
             )
             menu.addSeparator()
             delete = menu.addAction("Delete")
