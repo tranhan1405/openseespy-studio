@@ -1236,6 +1236,17 @@ class ElasticGeometryDialog(QDialog):
             **self.dimensions(),
         )
 
+    def display_geometry(self) -> dict[str, object]:
+        visible = self._visible_keys()
+        dimensions = self.dimensions()
+        return {
+            "shape": self.shape.currentText(),
+            "dimensions": {
+                key: float(dimensions[key])
+                for key in visible
+            },
+        }
+
     def _update_preview(self, *args) -> None:
         visible = self._visible_keys()
         for key, field in self.fields.items():
@@ -1488,6 +1499,17 @@ class ShapeTemplateDialog(QDialog):
             },
         )
 
+    def display_geometry(self) -> dict[str, object]:
+        shape, dimensions = self._geometry_for_sketch()
+        return {
+            "shape": shape,
+            "dimensions": {
+                key: float(value)
+                for key, value in dimensions.items()
+                if key != "cover"
+            },
+        }
+
     def _sync_sketch(self, *args) -> None:
         shape, dimensions = self._geometry_for_sketch()
         self.sketch.set_geometry(shape, dimensions)
@@ -1605,6 +1627,21 @@ class SectionDialog(QDialog):
         self.materials = materials
         self.unit_system = UnitSystem.from_mapping(units)
         self._initial_section = section
+        self._display_geometry = (
+            {
+                "shape": str(section.display_geometry.get("shape", "")),
+                "dimensions": dict(
+                    section.display_geometry.get("dimensions", {})
+                ),
+            }
+            if section and section.display_geometry
+            else {}
+        )
+        self._display_geometry_section_type = (
+            section.section_type
+            if section and self._display_geometry
+            else None
+        )
         self._components = [
             FiberComponentData.from_dict(component.to_dict())
             for component in (
@@ -1673,6 +1710,15 @@ class SectionDialog(QDialog):
         )
         self.elastic_geometry_status.setWordWrap(True)
         self.elastic_geometry_status.setStyleSheet("color: #657586;")
+        if (
+            section is not None
+            and section.section_type == "Elastic"
+            and section.display_geometry
+        ):
+            shape = str(section.display_geometry.get("shape", "Section"))
+            self.elastic_geometry_status.setText(
+                f"{shape} display geometry stored with this section."
+            )
         geometry_row = QHBoxLayout()
         geometry_row.addWidget(geometry_button)
         geometry_row.addWidget(self.elastic_geometry_status, 1)
@@ -1953,6 +1999,8 @@ class SectionDialog(QDialog):
         values = props.as_elastic_parameters()
         for key in ("A", "Iy", "Iz", "J"):
             self.elastic_spins[key].setValue(values[key])
+        self._display_geometry = dialog.display_geometry()
+        self._display_geometry_section_type = "Elastic"
         note = "J approximate" if props.j_is_approximate else "J exact"
         self.elastic_geometry_status.setText(
             f"{dialog.shape.currentText()} geometry applied · "
@@ -2150,8 +2198,14 @@ class SectionDialog(QDialog):
 
         if replace_existing:
             self._components = generated
+            self._display_geometry = dialog.display_geometry()
+            self._display_geometry_section_type = "Fiber"
         else:
             self._components.extend(generated)
+            # Appending a second full-section template makes the outer display
+            # envelope ambiguous, so fall back to geometry inference/tube.
+            self._display_geometry = {}
+            self._display_geometry_section_type = None
 
         self._refresh_component_list()
         self._update_fiber_outputs()
@@ -2422,4 +2476,17 @@ class SectionDialog(QDialog):
             fibers=fibers,
             fiber_components=components,
             material_tag=material_tag,
+            display_geometry=(
+                {
+                    "shape": str(
+                        self._display_geometry.get("shape", "")
+                    ),
+                    "dimensions": dict(
+                        self._display_geometry.get("dimensions", {})
+                    ),
+                }
+                if self._display_geometry
+                and self._display_geometry_section_type == section_type
+                else {}
+            ),
         )
