@@ -2043,20 +2043,25 @@ class MainWindow(QMainWindow):
         self.project.prune_element_loads()
         self.project.prune_recorders()
 
+        if spec.planar_2d:
+            base_message = (
+                f"Generated planar 2D frame: {spec.nx} bay(s), "
+                f"{spec.nz} storey(s), {spec.base_support.lower()} base"
+            )
+        else:
+            base_message = (
+                f"Generated 3D frame: {spec.nx} × {spec.ny} bay(s), "
+                f"{spec.nz} storey(s), {spec.base_support.lower()} base"
+            )
+
         if created_transformations:
             names = ", ".join(
                 f"{item.name} [{item.tag}]"
                 for item in created_transformations
             )
-            message = (
-                f"Generated {spec.nx} × {spec.ny} bay, "
-                f"{spec.nz}-storey frame · created {names}"
-            )
+            message = f"{base_message} · created {names}"
         else:
-            message = (
-                f"Generated {spec.nx} × {spec.ny} bay, "
-                f"{spec.nz}-storey frame"
-            )
+            message = base_message
 
         self._refresh_all(message)
         self.frame_grid_panel.set_assignment_tags(
@@ -5140,6 +5145,9 @@ class MainWindow(QMainWindow):
                     ),
                     max_increment=float(request["max_increment"]),
                     distribution=str(request["distribution"]),
+                    custom_weights=dict(
+                        request.get("custom_weights", {})
+                    ),
                     solver_preset=str(request["solver_preset"]),
                 )
             elif kind == "Cyclic":
@@ -5151,19 +5159,17 @@ class MainWindow(QMainWindow):
                     protocol_rows=list(request["protocol_rows"]),
                     max_increment=float(request["max_increment"]),
                     distribution=str(request["distribution"]),
+                    custom_weights=dict(
+                        request.get("custom_weights", {})
+                    ),
                     solver_preset=str(request["solver_preset"]),
                 )
             else:
                 plan = build_nlth_template(
                     self.project,
                     name=str(request["name"]),
-                    ground_motion_values=list(
-                        request["ground_motion_values"]
-                    ),
+                    components=list(request["components"]),
                     dt=float(request["dt"]),
-                    input_unit=str(request["input_unit"]),
-                    scale_factor=float(request["scale_factor"]),
-                    direction=int(request["direction"]),
                     monitor_node=int(request["monitor_node"]),
                     damping_ratio=float(request["damping_ratio"]),
                     damping_mode_i=int(request["damping_mode_i"]),
@@ -6450,8 +6456,14 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "frame_grids_root":
-            create = menu.addAction("Create / Edit Frame Grid...")
-            create.triggered.connect(self._show_frame_grid)
+            frame_2d = menu.addAction("Quick 2D Frame...")
+            frame_2d.triggered.connect(
+                lambda: self._show_frame_grid(True)
+            )
+            grid_3d = menu.addAction("3D Frame Grid...")
+            grid_3d.triggered.connect(
+                lambda: self._show_frame_grid(False)
+            )
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
