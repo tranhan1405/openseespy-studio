@@ -494,7 +494,7 @@ def analysis_to_openseespy(
         "    return _iterations, _norm",
         "",
         "_studio_results = {",
-        "    'schema_version': 6,",
+        "    'schema_version': 7,",
         "    'analysis': {",
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
@@ -506,6 +506,13 @@ def analysis_to_openseespy(
         f"        'planned_steps': {total_steps},",
         "    },",
         "    'final': {},",
+        "    'convergence': {",
+        f"        'test': {settings.test!r},",
+        f"        'tolerance': {settings.tolerance:g},",
+        f"        'max_iterations': {settings.max_iterations},",
+        f"        'primary_algorithm': {settings.algorithm!r},",
+        "        'steps': [],",
+        "    },",
         "    'history': {'time': [], 'monitor_node': "
         f"{monitor_node}, 'control_dof': {settings.control_dof}, "
         "'displacement': [], 'base_shear': [], "
@@ -623,6 +630,7 @@ def analysis_to_openseespy(
     )
     lines.append(f"for _studio_step in range({total_steps}):")
     lines.append("    _studio_step_no = _studio_step + 1")
+    lines.append("    _studio_attempts = []")
     if settings.analysis_type == "Cyclic":
         lines.append(
             "    _studio_disp_increment = "
@@ -637,6 +645,15 @@ def analysis_to_openseespy(
     lines.append(f"    _studio_ok = {analyze_call}")
     lines.append(
         "    _studio_iterations, _studio_norm = _studio_test_state()"
+    )
+    lines.append(
+        "    _studio_attempts.append({"
+        "'algorithm': _studio_active_algorithm, "
+        "'iterations': _studio_iterations, "
+        "'norm': _studio_norm, "
+        "'code': int(_studio_ok), "
+        "'success': bool(_studio_ok == 0)"
+        "})"
     )
     lines.append("    if _studio_ok != 0:")
     lines.append(
@@ -666,6 +683,15 @@ def analysis_to_openseespy(
             "            _studio_iterations, _studio_norm = "
             "_studio_test_state()"
         )
+        lines.append(
+            "            _studio_attempts.append({"
+            "'algorithm': _studio_alg, "
+            "'iterations': _studio_iterations, "
+            "'norm': _studio_norm, "
+            "'code': int(_studio_ok), "
+            "'success': bool(_studio_ok == 0)"
+            "})"
+        )
         lines.append("            if _studio_ok == 0:")
         lines.append("                _studio_active_algorithm = _studio_alg")
         lines.append(
@@ -679,6 +705,18 @@ def analysis_to_openseespy(
 
     lines.append("    if _studio_ok != 0:")
     lines.append(
+        "        _studio_results['convergence']['steps'].append({"
+        "'step': _studio_step_no, "
+        "'status': 'failed', "
+        "'algorithm': _studio_active_algorithm, "
+        "'iterations': _studio_iterations, "
+        "'norm': _studio_norm, "
+        "'recovered': False, "
+        "'time': float(ops.getTime()), "
+        "'attempts': list(_studio_attempts)"
+        "})"
+    )
+    lines.append(
         "        _studio_emit('failed', step=_studio_step_no, "
         f"total={total_steps}, "
         "algorithm=_studio_active_algorithm, "
@@ -690,6 +728,18 @@ def analysis_to_openseespy(
         "f'Analysis failed at step {_studio_step_no}')"
     )
     lines.append("    _studio_time = float(ops.getTime())")
+    lines.append(
+        "    _studio_results['convergence']['steps'].append({"
+        "'step': _studio_step_no, "
+        "'status': 'recovered' if len(_studio_attempts) > 1 else 'converged', "
+        "'algorithm': _studio_active_algorithm, "
+        "'iterations': _studio_iterations, "
+        "'norm': _studio_norm, "
+        "'recovered': bool(len(_studio_attempts) > 1), "
+        "'time': _studio_time, "
+        "'attempts': list(_studio_attempts)"
+        "})"
+    )
     lines.append(
         "    _studio_results['history']['time'].append(_studio_time)"
     )
