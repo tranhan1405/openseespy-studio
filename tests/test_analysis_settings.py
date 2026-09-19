@@ -56,9 +56,21 @@ def test_transient_generator():
 
 
 def test_modal_generator():
-    a=AnalysisSettingsData(1,"Modes","Modal",num_modes=6)
+    a=AnalysisSettingsData(
+        1,
+        "Modes",
+        "Modal",
+        num_modes=6,
+        eigen_solver="-fullGenLapack",
+    )
     text="\n".join(analysis_to_openseespy(a))
-    assert "_studio_eigenvalues = ops.eigen(6)" in text
+    assert (
+        "_studio_eigenvalues = ops.eigen('-fullGenLapack', 6)"
+        in text
+    )
+    assert "'frequency_hz': _studio_frequency" in text
+    assert "'period_s': _studio_period" in text
+    assert "'participation': _studio_participation" in text
     assert "ops.integrator" not in text
 
 
@@ -70,7 +82,7 @@ def test_only_active_analysis_is_generated():
     }
     script=to_openseespy(m,analyses=analyses,active_analysis_tag=2)
     assert "# Active analysis 2: Modes" in script
-    assert "ops.eigen(4)" in script
+    assert "ops.eigen('-genBandArpack', 4)" in script
     assert "# Active analysis 1: Static" not in script
 
 
