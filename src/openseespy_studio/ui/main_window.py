@@ -6570,7 +6570,10 @@ class MainWindow(QMainWindow):
             node_action.triggered.connect(self._create_node)
             element_action = menu.addAction("New Element...")
             element_action.triggered.connect(self._create_element)
-            grid_action = menu.addAction("Create Frame Grid...")
+            menu.addSeparator()
+            quick_2d = menu.addAction("Quick 2D Frame...")
+            quick_2d.triggered.connect(self._show_frame_grid_2d)
+            grid_action = menu.addAction("Create 3D / Frame Grid...")
             grid_action.triggered.connect(self._show_frame_grid)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
@@ -6593,6 +6596,8 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "frame_grids_root":
+            quick_2d = menu.addAction("Quick 2D Frame...")
+            quick_2d.triggered.connect(self._show_frame_grid_2d)
             create = menu.addAction("Create / Edit Frame Grid...")
             create.triggered.connect(self._show_frame_grid)
             menu.exec(self.tree.viewport().mapToGlobal(position))
