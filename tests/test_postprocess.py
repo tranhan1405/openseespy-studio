@@ -6,6 +6,7 @@ from openseespy_studio.postprocess import (
     component_end_resultants,
     convergence_series,
     convergence_steps,
+    convergence_trace,
     convergence_summary,
     cyclic_hysteresis_curve,
     cyclic_hysteresis_metrics,
@@ -848,3 +849,107 @@ def test_enrichment_uses_current_plain_pattern_factor_for_equilibrium():
     assert vy["source"] == "equilibrium"
     assert math.isclose(vy["values"][0], 10.0)
     assert math.isclose(vy["values"][-1], -10.0)
+
+
+
+def test_convergence_trace_uses_cumulative_iterations_and_adaptive_markers():
+    result = {
+        "convergence": {
+            "tolerance": 1.0e-8,
+            "steps": [
+                {
+                    "step": 1,
+                    "status": "converged",
+                    "time": 0.1,
+                    "attempts": [
+                        {
+                            "algorithm": "Newton",
+                            "iterations": 3,
+                            "norm": 1.0e-9,
+                            "norm_history": [1.0e-2, 1.0e-5, 1.0e-9],
+                        }
+                    ],
+                },
+                {
+                    "step": 2,
+                    "status": "recovered",
+                    "time": 0.15,
+                    "substeps": [
+                        {
+                            "accepted": False,
+                            "time": 0.1,
+                            "attempts": [
+                                {
+                                    "algorithm": "Newton",
+                                    "iterations": 2,
+                                    "norm": 1.0e-3,
+                                    "norm_history": [1.0e-2, 1.0e-3],
+                                }
+                            ],
+                        },
+                        {
+                            "accepted": True,
+                            "time": 0.15,
+                            "attempts": [
+                                {
+                                    "algorithm": "Newton",
+                                    "iterations": 2,
+                                    "norm": 1.0e-9,
+                                    "norm_history": [1.0e-3, 1.0e-9],
+                                }
+                            ],
+                        },
+                    ],
+                    "attempts": [],
+                },
+            ],
+        }
+    }
+
+    trace = convergence_trace(result)
+
+    assert trace["iteration"] == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+    assert trace["norm"] == [
+        1.0e-2,
+        1.0e-5,
+        1.0e-9,
+        1.0e-2,
+        1.0e-3,
+        1.0e-3,
+        1.0e-9,
+    ]
+    assert trace["criterion"] == 1.0e-8
+    assert trace["cutbacks"] == [5.0]
+    assert trace["converged"] == [3.0, 7.0]
+    assert trace["coordinate_iteration"] == [0.0, 3.0, 7.0]
+    assert trace["coordinate"] == [0.0, 0.1, 0.15]
+    assert trace["total_iterations"] == 7
+
+
+def test_convergence_trace_falls_back_to_final_norm_without_history():
+    result = {
+        "convergence": {
+            "tolerance": 1.0e-6,
+            "steps": [
+                {
+                    "step": 1,
+                    "status": "converged",
+                    "time": 1.0,
+                    "attempts": [
+                        {
+                            "iterations": 4,
+                            "norm": 2.0e-7,
+                        }
+                    ],
+                }
+            ],
+        }
+    }
+
+    trace = convergence_trace(result)
+
+    assert trace["iteration"] == [4.0]
+    assert trace["norm"] == [2.0e-7]
+    assert trace["converged"] == [4.0]
+    assert trace["coordinate_iteration"] == [0.0, 4.0]
+    assert trace["coordinate"] == [0.0, 1.0]
