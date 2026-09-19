@@ -1,4 +1,7 @@
-from openseespy_studio.result_catalog import (\n    convergence_result_label,\n    result_choices_for_analysis,\n)
+from openseespy_studio.result_catalog import (
+    convergence_result_label,
+    result_choices_for_analysis,
+)
 
 
 def _types(analysis_type: str) -> set[str]:
