@@ -579,9 +579,10 @@ def analysis_to_openseespy(
         lines.append("print('Eigenvalues:', _studio_eigenvalues)")
         return lines
 
+    _studio_print_flag = 1 if settings.live_convergence else 0
     lines.append(
         f"ops.test('{settings.test}', {settings.tolerance:g}, "
-        f"{settings.max_iterations}, 1)"
+        f"{settings.max_iterations}, {_studio_print_flag})"
     )
     lines.append(f"ops.algorithm('{settings.algorithm}')")
     lines.append(f"_studio_primary_algorithm = {settings.algorithm!r}")
