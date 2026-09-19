@@ -339,3 +339,65 @@ def test_nlth_dialog_requests_mass_gravity_and_optional_damping(qapp):
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+
+def test_nlth_bundled_el_centro_can_create_request_without_browse(qapp):
+    model = StructuralModel("nlth-bundled")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+
+    dialog = AnalysisTemplateDialog(
+        default_node=1,
+        units={"length": "m", "force": "kN", "time": "s"},
+        initial_template="Nonlinear Time History",
+        project=project,
+    )
+    try:
+        index = dialog.gm_library.findData("el-centro-1940")
+        assert index >= 0
+        dialog.gm_library.setCurrentIndex(index)
+        qapp.processEvents()
+
+        assert len(dialog._ground_motion_values[1]) == 1559
+        assert dialog.gm_dt.value() == pytest.approx(0.02)
+        assert dialog.gm_unit.currentText() == "g"
+        assert dialog.gm_files[1].text().startswith("[Built-in]")
+        request = dialog.request()
+        assert len(request["components"]) == 1
+        assert request["components"][0]["direction"] == 1
+        assert len(request["components"][0]["values"]) == 1559
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_nlth_reference_only_preset_clears_previous_auto_record(qapp):
+    model = StructuralModel("nlth-reference-only")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+
+    dialog = AnalysisTemplateDialog(
+        default_node=1,
+        units={"length": "m", "force": "kN", "time": "s"},
+        initial_template="Nonlinear Time History",
+        project=project,
+    )
+    try:
+        dialog.gm_library.setCurrentIndex(
+            dialog.gm_library.findData("el-centro-1940")
+        )
+        qapp.processEvents()
+        assert dialog._ground_motion_values[1]
+
+        dialog.gm_library.setCurrentIndex(
+            dialog.gm_library.findData("kobe-1995-kjma")
+        )
+        qapp.processEvents()
+        assert not dialog._ground_motion_values[1]
+        assert "Reference only" in dialog.gm_library_info.text()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
