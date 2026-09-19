@@ -1292,7 +1292,13 @@ class MainWindow(QMainWindow):
         self._make_action("analysis_setup", "Analysis Setup...", "analysis", self._create_analysis, "Create analysis settings")
         self._make_action("check_model", "Check Model", "analysis", self._check_model, "Validate the model before analysis")
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
-        self._make_action("plot", "Plot", "plot", self._not_implemented, "Plot results")
+        self._make_action(
+            "plot",
+            "Plot",
+            "plot",
+            self._show_plot_menu,
+            "Plot results from the selected or latest completed Job",
+        )
 
         menus["File"].addActions([self.actions["new"], self.actions["open"], self.actions["save"]])
         menus["File"].addAction(self.actions["save_as"])
@@ -5122,6 +5128,105 @@ class MainWindow(QMainWindow):
                 )
             )
 
+    def _plot_source_job(self) -> JobRecord | None:
+        """Resolve the Job that the global Plot action should use."""
+        item = self.tree.currentItem()
+        if item is not None:
+            payload = item.data(0, Qt.UserRole)
+            if payload:
+                kind, value = payload
+                if kind == "job":
+                    job = self._jobs.get(int(value))
+                    if job is not None and job.results:
+                        return job
+                elif kind == "job_plot":
+                    try:
+                        job_id = int(value[0])
+                    except (TypeError, ValueError, IndexError):
+                        job_id = -1
+                    job = self._jobs.get(job_id)
+                    if job is not None and job.results:
+                        return job
+                elif kind == "solution_result":
+                    result_object = self.project.solution_results.get(
+                        int(value)
+                    )
+                    if result_object is not None:
+                        job = self._latest_job_for_analysis(
+                            result_object.analysis_tag
+                        )
+                        if job is not None:
+                            return job
+                elif kind in {
+                    "analysis",
+                    "analysis_settings",
+                    "solution_root",
+                    "solution_information",
+                    "solution_convergence",
+                    "solver_output",
+                }:
+                    try:
+                        analysis_tag = int(value)
+                    except (TypeError, ValueError):
+                        analysis_tag = -1
+                    job = self._latest_job_for_analysis(analysis_tag)
+                    if job is not None:
+                        return job
+
+        if self._current_job_id is not None:
+            current = self._jobs.get(int(self._current_job_id))
+            if current is not None and current.results:
+                return current
+
+        for job_id in sorted(self._jobs, reverse=True):
+            job = self._jobs[job_id]
+            if job.results:
+                return job
+        return None
+
+    def _show_plot_menu(self) -> None:
+        """Open the same result catalog used by a Job's Plot submenu."""
+        job = self._plot_source_job()
+        if job is None:
+            self.results_panel.show_jobs()
+            self.results_dock.show()
+            self.results_dock.raise_()
+            self.status_message.setText(
+                "No completed analysis result is available to plot."
+            )
+            return
+
+        menu = QMenu(self)
+        source = menu.addAction(
+            f"Job {job.job_id} · {job.analysis_name}"
+        )
+        source.setEnabled(False)
+        menu.addSeparator()
+
+        self._populate_result_choice_menu(
+            menu,
+            job.analysis_type,
+            lambda result_type, name, settings:
+            self._quick_plot_job_result(
+                job.job_id,
+                result_type,
+                name,
+                settings,
+            ),
+            convergence_test=self._job_convergence_test(job),
+        )
+
+        menu.addSeparator()
+        manager = menu.addAction("Show Job Manager")
+        manager.triggered.connect(
+            lambda: (
+                self.results_panel.show_jobs(),
+                self.results_dock.show(),
+                self.results_dock.raise_(),
+            )
+        )
+        menu.exec(QCursor.pos())
+
     def _render_result_data(
         self,
         result: dict[str, object],
@@ -5949,6 +6054,22 @@ class MainWindow(QMainWindow):
             self._edit_analysis(int(value))
         elif kind == "job":
             self._activate_job_result(int(value))
+        elif kind == "job_plot":
+            try:
+                self._show_job_plot(int(value[0]), int(value[1]))
+            except (TypeError, ValueError, IndexError):
+                return
+        elif kind == "solution_result":
+            self._evaluate_solution_result(int(value))
+        elif kind == "solution_convergence":
+            self._show_solution_convergence(int(value))
+        elif kind == "solver_output":
+            self.console_dock.show()
+            self.console_dock.raise_()
+        elif kind == "jobs_root":
+            self.results_panel.show_jobs()
+            self.results_dock.show()
+            self.results_dock.raise_()
         elif kind == "recorder":
             self._edit_recorder(int(value))
 
