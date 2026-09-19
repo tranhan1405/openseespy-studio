@@ -205,7 +205,10 @@ def test_rayleigh_settings_round_trip_and_generator():
             support_node_tags=[1],
         )
     )
-    assert "_studio_damping_eigs = ops.eigen(3)" in text
+    assert (
+        "_studio_damping_eigs = ops.eigen('-genBandArpack', 3)"
+        in text
+    )
     assert "ops.rayleigh(_studio_alpha_m, 0.0, 0.0, _studio_beta_k)" in text
 
 
