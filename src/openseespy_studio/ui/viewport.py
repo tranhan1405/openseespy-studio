@@ -1292,6 +1292,9 @@ class ModelViewport(QWidget):
                     render=False,
                 )
 
+        if self._display_options.get("section_axes", False):
+            self._draw_section_axis_labels()
+
         if render:
             self.plotter.render()
 
@@ -1380,6 +1383,28 @@ class ModelViewport(QWidget):
             factor=1.0,
             geom=source,
         )
+
+    @staticmethod
+    def _batched_axis_line_mesh(records):
+        if not records:
+            return None
+        points = []
+        lines = []
+        for center, direction, length in records:
+            start = np.asarray(center, dtype=float)
+            unit = np.asarray(direction, dtype=float)
+            norm = float(np.linalg.norm(unit))
+            if norm <= 1.0e-15:
+                continue
+            unit = unit / norm
+            index = len(points)
+            points.extend((start, start + unit * float(length)))
+            lines.extend((2, index, index + 1))
+        if not points:
+            return None
+        mesh = pv.PolyData(np.asarray(points, dtype=float))
+        mesh.lines = np.asarray(lines, dtype=np.int64)
+        return mesh
 
     def _add_annotation_labels(
         self,
@@ -1785,6 +1810,85 @@ class ModelViewport(QWidget):
         )
         return global_vector, prefix
 
+    def _section_axis_label_tags(self) -> set[int]:
+        tags = set(self._selected_elements)
+        if self._hover_ref and self._hover_ref[0] == "element":
+            tags.add(int(self._hover_ref[1]))
+        return tags & self._visible_element_tags()
+
+    def _draw_section_axis_labels(self) -> None:
+        if self._model is None:
+            return
+
+        self._remove_overlay("display-section-axis-labels")
+        label_tags = self._section_axis_label_tags()
+        if not label_tags:
+            return
+
+        axis_length = max(self._model_span() * 0.075, 0.10)
+        label_points = []
+        labels = []
+
+        for tag in sorted(label_tags):
+            element = self._model.elements.get(tag)
+            if element is None or element.transf_tag is None:
+                continue
+            transformation = self._transformations.get(element.transf_tag)
+            if transformation is None:
+                continue
+            node_i = self._model.nodes.get(element.i)
+            node_j = self._model.nodes.get(element.j)
+            if node_i is None or node_j is None:
+                continue
+            try:
+                _, local_y, local_z = element_local_axes(
+                    self._model,
+                    element,
+                    transformation,
+                )
+            except ValueError:
+                continue
+
+            center = np.asarray(
+                [
+                    0.5 * (float(x) + float(y))
+                    for x, y in zip(node_i.xyz, node_j.xyz)
+                ],
+                dtype=float,
+            )
+            y_axis = np.asarray(local_y, dtype=float)
+            z_axis = np.asarray(local_z, dtype=float)
+            section = (
+                self._sections.get(element.section_tag)
+                if element.section_tag is not None
+                else None
+            )
+            y_label, z_label = section_axis_strength_labels(
+                section,
+                self._materials,
+            )
+            label_points.extend(
+                (
+                    center + y_axis * axis_length * 1.08,
+                    center + z_axis * axis_length * 1.08,
+                )
+            )
+            labels.extend(
+                (
+                    f"{tag}: {y_label}",
+                    f"{tag}: {z_label}",
+                )
+            )
+
+        self._add_annotation_labels(
+            label_points,
+            labels,
+            name="display-section-axis-labels",
+            text_color="#334155",
+            font_size=9,
+            always_visible=False,
+        )
+
     def _draw_section_axes(self) -> None:
         if self._model is None:
             return
@@ -1792,8 +1896,6 @@ class ModelViewport(QWidget):
         axis_length = max(self._model_span() * 0.075, 0.10)
         y_records = []
         z_records = []
-        label_points = []
-        labels = []
 
         for tag in sorted(self._visible_element_tags()):
             element = self._model.elements.get(tag)
@@ -1817,61 +1919,42 @@ class ModelViewport(QWidget):
 
             center = np.asarray(
                 [
-                    0.5 * (float(a) + float(b))
-                    for a, b in zip(node_i.xyz, node_j.xyz)
+                    0.5 * (float(x) + float(y))
+                    for x, y in zip(node_i.xyz, node_j.xyz)
                 ],
                 dtype=float,
             )
-            y_axis = np.asarray(local_y, dtype=float)
-            z_axis = np.asarray(local_z, dtype=float)
-            y_records.append((center, y_axis, axis_length))
-            z_records.append((center, z_axis, axis_length))
+            y_records.append(
+                (center, np.asarray(local_y, dtype=float), axis_length)
+            )
+            z_records.append(
+                (center, np.asarray(local_z, dtype=float), axis_length)
+            )
 
-            section = (
-                self._sections.get(element.section_tag)
-                if element.section_tag is not None
-                else None
-            )
-            y_label, z_label = section_axis_strength_labels(
-                section,
-                self._materials,
-            )
-            label_points.extend(
-                (
-                    center + y_axis * axis_length * 1.08,
-                    center + z_axis * axis_length * 1.08,
-                )
-            )
-            labels.extend((y_label, z_label))
-
-        y_mesh = self._batched_arrow_mesh(y_records)
+        y_mesh = self._batched_axis_line_mesh(y_records)
         if y_mesh is not None:
             self.plotter.add_mesh(
                 y_mesh,
                 name="display-section-axis-y",
                 color="#2e8b57",
-                smooth_shading=False,
+                line_width=2,
+                render_lines_as_tubes=False,
                 pickable=False,
                 render=False,
             )
-        z_mesh = self._batched_arrow_mesh(z_records)
+        z_mesh = self._batched_axis_line_mesh(z_records)
         if z_mesh is not None:
             self.plotter.add_mesh(
                 z_mesh,
                 name="display-section-axis-z",
                 color="#4169e1",
-                smooth_shading=False,
+                line_width=2,
+                render_lines_as_tubes=False,
                 pickable=False,
                 render=False,
             )
-        self._add_annotation_labels(
-            label_points,
-            labels,
-            name="display-section-axis-labels",
-            text_color="#334155",
-            font_size=9,
-            always_visible=True,
-        )
+
+        self._draw_section_axis_labels()
 
     def _draw_element_loads(self) -> None:
         if self._model is None or not self._element_loads:
