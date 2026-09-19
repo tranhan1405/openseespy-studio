@@ -1171,7 +1171,12 @@ class AnalysisTemplateDialog(QDialog):
         combo: QComboBox,
     ) -> MassSourceData | None:
         override = self._template_mass_source_overrides.get(context)
-        if override is not None:
+        selected_tag = combo.currentData()
+        if (
+            override is not None
+            and selected_tag is not None
+            and int(selected_tag) == override.tag
+        ):
             return override
         if self.project is None:
             return None
