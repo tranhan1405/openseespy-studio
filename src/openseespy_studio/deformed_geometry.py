@@ -449,7 +449,8 @@ def deformed_member_frames(
     ri = basis @ rot_i
     rj = basis @ rot_j
 
-    count = max(3, int(stations))
+    minimum_stations = 3 if smooth else 2
+    count = max(minimum_stations, int(stations))
     s_values = np.linspace(0.0, 1.0, count)
     centerline = np.zeros((count, 3), dtype=float)
     magnitudes = np.zeros(count, dtype=float)
