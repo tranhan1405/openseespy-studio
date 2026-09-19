@@ -73,3 +73,43 @@ def test_external_console_setting_round_trip():
     restored = ProjectDatabase.from_dict(project.to_dict())
 
     assert restored.analyses[1].show_external_console is True
+
+
+def test_live_convergence_setting_round_trip_and_disable_print_stream():
+    model = StructuralModel()
+    model.add_node(1, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+    analysis = AnalysisSettingsData(
+        2,
+        "Quiet",
+        "Static",
+        live_convergence=False,
+    )
+    project.add_analysis(analysis)
+
+    restored = ProjectDatabase.from_dict(project.to_dict())
+    assert restored.analyses[2].live_convergence is False
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            restored.analyses[2],
+            node_tags=[1],
+        )
+    )
+    assert "ops.test('NormDispIncr', 1e-08, 50, 0)" in text
+    assert "live_convergence=False" in text
+    assert "'norm_history': list(_studio_norm_history)" in text
+
+
+def test_test_norm_history_is_trimmed_to_used_iterations():
+    settings = AnalysisSettingsData(
+        3,
+        "Live",
+        "Static",
+        live_convergence=True,
+    )
+    text = "\n".join(analysis_to_openseespy(settings))
+
+    assert "_all_norms = [float(v) for v in (ops.testNorms() or [])]" in text
+    assert "_used = max(0, min(_iterations, len(_all_norms)))" in text
+    assert "_norms = _all_norms[:_used]" in text
