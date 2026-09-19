@@ -390,6 +390,8 @@ def analysis_to_openseespy(
     frame_element_tags = list(frame_element_tags or [])
     support_node_tags = list(support_node_tags or [])
     plain_pattern_tags = list(plain_pattern_tags or [])
+    if monitor_node is None and settings.analysis_type == "Pushover":
+        monitor_node = settings.control_node
     monitor_node = int(monitor_node or (node_tags[0] if node_tags else 1))
 
     lines = [
