@@ -27,6 +27,9 @@ from PySide6.QtWidgets import (
 from ..jobs import JobRecord
 from ..postprocess import (
     component_end_resultants,
+    convergence_series,
+    convergence_steps,
+    convergence_summary,
     cyclic_hysteresis_curve,
     cyclic_hysteresis_metrics,
     fiber_response_element_tags,
@@ -322,6 +325,7 @@ class ResultsPanel(QWidget):
         root.addWidget(self.tabs, 1)
 
         self._build_jobs_tab()
+        self._build_convergence_tab()
         self._build_deformation_tab()
         self._build_mode_tab()
         self._build_node_tab()
@@ -356,6 +360,84 @@ class ResultsPanel(QWidget):
         self.jobs_table.cellClicked.connect(self._job_clicked)
         layout.addWidget(self.jobs_table)
         self.tabs.addTab(page, "Jobs")
+
+    def _build_convergence_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        controls = QHBoxLayout()
+        export = QPushButton("Export CSV")
+        export.clicked.connect(self._export_convergence_csv)
+        controls.addWidget(export)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.convergence_info = QLabel(
+            "Run a non-modal analysis to inspect solver convergence."
+        )
+        self.convergence_info.setWordWrap(True)
+        layout.addWidget(self.convergence_info)
+
+        self.convergence_summary_label = QLabel(
+            "Steps: -   Recovered: -   Failed: -   Max iterations: -"
+        )
+        self.convergence_summary_label.setWordWrap(True)
+        layout.addWidget(self.convergence_summary_label)
+
+        layout.addWidget(QLabel("Iterations by step"))
+        self.convergence_iterations_plot = TimeHistoryPlot(
+            empty_message="No convergence iteration data"
+        )
+        self.convergence_iterations_plot.setMinimumHeight(110)
+        layout.addWidget(self.convergence_iterations_plot)
+
+        layout.addWidget(QLabel("Final convergence norm by step"))
+        self.convergence_norm_plot = TimeHistoryPlot(
+            empty_message="No convergence norm data"
+        )
+        self.convergence_norm_plot.setMinimumHeight(110)
+        layout.addWidget(self.convergence_norm_plot)
+
+        self.convergence_table = QTableWidget(0, 7)
+        self.convergence_table.setHorizontalHeaderLabels(
+            [
+                "Step",
+                "Status",
+                "Algorithm",
+                "Iterations",
+                "Norm",
+                "Attempts",
+                "Time / Load factor",
+            ]
+        )
+        self.convergence_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.convergence_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.convergence_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.convergence_table.setSelectionBehavior(
+            QAbstractItemView.SelectRows
+        )
+        self.convergence_table.setSelectionMode(
+            QAbstractItemView.SingleSelection
+        )
+        self.convergence_table.cellClicked.connect(
+            self._convergence_row_clicked
+        )
+        layout.addWidget(self.convergence_table, 1)
+
+        self.convergence_attempt_info = QLabel(
+            "Select a step to inspect primary/fallback attempts."
+        )
+        self.convergence_attempt_info.setWordWrap(True)
+        layout.addWidget(self.convergence_attempt_info)
+
+        self.tabs.addTab(page, "Convergence")
 
     def _build_deformation_tab(self) -> None:
         page = QWidget()
@@ -755,6 +837,18 @@ class ResultsPanel(QWidget):
     def clear_all(self) -> None:
         self._result = {}
         self.jobs_table.setRowCount(0)
+        self.convergence_table.setRowCount(0)
+        self.convergence_iterations_plot.set_series([], [])
+        self.convergence_norm_plot.set_series([], [])
+        self.convergence_info.setText(
+            "Run a non-modal analysis to inspect solver convergence."
+        )
+        self.convergence_summary_label.setText(
+            "Steps: -   Recovered: -   Failed: -   Max iterations: -"
+        )
+        self.convergence_attempt_info.setText(
+            "Select a step to inspect primary/fallback attempts."
+        )
         self.node_table.setRowCount(0)
         self.element_table.setRowCount(0)
         self.element_info.setText(
@@ -884,6 +978,7 @@ class ResultsPanel(QWidget):
             else "No mode-shape data in this result."
         )
 
+        self._populate_convergence_dashboard()
         self._populate_node_table()
         self._populate_element_table()
         self._populate_fiber_elements()
@@ -892,6 +987,226 @@ class ResultsPanel(QWidget):
         self._update_pushover_plot()
         self._update_cyclic_plot()
         self._update_history_plot()
+
+    def _populate_convergence_dashboard(self) -> None:
+        rows = convergence_steps(self._result)
+        summary = convergence_summary(self._result)
+        analysis = self._result.get("analysis", {})
+        analysis_type = (
+            str(analysis.get("type", ""))
+            if isinstance(analysis, dict)
+            else ""
+        )
+
+        if not rows:
+            self.convergence_table.setRowCount(0)
+            self.convergence_iterations_plot.set_series([], [])
+            self.convergence_norm_plot.set_series([], [])
+            self.convergence_info.setText(
+                "No iterative convergence history is available for this "
+                "result."
+                if analysis_type
+                else "Run a non-modal analysis to inspect solver convergence."
+            )
+            self.convergence_summary_label.setText(
+                "Steps: -   Recovered: -   Failed: -   Max iterations: -"
+            )
+            self.convergence_attempt_info.setText(
+                "Select a step to inspect primary/fallback attempts."
+            )
+            return
+
+        tolerance = summary.get("tolerance")
+        tolerance_text = (
+            f"{float(tolerance):.3e}"
+            if tolerance is not None
+            else "-"
+        )
+        configured_max = summary.get("configured_max_iterations")
+        self.convergence_info.setText(
+            f"{analysis_type or 'Analysis'} · "
+            f"Test {summary.get('test') or '-'} · "
+            f"tol={tolerance_text} · "
+            f"configured max iter={configured_max if configured_max is not None else '-'} · "
+            f"primary={summary.get('primary_algorithm') or '-'}"
+        )
+
+        algorithms = ", ".join(summary.get("algorithms", [])) or "-"
+        worst_norm = summary.get("worst_norm")
+        worst_step = summary.get("worst_step")
+        worst_text = (
+            f"{float(worst_norm):.3e} at step {worst_step}"
+            if worst_norm is not None
+            else "-"
+        )
+        self.convergence_summary_label.setText(
+            f"Steps: {summary['steps']} · "
+            f"Converged: {summary['converged']} · "
+            f"Recovered: {summary['recovered']} · "
+            f"Failed: {summary['failed']} · "
+            f"Attempts: {summary['total_attempts']} · "
+            f"Max iterations used: {summary['max_iterations_used']} · "
+            f"Worst norm: {worst_text} · Algorithms: {algorithms}"
+        )
+
+        self.convergence_table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            attempts = row.get("attempts", [])
+            attempt_count = len(attempts) if isinstance(attempts, list) else 0
+            norm = row.get("norm")
+            norm_text = "-"
+            if norm is not None:
+                try:
+                    norm_text = f"{float(norm):.3e}"
+                except (TypeError, ValueError):
+                    norm_text = str(norm)
+            time_value = row.get("time")
+            time_text = "-"
+            if time_value is not None:
+                try:
+                    time_text = f"{float(time_value):.7g}"
+                except (TypeError, ValueError):
+                    time_text = str(time_value)
+            values = [
+                str(row.get("step", "-")),
+                str(row.get("status", "-")),
+                str(row.get("algorithm", "-")),
+                str(row.get("iterations", "-")),
+                norm_text,
+                str(attempt_count),
+                time_text,
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 0:
+                    item.setData(Qt.UserRole, int(row.get("step", 0)))
+                self.convergence_table.setItem(
+                    row_index,
+                    column,
+                    item,
+                )
+
+        x_iter, y_iter = convergence_series(
+            self._result,
+            "iterations",
+        )
+        x_norm, y_norm = convergence_series(
+            self._result,
+            "norm",
+        )
+        self.convergence_iterations_plot.set_series(x_iter, y_iter)
+        self.convergence_norm_plot.set_series(x_norm, y_norm)
+
+    def _convergence_row_clicked(self, row: int, column: int) -> None:
+        item = self.convergence_table.item(row, 0)
+        if item is None:
+            return
+        step = item.data(Qt.UserRole)
+        records = convergence_steps(self._result)
+        record = next(
+            (
+                candidate
+                for candidate in records
+                if int(candidate.get("step", -1)) == int(step)
+            ),
+            None,
+        )
+        if not isinstance(record, dict):
+            return
+
+        attempts = record.get("attempts", [])
+        if not isinstance(attempts, list) or not attempts:
+            self.convergence_attempt_info.setText(
+                f"Step {step}: no attempt details available."
+            )
+            return
+
+        labels: list[str] = []
+        for attempt in attempts:
+            if not isinstance(attempt, dict):
+                continue
+            success = bool(attempt.get("success"))
+            norm = attempt.get("norm")
+            norm_text = "-"
+            if norm is not None:
+                try:
+                    norm_text = f"{float(norm):.3e}"
+                except (TypeError, ValueError):
+                    norm_text = str(norm)
+            labels.append(
+                f"{attempt.get('algorithm', '-')} "
+                f"{'✓' if success else '✗'} "
+                f"(iter={attempt.get('iterations', '-')}, "
+                f"norm={norm_text}, code={attempt.get('code', '-')})"
+            )
+        self.convergence_attempt_info.setText(
+            f"Step {step}: " + " → ".join(labels)
+        )
+
+    def _export_convergence_csv(self) -> None:
+        rows = convergence_steps(self._result)
+        if not rows:
+            self.convergence_attempt_info.setText(
+                "No convergence data is available to export."
+            )
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Convergence History",
+            "convergence_history.csv",
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+
+        with open(path, "w", newline="", encoding="utf-8") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(
+                [
+                    "step",
+                    "status",
+                    "algorithm",
+                    "iterations",
+                    "norm",
+                    "recovered",
+                    "time_or_load_factor",
+                    "attempt_count",
+                    "attempt_chain",
+                ]
+            )
+            for row in rows:
+                attempts = row.get("attempts", [])
+                attempts = attempts if isinstance(attempts, list) else []
+                chain = " -> ".join(
+                    (
+                        f"{attempt.get('algorithm', '-')}:"
+                        f"{'ok' if attempt.get('success') else 'fail'}:"
+                        f"iter={attempt.get('iterations', '-')}:"
+                        f"norm={attempt.get('norm', '-')}:"
+                        f"code={attempt.get('code', '-')}"
+                    )
+                    for attempt in attempts
+                    if isinstance(attempt, dict)
+                )
+                writer.writerow(
+                    [
+                        row.get("step"),
+                        row.get("status"),
+                        row.get("algorithm"),
+                        row.get("iterations"),
+                        row.get("norm"),
+                        row.get("recovered"),
+                        row.get("time"),
+                        len(attempts),
+                        chain,
+                    ]
+                )
+        self.convergence_attempt_info.setText(
+            f"Exported {len(rows)} convergence step(s) to {path}"
+        )
 
     def _populate_node_table(self) -> None:
         final = self._result.get("final", {})

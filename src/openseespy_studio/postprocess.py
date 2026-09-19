@@ -284,6 +284,147 @@ def cyclic_hysteresis_metrics(
     }
 
 
+def convergence_steps(
+    result: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Return normalized per-step convergence records."""
+    if not isinstance(result, dict):
+        return []
+    convergence = result.get("convergence", {})
+    if not isinstance(convergence, dict):
+        return []
+    raw_steps = convergence.get("steps", [])
+    if not isinstance(raw_steps, list):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for raw in raw_steps:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            step = int(raw.get("step", 0))
+        except (TypeError, ValueError):
+            continue
+        row = dict(raw)
+        row["step"] = step
+        attempts = row.get("attempts", [])
+        row["attempts"] = (
+            [dict(item) for item in attempts if isinstance(item, dict)]
+            if isinstance(attempts, list)
+            else []
+        )
+        rows.append(row)
+    return sorted(rows, key=lambda item: int(item["step"]))
+
+
+def convergence_summary(
+    result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Summarize solver convergence performance for the dashboard."""
+    steps = convergence_steps(result)
+    algorithms: set[str] = set()
+    total_attempts = 0
+    recovered = 0
+    failed = 0
+    max_iterations = 0
+    worst_norm: float | None = None
+    worst_step: int | None = None
+
+    for row in steps:
+        if bool(row.get("recovered")):
+            recovered += 1
+        if str(row.get("status", "")) == "failed":
+            failed += 1
+
+        attempts = row.get("attempts", [])
+        if isinstance(attempts, list):
+            total_attempts += len(attempts)
+            for attempt in attempts:
+                if not isinstance(attempt, dict):
+                    continue
+                algorithm = str(attempt.get("algorithm", "") or "")
+                if algorithm:
+                    algorithms.add(algorithm)
+
+        try:
+            iterations = int(row.get("iterations", 0) or 0)
+        except (TypeError, ValueError):
+            iterations = 0
+        max_iterations = max(max_iterations, iterations)
+
+        raw_norm = row.get("norm")
+        if raw_norm is not None:
+            try:
+                norm = abs(float(raw_norm))
+            except (TypeError, ValueError):
+                norm = math.nan
+            if math.isfinite(norm) and (
+                worst_norm is None or norm > worst_norm
+            ):
+                worst_norm = norm
+                worst_step = int(row["step"])
+
+    convergence = (
+        result.get("convergence", {})
+        if isinstance(result, dict)
+        else {}
+    )
+    if not isinstance(convergence, dict):
+        convergence = {}
+
+    return {
+        "steps": len(steps),
+        "converged": sum(
+            1
+            for row in steps
+            if str(row.get("status", "")) == "converged"
+        ),
+        "recovered": recovered,
+        "failed": failed,
+        "total_attempts": total_attempts,
+        "max_iterations_used": max_iterations,
+        "worst_norm": worst_norm,
+        "worst_step": worst_step,
+        "algorithms": sorted(algorithms),
+        "test": str(convergence.get("test", "") or ""),
+        "tolerance": convergence.get("tolerance"),
+        "configured_max_iterations": convergence.get("max_iterations"),
+        "primary_algorithm": str(
+            convergence.get("primary_algorithm", "") or ""
+        ),
+    }
+
+
+def convergence_series(
+    result: dict[str, Any] | None,
+    quantity: str,
+) -> tuple[list[float], list[float]]:
+    """Return step-number series for iteration count or final convergence norm."""
+    key = str(quantity).strip().lower()
+    if key not in {"iterations", "norm"}:
+        raise ValueError(
+            f"Unsupported convergence series quantity: {quantity}"
+        )
+
+    x: list[float] = []
+    y: list[float] = []
+    for row in convergence_steps(result):
+        raw = row.get(key)
+        if raw is None:
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(value):
+            continue
+        if key == "norm":
+            value = abs(value)
+        x.append(float(row["step"]))
+        y.append(value)
+    return x, y
+
+
 def time_history_node_tags(
     result: dict[str, Any] | None,
 ) -> list[int]:

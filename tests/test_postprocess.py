@@ -4,6 +4,9 @@ from openseespy_studio.model import StructuralModel
 from openseespy_studio.postprocess import (
     classify_fiber_state,
     component_end_resultants,
+    convergence_series,
+    convergence_steps,
+    convergence_summary,
     cyclic_hysteresis_curve,
     cyclic_hysteresis_metrics,
     cyclic_reversal_points,
@@ -418,6 +421,129 @@ def test_cyclic_open_path_does_not_label_work_as_dissipated_energy():
     assert metrics["closed_path"] is False
     assert metrics["dissipated_energy"] is None
     assert metrics["signed_work"] > 0.0
+
+
+def test_convergence_dashboard_helpers_summarize_recovery_and_failure():
+    result = {
+        "convergence": {
+            "test": "NormDispIncr",
+            "tolerance": 1.0e-8,
+            "max_iterations": 50,
+            "primary_algorithm": "Newton",
+            "steps": [
+                {
+                    "step": 1,
+                    "status": "converged",
+                    "algorithm": "Newton",
+                    "iterations": 4,
+                    "norm": 1.0e-10,
+                    "recovered": False,
+                    "time": 0.1,
+                    "attempts": [
+                        {
+                            "algorithm": "Newton",
+                            "iterations": 4,
+                            "norm": 1.0e-10,
+                            "code": 0,
+                            "success": True,
+                        }
+                    ],
+                },
+                {
+                    "step": 2,
+                    "status": "recovered",
+                    "algorithm": "NewtonLineSearch",
+                    "iterations": 7,
+                    "norm": 5.0e-9,
+                    "recovered": True,
+                    "time": 0.2,
+                    "attempts": [
+                        {
+                            "algorithm": "Newton",
+                            "iterations": 50,
+                            "norm": 2.0e-4,
+                            "code": -3,
+                            "success": False,
+                        },
+                        {
+                            "algorithm": "NewtonLineSearch",
+                            "iterations": 7,
+                            "norm": 5.0e-9,
+                            "code": 0,
+                            "success": True,
+                        },
+                    ],
+                },
+                {
+                    "step": 3,
+                    "status": "failed",
+                    "algorithm": "ModifiedNewton",
+                    "iterations": 50,
+                    "norm": 1.0e-2,
+                    "recovered": False,
+                    "time": 0.2,
+                    "attempts": [
+                        {
+                            "algorithm": "Newton",
+                            "iterations": 50,
+                            "norm": 1.0e-3,
+                            "code": -3,
+                            "success": False,
+                        },
+                        {
+                            "algorithm": "ModifiedNewton",
+                            "iterations": 50,
+                            "norm": 1.0e-2,
+                            "code": -3,
+                            "success": False,
+                        },
+                    ],
+                },
+            ],
+        }
+    }
+
+    steps = convergence_steps(result)
+    assert [row["step"] for row in steps] == [1, 2, 3]
+
+    summary = convergence_summary(result)
+    assert summary["steps"] == 3
+    assert summary["converged"] == 1
+    assert summary["recovered"] == 1
+    assert summary["failed"] == 1
+    assert summary["total_attempts"] == 5
+    assert summary["max_iterations_used"] == 50
+    assert summary["worst_norm"] == 1.0e-2
+    assert summary["worst_step"] == 3
+    assert summary["algorithms"] == [
+        "ModifiedNewton",
+        "Newton",
+        "NewtonLineSearch",
+    ]
+
+    assert convergence_series(
+        result,
+        "iterations",
+    ) == ([1.0, 2.0, 3.0], [4.0, 7.0, 50.0])
+    assert convergence_series(
+        result,
+        "norm",
+    ) == ([1.0, 2.0, 3.0], [1.0e-10, 5.0e-9, 1.0e-2])
+
+
+def test_convergence_helpers_handle_empty_and_validate_quantity():
+    assert convergence_steps({}) == []
+    summary = convergence_summary({})
+    assert summary["steps"] == 0
+    assert summary["failed"] == 0
+    assert convergence_series({}, "norm") == ([], [])
+
+    try:
+        convergence_series({}, "energy")
+    except ValueError as exc:
+        assert "Unsupported convergence series quantity" in str(exc)
+    else:
+        raise AssertionError("Expected bad convergence quantity to fail")
 
 def _local_force_vector():
     return [
