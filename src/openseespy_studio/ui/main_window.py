@@ -5639,7 +5639,11 @@ class MainWindow(QMainWindow):
 
         if kind == "solution_convergence":
             analysis_tag = int(value)
-            evaluate = menu.addAction("Open Convergence Monitor")
+            analysis = self.project.analyses.get(analysis_tag)
+            label = convergence_result_label(
+                analysis.test if analysis is not None else None
+            )
+            evaluate = menu.addAction(f"Open {label}")
             evaluate.triggered.connect(
                 lambda: self._show_solution_convergence(analysis_tag)
             )
@@ -5680,7 +5684,14 @@ class MainWindow(QMainWindow):
             )
 
             plot_menu = menu.addMenu("Plot")
-            plot_menu.setEnabled(bool(job and job.results))
+            plot_menu.setEnabled(
+                bool(
+                    job
+                    and job.results
+                    and job.analysis_tag is not None
+                    and job.analysis_tag in self.project.analyses
+                )
+            )
             if job is not None:
                 self._populate_result_choice_menu(
                     plot_menu,
@@ -5692,28 +5703,7 @@ class MainWindow(QMainWindow):
                         name,
                         settings,
                     ),
-                )
-
-            add_menu = menu.addMenu("Add Plot to Solution")
-            add_menu.setEnabled(
-                bool(
-                    job
-                    and job.results
-                    and job.analysis_tag is not None
-                    and job.analysis_tag in self.project.analyses
-                )
-            )
-            if job is not None:
-                self._populate_result_choice_menu(
-                    add_menu,
-                    job.analysis_type,
-                    lambda result_type, name, settings:
-                    self._add_job_plot_to_solution(
-                        job_id,
-                        result_type,
-                        name,
-                        settings,
-                    ),
+                    convergence_test=self._job_convergence_test(job),
                 )
 
             menu.addSeparator()
