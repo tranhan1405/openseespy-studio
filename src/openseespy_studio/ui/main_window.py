@@ -2105,9 +2105,15 @@ class MainWindow(QMainWindow):
             self._show_solution_result_properties(solution_result_tag)
             self._evaluate_solution_result(solution_result_tag)
         elif solution_convergence_tag is not None:
+            analysis = self.project.analyses.get(
+                solution_convergence_tag
+            )
+            convergence_name = convergence_result_label(
+                analysis.test if analysis is not None else None
+            )
             self._show_solution_information(
                 solution_convergence_tag,
-                "Convergence Monitor",
+                convergence_name,
             )
             self._show_solution_convergence(solution_convergence_tag)
         elif solver_output_tag is not None:
@@ -5271,6 +5277,7 @@ class MainWindow(QMainWindow):
         for index in range(root.childCount()):
             found = visit(root.child(index))
             if found is not None:
+                self.tree.clearSelection()
                 self.tree.setCurrentItem(found)
                 found.setSelected(True)
                 parent = found.parent()
