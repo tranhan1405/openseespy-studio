@@ -2,6 +2,7 @@ from openseespy_studio.generator import (
     element_load_to_openseespy,
     load_pattern_to_openseespy,
     nodal_load_to_openseespy,
+    prescribed_displacement_to_openseespy,
     time_series_to_openseespy,
     to_openseespy,
 )
@@ -11,6 +12,7 @@ from openseespy_studio.project import (
     LoadPatternData,
     MaterialData,
     NodalLoadData,
+    PrescribedDisplacementData,
     ProjectDatabase,
     SectionData,
     TimeSeriesData,
@@ -104,6 +106,135 @@ def test_prune_nodal_load_after_node_delete():
     assert project.prune_nodal_loads()==[1]
 
 
+
+
+
+def test_prescribed_displacement_round_trip_and_generator():
+    project=ProjectDatabase(model=model_with_nodes())
+    project.add_time_series(TimeSeriesData(1,"Ramp","Linear"))
+    project.add_load_pattern(LoadPatternData(1,"Settlement","Plain",1))
+    displacement=PrescribedDisplacementData(
+        1,
+        "Support movement",
+        1,
+        2,
+        1,
+        0.015,
+    )
+    project.add_prescribed_displacement(displacement)
+
+    restored=ProjectDatabase.from_dict(project.to_dict())
+    item=restored.prescribed_displacements[1]
+    assert item.node_tag==2
+    assert item.dof==1
+    assert item.value==0.015
+    assert prescribed_displacement_to_openseespy(item)==(
+        "ops.sp(2, 1, 0.015)"
+    )
+
+
+def test_full_script_places_prescribed_displacement_under_plain_pattern():
+    model=model_with_nodes()
+    ts={1:TimeSeriesData(1,"Ramp","Linear")}
+    patterns={1:LoadPatternData(1,"Settlement","Plain",1)}
+    displacements={
+        1:PrescribedDisplacementData(
+            1,"Move X",1,2,1,0.02
+        )
+    }
+
+    script=to_openseespy(
+        model,
+        time_series=ts,
+        load_patterns=patterns,
+        prescribed_displacements=displacements,
+    )
+
+    pattern_index=script.index("ops.pattern('Plain', 1, 1)")
+    sp_index=script.index("ops.sp(2, 1, 0.02)")
+    assert pattern_index < sp_index
+    assert "# Prescribed displacement 1: Move X" in script
+
+
+def test_prescribed_displacement_rejects_restrained_dof():
+    project=ProjectDatabase(model=model_with_nodes())
+    project.model.set_fixity(2,(1,0,0,0,0,0))
+    project.add_time_series(TimeSeriesData(1,"Ramp","Linear"))
+    project.add_load_pattern(LoadPatternData(1,"Settlement","Plain",1))
+
+    try:
+        project.add_prescribed_displacement(
+            PrescribedDisplacementData(
+                1,"Bad UX",1,2,1,0.01
+            )
+        )
+    except ValueError as exc:
+        assert "restrained" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected prescribed displacement/support conflict"
+        )
+
+
+def test_prescribed_displacement_rejects_duplicate_node_dof():
+    project=ProjectDatabase(model=model_with_nodes())
+    project.add_time_series(TimeSeriesData(1,"Ramp","Linear"))
+    project.add_load_pattern(LoadPatternData(1,"Settlement","Plain",1))
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(
+            1,"Move once",1,2,1,0.01
+        )
+    )
+
+    try:
+        project.add_prescribed_displacement(
+            PrescribedDisplacementData(
+                2,"Move twice",1,2,1,0.02
+            )
+        )
+    except ValueError as exc:
+        assert "already has a prescribed displacement" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected duplicate node/DOF prescribed displacement rejection"
+        )
+
+
+def test_prescribed_displacement_requires_plain_pattern():
+    project=ProjectDatabase(model=model_with_nodes())
+    project.add_time_series(
+        TimeSeriesData(1,"EQ","Path",1.0,0.01,[0.0,1.0])
+    )
+    project.add_load_pattern(
+        LoadPatternData(1,"EQ","UniformExcitation",1,1)
+    )
+
+    try:
+        project.add_prescribed_displacement(
+            PrescribedDisplacementData(
+                1,"Bad",1,2,1,0.01
+            )
+        )
+    except ValueError as exc:
+        assert "Plain" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected UniformExcitation prescribed-displacement rejection"
+        )
+
+
+def test_prune_prescribed_displacement_after_node_delete():
+    project=ProjectDatabase(model=model_with_nodes())
+    project.add_time_series(TimeSeriesData(1,"Ramp","Linear"))
+    project.add_load_pattern(LoadPatternData(1,"Settlement","Plain",1))
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(
+            1,"Move X",1,2,1,0.01
+        )
+    )
+    project.model.remove_node(2,cascade=True)
+
+    assert project.prune_prescribed_displacements()==[1]
 
 def test_element_load_round_trip_and_project_validation():
     project=ProjectDatabase(model=model_with_nodes())
