@@ -157,3 +157,159 @@ def test_cyclic_analysis_requires_valid_control_node():
         assert "Cyclic control node" in str(exc)
     else:
         raise AssertionError("Expected cyclic control node validation")
+
+
+def test_adaptive_settings_round_trip_and_validation():
+    project = ProjectDatabase(model=model())
+    analysis = AnalysisSettingsData(
+        20,
+        "Adaptive push",
+        "Pushover",
+        control_node=2,
+        displacement_increment=0.004,
+        adaptive_step=True,
+        adaptive_cutback_factor=0.5,
+        adaptive_min_factor=0.125,
+        adaptive_growth_factor=1.5,
+        adaptive_easy_iterations=4,
+        adaptive_growth_after=3,
+    )
+    project.add_analysis(analysis)
+    restored = ProjectDatabase.from_dict(project.to_dict()).analyses[20]
+
+    assert restored.adaptive_step is True
+    assert restored.adaptive_cutback_factor == 0.5
+    assert restored.adaptive_min_factor == 0.125
+    assert restored.adaptive_growth_factor == 1.5
+    assert restored.adaptive_easy_iterations == 4
+    assert restored.adaptive_growth_after == 3
+
+    try:
+        AnalysisSettingsData(
+            21,
+            "Bad adaptive",
+            "Pushover",
+            displacement_increment=0.0,
+            adaptive_step=True,
+        )
+    except ValueError as exc:
+        assert "nonzero displacement increment" in str(exc)
+    else:
+        raise AssertionError("Expected zero adaptive pushover increment to fail")
+
+
+def test_adaptive_static_generator_preserves_nominal_target_with_cutback_loop():
+    analysis = AnalysisSettingsData(
+        22,
+        "Adaptive gravity",
+        "Static",
+        steps=4,
+        load_increment=0.25,
+        adaptive_step=True,
+        adaptive_cutback_factor=0.5,
+        adaptive_min_factor=0.125,
+        adaptive_growth_factor=1.5,
+        adaptive_easy_iterations=4,
+        adaptive_growth_after=2,
+    )
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            analysis,
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
+
+    assert "_studio_nominal_increment = 0.25" in text
+    assert "_studio_remaining = _studio_nominal_increment" in text
+    assert "while abs(_studio_remaining) > _studio_remaining_tol:" in text
+    assert "ops.integrator('LoadControl', _studio_trial_increment)" in text
+    assert "_studio_emit('cutback'" in text
+    assert "_studio_emit('grow'" in text
+    assert "_studio_emit('adaptive_substep'" in text
+    assert "'substeps': list(_studio_substeps)" in text
+    assert "'cutbacks': _studio_cutbacks" in text
+    compile(text, "<adaptive-static>", "exec")
+
+
+def test_adaptive_pushover_generator_retries_with_smaller_displacement_increment():
+    analysis = AnalysisSettingsData(
+        23,
+        "Adaptive push",
+        "Pushover",
+        steps=3,
+        control_node=2,
+        control_dof=1,
+        displacement_increment=0.006,
+        adaptive_step=True,
+    )
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            analysis,
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
+
+    assert (
+        "ops.integrator('DisplacementControl', 2, 1, "
+        "_studio_trial_increment)"
+        in text
+    )
+    assert "_studio_new_size = max(" in text
+    assert "_studio_trial_size * _studio_cutback_factor" in text
+    compile(text, "<adaptive-pushover>", "exec")
+
+
+def test_adaptive_transient_generator_splits_nominal_dt_without_changing_target_time():
+    analysis = AnalysisSettingsData(
+        24,
+        "Adaptive EQ",
+        "Transient",
+        steps=5,
+        dt=0.01,
+        adaptive_step=True,
+    )
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            analysis,
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
+
+    assert "_studio_nominal_increment = 0.01" in text
+    assert "ops.analyze(1, _studio_trial_size)" in text
+    assert "_studio_remaining -= _studio_trial_increment" in text
+    compile(text, "<adaptive-transient>", "exec")
+
+
+def test_adaptive_cyclic_generator_keeps_explicit_protocol_increments():
+    analysis = AnalysisSettingsData(
+        25,
+        "Adaptive cyclic",
+        "Cyclic",
+        control_node=2,
+        cyclic_targets=[0.004, -0.004, 0.0],
+        cyclic_increment=0.002,
+        adaptive_step=True,
+    )
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            analysis,
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
+
+    assert (
+        "_studio_nominal_increment = "
+        "_studio_cyclic_increments[_studio_step]"
+        in text
+    )
+    assert "_studio_remaining -= _studio_trial_increment" in text
+    compile(text, "<adaptive-cyclic>", "exec")
