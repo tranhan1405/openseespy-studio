@@ -5380,6 +5380,7 @@ class MainWindow(QMainWindow):
                 default_node=default_node,
                 units=self.project.units,
                 initial_template=str(initial_template),
+                project=self.project,
                 parent=self,
             )
         except Exception as exc:
@@ -5433,6 +5434,14 @@ class MainWindow(QMainWindow):
                         if isinstance(distribution_weights, dict)
                         else None
                     ),
+                    height_axis=int(request["height_axis"]),
+                    driver_pattern_tag=(
+                        int(request["driver_pattern_tag"])
+                        if request["driver_pattern_tag"] is not None
+                        else None
+                    ),
+                    preload_gravity=bool(request["preload_gravity"]),
+                    gravity_steps=int(request["gravity_steps"]),
                     solver_preset=str(request["solver_preset"]),
                 )
             elif kind == "Cyclic":
