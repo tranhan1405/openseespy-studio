@@ -382,6 +382,65 @@ def _result_objects(
     return result
 
 
+def build_modal_template(
+    project: ProjectDatabase,
+    *,
+    name: str,
+    num_modes: int = 6,
+    eigen_solver: str = "-genBandArpack",
+    require_nodal_mass: bool = True,
+) -> AnalysisTemplatePlan:
+    if not project.model.nodes:
+        raise ValueError("Modal template needs a structural model.")
+    num_modes = int(num_modes)
+    if num_modes < 1:
+        raise ValueError("Number of modes must be at least 1.")
+
+    has_translational_mass = any(
+        any(abs(float(value)) > 1.0e-15 for value in node.mass[:3])
+        for node in project.model.nodes.values()
+    )
+    if require_nodal_mass and not has_translational_mass:
+        raise ValueError(
+            "Modal template found no translational nodal mass. "
+            "Assign nodal mass first, or disable the mass check if mass is "
+            "provided by another supported modeling mechanism."
+        )
+
+    tag = project.next_analysis_tag()
+    analysis = AnalysisSettingsData(
+        tag=tag,
+        name=str(name).strip() or f"Modal {tag}",
+        analysis_type="Modal",
+        num_modes=num_modes,
+        eigen_solver=str(eigen_solver),
+        recovery=False,
+        adaptive_step=False,
+        live_convergence=False,
+    )
+    result_specs = [
+        (
+            f"Mode Shape {mode}",
+            "ModeShape",
+            {"mode": mode, "scale": 1.0},
+        )
+        for mode in range(1, num_modes + 1)
+    ]
+    results = _result_objects(project, tag, result_specs)
+    mass_note = (
+        "nodal mass detected"
+        if has_translational_mass
+        else "mass check bypassed"
+    )
+    return AnalysisTemplatePlan(
+        analysis=analysis,
+        results=results,
+        summary=(
+            f"Modal · {num_modes} mode(s) · {eigen_solver} · {mass_note}"
+        ),
+    )
+
+
 def build_pushover_template(
     project: ProjectDatabase,
     *,
