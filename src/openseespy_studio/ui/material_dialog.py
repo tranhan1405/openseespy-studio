@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QScrollArea,
     QSpinBox,
     QSplitter,
@@ -28,6 +29,7 @@ from ..project import (
     MaterialData,
 )
 from ..units import UnitSystem
+from .material_test_dialog import MaterialTestDialog
 
 
 PA_PER_MPA = 1.0e6
@@ -278,6 +280,11 @@ class MaterialDialog(QDialog):
         splitter.setStretchFactor(1, 2)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.test_material_button = buttons.addButton(
+            "Test Material...",
+            QDialogButtonBox.ActionRole,
+        )
+        self.test_material_button.clicked.connect(self._open_material_test)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
@@ -541,6 +548,24 @@ class MaterialDialog(QDialog):
             self.material_note.setStyleSheet(
                 "padding: 7px; background: #f2f5f8; color: #526578;"
             )
+
+    def _open_material_test(self) -> None:
+        try:
+            material = self.material_data()
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Material Test Lab",
+                str(exc),
+            )
+            return
+
+        dialog = MaterialTestDialog(
+            material,
+            units=self.unit_system.as_mapping(),
+            parent=self,
+        )
+        dialog.exec()
 
     def material_data(self) -> MaterialData:
         material_type = str(self.material_type.currentData())
