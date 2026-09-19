@@ -26,14 +26,75 @@ class FrameGridSpec:
     beam_section_tag: int | None = None
     column_transf_tag: int | None = None
     beam_transf_tag: int | None = None
+    planar_2d: bool = False
+    planar_base_support: str = "Fixed"
 
 
 def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
-    """Create a regular 3-D frame grid.
+    """Create a regular frame grid.
 
-    nx/ny are bay counts, nz is storey count. Ground-level nodes are included.
+    Standard mode creates a 3-D X-Y-Z frame. Planar mode creates an X-Z
+    frame while retaining the Studio 3-D / 6-DOF backend and automatically
+    restraining all out-of-plane DOFs.
     """
     model.clear()
+
+    if spec.planar_2d:
+        if spec.planar_base_support not in {"Fixed", "Pinned"}:
+            raise ValueError(
+                "2D frame base support must be Fixed or Pinned."
+            )
+        node_tag = spec.start_node_tag
+        node_at_2d: dict[tuple[int, int], int] = {}
+        out_of_plane = (0, 1, 0, 1, 0, 1)
+
+        for k in range(spec.nz + 1):
+            for i in range(spec.nx + 1):
+                model.add_node(
+                    node_tag,
+                    i * spec.dx,
+                    0.0,
+                    k * spec.dz,
+                )
+                node_at_2d[(i, k)] = node_tag
+                model.set_fixity(node_tag, out_of_plane)
+                node_tag += 1
+
+        ele_tag = spec.start_element_tag
+        if spec.create_columns:
+            for k in range(spec.nz):
+                for i in range(spec.nx + 1):
+                    model.add_element(
+                        ele_tag,
+                        node_at_2d[(i, k)],
+                        node_at_2d[(i, k + 1)],
+                        section_tag=spec.column_section_tag,
+                        transf_tag=spec.column_transf_tag,
+                        group="column-2d",
+                    )
+                    ele_tag += 1
+
+        if spec.create_beams_x:
+            for k in range(1, spec.nz + 1):
+                for i in range(spec.nx):
+                    model.add_element(
+                        ele_tag,
+                        node_at_2d[(i, k)],
+                        node_at_2d[(i + 1, k)],
+                        section_tag=spec.beam_section_tag,
+                        transf_tag=spec.beam_transf_tag,
+                        group="beam-2d",
+                    )
+                    ele_tag += 1
+
+        base_fixity = (
+            (1, 1, 1, 1, 1, 1)
+            if spec.planar_base_support == "Fixed"
+            else (1, 1, 1, 1, 0, 1)
+        )
+        for i in range(spec.nx + 1):
+            model.set_fixity(node_at_2d[(i, 0)], base_fixity)
+        return
     node_tag = spec.start_node_tag
     node_at: dict[tuple[int, int, int], int] = {}
 
