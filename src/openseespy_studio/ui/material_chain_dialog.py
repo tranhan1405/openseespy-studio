@@ -33,7 +33,7 @@ def _spin(
     *,
     decimals: int = 8,
     minimum: float = -1.0e12,
-    maximum: float = 1.0e12,
+    maximum: float = 1.0e20,
 ) -> QDoubleSpinBox:
     spin = QDoubleSpinBox()
     spin.setDecimals(decimals)
