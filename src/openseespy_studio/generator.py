@@ -657,7 +657,7 @@ def analysis_to_openseespy(
         lines.append(
             "            _studio_emit('fallback', "
             "step=_studio_step_no, "
-            f"total={settings.steps}, algorithm=_studio_alg)"
+            f"total={total_steps}, algorithm=_studio_alg)"
         )
         lines.append("            ops.algorithm(_studio_alg)")
         lines.append(f"            _studio_ok = {analyze_call}")
@@ -670,7 +670,7 @@ def analysis_to_openseespy(
         lines.append(
             "                _studio_emit('recovered', "
             "step=_studio_step_no, "
-            f"total={settings.steps}, algorithm=_studio_alg, "
+            f"total={total_steps}, algorithm=_studio_alg, "
             "iterations=_studio_iterations, norm=_studio_norm)"
         )
         lines.append("                break")
@@ -679,7 +679,7 @@ def analysis_to_openseespy(
     lines.append("    if _studio_ok != 0:")
     lines.append(
         "        _studio_emit('failed', step=_studio_step_no, "
-        f"total={settings.steps}, "
+        f"total={total_steps}, "
         "algorithm=_studio_active_algorithm, "
         "iterations=_studio_iterations, norm=_studio_norm, "
         "code=int(_studio_ok))"
@@ -769,7 +769,7 @@ def analysis_to_openseespy(
     )
     lines.append(
         "    _studio_emit('progress', step=_studio_step_no, "
-        f"total={settings.steps}, "
+        f"total={total_steps}, "
         f"percent=100.0 * _studio_step_no / {total_steps}, "
         "algorithm=_studio_active_algorithm, "
         "iterations=_studio_iterations, norm=_studio_norm, "
