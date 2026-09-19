@@ -511,6 +511,9 @@ def analysis_to_openseespy(
         f"        'adaptive_cutback_factor': {settings.adaptive_cutback_factor:g},",
         f"        'adaptive_min_factor': {settings.adaptive_min_factor:g},",
         f"        'adaptive_growth_factor': {settings.adaptive_growth_factor:g},",
+        f"        'rayleigh_damping_ratio': {settings.rayleigh_damping_ratio:g},",
+        f"        'rayleigh_mode_i': {settings.rayleigh_mode_i},",
+        f"        'rayleigh_mode_j': {settings.rayleigh_mode_j},",
         "    },",
         "    'final': {},",
         "    'convergence': {",
@@ -549,6 +552,45 @@ def analysis_to_openseespy(
         f"ops.numberer('{settings.numberer}')",
         f"ops.system('{settings.system}')",
     ]
+
+    if (
+        settings.analysis_type == "Transient"
+        and settings.rayleigh_damping_ratio > 0.0
+    ):
+        max_mode = max(
+            settings.rayleigh_mode_i,
+            settings.rayleigh_mode_j,
+        )
+        lines.extend([
+            "# Rayleigh damping from two modal frequencies",
+            f"_studio_damping_eigs = ops.eigen({max_mode})",
+            "if not isinstance(_studio_damping_eigs, (list, tuple)):",
+            "    _studio_damping_eigs = [_studio_damping_eigs]",
+            (
+                f"_studio_lambda_i = float(_studio_damping_eigs["
+                f"{settings.rayleigh_mode_i - 1}])"
+            ),
+            (
+                f"_studio_lambda_j = float(_studio_damping_eigs["
+                f"{settings.rayleigh_mode_j - 1}])"
+            ),
+            "_studio_omega_i = math.sqrt(max(_studio_lambda_i, 0.0))",
+            "_studio_omega_j = math.sqrt(max(_studio_lambda_j, 0.0))",
+            (
+                f"_studio_zeta = {settings.rayleigh_damping_ratio:g}"
+            ),
+            (
+                "_studio_beta_k = "
+                "2.0 * _studio_zeta / "
+                "(_studio_omega_i + _studio_omega_j)"
+            ),
+            (
+                "_studio_alpha_m = "
+                "_studio_beta_k * _studio_omega_i * _studio_omega_j"
+            ),
+            "ops.rayleigh(_studio_alpha_m, 0.0, 0.0, _studio_beta_k)",
+            "",
+        ])
 
     if settings.analysis_type == "Modal":
         lines.append(
@@ -1389,6 +1431,7 @@ def to_openseespy(
 ) -> str:
     lines: list[str] = [
         "import json",
+        "import math",
         "import os",
         "import openseespy.opensees as ops",
         "",
