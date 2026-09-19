@@ -5539,6 +5539,22 @@ class MainWindow(QMainWindow):
             ("Active", "Yes" if tag == self.project.active_analysis_tag else "No"),
             ("Constraints", settings.constraints_handler),
             ("Numberer", settings.numberer), ("System", settings.system),
+            (
+                "Gravity preload",
+                (
+                    f"On · {settings.gravity_steps} step(s)"
+                    if settings.preload_gravity
+                    else "Off"
+                ),
+            ),
+            (
+                "Driving pattern(s)",
+                (
+                    ", ".join(map(str, settings.deferred_pattern_tags))
+                    if settings.deferred_pattern_tags
+                    else "-"
+                ),
+            ),
         ]
         if settings.analysis_type == "Modal":
             rows.append(("Modes", settings.num_modes))
