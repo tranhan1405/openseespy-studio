@@ -334,7 +334,7 @@ def test_nlth_template_converts_g_and_creates_uniform_excitation():
     assert pattern.pattern_type == "UniformExcitation"
     assert pattern.direction == 1
     assert plan.analysis.analysis_type == "Transient"
-    assert plan.analysis.steps == 3
+    assert plan.analysis.steps == 2
     assert plan.analysis.rayleigh_damping_ratio == 0.05
     assert plan.analysis.rayleigh_mode_i == 1
     assert plan.analysis.rayleigh_mode_j == 3
@@ -558,7 +558,7 @@ def test_multi_component_nlth_creates_one_excitation_per_axis():
     assert len(plan.time_series) == 2
     assert len(plan.load_patterns) == 2
     assert [pattern.direction for pattern in plan.load_patterns] == [1, 2]
-    assert plan.analysis.steps == 4
+    assert plan.analysis.steps == 3
     assert plan.analysis.deferred_pattern_tags == [
         pattern.tag for pattern in plan.load_patterns
     ]
@@ -569,6 +569,106 @@ def test_multi_component_nlth_creates_one_excitation_per_axis():
     ]
     assert {result.settings["dof"] for result in histories} == {1, 2}
 
+
+
+def test_nlth_v2_gravity_mass_check_and_default_histories():
+    project = project_with_two_storeys()
+    project.model.set_mass(
+        2,
+        (1.0, 1.5, 0.0, 0.0, 0.0, 0.0),
+    )
+    project.model.set_mass(
+        3,
+        (2.0, 2.5, 0.0, 0.0, 0.0, 0.0),
+    )
+    plan = build_nlth_multi_template(
+        project,
+        name="NLTH V2",
+        components=[
+            GroundMotionComponentSpec(
+                direction=1,
+                values=[0.0, 0.1, -0.1, 0.0],
+            ),
+            GroundMotionComponentSpec(
+                direction=2,
+                values=[0.0, 0.2, -0.2, 0.0],
+            ),
+        ],
+        dt=0.02,
+        input_unit="g",
+        monitor_node=3,
+        monitor_dof=1,
+        preload_gravity=False,
+        gravity_steps=25,
+        require_nodal_mass=True,
+    )
+
+    assert plan.analysis.steps == 3
+    assert plan.analysis.preload_gravity is False
+    assert plan.analysis.gravity_steps == 25
+
+    history_specs = {
+        (result.settings.get("quantity"), result.settings.get("dof"))
+        for result in plan.results
+        if result.result_type == "TimeHistory"
+    }
+    for dof in (1, 2):
+        assert ("Displacement", dof) in history_specs
+        assert ("Velocity", dof) in history_specs
+        assert ("Acceleration", dof) in history_specs
+        assert ("Base shear", dof) in history_specs
+
+
+def test_nlth_mass_check_rejects_missing_mass_in_excited_direction():
+    project = project_with_two_storeys()
+    project.model.set_mass(
+        2,
+        (1.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    )
+    project.model.set_mass(
+        3,
+        (1.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    )
+
+    with pytest.raises(ValueError, match="direction.*Y"):
+        build_nlth_multi_template(
+            project,
+            name="No Y Mass",
+            components=[
+                GroundMotionComponentSpec(
+                    direction=2,
+                    values=[0.0, 0.1, 0.0],
+                )
+            ],
+            dt=0.01,
+            input_unit="g",
+            monitor_node=3,
+            monitor_dof=1,
+            require_nodal_mass=True,
+        )
+
+
+def test_nlth_2d_model_rejects_z_excitation():
+    model = StructuralModel("2d-nlth", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 3.0, 0.0)
+    project = ProjectDatabase(model=model)
+
+    with pytest.raises(ValueError, match="ndm=2"):
+        build_nlth_multi_template(
+            project,
+            name="Bad Z",
+            components=[
+                GroundMotionComponentSpec(
+                    direction=3,
+                    values=[0.0, 0.1, 0.0],
+                )
+            ],
+            dt=0.01,
+            input_unit="g",
+            monitor_node=2,
+            monitor_dof=1,
+        )
 
 
 def test_modal_template_creates_mode_results_and_checks_mass():

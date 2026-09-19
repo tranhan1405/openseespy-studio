@@ -1,5 +1,6 @@
 from openseespy_studio.ground_motion_library import (
     GROUND_MOTION_LIBRARY,
+    common_scale_factor_for_target_pga,
     parse_ground_motion_record_text,
     parse_peer_at2_text,
     pga_in_g,
@@ -82,3 +83,17 @@ def test_target_pga_scale_factor():
         target_pga_g=0.35,
     )
     assert abs(factor - 0.7) < 1.0e-12
+
+
+def test_common_target_pga_scale_preserves_component_ratio():
+    factor = common_scale_factor_for_target_pga(
+        [
+            [0.0, 0.25, -0.50],
+            [0.0, 0.10, -0.20],
+        ],
+        "g",
+        target_pga_g=0.40,
+    )
+    assert abs(factor - 0.8) < 1.0e-12
+    assert abs(0.50 * factor - 0.40) < 1.0e-12
+    assert abs(0.20 * factor - 0.16) < 1.0e-12

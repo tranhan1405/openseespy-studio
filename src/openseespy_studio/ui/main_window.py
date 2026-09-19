@@ -5782,6 +5782,11 @@ class MainWindow(QMainWindow):
                     damping_ratio=float(request["damping_ratio"]),
                     damping_mode_i=int(request["damping_mode_i"]),
                     damping_mode_j=int(request["damping_mode_j"]),
+                    preload_gravity=bool(request["preload_gravity"]),
+                    gravity_steps=int(request["gravity_steps"]),
+                    require_nodal_mass=bool(
+                        request["require_nodal_mass"]
+                    ),
                     solver_preset=str(request["solver_preset"]),
                 )
 
