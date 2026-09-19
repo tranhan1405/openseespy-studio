@@ -41,6 +41,7 @@ class ConnectionDialog(QDialog):
         initial_node_i: int = 1,
         initial_node_j: int = 2,
         default_to_ground: bool = False,
+        units=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -48,6 +49,7 @@ class ConnectionDialog(QDialog):
         self.setModal(True)
         self.resize(560, 520)
         self.materials = dict(materials)
+        self.units = dict(units or {})
         self.pending_materials: list[MaterialData] = []
 
         root = QVBoxLayout(self)
@@ -238,6 +240,7 @@ class ConnectionDialog(QDialog):
         label = self.DOF_LABELS[dof - 1]
         dialog = MaterialChainDialog(
             self.materials,
+            units=self.units,
             target_dof_label=label,
             parent=self,
         )
@@ -258,6 +261,36 @@ class ConnectionDialog(QDialog):
 
     def _sync_ground_state(self, checked: bool) -> None:
         self.node_j.setEnabled(not checked)
+
+    def _pending_materials_in_use(
+        self,
+        materials_by_dof: dict[int, int],
+    ) -> list[MaterialData]:
+        pending = {material.tag: material for material in self.pending_materials}
+        needed: set[int] = set()
+
+        def collect(tag: int) -> None:
+            if tag in needed or tag not in pending:
+                return
+            needed.add(tag)
+            material = pending[tag]
+            if (
+                material.material_type in {"MinMax", "Fatigue"}
+                and material.base_material_tag is not None
+            ):
+                collect(material.base_material_tag)
+            elif material.material_type in {"Parallel", "Series"}:
+                for dependency in material.material_tags:
+                    collect(dependency)
+
+        for material_tag in materials_by_dof.values():
+            collect(material_tag)
+
+        return [
+            material
+            for material in self.pending_materials
+            if material.tag in needed
+        ]
 
     def spec(self) -> dict:
         materials_by_dof: dict[int, int] = {}
@@ -289,7 +322,9 @@ class ConnectionDialog(QDialog):
             "orient_x": tuple(spin.value() for spin in self.ox),
             "orient_y": tuple(spin.value() for spin in self.oy),
             "do_rayleigh": self.do_rayleigh.isChecked(),
-            "pending_materials": list(self.pending_materials),
+            "pending_materials": self._pending_materials_in_use(
+                materials_by_dof
+            ),
         }
 
     def _validate_and_accept(self) -> None:
