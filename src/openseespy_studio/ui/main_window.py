@@ -85,6 +85,14 @@ QMainWindow {
     background: #eef2f6;
     color: #23364a;
 }
+QMainWindow::separator {
+    background: #c7d0da;
+    width: 5px;
+    height: 5px;
+}
+QMainWindow::separator:hover {
+    background: #2f80ed;
+}
 QMenuBar {
     background: #fbfcfd;
     color: #1f2f40;
@@ -936,6 +944,7 @@ class MainWindow(QMainWindow):
         }
         self._last_result: dict[str, object] = {}
         self._active_solution_result_tag: int | None = None
+        self._results_dock_sized_once = False
         self._dirty = False
         self._job_ui_timer = QTimer(self)
         self._job_ui_timer.setInterval(1000)
@@ -1030,9 +1039,15 @@ class MainWindow(QMainWindow):
         script_dock = QDockWidget("", self)
         script_dock.setObjectName("PythonDock")
         script_dock.setAllowedAreas(Qt.BottomDockWidgetArea)
+        script_dock.setMinimumWidth(120)
 
         script_tabs = QTabWidget()
         script_tabs.setDocumentMode(True)
+        script_tabs.setMinimumWidth(0)
+        script_tabs.setSizePolicy(
+            QSizePolicy.Ignored,
+            QSizePolicy.Expanding,
+        )
         self.script = CodeEditor()
         command = QPlainTextEdit()
         command.setReadOnly(True)
@@ -1045,7 +1060,13 @@ class MainWindow(QMainWindow):
         console_dock = QDockWidget("Console", self)
         console_dock.setObjectName("ConsoleDock")
         console_dock.setAllowedAreas(Qt.BottomDockWidgetArea)
+        console_dock.setMinimumWidth(120)
         self.console = QPlainTextEdit()
+        self.console.setMinimumWidth(0)
+        self.console.setSizePolicy(
+            QSizePolicy.Ignored,
+            QSizePolicy.Expanding,
+        )
         self.console.setReadOnly(True)
         self.console.setFont(QFont("Consolas", 9))
         console_dock.setWidget(self.console)
@@ -1054,7 +1075,13 @@ class MainWindow(QMainWindow):
         results_dock = QDockWidget("Results Viewer", self)
         results_dock.setObjectName("ResultsDock")
         results_dock.setAllowedAreas(Qt.BottomDockWidgetArea)
+        results_dock.setMinimumWidth(160)
         self.results_panel = ResultsPanel()
+        self.results_panel.setMinimumWidth(0)
+        self.results_panel.setSizePolicy(
+            QSizePolicy.Ignored,
+            QSizePolicy.Expanding,
+        )
         self.results_panel.deformation_requested.connect(
             self._show_deformation_result
         )
@@ -1083,6 +1110,10 @@ class MainWindow(QMainWindow):
         self.script_dock = script_dock
         self.console_dock = console_dock
         self.results_dock = results_dock
+        self.results_dock.visibilityChanged.connect(
+            self._results_dock_visibility_changed
+        )
+        self.results_dock.hide()
 
     def _make_action(
         self,
@@ -1295,6 +1326,17 @@ class MainWindow(QMainWindow):
         menus["Analysis"].addAction(self.actions["run"])
         menus["Results"].addAction(self.actions["plot"])
 
+        menus["Window"].addAction(self.model_tree_dock.toggleViewAction())
+        menus["Window"].addAction(self.properties_dock.toggleViewAction())
+        menus["Window"].addAction(self.script_dock.toggleViewAction())
+        menus["Window"].addAction(self.console_dock.toggleViewAction())
+        menus["Window"].addAction(self.results_dock.toggleViewAction())
+        menus["Window"].addAction(self.create_dock.toggleViewAction())
+        menus["Window"].addSeparator()
+        reset_layout = QAction("Reset Dock Layout", self)
+        reset_layout.triggered.connect(self._reset_dock_layout)
+        menus["Window"].addAction(reset_layout)
+
         ribbon = QToolBar("Ribbon", self)
         ribbon.setObjectName("Ribbon")
         ribbon.setMovable(False)
@@ -1350,14 +1392,54 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.status_counts)
 
     def _size_initial_docks(self) -> None:
-        self.resizeDocks([self.model_tree_dock, self.create_dock], [275, 340], Qt.Horizontal)
-        self.resizeDocks([self.model_tree_dock, self.properties_dock], [575, 230], Qt.Vertical)
         self.resizeDocks(
-            [self.script_dock, self.console_dock, self.results_dock],
-            [500, 275, 480],
+            [self.model_tree_dock, self.create_dock],
+            [275, 340],
             Qt.Horizontal,
         )
-        self.resizeDocks([self.script_dock], [245], Qt.Vertical)
+        self.resizeDocks(
+            [self.model_tree_dock, self.properties_dock],
+            [575, 230],
+            Qt.Vertical,
+        )
+        self.resizeDocks(
+            [self.script_dock, self.console_dock],
+            [620, 360],
+            Qt.Horizontal,
+        )
+        self.resizeDocks(
+            [self.script_dock],
+            [245],
+            Qt.Vertical,
+        )
+
+    def _results_dock_visibility_changed(self, visible: bool) -> None:
+        if not visible or self._results_dock_sized_once:
+            return
+        self._results_dock_sized_once = True
+        QTimer.singleShot(0, self._size_bottom_docks_with_results)
+
+    def _size_bottom_docks_with_results(self) -> None:
+        if not self.results_dock.isVisible():
+            return
+        self.resizeDocks(
+            [self.script_dock, self.console_dock, self.results_dock],
+            [560, 300, 320],
+            Qt.Horizontal,
+        )
+
+    def _reset_dock_layout(self) -> None:
+        self.model_tree_dock.show()
+        self.properties_dock.show()
+        self.script_dock.show()
+        self.console_dock.show()
+        self.create_dock.show()
+        self.results_dock.setVisible(bool(self._jobs))
+        self._results_dock_sized_once = False
+        self._size_initial_docks()
+        if self.results_dock.isVisible():
+            self._results_dock_visibility_changed(True)
+        self.status_message.setText("Dock layout reset")
 
     def _create_default_model(self) -> None:
         spec = FrameGridSpec(nx=4, ny=3, nz=3)
@@ -6008,6 +6090,8 @@ class MainWindow(QMainWindow):
         self._analysis_stop_requested = False
         self.results_panel.add_or_update_job(job)
         self.results_panel.show_jobs()
+        self.results_dock.show()
+        self.results_dock.raise_()
         self._refresh_tree()
 
         self._append_analysis_log(
