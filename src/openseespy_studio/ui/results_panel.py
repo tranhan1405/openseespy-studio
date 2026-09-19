@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import math
 from typing import Any
 
 from PySide6.QtCore import QPointF, Qt, Signal
@@ -26,6 +27,9 @@ from PySide6.QtWidgets import (
 from ..jobs import JobRecord
 from ..postprocess import (
     component_end_resultants,
+    fiber_response_element_tags,
+    fiber_response_range,
+    fiber_response_sections,
     pushover_capacity_curve,
     time_history_node_tags,
     time_history_series,
@@ -99,6 +103,198 @@ class TimeHistoryPlot(QWidget):
         painter.drawText(right - 35, self.height() - 7, f"{xmax:.3g}")
 
 
+class FiberResponsePlot(QWidget):
+    fiber_selected = Signal(object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._section: dict[str, Any] = {}
+        self._quantity = "stress"
+        self._screen_fibers: list[
+            tuple[float, float, float, dict[str, Any], int]
+        ] = []
+        self.setMinimumHeight(220)
+
+    def set_response(
+        self,
+        section: dict[str, Any] | None,
+        quantity: str,
+    ) -> None:
+        self._section = dict(section or {})
+        self._quantity = str(quantity).strip().lower()
+        self._screen_fibers = []
+        self.update()
+
+    @staticmethod
+    def _lerp(a: int, b: int, t: float) -> int:
+        return int(round(a + (b - a) * max(0.0, min(1.0, t))))
+
+    @classmethod
+    def _response_color(
+        cls,
+        value: float,
+        limit: float,
+    ) -> QColor:
+        if limit <= 1.0e-30:
+            return QColor("#d9dee5")
+        t = max(-1.0, min(1.0, value / limit))
+        neutral = (238, 241, 245)
+        if t < 0.0:
+            end = (47, 128, 237)
+            ratio = -t
+        else:
+            end = (214, 64, 69)
+            ratio = t
+        return QColor(
+            cls._lerp(neutral[0], end[0], ratio),
+            cls._lerp(neutral[1], end[1], ratio),
+            cls._lerp(neutral[2], end[2], ratio),
+        )
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#ffffff"))
+
+        fibers = self._section.get("fibers", [])
+        if not isinstance(fibers, list) or not fibers:
+            painter.setPen(QColor("#718195"))
+            painter.drawText(
+                self.rect(),
+                Qt.AlignCenter,
+                "No fiber response data",
+            )
+            return
+
+        numeric: list[tuple[int, dict[str, Any], float, float, float]] = []
+        values: list[float] = []
+        for index, fiber in enumerate(fibers):
+            if not isinstance(fiber, dict):
+                continue
+            try:
+                y = float(fiber.get("y", 0.0))
+                z = float(fiber.get("z", 0.0))
+                area = max(float(fiber.get("area", 0.0)), 0.0)
+            except (TypeError, ValueError):
+                continue
+            raw_value = fiber.get(self._quantity)
+            try:
+                value = float(raw_value) if raw_value is not None else math.nan
+            except (TypeError, ValueError):
+                value = math.nan
+            numeric.append((index, fiber, y, z, area))
+            if math.isfinite(value):
+                values.append(value)
+
+        if not numeric:
+            painter.setPen(QColor("#718195"))
+            painter.drawText(
+                self.rect(),
+                Qt.AlignCenter,
+                "No valid fiber geometry",
+            )
+            return
+
+        radii = [
+            math.sqrt(area / math.pi) if area > 0.0 else 0.0
+            for _, _, _, _, area in numeric
+        ]
+        ymin = min(item[2] - radius for item, radius in zip(numeric, radii))
+        ymax = max(item[2] + radius for item, radius in zip(numeric, radii))
+        zmin = min(item[3] - radius for item, radius in zip(numeric, radii))
+        zmax = max(item[3] + radius for item, radius in zip(numeric, radii))
+
+        if abs(ymax - ymin) < 1.0e-15:
+            ymin -= 0.5
+            ymax += 0.5
+        if abs(zmax - zmin) < 1.0e-15:
+            zmin -= 0.5
+            zmax += 0.5
+
+        margin_left, margin_right = 54.0, 24.0
+        margin_top, margin_bottom = 24.0, 42.0
+        available_w = max(self.width() - margin_left - margin_right, 1.0)
+        available_h = max(self.height() - margin_top - margin_bottom, 1.0)
+        scale = min(
+            available_w / (ymax - ymin),
+            available_h / (zmax - zmin),
+        )
+        drawing_w = (ymax - ymin) * scale
+        drawing_h = (zmax - zmin) * scale
+        x0 = margin_left + 0.5 * (available_w - drawing_w)
+        y0 = margin_top + 0.5 * (available_h - drawing_h)
+
+        limit = max((abs(value) for value in values), default=0.0)
+        self._screen_fibers = []
+
+        painter.setPen(QPen(QColor("#9aa9b8"), 1))
+        for (index, fiber, y, z, area), physical_radius in zip(
+            numeric,
+            radii,
+        ):
+            px = x0 + (y - ymin) * scale
+            py = y0 + (zmax - z) * scale
+            radius = max(2.0, physical_radius * scale)
+            raw_value = fiber.get(self._quantity)
+            try:
+                value = (
+                    float(raw_value)
+                    if raw_value is not None
+                    else math.nan
+                )
+            except (TypeError, ValueError):
+                value = math.nan
+            color = (
+                self._response_color(value, limit)
+                if math.isfinite(value)
+                else QColor("#c8ced6")
+            )
+            painter.setBrush(color)
+            painter.drawEllipse(QPointF(px, py), radius, radius)
+            self._screen_fibers.append(
+                (px, py, radius, fiber, index)
+            )
+
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QColor("#526579"))
+        painter.drawText(
+            6,
+            16,
+            (
+                f"{self._quantity.title()} range: "
+                f"{min(values):.4g} to {max(values):.4g}"
+                if values
+                else f"{self._quantity.title()}: unavailable"
+            ),
+        )
+        painter.drawText(
+            int(x0),
+            self.height() - 10,
+            "y →",
+        )
+        painter.drawText(
+            6,
+            int(y0 + 12),
+            "z ↑",
+        )
+
+    def mousePressEvent(self, event) -> None:
+        position = event.position()
+        best: tuple[float, dict[str, Any], int] | None = None
+        for px, py, radius, fiber, index in self._screen_fibers:
+            distance = math.hypot(position.x() - px, position.y() - py)
+            threshold = max(radius, 8.0)
+            if distance <= threshold and (
+                best is None or distance < best[0]
+            ):
+                best = (distance, fiber, index)
+        if best is not None:
+            payload = dict(best[1])
+            payload["index"] = best[2]
+            self.fiber_selected.emit(payload)
+        super().mousePressEvent(event)
+
+
 class ResultsPanel(QWidget):
     deformation_requested = Signal(float)
     mode_shape_requested = Signal(int, float)
@@ -125,6 +321,7 @@ class ResultsPanel(QWidget):
         self._build_mode_tab()
         self._build_node_tab()
         self._build_element_tab()
+        self._build_fiber_tab()
         self._build_pushover_tab()
         self._build_history_tab()
 
@@ -316,6 +513,57 @@ class ResultsPanel(QWidget):
         layout.addWidget(self.element_table)
         self.tabs.addTab(page, "Member Forces")
 
+    def _build_fiber_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Element:"))
+        self.fiber_element = QComboBox()
+        self.fiber_element.currentIndexChanged.connect(
+            self._fiber_element_changed
+        )
+        controls.addWidget(self.fiber_element)
+
+        controls.addWidget(QLabel("Section/IP:"))
+        self.fiber_section = QComboBox()
+        self.fiber_section.currentIndexChanged.connect(
+            self._update_fiber_view
+        )
+        controls.addWidget(self.fiber_section)
+
+        controls.addWidget(QLabel("Quantity:"))
+        self.fiber_quantity = QComboBox()
+        self.fiber_quantity.addItems(["Stress", "Strain"])
+        self.fiber_quantity.currentTextChanged.connect(
+            self._update_fiber_view
+        )
+        controls.addWidget(self.fiber_quantity)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.fiber_info = QLabel(
+            "Run a nonlinear beam-column model with a FiberSection "
+            "to inspect final fiber stress/strain."
+        )
+        self.fiber_info.setWordWrap(True)
+        layout.addWidget(self.fiber_info)
+
+        self.fiber_plot = FiberResponsePlot()
+        self.fiber_plot.fiber_selected.connect(
+            self._fiber_selected
+        )
+        layout.addWidget(self.fiber_plot, 1)
+
+        self.fiber_selected_info = QLabel(
+            "Click a fiber to inspect material, stress and strain."
+        )
+        self.fiber_selected_info.setWordWrap(True)
+        layout.addWidget(self.fiber_selected_info)
+
+        self.tabs.addTab(page, "Fiber Response")
+
     def _build_pushover_tab(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -420,6 +668,16 @@ class ResultsPanel(QWidget):
         self.element_info.setText(
             "Run a non-modal frame analysis to populate local member forces."
         )
+        self.fiber_element.clear()
+        self.fiber_section.clear()
+        self.fiber_plot.set_response({}, "stress")
+        self.fiber_info.setText(
+            "Run a nonlinear beam-column model with a FiberSection "
+            "to inspect final fiber stress/strain."
+        )
+        self.fiber_selected_info.setText(
+            "Click a fiber to inspect material, stress and strain."
+        )
         self.mode_combo.clear()
         self.deformation_info.setText(
             "Run a non-modal analysis to view deformation."
@@ -522,6 +780,7 @@ class ResultsPanel(QWidget):
 
         self._populate_node_table()
         self._populate_element_table()
+        self._populate_fiber_elements()
         self._populate_history_nodes()
         self._update_pushover_plot()
         self._update_history_plot()
@@ -665,6 +924,114 @@ class ResultsPanel(QWidget):
             self.element_info.setText(
                 "No local member-force result is available for this job."
             )
+
+    def _populate_fiber_elements(self) -> None:
+        previous = self.fiber_element.currentData()
+        tags = fiber_response_element_tags(self._result)
+        self.fiber_element.blockSignals(True)
+        self.fiber_element.clear()
+        for tag in tags:
+            self.fiber_element.addItem(str(tag), int(tag))
+        if previous is not None:
+            index = self.fiber_element.findData(previous)
+            if index >= 0:
+                self.fiber_element.setCurrentIndex(index)
+        self.fiber_element.blockSignals(False)
+        self._fiber_element_changed()
+
+    def _fiber_element_changed(self) -> None:
+        element_data = self.fiber_element.currentData()
+        self.fiber_section.blockSignals(True)
+        self.fiber_section.clear()
+        if element_data is not None:
+            sections = fiber_response_sections(
+                self._result,
+                int(element_data),
+            )
+            for index, section in enumerate(sections):
+                number = int(section.get("number", index + 1))
+                try:
+                    location = float(section.get("location", 0.0))
+                except (TypeError, ValueError):
+                    location = 0.0
+                self.fiber_section.addItem(
+                    f"IP {number} · x={location:.5g}",
+                    index,
+                )
+        self.fiber_section.blockSignals(False)
+        if element_data is not None:
+            self.element_selected.emit(int(element_data))
+        self._update_fiber_view()
+
+    def _current_fiber_section(self) -> dict[str, Any]:
+        element_data = self.fiber_element.currentData()
+        section_index = self.fiber_section.currentData()
+        if element_data is None or section_index is None:
+            return {}
+        sections = fiber_response_sections(
+            self._result,
+            int(element_data),
+        )
+        index = int(section_index)
+        if index < 0 or index >= len(sections):
+            return {}
+        return sections[index]
+
+    def _update_fiber_view(self) -> None:
+        section = self._current_fiber_section()
+        quantity = self.fiber_quantity.currentText().lower()
+        self.fiber_plot.set_response(section, quantity)
+        self.fiber_selected_info.setText(
+            "Click a fiber to inspect material, stress and strain."
+        )
+
+        if not section:
+            self.fiber_info.setText(
+                "No fiber response is available for the selected result."
+            )
+            return
+
+        minimum, maximum = fiber_response_range(section, quantity)
+        fibers = section.get("fibers", [])
+        valid = sum(
+            isinstance(fiber, dict)
+            and fiber.get(quantity) is not None
+            for fiber in fibers
+        )
+        element_tag = self.fiber_element.currentData()
+        number = section.get("number", "-")
+        location = section.get("location", "-")
+        range_text = (
+            f"{minimum:.6g} … {maximum:.6g}"
+            if minimum is not None and maximum is not None
+            else "unavailable"
+        )
+        self.fiber_info.setText(
+            f"Element {element_tag} · IP {number} · x={location} · "
+            f"{len(fibers)} fiber(s), {valid} response(s) · "
+            f"{quantity} range: {range_text}"
+        )
+
+    def _fiber_selected(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        def numeric(name: str) -> str:
+            raw = payload.get(name)
+            if raw is None:
+                return "-"
+            try:
+                return f"{float(raw):.7g}"
+            except (TypeError, ValueError):
+                return str(raw)
+
+        self.fiber_selected_info.setText(
+            f"Fiber #{int(payload.get('index', 0)) + 1} · "
+            f"Material {payload.get('material_tag', '-')} · "
+            f"y={numeric('y')} · z={numeric('z')} · "
+            f"A={numeric('area')} · "
+            f"stress={numeric('stress')} · "
+            f"strain={numeric('strain')}"
+        )
 
     def _update_pushover_plot(self) -> None:
         x, y, control_node, control_dof = pushover_capacity_curve(
