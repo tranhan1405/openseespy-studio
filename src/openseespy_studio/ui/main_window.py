@@ -48,6 +48,7 @@ from ..jobs import JobRecord
 from ..live_convergence import parse_opensees_convergence_line
 from ..model import StructuralModel, classify_fixity
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
+from ..result_catalog import result_choices_for_analysis
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData
 from ..runtime import build_worker_pythonpath, probe_opensees_runtime
 from ..validation import ValidationIssue, validate_project
@@ -1791,6 +1792,15 @@ class MainWindow(QMainWindow):
             item.setExpanded(True)
             analysis.addChild(item)
 
+            settings_item = QTreeWidgetItem(["Analysis Settings"])
+            settings_item.setIcon(0, studio_icon("analysis"))
+            settings_item.setData(
+                0,
+                Qt.UserRole,
+                ("analysis_settings", tag),
+            )
+            item.addChild(settings_item)
+
             solution_results = self.project.solution_results_for_analysis(tag)
             solution = QTreeWidgetItem([
                 f"Solution ({len(solution_results)})"
@@ -1864,7 +1874,8 @@ class MainWindow(QMainWindow):
         for job_id in sorted(self._jobs, reverse=True):
             job = self._jobs[job_id]
             item = QTreeWidgetItem([
-                f"Job {job_id} · {job.analysis_type} · {job.status}"
+                f"Job {job_id} · {job.analysis_name} "
+                f"({job.analysis_type}) · {job.status}"
             ])
             item.setIcon(0, studio_icon("results"))
             item.setData(0, Qt.UserRole, ("job", job_id))
@@ -1929,6 +1940,8 @@ class MainWindow(QMainWindow):
             elif kind == "element_load":
                 element_load_tag = int(tag)
             elif kind == "analysis":
+                analysis_tag = int(tag)
+            elif kind == "analysis_settings":
                 analysis_tag = int(tag)
             elif kind == "recorder":
                 recorder_tag = int(tag)
