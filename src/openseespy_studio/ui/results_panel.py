@@ -30,6 +30,8 @@ from ..postprocess import (
     fiber_response_element_tags,
     fiber_response_range,
     fiber_response_sections,
+    fiber_state_element_tags,
+    fiber_state_sections,
     pushover_capacity_curve,
     time_history_node_tags,
     time_history_series,
@@ -301,6 +303,7 @@ class ResultsPanel(QWidget):
     clear_overlay_requested = Signal()
     member_force_requested = Signal(str, float)
     node_contour_requested = Signal(str, str)
+    hinge_state_requested = Signal()
     element_selected = Signal(int)
     job_selected = Signal(int)
 
@@ -322,6 +325,7 @@ class ResultsPanel(QWidget):
         self._build_node_tab()
         self._build_element_tab()
         self._build_fiber_tab()
+        self._build_hinge_tab()
         self._build_pushover_tab()
         self._build_history_tab()
 
@@ -564,6 +568,51 @@ class ResultsPanel(QWidget):
 
         self.tabs.addTab(page, "Fiber Response")
 
+    def _build_hinge_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        controls = QHBoxLayout()
+        show = QPushButton("Show States on Model")
+        show.clicked.connect(self.hinge_state_requested.emit)
+        clear = QPushButton("Clear")
+        clear.clicked.connect(self.clear_overlay_requested.emit)
+        controls.addWidget(show)
+        controls.addWidget(clear)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.hinge_info = QLabel(
+            "Fiber-based diagnostic states: Elastic → Nonlinear/near yield "
+            "→ Yielding/softening → Plastic/crushing."
+        )
+        self.hinge_info.setWordWrap(True)
+        layout.addWidget(self.hinge_info)
+
+        self.hinge_table = QTableWidget(0, 6)
+        self.hinge_table.setHorizontalHeaderLabels(
+            [
+                "Element",
+                "IP",
+                "x",
+                "State",
+                "Controlling material",
+                "Controlling fiber",
+            ]
+        )
+        self.hinge_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.hinge_table.horizontalHeader().setStretchLastSection(True)
+        self.hinge_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.hinge_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.hinge_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.hinge_table.cellClicked.connect(self._hinge_row_clicked)
+        layout.addWidget(self.hinge_table)
+
+        self.tabs.addTab(page, "Hinge / Yield States")
+
     def _build_pushover_tab(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -678,6 +727,11 @@ class ResultsPanel(QWidget):
         self.fiber_selected_info.setText(
             "Click a fiber to inspect material, stress and strain."
         )
+        self.hinge_table.setRowCount(0)
+        self.hinge_info.setText(
+            "Fiber-based diagnostic states: Elastic → Nonlinear/near yield "
+            "→ Yielding/softening → Plastic/crushing."
+        )
         self.mode_combo.clear()
         self.deformation_info.setText(
             "Run a non-modal analysis to view deformation."
@@ -781,6 +835,7 @@ class ResultsPanel(QWidget):
         self._populate_node_table()
         self._populate_element_table()
         self._populate_fiber_elements()
+        self._populate_hinge_table()
         self._populate_history_nodes()
         self._update_pushover_plot()
         self._update_history_plot()
@@ -924,6 +979,65 @@ class ResultsPanel(QWidget):
             self.element_info.setText(
                 "No local member-force result is available for this job."
             )
+
+    def _populate_hinge_table(self) -> None:
+        rows: list[tuple[int, dict[str, Any]]] = []
+        for tag in fiber_state_element_tags(self._result):
+            for section in fiber_state_sections(self._result, tag):
+                rows.append((tag, section))
+
+        self.hinge_table.setRowCount(len(rows))
+        counts = {0: 0, 1: 0, 2: 0, 3: 0}
+        for row, (tag, section) in enumerate(rows):
+            severity = int(section.get("severity", -1))
+            if severity in counts:
+                counts[severity] += 1
+            controlling = section.get("controlling_fiber")
+            controlling = controlling if isinstance(controlling, dict) else {}
+            values = [
+                str(tag),
+                str(section.get("number", "-")),
+                f"{float(section.get('location', 0.0)):.6g}",
+                str(section.get("state", "Unknown")),
+                (
+                    f"{controlling.get('material_type', '-')} "
+                    f"[{controlling.get('material_tag', '-')}]"
+                ),
+                (
+                    f"#{int(controlling.get('fiber_index', -1)) + 1} · "
+                    f"strain={controlling.get('strain', '-')}"
+                    if controlling
+                    else "-"
+                ),
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 0:
+                    item.setData(Qt.UserRole, int(tag))
+                self.hinge_table.setItem(row, column, item)
+
+        total = len(rows)
+        if total:
+            self.hinge_info.setText(
+                f"{total} integration point(s) · "
+                f"Elastic {counts[0]} · Nonlinear/near yield {counts[1]} · "
+                f"Yielding/softening {counts[2]} · "
+                f"Plastic/crushing {counts[3]}. "
+                "States are material-based diagnostics, not code acceptance checks."
+            )
+        else:
+            self.hinge_info.setText(
+                "No fiber-state summary is available. Run a nonlinear "
+                "FiberSection analysis first."
+            )
+
+    def _hinge_row_clicked(self, row: int, column: int) -> None:
+        item = self.hinge_table.item(row, 0)
+        if item is None:
+            return
+        tag = item.data(Qt.UserRole)
+        if tag is not None:
+            self.element_selected.emit(int(tag))
 
     def _populate_fiber_elements(self) -> None:
         previous = self.fiber_element.currentData()
