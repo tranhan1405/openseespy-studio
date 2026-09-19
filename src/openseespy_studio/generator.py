@@ -1832,6 +1832,24 @@ def to_openseespy(
             [],
         ).append(displacement)
 
+    if (
+        active_analysis is not None
+        and active_analysis.analysis_type in {"Pushover", "Cyclic"}
+    ):
+        invalid_driver_patterns = sorted(
+            tag
+            for tag in deferred_pattern_tags
+            if displacement_by_pattern.get(tag)
+        )
+        if invalid_driver_patterns:
+            raise ValueError(
+                "Pushover/Cyclic driving load pattern(s) cannot contain "
+                "Prescribed Displacement objects: "
+                + ", ".join(map(str, invalid_driver_patterns))
+                + ". Use a force reference-load pattern for "
+                "DisplacementControl."
+            )
+
     if load_patterns:
         lines.extend(["", "# Load patterns"])
         for tag in sorted(load_patterns):
