@@ -1,4 +1,4 @@
-from openseespy_studio.result_catalog import result_choices_for_analysis
+from openseespy_studio.result_catalog import (\n    convergence_result_label,\n    result_choices_for_analysis,\n)
 
 
 def _types(analysis_type: str) -> set[str]:
@@ -43,3 +43,34 @@ def test_static_and_transient_catalogs_exclude_specialized_curves():
         assert "CyclicHysteresis" not in types
         assert "TimeHistory" in types
         assert "Convergence" in types
+
+
+
+def test_convergence_result_label_matches_analysis_test():
+    assert (
+        convergence_result_label("NormUnbalance")
+        == "Force / Residual Convergence"
+    )
+    assert (
+        convergence_result_label("NormDispIncr")
+        == "Displacement Increment Convergence"
+    )
+    assert (
+        convergence_result_label("EnergyIncr")
+        == "Energy Increment Convergence"
+    )
+
+
+def test_result_catalog_uses_specific_convergence_name():
+    choices = result_choices_for_analysis(
+        "Static",
+        convergence_test="NormUnbalance",
+    )
+    convergence = next(
+        choice for choice in choices
+        if choice.result_type == "Convergence"
+    )
+
+    assert convergence.label == "Force / Residual Convergence"
+    assert convergence.name == "Force / Residual Convergence"
+    assert convergence.settings["test"] == "NormUnbalance"
