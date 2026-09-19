@@ -860,8 +860,9 @@ class ModelViewport(QWidget):
                 zeros,
                 ndm=self._model.ndm,
                 scale=1.0,
-                stations=3,
+                stations=2,
                 smooth=False,
+                circle_resolution=12,
             )
         except (KeyError, TypeError, ValueError):
             geometry = None
@@ -974,7 +975,7 @@ class ModelViewport(QWidget):
                 color=group_colors[group_name],
                 edge_color="#243b52",
                 show_edges=(
-                    self._model_representation != "centerline"
+                    self._model_representation == "tube"
                 ),
                 line_width=(
                     3 if self._model_representation == "centerline" else 1
