@@ -24,7 +24,11 @@ openseespy-studio = "openseespy_studio.app:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-openseespy_studio = ["resources/icons/*.svg"]
+openseespy_studio = [
+  "resources/icons/*.svg",
+  "resources/ground_motions/*.at2",
+  "resources/ground_motions/*.json",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
