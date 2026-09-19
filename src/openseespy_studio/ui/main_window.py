@@ -1470,6 +1470,46 @@ class MainWindow(QMainWindow):
             self._show_solver_output,
             "Show solver output console",
         )
+        for key, label, icon, option, tooltip in (
+            (
+                "show_node_numbers",
+                "Node Numbers",
+                "node",
+                "node_numbers",
+                "Show node tags in the viewport",
+            ),
+            (
+                "show_element_numbers",
+                "Element Numbers",
+                "element",
+                "element_numbers",
+                "Show element tags in the viewport",
+            ),
+            (
+                "show_nodal_loads",
+                "Nodal Loads",
+                "load",
+                "nodal_loads",
+                "Show applied nodal load vectors and values",
+            ),
+            (
+                "show_element_loads",
+                "Beam Loads",
+                "load",
+                "element_loads",
+                "Show applied beam/column load vectors and values",
+            ),
+        ):
+            self._make_action(
+                key,
+                label,
+                icon,
+                lambda checked=False, name=option: (
+                    self.viewport.set_display_option(name, checked)
+                ),
+                tooltip,
+                checkable=True,
+            )
 
         ribbon = QToolBar("Ribbon", self)
         ribbon.setObjectName("Ribbon")
@@ -1631,6 +1671,16 @@ class MainWindow(QMainWindow):
             "Views",
             large=("iso",),
             small=("xy", "xz", "yz"),
+        )
+        add_group(
+            display_page,
+            "Annotations",
+            small=(
+                "show_node_numbers",
+                "show_element_numbers",
+                "show_nodal_loads",
+                "show_element_loads",
+            ),
         )
         display_page.finish()
         self.ribbon_tabs.addTab(display_page, "Display")
@@ -1930,11 +1980,37 @@ class MainWindow(QMainWindow):
         )
         self._record_project_change("Generate frame grid", before)
 
-    def _refresh_all(self, message: str = "") -> None:
-        self.viewport.draw_model(self.model, self.project.connections)
-        self._refresh_project_metadata(message)
+    def _sync_viewport_display_data(
+        self,
+        *,
+        refresh: bool = True,
+    ) -> None:
+        self.viewport.set_display_data(
+            nodal_loads=self.project.nodal_loads,
+            element_loads=self.project.element_loads,
+            transformations=self.project.transformations,
+            sections=self.project.sections,
+            materials=self.project.materials,
+            units=self.project.units,
+            refresh=refresh,
+        )
 
-    def _refresh_project_metadata(self, message: str = "") -> None:
+    def _refresh_all(self, message: str = "") -> None:
+        self._sync_viewport_display_data(refresh=False)
+        self.viewport.draw_model(self.model, self.project.connections)
+        self._refresh_project_metadata(
+            message,
+            sync_viewport_display=False,
+        )
+
+    def _refresh_project_metadata(
+        self,
+        message: str = "",
+        *,
+        sync_viewport_display: bool = True,
+    ) -> None:
+        if sync_viewport_display:
+            self._sync_viewport_display_data(refresh=True)
         self.viewport.set_model_info(
             self.model.name,
             len(self.model.nodes),
