@@ -16,6 +16,17 @@ class ResultChoice:
 def result_choices_for_analysis(analysis_type: str) -> list[ResultChoice]:
     """Return the shared result catalog for Solution and Job menus."""
     kind = str(analysis_type)
+    if kind == "Modal":
+        return [
+            ResultChoice(
+                "Mode Results",
+                "Mode Shape",
+                "ModeShape",
+                "Mode Shape 1",
+                {"mode": 1, "scale": 1.0},
+            )
+        ]
+
     choices: list[ResultChoice] = [
         ResultChoice(
             "Deformation",
@@ -110,34 +121,23 @@ def result_choices_for_analysis(analysis_type: str) -> list[ResultChoice]:
                 {},
             )
         )
-    if kind == "Modal":
-        choices.append(
-            ResultChoice(
-                "Charts / History",
-                "Mode Shape",
-                "ModeShape",
-                "Mode Shape 1",
-                {"mode": 1, "scale": 1.0},
-            )
+    choices.append(
+        ResultChoice(
+            "Charts / History",
+            "Response History",
+            "TimeHistory",
+            "Response History",
+            {},
         )
-    else:
-        choices.append(
-            ResultChoice(
-                "Charts / History",
-                "Response History",
-                "TimeHistory",
-                "Response History",
-                {},
-            )
+    )
+    choices.append(
+        ResultChoice(
+            "Solver Results",
+            "Convergence History",
+            "Convergence",
+            "Convergence History",
+            {},
         )
-        choices.append(
-            ResultChoice(
-                "Solver Results",
-                "Convergence History",
-                "Convergence",
-                "Convergence History",
-                {},
-            )
-        )
+    )
 
     return choices
