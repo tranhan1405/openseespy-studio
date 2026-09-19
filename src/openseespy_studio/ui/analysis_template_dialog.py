@@ -1425,18 +1425,72 @@ class AnalysisTemplateDialog(QDialog):
             self.gm_unit.setCurrentText("g")
         self._update_summary()
 
+    def _clear_ground_motion(self, direction: int) -> None:
+        direction = int(direction)
+        if direction not in self._nlth_directions:
+            return
+        self.gm_files[direction].clear()
+        self._ground_motion_values[direction] = []
+        self._ground_motion_formats[direction] = ""
+        self.gm_scales[direction].setValue(1.0)
+        self._apply_target_pga_scaling()
+        self._refresh_all_ground_motion_previews()
+
+    def _sync_nlth_damping(self, *_args) -> None:
+        enabled = self.nlth_use_damping.isChecked()
+        self.damping_ratio.setEnabled(enabled)
+        self.damping_mode_i.setEnabled(enabled)
+        self.damping_mode_j.setEnabled(enabled)
+        self._update_summary()
+
+    def _sync_nlth_gravity(self, *_args) -> None:
+        self.nlth_gravity_steps.setEnabled(
+            self.nlth_preload_gravity.isChecked()
+        )
+        self._update_summary()
+
+    def _update_ground_motion_analysis_preview(self) -> None:
+        active = [
+            direction
+            for direction in self._nlth_directions
+            if self._ground_motion_values[direction]
+        ]
+        if not active:
+            self.gm_analysis_preview.setText(
+                "No active ground-motion component."
+            )
+            return
+        max_points = max(
+            len(self._ground_motion_values[direction])
+            for direction in active
+        )
+        duration = max(0, max_points - 1) * self.gm_dt.value()
+        step_count = max(1, max_points - 1)
+        component_text = "+".join(
+            {1: "X", 2: "Y", 3: "Z"}[direction]
+            for direction in active
+        )
+        self.gm_analysis_preview.setText(
+            f"Analysis window: {component_text} · longest record "
+            f"{max_points} point(s) · {step_count} nominal interval(s) · "
+            f"end time ≈ {duration:g} s. Shorter components become zero "
+            "after their Path TimeSeries ends."
+        )
+
     def _sync_ground_motion_scale_mode(self, *_args) -> None:
-        target_mode = self.gm_scale_mode.currentData() == "target_pga"
+        mode = str(self.gm_scale_mode.currentData() or "factor")
+        target_mode = mode in {"target_pga", "target_common_pga"}
         self.gm_target_pga.setEnabled(target_mode)
         for scale in self.gm_scales.values():
-            scale.setEnabled(not target_mode)
+            scale.setEnabled(mode == "factor")
         if target_mode:
             self._apply_target_pga_scaling()
         else:
             self._refresh_all_ground_motion_previews()
 
     def _ground_motion_unit_changed(self, *_args) -> None:
-        if self.gm_scale_mode.currentData() == "target_pga":
+        mode = str(self.gm_scale_mode.currentData() or "factor")
+        if mode in {"target_pga", "target_common_pga"}:
             self._apply_target_pga_scaling()
         else:
             self._refresh_all_ground_motion_previews()
@@ -1483,7 +1537,7 @@ class AnalysisTemplateDialog(QDialog):
         if parsed.dt is not None:
             other_active = any(
                 self._ground_motion_values[other]
-                for other in (1, 2, 3)
+                for other in self._nlth_directions
                 if other != direction
             )
             current_dt = self.gm_dt.value()
@@ -1509,34 +1563,64 @@ class AnalysisTemplateDialog(QDialog):
         self._ground_motion_values[direction] = list(parsed.values)
         self._ground_motion_formats[direction] = parsed.format
 
-        if self.gm_scale_mode.currentData() == "target_pga":
+        if self.gm_scale_mode.currentData() in {
+            "target_pga",
+            "target_common_pga",
+        }:
             self._apply_target_pga_scaling()
         else:
             self._refresh_ground_motion_preview(direction)
         self._update_summary()
 
     def _reload_all_ground_motions(self, *_args) -> None:
-        for direction in (1, 2, 3):
+        for direction in self._nlth_directions:
             if self.gm_files[direction].text().strip():
                 self._reload_ground_motion(direction)
 
     def _apply_target_pga_scaling(self, *_args) -> None:
-        if self.gm_scale_mode.currentData() != "target_pga":
+        mode = str(self.gm_scale_mode.currentData() or "factor")
+        if mode not in {"target_pga", "target_common_pga"}:
+            self._refresh_all_ground_motion_previews()
             return
+
         target = self.gm_target_pga.value()
         input_unit = self.gm_unit.currentText()
-        for direction in (1, 2, 3):
-            values = self._ground_motion_values[direction]
-            if not values:
-                continue
+        active = [
+            direction
+            for direction in self._nlth_directions
+            if self._ground_motion_values[direction]
+        ]
+        if not active:
+            self._refresh_all_ground_motion_previews()
+            return
+
+        if mode == "target_common_pga":
             try:
-                factor = scale_factor_for_target_pga(
-                    values,
+                common = common_scale_factor_for_target_pga(
+                    [
+                        self._ground_motion_values[direction]
+                        for direction in active
+                    ],
                     input_unit,
                     target,
                 )
             except ValueError:
-                continue
+                self._refresh_all_ground_motion_previews()
+                return
+            factors = {direction: common for direction in active}
+        else:
+            factors = {}
+            for direction in active:
+                try:
+                    factors[direction] = scale_factor_for_target_pga(
+                        self._ground_motion_values[direction],
+                        input_unit,
+                        target,
+                    )
+                except ValueError:
+                    continue
+
+        for direction, factor in factors.items():
             scale = self.gm_scales[direction]
             scale.blockSignals(True)
             try:
@@ -1568,8 +1652,9 @@ class AnalysisTemplateDialog(QDialog):
         self._update_summary()
 
     def _refresh_all_ground_motion_previews(self, *_args) -> None:
-        for direction in (1, 2, 3):
+        for direction in self._nlth_directions:
             self._refresh_ground_motion_preview(direction)
+        self._update_ground_motion_analysis_preview()
 
     def _update_summary(self, *_args) -> None:
         if self._initializing:
@@ -1647,22 +1732,39 @@ class AnalysisTemplateDialog(QDialog):
             )
         else:
             active = [
-                axis
-                for axis, direction in (("X", 1), ("Y", 2), ("Z", 3))
+                {1: "X", 2: "Y", 3: "Z"}[direction]
+                for direction in self._nlth_directions
                 if self._ground_motion_values[direction]
             ]
             point_count = max(
                 (
                     len(self._ground_motion_values[direction])
-                    for direction in (1, 2, 3)
+                    for direction in self._nlth_directions
                 ),
                 default=0,
             )
+            duration = max(0, point_count - 1) * self.gm_dt.value()
+            damping = (
+                f"Rayleigh ζ={self.damping_ratio.value():g} "
+                f"(modes {self.damping_mode_i.value()},"
+                f"{self.damping_mode_j.value()})"
+                if self.nlth_use_damping.isChecked()
+                else "damping OFF"
+            )
+            gravity = (
+                f"gravity {self.nlth_gravity_steps.value()} steps"
+                if self.nlth_preload_gravity.isChecked()
+                else "gravity preload OFF"
+            )
+            mass_check = (
+                "mass check ON"
+                if self.nlth_require_mass.isChecked()
+                else "mass check OFF"
+            )
             text = (
                 f"NLTH {'+'.join(active) if active else '-'} · "
-                f"{point_count} max point(s) · "
-                f"dt={self.gm_dt.value():g} s · "
-                f"ζ={self.damping_ratio.value():g} · "
+                f"duration≈{duration:g} s · dt={self.gm_dt.value():g} s · "
+                f"{damping} · {gravity} · {mass_check} · "
                 f"{self.solver.currentText()} solver"
             )
         self.summary.setText(text)
@@ -1742,7 +1844,7 @@ class AnalysisTemplateDialog(QDialog):
             )
         else:
             components = []
-            for direction in (1, 2, 3):
+            for direction in self._nlth_directions:
                 values = self._ground_motion_values[direction]
                 if not values:
                     continue
@@ -1765,9 +1867,16 @@ class AnalysisTemplateDialog(QDialog):
                     "input_unit": self.gm_unit.currentText(),
                     "monitor_node": self.control_node.value(),
                     "monitor_dof": int(self.direction.currentData()),
-                    "damping_ratio": self.damping_ratio.value(),
+                    "damping_ratio": (
+                        self.damping_ratio.value()
+                        if self.nlth_use_damping.isChecked()
+                        else 0.0
+                    ),
                     "damping_mode_i": self.damping_mode_i.value(),
                     "damping_mode_j": self.damping_mode_j.value(),
+                    "preload_gravity": self.nlth_preload_gravity.isChecked(),
+                    "gravity_steps": self.nlth_gravity_steps.value(),
+                    "require_nodal_mass": self.nlth_require_mass.isChecked(),
                 }
             )
         return base
