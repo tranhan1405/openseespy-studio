@@ -91,6 +91,7 @@ class ResultsPanel(QWidget):
     mode_shape_requested = Signal(int, float)
     clear_overlay_requested = Signal()
     member_force_requested = Signal(str, float)
+    node_contour_requested = Signal(str, str)
     element_selected = Signal(int)
     job_selected = Signal(int)
 
@@ -196,14 +197,32 @@ class ResultsPanel(QWidget):
         row.addWidget(QLabel("Quantity:"))
         self.node_quantity = QComboBox()
         self.node_quantity.addItems(["Displacement", "Reaction"])
-        self.node_quantity.currentTextChanged.connect(self._populate_node_table)
+        self.node_quantity.currentTextChanged.connect(
+            self._node_quantity_changed
+        )
         row.addWidget(self.node_quantity)
+
+        row.addWidget(QLabel("Contour:"))
+        self.node_contour_component = QComboBox()
+        row.addWidget(self.node_contour_component)
+
+        show = QPushButton("Show Contour")
+        show.clicked.connect(
+            lambda: self.node_contour_requested.emit(
+                self.node_quantity.currentText(),
+                self.node_contour_component.currentText(),
+            )
+        )
+        clear = QPushButton("Clear")
+        clear.clicked.connect(self.clear_overlay_requested.emit)
+        row.addWidget(show)
+        row.addWidget(clear)
         row.addStretch(1)
         layout.addLayout(row)
 
         self.node_table = QTableWidget(0, 7)
         self.node_table.setHorizontalHeaderLabels(
-            ["Node", "X", "Y", "Z", "RX", "RY", "RZ"]
+            ["Node", "UX", "UY", "UZ", "RX", "RY", "RZ"]
         )
         self.node_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeToContents
@@ -212,6 +231,19 @@ class ResultsPanel(QWidget):
         self.node_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         layout.addWidget(self.node_table)
         self.tabs.addTab(page, "Node Results")
+        self._node_quantity_changed(self.node_quantity.currentText())
+
+    def _node_quantity_changed(self, quantity: str) -> None:
+        self.node_contour_component.clear()
+        if str(quantity) == "Reaction":
+            self.node_contour_component.addItems(
+                ["|F|", "FX", "FY", "FZ", "|M|", "MX", "MY", "MZ"]
+            )
+        else:
+            self.node_contour_component.addItems(
+                ["|U|", "UX", "UY", "UZ", "|R|", "RX", "RY", "RZ"]
+            )
+        self._populate_node_table()
 
     def _build_element_tab(self) -> None:
         page = QWidget()
@@ -417,12 +449,18 @@ class ResultsPanel(QWidget):
 
     def _populate_node_table(self) -> None:
         final = self._result.get("final", {})
-        key = (
-            "node_displacements"
-            if self.node_quantity.currentText() == "Displacement"
-            else "node_reactions"
+        displacement = self.node_quantity.currentText() == "Displacement"
+        key = "node_displacements" if displacement else "node_reactions"
+        self.node_table.setHorizontalHeaderLabels(
+            (
+                ["Node", "UX", "UY", "UZ", "RX", "RY", "RZ"]
+                if displacement
+                else ["Node", "FX", "FY", "FZ", "MX", "MY", "MZ"]
+            )
         )
         data = final.get(key, {})
+        if not isinstance(data, dict):
+            data = {}
         tags = sorted(data, key=lambda value: int(value))
         self.node_table.setRowCount(len(tags))
         for row, tag in enumerate(tags):

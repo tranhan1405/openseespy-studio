@@ -39,6 +39,55 @@ SECTION_FORCE_INDEX: dict[str, int] = {
 }
 
 
+NODAL_COMPONENT_INDEX: dict[str, int] = {
+    "UX": 0,
+    "UY": 1,
+    "UZ": 2,
+    "RX": 3,
+    "RY": 4,
+    "RZ": 5,
+    "FX": 0,
+    "FY": 1,
+    "FZ": 2,
+    "MX": 3,
+    "MY": 4,
+    "MZ": 5,
+}
+
+NODAL_MAGNITUDE_COMPONENTS: dict[str, tuple[int, ...]] = {
+    "|U|": (0, 1, 2),
+    "|R|": (3, 4, 5),
+    "|F|": (0, 1, 2),
+    "|M|": (3, 4, 5),
+}
+
+
+def nodal_result_scalar(
+    values: Sequence[float],
+    component: str,
+) -> float | None:
+    """Extract one scalar from a six-DOF nodal result vector.
+
+    Displacement aliases (UX..RZ) and reaction aliases (FX..MZ) share the
+    same six-DOF ordering. Magnitude components keep translation/force and
+    rotation/moment groups separate so incompatible units are never mixed.
+    """
+    component = str(component).strip().upper()
+    index = NODAL_COMPONENT_INDEX.get(component)
+    if index is not None:
+        if len(values) <= index:
+            return None
+        return float(values[index])
+
+    magnitude_indices = NODAL_MAGNITUDE_COMPONENTS.get(component)
+    if magnitude_indices is not None:
+        if len(values) <= max(magnitude_indices):
+            return None
+        return math.sqrt(sum(float(values[index]) ** 2 for index in magnitude_indices))
+
+    raise ValueError(f"Unsupported nodal result component: {component}")
+
+
 def local_end_actions(
     values: Sequence[float],
 ) -> dict[str, tuple[float, float]]:

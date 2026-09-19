@@ -28,7 +28,7 @@ except ImportError:
 
 from ..beam_loads import element_local_axes
 from ..model import StructuralModel, classify_fixity
-from ..postprocess import component_end_resultants
+from ..postprocess import component_end_resultants, nodal_result_scalar
 from ..project import ConnectionData
 from .icons import studio_icon
 
@@ -1056,6 +1056,8 @@ class ModelViewport(QWidget):
             "result-nodes",
             "result-force-diagram",
             "result-force-connectors",
+            "result-contour",
+            "result-contour-nodes",
         ):
             self._remove_overlay(name)
         self._result_overlay_active = False
@@ -1142,6 +1144,133 @@ class ModelViewport(QWidget):
                 pickable=False,
                 show_scalar_bar=False,
             )
+
+        self._result_overlay_active = True
+        self.plotter.render()
+
+    def show_node_contour(
+        self,
+        result: dict[str, object],
+        quantity: str,
+        component: str,
+    ) -> None:
+        """Show a nodal displacement or reaction scalar on the frame mesh."""
+        if self._model is None:
+            return
+
+        final = result.get("final", {}) if isinstance(result, dict) else {}
+        if not isinstance(final, dict):
+            self.clear_result_overlay()
+            return
+
+        quantity = str(quantity)
+        component = str(component)
+        key = (
+            "node_displacements"
+            if quantity == "Displacement"
+            else "node_reactions"
+        )
+        data = final.get(key, {})
+        if not isinstance(data, dict) or not data:
+            self.clear_result_overlay()
+            return
+
+        def value_for(tag: int) -> float | None:
+            raw = data.get(str(tag), data.get(tag))
+            if not isinstance(raw, (list, tuple)):
+                return None
+            try:
+                return nodal_result_scalar(raw, component)
+            except ValueError:
+                return None
+
+        points: list[tuple[float, float, float]] = []
+        lines: list[int] = []
+        scalars: list[float] = []
+
+        for tag in sorted(self._visible_element_tags()):
+            element = self._model.elements.get(tag)
+            if element is None:
+                continue
+            value_i = value_for(element.i)
+            value_j = value_for(element.j)
+            if value_i is None or value_j is None:
+                continue
+            node_i = self._model.nodes.get(element.i)
+            node_j = self._model.nodes.get(element.j)
+            if node_i is None or node_j is None:
+                continue
+            index = len(points)
+            points.extend((node_i.xyz, node_j.xyz))
+            scalars.extend((float(value_i), float(value_j)))
+            lines.extend((2, index, index + 1))
+
+        node_points: list[tuple[float, float, float]] = []
+        node_scalars: list[float] = []
+        for tag in sorted(self._visible_node_tags()):
+            node = self._model.nodes.get(tag)
+            value = value_for(tag)
+            if node is None or value is None:
+                continue
+            node_points.append(node.xyz)
+            node_scalars.append(float(value))
+
+        if not points and not node_points:
+            self.clear_result_overlay()
+            return
+
+        all_values = scalars + node_scalars
+        magnitude = component.startswith("|")
+        cmap = "turbo" if magnitude else "coolwarm"
+        clim = None
+        if not magnitude and all_values:
+            max_abs = max(abs(value) for value in all_values)
+            if max_abs > 1.0e-15:
+                clim = (-max_abs, max_abs)
+
+        self.clear_result_overlay()
+
+        scalar_name = "nodal_result"
+        scalar_bar_args = {
+            "title": f"{quantity} {component}",
+        }
+
+        if points:
+            mesh = pv.PolyData(np.asarray(points, dtype=float))
+            mesh.lines = np.asarray(lines, dtype=np.int64)
+            mesh.point_data[scalar_name] = np.asarray(scalars, dtype=float)
+            mesh_kwargs = {
+                "name": "result-contour",
+                "scalars": scalar_name,
+                "cmap": cmap,
+                "line_width": 7,
+                "render_lines_as_tubes": True,
+                "pickable": False,
+                "scalar_bar_args": scalar_bar_args,
+            }
+            if clim is not None:
+                mesh_kwargs["clim"] = clim
+            self.plotter.add_mesh(mesh, **mesh_kwargs)
+
+        if node_points:
+            node_mesh = pv.PolyData(np.asarray(node_points, dtype=float))
+            node_mesh.point_data[scalar_name] = np.asarray(
+                node_scalars,
+                dtype=float,
+            )
+            node_kwargs = {
+                "name": "result-contour-nodes",
+                "scalars": scalar_name,
+                "cmap": cmap,
+                "render_points_as_spheres": True,
+                "point_size": 9,
+                "pickable": False,
+                "show_scalar_bar": not bool(points),
+                "scalar_bar_args": scalar_bar_args,
+            }
+            if clim is not None:
+                node_kwargs["clim"] = clim
+            self.plotter.add_mesh(node_mesh, **node_kwargs)
 
         self._result_overlay_active = True
         self.plotter.render()

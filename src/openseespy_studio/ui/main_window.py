@@ -744,6 +744,9 @@ class MainWindow(QMainWindow):
         self.results_panel.member_force_requested.connect(
             self._show_member_force_result
         )
+        self.results_panel.node_contour_requested.connect(
+            self._show_node_contour_result
+        )
         self.results_panel.element_selected.connect(
             self._select_result_element
         )
@@ -5147,6 +5150,23 @@ class MainWindow(QMainWindow):
         )
         self.status_message.setText(
             f"Showing deformed shape · scale {float(scale):g}"
+        )
+
+    def _show_node_contour_result(
+        self,
+        quantity: str,
+        component: str,
+    ) -> None:
+        if not self._last_result:
+            self.status_message.setText("No nodal result available")
+            return
+        self.viewport.show_node_contour(
+            self._last_result,
+            str(quantity),
+            str(component),
+        )
+        self.status_message.setText(
+            f"Showing {str(quantity).lower()} contour · {component}"
         )
 
     def _select_result_element(self, tag: int) -> None:
