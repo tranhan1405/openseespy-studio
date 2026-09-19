@@ -619,6 +619,9 @@ class ResultsPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._result: dict[str, Any] = {}
+        # Stable source key (normally ("job", job_id)) used to avoid
+        # rebuilding every result table when switching views of one Job.
+        self._result_cache_key: object | None = None
         self._live_convergence_attempts: list[dict[str, Any]] = []
         self._live_convergence_step = 0
         self._live_convergence_total = 0
@@ -1398,6 +1401,7 @@ class ResultsPanel(QWidget):
 
     def clear_all(self) -> None:
         self._result = {}
+        self._result_cache_key = None
         self.jobs_table.setRowCount(0)
         self.convergence_table.setRowCount(0)
         self._live_convergence_attempts = []
@@ -1739,8 +1743,28 @@ class ResultsPanel(QWidget):
             QTableWidgetItem(job.message),
         )
 
-    def set_result(self, result: dict[str, Any]) -> None:
+    def set_result(
+        self,
+        result: dict[str, Any],
+        *,
+        cache_key: object | None = None,
+    ) -> bool:
+        """Load result data, skipping an identical already-loaded source.
+
+        A completed Job is immutable for post-processing, so all saved plot
+        children of that Job can share the same populated tables/dashboard.
+        This avoids rebuilding convergence, node, member, fiber, hinge and
+        history widgets on every tree selection.
+        """
+        if (
+            cache_key is not None
+            and cache_key == self._result_cache_key
+            and self._result
+        ):
+            return False
+
         self._result = dict(result or {})
+        self._result_cache_key = cache_key
         analysis = self._result.get("analysis", {})
         final = self._result.get("final", {})
         displacements = final.get("node_displacements", {})
@@ -1776,6 +1800,7 @@ class ResultsPanel(QWidget):
         self._update_pushover_plot()
         self._update_cyclic_plot()
         self._update_history_plot()
+        return True
 
     def _populate_convergence_dashboard(self) -> None:
         rows = convergence_steps(self._result)
