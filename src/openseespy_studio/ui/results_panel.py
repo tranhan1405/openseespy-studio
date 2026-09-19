@@ -511,6 +511,7 @@ class ResultsPanel(QWidget):
 
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
+        self.tabs.tabBar().hide()
         root.addWidget(self.tabs, 1)
 
         self._build_jobs_tab()
@@ -524,6 +525,96 @@ class ResultsPanel(QWidget):
         self._build_pushover_tab()
         self._build_cyclic_tab()
         self._build_history_tab()
+
+    def _select_tab(self, title: str) -> None:
+        for index in range(self.tabs.count()):
+            if self.tabs.tabText(index) == str(title):
+                self.tabs.setCurrentIndex(index)
+                return
+
+    def show_jobs(self) -> None:
+        self._select_tab("Jobs")
+
+    def show_solution_result(
+        self,
+        result_type: str,
+        settings: dict[str, Any] | None = None,
+    ) -> None:
+        options = dict(settings or {})
+        kind = str(result_type)
+
+        if kind == "DeformedShape":
+            scale = options.get("scale", 10.0)
+            try:
+                self.deformation_scale.setValue(float(scale))
+            except (TypeError, ValueError):
+                pass
+            self._select_tab("Deformation")
+            return
+
+        if kind in {"NodalDisplacement", "NodalReaction"}:
+            quantity = (
+                "Reaction"
+                if kind == "NodalReaction"
+                else "Displacement"
+            )
+            self.node_quantity.setCurrentText(quantity)
+            component = str(
+                options.get(
+                    "component",
+                    "FX" if quantity == "Reaction" else "|U|",
+                )
+            )
+            index = self.node_contour_component.findText(component)
+            if index >= 0:
+                self.node_contour_component.setCurrentIndex(index)
+            self._select_tab("Node Results")
+            return
+
+        if kind == "MemberForce":
+            component = str(options.get("component", "Mz"))
+            index = self.element_quantity.findText(component)
+            if index >= 0:
+                self.element_quantity.setCurrentIndex(index)
+            self._select_tab("Member Forces")
+            return
+
+        if kind in {"FiberStress", "FiberStrain"}:
+            self.fiber_quantity.setCurrentText(
+                "Stress" if kind == "FiberStress" else "Strain"
+            )
+            self._select_tab("Fiber Response")
+            return
+
+        if kind == "HingeState":
+            self._select_tab("Hinge / Yield States")
+            return
+        if kind == "PushoverCurve":
+            self._select_tab("Pushover Curve")
+            return
+        if kind == "CyclicHysteresis":
+            self._select_tab("Cyclic Hysteresis")
+            return
+        if kind == "TimeHistory":
+            self._select_tab("Time History")
+            return
+        if kind == "ModeShape":
+            mode = options.get("mode")
+            if mode is not None:
+                index = self.mode_combo.findData(int(mode))
+                if index >= 0:
+                    self.mode_combo.setCurrentIndex(index)
+            scale = options.get("scale")
+            if scale is not None:
+                try:
+                    self.mode_scale.setValue(float(scale))
+                except (TypeError, ValueError):
+                    pass
+            self._select_tab("Mode Shape")
+            return
+        if kind == "Convergence":
+            self._select_tab("Convergence")
+            return
 
     def _build_jobs_tab(self) -> None:
         page = QWidget()

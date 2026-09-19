@@ -11,7 +11,7 @@ from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 18
+PROJECT_FORMAT_VERSION = 19
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -1251,6 +1251,79 @@ class RecorderData:
         )
 
 
+SOLUTION_RESULT_TYPES = {
+    "DeformedShape",
+    "NodalDisplacement",
+    "NodalReaction",
+    "MemberForce",
+    "FiberStress",
+    "FiberStrain",
+    "HingeState",
+    "PushoverCurve",
+    "CyclicHysteresis",
+    "TimeHistory",
+    "ModeShape",
+    "Convergence",
+}
+
+
+@dataclass
+class SolutionResultData:
+    tag: int
+    analysis_tag: int
+    name: str
+    result_type: str
+    node_scope: list[int] = field(default_factory=list)
+    element_scope: list[int] = field(default_factory=list)
+    settings: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.tag = int(self.tag)
+        self.analysis_tag = int(self.analysis_tag)
+        self.name = str(self.name).strip() or f"Result {self.tag}"
+        self.result_type = str(self.result_type)
+        self.node_scope = sorted({int(tag) for tag in self.node_scope})
+        self.element_scope = sorted({int(tag) for tag in self.element_scope})
+        self.settings = dict(self.settings)
+        if self.tag <= 0:
+            raise ValueError("Solution result tag must be positive.")
+        if self.analysis_tag <= 0:
+            raise ValueError("Solution result analysis tag must be positive.")
+        if self.result_type not in SOLUTION_RESULT_TYPES:
+            raise ValueError(
+                f"Unsupported solution result type: {self.result_type}"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "analysis_tag": self.analysis_tag,
+            "name": self.name,
+            "result_type": self.result_type,
+            "node_scope": list(self.node_scope),
+            "element_scope": list(self.element_scope),
+            "settings": dict(self.settings),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SolutionResultData":
+        return cls(
+            tag=int(data["tag"]),
+            analysis_tag=int(data["analysis_tag"]),
+            name=str(data.get("name", "")),
+            result_type=str(data["result_type"]),
+            node_scope=[
+                int(tag)
+                for tag in data.get("node_scope", [])
+            ],
+            element_scope=[
+                int(tag)
+                for tag in data.get("element_scope", [])
+            ],
+            settings=dict(data.get("settings", {})),
+        )
+
+
 @dataclass
 class SelectionSetData:
     name: str
@@ -1292,6 +1365,9 @@ class ProjectDatabase:
     element_loads: dict[int, ElementLoadData] = field(default_factory=dict)
     analyses: dict[int, AnalysisSettingsData] = field(default_factory=dict)
     recorders: dict[int, RecorderData] = field(default_factory=dict)
+    solution_results: dict[int, SolutionResultData] = field(
+        default_factory=dict
+    )
     active_analysis_tag: int | None = None
 
     units: dict[str, str] = field(
@@ -1926,10 +2002,17 @@ class ProjectDatabase:
                 f"{analysis.control_node} does not exist."
             )
         self.analyses.pop(original_tag); self.analyses[analysis.tag]=analysis
+        if analysis.tag != original_tag:
+            for result in self.solution_results.values():
+                if result.analysis_tag == original_tag:
+                    result.analysis_tag = analysis.tag
         if self.active_analysis_tag==original_tag: self.active_analysis_tag=analysis.tag
 
     def remove_analysis(self, tag:int) -> None:
         tag=int(tag); self.analyses.pop(tag,None)
+        for result_tag, result in list(self.solution_results.items()):
+            if result.analysis_tag == tag:
+                self.solution_results.pop(result_tag)
         if self.active_analysis_tag==tag:
             self.active_analysis_tag=min(self.analyses,default=None)
 
@@ -1937,6 +2020,78 @@ class ProjectDatabase:
         tag=int(tag)
         if tag not in self.analyses: raise ValueError(f"Analysis tag {tag} does not exist.")
         self.active_analysis_tag=tag
+
+    def next_solution_result_tag(self) -> int:
+        return max(self.solution_results, default=0) + 1
+
+    def _validate_solution_result(self, result: SolutionResultData) -> None:
+        if result.analysis_tag not in self.analyses:
+            raise ValueError(
+                f"Solution result references missing analysis "
+                f"{result.analysis_tag}."
+            )
+        missing_nodes = [
+            tag for tag in result.node_scope
+            if tag not in self.model.nodes
+        ]
+        if missing_nodes:
+            raise ValueError(
+                "Solution result references missing node tag(s): "
+                + ", ".join(map(str, missing_nodes))
+            )
+        valid_elements = set(self.model.elements) | set(self.connections)
+        missing_elements = [
+            tag for tag in result.element_scope
+            if tag not in valid_elements
+        ]
+        if missing_elements:
+            raise ValueError(
+                "Solution result references missing element tag(s): "
+                + ", ".join(map(str, missing_elements))
+            )
+
+    def add_solution_result(self, result: SolutionResultData) -> None:
+        if result.tag in self.solution_results:
+            raise ValueError(
+                f"Solution result tag {result.tag} already exists."
+            )
+        self._validate_solution_result(result)
+        self.solution_results[result.tag] = result
+
+    def update_solution_result(
+        self,
+        original_tag: int,
+        result: SolutionResultData,
+    ) -> None:
+        original_tag = int(original_tag)
+        if original_tag not in self.solution_results:
+            raise ValueError(
+                f"Solution result tag {original_tag} does not exist."
+            )
+        if (
+            result.tag != original_tag
+            and result.tag in self.solution_results
+        ):
+            raise ValueError(
+                f"Solution result tag {result.tag} already exists."
+            )
+        self._validate_solution_result(result)
+        self.solution_results.pop(original_tag)
+        self.solution_results[result.tag] = result
+
+    def remove_solution_result(self, tag: int) -> None:
+        self.solution_results.pop(int(tag), None)
+
+    def solution_results_for_analysis(
+        self,
+        analysis_tag: int,
+    ) -> list[SolutionResultData]:
+        target = int(analysis_tag)
+        return [
+            self.solution_results[tag]
+            for tag in sorted(self.solution_results)
+            if self.solution_results[tag].analysis_tag == target
+        ]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1992,6 +2147,10 @@ class ProjectDatabase:
             "recorders": [
                 self.recorders[tag].to_dict()
                 for tag in sorted(self.recorders)
+            ],
+            "solution_results": [
+                self.solution_results[tag].to_dict()
+                for tag in sorted(self.solution_results)
             ],
             "active_analysis_tag": self.active_analysis_tag,
         }
@@ -2189,6 +2348,22 @@ class ProjectDatabase:
         return result
 
     @staticmethod
+    def _load_solution_results(
+        raw: Any,
+    ) -> dict[int, SolutionResultData]:
+        result: dict[int, SolutionResultData] = {}
+        if isinstance(raw, list):
+            for item in raw:
+                solution_result = SolutionResultData.from_dict(dict(item))
+                if solution_result.tag in result:
+                    raise ValueError(
+                        f"Duplicate solution result tag "
+                        f"{solution_result.tag}."
+                    )
+                result[solution_result.tag] = solution_result
+        return result
+
+    @staticmethod
     def _load_recorders(raw: Any) -> dict[int, RecorderData]:
         result: dict[int, RecorderData] = {}
         if isinstance(raw, list):
@@ -2238,6 +2413,9 @@ class ProjectDatabase:
             ),
             analyses=cls._load_analyses(data.get("analyses", [])),
             recorders=cls._load_recorders(data.get("recorders", [])),
+            solution_results=cls._load_solution_results(
+                data.get("solution_results", [])
+            ),
             active_analysis_tag=(
                 int(data["active_analysis_tag"])
                 if data.get("active_analysis_tag") is not None

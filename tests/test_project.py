@@ -1,5 +1,5 @@
 from openseespy_studio.model import StructuralModel
-from openseespy_studio.project import ProjectDatabase, SelectionSetData
+from openseespy_studio.project import AnalysisSettingsData, ProjectDatabase, SelectionSetData, SolutionResultData
 
 
 def build_project() -> ProjectDatabase:
@@ -58,3 +58,92 @@ def test_future_project_version_is_rejected():
         assert "newer than supported" in str(exc)
     else:
         raise AssertionError("Expected a future project version to be rejected")
+
+
+
+def test_solution_result_round_trip_and_analysis_link():
+    project = build_project()
+    project.add_analysis(
+        AnalysisSettingsData(
+            1,
+            "Push",
+            "Pushover",
+            control_node=2,
+        )
+    )
+    project.add_solution_result(
+        SolutionResultData(
+            1,
+            1,
+            "Moment Mz",
+            "MemberForce",
+            element_scope=[10],
+            settings={"component": "Mz", "scale": 1.0},
+        )
+    )
+
+    restored = ProjectDatabase.from_dict(project.to_dict())
+
+    assert restored.solution_results[1].analysis_tag == 1
+    assert restored.solution_results[1].result_type == "MemberForce"
+    assert restored.solution_results[1].element_scope == [10]
+    assert restored.solution_results[1].settings["component"] == "Mz"
+    assert restored.solution_results_for_analysis(1)[0].name == "Moment Mz"
+
+
+def test_solution_results_follow_analysis_tag_change_and_delete():
+    project = build_project()
+    project.add_analysis(
+        AnalysisSettingsData(
+            1,
+            "Static",
+            "Static",
+        )
+    )
+    project.add_solution_result(
+        SolutionResultData(
+            1,
+            1,
+            "Deformed Shape",
+            "DeformedShape",
+        )
+    )
+
+    project.update_analysis(
+        1,
+        AnalysisSettingsData(
+            3,
+            "Static renamed",
+            "Static",
+        ),
+    )
+    assert project.solution_results[1].analysis_tag == 3
+
+    project.remove_analysis(3)
+    assert project.solution_results == {}
+
+
+def test_solution_result_scope_validation():
+    project = build_project()
+    project.add_analysis(
+        AnalysisSettingsData(
+            1,
+            "Static",
+            "Static",
+        )
+    )
+
+    try:
+        project.add_solution_result(
+            SolutionResultData(
+                1,
+                1,
+                "Bad Scope",
+                "MemberForce",
+                element_scope=[999],
+            )
+        )
+    except ValueError as exc:
+        assert "missing element" in str(exc)
+    else:
+        raise AssertionError("Expected solution result scope validation")
