@@ -330,8 +330,10 @@ QStatusBar {
 class BrandWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumWidth(215)
-        self.setMaximumWidth(245)
+        # Reserve enough room for the full wordmark.  The old ribbon-level
+        # 185 px cap squeezed this widget and made the leading "O" appear
+        # crowded by the waveform icon.
+        self.setFixedWidth(255)
         self.setMinimumHeight(64)
 
     def paintEvent(self, event):
@@ -341,25 +343,27 @@ class BrandWidget(QWidget):
         pen = QPen(QColor("#c62828"), 2.4)
         painter.setPen(pen)
         points = [
-            (7, 31), (16, 31), (20, 16), (25, 46), (31, 8),
-            (36, 40), (41, 21), (47, 34), (54, 34), (58, 25),
-            (63, 37), (69, 31), (76, 31),
+            (7, 31), (15, 31), (19, 17), (24, 45), (30, 9),
+            (35, 39), (40, 22), (46, 34), (52, 34), (56, 26),
+            (61, 36), (67, 31), (72, 31),
         ]
         for a, b in zip(points[:-1], points[1:]):
             painter.drawLine(a[0], a[1], b[0], b[1])
+
+        text_x = 92
 
         painter.setPen(QColor("#17356d"))
         font = QFont(self.font())
         font.setPointSize(11)
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(84, 28, "OpenSeesPy Studio")
+        painter.drawText(text_x, 28, "OpenSeesPy Studio")
 
         painter.setPen(QColor("#6f7d8c"))
         font.setPointSize(7)
         font.setBold(False)
         painter.setFont(font)
-        painter.drawText(84, 45, "Model  ·  Analyze  ·  Visualize")
+        painter.drawText(text_x, 45, "Model  ·  Analyze  ·  Understand")
 
 
 class RibbonGroup(QWidget):
@@ -2146,7 +2150,6 @@ class MainWindow(QMainWindow):
         }
 
         brand = BrandWidget()
-        brand.setMaximumWidth(185)
         ribbon.addWidget(brand)
 
     def _unit_preset_index(self) -> int:
