@@ -42,6 +42,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..analysis_templates import (
+    build_cyclic_template,
+    build_nlth_template,
+    build_pushover_template,
+    default_control_node,
+)
 from ..frame_setup import prepare_frame_grid
 from ..generator import FrameGridSpec, cyclic_displacement_steps, generate_frame_grid, to_openseespy
 from ..jobs import JobRecord
@@ -57,6 +63,7 @@ from ..runtime import build_worker_pythonpath, probe_opensees_runtime
 from ..validation import ValidationIssue, validate_project
 from ..units import UnitSystem
 from .analysis_dialog import AnalysisDialog
+from .analysis_template_dialog import AnalysisTemplateDialog
 from .code_editor import CodeEditor
 from .connection_dialog import ConnectionDialog
 from .constraint_dialog import ConstraintDialog
@@ -1393,6 +1400,13 @@ class MainWindow(QMainWindow):
         self._make_action("nodal_load", "Nodal Load...", "load", self._create_nodal_load, "Create nodal load")
         self._make_action("beam_load", "Beam Load...", "load", self._create_element_load, "Create uniform, point, or self-weight beam load")
         self._make_action("analysis_setup", "Analysis Setup...", "analysis", self._create_analysis, "Create analysis settings")
+        self._make_action(
+            "analysis_template",
+            "Templates",
+            "analysis",
+            self._create_analysis_template,
+            "Create Pushover, Cyclic, or nonlinear time-history workflow",
+        )
         self._make_action("check_model", "Check Model", "analysis", self._check_model, "Validate the model before analysis")
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action(
@@ -1433,6 +1447,7 @@ class MainWindow(QMainWindow):
         menus["Loads"].addAction(self.actions["load_pattern"])
         menus["Loads"].addAction(self.actions["nodal_load"])
         menus["Loads"].addAction(self.actions["beam_load"])
+        menus["Analysis"].addAction(self.actions["analysis_template"])
         menus["Analysis"].addAction(self.actions["analysis_setup"])
         menus["Analysis"].addAction(self.actions["check_model"])
         menus["Analysis"].addAction(self.actions["run"])
@@ -1632,6 +1647,11 @@ class MainWindow(QMainWindow):
         self.ribbon_tabs.addTab(model_page, "Model")
 
         analysis_page = RibbonPage()
+        add_group(
+            analysis_page,
+            "Templates",
+            large=("analysis_template",),
+        )
         add_group(
             analysis_page,
             "Solver",
@@ -5025,6 +5045,102 @@ class MainWindow(QMainWindow):
 
         self.properties_panel.set_properties("Constraint", rows)
 
+    def _create_analysis_template(
+        self,
+        initial_template: str = "Pushover",
+    ) -> None:
+        if not self.model.nodes:
+            QMessageBox.information(
+                self,
+                "Analysis Template",
+                "Create the structural model before creating an analysis template.",
+            )
+            return
+
+        default_node = default_control_node(self.project)
+        dialog = AnalysisTemplateDialog(
+            default_node=default_node,
+            units=self.project.units,
+            initial_template=str(initial_template),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            request = dialog.request()
+            kind = str(request["template"])
+            if kind == "Pushover":
+                plan = build_pushover_template(
+                    self.project,
+                    name=str(request["name"]),
+                    control_node=int(request["control_node"]),
+                    control_dof=int(request["control_dof"]),
+                    target_displacement=float(
+                        request["target_displacement"]
+                    ),
+                    max_increment=float(request["max_increment"]),
+                    distribution=str(request["distribution"]),
+                    solver_preset=str(request["solver_preset"]),
+                )
+            elif kind == "Cyclic":
+                plan = build_cyclic_template(
+                    self.project,
+                    name=str(request["name"]),
+                    control_node=int(request["control_node"]),
+                    control_dof=int(request["control_dof"]),
+                    protocol_rows=list(request["protocol_rows"]),
+                    max_increment=float(request["max_increment"]),
+                    distribution=str(request["distribution"]),
+                    solver_preset=str(request["solver_preset"]),
+                )
+            else:
+                plan = build_nlth_template(
+                    self.project,
+                    name=str(request["name"]),
+                    ground_motion_values=list(
+                        request["ground_motion_values"]
+                    ),
+                    dt=float(request["dt"]),
+                    input_unit=str(request["input_unit"]),
+                    scale_factor=float(request["scale_factor"]),
+                    direction=int(request["direction"]),
+                    monitor_node=int(request["monitor_node"]),
+                    damping_ratio=float(request["damping_ratio"]),
+                    damping_mode_i=int(request["damping_mode_i"]),
+                    damping_mode_j=int(request["damping_mode_j"]),
+                    solver_preset=str(request["solver_preset"]),
+                )
+
+            for series in plan.time_series:
+                self.project.add_time_series(series)
+            for pattern in plan.load_patterns:
+                self.project.add_load_pattern(pattern)
+            for load in plan.nodal_loads:
+                self.project.add_nodal_load(load)
+            self.project.add_analysis(plan.analysis)
+            for result in plan.results:
+                self.project.add_solution_result(result)
+            self.project.set_active_analysis(plan.analysis.tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Analysis Template", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_project_metadata(
+            f"Created {plan.summary}"
+        )
+        self._record_project_change(
+            f"Create {plan.analysis.analysis_type} template",
+            before,
+        )
+        self._refresh_tree()
+        self._select_tree_payload("analysis", plan.analysis.tag)
+        self._show_analysis_properties(plan.analysis.tag)
+
     def _create_analysis(self) -> None:
         self._create_analysis_of_type(None)
 
@@ -5423,6 +5539,22 @@ class MainWindow(QMainWindow):
             ("Active", "Yes" if tag == self.project.active_analysis_tag else "No"),
             ("Constraints", settings.constraints_handler),
             ("Numberer", settings.numberer), ("System", settings.system),
+            (
+                "Gravity preload",
+                (
+                    f"On · {settings.gravity_steps} step(s)"
+                    if settings.preload_gravity
+                    else "Off"
+                ),
+            ),
+            (
+                "Driving pattern(s)",
+                (
+                    ", ".join(map(str, settings.deferred_pattern_tags))
+                    if settings.deferred_pattern_tags
+                    else "-"
+                ),
+            ),
         ]
         if settings.analysis_type == "Modal":
             rows.append(("Modes", settings.num_modes))
@@ -5465,6 +5597,22 @@ class MainWindow(QMainWindow):
                     ("Control DOF", settings.control_dof),
                     ("Disp. increment", f"{settings.displacement_increment:g}"),
                 ])
+            elif settings.analysis_type == "Transient":
+                rows.extend([
+                    ("Time step", f"{settings.dt:g}"),
+                    ("Newmark gamma", f"{settings.gamma:g}"),
+                    ("Newmark beta", f"{settings.beta:g}"),
+                    (
+                        "Rayleigh damping",
+                        (
+                            f"{settings.rayleigh_damping_ratio:g} "
+                            f"(modes {settings.rayleigh_mode_i}, "
+                            f"{settings.rayleigh_mode_j})"
+                            if settings.rayleigh_damping_ratio > 0.0
+                            else "Off"
+                        ),
+                    ),
+                ])
             elif settings.analysis_type == "Cyclic":
                 expanded = cyclic_displacement_steps(
                     settings.cyclic_targets,
@@ -5479,11 +5627,6 @@ class MainWindow(QMainWindow):
                     ),
                     ("Max increment", f"{settings.cyclic_increment:g}"),
                     ("Expanded steps", len(expanded)),
-                ])
-            elif settings.analysis_type == "Transient":
-                rows.extend([
-                    ("dt", f"{settings.dt:g}"), ("gamma", f"{settings.gamma:g}"),
-                    ("beta", f"{settings.beta:g}"),
                 ])
         self.properties_panel.set_properties("Analysis Settings", rows)
 
@@ -6575,6 +6718,18 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "analyses_root":
+            template_menu = menu.addMenu("Templates")
+            for template_name in (
+                "Pushover",
+                "Cyclic",
+                "Nonlinear Time History",
+            ):
+                action = template_menu.addAction(template_name)
+                action.triggered.connect(
+                    lambda checked=False, name=template_name:
+                    self._create_analysis_template(name)
+                )
+            menu.addSeparator()
             insert_menu = menu.addMenu("Insert")
             for analysis_type in (
                 "Static",
