@@ -5316,6 +5316,7 @@ class MainWindow(QMainWindow):
         dialog = MaterialDialog(
             next_tag=self.project.next_material_tag(),
             units=self.project.units,
+            materials=self.project.materials,
             parent=self,
         )
         if not dialog.exec():
@@ -5346,6 +5347,7 @@ class MainWindow(QMainWindow):
         dialog = MaterialDialog(
             material=material,
             units=self.project.units,
+            materials=self.project.materials,
             parent=self,
         )
         if not dialog.exec():
@@ -5375,6 +5377,15 @@ class MainWindow(QMainWindow):
                         for dof, material_tag
                         in connection.materials_by_dof.items()
                     }
+                for wrapper in self.project.materials.values():
+                    if wrapper.tag == updated.tag:
+                        continue
+                    if wrapper.base_material_tag == tag:
+                        wrapper.base_material_tag = updated.tag
+                    wrapper.material_tags = [
+                        updated.tag if value == tag else value
+                        for value in wrapper.material_tags
+                    ]
         except ValueError as exc:
             QMessageBox.warning(self, "Material Editor", str(exc))
             return
@@ -5402,6 +5413,9 @@ class MainWindow(QMainWindow):
             parameters=dict(source.parameters),
             poisson_ratio=source.poisson_ratio,
             density=source.density,
+            base_material_tag=source.base_material_tag,
+            material_tags=list(source.material_tags),
+            factors=list(source.factors),
         )
         self.project.add_material(duplicate)
         self._refresh_project_metadata(
@@ -5420,7 +5434,8 @@ class MainWindow(QMainWindow):
 
         used_by = self.project.sections_using_material(tag)
         connection_uses = self.project.connections_using_material(tag)
-        if used_by or connection_uses:
+        wrapper_uses = self.project.materials_using_material(tag)
+        if used_by or connection_uses or wrapper_uses:
             details = []
             if used_by:
                 details.append(
@@ -5430,6 +5445,11 @@ class MainWindow(QMainWindow):
                 details.append(
                     "connection(s): "
                     + ", ".join(map(str, connection_uses))
+                )
+            if wrapper_uses:
+                details.append(
+                    "wrapper material(s): "
+                    + ", ".join(map(str, wrapper_uses))
                 )
             QMessageBox.warning(
                 self,
@@ -5470,6 +5490,33 @@ class MainWindow(QMainWindow):
             ("Poisson ratio", f"{material.poisson_ratio:g}"),
             ("Density", f"{material.density:g}"),
         ]
+        if material.base_material_tag is not None:
+            base = self.project.materials.get(material.base_material_tag)
+            rows.append((
+                "Base material",
+                (
+                    f"{material.base_material_tag} - {base.name}"
+                    if base is not None
+                    else f"{material.base_material_tag} (missing)"
+                ),
+            ))
+        if material.material_tags:
+            component_text = ", ".join(
+                (
+                    f"{component_tag} - "
+                    f"{self.project.materials[component_tag].name}"
+                    if component_tag in self.project.materials
+                    else f"{component_tag} (missing)"
+                )
+                for component_tag in material.material_tags
+            )
+            rows.append(("Component materials", component_text))
+            if material.material_type == "Parallel":
+                rows.append((
+                    "Factors",
+                    ", ".join(f"{value:g}" for value in material.factors),
+                ))
+
         try:
             elastic_e = material.elastic_modulus()
             elastic_g = material.shear_modulus()
