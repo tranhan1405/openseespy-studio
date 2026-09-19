@@ -1276,9 +1276,23 @@ class ModelViewport(QWidget):
         *,
         node_tags: set[int] | None = None,
         element_tags: set[int] | None = None,
+        cache_key: object | None = None,
     ) -> None:
         """Show a nodal displacement or reaction scalar on the frame mesh."""
         if self._model is None:
+            return
+
+        quantity = str(quantity)
+        component = str(component)
+        view_key = self._result_view_key(
+            cache_key,
+            "node-contour",
+            quantity,
+            component,
+            self._result_scope_key(node_tags),
+            self._result_scope_key(element_tags),
+        )
+        if self._show_cached_result_view(view_key):
             return
 
         final = result.get("final", {}) if isinstance(result, dict) else {}
@@ -1286,8 +1300,6 @@ class ModelViewport(QWidget):
             self.clear_result_overlay()
             return
 
-        quantity = str(quantity)
-        component = str(component)
         key = (
             "node_displacements"
             if quantity == "Displacement"
@@ -1376,6 +1388,7 @@ class ModelViewport(QWidget):
                 clim = (-max_abs, max_abs)
 
         self.clear_result_overlay(render=False)
+        entries: list[tuple[object, dict[str, object]]] = []
 
         scalar_name = "nodal_result"
         scalar_bar_args = {
@@ -1399,6 +1412,9 @@ class ModelViewport(QWidget):
             if clim is not None:
                 mesh_kwargs["clim"] = clim
             self.plotter.add_mesh(mesh, **mesh_kwargs)
+            cache_kwargs = dict(mesh_kwargs)
+            cache_kwargs.pop("render", None)
+            entries.append((mesh, cache_kwargs))
 
         if node_points:
             node_mesh = pv.PolyData(np.asarray(node_points, dtype=float))
@@ -1420,7 +1436,11 @@ class ModelViewport(QWidget):
             if clim is not None:
                 node_kwargs["clim"] = clim
             self.plotter.add_mesh(node_mesh, **node_kwargs)
+            cache_kwargs = dict(node_kwargs)
+            cache_kwargs.pop("render", None)
+            entries.append((node_mesh, cache_kwargs))
 
+        self._remember_result_view(view_key, entries)
         self._result_overlay_active = True
         self.plotter.render()
 
@@ -1429,9 +1449,18 @@ class ModelViewport(QWidget):
         result: dict[str, object],
         *,
         element_tags: set[int] | None = None,
+        cache_key: object | None = None,
     ) -> None:
         """Show fiber-derived section state severity on nonlinear members."""
         if self._model is None:
+            return
+
+        view_key = self._result_view_key(
+            cache_key,
+            "hinge-state",
+            self._result_scope_key(element_tags),
+        )
+        if self._show_cached_result_view(view_key):
             return
 
         final = result.get("final", {}) if isinstance(result, dict) else {}
@@ -1505,6 +1534,7 @@ class ModelViewport(QWidget):
             return
 
         self.clear_result_overlay(render=False)
+        entries: list[tuple[object, dict[str, object]]] = []
         state_cmap = [
             "#8fa2b5",
             "#e7b34c",
@@ -1518,24 +1548,28 @@ class ModelViewport(QWidget):
             member_severity,
             dtype=float,
         )
-        self.plotter.add_mesh(
-            member_mesh,
-            name="result-hinge-members",
-            scalars="state_severity",
-            preference="cell",
-            cmap=state_cmap,
-            clim=(-0.5, 3.5),
-            line_width=9,
-            render_lines_as_tubes=True,
-            pickable=False,
-            scalar_bar_args={
+        member_kwargs = {
+            "name": "result-hinge-members",
+            "scalars": "state_severity",
+            "preference": "cell",
+            "cmap": state_cmap,
+            "clim": (-0.5, 3.5),
+            "line_width": 9,
+            "render_lines_as_tubes": True,
+            "pickable": False,
+            "scalar_bar_args": {
                 "title": (
                     "Fiber state: 0 Elastic · 1 Nonlinear · "
                     "2 Yielding · 3 Plastic/Crushing"
                 )
             },
+        }
+        self.plotter.add_mesh(
+            member_mesh,
+            **member_kwargs,
             render=False,
         )
+        entries.append((member_mesh, member_kwargs))
 
         if state_points:
             point_mesh = pv.PolyData(
@@ -1545,19 +1579,24 @@ class ModelViewport(QWidget):
                 state_severity,
                 dtype=float,
             )
+            point_kwargs = {
+                "name": "result-hinge-points",
+                "scalars": "state_severity",
+                "cmap": state_cmap,
+                "clim": (-0.5, 3.5),
+                "render_points_as_spheres": True,
+                "point_size": 13,
+                "pickable": False,
+                "show_scalar_bar": False,
+            }
             self.plotter.add_mesh(
                 point_mesh,
-                name="result-hinge-points",
-                scalars="state_severity",
-                cmap=state_cmap,
-                clim=(-0.5, 3.5),
-                render_points_as_spheres=True,
-                point_size=13,
-                pickable=False,
-                show_scalar_bar=False,
+                **point_kwargs,
                 render=False,
             )
+            entries.append((point_mesh, point_kwargs))
 
+        self._remember_result_view(view_key, entries)
         self._result_overlay_active = True
         self.plotter.render()
 
@@ -1569,8 +1608,20 @@ class ModelViewport(QWidget):
         *,
         scale: float = 1.0,
         element_tags: set[int] | None = None,
+        cache_key: object | None = None,
     ) -> None:
         if self._model is None or not self._model.elements:
+            return
+
+        component = str(component)
+        view_key = self._result_view_key(
+            cache_key,
+            "member-force",
+            component,
+            float(scale),
+            self._result_scope_key(element_tags),
+        )
+        if self._show_cached_result_view(view_key):
             return
 
         final = result.get("final", {}) if isinstance(result, dict) else {}
@@ -1752,6 +1803,7 @@ class ModelViewport(QWidget):
             return
 
         self.clear_result_overlay(render=False)
+        entries: list[tuple[object, dict[str, object]]] = []
 
         mesh = pv.PolyData(
             np.asarray(diagram_points, dtype=float)
@@ -1761,19 +1813,23 @@ class ModelViewport(QWidget):
             diagram_values,
             dtype=float,
         )
-        self.plotter.add_mesh(
-            mesh,
-            name="result-force-diagram",
-            scalars="member_force",
-            cmap="coolwarm",
-            line_width=5,
-            render_lines_as_tubes=True,
-            pickable=False,
-            scalar_bar_args={
+        mesh_kwargs = {
+            "name": "result-force-diagram",
+            "scalars": "member_force",
+            "cmap": "coolwarm",
+            "line_width": 5,
+            "render_lines_as_tubes": True,
+            "pickable": False,
+            "scalar_bar_args": {
                 "title": f"{component} · local member resultant"
             },
+        }
+        self.plotter.add_mesh(
+            mesh,
+            **mesh_kwargs,
             render=False,
         )
+        entries.append((mesh, mesh_kwargs))
 
         if connector_points:
             connectors = pv.PolyData(
@@ -1783,17 +1839,22 @@ class ModelViewport(QWidget):
                 connector_lines,
                 dtype=np.int64,
             )
+            connector_kwargs = {
+                "name": "result-force-connectors",
+                "color": "#6f7f8f",
+                "line_width": 1,
+                "opacity": 0.6,
+                "pickable": False,
+                "show_scalar_bar": False,
+            }
             self.plotter.add_mesh(
                 connectors,
-                name="result-force-connectors",
-                color="#6f7f8f",
-                line_width=1,
-                opacity=0.6,
-                pickable=False,
-                show_scalar_bar=False,
+                **connector_kwargs,
                 render=False,
             )
+            entries.append((connectors, connector_kwargs))
 
+        self._remember_result_view(view_key, entries)
         self._result_overlay_active = True
         self.plotter.render()
 
@@ -1804,6 +1865,7 @@ class ModelViewport(QWidget):
         scale: float = 1.0,
         node_tags: set[int] | None = None,
         element_tags: set[int] | None = None,
+        cache_key: object | None = None,
     ) -> None:
         final = result.get("final", {}) if isinstance(result, dict) else {}
         vectors = (
@@ -1814,12 +1876,20 @@ class ModelViewport(QWidget):
         if not isinstance(vectors, dict) or not vectors:
             self.clear_result_overlay()
             return
+        view_key = self._result_view_key(
+            cache_key,
+            "deformed-shape",
+            float(scale),
+            self._result_scope_key(node_tags),
+            self._result_scope_key(element_tags),
+        )
         self._show_vector_overlay(
             vectors,
             scale=float(scale),
             label="Displacement magnitude",
             node_tags=node_tags,
             element_tags=element_tags,
+            view_cache_key=view_key,
         )
 
     def show_mode_shape(
@@ -1830,7 +1900,19 @@ class ModelViewport(QWidget):
         scale: float = 1.0,
         node_tags: set[int] | None = None,
         element_tags: set[int] | None = None,
+        cache_key: object | None = None,
     ) -> None:
+        view_key = self._result_view_key(
+            cache_key,
+            "mode-shape",
+            int(mode),
+            float(scale),
+            self._result_scope_key(node_tags),
+            self._result_scope_key(element_tags),
+        )
+        if self._show_cached_result_view(view_key):
+            return
+
         modes = result.get("modes", {}) if isinstance(result, dict) else {}
         mode_data = modes.get(str(int(mode)), {}) if isinstance(modes, dict) else {}
         vectors = (
@@ -1865,6 +1947,9 @@ class ModelViewport(QWidget):
             vectors,
             scale=auto_scale,
             label=f"Mode {int(mode)} amplitude",
+            node_tags=node_tags,
+            element_tags=element_tags,
+            view_cache_key=view_key,
         )
 
     def zoom_to_selection(self, nodes: set[int], elements: set[int]) -> None:
