@@ -212,13 +212,15 @@ def motion_frame(
     mode: int | None = None,
     modal_frames: int = 48,
     fallback_frames: int = 30,
+    info: MotionInfo | None = None,
 ) -> MotionFrame:
-    info = motion_info(
-        result,
-        mode=mode,
-        modal_frames=modal_frames,
-        fallback_frames=fallback_frames,
-    )
+    if info is None:
+        info = motion_info(
+            result,
+            mode=mode,
+            modal_frames=modal_frames,
+            fallback_frames=fallback_frames,
+        )
     if info.frame_count <= 0:
         return MotionFrame(
             index=0,
