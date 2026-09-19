@@ -421,6 +421,156 @@ def convergence_summary(
     }
 
 
+def convergence_trace(
+    result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return an ANSYS-style cumulative-iteration convergence trace."""
+    convergence = (
+        result.get("convergence", {})
+        if isinstance(result, dict)
+        else {}
+    )
+    if not isinstance(convergence, dict):
+        convergence = {}
+
+    tolerance = convergence.get("tolerance")
+    try:
+        tolerance_value = (
+            abs(float(tolerance))
+            if tolerance is not None
+            else None
+        )
+    except (TypeError, ValueError):
+        tolerance_value = None
+    if (
+        tolerance_value is not None
+        and (
+            not math.isfinite(tolerance_value)
+            or tolerance_value <= 0.0
+        )
+    ):
+        tolerance_value = None
+
+    cumulative = 0
+    norm_x: list[float] = []
+    norm_y: list[float] = []
+    cutbacks: list[float] = []
+    converged: list[float] = []
+    coordinate_x: list[float] = [0.0]
+    coordinate_y: list[float] = [0.0]
+
+    def append_attempts(raw_attempts: Any) -> None:
+        nonlocal cumulative
+        attempts = raw_attempts if isinstance(raw_attempts, list) else []
+        for attempt in attempts:
+            if not isinstance(attempt, dict):
+                continue
+            history = attempt.get("norm_history", [])
+            used_history = False
+            if isinstance(history, (list, tuple)):
+                for raw_norm in history:
+                    try:
+                        norm = abs(float(raw_norm))
+                    except (TypeError, ValueError):
+                        continue
+                    if not math.isfinite(norm) or norm <= 0.0:
+                        continue
+                    cumulative += 1
+                    norm_x.append(float(cumulative))
+                    norm_y.append(norm)
+                    used_history = True
+
+            if used_history:
+                continue
+
+            try:
+                iterations = max(
+                    0,
+                    int(attempt.get("iterations", 0) or 0),
+                )
+            except (TypeError, ValueError):
+                iterations = 0
+            raw_norm = attempt.get("norm")
+            try:
+                norm = (
+                    abs(float(raw_norm))
+                    if raw_norm is not None
+                    else None
+                )
+            except (TypeError, ValueError):
+                norm = None
+            if iterations > 0:
+                cumulative += iterations
+            elif norm is not None:
+                cumulative += 1
+            if (
+                norm is not None
+                and math.isfinite(norm)
+                and norm > 0.0
+            ):
+                norm_x.append(float(cumulative))
+                norm_y.append(norm)
+
+    for row in convergence_steps(result):
+        substeps = row.get("substeps", [])
+        if isinstance(substeps, list) and substeps:
+            for substep in substeps:
+                if not isinstance(substep, dict):
+                    continue
+                append_attempts(substep.get("attempts", []))
+                marker_x = float(cumulative)
+                if bool(substep.get("accepted")):
+                    if marker_x > 0.0:
+                        converged.append(marker_x)
+                    raw_coordinate = substep.get("time")
+                    if raw_coordinate is not None:
+                        try:
+                            coordinate = float(raw_coordinate)
+                        except (TypeError, ValueError):
+                            coordinate = math.nan
+                        if math.isfinite(coordinate):
+                            coordinate_x.append(marker_x)
+                            coordinate_y.append(coordinate)
+                elif marker_x > 0.0:
+                    cutbacks.append(marker_x)
+        else:
+            append_attempts(row.get("attempts", []))
+            marker_x = float(cumulative)
+            if str(row.get("status", "")) != "failed" and marker_x > 0.0:
+                converged.append(marker_x)
+            try:
+                cutback_count = int(row.get("cutbacks", 0) or 0)
+            except (TypeError, ValueError):
+                cutback_count = 0
+            if cutback_count > 0 and marker_x > 0.0:
+                cutbacks.extend([marker_x] * cutback_count)
+
+        raw_coordinate = row.get("time")
+        if raw_coordinate is not None and cumulative > 0:
+            try:
+                coordinate = float(raw_coordinate)
+            except (TypeError, ValueError):
+                coordinate = math.nan
+            if math.isfinite(coordinate):
+                marker_x = float(cumulative)
+                if (
+                    coordinate_x[-1] != marker_x
+                    or coordinate_y[-1] != coordinate
+                ):
+                    coordinate_x.append(marker_x)
+                    coordinate_y.append(coordinate)
+
+    return {
+        "iteration": norm_x,
+        "norm": norm_y,
+        "criterion": tolerance_value,
+        "cutbacks": cutbacks,
+        "converged": converged,
+        "coordinate_iteration": coordinate_x,
+        "coordinate": coordinate_y,
+        "total_iterations": cumulative,
+    }
+
 def convergence_series(
     result: dict[str, Any] | None,
     quantity: str,

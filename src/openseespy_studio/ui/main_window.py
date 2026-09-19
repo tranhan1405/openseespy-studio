@@ -6372,6 +6372,8 @@ class MainWindow(QMainWindow):
                     tolerance=payload.get("tolerance"),
                     algorithm=str(payload.get("algorithm", "") or ""),
                 )
+                self.results_dock.show()
+                self.results_dock.raise_()
         elif event == "step_start":
             self._live_convergence_context = {
                 "step": int(payload.get("step", 0) or 0),
@@ -6419,6 +6421,9 @@ class MainWindow(QMainWindow):
                 "eigenvalue" not in payload
                 and bool(self._live_convergence_context.get("enabled"))
             ):
+                self.results_panel.update_live_analysis_coordinate(
+                    payload.get("time")
+                )
                 self.results_panel.finish_live_convergence("CONVERGED")
         elif event == "convergence_failed":
             job.message = (
@@ -6491,6 +6496,9 @@ class MainWindow(QMainWindow):
                 payload.get("algorithm", "") or ""
             )
             if bool(self._live_convergence_context.get("enabled")):
+                self.results_panel.mark_live_substep_converged(
+                    payload.get("time")
+                )
                 self.results_panel.begin_live_convergence_attempt(
                     f"{payload.get('algorithm', '-')} · |Δ|={next_size:.6g}"
                 )

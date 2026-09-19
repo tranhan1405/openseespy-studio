@@ -497,7 +497,7 @@ def analysis_to_openseespy(
         "    return _iterations, _norm, _norms",
         "",
         "_studio_results = {",
-        "    'schema_version': 9,",
+        "    'schema_version': 10,",
         "    'analysis': {",
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
@@ -818,6 +818,7 @@ def analysis_to_openseespy(
             "'algorithm': _studio_active_algorithm, "
             "'iterations': _studio_iterations, "
             "'norm': _studio_norm, "
+            "'time': float(ops.getTime()), "
             "'attempts': list(_studio_trial_attempts)"
             "})"
         )
@@ -909,6 +910,7 @@ def analysis_to_openseespy(
             "'algorithm': _studio_active_algorithm, "
             "'iterations': _studio_iterations, "
             "'norm': _studio_norm, "
+            "'time': float(ops.getTime()), "
             "'attempts': list(_studio_trial_attempts)"
             "})"
         )
@@ -969,6 +971,7 @@ def analysis_to_openseespy(
             "remaining=_studio_remaining, "
             "next_size=min(abs(_studio_remaining), "
             "_studio_adaptive_size), "
+            "time=float(ops.getTime()), "
             "algorithm=_studio_primary_algorithm)"
         )
 
