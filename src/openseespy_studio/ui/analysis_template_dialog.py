@@ -305,7 +305,7 @@ class AnalysisTemplateDialog(QDialog):
             self._refresh_pushover_reference_height
         )
         self.push_reference_height.valueChanged.connect(
-            self._update_summary
+            self._manual_pushover_height_changed
         )
         self.push_increment.valueChanged.connect(self._update_summary)
         self.push_load_source.currentIndexChanged.connect(
@@ -599,9 +599,7 @@ class AnalysisTemplateDialog(QDialog):
         self.push_drift.setEnabled(drift)
         self.push_height_axis.setEnabled(drift or self.push_distribution.currentText() == "Triangular")
         self.push_auto_height.setEnabled(drift and self.project is not None)
-        self.push_reference_height.setEnabled(
-            drift and not self.push_auto_height.isChecked()
-        )
+        self.push_reference_height.setEnabled(drift)
         self._update_summary()
 
     def _refresh_pushover_reference_height(self, *_args) -> None:
@@ -611,7 +609,6 @@ class AnalysisTemplateDialog(QDialog):
         )
         self.push_reference_height.setEnabled(
             self.push_target_mode.currentText() == "Roof drift ratio"
-            and not use_auto
         )
         if use_auto:
             try:
@@ -626,6 +623,16 @@ class AnalysisTemplateDialog(QDialog):
                 self.push_reference_height.blockSignals(True)
                 self.push_reference_height.setValue(height)
                 self.push_reference_height.blockSignals(False)
+        self._update_summary()
+
+    def _manual_pushover_height_changed(self, *_args) -> None:
+        if (
+            self.push_target_mode.currentText() == "Roof drift ratio"
+            and self.push_auto_height.isChecked()
+        ):
+            self.push_auto_height.blockSignals(True)
+            self.push_auto_height.setChecked(False)
+            self.push_auto_height.blockSignals(False)
         self._update_summary()
 
     def _pushover_target_displacement(self) -> float:
