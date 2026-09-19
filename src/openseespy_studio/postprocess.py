@@ -88,6 +88,74 @@ def nodal_result_scalar(
     raise ValueError(f"Unsupported nodal result component: {component}")
 
 
+def pushover_capacity_curve(
+    result: dict[str, Any] | None,
+) -> tuple[list[float], list[float], int | None, int | None]:
+    """Return control displacement and applied base shear for pushover.
+
+    OpenSees support reactions oppose the applied lateral load, so the
+    capacity curve uses minus the summed reactions. A positive push therefore
+    gives positive control displacement and positive applied base shear.
+    """
+    if not isinstance(result, dict):
+        return [], [], None, None
+
+    analysis = result.get("analysis", {})
+    history = result.get("history", {})
+    if not isinstance(analysis, dict) or not isinstance(history, dict):
+        return [], [], None, None
+    if str(analysis.get("type", "")) != "Pushover":
+        return [], [], None, None
+
+    control_node_raw = history.get(
+        "monitor_node",
+        analysis.get("control_node"),
+    )
+    control_dof_raw = history.get(
+        "control_dof",
+        analysis.get("control_dof", 1),
+    )
+    try:
+        control_node = (
+            int(control_node_raw)
+            if control_node_raw is not None
+            else None
+        )
+    except (TypeError, ValueError):
+        control_node = None
+    try:
+        control_dof = int(control_dof_raw)
+    except (TypeError, ValueError):
+        control_dof = 1
+    if control_dof not in range(1, 7):
+        control_dof = 1
+
+    displacement_rows = history.get("displacement", [])
+    reaction_sums = history.get("base_shear", [])
+    if not isinstance(displacement_rows, (list, tuple)):
+        return [], [], control_node, control_dof
+    if not isinstance(reaction_sums, (list, tuple)):
+        return [], [], control_node, control_dof
+
+    x: list[float] = []
+    y: list[float] = []
+    index = control_dof - 1
+    for row, reaction_sum in zip(displacement_rows, reaction_sums):
+        if not isinstance(row, (list, tuple)) or len(row) <= index:
+            continue
+        try:
+            displacement = float(row[index])
+            base_shear = -float(reaction_sum)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(displacement) or not math.isfinite(base_shear):
+            continue
+        x.append(displacement)
+        y.append(base_shear)
+
+    return x, y, control_node, control_dof
+
+
 def local_end_actions(
     values: Sequence[float],
 ) -> dict[str, tuple[float, float]]:
