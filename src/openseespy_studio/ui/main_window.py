@@ -9750,6 +9750,8 @@ class MainWindow(QMainWindow):
         self,
         scale: float,
         display_mode: str,
+        representation: str,
+        smooth_curvature: bool,
     ) -> None:
         if not self._last_result:
             self.status_message.setText("No analysis result available")
@@ -9758,6 +9760,8 @@ class MainWindow(QMainWindow):
             self._last_result,
             scale=float(scale),
             display_mode=str(display_mode),
+            representation=str(representation),
+            smooth_curvature=bool(smooth_curvature),
             cache_key=self._last_result_cache_key,
         )
         label = {
@@ -9765,13 +9769,19 @@ class MainWindow(QMainWindow):
             "both": "undeformed + deformed",
             "undeformed_only": "undeformed only",
         }.get(str(display_mode), "deformed only")
+        representation_label = {
+            "actual_section": "actual section",
+            "tube": "tube",
+            "centerline": "centerline",
+        }.get(str(representation), "actual section")
         self._sync_result_ribbon_controls(
             "deformation",
             str(display_mode),
             float(scale),
         )
         self.status_message.setText(
-            f"Showing {label} · scale {float(scale):g}"
+            f"Showing {label} · {representation_label} · "
+            f"scale {float(scale):g}"
         )
 
     def _show_motion_frame_result(
@@ -9862,6 +9872,8 @@ class MainWindow(QMainWindow):
         mode: int,
         scale: float,
         display_mode: str,
+        representation: str,
+        smooth_curvature: bool,
     ) -> None:
         if not self._last_result:
             self.status_message.setText("No modal result available")
@@ -9871,6 +9883,8 @@ class MainWindow(QMainWindow):
             int(mode),
             scale=float(scale),
             display_mode=str(display_mode),
+            representation=str(representation),
+            smooth_curvature=bool(smooth_curvature),
             cache_key=self._last_result_cache_key,
         )
         label = {
@@ -9878,6 +9892,11 @@ class MainWindow(QMainWindow):
             "both": "undeformed + deformed",
             "undeformed_only": "undeformed only",
         }.get(str(display_mode), "deformed only")
+        representation_label = {
+            "actual_section": "actual section",
+            "tube": "tube",
+            "centerline": "centerline",
+        }.get(str(representation), "actual section")
         self._sync_result_ribbon_controls(
             "mode",
             str(display_mode),
@@ -9885,7 +9904,7 @@ class MainWindow(QMainWindow):
         )
         self.status_message.setText(
             f"Showing mode {int(mode)} · {label} · "
-            f"scale {float(scale):g}"
+            f"{representation_label} · scale {float(scale):g}"
         )
 
     def _cleanup_analysis_files(self) -> None:
