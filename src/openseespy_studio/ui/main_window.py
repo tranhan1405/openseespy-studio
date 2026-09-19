@@ -2074,23 +2074,29 @@ class MainWindow(QMainWindow):
 
         root = QTreeWidgetItem(["OpenSees Model"])
         root.setIcon(0, studio_icon("model"))
+        root.setData(0, Qt.UserRole, ("model_root", None))
         root.setExpanded(True)
 
         geometry = QTreeWidgetItem(["Geometry"])
         geometry.setIcon(0, studio_icon("grid"))
+        geometry.setData(0, Qt.UserRole, ("geometry_root", None))
         geometry.setExpanded(True)
         root.addChild(geometry)
 
         nodes = QTreeWidgetItem([f"Nodes ({len(self.model.nodes)})"])
         nodes.setIcon(0, studio_icon("node"))
+        nodes.setData(0, Qt.UserRole, ("nodes_root", None))
         lines = QTreeWidgetItem(["Lines (0)"])
         lines.setIcon(0, studio_icon("element"))
+        lines.setData(0, Qt.UserRole, ("lines_root", None))
         frame_grids = QTreeWidgetItem(["Frame Grids (1)" if self.model.nodes else "Frame Grids (0)"])
         frame_grids.setIcon(0, studio_icon("grid"))
+        frame_grids.setData(0, Qt.UserRole, ("frame_grids_root", None))
         geometry.addChildren([nodes, lines, frame_grids])
 
         elements = QTreeWidgetItem([f"Elements ({len(self.model.elements)})"])
         elements.setIcon(0, studio_icon("element"))
+        elements.setData(0, Qt.UserRole, ("elements_root", None))
         elements.setExpanded(True)
         root.addChild(elements)
 
@@ -2108,6 +2114,11 @@ class MainWindow(QMainWindow):
         for element_type in sorted(known_types | set(type_counts)):
             item = QTreeWidgetItem([f"{element_type} ({type_counts.get(element_type, 0)})"])
             item.setIcon(0, studio_icon("element"))
+            item.setData(
+                0,
+                Qt.UserRole,
+                ("element_type_group", element_type),
+            )
             type_items[element_type] = item
             elements.addChild(item)
 
@@ -2130,6 +2141,7 @@ class MainWindow(QMainWindow):
             f"Named Selections ({len(self.project.selection_sets)})"
         ])
         named_sets.setIcon(0, studio_icon("select"))
+        named_sets.setData(0, Qt.UserRole, ("named_sets_root", None))
         named_sets.setExpanded(True)
         root.addChild(named_sets)
 
@@ -2232,6 +2244,11 @@ class MainWindow(QMainWindow):
                 f"{support_type} ({len(tags)})"
             ])
             group_item.setIcon(0, studio_icon("boundary"))
+            group_item.setData(
+                0,
+                Qt.UserRole,
+                ("boundary_group", support_type),
+            )
             group_item.setExpanded(True)
             boundary_root.addChild(group_item)
             for tag in tags:
@@ -2276,6 +2293,11 @@ class MainWindow(QMainWindow):
                 f"{connection_type} ({len(tags)})"
             ])
             group.setIcon(0, studio_icon("element"))
+            group.setData(
+                0,
+                Qt.UserRole,
+                ("connection_group", connection_type),
+            )
             group.setExpanded(True)
             connections_root.addChild(group)
             connection_groups[connection_type] = group
@@ -6087,6 +6109,98 @@ class MainWindow(QMainWindow):
             f"Exported Job {job.job_id} results to {Path(path).name}"
         )
 
+    def _select_all_tree_nodes(self) -> None:
+        self.selection.set_selection(nodes=set(self.model.nodes))
+
+    def _select_all_tree_elements(
+        self,
+        element_type: str | None = None,
+    ) -> None:
+        tags = {
+            tag
+            for tag, element in self.model.elements.items()
+            if element_type is None
+            or element.element_type == str(element_type)
+        }
+        self.selection.set_selection(elements=tags)
+
+    def _select_boundary_group(self, support_type: str) -> None:
+        tags = {
+            tag
+            for tag, node in self.model.nodes.items()
+            if any(node.fixity)
+            and classify_fixity(node.fixity) == str(support_type)
+        }
+        self.selection.set_selection(nodes=tags)
+
+    def _run_analysis_from_tree(self, tag: int) -> None:
+        if (
+            self._analysis_process is not None
+            and self._analysis_process.state() != QProcess.NotRunning
+        ):
+            return
+        if int(tag) != self.project.active_analysis_tag:
+            self._set_active_analysis(int(tag))
+        self._start_analysis()
+
+    def _rename_job_plot(self, job_id: int, plot_id: int) -> None:
+        job = self._jobs.get(int(job_id))
+        plot = job.plot(plot_id) if job is not None else None
+        if job is None or plot is None:
+            return
+        old_name = str(plot.get("name", f"Result {plot_id}"))
+        name, ok = QInputDialog.getText(
+            self,
+            "Rename Result",
+            "Name:",
+            text=old_name,
+        )
+        name = name.strip()
+        if not ok or not name or name == old_name:
+            return
+        existing = {
+            str(item.get("name", ""))
+            for item in job.plots
+            if isinstance(item, dict)
+            and int(item.get("plot_id", 0) or 0) != int(plot_id)
+        }
+        if name in existing:
+            QMessageBox.warning(
+                self,
+                "Rename Result",
+                f"A result named '{name}' already exists under this Job.",
+            )
+            return
+        plot["name"] = name
+        self._refresh_tree()
+        self._select_tree_payload("job_plot", (job.job_id, int(plot_id)))
+        self.status_message.setText(
+            f"Job {job.job_id} · renamed result to {name}"
+        )
+
+    def _duplicate_job_plot(self, job_id: int, plot_id: int) -> None:
+        job = self._jobs.get(int(job_id))
+        plot = job.plot(plot_id) if job is not None else None
+        if job is None or plot is None:
+            return
+        duplicate = job.add_plot(
+            name=f"{plot.get('name', f'Result {plot_id}')} Copy",
+            result_type=str(plot.get("result_type", "")),
+            settings=dict(plot.get("settings", {})),
+            node_scope=list(plot.get("node_scope", [])),
+            element_scope=list(plot.get("element_scope", [])),
+        )
+        new_plot_id = int(duplicate["plot_id"])
+        self._refresh_tree()
+        self._select_tree_payload(
+            "job_plot",
+            (job.job_id, new_plot_id),
+        )
+        self._show_job_plot(job.job_id, new_plot_id)
+        self.status_message.setText(
+            f"Job {job.job_id} · duplicated result: {duplicate['name']}"
+        )
+
     def _show_tree_context_menu(self, position) -> None:
         item = self.tree.itemAt(position)
         if item is None:
@@ -6098,6 +6212,199 @@ class MainWindow(QMainWindow):
         kind, value = payload
         menu = QMenu(self)
 
+        if kind == "model_root":
+            menu.addAction(self.actions["check_model"])
+            menu.addAction(self.actions["run"])
+            menu.addSeparator()
+            show_all = menu.addAction("Show All")
+            show_all.triggered.connect(self._show_all)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "geometry_root":
+            node_action = menu.addAction("New Node...")
+            node_action.triggered.connect(self._create_node)
+            element_action = menu.addAction("New Element...")
+            element_action.triggered.connect(self._create_element)
+            grid_action = menu.addAction("Create Frame Grid...")
+            grid_action.triggered.connect(self._show_frame_grid)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "nodes_root":
+            create = menu.addAction("New Node...")
+            create.triggered.connect(self._create_node)
+            select_all = menu.addAction("Select All Nodes")
+            select_all.setEnabled(bool(self.model.nodes))
+            select_all.triggered.connect(self._select_all_tree_nodes)
+            menu.addSeparator()
+            menu.addAction(self.actions["show_node_numbers"])
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "lines_root":
+            create = menu.addAction("New Line / Element...")
+            create.triggered.connect(self._create_element)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "frame_grids_root":
+            create = menu.addAction("Create / Edit Frame Grid...")
+            create.triggered.connect(self._show_frame_grid)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "elements_root":
+            create = menu.addAction("New Element...")
+            create.triggered.connect(self._create_element)
+            select_all = menu.addAction("Select All Elements")
+            select_all.setEnabled(bool(self.model.elements))
+            select_all.triggered.connect(
+                lambda: self._select_all_tree_elements()
+            )
+            menu.addSeparator()
+            menu.addAction(self.actions["show_element_numbers"])
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "element_type_group":
+            element_type = str(value)
+            tags = {
+                tag
+                for tag, element in self.model.elements.items()
+                if element.element_type == element_type
+            }
+            select_all = menu.addAction(
+                f"Select All {element_type} ({len(tags)})"
+            )
+            select_all.setEnabled(bool(tags))
+            select_all.triggered.connect(
+                lambda checked=False, t=element_type:
+                self._select_all_tree_elements(t)
+            )
+            menu.addSeparator()
+            formulation = menu.addAction("Element Formulation...")
+            formulation.setEnabled(bool(tags))
+            formulation.triggered.connect(
+                lambda checked=False, t=element_type: (
+                    self._select_all_tree_elements(t),
+                    self._set_element_formulation(),
+                )
+            )
+            assign = menu.addMenu("Assign")
+            assign.setEnabled(bool(tags))
+            section = assign.addAction("Section...")
+            section.triggered.connect(
+                lambda checked=False, t=element_type: (
+                    self._select_all_tree_elements(t),
+                    self._assign_section_to_selection(),
+                )
+            )
+            transformation = assign.addAction("Transformation...")
+            transformation.triggered.connect(
+                lambda checked=False, t=element_type: (
+                    self._select_all_tree_elements(t),
+                    self._assign_transformation_to_selection(),
+                )
+            )
+            beam_load = menu.addAction("Create Beam Load...")
+            beam_load.setEnabled(bool(tags))
+            beam_load.triggered.connect(
+                lambda checked=False, t=element_type: (
+                    self._select_all_tree_elements(t),
+                    self._create_element_load(),
+                )
+            )
+            menu.addSeparator()
+            named = menu.addAction("Create Named Selection")
+            named.setEnabled(bool(tags))
+            named.triggered.connect(
+                lambda checked=False, t=element_type: (
+                    self._select_all_tree_elements(t),
+                    self._create_named_selection(),
+                )
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "named_sets_root":
+            create = menu.addAction("Create from Current Selection...")
+            create.setEnabled(
+                bool(self.selection.nodes or self.selection.elements)
+            )
+            create.triggered.connect(self._create_named_selection)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "boundary_root":
+            constrained = {
+                tag
+                for tag, node in self.model.nodes.items()
+                if any(node.fixity)
+            }
+            select_all = menu.addAction(
+                f"Select All Supported Nodes ({len(constrained)})"
+            )
+            select_all.setEnabled(bool(constrained))
+            select_all.triggered.connect(
+                lambda: self.selection.set_selection(nodes=constrained)
+            )
+            menu.addSeparator()
+            apply_support = menu.addAction(
+                "Apply / Edit Support on Current Selection..."
+            )
+            apply_support.setEnabled(bool(self.selection.nodes))
+            apply_support.triggered.connect(self._apply_restraint)
+            clear_support = menu.addAction(
+                "Clear Support on Current Selection"
+            )
+            clear_support.setEnabled(bool(self.selection.nodes))
+            clear_support.triggered.connect(self._clear_restraint)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "boundary_group":
+            support_type = str(value)
+            tags = {
+                tag
+                for tag, node in self.model.nodes.items()
+                if any(node.fixity)
+                and classify_fixity(node.fixity) == support_type
+            }
+            select_all = menu.addAction(
+                f"Select {support_type} Nodes ({len(tags)})"
+            )
+            select_all.setEnabled(bool(tags))
+            select_all.triggered.connect(
+                lambda checked=False, s=support_type:
+                self._select_boundary_group(s)
+            )
+            zoom = menu.addAction("Zoom to Group")
+            zoom.setEnabled(bool(tags))
+            zoom.triggered.connect(
+                lambda checked=False, s=support_type: (
+                    self._select_boundary_group(s),
+                    self._zoom_selection(),
+                )
+            )
+            menu.addSeparator()
+            clear = menu.addAction("Clear These Supports")
+            clear.setEnabled(bool(tags))
+            clear.triggered.connect(
+                lambda checked=False, s=support_type: (
+                    self._select_boundary_group(s),
+                    self._clear_restraint(),
+                )
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "connection_group":
+            create = menu.addAction("New Connection / Spring...")
+            create.triggered.connect(self._create_connection)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
         if kind == "node":
             tag = int(value)
             if tag not in self.selection.nodes:
@@ -6106,18 +6413,55 @@ class MainWindow(QMainWindow):
             properties_action.triggered.connect(
                 lambda: self._show_entity_properties("node", tag)
             )
+
+            menu.addSeparator()
+            zoom = menu.addAction("Zoom to Selection")
+            zoom.triggered.connect(self._zoom_selection)
+            hide = menu.addAction("Hide")
+            hide.triggered.connect(self._hide_selection)
+            isolate = menu.addAction("Isolate")
+            isolate.triggered.connect(self._isolate_selection)
+            show_all = menu.addAction("Show All")
+            show_all.triggered.connect(self._show_all)
+
             menu.addSeparator()
             support_action = menu.addAction("Support / Restraint...")
             support_action.triggered.connect(self._apply_restraint)
             clear_action = menu.addAction("Clear Support")
             clear_action.triggered.connect(self._clear_restraint)
-            menu.addSeparator()
             mass_action = menu.addAction("Assign Mass...")
             mass_action.triggered.connect(self._assign_mass)
             clear_mass = menu.addAction("Clear Mass")
             clear_mass.triggered.connect(self._clear_mass)
             nodal_load = menu.addAction("Create Nodal Load...")
             nodal_load.triggered.connect(self._create_nodal_load)
+
+            constraint = menu.addAction("Create Constraint...")
+            constraint.setEnabled(len(self.selection.nodes) >= 2)
+            constraint.triggered.connect(self._create_constraint)
+            connection = menu.addAction("Create Connection / Spring...")
+            connection.setEnabled(1 <= len(self.selection.nodes) <= 2)
+            connection.triggered.connect(self._create_connection)
+
+            menu.addSeparator()
+            modify = menu.addMenu("Modify")
+            move = modify.addAction("Move...")
+            move.triggered.connect(self._move_selection)
+            copy = modify.addAction("Copy...")
+            copy.triggered.connect(self._copy_selection)
+            rotate = modify.addAction("Rotate...")
+            rotate.triggered.connect(self._rotate_selection)
+            mirror = modify.addAction("Mirror...")
+            mirror.triggered.connect(self._mirror_selection)
+
+            copy_tag = menu.addAction("Copy Tag(s)")
+            copy_tag.triggered.connect(self._copy_selected_tags)
+            named = menu.addAction("Create Named Selection")
+            named.triggered.connect(self._create_named_selection)
+
+            menu.addSeparator()
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(self._delete_selection)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
@@ -6129,22 +6473,66 @@ class MainWindow(QMainWindow):
             properties_action.triggered.connect(
                 lambda: self._show_entity_properties("element", tag)
             )
+
+            menu.addSeparator()
+            zoom = menu.addAction("Zoom to Selection")
+            zoom.triggered.connect(self._zoom_selection)
+            hide = menu.addAction("Hide")
+            hide.triggered.connect(self._hide_selection)
+            isolate = menu.addAction("Isolate")
+            isolate.triggered.connect(self._isolate_selection)
+            show_all = menu.addAction("Show All")
+            show_all.triggered.connect(self._show_all)
+
+            menu.addSeparator()
             formulation = menu.addAction("Element Formulation...")
             formulation.triggered.connect(
                 self._set_element_formulation
             )
-            section_action = menu.addAction("Assign Section...")
+            assign = menu.addMenu("Assign")
+            section_action = assign.addAction("Section...")
             section_action.triggered.connect(
                 self._assign_section_to_selection
             )
-            transformation_action = menu.addAction(
-                "Assign Transformation..."
+            transformation_action = assign.addAction(
+                "Transformation..."
             )
             transformation_action.triggered.connect(
                 self._assign_transformation_to_selection
             )
+            assign.addSeparator()
+            clear_section = assign.addAction("Clear Section")
+            clear_section.triggered.connect(
+                self._clear_section_assignment
+            )
+            clear_transformation = assign.addAction(
+                "Clear Transformation"
+            )
+            clear_transformation.triggered.connect(
+                self._clear_transformation_assignment
+            )
             beam_load = menu.addAction("Create Beam Load...")
             beam_load.triggered.connect(self._create_element_load)
+
+            menu.addSeparator()
+            modify = menu.addMenu("Modify")
+            move = modify.addAction("Move...")
+            move.triggered.connect(self._move_selection)
+            copy = modify.addAction("Copy...")
+            copy.triggered.connect(self._copy_selection)
+            rotate = modify.addAction("Rotate...")
+            rotate.triggered.connect(self._rotate_selection)
+            mirror = modify.addAction("Mirror...")
+            mirror.triggered.connect(self._mirror_selection)
+
+            copy_tag = menu.addAction("Copy Tag(s)")
+            copy_tag.triggered.connect(self._copy_selected_tags)
+            named = menu.addAction("Create Named Selection")
+            named.triggered.connect(self._create_named_selection)
+
+            menu.addSeparator()
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(self._delete_selection)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
@@ -6213,6 +6601,15 @@ class MainWindow(QMainWindow):
             active = menu.addAction("Set Active")
             active.setEnabled(tag != self.project.active_analysis_tag)
             active.triggered.connect(lambda: self._set_active_analysis(tag))
+            run = menu.addAction("Run This Analysis")
+            run.setEnabled(
+                self._analysis_process is None
+                or self._analysis_process.state() == QProcess.NotRunning
+            )
+            run.triggered.connect(
+                lambda: self._run_analysis_from_tree(tag)
+            )
+            menu.addSeparator()
             edit = menu.addAction("Edit Analysis Settings...")
             edit.triggered.connect(lambda: self._edit_analysis(tag))
             delete = menu.addAction("Delete")
@@ -6272,6 +6669,30 @@ class MainWindow(QMainWindow):
             delete = menu.addAction("Delete")
             delete.triggered.connect(
                 lambda: self._delete_solution_result(tag)
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "solution_information":
+            analysis_tag = int(value)
+            solver_output = menu.addAction("Show Solver Output")
+            solver_output.triggered.connect(
+                lambda: (
+                    self._show_solution_information(
+                        analysis_tag,
+                        "Solver Output",
+                    ),
+                    self.console_dock.show(),
+                    self.console_dock.raise_(),
+                )
+            )
+            analysis = self.project.analyses.get(analysis_tag)
+            label = convergence_result_label(
+                analysis.test if analysis is not None else None
+            )
+            convergence = menu.addAction(f"Open {label}")
+            convergence.triggered.connect(
+                lambda: self._show_solution_convergence(analysis_tag)
             )
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
@@ -6361,6 +6782,14 @@ class MainWindow(QMainWindow):
             show = menu.addAction("Show")
             show.triggered.connect(
                 lambda: self._show_job_plot(job_id, plot_id)
+            )
+            rename = menu.addAction("Rename...")
+            rename.triggered.connect(
+                lambda: self._rename_job_plot(job_id, plot_id)
+            )
+            duplicate = menu.addAction("Duplicate")
+            duplicate.triggered.connect(
+                lambda: self._duplicate_job_plot(job_id, plot_id)
             )
             menu.addSeparator()
             delete = menu.addAction("Delete")
