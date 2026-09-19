@@ -1,11 +1,16 @@
 import math
 
 from openseespy_studio.analysis_templates import (
+    GroundMotionComponentSpec,
     build_cyclic_template,
+    build_nlth_multi_template,
     build_nlth_template,
     build_pushover_template,
     expand_cyclic_protocol,
+    lateral_load_weights,
+    parse_cyclic_protocol_text,
     parse_ground_motion_text,
+    parse_node_weight_text,
 )
 from openseespy_studio.generator import (
     analysis_to_openseespy,
@@ -290,3 +295,86 @@ def test_generator_rejects_missing_deferred_pattern():
         assert "missing driving load pattern" in str(exc)
     else:
         raise AssertionError("Expected missing driving-pattern validation")
+
+
+
+def test_parse_cyclic_protocol_text_accepts_header_and_csv():
+    rows = parse_cyclic_protocol_text(
+        "Amplitude,Cycles\n0.005,2\n0.010,3\n"
+    )
+    assert rows == [(0.005, 2), (0.01, 3)]
+
+
+def test_parse_custom_node_weights_and_normalize():
+    project = project_with_two_storeys()
+    weights = parse_node_weight_text("2, 2\n3, 6\n")
+    normalized = lateral_load_weights(
+        project,
+        dof=1,
+        distribution="Custom",
+        custom_weights=weights,
+    )
+    assert normalized == {2: 0.25, 3: 0.75}
+
+
+def test_pushover_accepts_first_mode_weight_map():
+    project = project_with_two_storeys()
+    plan = build_pushover_template(
+        project,
+        name="Mode Push",
+        control_node=3,
+        control_dof=1,
+        target_displacement=0.03,
+        max_increment=0.003,
+        distribution="First-mode proportional",
+        distribution_weights={2: 0.4, 3: 1.0},
+    )
+    force_by_node = {
+        load.node_tag: load.values[0]
+        for load in plan.nodal_loads
+    }
+    assert math.isclose(
+        sum(abs(value) for value in force_by_node.values()),
+        1.0,
+    )
+    assert force_by_node[3] > force_by_node[2]
+
+
+def test_multi_component_nlth_creates_one_excitation_per_axis():
+    project = project_with_two_storeys()
+    plan = build_nlth_multi_template(
+        project,
+        name="BiDir EQ",
+        components=[
+            GroundMotionComponentSpec(
+                direction=1,
+                values=[0.0, 0.1, -0.1],
+                scale_factor=1.0,
+                name="X",
+            ),
+            GroundMotionComponentSpec(
+                direction=2,
+                values=[0.0, 0.2, -0.2, 0.1],
+                scale_factor=0.8,
+                name="Y",
+            ),
+        ],
+        dt=0.01,
+        input_unit="g",
+        monitor_node=3,
+        monitor_dof=1,
+    )
+
+    assert len(plan.time_series) == 2
+    assert len(plan.load_patterns) == 2
+    assert [pattern.direction for pattern in plan.load_patterns] == [1, 2]
+    assert plan.analysis.steps == 4
+    assert plan.analysis.deferred_pattern_tags == [
+        pattern.tag for pattern in plan.load_patterns
+    ]
+    histories = [
+        result
+        for result in plan.results
+        if result.result_type == "TimeHistory"
+    ]
+    assert {result.settings["dof"] for result in histories} == {1, 2}
