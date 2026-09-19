@@ -101,6 +101,7 @@ class ModelViewport(QWidget):
         self._node_actor = None
         self._node_tags: list[int] = []
         self._element_actor_data: dict[str, tuple[object, np.ndarray]] = {}
+        self._annotation_label_actors: dict[str, object] = {}
         self._undeformed_element_actors: list[object] = []
         self._undeformed_model_visible = True
         self._left_press_pos: tuple[int, int] | None = None
@@ -1213,6 +1214,7 @@ class ModelViewport(QWidget):
         return None
 
     def _remove_overlay(self, name: str) -> None:
+        self._annotation_label_actors.pop(name, None)
         try:
             self.plotter.remove_actor(name, reset_camera=False, render=False)
         except Exception:
@@ -1225,20 +1227,22 @@ class ModelViewport(QWidget):
         render: bool = False,
     ) -> None:
         """Cheaply hide/show expensive node and element number labels."""
-        actors = getattr(self.plotter.renderer, "actors", {})
         for option, name in (
             ("node_numbers", "display-node-numbers"),
             ("element_numbers", "display-element-numbers"),
         ):
             if visible and not self._display_options.get(option, False):
                 continue
-            actor = actors.get(name) if hasattr(actors, "get") else None
+            actor = self._annotation_label_actors.get(name)
             if actor is None:
                 continue
             try:
                 actor.SetVisibility(1 if visible else 0)
             except Exception:
-                continue
+                try:
+                    actor.SetVisibility(bool(visible))
+                except Exception:
+                    continue
         if render:
             self.plotter.render()
 
@@ -1464,7 +1468,7 @@ class ModelViewport(QWidget):
     ) -> None:
         if not points:
             return
-        self.plotter.add_point_labels(
+        actor = self.plotter.add_point_labels(
             np.asarray(points, dtype=float),
             [str(label) for label in labels],
             name=name,
@@ -1476,6 +1480,9 @@ class ModelViewport(QWidget):
             pickable=False,
             render=False,
         )
+        # Keep the actual label actor handle. Point-label actors are not
+        # guaranteed to be exposed through renderer.actors like mesh actors.
+        self._annotation_label_actors[name] = actor
 
     def _draw_node_numbers(self) -> None:
         if self._model is None:
