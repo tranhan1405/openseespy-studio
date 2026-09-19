@@ -61,7 +61,11 @@ class MassSourceDialog(QDialog):
         self.gravity_axis = QComboBox()
         for axis, label in ((1, "Global X"), (2, "Global Y"), (3, "Global Z")):
             self.gravity_axis.addItem(label, axis)
-        gravity_axis = source.gravity_axis if source else 3
+        gravity_axis = (
+            source.gravity_axis
+            if source
+            else (2 if int(project.model.ndm) == 2 else 3)
+        )
         index = self.gravity_axis.findData(gravity_axis)
         if index >= 0:
             self.gravity_axis.setCurrentIndex(index)
@@ -127,7 +131,9 @@ class MassSourceDialog(QDialog):
             "Double-count protection: if structural self mass is enabled, "
             "SelfWeight beam loads are not converted again. Elements with an "
             "explicit OpenSees mass/length are also not converted to nodal "
-            "self mass."
+            "self mass. If an ordinary Dead Load pattern already includes "
+            "structural self-weight, do not convert that self-weight again "
+            "while structural self mass is enabled."
         )
         warning.setWordWrap(True)
         warning.setObjectName("Muted")
