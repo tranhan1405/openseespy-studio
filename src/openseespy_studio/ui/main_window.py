@@ -1306,6 +1306,9 @@ class MainWindow(QMainWindow):
         self.results_panel.mode_shape_requested.connect(
             self._show_mode_shape_result
         )
+        self.results_panel.motion_frame_requested.connect(
+            self._show_motion_frame_result
+        )
         self.results_panel.member_force_requested.connect(
             self._show_member_force_result
         )
@@ -8470,6 +8473,25 @@ class MainWindow(QMainWindow):
         self.status_message.setText(
             f"Showing deformed shape · scale {float(scale):g}"
         )
+
+    def _show_motion_frame_result(
+        self,
+        vectors: object,
+        scale: float,
+        auto_scale: bool,
+        reference_magnitude: float,
+        label: str,
+    ) -> None:
+        if not isinstance(vectors, dict) or not vectors:
+            self.status_message.setText("No motion frame data available")
+            return
+        self.viewport.show_motion_frame(
+            vectors,
+            scale=float(scale),
+            auto_scale=bool(auto_scale),
+            reference_magnitude=float(reference_magnitude),
+        )
+        self.status_message.setText(str(label))
 
     def _show_node_contour_result(
         self,
