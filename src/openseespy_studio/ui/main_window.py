@@ -5045,6 +5045,102 @@ class MainWindow(QMainWindow):
 
         self.properties_panel.set_properties("Constraint", rows)
 
+    def _create_analysis_template(
+        self,
+        initial_template: str = "Pushover",
+    ) -> None:
+        if not self.model.nodes:
+            QMessageBox.information(
+                self,
+                "Analysis Template",
+                "Create the structural model before creating an analysis template.",
+            )
+            return
+
+        default_node = default_control_node(self.project)
+        dialog = AnalysisTemplateDialog(
+            default_node=default_node,
+            units=self.project.units,
+            initial_template=str(initial_template),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            request = dialog.request()
+            kind = str(request["template"])
+            if kind == "Pushover":
+                plan = build_pushover_template(
+                    self.project,
+                    name=str(request["name"]),
+                    control_node=int(request["control_node"]),
+                    control_dof=int(request["control_dof"]),
+                    target_displacement=float(
+                        request["target_displacement"]
+                    ),
+                    max_increment=float(request["max_increment"]),
+                    distribution=str(request["distribution"]),
+                    solver_preset=str(request["solver_preset"]),
+                )
+            elif kind == "Cyclic":
+                plan = build_cyclic_template(
+                    self.project,
+                    name=str(request["name"]),
+                    control_node=int(request["control_node"]),
+                    control_dof=int(request["control_dof"]),
+                    protocol_rows=list(request["protocol_rows"]),
+                    max_increment=float(request["max_increment"]),
+                    distribution=str(request["distribution"]),
+                    solver_preset=str(request["solver_preset"]),
+                )
+            else:
+                plan = build_nlth_template(
+                    self.project,
+                    name=str(request["name"]),
+                    ground_motion_values=list(
+                        request["ground_motion_values"]
+                    ),
+                    dt=float(request["dt"]),
+                    input_unit=str(request["input_unit"]),
+                    scale_factor=float(request["scale_factor"]),
+                    direction=int(request["direction"]),
+                    monitor_node=int(request["monitor_node"]),
+                    damping_ratio=float(request["damping_ratio"]),
+                    damping_mode_i=int(request["damping_mode_i"]),
+                    damping_mode_j=int(request["damping_mode_j"]),
+                    solver_preset=str(request["solver_preset"]),
+                )
+
+            for series in plan.time_series:
+                self.project.add_time_series(series)
+            for pattern in plan.load_patterns:
+                self.project.add_load_pattern(pattern)
+            for load in plan.nodal_loads:
+                self.project.add_nodal_load(load)
+            self.project.add_analysis(plan.analysis)
+            for result in plan.results:
+                self.project.add_solution_result(result)
+            self.project.set_active_analysis(plan.analysis.tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Analysis Template", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_project_metadata(
+            f"Created {plan.summary}"
+        )
+        self._record_project_change(
+            f"Create {plan.analysis.analysis_type} template",
+            before,
+        )
+        self._refresh_tree()
+        self._select_tree_payload("analysis", plan.analysis.tag)
+        self._show_analysis_properties(plan.analysis.tag)
+
     def _create_analysis(self) -> None:
         self._create_analysis_of_type(None)
 
