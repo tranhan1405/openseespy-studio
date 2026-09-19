@@ -4069,6 +4069,277 @@ class MainWindow(QMainWindow):
         self._show_analysis_properties(updated.tag)
         self._record_project_change(f"Edit analysis {tag}", before)
 
+    def _latest_job_for_analysis(
+        self,
+        analysis_tag: int,
+    ) -> JobRecord | None:
+        target = int(analysis_tag)
+        for job_id in sorted(self._jobs, reverse=True):
+            job = self._jobs[job_id]
+            if job.analysis_tag == target and job.results:
+                return job
+        return None
+
+    def _insert_solution_result(
+        self,
+        analysis_tag: int,
+        result_type: str,
+        name: str,
+        settings: dict[str, object] | None = None,
+    ) -> None:
+        before = self.project.to_dict()
+        result = SolutionResultData(
+            tag=self.project.next_solution_result_tag(),
+            analysis_tag=int(analysis_tag),
+            name=str(name),
+            result_type=str(result_type),
+            node_scope=sorted(self.selection.nodes),
+            element_scope=sorted(self.selection.elements),
+            settings=dict(settings or {}),
+        )
+        try:
+            self.project.add_solution_result(result)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Solution Result", str(exc))
+            return
+        self._record_project_change(
+            f"Insert solution result {result.name}",
+            before,
+        )
+        self._refresh_tree()
+        self._show_solution_result_properties(result.tag)
+        self._evaluate_solution_result(result.tag)
+        self.status_message.setText(
+            f"Inserted result: {result.name}"
+        )
+
+    def _delete_solution_result(self, tag: int) -> None:
+        result = self.project.solution_results.get(int(tag))
+        if result is None:
+            return
+        before = self.project.to_dict()
+        self.project.remove_solution_result(tag)
+        self._record_project_change(
+            f"Delete solution result {result.name}",
+            before,
+        )
+        self.viewport.clear_result_overlay()
+        self._refresh_tree()
+        self.status_message.setText(
+            f"Deleted result: {result.name}"
+        )
+
+    def _rename_solution_result(self, tag: int) -> None:
+        result = self.project.solution_results.get(int(tag))
+        if result is None:
+            return
+        name, ok = QInputDialog.getText(
+            self,
+            "Rename Result",
+            "Name:",
+            text=result.name,
+        )
+        name = str(name).strip()
+        if not ok or not name or name == result.name:
+            return
+        before = self.project.to_dict()
+        result.name = name
+        self._record_project_change(
+            f"Rename solution result {tag}",
+            before,
+        )
+        self._refresh_tree()
+        self._show_solution_result_properties(tag)
+
+    def _duplicate_solution_result(self, tag: int) -> None:
+        source = self.project.solution_results.get(int(tag))
+        if source is None:
+            return
+        before = self.project.to_dict()
+        duplicate = SolutionResultData(
+            tag=self.project.next_solution_result_tag(),
+            analysis_tag=source.analysis_tag,
+            name=f"{source.name} Copy",
+            result_type=source.result_type,
+            node_scope=list(source.node_scope),
+            element_scope=list(source.element_scope),
+            settings=dict(source.settings),
+        )
+        self.project.add_solution_result(duplicate)
+        self._record_project_change(
+            f"Duplicate solution result {source.name}",
+            before,
+        )
+        self._refresh_tree()
+
+    def _show_solution_information(
+        self,
+        analysis_tag: int,
+        title: str,
+    ) -> None:
+        settings = self.project.analyses.get(int(analysis_tag))
+        job = self._latest_job_for_analysis(analysis_tag)
+        rows: list[tuple[str, object]] = [
+            ("Analysis", settings.name if settings else analysis_tag),
+            (
+                "Type",
+                settings.analysis_type if settings else "-",
+            ),
+        ]
+        if job is None:
+            rows.extend([
+                ("Result", "Not evaluated"),
+                ("Job", "-"),
+                ("Status", "-"),
+            ])
+        else:
+            rows.extend([
+                ("Result", "Latest job"),
+                ("Job", job.job_id),
+                ("Status", job.status),
+                ("Progress", f"{job.progress_percent:.1f}%"),
+                ("Message", job.message or "-"),
+            ])
+        self.properties_panel.set_properties(title, rows)
+
+    def _show_solution_result_properties(self, tag: int) -> None:
+        result = self.project.solution_results.get(int(tag))
+        if result is None:
+            return
+        settings = self.project.analyses.get(result.analysis_tag)
+        option_text = ", ".join(
+            f"{key}={value}"
+            for key, value in sorted(result.settings.items())
+        ) or "-"
+        self.properties_panel.set_properties(
+            result.name,
+            [
+                ("Tag", result.tag),
+                (
+                    "Analysis",
+                    settings.name if settings else result.analysis_tag,
+                ),
+                ("Result type", result.result_type),
+                (
+                    "Node scope",
+                    ", ".join(map(str, result.node_scope)) or "All",
+                ),
+                (
+                    "Element scope",
+                    ", ".join(map(str, result.element_scope)) or "All",
+                ),
+                ("Settings", option_text),
+                ("Data", "Latest job for analysis"),
+            ],
+        )
+
+    def _load_analysis_result(
+        self,
+        analysis_tag: int,
+    ) -> dict[str, object] | None:
+        job = self._latest_job_for_analysis(analysis_tag)
+        if job is None:
+            self.status_message.setText(
+                "Result object is not evaluated yet — run its analysis first."
+            )
+            return None
+        result = dict(job.results)
+        self._last_result = result
+        self.results_panel.set_result(result)
+        return result
+
+    def _show_solution_convergence(self, analysis_tag: int) -> None:
+        result = self._load_analysis_result(analysis_tag)
+        if result is None:
+            return
+        self.results_panel.show_solution_result("Convergence", {})
+        self.results_dock.show()
+        self.results_dock.raise_()
+
+    def _evaluate_solution_result(self, tag: int) -> None:
+        result_object = self.project.solution_results.get(int(tag))
+        if result_object is None:
+            return
+        result = self._load_analysis_result(result_object.analysis_tag)
+        if result is None:
+            return
+
+        kind = result_object.result_type
+        options = dict(result_object.settings)
+        self.results_panel.show_solution_result(kind, options)
+        self.results_dock.show()
+        self.results_dock.raise_()
+
+        if result_object.node_scope:
+            self.selection.set_selection(
+                nodes=set(result_object.node_scope),
+                elements=set(result_object.element_scope),
+            )
+        elif result_object.element_scope:
+            self.selection.set_selection(
+                nodes=set(),
+                elements=set(result_object.element_scope),
+            )
+
+        if kind == "DeformedShape":
+            self.viewport.show_deformed_shape(
+                result,
+                scale=float(options.get("scale", 10.0)),
+            )
+        elif kind in {"NodalDisplacement", "NodalReaction"}:
+            quantity = (
+                "Reaction"
+                if kind == "NodalReaction"
+                else "Displacement"
+            )
+            component = str(
+                options.get(
+                    "component",
+                    "FX" if quantity == "Reaction" else "|U|",
+                )
+            )
+            self.viewport.show_node_contour(
+                result,
+                quantity,
+                component,
+            )
+        elif kind == "MemberForce":
+            self.viewport.show_member_force_diagram(
+                result,
+                self.project.transformations,
+                str(options.get("component", "Mz")),
+                scale=float(options.get("scale", 1.0)),
+            )
+        elif kind == "HingeState":
+            self.viewport.show_hinge_states(result)
+        elif kind == "ModeShape":
+            modes = result.get("modes", {})
+            mode = int(options.get("mode", 1))
+            if isinstance(modes, dict) and str(mode) not in modes and modes:
+                mode = min(int(key) for key in modes)
+            self.viewport.show_mode_shape(
+                result,
+                mode,
+                scale=float(options.get("scale", 1.0)),
+            )
+
+        self.status_message.setText(
+            f"Evaluated result: {result_object.name}"
+        )
+
+    def _evaluate_all_solution_results(self, analysis_tag: int) -> None:
+        objects = self.project.solution_results_for_analysis(analysis_tag)
+        if not objects:
+            self.status_message.setText(
+                "Solution contains no inserted result objects."
+            )
+            return
+        for result in objects:
+            self._evaluate_solution_result(result.tag)
+        self.status_message.setText(
+            f"Evaluated {len(objects)} solution result object(s)"
+        )
+
     def _delete_analysis(self, tag: int) -> None:
         if tag not in self.project.analyses:
             return
