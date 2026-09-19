@@ -116,8 +116,10 @@ def test_bundled_northridge_rinaldi_record_loads_without_user_file():
         "northridge-1994-rinaldi"
     )
     assert record.format == "SimCenter JSON"
-    assert record.npts == 1992
+    # Upstream SimCenter metadata declares 1992 points, while its bundled
+    # accel_data array contains 1991 actual samples. Use the real data length.
+    assert record.npts == 1991
     assert record.dt == 0.01
     assert record.input_unit == "g"
-    assert len(record.values) == 1992
+    assert len(record.values) == 1991
     assert pga_in_g(record.values, "g") > 0.50
