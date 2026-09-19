@@ -142,3 +142,96 @@ def test_disabled_member_family_does_not_create_unused_transformation():
     assert spec.column_transf_tag is None
     assert spec.beam_transf_tag == created[0].tag
     assert created[0].name == BEAM_TRANSFORMATION_NAME
+
+
+
+def test_generate_planar_2d_frame_counts_and_restraints():
+    project = ProjectDatabase(model=StructuralModel())
+    spec = FrameGridSpec(
+        nx=2,
+        nz=2,
+        dx=5.0,
+        dz=3.0,
+        planar_2d=True,
+        planar_base_support="Fixed",
+    )
+
+    prepare_frame_grid(project, spec)
+    generate_frame_grid(project.model, spec)
+
+    assert len(project.model.nodes) == 9
+    assert len(project.model.elements) == 10
+    assert all(
+        abs(node.xyz[1]) <= 1.0e-12
+        for node in project.model.nodes.values()
+    )
+
+    base = [
+        node
+        for node in project.model.nodes.values()
+        if abs(node.xyz[2]) <= 1.0e-12
+    ]
+    upper = [
+        node
+        for node in project.model.nodes.values()
+        if node.xyz[2] > 1.0e-12
+    ]
+    assert all(node.fixity == (1, 1, 1, 1, 1, 1) for node in base)
+    assert all(node.fixity == (0, 1, 0, 1, 0, 1) for node in upper)
+
+    groups = [element.group for element in project.model.elements.values()]
+    assert groups.count("column-2d") == 6
+    assert groups.count("beam-2d") == 4
+
+    orientation_errors = [
+        issue
+        for issue in validate_project(project)
+        if issue.category == "Transformation orientation"
+        and issue.severity == "ERROR"
+    ]
+    assert orientation_errors == []
+
+
+def test_generate_planar_2d_pinned_base_keeps_in_plane_rotation_free():
+    project = ProjectDatabase(model=StructuralModel())
+    spec = FrameGridSpec(
+        nx=1,
+        nz=1,
+        planar_2d=True,
+        planar_base_support="Pinned",
+    )
+
+    prepare_frame_grid(project, spec)
+    generate_frame_grid(project.model, spec)
+
+    base = [
+        node
+        for node in project.model.nodes.values()
+        if abs(node.xyz[2]) <= 1.0e-12
+    ]
+    assert len(base) == 2
+    assert all(node.fixity == (1, 1, 1, 1, 0, 1) for node in base)
+
+
+def test_planar_2d_does_not_generate_y_direction_beams():
+    project = ProjectDatabase(model=StructuralModel())
+    spec = FrameGridSpec(
+        nx=3,
+        ny=5,
+        nz=1,
+        planar_2d=True,
+        create_beams_y=True,
+    )
+
+    prepare_frame_grid(project, spec)
+    generate_frame_grid(project.model, spec)
+
+    assert all(
+        abs(project.model.nodes[element.i].xyz[1]) <= 1.0e-12
+        and abs(project.model.nodes[element.j].xyz[1]) <= 1.0e-12
+        for element in project.model.elements.values()
+    )
+    assert not any(
+        element.group == "beam-y"
+        for element in project.model.elements.values()
+    )
