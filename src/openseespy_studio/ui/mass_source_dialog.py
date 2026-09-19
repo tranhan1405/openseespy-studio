@@ -74,10 +74,24 @@ class MassSourceDialog(QDialog):
         direction_group = QGroupBox("Mass directions")
         direction_layout = QHBoxLayout(direction_group)
         self.direction_checks: dict[int, QCheckBox] = {}
-        available = range(1, min(3, int(project.model.ndf)) + 1)
-        selected = set(source.directions if source else ())
-        if not selected:
-            selected = {1} if int(project.model.ndm) <= 2 else {1, 2}
+        candidate_dofs = list(
+            range(1, min(3, int(project.model.ndm)) + 1)
+        )
+        available = [
+            dof
+            for dof in candidate_dofs
+            if (
+                not project.model.nodes
+                or any(
+                    dof - 1 < len(node.fixity)
+                    and not bool(node.fixity[dof - 1])
+                    for node in project.model.nodes.values()
+                )
+            )
+        ]
+        if not available:
+            available = candidate_dofs
+        selected = set(source.directions if source else available)
         for dof in available:
             label = ("UX", "UY", "UZ")[dof - 1]
             check = QCheckBox(label)
