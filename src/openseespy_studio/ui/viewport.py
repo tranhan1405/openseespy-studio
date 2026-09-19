@@ -28,7 +28,10 @@ except ImportError:
     vtkPointPicker = None
 
 from ..beam_loads import element_local_axes, resolve_self_weight_local
-from ..deformed_geometry import build_swept_member_geometry
+from ..deformed_geometry import (
+    build_swept_member_geometry,
+    section_axis_strength_labels,
+)
 from ..model import StructuralModel, classify_fixity
 from ..postprocess import component_end_resultants, nodal_result_scalar
 from ..project import (
@@ -80,8 +83,10 @@ class ModelViewport(QWidget):
             "nodal_loads": False,
             "element_loads": False,
             "prescribed_displacements": False,
+            "section_axes": False,
             "load_values": True,
         }
+        self._model_representation = "actual_section"
         self._selection_filter = "all"
         self._selected_nodes: set[int] = set()
         self._selected_elements: set[int] = set()
@@ -611,6 +616,31 @@ class ModelViewport(QWidget):
             zlabel="Z",
         )
 
+    @staticmethod
+    def _normalized_model_representation(value: str) -> str:
+        representation = str(value or "actual_section").strip().lower()
+        aliases = {
+            "actual": "actual_section",
+            "actual section": "actual_section",
+            "section": "actual_section",
+            "line": "centerline",
+        }
+        representation = aliases.get(representation, representation)
+        if representation not in {"actual_section", "tube", "centerline"}:
+            return "actual_section"
+        return representation
+
+    def set_model_representation(self, value: str) -> None:
+        representation = self._normalized_model_representation(value)
+        if representation == self._model_representation:
+            return
+        self._model_representation = representation
+        if self._model is not None:
+            self._rebuild_visible_scene()
+
+    def model_representation(self) -> str:
+        return self._model_representation
+
     def set_display_data(
         self,
         *,
@@ -626,6 +656,11 @@ class ModelViewport(QWidget):
         units: dict[str, str] | None = None,
         refresh: bool = True,
     ) -> None:
+        geometry_changed = (
+            dict(transformations or {}) != self._transformations
+            or dict(sections or {}) != self._sections
+            or dict(materials or {}) != self._materials
+        )
         self._nodal_loads = dict(nodal_loads or {})
         self._prescribed_displacements = dict(
             prescribed_displacements or {}
@@ -637,7 +672,16 @@ class ModelViewport(QWidget):
         if units is not None:
             self._units = dict(units)
         if refresh:
-            self._refresh_load_overlays()
+            if (
+                geometry_changed
+                and self._model is not None
+                and self._model_representation == "actual_section"
+            ):
+                self._rebuild_visible_scene()
+            else:
+                self._refresh_load_overlays()
+                if geometry_changed and self._display_options["section_axes"]:
+                    self._update_display_option("section_axes")
 
     def set_display_option(self, name: str, enabled: bool) -> None:
         if name not in self._display_options:
@@ -790,26 +834,80 @@ class ModelViewport(QWidget):
             capping=True,
         )
 
+    def _actual_section_member_mesh(self, element):
+        if self._model is None:
+            return None
+        if element.section_tag is None or element.transf_tag is None:
+            return None
+        section = self._sections.get(element.section_tag)
+        transformation = self._transformations.get(element.transf_tag)
+        if section is None or transformation is None:
+            return None
+        try:
+            _, local_y, local_z = element_local_axes(
+                self._model,
+                element,
+                transformation,
+            )
+            zeros = (0.0,) * max(int(self._model.ndf), 3)
+            geometry = build_swept_member_geometry(
+                section,
+                self._model.nodes[element.i].xyz,
+                self._model.nodes[element.j].xyz,
+                local_y,
+                local_z,
+                zeros,
+                zeros,
+                ndm=self._model.ndm,
+                scale=1.0,
+                stations=3,
+                smooth=False,
+            )
+        except (KeyError, TypeError, ValueError):
+            geometry = None
+        if geometry is None:
+            return None
+        mesh = pv.PolyData(geometry.points)
+        mesh.faces = geometry.faces
+        return mesh
+
     def _combined_element_meshes(self, visible_tags: set[int], span: float):
         if self._model is None:
             return {}
         groups: dict[str, list[object]] = {"column": [], "beam": []}
         beam_size = max(span * 0.010, 0.08)
         column_size = max(span * 0.0115, 0.09)
+        representation = self._normalized_model_representation(
+            self._model_representation
+        )
 
         for tag in visible_tags:
             element = self._model.elements[tag]
             start = self._model.nodes[element.i].xyz
             end = self._model.nodes[element.j].xyz
             is_column = element.group == "column"
-            mesh = self._member_mesh(
-                start,
-                end,
-                column_size if is_column else beam_size,
-            )
+            mesh = None
+
+            if representation == "actual_section":
+                mesh = self._actual_section_member_mesh(element)
+
+            if mesh is None and representation == "centerline":
+                mesh = pv.Line(start, end)
+
+            if mesh is None:
+                mesh = self._member_mesh(
+                    start,
+                    end,
+                    column_size if is_column else beam_size,
+                )
+
             if mesh is None:
                 continue
-            mesh.cell_data["element_tag"] = np.full(mesh.n_cells, tag, dtype=np.int64)
+            mesh.cell_data["element_tag"] = np.full(
+                mesh.n_cells,
+                tag,
+                dtype=np.int64,
+            )
             groups["column" if is_column else "beam"].append(mesh)
 
         combined = {}
