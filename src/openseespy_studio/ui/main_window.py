@@ -4849,7 +4849,7 @@ class MainWindow(QMainWindow):
             "--result-file",
             result_path,
         ])
-        process.setProcessChannelMode(QProcess.SeparateChannels)
+        process.setProcessChannelMode(QProcess.MergedChannels)
         process.readyReadStandardOutput.connect(self._read_analysis_stdout)
         process.readyReadStandardError.connect(self._read_analysis_stderr)
         process.finished.connect(self._analysis_finished)
@@ -4947,6 +4947,13 @@ class MainWindow(QMainWindow):
             return (
                 f"[Job] Solver started · {payload.get('analysis_type', '')} "
                 f"· total={total} · algorithm={algorithm}"
+            )
+
+        if event == "step_start":
+            return (
+                f"▶ Step {step}/{total} · {algorithm} · "
+                f"{payload.get('test', '')} · "
+                f"tol={float(payload.get('tolerance', 0.0) or 0.0):.3e}"
             )
 
         if event == "progress":
@@ -5123,16 +5130,27 @@ class MainWindow(QMainWindow):
         display = line
         parsed_convergence = parse_opensees_convergence_line(line)
         if parsed_convergence is not None:
-            self.results_panel.append_live_convergence_iteration(
-                iteration=int(parsed_convergence.get("iteration", 0) or 0),
-                norm=float(parsed_convergence.get("norm", 0.0) or 0.0),
-                tolerance=parsed_convergence.get("tolerance"),
-                test=str(parsed_convergence.get("test", "") or ""),
-                algorithm=str(
-                    self._live_convergence_context.get("algorithm", "")
-                    or ""
-                ),
+            iteration = int(
+                parsed_convergence.get("iteration", 0) or 0
             )
+            if iteration > 0:
+                self.results_panel.append_live_convergence_iteration(
+                    iteration=iteration,
+                    norm=float(
+                        parsed_convergence.get("norm", 0.0) or 0.0
+                    ),
+                    tolerance=parsed_convergence.get("tolerance"),
+                    test=str(
+                        parsed_convergence.get("test", "") or ""
+                    ),
+                    algorithm=str(
+                        self._live_convergence_context.get(
+                            "algorithm",
+                            "",
+                        )
+                        or ""
+                    ),
+                )
 
         prefix = "[STUDIO_EVENT] "
         if line.startswith(prefix):
