@@ -1572,6 +1572,7 @@ class ResultsPanel(QWidget):
         self._motion_info = motion_info(
             self._result,
             mode=self._motion_selected_mode(),
+            scan_reference=False,
         )
         count = int(self._motion_info.frame_count)
         self.motion_slider.blockSignals(True)
@@ -1604,6 +1605,7 @@ class ResultsPanel(QWidget):
         self._motion_info = motion_info(
             self._result,
             mode=self._motion_selected_mode(),
+            scan_reference=False,
         )
         count = int(self._motion_info.frame_count)
         self.motion_slider.blockSignals(True)
@@ -1737,10 +1739,14 @@ class ResultsPanel(QWidget):
         if not hasattr(self, "motion_info_label"):
             return
         mode = self._motion_selected_mode()
-        if self._motion_info is None:
+        if (
+            self._motion_info is None
+            or self._motion_info.reference_magnitude is None
+        ):
             self._motion_info = motion_info(
                 self._result,
                 mode=mode,
+                scan_reference=True,
             )
         count = int(self._motion_info.frame_count)
         if count <= 0:
@@ -1773,7 +1779,7 @@ class ResultsPanel(QWidget):
             frame.vectors,
             float(self.motion_scale.value()),
             bool(self.motion_auto_scale.isChecked()),
-            float(self._motion_info.reference_magnitude),
+            float(self._motion_info.reference_magnitude or 0.0),
             frame.label,
         )
 
