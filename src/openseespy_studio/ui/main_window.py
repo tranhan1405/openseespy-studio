@@ -43,8 +43,9 @@ from PySide6.QtWidgets import (
 )
 
 from ..analysis_templates import (
+    GroundMotionComponentSpec,
     build_cyclic_template,
-    build_nlth_template,
+    build_nlth_multi_template,
     build_pushover_template,
     default_control_node,
 )
@@ -5045,6 +5046,101 @@ class MainWindow(QMainWindow):
 
         self.properties_panel.set_properties("Constraint", rows)
 
+    def _first_mode_lateral_weights(
+        self,
+        *,
+        mode: int,
+        dof: int,
+        control_node: int,
+    ) -> dict[int, float]:
+        mode = int(mode)
+        dof = int(dof)
+        latest_modal = None
+        for job_id in sorted(self._jobs, reverse=True):
+            job = self._jobs[job_id]
+            if job.analysis_type == "Modal" and job.results:
+                latest_modal = job
+                break
+        if latest_modal is None:
+            raise ValueError(
+                "First-mode proportional loading needs a completed Modal "
+                "analysis. Run Modal analysis first, then reopen the "
+                "Pushover template."
+            )
+
+        modes = latest_modal.results.get("modes", {})
+        mode_data = (
+            modes.get(str(mode), modes.get(mode))
+            if isinstance(modes, dict)
+            else None
+        )
+        if not isinstance(mode_data, dict):
+            raise ValueError(
+                f"Modal Job {latest_modal.job_id} has no mode {mode}."
+            )
+        vectors = mode_data.get("vectors", {})
+        if not isinstance(vectors, dict):
+            raise ValueError("Modal result does not contain nodal vectors.")
+
+        component_index = dof - 1
+        control_vector = vectors.get(
+            str(int(control_node)),
+            vectors.get(int(control_node)),
+        )
+        control_value = 0.0
+        if isinstance(control_vector, (list, tuple)) and len(control_vector) > component_index:
+            control_value = float(control_vector[component_index])
+
+        sign = 1.0
+        if abs(control_value) > 1.0e-15:
+            sign = 1.0 if control_value >= 0.0 else -1.0
+        else:
+            for vector in vectors.values():
+                if (
+                    isinstance(vector, (list, tuple))
+                    and len(vector) > component_index
+                    and abs(float(vector[component_index])) > 1.0e-15
+                ):
+                    sign = (
+                        1.0
+                        if float(vector[component_index]) >= 0.0
+                        else -1.0
+                    )
+                    break
+
+        nodal_mass_available = any(
+            len(node.mass) > component_index
+            and float(node.mass[component_index]) > 0.0
+            for node in self.model.nodes.values()
+        )
+        weights: dict[int, float] = {}
+        for tag, node in self.model.nodes.items():
+            vector = vectors.get(str(tag), vectors.get(tag))
+            if not isinstance(vector, (list, tuple)):
+                continue
+            if len(vector) <= component_index:
+                continue
+            phi = sign * float(vector[component_index])
+            if abs(phi) <= 1.0e-15:
+                continue
+            if nodal_mass_available:
+                mass = (
+                    float(node.mass[component_index])
+                    if len(node.mass) > component_index
+                    else 0.0
+                )
+                value = mass * phi
+            else:
+                value = phi
+            if abs(value) > 1.0e-15:
+                weights[int(tag)] = value
+
+        if not weights:
+            raise ValueError(
+                f"Mode {mode} has no usable DOF {dof} participation."
+            )
+        return weights
+
     def _create_analysis_template(
         self,
         initial_template: str = "Pushover",
@@ -5072,6 +5168,14 @@ class MainWindow(QMainWindow):
             request = dialog.request()
             kind = str(request["template"])
             if kind == "Pushover":
+                distribution = str(request["distribution"])
+                distribution_weights = request.get("custom_weights")
+                if distribution == "First-mode proportional":
+                    distribution_weights = self._first_mode_lateral_weights(
+                        mode=int(request["mode_number"]),
+                        dof=int(request["control_dof"]),
+                        control_node=int(request["control_node"]),
+                    )
                 plan = build_pushover_template(
                     self.project,
                     name=str(request["name"]),
@@ -5081,7 +5185,12 @@ class MainWindow(QMainWindow):
                         request["target_displacement"]
                     ),
                     max_increment=float(request["max_increment"]),
-                    distribution=str(request["distribution"]),
+                    distribution=distribution,
+                    distribution_weights=(
+                        dict(distribution_weights)
+                        if isinstance(distribution_weights, dict)
+                        else None
+                    ),
                     solver_preset=str(request["solver_preset"]),
                 )
             elif kind == "Cyclic":
@@ -5096,17 +5205,28 @@ class MainWindow(QMainWindow):
                     solver_preset=str(request["solver_preset"]),
                 )
             else:
-                plan = build_nlth_template(
+                components = [
+                    GroundMotionComponentSpec(
+                        direction=int(item["direction"]),
+                        values=[
+                            float(value)
+                            for value in item["values"]
+                        ],
+                        scale_factor=float(item["scale_factor"]),
+                        name={1: "X", 2: "Y", 3: "Z"}[
+                            int(item["direction"])
+                        ],
+                    )
+                    for item in request["components"]
+                ]
+                plan = build_nlth_multi_template(
                     self.project,
                     name=str(request["name"]),
-                    ground_motion_values=list(
-                        request["ground_motion_values"]
-                    ),
+                    components=components,
                     dt=float(request["dt"]),
                     input_unit=str(request["input_unit"]),
-                    scale_factor=float(request["scale_factor"]),
-                    direction=int(request["direction"]),
                     monitor_node=int(request["monitor_node"]),
+                    monitor_dof=int(request["monitor_dof"]),
                     damping_ratio=float(request["damping_ratio"]),
                     damping_mode_i=int(request["damping_mode_i"]),
                     damping_mode_j=int(request["damping_mode_j"]),
