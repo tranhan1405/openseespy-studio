@@ -10,6 +10,8 @@ from openseespy_studio.postprocess import (
     nodal_result_scalar,
     pushover_capacity_curve,
     section_component_samples,
+    time_history_node_tags,
+    time_history_series,
 )
 from openseespy_studio.project import (
     ElementLoadData,
@@ -83,6 +85,84 @@ def test_pushover_capacity_curve_rejects_non_pushover_results():
     assert y == []
     assert node is None
     assert dof is None
+
+
+def test_time_history_node_tags_and_nodal_series():
+    result = {
+        "history": {
+            "time": [0.1, 0.2],
+            "monitor_node": 2,
+            "nodes": {
+                "2": {
+                    "disp": [[1.0, 2.0], [3.0, 4.0]],
+                    "vel": [[5.0, 6.0], [7.0, 8.0]],
+                    "accel": [[9.0, 10.0], [11.0, 12.0]],
+                    "reaction": [[-1.0, -2.0], [-3.0, -4.0]],
+                },
+                "10": {
+                    "disp": [[0.0, 0.5], [0.0, 1.0]],
+                    "vel": [[0.0, 1.5], [0.0, 2.0]],
+                    "accel": [[0.0, 2.5], [0.0, 3.0]],
+                    "reaction": [[0.0, -5.0], [0.0, -6.0]],
+                },
+            },
+        },
+    }
+
+    assert time_history_node_tags(result) == [2, 10]
+    assert time_history_series(
+        result, "Displacement", node_tag=10, dof=2
+    ) == ([0.1, 0.2], [0.5, 1.0])
+    assert time_history_series(
+        result, "Velocity", node_tag=2, dof=1
+    ) == ([0.1, 0.2], [5.0, 7.0])
+    assert time_history_series(
+        result, "Acceleration", node_tag=2, dof=2
+    ) == ([0.1, 0.2], [10.0, 12.0])
+    assert time_history_series(
+        result, "Reaction", node_tag=10, dof=2
+    ) == ([0.1, 0.2], [-5.0, -6.0])
+
+
+def test_time_history_base_shear_uses_all_support_reaction_components():
+    result = {
+        "history": {
+            "time": [0.1, 0.2],
+            "control_dof": 1,
+            "base_reactions": [
+                [-100.0, 20.0, 0.0, 0.0, 0.0, 0.0],
+                [-150.0, 30.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+        },
+    }
+
+    assert time_history_series(
+        result, "Base shear", dof=1
+    ) == ([0.1, 0.2], [100.0, 150.0])
+    assert time_history_series(
+        result, "Base shear", dof=2
+    ) == ([0.1, 0.2], [-20.0, -30.0])
+    assert time_history_series(result, "Base shear", dof=4) == ([], [])
+
+
+def test_time_history_schema3_monitor_displacement_remains_readable():
+    result = {
+        "history": {
+            "time": [1.0, 2.0],
+            "monitor_node": 7,
+            "control_dof": 1,
+            "displacement": [[0.01], [0.02]],
+            "base_shear": [-10.0, -20.0],
+        },
+    }
+
+    assert time_history_node_tags(result) == [7]
+    assert time_history_series(
+        result, "Displacement", node_tag=7, dof=1
+    ) == ([1.0, 2.0], [0.01, 0.02])
+    assert time_history_series(
+        result, "Base shear", dof=1
+    ) == ([1.0, 2.0], [10.0, 20.0])
 
 def _local_force_vector():
     return [

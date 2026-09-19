@@ -156,6 +156,166 @@ def pushover_capacity_curve(
     return x, y, control_node, control_dof
 
 
+TIME_HISTORY_NODE_KEYS: dict[str, str] = {
+    "displacement": "disp",
+    "velocity": "vel",
+    "acceleration": "accel",
+    "reaction": "reaction",
+}
+
+
+def time_history_node_tags(
+    result: dict[str, Any] | None,
+) -> list[int]:
+    """Return sorted node tags that have recorded nodal histories."""
+    if not isinstance(result, dict):
+        return []
+    history = result.get("history", {})
+    if not isinstance(history, dict):
+        return []
+
+    nodes = history.get("nodes", {})
+    tags: list[int] = []
+    if isinstance(nodes, dict):
+        for raw_tag in nodes:
+            try:
+                tags.append(int(raw_tag))
+            except (TypeError, ValueError):
+                continue
+    if tags:
+        return sorted(set(tags))
+
+    # Backward compatibility with schema <= 3, which recorded only the
+    # monitor-node displacement history.
+    try:
+        monitor = int(history.get("monitor_node"))
+    except (TypeError, ValueError):
+        return []
+    return [monitor]
+
+
+def time_history_series(
+    result: dict[str, Any] | None,
+    quantity: str,
+    *,
+    node_tag: int | None = None,
+    dof: int = 1,
+) -> tuple[list[float], list[float]]:
+    """Extract a nodal or base-response time-history series.
+
+    Base shear uses the applied-equivalent sign convention: minus the summed
+    support reactions. Nodal reactions keep the native OpenSees sign.
+    """
+    if not isinstance(result, dict):
+        return [], []
+    history = result.get("history", {})
+    if not isinstance(history, dict):
+        return [], []
+
+    try:
+        dof = int(dof)
+    except (TypeError, ValueError):
+        return [], []
+    if dof not in range(1, 7):
+        return [], []
+
+    raw_time = history.get("time", [])
+    if not isinstance(raw_time, (list, tuple)):
+        return [], []
+    times: list[float] = []
+    for value in raw_time:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return [], []
+        if not math.isfinite(numeric):
+            return [], []
+        times.append(numeric)
+
+    normalized = str(quantity).strip().lower()
+    if normalized == "base shear":
+        if dof > 3:
+            return [], []
+        rows = history.get("base_reactions", [])
+        if isinstance(rows, (list, tuple)) and rows:
+            values: list[float] = []
+            selected_time: list[float] = []
+            index = dof - 1
+            for time_value, row in zip(times, rows):
+                if not isinstance(row, (list, tuple)) or len(row) <= index:
+                    continue
+                try:
+                    value = -float(row[index])
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(value):
+                    selected_time.append(time_value)
+                    values.append(value)
+            return selected_time, values
+
+        # Schema <= 3 stored only the reaction sum for the control DOF.
+        try:
+            control_dof = int(history.get("control_dof", 1))
+        except (TypeError, ValueError):
+            control_dof = 1
+        if dof != control_dof:
+            return [], []
+        raw_values = history.get("base_shear", [])
+        if not isinstance(raw_values, (list, tuple)):
+            return [], []
+        selected_time = []
+        values = []
+        for time_value, raw_value in zip(times, raw_values):
+            try:
+                value = -float(raw_value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                selected_time.append(time_value)
+                values.append(value)
+        return selected_time, values
+
+    key = TIME_HISTORY_NODE_KEYS.get(normalized)
+    if key is None or node_tag is None:
+        return [], []
+
+    nodes = history.get("nodes", {})
+    rows: Any = []
+    if isinstance(nodes, dict):
+        node_data = nodes.get(str(int(node_tag)), nodes.get(int(node_tag), {}))
+        if isinstance(node_data, dict):
+            rows = node_data.get(key, [])
+
+    if (
+        normalized == "displacement"
+        and (not isinstance(rows, (list, tuple)) or not rows)
+    ):
+        try:
+            monitor_node = int(history.get("monitor_node"))
+        except (TypeError, ValueError):
+            monitor_node = None
+        if monitor_node == int(node_tag):
+            rows = history.get("displacement", [])
+
+    if not isinstance(rows, (list, tuple)):
+        return [], []
+
+    index = dof - 1
+    selected_time: list[float] = []
+    values: list[float] = []
+    for time_value, row in zip(times, rows):
+        if not isinstance(row, (list, tuple)) or len(row) <= index:
+            continue
+        try:
+            value = float(row[index])
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            selected_time.append(time_value)
+            values.append(value)
+    return selected_time, values
+
+
 def local_end_actions(
     values: Sequence[float],
 ) -> dict[str, tuple[float, float]]:
