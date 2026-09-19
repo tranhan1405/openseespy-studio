@@ -10,12 +10,15 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPushButton,
     QScrollArea,
     QSpinBox,
     QSplitter,
+    QTableWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -193,6 +196,7 @@ class MaterialDialog(QDialog):
         *,
         next_tag: int = 1,
         units=None,
+        materials: dict[int, MaterialData] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -200,6 +204,9 @@ class MaterialDialog(QDialog):
         self.setModal(True)
         self.resize(920, 680)
         self.unit_system = UnitSystem.from_mapping(units)
+        self.materials = dict(materials or {})
+        if material is not None:
+            self.materials.pop(material.tag, None)
 
         root = QVBoxLayout(self)
 
@@ -296,6 +303,8 @@ class MaterialDialog(QDialog):
         self._initial_material = material
         self._frp_jacket_group: QGroupBox | None = None
         self._frp_ultimate_group: QGroupBox | None = None
+        self._base_material_combo: QComboBox | None = None
+        self._component_table: QTableWidget | None = None
 
         self.material_type.currentIndexChanged.connect(
             lambda _index: self._material_type_changed(str(self.material_type.currentData()))
@@ -316,6 +325,8 @@ class MaterialDialog(QDialog):
         self._parameter_spins.clear()
         self._frp_jacket_group = None
         self._frp_ultimate_group = None
+        self._base_material_combo = None
+        self._component_table = None
 
     def _parameter_kind(self, material_type: str, key: str) -> str:
         return MATERIAL_PARAMETER_KINDS.get(material_type, {}).get(key, "raw")
@@ -343,7 +354,23 @@ class MaterialDialog(QDialog):
             return f"{base} [MPa]:"
         if kind == "length":
             return f"{base} [{self.unit_system.length}]:"
-        if material_type == "Hysteretic":
+        if material_type == "MinMax":
+            self._add_base_material_selector(material_type)
+            self._add_group(
+                "Failure strain limits",
+                material_type,
+                ("min", "max"),
+            )
+        elif material_type == "Fatigue":
+            self._add_base_material_selector(material_type)
+            self._add_group(
+                "Coffin-Manson fatigue / global limits",
+                material_type,
+                ("E0", "m", "min", "max"),
+            )
+        elif material_type in {"Parallel", "Series"}:
+            self._add_composite_selector(material_type)
+        elif material_type == "Hysteretic":
             if key.startswith("s"):
                 return f"{key} response:"
             if key.startswith("e"):
@@ -408,6 +435,174 @@ class MaterialDialog(QDialog):
             form.addRow(self._parameter_label(material_type, key), self._make_widget(material_type, key))
         self.parameter_form.addRow(group)
         return group
+
+    def _reference_material_combo(
+        self,
+        selected_tag: int | None = None,
+    ) -> QComboBox:
+        combo = QComboBox()
+        for tag in sorted(self.materials):
+            item = self.materials[tag]
+            combo.addItem(
+                f"{tag} - {item.name} ({item.material_type})",
+                tag,
+            )
+        if selected_tag is not None:
+            index = combo.findData(int(selected_tag))
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        combo.currentIndexChanged.connect(self._parameter_changed)
+        return combo
+
+    def _add_base_material_selector(self, material_type: str) -> None:
+        group = QGroupBox("Wrapped material")
+        form = QFormLayout(group)
+        selected = (
+            self._initial_material.base_material_tag
+            if (
+                self._initial_material is not None
+                and self._initial_material.material_type == material_type
+            )
+            else None
+        )
+        self._base_material_combo = self._reference_material_combo(selected)
+        if self._base_material_combo.count() == 0:
+            self._base_material_combo.addItem(
+                "Create a base material first",
+                None,
+            )
+            self._base_material_combo.setEnabled(False)
+        form.addRow("Base material:", self._base_material_combo)
+        self.parameter_form.addRow(group)
+
+    def _add_component_row(
+        self,
+        material_tag: int | None = None,
+        factor: float = 1.0,
+    ) -> None:
+        table = self._component_table
+        if table is None:
+            return
+        row = table.rowCount()
+        table.insertRow(row)
+
+        combo = self._reference_material_combo(material_tag)
+        if combo.count() == 0:
+            combo.addItem("No materials available", None)
+            combo.setEnabled(False)
+        table.setCellWidget(row, 0, combo)
+
+        if str(self.material_type.currentData()) == "Parallel":
+            spin = QDoubleSpinBox()
+            spin.setDecimals(8)
+            spin.setRange(-1.0e12, 1.0e12)
+            spin.setValue(float(factor))
+            spin.valueChanged.connect(self._parameter_changed)
+            table.setCellWidget(row, 1, spin)
+        else:
+            table.setItem(row, 1, QTableWidgetItem("—"))
+
+        self._parameter_changed()
+
+    def _remove_component_rows(self) -> None:
+        table = self._component_table
+        if table is None:
+            return
+        rows = sorted(
+            {index.row() for index in table.selectedIndexes()},
+            reverse=True,
+        )
+        for row in rows:
+            table.removeRow(row)
+        self._parameter_changed()
+
+    def _add_composite_selector(self, material_type: str) -> None:
+        group = QGroupBox(
+            "Parallel components"
+            if material_type == "Parallel"
+            else "Series components"
+        )
+        layout = QVBoxLayout(group)
+        self._component_table = QTableWidget(0, 2)
+        self._component_table.setHorizontalHeaderLabels(
+            ["Material", "Factor" if material_type == "Parallel" else "Series"]
+        )
+        self._component_table.horizontalHeader().setSectionResizeMode(
+            0,
+            QHeaderView.Stretch,
+        )
+        self._component_table.horizontalHeader().setSectionResizeMode(
+            1,
+            QHeaderView.ResizeToContents,
+        )
+        layout.addWidget(self._component_table)
+
+        buttons = QHBoxLayout()
+        add_button = QPushButton("Add Material")
+        remove_button = QPushButton("Remove Selected")
+        add_button.clicked.connect(lambda: self._add_component_row())
+        remove_button.clicked.connect(self._remove_component_rows)
+        buttons.addWidget(add_button)
+        buttons.addWidget(remove_button)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+        self.parameter_form.addRow(group)
+
+        tags: list[int] = []
+        factors: list[float] = []
+        if (
+            self._initial_material is not None
+            and self._initial_material.material_type == material_type
+        ):
+            tags = list(self._initial_material.material_tags)
+            factors = list(self._initial_material.factors)
+        if not tags and self.materials:
+            tags = [next(iter(sorted(self.materials)))]
+        for index, tag in enumerate(tags):
+            factor = (
+                factors[index]
+                if index < len(factors)
+                else 1.0
+            )
+            self._add_component_row(tag, factor)
+
+    def _wrapper_references(
+        self,
+        material_type: str,
+    ) -> tuple[int | None, list[int], list[float]]:
+        if material_type in {"MinMax", "Fatigue"}:
+            base = (
+                None
+                if self._base_material_combo is None
+                else self._base_material_combo.currentData()
+            )
+            return (
+                None if base is None else int(base),
+                [],
+                [],
+            )
+
+        if material_type not in {"Parallel", "Series"}:
+            return None, [], []
+
+        tags: list[int] = []
+        factors: list[float] = []
+        table = self._component_table
+        if table is None:
+            return None, tags, factors
+        for row in range(table.rowCount()):
+            combo = table.cellWidget(row, 0)
+            if not isinstance(combo, QComboBox) or combo.currentData() is None:
+                continue
+            tags.append(int(combo.currentData()))
+            if material_type == "Parallel":
+                factor = table.cellWidget(row, 1)
+                factors.append(
+                    float(factor.value())
+                    if isinstance(factor, QDoubleSpinBox)
+                    else 1.0
+                )
+        return None, tags, factors
 
     def _rebuild_parameters(self, material_type: str) -> None:
         self._clear_parameter_form()
@@ -531,6 +726,36 @@ class MaterialDialog(QDialog):
                 self.material_note.setStyleSheet(
                     "padding: 7px; background: #fff4df; color: #7a5600;"
                 )
+        elif material_type in {"MinMax", "Fatigue"}:
+            base, _, _ = self._wrapper_references(material_type)
+            base_text = (
+                f"material {base}"
+                if base is not None
+                else "no base material selected"
+            )
+            self.material_note.setText(
+                f"{material_type} wraps {base_text}. The wrapped material must "
+                "already exist; Studio generates dependencies before wrappers "
+                "and blocks circular references."
+            )
+            self.material_note.setStyleSheet(
+                "padding: 7px; background: #eef4fb; color: #40566c;"
+            )
+        elif material_type in {"Parallel", "Series"}:
+            _, tags, factors = self._wrapper_references(material_type)
+            factor_text = (
+                " with explicit linear-combination factors"
+                if material_type == "Parallel"
+                else ""
+            )
+            self.material_note.setText(
+                f"{material_type} combines {len(tags)} referenced material(s)"
+                f"{factor_text}. Use Material Test to exercise the assembled "
+                "OpenSees constitutive object."
+            )
+            self.material_note.setStyleSheet(
+                "padding: 7px; background: #eef4fb; color: #40566c;"
+            )
         elif material_type in {"Hysteretic", "Pinching4"}:
             self.material_note.setText(
                 "Envelope points are shown live. These materials may represent "
@@ -560,23 +785,36 @@ class MaterialDialog(QDialog):
             )
             return
 
+        test_materials = dict(self.materials)
+        test_materials[material.tag] = material
         dialog = MaterialTestDialog(
             material,
             units=self.unit_system.as_mapping(),
+            materials=test_materials,
             parent=self,
         )
         dialog.exec()
 
     def material_data(self) -> MaterialData:
         material_type = str(self.material_type.currentData())
+        base_material_tag, material_tags, factors = (
+            self._wrapper_references(material_type)
+        )
         return MaterialData(
             tag=self.tag.value(),
             name=self.name.text().strip() or f"Material {self.tag.value()}",
             material_type=material_type,
             parameters={
-                key: self._stored_value(material_type, key, self._widget_value(key))
+                key: self._stored_value(
+                    material_type,
+                    key,
+                    self._widget_value(key),
+                )
                 for key in MATERIAL_PARAMETER_ORDER[material_type]
             },
             poisson_ratio=self.poisson_ratio.value(),
             density=self.density.value(),
+            base_material_tag=base_material_tag,
+            material_tags=material_tags,
+            factors=factors,
         )
