@@ -109,35 +109,76 @@ QMenuBar::item:selected {
     background: #e9f2fd;
 }
 QToolBar#Ribbon {
-    background: #fafbfd;
+    background: #f6f7f9;
     border: none;
-    border-bottom: 1px solid #cbd4de;
+    border-bottom: 1px solid #bfc8d2;
     spacing: 0;
-    padding: 2px 4px 0 4px;
+    padding: 0;
+}
+QTabWidget#RibbonTabs::pane {
+    border: none;
+    border-top: 1px solid #cfd6de;
+    background: #f8f9fb;
+}
+QTabBar#RibbonTabBar {
+    background: #f2f3f5;
+}
+QTabBar#RibbonTabBar::tab {
+    background: #f2f3f5;
+    color: #27394b;
+    border: none;
+    border-right: 1px solid transparent;
+    padding: 5px 16px 4px 16px;
+    min-width: 48px;
+}
+QTabBar#RibbonTabBar::tab:hover {
+    background: #e7edf5;
+}
+QTabBar#RibbonTabBar::tab:selected {
+    background: #ffffff;
+    color: #145da0;
+    border-top: 2px solid #2f80ed;
+    padding-top: 3px;
+    font-weight: 600;
+}
+QWidget#RibbonPage {
+    background: #ffffff;
 }
 QWidget#RibbonGroup {
-    border-right: 1px solid #d6dde5;
+    border-right: 1px solid #d4d9df;
     background: transparent;
 }
 QLabel#RibbonCaption {
-    color: #596a7b;
+    color: #617080;
     font-size: 9px;
-    padding: 0 2px 2px 2px;
+    padding: 1px 5px 2px 5px;
 }
-QToolButton#RibbonButton {
+QToolButton#RibbonLargeButton,
+QToolButton#RibbonSmallButton {
     color: #203247;
     border: 1px solid transparent;
-    border-radius: 3px;
-    padding: 2px 4px;
-    min-width: 45px;
-    min-height: 50px;
+    border-radius: 2px;
 }
-QToolButton#RibbonButton:hover {
+QToolButton#RibbonLargeButton {
+    padding: 3px 5px;
+    min-width: 54px;
+    min-height: 58px;
+}
+QToolButton#RibbonSmallButton {
+    padding: 1px 5px;
+    min-width: 84px;
+    min-height: 22px;
+    text-align: left;
+}
+QToolButton#RibbonLargeButton:hover,
+QToolButton#RibbonSmallButton:hover {
     background: #e9f3ff;
-    border-color: #bed3eb;
+    border-color: #b9d1ec;
 }
-QToolButton#RibbonButton:pressed,
-QToolButton#RibbonButton:checked {
+QToolButton#RibbonLargeButton:pressed,
+QToolButton#RibbonLargeButton:checked,
+QToolButton#RibbonSmallButton:pressed,
+QToolButton#RibbonSmallButton:checked {
     background: #d5eaff;
     border-color: #79ace3;
 }
@@ -301,33 +342,86 @@ class BrandWidget(QWidget):
 
 
 class RibbonGroup(QWidget):
+    """Compact ANSYS-style ribbon group with large and stacked commands."""
+
     def __init__(self, caption: str, parent=None):
         super().__init__(parent)
         self.setObjectName("RibbonGroup")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(3, 1, 5, 0)
+        layout.setContentsMargins(3, 2, 5, 0)
         layout.setSpacing(0)
 
-        self.button_row = QHBoxLayout()
-        self.button_row.setSpacing(0)
-        layout.addLayout(self.button_row)
+        self.body = QHBoxLayout()
+        self.body.setContentsMargins(0, 0, 0, 0)
+        self.body.setSpacing(1)
+        layout.addLayout(self.body, 1)
+
+        self._small_column: QVBoxLayout | None = None
+        self._small_column_count = 0
 
         label = QLabel(caption)
         label.setObjectName("RibbonCaption")
         label.setAlignment(Qt.AlignCenter)
         layout.addWidget(label)
 
-    def add_action(self, action: QAction) -> None:
+    def add_large_action(self, action: QAction) -> QToolButton:
+        self._small_column = None
+        self._small_column_count = 0
         button = QToolButton()
-        button.setObjectName("RibbonButton")
+        button.setObjectName("RibbonLargeButton")
         button.setDefaultAction(action)
         button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        button.setIconSize(QSize(24, 24))
+        button.setIconSize(QSize(28, 28))
         button.setAutoRaise(True)
-        self.button_row.addWidget(button)
+        self.body.addWidget(button, 0, Qt.AlignTop)
+        return button
+
+    def _ensure_small_column(self) -> QVBoxLayout:
+        if self._small_column is None or self._small_column_count >= 3:
+            holder = QWidget()
+            column = QVBoxLayout(holder)
+            column.setContentsMargins(0, 1, 0, 0)
+            column.setSpacing(0)
+            column.addStretch(1)
+            self.body.addWidget(holder, 0, Qt.AlignTop)
+            self._small_column = column
+            self._small_column_count = 0
+        return self._small_column
+
+    def add_small_action(self, action: QAction) -> QToolButton:
+        column = self._ensure_small_column()
+        button = QToolButton()
+        button.setObjectName("RibbonSmallButton")
+        button.setDefaultAction(action)
+        button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        button.setIconSize(QSize(16, 16))
+        button.setAutoRaise(True)
+        column.insertWidget(column.count() - 1, button)
+        self._small_column_count += 1
+        return button
+
+    def add_action(self, action: QAction) -> None:
+        self.add_large_action(action)
 
     def add_widget(self, widget: QWidget) -> None:
-        self.button_row.addWidget(widget)
+        self._small_column = None
+        self._small_column_count = 0
+        self.body.addWidget(widget, 0, Qt.AlignVCenter)
+
+
+class RibbonPage(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("RibbonPage")
+        self.row = QHBoxLayout(self)
+        self.row.setContentsMargins(4, 2, 4, 0)
+        self.row.setSpacing(0)
+
+    def add_group(self, group: RibbonGroup) -> None:
+        self.row.addWidget(group)
+
+    def finish(self) -> None:
+        self.row.addStretch(1)
 
 
 class FrameGridPanel(QWidget):
@@ -1347,43 +1441,205 @@ class MainWindow(QMainWindow):
         reset_layout.triggered.connect(self._reset_dock_layout)
         menus["Window"].addAction(reset_layout)
 
+        self._make_action(
+            "results_manager",
+            "Tabular Data",
+            "plot",
+            self._show_results_manager,
+            "Show completed Jobs and result data",
+        )
+        self._make_action(
+            "clear_result",
+            "Clear Result",
+            "delete",
+            self.viewport.clear_result_overlay,
+            "Clear the active result overlay",
+        )
+        self._make_action(
+            "solver_output_view",
+            "Solver Output",
+            "analysis",
+            self._show_solver_output,
+            "Show solver output console",
+        )
+
         ribbon = QToolBar("Ribbon", self)
         ribbon.setObjectName("Ribbon")
         ribbon.setMovable(False)
         ribbon.setFloatable(False)
+        ribbon.setIconSize(QSize(20, 20))
         self.addToolBar(Qt.TopToolBarArea, ribbon)
 
-        groups = (
-            ("File", ["new", "open", "save"]),
-            ("Edit", ["undo", "redo"]),
-            ("Geometry", ["node", "line", "frame", "grid", "extrude"]),
-            ("Modify", ["copy", "move", "rotate", "mirror", "delete"]),
-            ("Selection", ["select", "box", "polygon", "byid", "bytype"]),
-            ("View", ["xy", "yz", "xz", "iso"]),
-            ("Supports", ["support", "clear_support", "constraint", "connection"]),
-            ("Loads", ["mass", "time_series", "load_pattern", "nodal_load", "beam_load"]),
-            ("Analysis", ["analysis_setup", "check_model", "run", "plot"]),
+        self.ribbon_tabs = QTabWidget()
+        self.ribbon_tabs.setObjectName("RibbonTabs")
+        self.ribbon_tabs.tabBar().setObjectName("RibbonTabBar")
+        self.ribbon_tabs.setDocumentMode(False)
+        self.ribbon_tabs.setTabsClosable(False)
+        self.ribbon_tabs.setMovable(False)
+        self.ribbon_tabs.setMinimumHeight(105)
+        self.ribbon_tabs.setMaximumHeight(112)
+        self.ribbon_tabs.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Fixed,
+        )
+        ribbon.addWidget(self.ribbon_tabs)
+
+        def add_group(
+            page: RibbonPage,
+            caption: str,
+            *,
+            large: tuple[str, ...] = (),
+            small: tuple[str, ...] = (),
+            widgets: tuple[QWidget, ...] = (),
+        ) -> RibbonGroup:
+            group = RibbonGroup(caption)
+            for key in large:
+                group.add_large_action(self.actions[key])
+            for key in small:
+                group.add_small_action(self.actions[key])
+            for widget in widgets:
+                group.add_widget(widget)
+            page.add_group(group)
+            return group
+
+        home = RibbonPage()
+        add_group(
+            home,
+            "File",
+            large=("new",),
+            small=("open", "save", "save_as"),
+        )
+        add_group(
+            home,
+            "Edit",
+            small=("undo", "redo"),
+        )
+        add_group(
+            home,
+            "Geometry",
+            large=("grid",),
+            small=("node", "line", "frame", "extrude"),
+        )
+        add_group(
+            home,
+            "Modify",
+            large=("move",),
+            small=("copy", "rotate", "mirror", "delete"),
+        )
+        home.finish()
+        self.ribbon_tabs.addTab(home, "Home")
+
+        model_page = RibbonPage()
+        add_group(
+            model_page,
+            "Definition",
+            large=("new_section",),
+            small=("new_material", "new_transformation"),
+        )
+        add_group(
+            model_page,
+            "Assign",
+            large=("assign_section",),
+            small=("assign_transformation", "element_formulation"),
+        )
+        add_group(
+            model_page,
+            "Supports",
+            large=("support",),
+            small=("clear_support", "constraint", "connection"),
+        )
+        add_group(
+            model_page,
+            "Loads",
+            large=("load_pattern",),
+            small=("mass", "time_series", "nodal_load", "beam_load"),
+        )
+        model_page.finish()
+        self.ribbon_tabs.addTab(model_page, "Model")
+
+        analysis_page = RibbonPage()
+        add_group(
+            analysis_page,
+            "Solver",
+            large=("run",),
+            small=("analysis_setup", "check_model", "solver_output_view"),
+        )
+        add_group(
+            analysis_page,
+            "Post-processing",
+            large=("plot",),
+            small=("results_manager",),
+        )
+        analysis_page.finish()
+        self.ribbon_tabs.addTab(analysis_page, "Analysis")
+
+        result_page = RibbonPage()
+        add_group(
+            result_page,
+            "Outline",
+            large=("plot",),
+            small=("results_manager", "clear_result"),
+        )
+        add_group(
+            result_page,
+            "Solver",
+            large=("run",),
+            small=("analysis_setup", "solver_output_view"),
+        )
+        add_group(
+            result_page,
+            "Display",
+            large=("iso",),
+            small=("xy", "xz", "yz"),
+        )
+        result_page.finish()
+        result_index = self.ribbon_tabs.addTab(result_page, "Result")
+        self.ribbon_tabs.tabBar().setTabTextColor(
+            result_index,
+            QColor("#1768ad"),
         )
 
-        for caption, keys in groups:
-            group = RibbonGroup(caption)
-            for key in keys:
-                group.add_action(self.actions[key])
-            if caption == "Selection":
-                self.selection_filter_combo = QComboBox()
-                self.selection_filter_combo.addItems(["All", "Node", "Element"])
-                self.selection_filter_combo.setFixedWidth(76)
-                self.selection_filter_combo.setToolTip("Selection filter")
-                self.selection_filter_combo.currentTextChanged.connect(
-                    self._set_selection_filter
-                )
-                group.add_widget(self.selection_filter_combo)
-            ribbon.addWidget(group)
+        display_page = RibbonPage()
+        add_group(
+            display_page,
+            "Views",
+            large=("iso",),
+            small=("xy", "xz", "yz"),
+        )
+        display_page.finish()
+        self.ribbon_tabs.addTab(display_page, "Display")
 
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        ribbon.addWidget(spacer)
-        ribbon.addWidget(BrandWidget())
+        self.selection_filter_combo = QComboBox()
+        self.selection_filter_combo.addItems(["All", "Node", "Element"])
+        self.selection_filter_combo.setFixedWidth(98)
+        self.selection_filter_combo.setToolTip("Selection filter")
+        self.selection_filter_combo.currentTextChanged.connect(
+            self._set_selection_filter
+        )
+        selection_page = RibbonPage()
+        add_group(
+            selection_page,
+            "Select",
+            large=("select",),
+            small=("box", "polygon"),
+        )
+        add_group(
+            selection_page,
+            "Query",
+            small=("byid", "bytype"),
+            widgets=(self.selection_filter_combo,),
+        )
+        selection_page.finish()
+        self.ribbon_tabs.addTab(selection_page, "Selection")
+
+        self._ribbon_tab_indices = {
+            self.ribbon_tabs.tabText(index): index
+            for index in range(self.ribbon_tabs.count())
+        }
+
+        brand = BrandWidget()
+        brand.setMaximumWidth(185)
+        ribbon.addWidget(brand)
 
     def _build_status_bar(self) -> None:
         self.status_message = QLabel("Ready")
