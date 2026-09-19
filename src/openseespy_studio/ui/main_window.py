@@ -1550,6 +1550,7 @@ class MainWindow(QMainWindow):
 
         results = QTreeWidgetItem([f"Results / Jobs ({len(self._jobs)})"])
         results.setIcon(0, studio_icon("results"))
+        results.setData(0, Qt.UserRole, ("jobs_root", None))
         results.setExpanded(True)
         for job_id in sorted(self._jobs, reverse=True):
             job = self._jobs[job_id]
@@ -1582,6 +1583,7 @@ class MainWindow(QMainWindow):
         solver_output_tag: int | None = None
         solution_convergence_tag: int | None = None
         job_id: int | None = None
+        show_jobs_root = False
 
         for item in self.tree.selectedItems():
             payload = item.data(0, Qt.UserRole)
@@ -1629,6 +1631,8 @@ class MainWindow(QMainWindow):
                 solution_convergence_tag = int(tag)
             elif kind == "job":
                 job_id = int(tag)
+            elif kind == "jobs_root":
+                show_jobs_root = True
 
         self.selection.set_selection(nodes=nodes, elements=elements)
         if material_tag is not None:
@@ -1677,6 +1681,10 @@ class MainWindow(QMainWindow):
         elif job_id is not None:
             self.results_panel.show_jobs()
             self._select_job_result(job_id)
+        elif show_jobs_root:
+            self.results_panel.show_jobs()
+            self.results_dock.show()
+            self.results_dock.raise_()
 
     def _wire_selection(self) -> None:
         self.selection.changed.connect(self._selection_changed)
@@ -5397,6 +5405,7 @@ class MainWindow(QMainWindow):
         self._current_job_id = job.job_id
         self._analysis_stop_requested = False
         self.results_panel.add_or_update_job(job)
+        self.results_panel.show_jobs()
         self._refresh_tree()
 
         self._append_analysis_log(
