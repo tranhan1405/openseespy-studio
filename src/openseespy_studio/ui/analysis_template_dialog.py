@@ -253,6 +253,7 @@ class AnalysisTemplateDialog(QDialog):
             self._sync_custom_weight_fields
         )
         self.cyclic_custom.textChanged.connect(self._update_summary)
+        self._sync_custom_weight_fields()
         self._update_cyclic_preview()
         return page
 
