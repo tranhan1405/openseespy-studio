@@ -308,6 +308,62 @@ def section_contours(
     )
 
 
+def section_axis_inertias(
+    section: SectionData | None,
+    materials: dict[int, Any] | None = None,
+) -> tuple[float, float] | None:
+    """Return (Iy, Iz) for display/axis annotation when available."""
+    if section is None:
+        return None
+
+    if section.section_type == "Elastic":
+        try:
+            values = section.resolved_elastic_parameters(materials)
+        except ValueError:
+            values = dict(section.parameters)
+        try:
+            iy = float(values["Iy"])
+            iz = float(values["Iz"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if iy < 0.0 or iz < 0.0:
+            return None
+        return iy, iz
+
+    fibers = section.compiled_fibers()
+    if not fibers:
+        return None
+    total, (cy, cz) = section.fiber_area_and_centroid()
+    if total <= 0.0:
+        return None
+    iy = sum(
+        float(fiber.area) * (float(fiber.z) - float(cz)) ** 2
+        for fiber in fibers
+    )
+    iz = sum(
+        float(fiber.area) * (float(fiber.y) - float(cy)) ** 2
+        for fiber in fibers
+    )
+    return float(iy), float(iz)
+
+
+def section_axis_strength_labels(
+    section: SectionData | None,
+    materials: dict[int, Any] | None = None,
+) -> tuple[str, str]:
+    """Return human-readable local-y/local-z bending-axis labels."""
+    inertias = section_axis_inertias(section, materials)
+    if inertias is None:
+        return "y", "z"
+    iy, iz = inertias
+    scale = max(abs(iy), abs(iz), 1.0e-30)
+    if abs(iy - iz) <= 1.0e-6 * scale:
+        return "y · Iy", "z · Iz"
+    if iy > iz:
+        return "y · Iy strong", "z · Iz weak"
+    return "y · Iy weak", "z · Iz strong"
+
+
 def _vector_parts(raw: object, ndm: int) -> tuple[np.ndarray, np.ndarray, bool]:
     values = list(raw) if isinstance(raw, (list, tuple, np.ndarray)) else []
     if int(ndm) == 2:
