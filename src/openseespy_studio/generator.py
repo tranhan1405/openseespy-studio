@@ -6,7 +6,7 @@ import math
 from .beam_loads import resolve_self_weight_local
 from .units import UnitSystem
 from .model import StructuralModel
-from .project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SectionData, TimeSeriesData, TransformationData
+from .project import MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SectionData, TimeSeriesData, TransformationData
 
 
 @dataclass(slots=True)
@@ -160,30 +160,101 @@ def material_to_openseespy(
 ) -> str:
     p = material.parameters
     unit_system = UnitSystem.from_mapping(units)
+    stress = unit_system.stress_from_pa
 
     if material.material_type == "Elastic":
-        e = unit_system.stress_from_pa(p["E"])
-        return f"ops.uniaxialMaterial('Elastic', {material.tag}, {e:g})"
+        return f"ops.uniaxialMaterial('Elastic', {material.tag}, {stress(p['E']):g})"
+
+    if material.material_type == "Steel01":
+        return (
+            "ops.uniaxialMaterial('Steel01', "
+            f"{material.tag}, {stress(p['Fy']):g}, {stress(p['E0']):g}, "
+            f"{p['b']:g}, {p['a1']:g}, {p['a2']:g}, {p['a3']:g}, {p['a4']:g})"
+        )
 
     if material.material_type == "Steel02":
-        fy = unit_system.stress_from_pa(p["Fy"])
-        e0 = unit_system.stress_from_pa(p["E0"])
         return (
             "ops.uniaxialMaterial('Steel02', "
-            f"{material.tag}, {fy:g}, {e0:g}, {p['b']:g}, "
+            f"{material.tag}, {stress(p['Fy']):g}, {stress(p['E0']):g}, {p['b']:g}, "
             f"{p['R0']:g}, {p['cR1']:g}, {p['cR2']:g})"
         )
 
+    if material.material_type == "ReinforcingSteel":
+        return (
+            "ops.uniaxialMaterial('ReinforcingSteel', "
+            f"{material.tag}, {stress(p['fy']):g}, {stress(p['fu']):g}, "
+            f"{stress(p['Es']):g}, {stress(p['Esh']):g}, "
+            f"{p['eps_sh']:g}, {p['eps_ult']:g})"
+        )
+
+    if material.material_type == "Concrete01":
+        return (
+            "ops.uniaxialMaterial('Concrete01', "
+            f"{material.tag}, {stress(p['fpc']):g}, {p['epsc0']:g}, "
+            f"{stress(p['fpcu']):g}, {p['epsU']:g})"
+        )
+
     if material.material_type == "Concrete02":
-        fpc = unit_system.stress_from_pa(p["fpc"])
-        fpcu = unit_system.stress_from_pa(p["fpcu"])
-        ft = unit_system.stress_from_pa(p["ft"])
-        ets = unit_system.stress_from_pa(p["Ets"])
         return (
             "ops.uniaxialMaterial('Concrete02', "
-            f"{material.tag}, {fpc:g}, {p['epsc0']:g}, "
-            f"{fpcu:g}, {p['epsU']:g}, {p['lambda']:g}, "
-            f"{ft:g}, {ets:g})"
+            f"{material.tag}, {stress(p['fpc']):g}, {p['epsc0']:g}, "
+            f"{stress(p['fpcu']):g}, {p['epsU']:g}, {p['lambda']:g}, "
+            f"{stress(p['ft']):g}, {stress(p['Ets']):g})"
+        )
+
+    if material.material_type == "Concrete04":
+        return (
+            "ops.uniaxialMaterial('Concrete04', "
+            f"{material.tag}, {stress(p['fc']):g}, {p['epsc']:g}, "
+            f"{p['epscu']:g}, {stress(p['Ec']):g}, {stress(p['fct']):g}, "
+            f"{p['et']:g}, {p['beta']:g})"
+        )
+
+    if material.material_type == "Hysteretic":
+        args = [
+            p["s1p"], p["e1p"], p["s2p"], p["e2p"], p["s3p"], p["e3p"],
+            p["s1n"], p["e1n"], p["s2n"], p["e2n"], p["s3n"], p["e3n"],
+            p["pinchX"], p["pinchY"], p["damage1"], p["damage2"], p["beta"],
+        ]
+        return "ops.uniaxialMaterial('Hysteretic', " + str(material.tag) + ", " + ", ".join(f"{v:g}" for v in args) + ")"
+
+    if material.material_type == "Pinching4":
+        keys = MATERIAL_PARAMETER_ORDER["Pinching4"][:-1]
+        args = ", ".join(f"{p[key]:g}" for key in keys)
+        dmg_type = "cycle" if p["dmgType"] < 0.5 else "energy"
+        return f"ops.uniaxialMaterial('Pinching4', {material.tag}, {args}, {dmg_type!r})"
+
+    if material.material_type == "Bond_SP01":
+        return (
+            "ops.uniaxialMaterial('Bond_SP01', "
+            f"{material.tag}, {stress(p['Fy']):g}, {p['Sy']:g}, "
+            f"{stress(p['Fu']):g}, {p['Su']:g}, {p['b']:g}, {p['R']:g})"
+        )
+
+    if material.material_type == "ElasticPPGap":
+        damage = "damage" if p["damage"] >= 0.5 else "noDamage"
+        return (
+            "ops.uniaxialMaterial('ElasticPPGap', "
+            f"{material.tag}, {p['E']:g}, {p['Fy']:g}, {p['gap']:g}, "
+            f"{p['eta']:g}, {damage!r})"
+        )
+
+    if material.material_type == "FRPConfinedConcrete02":
+        common = (
+            f"ops.uniaxialMaterial('FRPConfinedConcrete02', {material.tag}, "
+            f"{stress(p['fc0']):g}, {stress(p['Ec']):g}, {p['ec0']:g}, "
+        )
+        if p["mode"] < 0.5:
+            return (
+                common
+                + f"'-JacketC', {p['tfrp']:g}, {stress(p['Efrp']):g}, "
+                + f"{p['erup']:g}, {p['R']:g}, {stress(p['ft']):g}, "
+                + f"{stress(p['Ets']):g}, 1)"
+            )
+        return (
+            common
+            + f"'-Ultimate', {stress(p['fcu']):g}, {p['ecu']:g}, "
+            + f"{stress(p['ft']):g}, {stress(p['Ets']):g}, 1)"
         )
 
     raise ValueError(f"Unsupported material type: {material.material_type}")

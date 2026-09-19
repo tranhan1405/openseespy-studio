@@ -13,39 +13,78 @@ from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 PROJECT_FORMAT = "openseespy-studio"
 PROJECT_FORMAT_VERSION = 24
 
+MATERIAL_CATEGORIES: dict[str, str] = {
+    "Elastic": "General",
+    "Steel01": "Steel",
+    "Steel02": "Steel",
+    "ReinforcingSteel": "Steel",
+    "Concrete01": "Concrete",
+    "Concrete02": "Concrete",
+    "Concrete04": "Concrete",
+    "Hysteretic": "Hysteretic / Connection",
+    "Pinching4": "Hysteretic / Connection",
+    "Bond_SP01": "Bond / Interface",
+    "ElasticPPGap": "Hysteretic / Connection",
+    "FRPConfinedConcrete02": "Concrete / FRP",
+}
+
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
+    "Steel01": ("Fy", "E0", "b", "a1", "a2", "a3", "a4"),
     "Steel02": ("Fy", "E0", "b", "R0", "cR1", "cR2"),
+    "ReinforcingSteel": ("fy", "fu", "Es", "Esh", "eps_sh", "eps_ult"),
+    "Concrete01": ("fpc", "epsc0", "fpcu", "epsU"),
     "Concrete02": ("fpc", "epsc0", "fpcu", "epsU", "lambda", "ft", "Ets"),
+    "Concrete04": ("fc", "epsc", "epscu", "Ec", "fct", "et", "beta"),
+    "Hysteretic": (
+        "s1p", "e1p", "s2p", "e2p", "s3p", "e3p",
+        "s1n", "e1n", "s2n", "e2n", "s3n", "e3n",
+        "pinchX", "pinchY", "damage1", "damage2", "beta",
+    ),
+    "Pinching4": (
+        "ePf1", "ePd1", "ePf2", "ePd2", "ePf3", "ePd3", "ePf4", "ePd4",
+        "eNf1", "eNd1", "eNf2", "eNd2", "eNf3", "eNd3", "eNf4", "eNd4",
+        "rDispP", "rForceP", "uForceP", "rDispN", "rForceN", "uForceN",
+        "gK1", "gK2", "gK3", "gK4", "gKLim",
+        "gD1", "gD2", "gD3", "gD4", "gDLim",
+        "gF1", "gF2", "gF3", "gF4", "gFLim", "gE", "dmgType",
+    ),
+    "Bond_SP01": ("Fy", "Sy", "Fu", "Su", "b", "R"),
+    "ElasticPPGap": ("E", "Fy", "gap", "eta", "damage"),
+    "FRPConfinedConcrete02": (
+        "fc0", "Ec", "ec0", "mode", "tfrp", "Efrp", "erup", "R",
+        "fcu", "ecu", "ft", "Ets",
+    ),
 }
 
 MATERIAL_ENGINEERING_DEFAULTS: dict[str, dict[str, float]] = {
-    "Elastic": {"poisson_ratio": 0.3, "density": 0.0},
-    "Steel02": {"poisson_ratio": 0.3, "density": 7850.0},
-    "Concrete02": {"poisson_ratio": 0.2, "density": 2400.0},
+    name: {
+        "poisson_ratio": 0.2 if "Concrete" in name else 0.3,
+        "density": 2400.0 if "Concrete" in name else 7850.0 if name in {"Steel01", "Steel02", "ReinforcingSteel"} else 0.0,
+    }
+    for name in MATERIAL_PARAMETER_ORDER
 }
 
 MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
-    "Elastic": {
-        "E": 2.0e11,
+    "Elastic": {"E": 2.0e11},
+    "Steel01": {"Fy": 3.55e8, "E0": 2.0e11, "b": 0.01, "a1": 0.0, "a2": 1.0, "a3": 0.0, "a4": 1.0},
+    "Steel02": {"Fy": 3.55e8, "E0": 2.0e11, "b": 0.01, "R0": 20.0, "cR1": 0.925, "cR2": 0.15},
+    "ReinforcingSteel": {"fy": 5.0e8, "fu": 6.5e8, "Es": 2.0e11, "Esh": 5.0e9, "eps_sh": 0.01, "eps_ult": 0.12},
+    "Concrete01": {"fpc": -30.0e6, "epsc0": -0.002, "fpcu": -6.0e6, "epsU": -0.006},
+    "Concrete02": {"fpc": -30.0e6, "epsc0": -0.002, "fpcu": -6.0e6, "epsU": -0.006, "lambda": 0.1, "ft": 3.0e6, "Ets": 2.0e8},
+    "Concrete04": {"fc": -30.0e6, "epsc": -0.002, "epscu": -0.006, "Ec": 3.0e10, "fct": 3.0e6, "et": 0.0002, "beta": 0.1},
+    "Hysteretic": {"s1p": 1.0, "e1p": 0.001, "s2p": 1.2, "e2p": 0.01, "s3p": 1.0, "e3p": 0.03, "s1n": -1.0, "e1n": -0.001, "s2n": -1.2, "e2n": -0.01, "s3n": -1.0, "e3n": -0.03, "pinchX": 0.5, "pinchY": 0.5, "damage1": 0.0, "damage2": 0.0, "beta": 0.0},
+    "Pinching4": {
+        "ePf1": 1.0, "ePd1": 0.001, "ePf2": 1.2, "ePd2": 0.01, "ePf3": 1.1, "ePd3": 0.02, "ePf4": 0.8, "ePd4": 0.04,
+        "eNf1": -1.0, "eNd1": -0.001, "eNf2": -1.2, "eNd2": -0.01, "eNf3": -1.1, "eNd3": -0.02, "eNf4": -0.8, "eNd4": -0.04,
+        "rDispP": 0.5, "rForceP": 0.25, "uForceP": 0.05, "rDispN": 0.5, "rForceN": 0.25, "uForceN": 0.05,
+        "gK1": 0.0, "gK2": 0.0, "gK3": 0.0, "gK4": 0.0, "gKLim": 0.0,
+        "gD1": 0.0, "gD2": 0.0, "gD3": 0.0, "gD4": 0.0, "gDLim": 0.0,
+        "gF1": 0.0, "gF2": 0.0, "gF3": 0.0, "gF4": 0.0, "gFLim": 0.0, "gE": 10.0, "dmgType": 0.0,
     },
-    "Steel02": {
-        "Fy": 3.55e8,
-        "E0": 2.0e11,
-        "b": 0.01,
-        "R0": 20.0,
-        "cR1": 0.925,
-        "cR2": 0.15,
-    },
-    "Concrete02": {
-        "fpc": -30.0e6,
-        "epsc0": -0.002,
-        "fpcu": -6.0e6,
-        "epsU": -0.006,
-        "lambda": 0.1,
-        "ft": 3.0e6,
-        "Ets": 2.0e8,
-    },
+    "Bond_SP01": {"Fy": 5.0e8, "Sy": 0.001, "Fu": 6.5e8, "Su": 0.01, "b": 0.4, "R": 0.8},
+    "ElasticPPGap": {"E": 1.0, "Fy": 1.0, "gap": 0.0, "eta": 0.0, "damage": 0.0},
+    "FRPConfinedConcrete02": {"fc0": -30.0e6, "Ec": 3.0e10, "ec0": -0.002, "mode": 0.0, "tfrp": 0.000334, "Efrp": 7.2e10, "erup": 0.015, "R": 0.2, "fcu": -45.0e6, "ecu": -0.015, "ft": 3.0e6, "Ets": 1.5e9},
 }
 
 
@@ -89,15 +128,21 @@ class MaterialData:
     def elastic_modulus(self) -> float:
         if self.material_type == "Elastic":
             return float(self.parameters["E"])
-        if self.material_type == "Steel02":
+        if self.material_type in {"Steel01", "Steel02"}:
             return float(self.parameters["E0"])
-        if self.material_type == "Concrete02":
+        if self.material_type == "ReinforcingSteel":
+            return float(self.parameters["Es"])
+        if self.material_type in {"Concrete01", "Concrete02"}:
             epsc0 = float(self.parameters["epsc0"])
             if abs(epsc0) <= 1.0e-16:
                 raise ValueError(
                     f"Concrete02 material {self.tag} has zero epsc0."
                 )
             return abs(2.0 * float(self.parameters["fpc"]) / epsc0)
+        if self.material_type == "Concrete04":
+            return float(self.parameters["Ec"])
+        if self.material_type == "FRPConfinedConcrete02":
+            return float(self.parameters["Ec"])
         raise ValueError(
             f"Material {self.tag} does not expose an elastic modulus."
         )

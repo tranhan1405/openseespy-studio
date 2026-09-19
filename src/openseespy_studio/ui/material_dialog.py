@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..project import (
+    MATERIAL_CATEGORIES,
     MATERIAL_DEFAULTS,
     MATERIAL_ENGINEERING_DEFAULTS,
     MATERIAL_PARAMETER_ORDER,
@@ -23,14 +24,21 @@ from ..project import (
 
 PA_PER_MPA = 1.0e6
 STRESS_PARAMETER_KEYS = {
-    "E",
-    "Fy",
-    "E0",
-    "fpc",
-    "fpcu",
-    "ft",
-    "Ets",
+    "E", "Fy", "E0", "fy", "fu", "Es", "Esh",
+    "fpc", "fpcu", "ft", "Ets", "fc", "Ec", "fct",
+    "Fu", "fc0", "Efrp", "fcu",
 }
+
+PARAMETER_LABELS = {
+    "mode": "FRP definition (0=JacketC, 1=Ultimate)",
+    "dmgType": "Damage type (0=cycle, 1=energy)",
+    "damage": "Gap damage (0=noDamage, 1=damage)",
+    "tfrp": "FRP thickness tfrp [model L]",
+    "R": "R / radius [model L]",
+    "Sy": "Yield slip Sy [model L]",
+    "Su": "Ultimate slip Su [model L]",
+}
+
 
 
 class MaterialDialog(QDialog):
@@ -38,7 +46,7 @@ class MaterialDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Material Editor")
         self.setModal(True)
-        self.resize(380, 420)
+        self.resize(500, 620)
 
         root = QVBoxLayout(self)
 
@@ -51,16 +59,24 @@ class MaterialDialog(QDialog):
         self.name.setText(material.name if material else f"Material {next_tag}")
 
         self.material_type = QComboBox()
-        self.material_type.addItems(sorted(MATERIAL_PARAMETER_ORDER))
+        ordered_types = sorted(
+            MATERIAL_PARAMETER_ORDER,
+            key=lambda name: (MATERIAL_CATEGORIES.get(name, ""), name),
+        )
+        for name in ordered_types:
+            category = MATERIAL_CATEGORIES.get(name, "General")
+            self.material_type.addItem(f"{category} · {name}", name)
         if material:
-            self.material_type.setCurrentText(material.material_type)
+            index = self.material_type.findData(material.material_type)
+            if index >= 0:
+                self.material_type.setCurrentIndex(index)
 
         form.addRow("Tag:", self.tag)
         form.addRow("Name:", self.name)
         form.addRow("Type:", self.material_type)
 
         engineering_defaults = MATERIAL_ENGINEERING_DEFAULTS[
-            material.material_type if material else self.material_type.currentText()
+            material.material_type if material else self.material_type.currentData()
         ]
         self.poisson_ratio = QDoubleSpinBox()
         self.poisson_ratio.setDecimals(6)
@@ -101,8 +117,12 @@ class MaterialDialog(QDialog):
 
         self._parameter_spins: dict[str, QDoubleSpinBox] = {}
         self._initial_material = material
-        self.material_type.currentTextChanged.connect(self._material_type_changed)
-        self._rebuild_parameters(self.material_type.currentText())
+        self.material_type.currentIndexChanged.connect(
+            lambda _index: self._material_type_changed(
+                str(self.material_type.currentData())
+            )
+        )
+        self._rebuild_parameters(str(self.material_type.currentData()))
 
     def _material_type_changed(self, material_type: str) -> None:
         self._rebuild_parameters(material_type)
@@ -153,12 +173,13 @@ class MaterialDialog(QDialog):
                 )
             spin.setValue(display_value)
 
-            label = f"{key} [MPa]:" if is_stress else f"{key}:"
+            base_label = PARAMETER_LABELS.get(key, key)
+            label = f"{base_label} [MPa]:" if is_stress else f"{base_label}:"
             self.parameter_form.addRow(label, spin)
             self._parameter_spins[key] = spin
 
     def material_data(self) -> MaterialData:
-        material_type = self.material_type.currentText()
+        material_type = str(self.material_type.currentData())
         return MaterialData(
             tag=self.tag.value(),
             name=self.name.text().strip() or f"Material {self.tag.value()}",
