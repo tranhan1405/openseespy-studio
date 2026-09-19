@@ -1641,6 +1641,42 @@ class MainWindow(QMainWindow):
         brand.setMaximumWidth(185)
         ribbon.addWidget(brand)
 
+    def _show_results_manager(self) -> None:
+        self.results_panel.show_jobs()
+        if not self.results_dock.isVisible():
+            self.results_dock.show()
+        self.results_dock.raise_()
+
+    def _show_solver_output(self) -> None:
+        self.console_dock.show()
+        self.console_dock.raise_()
+
+    def _set_ribbon_tab(self, name: str) -> None:
+        tabs = getattr(self, "ribbon_tabs", None)
+        indices = getattr(self, "_ribbon_tab_indices", {})
+        if tabs is None:
+            return
+        index = indices.get(str(name))
+        if index is not None and tabs.currentIndex() != index:
+            tabs.setCurrentIndex(index)
+
+    def _sync_ribbon_context(self, kinds: set[str]) -> None:
+        result_kinds = {
+            "jobs_root",
+            "job",
+            "job_plot",
+            "solution_root",
+            "solution_result",
+            "solution_information",
+            "solution_convergence",
+            "solver_output",
+        }
+        if kinds & result_kinds:
+            self._set_ribbon_tab("Result")
+            return
+        if kinds & {"analysis", "analysis_settings", "recorder"}:
+            self._set_ribbon_tab("Analysis")
+
     def _build_status_bar(self) -> None:
         self.status_message = QLabel("Ready")
         self.status_units = QLabel("Units: m, kN, s · mass t")
@@ -2331,6 +2367,8 @@ class MainWindow(QMainWindow):
                     job_plot_ref = None
             elif kind == "jobs_root":
                 show_jobs_root = True
+
+        self._sync_ribbon_context(selected_payload_kinds)
 
         if (
             solution_result_tag is None
