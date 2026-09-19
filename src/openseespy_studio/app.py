@@ -4,12 +4,14 @@ import sys
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from .ui.icons import app_icon
 from .ui.main_window import MainWindow
 
 
 def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("OpenSeesPy Studio")
+    app.setWindowIcon(app_icon())
     app.setStyle("Fusion")
     try:
         window = MainWindow()
