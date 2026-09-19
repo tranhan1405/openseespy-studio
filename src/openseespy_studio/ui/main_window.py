@@ -1577,6 +1577,11 @@ class MainWindow(QMainWindow):
         element_load_tag: int | None = None
         analysis_tag: int | None = None
         recorder_tag: int | None = None
+        solution_result_tag: int | None = None
+        solution_information_tag: int | None = None
+        solver_output_tag: int | None = None
+        solution_convergence_tag: int | None = None
+        job_id: int | None = None
 
         for item in self.tree.selectedItems():
             payload = item.data(0, Qt.UserRole)
@@ -1614,6 +1619,16 @@ class MainWindow(QMainWindow):
                 analysis_tag = int(tag)
             elif kind == "recorder":
                 recorder_tag = int(tag)
+            elif kind == "solution_result":
+                solution_result_tag = int(tag)
+            elif kind == "solution_information":
+                solution_information_tag = int(tag)
+            elif kind == "solver_output":
+                solver_output_tag = int(tag)
+            elif kind == "solution_convergence":
+                solution_convergence_tag = int(tag)
+            elif kind == "job":
+                job_id = int(tag)
 
         self.selection.set_selection(nodes=nodes, elements=elements)
         if material_tag is not None:
@@ -1638,6 +1653,30 @@ class MainWindow(QMainWindow):
             self._show_analysis_properties(analysis_tag)
         elif recorder_tag is not None:
             self._show_recorder_properties(recorder_tag)
+        elif solution_result_tag is not None:
+            self._show_solution_result_properties(solution_result_tag)
+            self._evaluate_solution_result(solution_result_tag)
+        elif solution_convergence_tag is not None:
+            self._show_solution_information(
+                solution_convergence_tag,
+                "Convergence Monitor",
+            )
+            self._show_solution_convergence(solution_convergence_tag)
+        elif solver_output_tag is not None:
+            self._show_solution_information(
+                solver_output_tag,
+                "Solver Output",
+            )
+            self.console_dock.show()
+            self.console_dock.raise_()
+        elif solution_information_tag is not None:
+            self._show_solution_information(
+                solution_information_tag,
+                "Solution Information",
+            )
+        elif job_id is not None:
+            self.results_panel.show_jobs()
+            self._select_job_result(job_id)
 
     def _wire_selection(self) -> None:
         self.selection.changed.connect(self._selection_changed)
