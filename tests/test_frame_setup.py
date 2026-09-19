@@ -142,3 +142,61 @@ def test_disabled_member_family_does_not_create_unused_transformation():
     assert spec.column_transf_tag is None
     assert spec.beam_transf_tag == created[0].tag
     assert created[0].name == BEAM_TRANSFORMATION_NAME
+
+
+
+def test_planar_2d_frame_generator_builds_one_xz_plane_and_locks_out_of_plane():
+    project = ProjectDatabase(model=StructuralModel())
+    spec = FrameGridSpec(
+        nx=2,
+        ny=4,
+        nz=2,
+        dx=5.0,
+        dz=3.0,
+        planar_2d=True,
+        base_support="Fixed",
+    )
+
+    prepare_frame_grid(project, spec)
+    generate_frame_grid(project.model, spec)
+
+    assert len(project.model.nodes) == 9
+    assert len(project.model.elements) == 10
+    assert all(
+        abs(node.xyz[1]) <= 1.0e-15
+        for node in project.model.nodes.values()
+    )
+
+    base = [
+        node
+        for node in project.model.nodes.values()
+        if abs(node.xyz[2]) <= 1.0e-15
+    ]
+    upper = [
+        node
+        for node in project.model.nodes.values()
+        if node.xyz[2] > 0.0
+    ]
+    assert all(node.fixity == (1, 1, 1, 1, 1, 1) for node in base)
+    assert all(node.fixity == (0, 1, 0, 1, 0, 1) for node in upper)
+    assert all(element.group != "beam-y" for element in project.model.elements.values())
+
+
+def test_planar_2d_pinned_base_keeps_in_plane_rotation_free():
+    project = ProjectDatabase(model=StructuralModel())
+    spec = FrameGridSpec(
+        nx=1,
+        nz=1,
+        planar_2d=True,
+        base_support="Pinned",
+    )
+
+    prepare_frame_grid(project, spec)
+    generate_frame_grid(project.model, spec)
+
+    base = [
+        node
+        for node in project.model.nodes.values()
+        if abs(node.xyz[2]) <= 1.0e-15
+    ]
+    assert all(node.fixity == (1, 1, 1, 1, 0, 1) for node in base)
