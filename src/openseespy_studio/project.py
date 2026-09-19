@@ -11,7 +11,7 @@ from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 22
+PROJECT_FORMAT_VERSION = 23
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -1112,6 +1112,73 @@ class ElementLoadData:
 
 
 @dataclass
+class MassSourceData:
+    tag: int
+    name: str
+    include_self_mass: bool = True
+    load_factors: dict[int, float] = field(default_factory=dict)
+    gravity_axis: int = 3
+    directions: tuple[int, ...] = (1, 2)
+
+    def __post_init__(self) -> None:
+        self.tag = int(self.tag)
+        self.name = str(self.name).strip() or f"Mass Source {self.tag}"
+        self.include_self_mass = bool(self.include_self_mass)
+        self.load_factors = {
+            int(tag): float(factor)
+            for tag, factor in dict(self.load_factors).items()
+            if float(factor) > 0.0
+        }
+        self.gravity_axis = int(self.gravity_axis)
+        self.directions = tuple(
+            sorted({int(dof) for dof in self.directions})
+        )
+        if self.tag <= 0:
+            raise ValueError("Mass source tag must be positive.")
+        if self.gravity_axis not in (1, 2, 3):
+            raise ValueError("Mass source gravity axis must be 1, 2, or 3.")
+        if not self.directions or any(
+            dof not in (1, 2, 3) for dof in self.directions
+        ):
+            raise ValueError(
+                "Mass source directions must contain translational DOFs 1..3."
+            )
+        if any(factor < 0.0 for factor in self.load_factors.values()):
+            raise ValueError("Mass source load factors cannot be negative.")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "include_self_mass": self.include_self_mass,
+            "load_factors": {
+                str(tag): factor
+                for tag, factor in sorted(self.load_factors.items())
+            },
+            "gravity_axis": self.gravity_axis,
+            "directions": list(self.directions),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MassSourceData":
+        return cls(
+            tag=int(data["tag"]),
+            name=str(data.get("name", f"Mass Source {data['tag']}")),
+            include_self_mass=bool(data.get("include_self_mass", True)),
+            load_factors={
+                int(tag): float(factor)
+                for tag, factor in dict(
+                    data.get("load_factors", {})
+                ).items()
+            },
+            gravity_axis=int(data.get("gravity_axis", 3)),
+            directions=tuple(
+                int(dof) for dof in data.get("directions", (1, 2))
+            ),
+        )
+
+
+@dataclass
 class AnalysisSettingsData:
     tag: int
     name: str
@@ -1468,6 +1535,7 @@ class ProjectDatabase:
         default_factory=dict
     )
     element_loads: dict[int, ElementLoadData] = field(default_factory=dict)
+    mass_sources: dict[int, MassSourceData] = field(default_factory=dict)
     analyses: dict[int, AnalysisSettingsData] = field(default_factory=dict)
     recorders: dict[int, RecorderData] = field(default_factory=dict)
     solution_results: dict[int, SolutionResultData] = field(
@@ -1895,6 +1963,10 @@ class ProjectDatabase:
         self.load_patterns.pop(original_tag)
         self.load_patterns[pattern.tag] = pattern
         if pattern.tag != original_tag:
+            for source in self.mass_sources.values():
+                if original_tag in source.load_factors:
+                    factor = source.load_factors.pop(original_tag)
+                    source.load_factors[pattern.tag] = factor
             for load in self.nodal_loads.values():
                 if load.pattern_tag == original_tag:
                     load.pattern_tag = pattern.tag
@@ -1919,6 +1991,62 @@ class ProjectDatabase:
         ):
             if displacement.pattern_tag == tag:
                 self.prescribed_displacements.pop(displacement_tag)
+        for source in self.mass_sources.values():
+            source.load_factors.pop(tag, None)
+
+    def next_mass_source_tag(self) -> int:
+        return max(self.mass_sources, default=0) + 1
+
+    def _validate_mass_source(self, source: MassSourceData) -> None:
+        missing = sorted(
+            tag
+            for tag in source.load_factors
+            if tag not in self.load_patterns
+        )
+        if missing:
+            raise ValueError(
+                "Mass source references missing load pattern tag(s): "
+                + ", ".join(map(str, missing))
+            )
+        invalid = sorted(
+            tag
+            for tag in source.load_factors
+            if self.load_patterns[tag].pattern_type != "Plain"
+        )
+        if invalid:
+            raise ValueError(
+                "Mass source can only reference Plain load patterns: "
+                + ", ".join(map(str, invalid))
+            )
+
+    def add_mass_source(self, source: MassSourceData) -> None:
+        if source.tag in self.mass_sources:
+            raise ValueError(
+                f"Mass source tag {source.tag} already exists."
+            )
+        self._validate_mass_source(source)
+        self.mass_sources[source.tag] = source
+
+    def update_mass_source(
+        self,
+        original_tag: int,
+        source: MassSourceData,
+    ) -> None:
+        original_tag = int(original_tag)
+        if original_tag not in self.mass_sources:
+            raise ValueError(
+                f"Mass source tag {original_tag} does not exist."
+            )
+        if source.tag != original_tag and source.tag in self.mass_sources:
+            raise ValueError(
+                f"Mass source tag {source.tag} already exists."
+            )
+        self._validate_mass_source(source)
+        self.mass_sources.pop(original_tag)
+        self.mass_sources[source.tag] = source
+
+    def remove_mass_source(self, tag: int) -> None:
+        self.mass_sources.pop(int(tag), None)
 
     def next_nodal_load_tag(self) -> int:
         return max(self.nodal_loads, default=0) + 1
@@ -2391,6 +2519,10 @@ class ProjectDatabase:
                 self.element_loads[tag].to_dict()
                 for tag in sorted(self.element_loads)
             ],
+            "mass_sources": [
+                self.mass_sources[tag].to_dict()
+                for tag in sorted(self.mass_sources)
+            ],
             "analyses": [
                 self.analyses[tag].to_dict()
                 for tag in sorted(self.analyses)
@@ -2603,6 +2735,19 @@ class ProjectDatabase:
         return result
 
     @staticmethod
+    def _load_mass_sources(raw: Any) -> dict[int, MassSourceData]:
+        result: dict[int, MassSourceData] = {}
+        if isinstance(raw, list):
+            for item in raw:
+                source = MassSourceData.from_dict(dict(item))
+                if source.tag in result:
+                    raise ValueError(
+                        f"Duplicate mass source tag {source.tag}."
+                    )
+                result[source.tag] = source
+        return result
+
+    @staticmethod
     def _load_analyses(raw: Any) -> dict[int, AnalysisSettingsData]:
         result: dict[int, AnalysisSettingsData] = {}
         if isinstance(raw,list):
@@ -2677,6 +2822,9 @@ class ProjectDatabase:
             ),
             element_loads=cls._load_element_loads(
                 data.get("element_loads", [])
+            ),
+            mass_sources=cls._load_mass_sources(
+                data.get("mass_sources", [])
             ),
             analyses=cls._load_analyses(data.get("analyses", [])),
             recorders=cls._load_recorders(data.get("recorders", [])),
