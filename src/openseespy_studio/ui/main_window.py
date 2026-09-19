@@ -2203,6 +2203,9 @@ class MainWindow(QMainWindow):
         before = self.project.to_dict()
         try:
             spec = dialog.data()
+            for section in dialog.new_sections():
+                self.project.add_section(section)
+
             if spec.replace_geometry:
                 self.selection.clear()
                 self._reset_runtime_results()

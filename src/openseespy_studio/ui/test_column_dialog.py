@@ -12,15 +12,17 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QPushButton,
     QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from ..project import ProjectDatabase
+from ..project import ProjectDatabase, SectionData
 from ..test_column import TestColumnSpec
 from ..units import UnitSystem
+from .section_dialog import SectionDialog
 
 
 def _double(
@@ -55,6 +57,7 @@ class TestColumnWizard(QDialog):
         super().__init__(parent)
         self.project = project
         self.units = UnitSystem.from_mapping(project.units)
+        self._pending_sections: dict[int, SectionData] = {}
         self.setWindowTitle("Quick 1D Column / Test Specimen")
         self.setModal(True)
         self.setSizeGripEnabled(True)
@@ -102,13 +105,20 @@ class TestColumnWizard(QDialog):
         self.planar.setChecked(True)
 
         self.section = QComboBox()
-        self.section.addItem("Unassigned · assign later", None)
-        for tag in sorted(project.sections):
-            item = project.sections[tag]
-            self.section.addItem(
-                f"{tag} - {item.name} ({item.section_type})",
-                tag,
-            )
+        self._refresh_section_combo()
+
+        self.new_section = QPushButton("New Section...")
+        self.new_section.setToolTip(
+            "Create a section without leaving the 1D Column wizard"
+        )
+        self.new_section.clicked.connect(self._create_section)
+
+        section_widget = QWidget()
+        section_row = QHBoxLayout(section_widget)
+        section_row.setContentsMargins(0, 0, 0, 0)
+        section_row.setSpacing(6)
+        section_row.addWidget(self.section, 1)
+        section_row.addWidget(self.new_section)
 
         self.element_type = QComboBox()
         self.element_type.addItems(
@@ -143,7 +153,7 @@ class TestColumnWizard(QDialog):
         geometry.addRow("Column axis:", self.axis)
         geometry.addRow("Lateral/test direction:", self.lateral)
         geometry.addRow("", self.planar)
-        geometry.addRow("Section:", self.section)
+        geometry.addRow("Section:", section_widget)
         geometry.addRow("Element formulation:", self.element_type)
         geometry.addRow("Beam integration:", self.integration)
         geometry.addRow("Integration points:", self.integration_points)
@@ -275,6 +285,76 @@ class TestColumnWizard(QDialog):
         self._sync_optional_controls()
         self._update_preview()
 
+    def _refresh_section_combo(
+        self,
+        selected_tag: int | None = None,
+    ) -> None:
+        current = (
+            selected_tag
+            if selected_tag is not None
+            else self.section.currentData()
+            if hasattr(self, "section")
+            else None
+        )
+        self.section.clear()
+        self.section.addItem("Unassigned · assign later", None)
+
+        combined = dict(self.project.sections)
+        combined.update(self._pending_sections)
+        for tag in sorted(combined):
+            item = combined[tag]
+            suffix = (
+                " · new"
+                if tag in self._pending_sections
+                else ""
+            )
+            self.section.addItem(
+                f"{tag} - {item.name} ({item.section_type}){suffix}",
+                tag,
+            )
+
+        if current is not None:
+            index = self.section.findData(int(current))
+            if index >= 0:
+                self.section.setCurrentIndex(index)
+
+    def _next_section_tag(self) -> int:
+        used = set(self.project.sections) | set(self._pending_sections)
+        return max(used, default=0) + 1
+
+    def _create_section(self) -> None:
+        dialog = SectionDialog(
+            self.project.materials,
+            next_tag=self._next_section_tag(),
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            section = dialog.section_data()
+            if section.tag in self.project.sections:
+                raise ValueError(
+                    f"Section tag {section.tag} already exists in the project."
+                )
+            if section.tag in self._pending_sections:
+                raise ValueError(
+                    f"Section tag {section.tag} is already staged in this wizard."
+                )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Section Editor", str(exc))
+            return
+
+        self._pending_sections[section.tag] = section
+        self._refresh_section_combo(section.tag)
+        self._update_preview()
+
+    def new_sections(self) -> list[SectionData]:
+        return [
+            SectionData.from_dict(self._pending_sections[tag].to_dict())
+            for tag in sorted(self._pending_sections)
+        ]
+
     def _apply_preset(self, preset: str) -> None:
         self.use_axial.setChecked(False)
         self.use_lateral.setChecked(False)
@@ -349,11 +429,25 @@ class TestColumnWizard(QDialog):
             options.append("prescribed displacement")
         if self.use_mass.isChecked():
             options.append("top mass")
+        section_tag = self.section.currentData()
+        section_note = (
+            "section unassigned"
+            if section_tag is None
+            else (
+                f"section {int(section_tag)}"
+                + (
+                    " (new)"
+                    if int(section_tag) in self._pending_sections
+                    else ""
+                )
+            )
+        )
         self.preview.setText(
             f"Preview: 1D {axis}-axis column · {self.column_height.value():g} "
             f"{self.units.length} · {self.elements.value()} element(s) · "
             f"lateral {lateral} · "
             f"{'planar' if self.planar.isChecked() else '3D'} · "
+            f"{section_note} · "
             + (", ".join(options) if options else "geometry only")
         )
 
