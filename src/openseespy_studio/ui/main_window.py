@@ -6085,14 +6085,24 @@ class MainWindow(QMainWindow):
         if connection is None:
             return
 
+        from ..material_chain import describe_material_chain
+
         dof_labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")
         material_text = []
         for dof in sorted(connection.materials_by_dof):
             material_tag = connection.materials_by_dof[dof]
             material = self.project.materials.get(material_tag)
             name = material.name if material is not None else "missing"
+            chain = describe_material_chain(
+                material_tag,
+                self.project.materials,
+            )
+            chain_text = " → ".join(
+                item.material_type for item in chain
+            )
+            suffix = f" [{chain_text}]" if len(chain) > 1 else ""
             material_text.append(
-                f"{dof_labels[dof - 1]} → {material_tag} - {name}"
+                f"{dof_labels[dof - 1]} → {material_tag} - {name}{suffix}"
             )
 
         rows: list[tuple[str, object]] = [
