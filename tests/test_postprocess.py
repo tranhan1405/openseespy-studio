@@ -2,12 +2,16 @@ import math
 
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.postprocess import (
+    classify_fiber_state,
     component_end_resultants,
+    enrich_fiber_state_results,
     enrich_member_force_results,
     equilibrium_component_samples,
     fiber_response_element_tags,
     fiber_response_range,
     fiber_response_sections,
+    fiber_state_element_tags,
+    fiber_state_sections,
     local_end_actions,
     member_end_resultants,
     nodal_result_scalar,
@@ -18,6 +22,7 @@ from openseespy_studio.postprocess import (
 )
 from openseespy_studio.project import (
     ElementLoadData,
+    MaterialData,
     SectionData,
     TransformationData,
 )
@@ -226,6 +231,129 @@ def test_fiber_response_range_ignores_missing_values_and_validates_quantity():
         assert "Unsupported fiber-response quantity" in str(exc)
     else:
         raise AssertionError("Expected unsupported fiber quantity to fail")
+
+
+def test_steel02_fiber_state_uses_yield_strain_ratio():
+    steel = MaterialData(
+        2,
+        "Steel",
+        "Steel02",
+        parameters={
+            "Fy": 400.0e6,
+            "E0": 200.0e9,
+            "b": 0.01,
+            "R0": 20.0,
+            "cR1": 0.925,
+            "cR2": 0.15,
+        },
+    )
+    materials = {2: steel}
+
+    elastic = classify_fiber_state(
+        {"material_tag": 2, "strain": 0.0010, "stress": 200.0e6},
+        materials,
+    )
+    near = classify_fiber_state(
+        {"material_tag": 2, "strain": 0.0018, "stress": 350.0e6},
+        materials,
+    )
+    yielding = classify_fiber_state(
+        {"material_tag": 2, "strain": 0.0022, "stress": 402.0e6},
+        materials,
+    )
+    plastic = classify_fiber_state(
+        {"material_tag": 2, "strain": 0.0040, "stress": 410.0e6},
+        materials,
+    )
+
+    assert elastic["severity"] == 0
+    assert near["severity"] == 1
+    assert yielding["severity"] == 2
+    assert plastic["severity"] == 3
+    assert math.isclose(yielding["yield_strain"], 0.002)
+
+
+def test_concrete02_fiber_state_tracks_cracking_softening_and_crushing():
+    concrete = MaterialData(
+        3,
+        "Concrete",
+        "Concrete02",
+    )
+    materials = {3: concrete}
+
+    cracked = classify_fiber_state(
+        {"material_tag": 3, "strain": 0.00015, "stress": 1.0e6},
+        materials,
+    )
+    nonlinear = classify_fiber_state(
+        {"material_tag": 3, "strain": -0.0017, "stress": -28.0e6},
+        materials,
+    )
+    softening = classify_fiber_state(
+        {"material_tag": 3, "strain": -0.0030, "stress": -20.0e6},
+        materials,
+    )
+    crushing = classify_fiber_state(
+        {"material_tag": 3, "strain": -0.0065, "stress": -5.0e6},
+        materials,
+    )
+
+    assert cracked["severity"] == 1
+    assert nonlinear["severity"] == 1
+    assert softening["severity"] == 2
+    assert crushing["severity"] == 3
+
+
+def test_fiber_state_enrichment_summarizes_hinge_locations():
+    materials = {
+        2: MaterialData(2, "Steel", "Steel02"),
+    }
+    result = {
+        "final": {
+            "element_fiber_responses": {
+                "10": {
+                    "sections": [
+                        {
+                            "number": 1,
+                            "location": 0.0,
+                            "fibers": [
+                                {
+                                    "material_tag": 2,
+                                    "strain": 0.001,
+                                    "stress": 200.0e6,
+                                    "y": -0.1,
+                                    "z": 0.0,
+                                }
+                            ],
+                        },
+                        {
+                            "number": 2,
+                            "location": 1.5,
+                            "fibers": [
+                                {
+                                    "material_tag": 2,
+                                    "strain": 0.003,
+                                    "stress": 360.0e6,
+                                    "y": 0.1,
+                                    "z": 0.0,
+                                }
+                            ],
+                        },
+                    ]
+                }
+            }
+        }
+    }
+
+    enriched = enrich_fiber_state_results(result, materials)
+
+    assert fiber_state_element_tags(enriched) == [10]
+    sections = fiber_state_sections(enriched, 10)
+    assert [row["severity"] for row in sections] == [0, 2]
+    summary = enriched["final"]["fiber_state_summary"]["10"]
+    assert summary["severity"] == 2
+    assert summary["hinge_count"] == 1
+    assert sections[1]["controlling_fiber"]["material_tag"] == 2
 
 def _local_force_vector():
     return [
