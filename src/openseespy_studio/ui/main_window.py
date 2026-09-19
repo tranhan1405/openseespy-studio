@@ -57,6 +57,7 @@ from ..live_convergence import parse_opensees_convergence_line
 from ..model import StructuralModel, classify_fixity
 from ..mass_source import apply_mass_source, evaluate_mass_source
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
+from ..test_column import build_test_column
 from ..result_catalog import (
     convergence_result_label,
     result_choices_for_analysis,
@@ -87,6 +88,7 @@ from .model_check_dialog import ModelCheckDialog
 from .recorder_dialog import RecorderDialog
 from .section_dialog import SectionDialog
 from .transformation_dialog import TransformationDialog
+from .test_column_dialog import TestColumnWizard
 from .icons import studio_icon
 from .results_panel import ResultsPanel
 from .restraint_dialog import RestraintDialog
@@ -1394,6 +1396,13 @@ class MainWindow(QMainWindow):
         self._make_action("frame", "Frame", "element", self._create_element, "Create frame element")
         self._make_action("grid", "Grid", "grid", self._show_frame_grid, "Create frame grid")
         self._make_action(
+            "column_1d",
+            "1D Column",
+            "element",
+            self._show_test_column_wizard,
+            "Quick-create a standalone column / experimental test specimen",
+        )
+        self._make_action(
             "frame_2d",
             "2D Frame",
             "grid",
@@ -1615,8 +1624,8 @@ class MainWindow(QMainWindow):
         menus["Model"].addAction(self.actions["element_formulation"])
         menus["Geometry"].addActions([
             self.actions["node"], self.actions["line"], self.actions["frame"],
-            self.actions["grid"], self.actions["frame_2d"],
-            self.actions["extrude"],
+            self.actions["column_1d"], self.actions["grid"],
+            self.actions["frame_2d"], self.actions["extrude"],
         ])
         menus["View"].addActions([
             self.actions["xy"], self.actions["yz"], self.actions["xz"], self.actions["iso"],
@@ -1805,7 +1814,14 @@ class MainWindow(QMainWindow):
             home,
             "Geometry",
             large=("grid",),
-            small=("frame_2d", "node", "line", "frame", "extrude"),
+            small=(
+                "column_1d",
+                "frame_2d",
+                "node",
+                "line",
+                "frame",
+                "extrude",
+            ),
         )
         add_group(
             home,
@@ -2175,6 +2191,96 @@ class MainWindow(QMainWindow):
         self.undo_stack.setClean()
         self._set_dirty(False)
         self._refresh_all("New empty project")
+
+    def _show_test_column_wizard(self) -> None:
+        dialog = TestColumnWizard(
+            self.project,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            spec = dialog.data()
+            if spec.replace_geometry:
+                # A standalone specimen must not inherit model-linked objects
+                # from an older geometry that happens to reuse the same tags.
+                self.selection.clear()
+                self.project.selection_sets.clear()
+                self.project.constraints.clear()
+                self.project.connections.clear()
+                self.project.time_series.clear()
+                self.project.load_patterns.clear()
+                self.project.nodal_loads.clear()
+                self.project.prescribed_displacements.clear()
+                self.project.element_loads.clear()
+                self.project.mass_sources.clear()
+                self.project.analyses.clear()
+                self.project.recorders.clear()
+                self.project.solution_results.clear()
+                self.project.active_analysis_tag = None
+                self._reset_runtime_results()
+
+            result = build_test_column(
+                self.project,
+                spec,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "Quick 1D Column",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+
+        self.model = self.project.model
+        extras = []
+        if result.axial_pattern_tag is not None:
+            extras.append(f"axial pattern {result.axial_pattern_tag}")
+        if result.lateral_pattern_tag is not None:
+            extras.append(
+                f"lateral pattern {result.lateral_pattern_tag}"
+            )
+        if result.prescribed_pattern_tag is not None:
+            extras.append(
+                f"prescribed-displacement pattern "
+                f"{result.prescribed_pattern_tag}"
+            )
+        if spec.top_mass > 0.0:
+            extras.append("top mass")
+
+        message = (
+            f"Created 1D test column · {len(result.node_tags)} nodes · "
+            f"{len(result.element_tags)} element(s) · "
+            f"top node {result.top_node}"
+        )
+        if extras:
+            message += " · " + ", ".join(extras)
+        if result.created_transformation:
+            message += (
+                f" · created transformation {result.transformation_tag}"
+            )
+
+        self._refresh_all(message)
+        self.selection.set_selection(nodes={result.top_node})
+        self._record_project_change(
+            "Create 1D test column specimen",
+            before,
+        )
+
+        plane = {int(spec.axis), int(spec.lateral_direction)}
+        if plane == {1, 2}:
+            self.viewport.set_view("xy")
+        elif plane == {1, 3}:
+            self.viewport.set_view("xz")
+        elif plane == {2, 3}:
+            self.viewport.set_view("yz")
+        else:
+            self.viewport.set_view("iso")
 
     def _open_frame_grid(self, *, planar_2d: bool) -> None:
         self.frame_grid_panel.set_planar_2d(planar_2d)
@@ -7424,6 +7530,8 @@ class MainWindow(QMainWindow):
             element_action = menu.addAction("New Element...")
             element_action.triggered.connect(self._create_element)
             menu.addSeparator()
+            quick_column = menu.addAction("Quick 1D Column / Test Specimen...")
+            quick_column.triggered.connect(self._show_test_column_wizard)
             quick_2d = menu.addAction("Quick 2D Frame...")
             quick_2d.triggered.connect(self._show_frame_grid_2d)
             grid_action = menu.addAction("Create 3D / Frame Grid...")
@@ -7449,6 +7557,10 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "frame_grids_root":
+            quick_column = menu.addAction(
+                "Quick 1D Column / Test Specimen..."
+            )
+            quick_column.triggered.connect(self._show_test_column_wizard)
             quick_2d = menu.addAction("Quick 2D Frame...")
             quick_2d.triggered.connect(self._show_frame_grid_2d)
             create = menu.addAction("Create / Edit Frame Grid...")
