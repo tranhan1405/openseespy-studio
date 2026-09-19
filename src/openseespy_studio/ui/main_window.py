@@ -5020,6 +5020,29 @@ class MainWindow(QMainWindow):
                 f"→ Step {step}/{total} · trying fallback {algorithm}"
             )
 
+        if event == "cutback":
+            return (
+                f"↘ Step {step}/{total} · CUTBACK "
+                f"{float(payload.get('old_size', 0.0) or 0.0):.6g} → "
+                f"{float(payload.get('new_size', 0.0) or 0.0):.6g} "
+                f"· remaining={float(payload.get('remaining', 0.0) or 0.0):.6g}"
+            )
+
+        if event == "grow":
+            return (
+                f"↗ Step {step}/{total} · GROW "
+                f"{float(payload.get('old_size', 0.0) or 0.0):.6g} → "
+                f"{float(payload.get('new_size', 0.0) or 0.0):.6g}"
+            )
+
+        if event == "adaptive_substep":
+            return (
+                f"· Step {step}/{total} · substep accepted "
+                f"{float(payload.get('accepted_increment', 0.0) or 0.0):.6g} "
+                f"· remaining={float(payload.get('remaining', 0.0) or 0.0):.6g} "
+                f"· next={float(payload.get('next_size', 0.0) or 0.0):.6g}"
+            )
+
         if event == "recovered":
             norm_text = (
                 f"{float(norm):.3e}"
@@ -5164,6 +5187,43 @@ class MainWindow(QMainWindow):
                 self.results_panel.begin_live_convergence_attempt(
                     str(payload.get("algorithm", "") or "")
                 )
+        elif event == "cutback":
+            old_size = float(payload.get("old_size", 0.0) or 0.0)
+            new_size = float(payload.get("new_size", 0.0) or 0.0)
+            job.message = (
+                f"CUTBACK step {payload.get('step')}: "
+                f"{old_size:.6g} → {new_size:.6g}"
+            )
+            self._live_convergence_context["algorithm"] = str(
+                payload.get("algorithm", "") or ""
+            )
+            if bool(self._live_convergence_context.get("enabled")):
+                self.results_panel.mark_live_adaptive_event(
+                    "CUTBACK",
+                    old_size=old_size,
+                    new_size=new_size,
+                )
+                self.results_panel.begin_live_convergence_attempt(
+                    str(payload.get("algorithm", "") or "")
+                )
+        elif event == "grow":
+            old_size = float(payload.get("old_size", 0.0) or 0.0)
+            new_size = float(payload.get("new_size", 0.0) or 0.0)
+            job.message = (
+                f"GROW step {payload.get('step')}: "
+                f"{old_size:.6g} → {new_size:.6g}"
+            )
+            if bool(self._live_convergence_context.get("enabled")):
+                self.results_panel.mark_live_adaptive_event(
+                    "GROW",
+                    old_size=old_size,
+                    new_size=new_size,
+                )
+        elif event == "adaptive_substep":
+            job.message = (
+                f"Adaptive substep · remaining "
+                f"{float(payload.get('remaining', 0.0) or 0.0):.6g}"
+            )
         elif event == "recovered":
             job.message = (
                 f"Recovered with {payload.get('algorithm')} "
