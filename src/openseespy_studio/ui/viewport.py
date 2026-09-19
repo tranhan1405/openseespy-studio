@@ -1230,10 +1230,9 @@ class ModelViewport(QWidget):
             name=name,
             font_size=font_size,
             text_color=text_color,
-            shape_color="#ffffff",
-            shape_opacity=0.72,
+            shape=None,
             show_points=False,
-            always_visible=True,
+            always_visible=False,
             pickable=False,
             render=False,
         )
