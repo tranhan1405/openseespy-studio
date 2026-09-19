@@ -1966,7 +1966,25 @@ class MainWindow(QMainWindow):
             ])
             item.setIcon(0, studio_icon("results"))
             item.setData(0, Qt.UserRole, ("job", job_id))
+            item.setExpanded(True)
             results.addChild(item)
+
+            for plot in job.plots:
+                if not isinstance(plot, dict):
+                    continue
+                plot_id = int(plot.get("plot_id", 0) or 0)
+                if plot_id <= 0:
+                    continue
+                plot_item = QTreeWidgetItem([
+                    str(plot.get("name", f"Result {plot_id}"))
+                ])
+                plot_item.setIcon(0, studio_icon("results"))
+                plot_item.setData(
+                    0,
+                    Qt.UserRole,
+                    ("job_plot", (job_id, plot_id)),
+                )
+                item.addChild(plot_item)
         root.addChild(results)
 
         self.tree.addTopLevelItem(root)
@@ -1990,6 +2008,7 @@ class MainWindow(QMainWindow):
         solver_output_tag: int | None = None
         solution_convergence_tag: int | None = None
         job_id: int | None = None
+        job_plot_ref: tuple[int, int] | None = None
         show_jobs_root = False
 
         selected_payload_kinds: set[str] = set()
@@ -2042,6 +2061,11 @@ class MainWindow(QMainWindow):
                 solution_convergence_tag = int(tag)
             elif kind == "job":
                 job_id = int(tag)
+            elif kind == "job_plot":
+                try:
+                    job_plot_ref = (int(tag[0]), int(tag[1]))
+                except (TypeError, ValueError, IndexError):
+                    job_plot_ref = None
             elif kind == "jobs_root":
                 show_jobs_root = True
 
@@ -2097,6 +2121,11 @@ class MainWindow(QMainWindow):
             self._show_solution_information(
                 solution_information_tag,
                 "Solution Information",
+            )
+        elif job_plot_ref is not None:
+            self._show_job_plot(
+                job_plot_ref[0],
+                job_plot_ref[1],
             )
         elif job_id is not None:
             self._select_job_result(job_id)
