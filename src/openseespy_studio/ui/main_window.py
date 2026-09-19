@@ -463,14 +463,25 @@ class FrameGridPanel(QWidget):
         layout.addWidget(title)
 
         mode_row = QHBoxLayout()
-        self.rectangular = QPushButton("Rectangular Grid")
-        self.rectangular.setCheckable(True)
-        self.rectangular.setChecked(True)
-        self.circular = QPushButton("Circular Grid")
-        self.circular.setEnabled(False)
-        mode_row.addWidget(self.rectangular)
-        mode_row.addWidget(self.circular)
+        self.grid_3d = QPushButton("3D Frame Grid")
+        self.grid_3d.setCheckable(True)
+        self.grid_3d.setChecked(True)
+        self.frame_2d = QPushButton("2D Frame")
+        self.frame_2d.setCheckable(True)
+        mode_row.addWidget(self.grid_3d)
+        mode_row.addWidget(self.frame_2d)
         layout.addLayout(mode_row)
+        self.mode_note = QLabel(
+            "3D grid: X × Y bays with Z storeys."
+        )
+        self.mode_note.setWordWrap(True)
+        layout.addWidget(self.mode_note)
+        self.grid_3d.clicked.connect(
+            lambda: self.set_planar_mode(False)
+        )
+        self.frame_2d.clicked.connect(
+            lambda: self.set_planar_mode(True)
+        )
 
         self.nx = self._int_spin(4)
         self.dx = self._float_spin(5.0)
@@ -501,8 +512,16 @@ class FrameGridPanel(QWidget):
         self.beams = QCheckBox("Create beams:")
         self.columns.setChecked(True)
         self.beams.setChecked(True)
+        self.base_support = QComboBox()
+        self.base_support.addItems(["Fixed", "Pinned"])
         layout.addWidget(self.columns)
         layout.addWidget(self.beams)
+        support_form = QFormLayout()
+        support_form.setContentsMargins(0, 0, 0, 0)
+        support_form.addRow("Base support:", self.base_support)
+        support_widget = QWidget()
+        support_widget.setLayout(support_form)
+        layout.addWidget(support_widget)
 
         self.column_section = QComboBox()
         self.beam_section = QComboBox()
@@ -547,6 +566,25 @@ class FrameGridPanel(QWidget):
         buttons.addWidget(generate)
         buttons.addWidget(close)
         root.addLayout(buttons)
+
+    def set_planar_mode(self, planar: bool) -> None:
+        planar = bool(planar)
+        self.frame_2d.setChecked(planar)
+        self.grid_3d.setChecked(not planar)
+        self.ny.setEnabled(not planar)
+        self.dy.setEnabled(not planar)
+        if planar:
+            self.mode_note.setText(
+                "2D frame: one X-Z plane. Studio automatically restrains "
+                "UY, RX and RZ so only UX, UZ and RY remain in-plane."
+            )
+        else:
+            self.mode_note.setText(
+                "3D grid: X × Y bays with Z storeys."
+            )
+
+    def is_planar_mode(self) -> bool:
+        return bool(self.frame_2d.isChecked())
 
     @staticmethod
     def _separator() -> QFrame:
@@ -677,6 +715,8 @@ class FrameGridPanel(QWidget):
             beam_section_tag=self.beam_section.currentData(),
             column_transf_tag=self.column_transformation.currentData(),
             beam_transf_tag=self.beam_transformation.currentData(),
+            planar_2d=self.is_planar_mode(),
+            base_support=self.base_support.currentText(),
         ))
 
 
@@ -1269,7 +1309,20 @@ class MainWindow(QMainWindow):
         self._make_action("node", "Node", "node", self._create_node, "Create node")
         self._make_action("line", "Line", "element", self._create_element, "Create element")
         self._make_action("frame", "Frame", "element", self._create_element, "Create frame element")
-        self._make_action("grid", "Grid", "grid", self._show_frame_grid, "Create frame grid")
+        self._make_action(
+            "grid",
+            "3D Grid",
+            "grid",
+            lambda: self._show_frame_grid(False),
+            "Create 3D frame grid",
+        )
+        self._make_action(
+            "frame2d",
+            "2D Frame",
+            "grid",
+            lambda: self._show_frame_grid(True),
+            "Quick-create a planar 2D frame",
+        )
         self._make_action("extrude", "Extrude", "copy", self._not_implemented, "Extrude geometry")
 
         modify_callbacks = {
@@ -1431,7 +1484,7 @@ class MainWindow(QMainWindow):
         menus["Model"].addAction(self.actions["element_formulation"])
         menus["Geometry"].addActions([
             self.actions["node"], self.actions["line"], self.actions["frame"],
-            self.actions["grid"], self.actions["extrude"],
+            self.actions["frame2d"], self.actions["grid"], self.actions["extrude"],
         ])
         menus["View"].addActions([
             self.actions["xy"], self.actions["yz"], self.actions["xz"], self.actions["iso"],
@@ -1606,7 +1659,7 @@ class MainWindow(QMainWindow):
         add_group(
             home,
             "Geometry",
-            large=("grid",),
+            large=("frame2d", "grid"),
             small=("node", "line", "frame", "extrude"),
         )
         add_group(
@@ -1957,7 +2010,12 @@ class MainWindow(QMainWindow):
         self._set_dirty(False)
         self._refresh_all("New empty project")
 
-    def _show_frame_grid(self) -> None:
+    def _show_frame_grid(
+        self,
+        planar: bool | None = None,
+    ) -> None:
+        if planar is not None:
+            self.frame_grid_panel.set_planar_mode(bool(planar))
         self.frame_grid_panel.refresh_assignments(
             self.project.sections,
             self.project.transformations,
