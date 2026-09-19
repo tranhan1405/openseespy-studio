@@ -545,6 +545,80 @@ def test_convergence_helpers_handle_empty_and_validate_quantity():
     else:
         raise AssertionError("Expected bad convergence quantity to fail")
 
+
+def test_convergence_summary_reports_adaptive_cutbacks_and_minimum_step():
+    result = {
+        "convergence": {
+            "test": "NormDispIncr",
+            "tolerance": 1.0e-8,
+            "max_iterations": 50,
+            "primary_algorithm": "Newton",
+            "adaptive_step": True,
+            "cutback_factor": 0.5,
+            "minimum_factor": 0.125,
+            "growth_factor": 1.5,
+            "steps": [
+                {
+                    "step": 1,
+                    "status": "recovered",
+                    "algorithm": "Newton",
+                    "iterations": 3,
+                    "total_iterations": 61,
+                    "norm": 1.0e-10,
+                    "recovered": True,
+                    "adaptive": True,
+                    "cutbacks": 1,
+                    "min_step_size_used": 0.005,
+                    "attempts": [
+                        {
+                            "algorithm": "Newton",
+                            "iterations": 50,
+                            "norm": 1.0e-3,
+                        },
+                        {
+                            "algorithm": "NewtonLineSearch",
+                            "iterations": 8,
+                            "norm": 1.0e-4,
+                        },
+                        {
+                            "algorithm": "Newton",
+                            "iterations": 3,
+                            "norm": 1.0e-10,
+                        },
+                    ],
+                },
+                {
+                    "step": 2,
+                    "status": "converged",
+                    "algorithm": "Newton",
+                    "iterations": 2,
+                    "norm": 1.0e-11,
+                    "recovered": False,
+                    "adaptive": True,
+                    "cutbacks": 0,
+                    "min_step_size_used": 0.0075,
+                    "attempts": [
+                        {
+                            "algorithm": "Newton",
+                            "iterations": 2,
+                            "norm": 1.0e-11,
+                        }
+                    ],
+                },
+            ],
+        }
+    }
+
+    summary = convergence_summary(result)
+
+    assert summary["adaptive_step"] is True
+    assert summary["adaptive_steps"] == 2
+    assert summary["total_cutbacks"] == 1
+    assert summary["minimum_step_size"] == 0.005
+    assert summary["cutback_factor"] == 0.5
+    assert summary["minimum_factor"] == 0.125
+    assert summary["growth_factor"] == 1.5
+
 def _local_force_vector():
     return [
         -10.0,

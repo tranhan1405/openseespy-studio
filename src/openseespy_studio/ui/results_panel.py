@@ -598,15 +598,18 @@ class ResultsPanel(QWidget):
         self.convergence_norm_plot.setMinimumHeight(110)
         layout.addWidget(self.convergence_norm_plot)
 
-        self.convergence_table = QTableWidget(0, 7)
+        self.convergence_table = QTableWidget(0, 10)
         self.convergence_table.setHorizontalHeaderLabels(
             [
                 "Step",
                 "Status",
                 "Algorithm",
-                "Iterations",
+                "Last iter",
+                "Total iter",
                 "Norm",
                 "Attempts",
+                "Cutbacks",
+                "Min |step|",
                 "Time / Load factor",
             ]
         )
@@ -1229,6 +1232,9 @@ class ResultsPanel(QWidget):
             )
         )
 
+    def set_live_convergence_message(self, message: str) -> None:
+        self.live_convergence_status.setText(str(message))
+
     def finish_live_convergence(self, status: str) -> None:
         if self._live_convergence_step <= 0:
             return
@@ -1363,12 +1369,21 @@ class ResultsPanel(QWidget):
             else "-"
         )
         configured_max = summary.get("configured_max_iterations")
+        adaptive_text = (
+            " · adaptive ON "
+            f"(cut={summary.get('cutback_factor')}, "
+            f"min={summary.get('minimum_factor')}, "
+            f"grow={summary.get('growth_factor')})"
+            if summary.get("adaptive_step")
+            else " · adaptive OFF"
+        )
         self.convergence_info.setText(
             f"{analysis_type or 'Analysis'} · "
             f"Test {summary.get('test') or '-'} · "
             f"tol={tolerance_text} · "
             f"configured max iter={configured_max if configured_max is not None else '-'} · "
             f"primary={summary.get('primary_algorithm') or '-'}"
+            + adaptive_text
         )
 
         algorithms = ", ".join(summary.get("algorithms", [])) or "-"
@@ -1379,12 +1394,20 @@ class ResultsPanel(QWidget):
             if worst_norm is not None
             else "-"
         )
+        minimum_step = summary.get("minimum_step_size")
+        minimum_step_text = (
+            f"{float(minimum_step):.6g}"
+            if minimum_step is not None
+            else "-"
+        )
         self.convergence_summary_label.setText(
             f"Steps: {summary['steps']} · "
             f"Converged: {summary['converged']} · "
             f"Recovered: {summary['recovered']} · "
             f"Failed: {summary['failed']} · "
             f"Attempts: {summary['total_attempts']} · "
+            f"Cutbacks: {summary.get('total_cutbacks', 0)} · "
+            f"Min |step|: {minimum_step_text} · "
             f"Max iterations used: {summary['max_iterations_used']} · "
             f"Worst norm: {worst_text} · Algorithms: {algorithms}"
         )
@@ -1407,13 +1430,23 @@ class ResultsPanel(QWidget):
                     time_text = f"{float(time_value):.7g}"
                 except (TypeError, ValueError):
                     time_text = str(time_value)
+            min_step = row.get("min_step_size_used")
+            min_step_text = "-"
+            if min_step is not None:
+                try:
+                    min_step_text = f"{float(min_step):.6g}"
+                except (TypeError, ValueError):
+                    min_step_text = str(min_step)
             values = [
                 str(row.get("step", "-")),
                 str(row.get("status", "-")),
                 str(row.get("algorithm", "-")),
                 str(row.get("iterations", "-")),
+                str(row.get("total_iterations", row.get("iterations", "-"))),
                 norm_text,
                 str(attempt_count),
+                str(row.get("cutbacks", 0) or 0),
+                min_step_text,
                 time_text,
             ]
             for column, value in enumerate(values):
@@ -1470,8 +1503,18 @@ class ResultsPanel(QWidget):
                             continue
                         if math.isfinite(norm):
                             values.append((iteration, norm))
+                algorithm_label = str(
+                    attempt.get("algorithm", "-")
+                )
+                if attempt.get("increment") is not None:
+                    try:
+                        algorithm_label += (
+                            f" · Δ={float(attempt.get('increment')):.6g}"
+                        )
+                    except (TypeError, ValueError):
+                        pass
                 plot_attempts.append({
-                    "algorithm": str(attempt.get("algorithm", "-")),
+                    "algorithm": algorithm_label,
                     "values": values,
                 })
             convergence = self._result.get("convergence", {})
@@ -1505,11 +1548,19 @@ class ResultsPanel(QWidget):
                     norm_text = f"{float(norm):.3e}"
                 except (TypeError, ValueError):
                     norm_text = str(norm)
+            increment = attempt.get("increment")
+            increment_text = ""
+            if increment is not None:
+                try:
+                    increment_text = f", Δ={float(increment):.6g}"
+                except (TypeError, ValueError):
+                    increment_text = f", Δ={increment}"
             labels.append(
                 f"{attempt.get('algorithm', '-')} "
                 f"{'✓' if success else '✗'} "
                 f"(iter={attempt.get('iterations', '-')}, "
-                f"norm={norm_text}, code={attempt.get('code', '-')})"
+                f"norm={norm_text}, code={attempt.get('code', '-')}"
+                f"{increment_text})"
             )
         self.convergence_attempt_info.setText(
             f"Step {step}: " + " → ".join(labels)
@@ -1542,8 +1593,14 @@ class ResultsPanel(QWidget):
                     "status",
                     "algorithm",
                     "iterations",
+                    "total_iterations",
                     "norm",
                     "recovered",
+                    "adaptive",
+                    "cutbacks",
+                    "nominal_increment",
+                    "min_step_size_used",
+                    "final_step_size",
                     "time_or_load_factor",
                     "attempt_count",
                     "attempt_chain",
@@ -1569,8 +1626,14 @@ class ResultsPanel(QWidget):
                         row.get("status"),
                         row.get("algorithm"),
                         row.get("iterations"),
+                        row.get("total_iterations", row.get("iterations")),
                         row.get("norm"),
                         row.get("recovered"),
+                        row.get("adaptive"),
+                        row.get("cutbacks", 0),
+                        row.get("nominal_increment"),
+                        row.get("min_step_size_used"),
+                        row.get("final_step_size"),
                         row.get("time"),
                         len(attempts),
                         chain,

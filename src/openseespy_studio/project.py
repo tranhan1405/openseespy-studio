@@ -11,7 +11,7 @@ from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 17
+PROJECT_FORMAT_VERSION = 18
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -1071,6 +1071,12 @@ class AnalysisSettingsData:
     beta: float = 0.25
     num_modes: int = 3
     recovery: bool = True
+    adaptive_step: bool = False
+    adaptive_cutback_factor: float = 0.5
+    adaptive_min_factor: float = 0.125
+    adaptive_growth_factor: float = 1.5
+    adaptive_easy_iterations: int = 4
+    adaptive_growth_after: int = 3
     live_convergence: bool = True
     show_external_console: bool = False
 
@@ -1085,6 +1091,12 @@ class AnalysisSettingsData:
         self.cyclic_increment=abs(float(self.cyclic_increment))
         self.dt=float(self.dt); self.gamma=float(self.gamma); self.beta=float(self.beta)
         self.num_modes=int(self.num_modes); self.recovery=bool(self.recovery)
+        self.adaptive_step=bool(self.adaptive_step)
+        self.adaptive_cutback_factor=float(self.adaptive_cutback_factor)
+        self.adaptive_min_factor=float(self.adaptive_min_factor)
+        self.adaptive_growth_factor=float(self.adaptive_growth_factor)
+        self.adaptive_easy_iterations=int(self.adaptive_easy_iterations)
+        self.adaptive_growth_after=int(self.adaptive_growth_after)
         self.live_convergence=bool(self.live_convergence)
         self.show_external_console=bool(self.show_external_console)
         if self.tag<=0: raise ValueError("Analysis tag must be positive.")
@@ -1099,6 +1111,20 @@ class AnalysisSettingsData:
         if self.tolerance<=0 or self.max_iterations<1: raise ValueError("Invalid convergence settings.")
         if self.steps<1: raise ValueError("Analysis steps must be at least 1.")
         if self.control_dof not in range(1,7): raise ValueError("Control DOF must be 1..6.")
+        if self.adaptive_cutback_factor <= 0.0 or self.adaptive_cutback_factor >= 1.0:
+            raise ValueError("Adaptive cutback factor must be between 0 and 1.")
+        if self.adaptive_min_factor <= 0.0 or self.adaptive_min_factor > 1.0:
+            raise ValueError("Adaptive minimum factor must be in (0, 1].")
+        if self.adaptive_growth_factor < 1.0:
+            raise ValueError("Adaptive growth factor must be at least 1.")
+        if self.adaptive_easy_iterations < 1:
+            raise ValueError("Adaptive easy-iteration threshold must be positive.")
+        if self.adaptive_growth_after < 1:
+            raise ValueError("Adaptive growth-after count must be positive.")
+        if self.adaptive_step and self.analysis_type == "Static" and abs(self.load_increment) <= 1.0e-30:
+            raise ValueError("Adaptive static analysis needs a nonzero load increment.")
+        if self.adaptive_step and self.analysis_type == "Pushover" and abs(self.displacement_increment) <= 1.0e-30:
+            raise ValueError("Adaptive pushover needs a nonzero displacement increment.")
         if self.analysis_type == "Cyclic":
             if not self.cyclic_targets:
                 raise ValueError("Cyclic analysis needs at least one displacement target.")
@@ -1113,7 +1139,10 @@ class AnalysisSettingsData:
             "test","tolerance","max_iterations","algorithm","steps","load_increment",
             "control_node","control_dof","displacement_increment",
             "cyclic_targets","cyclic_increment","dt","gamma","beta",
-            "num_modes","recovery","live_convergence","show_external_console"
+            "num_modes","recovery","adaptive_step",
+            "adaptive_cutback_factor","adaptive_min_factor",
+            "adaptive_growth_factor","adaptive_easy_iterations",
+            "adaptive_growth_after","live_convergence","show_external_console"
         )}
 
     @classmethod

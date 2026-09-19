@@ -497,7 +497,7 @@ def analysis_to_openseespy(
         "    return _iterations, _norm, _norms",
         "",
         "_studio_results = {",
-        "    'schema_version': 8,",
+        "    'schema_version': 9,",
         "    'analysis': {",
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
@@ -507,6 +507,10 @@ def analysis_to_openseespy(
         f"        'cyclic_targets': {settings.cyclic_targets!r},",
         f"        'cyclic_increment': {settings.cyclic_increment:g},",
         f"        'planned_steps': {total_steps},",
+        f"        'adaptive_step': {settings.adaptive_step!r},",
+        f"        'adaptive_cutback_factor': {settings.adaptive_cutback_factor:g},",
+        f"        'adaptive_min_factor': {settings.adaptive_min_factor:g},",
+        f"        'adaptive_growth_factor': {settings.adaptive_growth_factor:g},",
         "    },",
         "    'final': {},",
         "    'convergence': {",
@@ -514,12 +518,18 @@ def analysis_to_openseespy(
         f"        'tolerance': {settings.tolerance:g},",
         f"        'max_iterations': {settings.max_iterations},",
         f"        'primary_algorithm': {settings.algorithm!r},",
+        f"        'adaptive_step': {settings.adaptive_step!r},",
+        f"        'cutback_factor': {settings.adaptive_cutback_factor:g},",
+        f"        'minimum_factor': {settings.adaptive_min_factor:g},",
+        f"        'growth_factor': {settings.adaptive_growth_factor:g},",
+        f"        'easy_iterations': {settings.adaptive_easy_iterations},",
+        f"        'growth_after': {settings.adaptive_growth_after},",
         "        'steps': [],",
         "    },",
         "    'history': {'time': [], 'monitor_node': "
         f"{monitor_node}, 'control_dof': {settings.control_dof}, "
         "'displacement': [], 'base_shear': [], "
-        "'base_reactions': [], 'nodes': {}}},",
+        "'base_reactions': [], 'nodes': {}}," ,
         "    'modes': {},",
         "}",
         f"_studio_node_tags = {node_tags!r}",
@@ -632,75 +642,407 @@ def analysis_to_openseespy(
         f"analysis_type={settings.analysis_type!r}, "
         f"algorithm=_studio_primary_algorithm, "
         f"test={settings.test!r}, tolerance={settings.tolerance:g}, "
-        f"live_convergence={settings.live_convergence!r})"
+        f"live_convergence={settings.live_convergence!r}, "
+        f"adaptive_step={settings.adaptive_step!r})"
     )
-    lines.append(f"for _studio_step in range({total_steps}):")
-    lines.append("    _studio_step_no = _studio_step + 1")
-    lines.append("    _studio_attempts = []")
-    lines.append(
-        "    _studio_emit('step_start', step=_studio_step_no, "
-        f"total={total_steps}, algorithm=_studio_primary_algorithm, "
-        f"test={settings.test!r}, tolerance={settings.tolerance:g}, "
-        f"live_convergence={settings.live_convergence!r})"
-    )
-    if settings.analysis_type == "Cyclic":
-        lines.append(
-            "    _studio_disp_increment = "
-            "_studio_cyclic_increments[_studio_step]"
-        )
-        lines.append(
-            f"    ops.integrator('DisplacementControl', "
-            f"{settings.control_node}, {settings.control_dof}, "
-            "_studio_disp_increment)"
-        )
-    lines.append("    _studio_active_algorithm = _studio_primary_algorithm")
-    lines.append(f"    _studio_ok = {analyze_call}")
-    lines.append(
-        "    _studio_iterations, _studio_norm, "
-        "_studio_norm_history = _studio_test_state()"
-    )
-    lines.append(
-        "    _studio_attempts.append({"
-        "'algorithm': _studio_active_algorithm, "
-        "'iterations': _studio_iterations, "
-        "'norm': _studio_norm, "
-        "'norm_history': list(_studio_norm_history), "
-        "'code': int(_studio_ok), "
-        "'success': bool(_studio_ok == 0)"
-        "})"
-    )
-    lines.append("    if _studio_ok != 0:")
-    lines.append(
-        "        _studio_emit('convergence_failed', "
-        "step=_studio_step_no, "
-        f"total={total_steps}, "
-        "algorithm=_studio_active_algorithm, "
-        "iterations=_studio_iterations, norm=_studio_norm, "
-        "code=int(_studio_ok))"
-    )
+    if settings.adaptive_step:
+        if settings.analysis_type == "Static":
+            adaptive_initial = abs(settings.load_increment)
+            nominal_source = f"{settings.load_increment:g}"
+            adaptive_analyze_call = "ops.analyze(1)"
+        elif settings.analysis_type == "Pushover":
+            adaptive_initial = abs(settings.displacement_increment)
+            nominal_source = f"{settings.displacement_increment:g}"
+            adaptive_analyze_call = "ops.analyze(1)"
+        elif settings.analysis_type == "Cyclic":
+            adaptive_initial = abs(settings.cyclic_increment)
+            nominal_source = "_studio_cyclic_increments[_studio_step]"
+            adaptive_analyze_call = "ops.analyze(1)"
+        else:
+            adaptive_initial = abs(settings.dt)
+            nominal_source = f"{settings.dt:g}"
+            adaptive_analyze_call = "ops.analyze(1, _studio_trial_size)"
 
-    if settings.recovery:
-        fallbacks = [
+        adaptive_fallbacks = [
             algorithm
             for algorithm in ("NewtonLineSearch", "ModifiedNewton", "Newton")
             if algorithm != settings.algorithm
         ]
-        lines.append(f"        for _studio_alg in {fallbacks!r}:")
+
+        lines.extend([
+            f"_studio_adaptive_size = {adaptive_initial:g}",
+            "_studio_easy_streak = 0",
+            f"_studio_cutback_factor = {settings.adaptive_cutback_factor:g}",
+            f"_studio_min_factor = {settings.adaptive_min_factor:g}",
+            f"_studio_growth_factor = {settings.adaptive_growth_factor:g}",
+            f"_studio_easy_iterations = {settings.adaptive_easy_iterations}",
+            f"_studio_growth_after = {settings.adaptive_growth_after}",
+        ])
+        lines.append(f"for _studio_step in range({total_steps}):")
+        lines.append("    _studio_step_no = _studio_step + 1")
+        lines.append(f"    _studio_nominal_increment = {nominal_source}")
+        lines.append("    _studio_reference_size = abs(_studio_nominal_increment)")
         lines.append(
-            "            _studio_emit('fallback', "
-            "step=_studio_step_no, "
-            f"total={total_steps}, algorithm=_studio_alg)"
+            "    _studio_remaining_tol = "
+            "max(_studio_reference_size, 1.0) * 1.0e-12"
         )
-        lines.append("            _studio_active_algorithm = _studio_alg")
-        lines.append("            ops.algorithm(_studio_alg)")
-        lines.append(f"            _studio_ok = {analyze_call}")
+        lines.append("    _studio_remaining = _studio_nominal_increment")
         lines.append(
-            "            _studio_iterations, _studio_norm, "
+            "    _studio_min_size = "
+            "_studio_reference_size * _studio_min_factor"
+        )
+        lines.append(
+            "    _studio_adaptive_size = min("
+            "_studio_reference_size, "
+            "max(_studio_min_size, _studio_adaptive_size)"
+            ") if _studio_reference_size > 0.0 else 0.0"
+        )
+        lines.append("    _studio_attempts = []")
+        lines.append("    _studio_substeps = []")
+        lines.append("    _studio_cutbacks = 0")
+        lines.append("    _studio_had_recovery = False")
+        lines.append(
+            "    _studio_emit('step_start', step=_studio_step_no, "
+            f"total={total_steps}, algorithm=_studio_primary_algorithm, "
+            f"test={settings.test!r}, tolerance={settings.tolerance:g}, "
+            f"live_convergence={settings.live_convergence!r}, "
+            "adaptive_step=True, "
+            "increment=_studio_nominal_increment, "
+            "step_size=_studio_adaptive_size)"
+        )
+        lines.append(
+            "    while abs(_studio_remaining) > _studio_remaining_tol:"
+        )
+        lines.append(
+            "        _studio_direction = "
+            "1.0 if _studio_remaining >= 0.0 else -1.0"
+        )
+        lines.append(
+            "        _studio_trial_size = min("
+            "abs(_studio_remaining), _studio_adaptive_size)"
+        )
+        lines.append(
+            "        _studio_trial_increment = "
+            "_studio_direction * _studio_trial_size"
+        )
+        lines.append("        _studio_trial_attempts = []")
+        lines.append(
+            "        _studio_active_algorithm = _studio_primary_algorithm"
+        )
+        lines.append("        ops.algorithm(_studio_primary_algorithm)")
+
+        if settings.analysis_type == "Static":
+            lines.append(
+                "        ops.integrator('LoadControl', "
+                "_studio_trial_increment)"
+            )
+        elif settings.analysis_type in {"Pushover", "Cyclic"}:
+            lines.append(
+                f"        ops.integrator('DisplacementControl', "
+                f"{settings.control_node}, {settings.control_dof}, "
+                "_studio_trial_increment)"
+            )
+
+        lines.append(f"        _studio_ok = {adaptive_analyze_call}")
+        lines.append(
+            "        _studio_iterations, _studio_norm, "
             "_studio_norm_history = _studio_test_state()"
         )
         lines.append(
-            "            _studio_attempts.append({"
-            "'algorithm': _studio_alg, "
+            "        _studio_trial_attempts.append({"
+            "'algorithm': _studio_active_algorithm, "
+            "'iterations': _studio_iterations, "
+            "'norm': _studio_norm, "
+            "'norm_history': list(_studio_norm_history), "
+            "'code': int(_studio_ok), "
+            "'success': bool(_studio_ok == 0), "
+            "'increment': _studio_trial_increment"
+            "})"
+        )
+        lines.append("        if _studio_ok != 0:")
+        lines.append(
+            "            _studio_emit('convergence_failed', "
+            "step=_studio_step_no, "
+            f"total={total_steps}, "
+            "algorithm=_studio_active_algorithm, "
+            "iterations=_studio_iterations, norm=_studio_norm, "
+            "code=int(_studio_ok), "
+            "increment=_studio_trial_increment)"
+        )
+
+        if settings.recovery:
+            lines.append(
+                f"            for _studio_alg in {adaptive_fallbacks!r}:"
+            )
+            lines.append(
+                "                _studio_emit('fallback', "
+                "step=_studio_step_no, "
+                f"total={total_steps}, algorithm=_studio_alg, "
+                "increment=_studio_trial_increment)"
+            )
+            lines.append(
+                "                _studio_active_algorithm = _studio_alg"
+            )
+            lines.append("                ops.algorithm(_studio_alg)")
+            lines.append(f"                _studio_ok = {adaptive_analyze_call}")
+            lines.append(
+                "                _studio_iterations, _studio_norm, "
+                "_studio_norm_history = _studio_test_state()"
+            )
+            lines.append(
+                "                _studio_trial_attempts.append({"
+                "'algorithm': _studio_alg, "
+                "'iterations': _studio_iterations, "
+                "'norm': _studio_norm, "
+                "'norm_history': list(_studio_norm_history), "
+                "'code': int(_studio_ok), "
+                "'success': bool(_studio_ok == 0), "
+                "'increment': _studio_trial_increment"
+                "})"
+            )
+            lines.append("                if _studio_ok == 0:")
+            lines.append(
+                "                    _studio_emit('recovered', "
+                "step=_studio_step_no, "
+                f"total={total_steps}, algorithm=_studio_alg, "
+                "iterations=_studio_iterations, norm=_studio_norm, "
+                "increment=_studio_trial_increment)"
+            )
+            lines.append("                    break")
+
+        lines.append("        if _studio_ok != 0:")
+        lines.append(
+            "            _studio_substeps.append({"
+            "'accepted': False, "
+            "'increment': _studio_trial_increment, "
+            "'algorithm': _studio_active_algorithm, "
+            "'iterations': _studio_iterations, "
+            "'norm': _studio_norm, "
+            "'attempts': list(_studio_trial_attempts)"
+            "})"
+        )
+        lines.append(
+            "            _studio_attempts.extend(_studio_trial_attempts)"
+        )
+        lines.append(
+            "            _studio_can_cutback = "
+            "_studio_trial_size > "
+            "_studio_min_size * (1.0 + 1.0e-12)"
+        )
+        lines.append("            if _studio_can_cutback:")
+        lines.append(
+            "                _studio_new_size = max("
+            "_studio_min_size, "
+            "_studio_trial_size * _studio_cutback_factor)"
+        )
+        lines.append(
+            "                _studio_old_size = _studio_trial_size"
+        )
+        lines.append(
+            "                _studio_adaptive_size = _studio_new_size"
+        )
+        lines.append("                _studio_cutbacks += 1")
+        lines.append("                _studio_easy_streak = 0")
+        lines.append(
+            "                _studio_emit('cutback', "
+            "step=_studio_step_no, "
+            f"total={total_steps}, "
+            "old_size=_studio_old_size, "
+            "new_size=_studio_new_size, "
+            "remaining=_studio_remaining, "
+            "cutbacks=_studio_cutbacks, "
+            "algorithm=_studio_primary_algorithm)"
+        )
+        lines.append(
+            "                ops.algorithm(_studio_primary_algorithm)"
+        )
+        lines.append("                continue")
+        lines.append(
+            "            _studio_total_iterations = sum("
+            "max(0, int(_a.get('iterations', 0) or 0)) "
+            "for _a in _studio_attempts)"
+        )
+        lines.append(
+            "            _studio_results['convergence']['steps'].append({"
+            "'step': _studio_step_no, "
+            "'status': 'failed', "
+            "'algorithm': _studio_active_algorithm, "
+            "'iterations': _studio_iterations, "
+            "'total_iterations': _studio_total_iterations, "
+            "'norm': _studio_norm, "
+            "'recovered': False, "
+            "'adaptive': True, "
+            "'cutbacks': _studio_cutbacks, "
+            "'nominal_increment': _studio_nominal_increment, "
+            "'time': float(ops.getTime()), "
+            "'substeps': list(_studio_substeps), "
+            "'attempts': list(_studio_attempts)"
+            "})"
+        )
+        lines.append(
+            "            _studio_emit('failed', "
+            "step=_studio_step_no, "
+            f"total={total_steps}, "
+            "algorithm=_studio_active_algorithm, "
+            "iterations=_studio_iterations, "
+            "norm=_studio_norm, code=int(_studio_ok), "
+            "increment=_studio_trial_increment, "
+            "cutbacks=_studio_cutbacks)"
+        )
+        lines.append(
+            "            raise RuntimeError("
+            "f'Analysis failed at step {_studio_step_no} "
+            "after adaptive cutback')"
+        )
+        lines.append(
+            "        _studio_attempts.extend(_studio_trial_attempts)"
+        )
+        lines.append(
+            "        _studio_had_recovery = "
+            "_studio_had_recovery or "
+            "len(_studio_trial_attempts) > 1"
+        )
+        lines.append(
+            "        _studio_substeps.append({"
+            "'accepted': True, "
+            "'increment': _studio_trial_increment, "
+            "'algorithm': _studio_active_algorithm, "
+            "'iterations': _studio_iterations, "
+            "'norm': _studio_norm, "
+            "'attempts': list(_studio_trial_attempts)"
+            "})"
+        )
+        lines.append(
+            "        _studio_remaining -= _studio_trial_increment"
+        )
+        lines.append(
+            "        if abs(_studio_remaining) <= _studio_remaining_tol:"
+        )
+        lines.append("            _studio_remaining = 0.0")
+        lines.append(
+            "        _studio_easy = ("
+            "_studio_ok == 0 "
+            "and len(_studio_trial_attempts) == 1 "
+            "and _studio_iterations >= 0 "
+            "and _studio_iterations <= _studio_easy_iterations"
+            ")"
+        )
+        lines.append(
+            "        _studio_easy_streak = "
+            "_studio_easy_streak + 1 if _studio_easy else 0"
+        )
+        lines.append(
+            "        if ("
+            "_studio_easy_streak >= _studio_growth_after "
+            "and _studio_adaptive_size < "
+            "_studio_reference_size * (1.0 - 1.0e-12)"
+            "):"
+        )
+        lines.append(
+            "            _studio_old_size = _studio_adaptive_size"
+        )
+        lines.append(
+            "            _studio_adaptive_size = min("
+            "_studio_reference_size, "
+            "_studio_adaptive_size * _studio_growth_factor)"
+        )
+        lines.append(
+            "            if _studio_adaptive_size > "
+            "_studio_old_size * (1.0 + 1.0e-12):"
+        )
+        lines.append(
+            "                _studio_emit('grow', "
+            "step=_studio_step_no, "
+            f"total={total_steps}, "
+            "old_size=_studio_old_size, "
+            "new_size=_studio_adaptive_size, "
+            "algorithm=_studio_primary_algorithm)"
+        )
+        lines.append("            _studio_easy_streak = 0")
+        lines.append("        ops.algorithm(_studio_primary_algorithm)")
+        lines.append("        if _studio_remaining != 0.0:")
+        lines.append(
+            "            _studio_emit('adaptive_substep', "
+            "step=_studio_step_no, "
+            f"total={total_steps}, "
+            "accepted_increment=_studio_trial_increment, "
+            "remaining=_studio_remaining, "
+            "next_size=min(abs(_studio_remaining), "
+            "_studio_adaptive_size), "
+            "algorithm=_studio_primary_algorithm)"
+        )
+
+        lines.append("    _studio_time = float(ops.getTime())")
+        lines.append(
+            "    _studio_total_iterations = sum("
+            "max(0, int(_a.get('iterations', 0) or 0)) "
+            "for _a in _studio_attempts)"
+        )
+        lines.append(
+            "    _studio_step_recovered = "
+            "bool(_studio_cutbacks > 0 or _studio_had_recovery)"
+        )
+        lines.append(
+            "    _studio_accepted_sizes = ["
+            "abs(float(_s.get('increment', 0.0))) "
+            "for _s in _studio_substeps "
+            "if _s.get('accepted')"
+            "]"
+        )
+        lines.append(
+            "    _studio_results['convergence']['steps'].append({"
+            "'step': _studio_step_no, "
+            "'status': 'recovered' "
+            "if _studio_step_recovered else 'converged', "
+            "'algorithm': _studio_active_algorithm, "
+            "'iterations': _studio_iterations, "
+            "'total_iterations': _studio_total_iterations, "
+            "'norm': _studio_norm, "
+            "'recovered': _studio_step_recovered, "
+            "'adaptive': True, "
+            "'cutbacks': _studio_cutbacks, "
+            "'nominal_increment': _studio_nominal_increment, "
+            "'min_step_size_used': "
+            "min(_studio_accepted_sizes) "
+            "if _studio_accepted_sizes else None, "
+            "'final_step_size': _studio_adaptive_size, "
+            "'time': _studio_time, "
+            "'substeps': list(_studio_substeps), "
+            "'attempts': list(_studio_attempts)"
+            "})"
+        )
+        lines.append(
+            "    _studio_results['history']['time'].append(_studio_time)"
+        )
+    else:
+        lines.append(f"for _studio_step in range({total_steps}):")
+        lines.append("    _studio_step_no = _studio_step + 1")
+        lines.append("    _studio_attempts = []")
+        lines.append(
+            "    _studio_emit('step_start', step=_studio_step_no, "
+            f"total={total_steps}, algorithm=_studio_primary_algorithm, "
+            f"test={settings.test!r}, tolerance={settings.tolerance:g}, "
+            f"live_convergence={settings.live_convergence!r})"
+        )
+        if settings.analysis_type == "Cyclic":
+            lines.append(
+                "    _studio_disp_increment = "
+                "_studio_cyclic_increments[_studio_step]"
+            )
+            lines.append(
+                f"    ops.integrator('DisplacementControl', "
+                f"{settings.control_node}, {settings.control_dof}, "
+                "_studio_disp_increment)"
+            )
+        lines.append("    _studio_active_algorithm = _studio_primary_algorithm")
+        lines.append(f"    _studio_ok = {analyze_call}")
+        lines.append(
+            "    _studio_iterations, _studio_norm, "
+            "_studio_norm_history = _studio_test_state()"
+        )
+        lines.append(
+            "    _studio_attempts.append({"
+            "'algorithm': _studio_active_algorithm, "
             "'iterations': _studio_iterations, "
             "'norm': _studio_norm, "
             "'norm_history': list(_studio_norm_history), "
@@ -708,57 +1050,97 @@ def analysis_to_openseespy(
             "'success': bool(_studio_ok == 0)"
             "})"
         )
-        lines.append("            if _studio_ok == 0:")
-        lines.append("                _studio_active_algorithm = _studio_alg")
+        lines.append("    if _studio_ok != 0:")
         lines.append(
-            "                _studio_emit('recovered', "
+            "        _studio_emit('convergence_failed', "
             "step=_studio_step_no, "
-            f"total={total_steps}, algorithm=_studio_alg, "
-            "iterations=_studio_iterations, norm=_studio_norm)"
+            f"total={total_steps}, "
+            "algorithm=_studio_active_algorithm, "
+            "iterations=_studio_iterations, norm=_studio_norm, "
+            "code=int(_studio_ok))"
         )
-        lines.append("                break")
-        lines.append("        ops.algorithm(_studio_primary_algorithm)")
-
-    lines.append("    if _studio_ok != 0:")
-    lines.append(
-        "        _studio_results['convergence']['steps'].append({"
-        "'step': _studio_step_no, "
-        "'status': 'failed', "
-        "'algorithm': _studio_active_algorithm, "
-        "'iterations': _studio_iterations, "
-        "'norm': _studio_norm, "
-        "'recovered': False, "
-        "'time': float(ops.getTime()), "
-        "'attempts': list(_studio_attempts)"
-        "})"
-    )
-    lines.append(
-        "        _studio_emit('failed', step=_studio_step_no, "
-        f"total={total_steps}, "
-        "algorithm=_studio_active_algorithm, "
-        "iterations=_studio_iterations, norm=_studio_norm, "
-        "code=int(_studio_ok))"
-    )
-    lines.append(
-        "        raise RuntimeError("
-        "f'Analysis failed at step {_studio_step_no}')"
-    )
-    lines.append("    _studio_time = float(ops.getTime())")
-    lines.append(
-        "    _studio_results['convergence']['steps'].append({"
-        "'step': _studio_step_no, "
-        "'status': 'recovered' if len(_studio_attempts) > 1 else 'converged', "
-        "'algorithm': _studio_active_algorithm, "
-        "'iterations': _studio_iterations, "
-        "'norm': _studio_norm, "
-        "'recovered': bool(len(_studio_attempts) > 1), "
-        "'time': _studio_time, "
-        "'attempts': list(_studio_attempts)"
-        "})"
-    )
-    lines.append(
-        "    _studio_results['history']['time'].append(_studio_time)"
-    )
+    
+        if settings.recovery:
+            fallbacks = [
+                algorithm
+                for algorithm in ("NewtonLineSearch", "ModifiedNewton", "Newton")
+                if algorithm != settings.algorithm
+            ]
+            lines.append(f"        for _studio_alg in {fallbacks!r}:")
+            lines.append(
+                "            _studio_emit('fallback', "
+                "step=_studio_step_no, "
+                f"total={total_steps}, algorithm=_studio_alg)"
+            )
+            lines.append("            _studio_active_algorithm = _studio_alg")
+            lines.append("            ops.algorithm(_studio_alg)")
+            lines.append(f"            _studio_ok = {analyze_call}")
+            lines.append(
+                "            _studio_iterations, _studio_norm, "
+                "_studio_norm_history = _studio_test_state()"
+            )
+            lines.append(
+                "            _studio_attempts.append({"
+                "'algorithm': _studio_alg, "
+                "'iterations': _studio_iterations, "
+                "'norm': _studio_norm, "
+                "'norm_history': list(_studio_norm_history), "
+                "'code': int(_studio_ok), "
+                "'success': bool(_studio_ok == 0)"
+                "})"
+            )
+            lines.append("            if _studio_ok == 0:")
+            lines.append("                _studio_active_algorithm = _studio_alg")
+            lines.append(
+                "                _studio_emit('recovered', "
+                "step=_studio_step_no, "
+                f"total={total_steps}, algorithm=_studio_alg, "
+                "iterations=_studio_iterations, norm=_studio_norm)"
+            )
+            lines.append("                break")
+            lines.append("        ops.algorithm(_studio_primary_algorithm)")
+    
+        lines.append("    if _studio_ok != 0:")
+        lines.append(
+            "        _studio_results['convergence']['steps'].append({"
+            "'step': _studio_step_no, "
+            "'status': 'failed', "
+            "'algorithm': _studio_active_algorithm, "
+            "'iterations': _studio_iterations, "
+            "'norm': _studio_norm, "
+            "'recovered': False, "
+            "'time': float(ops.getTime()), "
+            "'attempts': list(_studio_attempts)"
+            "})"
+        )
+        lines.append(
+            "        _studio_emit('failed', step=_studio_step_no, "
+            f"total={total_steps}, "
+            "algorithm=_studio_active_algorithm, "
+            "iterations=_studio_iterations, norm=_studio_norm, "
+            "code=int(_studio_ok))"
+        )
+        lines.append(
+            "        raise RuntimeError("
+            "f'Analysis failed at step {_studio_step_no}')"
+        )
+        lines.append("    _studio_time = float(ops.getTime())")
+        lines.append(
+            "    _studio_results['convergence']['steps'].append({"
+            "'step': _studio_step_no, "
+            "'status': 'recovered' if len(_studio_attempts) > 1 else 'converged', "
+            "'algorithm': _studio_active_algorithm, "
+            "'iterations': _studio_iterations, "
+            "'norm': _studio_norm, "
+            "'recovered': bool(len(_studio_attempts) > 1), "
+            "'time': _studio_time, "
+            "'attempts': list(_studio_attempts)"
+            "})"
+        )
+        lines.append(
+            "    _studio_results['history']['time'].append(_studio_time)"
+        )
+    
     if settings.analysis_type == "Transient":
         lines.append("    ops.reactions('-dynamic', '-rayleigh')")
     else:

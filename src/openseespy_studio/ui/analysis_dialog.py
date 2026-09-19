@@ -59,6 +59,33 @@ class AnalysisDialog(QDialog):
         self.beta=fs(analysis.beta if analysis else 0.25)
         self.modes=QSpinBox(); self.modes.setRange(1,10000); self.modes.setValue(analysis.num_modes if analysis else 3)
         self.recovery=QCheckBox("Try NewtonLineSearch / ModifiedNewton / Newton on failed step"); self.recovery.setChecked(analysis.recovery if analysis else True)
+        self.adaptive=QCheckBox("Adaptive step size / automatic cutback")
+        self.adaptive.setChecked(analysis.adaptive_step if analysis else False)
+        self.cutback=fs(
+            analysis.adaptive_cutback_factor if analysis else 0.5,
+            0.01,
+            0.99,
+        )
+        self.min_factor=fs(
+            analysis.adaptive_min_factor if analysis else 0.125,
+            1e-6,
+            1.0,
+        )
+        self.growth=fs(
+            analysis.adaptive_growth_factor if analysis else 1.5,
+            1.0,
+            10.0,
+        )
+        self.easy_iter=QSpinBox()
+        self.easy_iter.setRange(1,100000)
+        self.easy_iter.setValue(
+            analysis.adaptive_easy_iterations if analysis else 4
+        )
+        self.grow_after=QSpinBox()
+        self.grow_after.setRange(1,100000)
+        self.grow_after.setValue(
+            analysis.adaptive_growth_after if analysis else 3
+        )
         self.live_convergence=QCheckBox("Live convergence monitor (iteration-level)")
         self.live_convergence.setChecked(
             analysis.live_convergence if analysis else True
@@ -76,6 +103,12 @@ class AnalysisDialog(QDialog):
         fields=(("Tag",self.tag),("Name",self.name),("Analysis type",self.kind),("Constraints",self.constraints),("Numberer",self.numberer),("System",self.system),("Test",self.test),("Tolerance",self.tol),("Max iterations",self.max_iter),("Algorithm",self.algorithm),("Steps",self.steps),("Load increment",self.load_inc),("Control node",self.control_node),("Control DOF",self.control_dof),("Disp. increment",self.disp_inc),("Cyclic targets",self.cyclic_targets),("Cyclic max increment",self.cyclic_inc),("Time step dt",self.dt),("Newmark gamma",self.gamma),("Newmark beta",self.beta),("Number of modes",self.modes))
         for label,w in fields: form.addRow(label+":",w)
         form.addRow("Recovery:",self.recovery)
+        form.addRow("Adaptive step:",self.adaptive)
+        form.addRow("Cutback factor:",self.cutback)
+        form.addRow("Minimum factor:",self.min_factor)
+        form.addRow("Growth factor:",self.growth)
+        form.addRow("Easy if iterations <=",self.easy_iter)
+        form.addRow("Grow after easy steps:",self.grow_after)
         form.addRow("Live convergence:",self.live_convergence)
         form.addRow("External terminal:",self.external_console)
         root.addLayout(form)
@@ -83,7 +116,7 @@ class AnalysisDialog(QDialog):
         self.kind.currentTextChanged.connect(self._sync); self._sync(self.kind.currentText())
     def _sync(self,kind):
         modal=kind=="Modal"; transient=kind=="Transient"; push=kind=="Pushover"; cyclic=kind=="Cyclic"; static=kind=="Static"
-        for w in (self.test,self.tol,self.max_iter,self.algorithm,self.steps,self.recovery): w.setEnabled(not modal)
+        for w in (self.test,self.tol,self.max_iter,self.algorithm,self.steps,self.recovery,self.adaptive,self.cutback,self.min_factor,self.growth,self.easy_iter,self.grow_after): w.setEnabled(not modal)
         self.steps.setEnabled(not modal and not cyclic)
         self.load_inc.setEnabled(static)
         self.control_node.setEnabled(push or cyclic)
@@ -108,6 +141,12 @@ class AnalysisDialog(QDialog):
             cyclic_targets=cyclic_targets,cyclic_increment=self.cyclic_inc.value(),
             dt=self.dt.value(),gamma=self.gamma.value(),beta=self.beta.value(),num_modes=self.modes.value(),
             recovery=self.recovery.isChecked(),
+            adaptive_step=self.adaptive.isChecked(),
+            adaptive_cutback_factor=self.cutback.value(),
+            adaptive_min_factor=self.min_factor.value(),
+            adaptive_growth_factor=self.growth.value(),
+            adaptive_easy_iterations=self.easy_iter.value(),
+            adaptive_growth_after=self.grow_after.value(),
             live_convergence=self.live_convergence.isChecked(),
             show_external_console=self.external_console.isChecked()
         )

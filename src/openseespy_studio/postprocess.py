@@ -327,6 +327,9 @@ def convergence_summary(
     recovered = 0
     failed = 0
     max_iterations = 0
+    total_cutbacks = 0
+    adaptive_steps = 0
+    minimum_step_size: float | None = None
     worst_norm: float | None = None
     worst_step: int | None = None
 
@@ -335,6 +338,22 @@ def convergence_summary(
             recovered += 1
         if str(row.get("status", "")) == "failed":
             failed += 1
+        if bool(row.get("adaptive")):
+            adaptive_steps += 1
+        try:
+            total_cutbacks += int(row.get("cutbacks", 0) or 0)
+        except (TypeError, ValueError):
+            pass
+        raw_min_step = row.get("min_step_size_used")
+        if raw_min_step is not None:
+            try:
+                min_step = abs(float(raw_min_step))
+            except (TypeError, ValueError):
+                min_step = math.nan
+            if math.isfinite(min_step) and (
+                minimum_step_size is None or min_step < minimum_step_size
+            ):
+                minimum_step_size = min_step
 
         attempts = row.get("attempts", [])
         if isinstance(attempts, list):
@@ -383,6 +402,9 @@ def convergence_summary(
         "failed": failed,
         "total_attempts": total_attempts,
         "max_iterations_used": max_iterations,
+        "adaptive_steps": adaptive_steps,
+        "total_cutbacks": total_cutbacks,
+        "minimum_step_size": minimum_step_size,
         "worst_norm": worst_norm,
         "worst_step": worst_step,
         "algorithms": sorted(algorithms),
@@ -392,6 +414,10 @@ def convergence_summary(
         "primary_algorithm": str(
             convergence.get("primary_algorithm", "") or ""
         ),
+        "adaptive_step": bool(convergence.get("adaptive_step", False)),
+        "cutback_factor": convergence.get("cutback_factor"),
+        "minimum_factor": convergence.get("minimum_factor"),
+        "growth_factor": convergence.get("growth_factor"),
     }
 
 

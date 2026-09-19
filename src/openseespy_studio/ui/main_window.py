@@ -4017,6 +4017,22 @@ class MainWindow(QMainWindow):
                 ("Max iterations", settings.max_iterations),
                 ("Algorithm", settings.algorithm), ("Steps", settings.steps),
                 ("Recovery", "On" if settings.recovery else "Off"),
+                ("Adaptive step", "On" if settings.adaptive_step else "Off"),
+                (
+                    "Cutback / min / grow",
+                    (
+                        f"{settings.adaptive_cutback_factor:g} / "
+                        f"{settings.adaptive_min_factor:g} / "
+                        f"{settings.adaptive_growth_factor:g}"
+                    ),
+                ),
+                (
+                    "Easy / grow-after",
+                    (
+                        f"≤ {settings.adaptive_easy_iterations} iter / "
+                        f"{settings.adaptive_growth_after} easy step(s)"
+                    ),
+                ),
                 (
                     "Live convergence",
                     "On" if settings.live_convergence else "Off",
@@ -5021,6 +5037,29 @@ class MainWindow(QMainWindow):
                 f"· algorithm={algorithm}"
             )
 
+        if event == "cutback":
+            return (
+                f"↘ CUTBACK Step {step}/{total} · "
+                f"|Δ| {float(payload.get('old_size', 0.0)):.6g} → "
+                f"{float(payload.get('new_size', 0.0)):.6g} · "
+                f"remaining={float(payload.get('remaining', 0.0)):.6g}"
+            )
+
+        if event == "grow":
+            return (
+                f"↗ GROW Step {step}/{total} · "
+                f"|Δ| {float(payload.get('old_size', 0.0)):.6g} → "
+                f"{float(payload.get('new_size', 0.0)):.6g}"
+            )
+
+        if event == "adaptive_substep":
+            return (
+                f"• Step {step}/{total} adaptive substep accepted · "
+                f"Δ={float(payload.get('accepted_increment', 0.0)):.6g} · "
+                f"remaining={float(payload.get('remaining', 0.0)):.6g} · "
+                f"next |Δ|={float(payload.get('next_size', 0.0)):.6g}"
+            )
+
         return "[Solver event] " + json.dumps(
             payload,
             ensure_ascii=False,
@@ -5068,10 +5107,15 @@ class MainWindow(QMainWindow):
                 "enabled": bool(payload.get("live_convergence", False)),
             }
             if bool(payload.get("live_convergence", False)):
+                algorithm_label = str(payload.get("algorithm", "") or "")
+                if payload.get("step_size") is not None:
+                    algorithm_label += (
+                        f" · |Δ|={float(payload.get('step_size', 0.0)):.6g}"
+                    )
                 self.results_panel.begin_live_convergence_step(
                     step=int(payload.get("step", 0) or 0),
                     total=int(payload.get("total", 0) or 0),
-                    algorithm=str(payload.get("algorithm", "") or ""),
+                    algorithm=algorithm_label,
                     test=str(payload.get("test", "") or ""),
                     tolerance=payload.get("tolerance"),
                 )
@@ -5133,6 +5177,48 @@ class MainWindow(QMainWindow):
             )
             if bool(self._live_convergence_context.get("enabled")):
                 self.results_panel.finish_live_convergence("FAILED")
+
+        elif event == "cutback":
+            old_size = float(payload.get("old_size", 0.0) or 0.0)
+            new_size = float(payload.get("new_size", 0.0) or 0.0)
+            job.message = (
+                f"CUTBACK step {payload.get('step')}: "
+                f"|Δ| {old_size:.6g} → {new_size:.6g}"
+            )
+            self._live_convergence_context["algorithm"] = str(
+                payload.get("algorithm", "") or ""
+            )
+            if bool(self._live_convergence_context.get("enabled")):
+                self.results_panel.finish_live_convergence("CUTBACK")
+                self.results_panel.begin_live_convergence_attempt(
+                    f"{payload.get('algorithm', '-')} · CUTBACK |Δ|={new_size:.6g}"
+                )
+        elif event == "grow":
+            old_size = float(payload.get("old_size", 0.0) or 0.0)
+            new_size = float(payload.get("new_size", 0.0) or 0.0)
+            job.message = (
+                f"GROW step {payload.get('step')}: "
+                f"|Δ| {old_size:.6g} → {new_size:.6g}"
+            )
+            if bool(self._live_convergence_context.get("enabled")):
+                self.results_panel.set_live_convergence_message(
+                    f"GROW · Step {payload.get('step')}/"
+                    f"{payload.get('total')} · |Δ| {old_size:.6g} → "
+                    f"{new_size:.6g}"
+                )
+        elif event == "adaptive_substep":
+            next_size = float(payload.get("next_size", 0.0) or 0.0)
+            job.message = (
+                f"Adaptive substep accepted at step {payload.get('step')}; "
+                f"next |Δ|={next_size:.6g}"
+            )
+            self._live_convergence_context["algorithm"] = str(
+                payload.get("algorithm", "") or ""
+            )
+            if bool(self._live_convergence_context.get("enabled")):
+                self.results_panel.begin_live_convergence_attempt(
+                    f"{payload.get('algorithm', '-')} · |Δ|={next_size:.6g}"
+                )
 
         self.results_panel.add_or_update_job(job)
 
