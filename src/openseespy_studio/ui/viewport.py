@@ -733,6 +733,7 @@ class ModelViewport(QWidget):
                 color=color,
                 line_width=1,
                 pickable=False,
+                render=False,
             )
         for j in range(ny + 1):
             y = gy0 + (gy1 - gy0) * j / ny
@@ -741,6 +742,7 @@ class ModelViewport(QWidget):
                 color=color,
                 line_width=1,
                 pickable=False,
+                render=False,
             )
 
     @staticmethod
@@ -854,6 +856,7 @@ class ModelViewport(QWidget):
                 line_width=1,
                 smooth_shading=False,
                 pickable=True,
+                render=False,
             )
             tags = np.asarray(mesh.cell_data["element_tag"], dtype=np.int64)
             self._element_actor_data[self._actor_key(actor)] = (mesh, tags)
@@ -873,6 +876,7 @@ class ModelViewport(QWidget):
                 point_size=7,
                 color="#064fd4",
                 pickable=True,
+                render=False,
             )
             self._node_tags = visible_nodes
             self._point_picker.InitializePickList()
@@ -919,6 +923,7 @@ class ModelViewport(QWidget):
                 show_edges=True,
                 line_width=1,
                 pickable=False,
+                render=False,
             )
 
             if support_type.startswith("Roller"):
@@ -944,6 +949,7 @@ class ModelViewport(QWidget):
                     color="#147b80",
                     line_width=3,
                     pickable=False,
+                    render=False,
                 )
 
         visible_node_set = set(visible_nodes)
@@ -963,6 +969,7 @@ class ModelViewport(QWidget):
                     color="#8e44ad",
                     line_width=4,
                     pickable=False,
+                    render=False,
                 )
                 center = tuple(
                     (float(x) + float(y)) * 0.5
@@ -975,6 +982,7 @@ class ModelViewport(QWidget):
                     ),
                     color="#9b59b6",
                     pickable=False,
+                    render=False,
                 )
             else:
                 center = tuple(
@@ -992,9 +1000,10 @@ class ModelViewport(QWidget):
                     edge_color="#5e3370",
                     show_edges=True,
                     pickable=False,
+                    render=False,
                 )
 
-        self._update_highlight_overlays()
+        self._update_highlight_overlays(render=False)
         self._update_display_overlays(render=False)
         self.set_view(self._current_view, render=False)
         if reset_camera:
@@ -1041,7 +1050,11 @@ class ModelViewport(QWidget):
             return None
         return pieces[0] if len(pieces) == 1 else pv.merge(pieces, merge_points=False)
 
-    def _update_highlight_overlays(self) -> None:
+    def _update_highlight_overlays(
+        self,
+        *,
+        render: bool = True,
+    ) -> None:
         for name in (
             "selection-elements",
             "selection-nodes",
@@ -1118,7 +1131,8 @@ class ModelViewport(QWidget):
                     render=False,
                 )
 
-        self.plotter.render()
+        if render:
+            self.plotter.render()
 
     def _clear_display_overlays(self) -> None:
         for name in (
@@ -1569,7 +1583,10 @@ class ModelViewport(QWidget):
             if self._display_options["element_loads"]:
                 self._draw_element_loads()
 
-        if render:
+        if render and (
+            self._display_options["nodal_loads"]
+            or self._display_options["element_loads"]
+        ):
             self.plotter.render()
 
     def _update_display_overlays(self, *, render: bool = True) -> None:
