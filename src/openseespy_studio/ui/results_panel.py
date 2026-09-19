@@ -552,6 +552,7 @@ class ResultsPanel(QWidget):
 
     def _build_convergence_tab(self) -> None:
         page = QWidget()
+        self.convergence_page = page
         layout = QVBoxLayout(page)
         layout.setContentsMargins(4, 4, 4, 4)
 
@@ -1118,6 +1119,7 @@ class ResultsPanel(QWidget):
     ) -> None:
         self._live_convergence_attempts = []
         self._live_convergence_step = 0
+        self.tabs.setCurrentWidget(self.convergence_page)
         self._live_convergence_total = int(total)
         self._live_convergence_test = str(test)
         self._live_convergence_tolerance = tolerance
