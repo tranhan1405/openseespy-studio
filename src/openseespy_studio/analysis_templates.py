@@ -776,6 +776,9 @@ def build_nlth_multi_template(
     damping_ratio: float = 0.05,
     damping_mode_i: int = 1,
     damping_mode_j: int = 3,
+    preload_gravity: bool = True,
+    gravity_steps: int = 10,
+    require_nodal_mass: bool = False,
     solver_preset: str = "Robust",
 ) -> AnalysisTemplatePlan:
     specs = list(components)
@@ -792,8 +795,38 @@ def build_nlth_multi_template(
     directions = [int(spec.direction) for spec in specs]
     if any(direction not in (1, 2, 3) for direction in directions):
         raise ValueError("NLTH components must use X, Y or Z excitation.")
+    if any(direction > int(project.model.ndm) for direction in directions):
+        raise ValueError(
+            f"NLTH excitation direction exceeds model ndm={project.model.ndm}."
+        )
     if len(set(directions)) != len(directions):
         raise ValueError("NLTH excitation directions must be unique.")
+
+    gravity_steps = int(gravity_steps)
+    if gravity_steps < 1:
+        raise ValueError("NLTH gravity steps must be at least 1.")
+
+    if require_nodal_mass:
+        missing_mass_directions = []
+        for direction in directions:
+            index = direction - 1
+            total_mass = sum(
+                max(0.0, float(node.mass[index]))
+                for node in project.model.nodes.values()
+                if index < len(node.mass)
+                and not bool(node.fixity[index])
+            )
+            if total_mass <= 1.0e-15:
+                missing_mass_directions.append(
+                    {1: "X", 2: "Y", 3: "Z"}[direction]
+                )
+        if missing_mass_directions:
+            raise ValueError(
+                "NLTH needs positive translational nodal mass in excitation "
+                "direction(s): "
+                + ", ".join(missing_mass_directions)
+                + ". Assign nodal mass first or disable the template mass check."
+            )
 
     next_series = _next_tag(project.time_series)
     next_pattern = _next_tag(project.load_patterns)
@@ -843,12 +876,16 @@ def build_nlth_multi_template(
         )
         max_points = max(max_points, len(converted))
 
+    # Path samples are defined from t=0 through (N-1)*dt. The transient
+    # analysis therefore advances N-1 nominal intervals to the record end.
+    analysis_steps = max(1, max_points - 1)
+
     tag = project.next_analysis_tag()
     analysis = AnalysisSettingsData(
         tag=tag,
         name=str(name).strip() or f"NLTH {tag}",
         analysis_type="Transient",
-        steps=max_points,
+        steps=analysis_steps,
         control_node=int(monitor_node),
         control_dof=int(monitor_dof),
         dt=dt,
@@ -857,8 +894,8 @@ def build_nlth_multi_template(
         rayleigh_damping_ratio=float(damping_ratio),
         rayleigh_mode_i=int(damping_mode_i),
         rayleigh_mode_j=int(damping_mode_j),
-        preload_gravity=True,
-        gravity_steps=10,
+        preload_gravity=bool(preload_gravity),
+        gravity_steps=gravity_steps,
         deferred_pattern_tags=[pattern.tag for pattern in patterns],
         **_solver_kwargs(solver_preset),
     )
@@ -867,6 +904,24 @@ def build_nlth_multi_template(
     for direction in directions:
         axis = axis_name[direction]
         result_specs.extend([
+            (
+                f"Displacement History {axis}",
+                "TimeHistory",
+                {
+                    "node": int(monitor_node),
+                    "quantity": "Displacement",
+                    "dof": direction,
+                },
+            ),
+            (
+                f"Velocity History {axis}",
+                "TimeHistory",
+                {
+                    "node": int(monitor_node),
+                    "quantity": "Velocity",
+                    "dof": direction,
+                },
+            ),
             (
                 f"Acceleration History {axis}",
                 "TimeHistory",
@@ -877,11 +932,10 @@ def build_nlth_multi_template(
                 },
             ),
             (
-                f"Displacement History {axis}",
+                f"Base Shear History {axis}",
                 "TimeHistory",
                 {
-                    "node": int(monitor_node),
-                    "quantity": "Displacement",
+                    "quantity": "Base shear",
                     "dof": direction,
                 },
             ),
@@ -902,8 +956,9 @@ def build_nlth_multi_template(
         load_patterns=patterns,
         results=results,
         summary=(
-            f"NLTH {component_text} · {max_points} analysis step(s) · "
-            f"dt={dt:g} s · {input_unit}"
+            f"NLTH {component_text} · {analysis_steps} analysis step(s) · "
+            f"duration≈{(max_points - 1) * dt:g} s · dt={dt:g} s · "
+            f"{input_unit}"
         ),
     )
 
@@ -921,6 +976,9 @@ def build_nlth_template(
     damping_ratio: float = 0.05,
     damping_mode_i: int = 1,
     damping_mode_j: int = 3,
+    preload_gravity: bool = True,
+    gravity_steps: int = 10,
+    require_nodal_mass: bool = False,
     solver_preset: str = "Robust",
 ) -> AnalysisTemplatePlan:
     """Backward-compatible one-component NLTH template."""
@@ -945,5 +1003,8 @@ def build_nlth_template(
         damping_ratio=damping_ratio,
         damping_mode_i=damping_mode_i,
         damping_mode_j=damping_mode_j,
+        preload_gravity=preload_gravity,
+        gravity_steps=gravity_steps,
+        require_nodal_mass=require_nodal_mass,
         solver_preset=solver_preset,
     )
