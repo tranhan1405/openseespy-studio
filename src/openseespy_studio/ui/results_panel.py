@@ -639,10 +639,10 @@ class ResultsPanel(QWidget):
             dof = options.get("dof")
             if dof is not None:
                 try:
-                    index = self.history_dof.findData(int(dof))
+                    index = int(dof) - 1
                 except (TypeError, ValueError):
                     index = -1
-                if index >= 0:
+                if 0 <= index < self.history_dof.count():
                     self.history_dof.setCurrentIndex(index)
             self._select_tab("Time History")
             return
