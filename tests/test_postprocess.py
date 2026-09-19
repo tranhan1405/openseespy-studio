@@ -8,6 +8,7 @@ from openseespy_studio.postprocess import (
     local_end_actions,
     member_end_resultants,
     nodal_result_scalar,
+    pushover_capacity_curve,
     section_component_samples,
 )
 from openseespy_studio.project import (
@@ -38,6 +39,50 @@ def test_nodal_result_scalar_handles_short_vectors_and_bad_components():
         assert "Unsupported nodal result component" in str(exc)
     else:
         raise AssertionError("Expected unsupported nodal component to fail")
+
+
+def test_pushover_capacity_curve_uses_control_dof_and_applied_shear_sign():
+    result = {
+        "analysis": {
+            "type": "Pushover",
+            "control_node": 9,
+            "control_dof": 2,
+        },
+        "history": {
+            "monitor_node": 9,
+            "control_dof": 2,
+            "displacement": [
+                [0.0, 0.01, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.02, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.03, 0.0, 0.0, 0.0, 0.0],
+            ],
+            "base_shear": [-100.0, -180.0, -150.0],
+        },
+    }
+
+    x, y, node, dof = pushover_capacity_curve(result)
+
+    assert x == [0.01, 0.02, 0.03]
+    assert y == [100.0, 180.0, 150.0]
+    assert node == 9
+    assert dof == 2
+
+
+def test_pushover_capacity_curve_rejects_non_pushover_results():
+    x, y, node, dof = pushover_capacity_curve(
+        {
+            "analysis": {"type": "Static"},
+            "history": {
+                "displacement": [[0.1] * 6],
+                "base_shear": [-10.0],
+            },
+        }
+    )
+
+    assert x == []
+    assert y == []
+    assert node is None
+    assert dof is None
 
 def _local_force_vector():
     return [
