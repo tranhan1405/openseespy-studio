@@ -497,7 +497,7 @@ def analysis_to_openseespy(
         "    return _iterations, _norm, _norms",
         "",
         "_studio_results = {",
-        "    'schema_version': 8,",
+        "    'schema_version': 9,",
         "    'analysis': {",
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
@@ -507,6 +507,10 @@ def analysis_to_openseespy(
         f"        'cyclic_targets': {settings.cyclic_targets!r},",
         f"        'cyclic_increment': {settings.cyclic_increment:g},",
         f"        'planned_steps': {total_steps},",
+        f"        'adaptive_step': {settings.adaptive_step!r},",
+        f"        'adaptive_cutback_factor': {settings.adaptive_cutback_factor:g},",
+        f"        'adaptive_min_factor': {settings.adaptive_min_factor:g},",
+        f"        'adaptive_growth_factor': {settings.adaptive_growth_factor:g},",
         "    },",
         "    'final': {},",
         "    'convergence': {",
@@ -514,6 +518,12 @@ def analysis_to_openseespy(
         f"        'tolerance': {settings.tolerance:g},",
         f"        'max_iterations': {settings.max_iterations},",
         f"        'primary_algorithm': {settings.algorithm!r},",
+        f"        'adaptive_step': {settings.adaptive_step!r},",
+        f"        'cutback_factor': {settings.adaptive_cutback_factor:g},",
+        f"        'minimum_factor': {settings.adaptive_min_factor:g},",
+        f"        'growth_factor': {settings.adaptive_growth_factor:g},",
+        f"        'easy_iterations': {settings.adaptive_easy_iterations},",
+        f"        'growth_after': {settings.adaptive_growth_after},",
         "        'steps': [],",
         "    },",
         "    'history': {'time': [], 'monitor_node': "
@@ -632,7 +642,8 @@ def analysis_to_openseespy(
         f"analysis_type={settings.analysis_type!r}, "
         f"algorithm=_studio_primary_algorithm, "
         f"test={settings.test!r}, tolerance={settings.tolerance:g}, "
-        f"live_convergence={settings.live_convergence!r})"
+        f"live_convergence={settings.live_convergence!r}, "
+        f"adaptive_step={settings.adaptive_step!r})"
     )
     lines.append(f"for _studio_step in range({total_steps}):")
     lines.append("    _studio_step_no = _studio_step + 1")
