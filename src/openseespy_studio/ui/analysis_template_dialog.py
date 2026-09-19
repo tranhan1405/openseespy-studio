@@ -610,8 +610,24 @@ class AnalysisTemplateDialog(QDialog):
                 f"{self.solver.currentText()} solver"
             )
         else:
+            enabled = [
+                direction
+                for direction in (1, 2, 3)
+                if self.gm_enabled[direction].isChecked()
+            ]
+            axes = "/".join(
+                {1: "X", 2: "Y", 3: "Z"}[direction]
+                for direction in enabled
+            ) or "-"
+            points = max(
+                (
+                    len(self._ground_motion_values[direction])
+                    for direction in enabled
+                ),
+                default=0,
+            )
             text = (
-                f"NLTH · {len(self._ground_motion_values)} point(s) · "
+                f"NLTH {axes} · up to {points} point(s) · "
                 f"dt={self.gm_dt.value():g} s · "
                 f"ζ={self.damping_ratio.value():g} · "
                 f"{self.solver.currentText()} solver"
@@ -633,6 +649,13 @@ class AnalysisTemplateDialog(QDialog):
                     "target_displacement": self.push_target.value(),
                     "max_increment": self.push_increment.value(),
                     "distribution": self.push_distribution.currentText(),
+                    "custom_weights": (
+                        self._parse_custom_weights(
+                            self.push_custom.text()
+                        )
+                        if self.push_distribution.currentText() == "Custom"
+                        else {}
+                    ),
                 }
             )
         elif kind == "Cyclic":
@@ -641,25 +664,51 @@ class AnalysisTemplateDialog(QDialog):
                     "protocol_rows": self._protocol_rows(),
                     "max_increment": self.cyclic_increment.value(),
                     "distribution": self.cyclic_distribution.currentText(),
+                    "custom_weights": (
+                        self._parse_custom_weights(
+                            self.cyclic_custom.text()
+                        )
+                        if self.cyclic_distribution.currentText() == "Custom"
+                        else {}
+                    ),
                 }
             )
         else:
-            if not self._ground_motion_values:
-                raise ValueError("Choose a valid ground-motion file first.")
+            components: list[dict[str, object]] = []
+            for direction, axis in ((1, "X"), (2, "Y"), (3, "Z")):
+                if not self.gm_enabled[direction].isChecked():
+                    continue
+                values = self._ground_motion_values[direction]
+                if not values:
+                    raise ValueError(
+                        f"Choose a valid {axis}-direction ground-motion file."
+                    )
+                components.append(
+                    {
+                        "direction": direction,
+                        "label": axis,
+                        "values": list(values),
+                        "input_unit": self.gm_unit.currentText(),
+                        "scale_factor": self.gm_scales[
+                            direction
+                        ].value(),
+                        "file": self.gm_files[
+                            direction
+                        ].text().strip(),
+                    }
+                )
+            if not components:
+                raise ValueError(
+                    "Enable at least one NLTH excitation component."
+                )
             base.update(
                 {
-                    "ground_motion_values": list(
-                        self._ground_motion_values
-                    ),
+                    "components": components,
                     "dt": self.gm_dt.value(),
-                    "input_unit": self.gm_unit.currentText(),
-                    "scale_factor": self.gm_scale.value(),
-                    "direction": int(self.direction.currentData()),
                     "monitor_node": self.control_node.value(),
                     "damping_ratio": self.damping_ratio.value(),
                     "damping_mode_i": self.damping_mode_i.value(),
                     "damping_mode_j": self.damping_mode_j.value(),
-                    "ground_motion_file": self.gm_file.text().strip(),
                 }
             )
         return base
