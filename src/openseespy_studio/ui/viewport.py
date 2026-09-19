@@ -1873,10 +1873,16 @@ class ModelViewport(QWidget):
                     center + z_axis * axis_length * 1.08,
                 )
             )
+            def selected_axis_text(axis: str, label: str) -> str:
+                if "·" not in label:
+                    return axis
+                detail = label.split("·", 1)[-1].strip().upper()
+                return f"{axis}  ·  {detail}"
+
             labels.extend(
                 (
-                    f"{tag}: {y_label}",
-                    f"{tag}: {z_label}",
+                    selected_axis_text("y", y_label),
+                    selected_axis_text("z", z_label),
                 )
             )
 
@@ -1884,9 +1890,9 @@ class ModelViewport(QWidget):
             label_points,
             labels,
             name="display-section-axis-labels",
-            text_color="#334155",
-            font_size=9,
-            always_visible=False,
+            text_color="#1f2937",
+            font_size=11,
+            always_visible=True,
         )
 
     def _draw_section_axes(self) -> None:
