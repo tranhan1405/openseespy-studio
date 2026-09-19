@@ -363,7 +363,7 @@ class BrandWidget(QWidget):
         font.setPointSize(7)
         font.setBold(False)
         painter.setFont(font)
-        painter.drawText(text_x, 45, "Model  ·  Analyze  ·  Understand")
+        painter.drawText(text_x, 45, "Visual Platform for OpenSeesPy")
 
 
 class RibbonGroup(QWidget):
