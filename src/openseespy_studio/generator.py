@@ -376,6 +376,39 @@ def element_load_to_openseespy(
     )
 
 
+def load_pattern_block_to_openseespy(
+    pattern: LoadPatternData,
+    *,
+    nodal_loads: list[NodalLoadData] | None = None,
+    element_loads: list[ElementLoadData] | None = None,
+    model: StructuralModel,
+    sections: dict[int, SectionData] | None = None,
+    materials: dict[int, MaterialData] | None = None,
+    transformations: dict[int, TransformationData] | None = None,
+    units: dict[str, str] | None = None,
+) -> list[str]:
+    lines = [load_pattern_to_openseespy(pattern)]
+    if pattern.pattern_type != "Plain":
+        return lines
+
+    for load in sorted(nodal_loads or [], key=lambda item: item.tag):
+        lines.append(f"# Nodal load {load.tag}: {load.name}")
+        lines.append(nodal_load_to_openseespy(load))
+    for load in sorted(element_loads or [], key=lambda item: item.tag):
+        lines.append(f"# Element load {load.tag}: {load.name}")
+        lines.append(
+            element_load_to_openseespy(
+                load,
+                model,
+                sections,
+                materials,
+                transformations,
+                units,
+            )
+        )
+    return lines
+
+
 def recorder_to_openseespy(recorder: RecorderData) -> list[str]:
     """Generate one native OpenSees recorder command."""
     path = recorder.file_name
@@ -1429,6 +1462,17 @@ def to_openseespy(
     recorders: dict[int, RecorderData] | None = None,
     units: dict[str, str] | None = None,
 ) -> str:
+    active_analysis = (
+        analyses.get(active_analysis_tag)
+        if analyses and active_analysis_tag in analyses
+        else None
+    )
+    deferred_pattern_tags = set(
+        active_analysis.deferred_pattern_tags
+        if active_analysis is not None
+        else []
+    )
+
     lines: list[str] = [
         "import json",
         "import math",
@@ -1607,45 +1651,32 @@ def to_openseespy(
         for tag in sorted(time_series):
             lines.append(time_series_to_openseespy(time_series[tag]))
 
+    nodal_by_pattern: dict[int, list[NodalLoadData]] = {}
+    for load in (nodal_loads or {}).values():
+        nodal_by_pattern.setdefault(load.pattern_tag, []).append(load)
+
+    element_by_pattern: dict[int, list[ElementLoadData]] = {}
+    for load in (element_loads or {}).values():
+        element_by_pattern.setdefault(load.pattern_tag, []).append(load)
+
     if load_patterns:
         lines.extend(["", "# Load patterns"])
-        nodal_by_pattern: dict[int, list[NodalLoadData]] = {}
-        for load in (nodal_loads or {}).values():
-            nodal_by_pattern.setdefault(load.pattern_tag, []).append(load)
-
-        element_by_pattern: dict[int, list[ElementLoadData]] = {}
-        for load in (element_loads or {}).values():
-            element_by_pattern.setdefault(load.pattern_tag, []).append(load)
-
         for tag in sorted(load_patterns):
+            if tag in deferred_pattern_tags:
+                continue
             pattern = load_patterns[tag]
-            lines.append(load_pattern_to_openseespy(pattern))
-            if pattern.pattern_type == "Plain":
-                for load in sorted(
-                    nodal_by_pattern.get(tag, []),
-                    key=lambda item: item.tag,
-                ):
-                    lines.append(
-                        f"# Nodal load {load.tag}: {load.name}"
-                    )
-                    lines.append(nodal_load_to_openseespy(load))
-                for load in sorted(
-                    element_by_pattern.get(tag, []),
-                    key=lambda item: item.tag,
-                ):
-                    lines.append(
-                        f"# Element load {load.tag}: {load.name}"
-                    )
-                    lines.append(
-                        element_load_to_openseespy(
-                            load,
-                            model,
-                            sections,
-                            materials,
-                            transformations,
-                            units,
-                        )
-                    )
+            lines.extend(
+                load_pattern_block_to_openseespy(
+                    pattern,
+                    nodal_loads=nodal_by_pattern.get(tag, []),
+                    element_loads=element_by_pattern.get(tag, []),
+                    model=model,
+                    sections=sections,
+                    materials=materials,
+                    transformations=transformations,
+                    units=units,
+                )
+            )
 
     if recorders:
         lines.extend(["", "# Recorders"])
@@ -1656,9 +1687,71 @@ def to_openseespy(
             )
             lines.extend(recorder_to_openseespy(recorder))
 
-    if analyses and active_analysis_tag in analyses:
+    if active_analysis is not None:
         lines.extend(["", "# Analysis settings"])
-        active = analyses[active_analysis_tag]
+        active = active_analysis
+
+        preload_plain_tags = sorted(
+            tag
+            for tag, pattern in (load_patterns or {}).items()
+            if (
+                pattern.pattern_type == "Plain"
+                and tag not in deferred_pattern_tags
+            )
+        )
+        if active.preload_gravity and preload_plain_tags:
+            gravity_increment = 1.0 / active.gravity_steps
+            lines.extend([
+                "",
+                "# Template sequence: gravity / existing Plain-load preload",
+                f"ops.constraints({active.constraints_handler!r})",
+                f"ops.numberer({active.numberer!r})",
+                f"ops.system({active.system!r})",
+                (
+                    f"ops.test({active.test!r}, {active.tolerance:g}, "
+                    f"{active.max_iterations}, 0)"
+                ),
+                f"ops.algorithm({active.algorithm!r})",
+                f"ops.integrator('LoadControl', {gravity_increment:g})",
+                "ops.analysis('Static')",
+                f"_studio_gravity_ok = ops.analyze({active.gravity_steps})",
+                "if _studio_gravity_ok != 0:",
+                (
+                    "    raise RuntimeError("
+                    "'Gravity preload failed before the template analysis')"
+                ),
+                "ops.loadConst('-time', 0.0)",
+                "ops.wipeAnalysis()",
+            ])
+
+        if deferred_pattern_tags:
+            lines.extend(["", "# Template driving / excitation patterns"])
+            for deferred_tag in sorted(deferred_pattern_tags):
+                pattern = (load_patterns or {}).get(deferred_tag)
+                if pattern is None:
+                    lines.append(
+                        f"# ERROR: Deferred load pattern {deferred_tag} "
+                        "does not exist."
+                    )
+                    continue
+                lines.extend(
+                    load_pattern_block_to_openseespy(
+                        pattern,
+                        nodal_loads=nodal_by_pattern.get(
+                            deferred_tag,
+                            [],
+                        ),
+                        element_loads=element_by_pattern.get(
+                            deferred_tag,
+                            [],
+                        ),
+                        model=model,
+                        sections=sections,
+                        materials=materials,
+                        transformations=transformations,
+                        units=units,
+                    )
+                )
         monitor_node = (
             active.control_node
             if active.control_node in model.nodes
