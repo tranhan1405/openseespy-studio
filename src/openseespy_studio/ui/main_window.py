@@ -2074,23 +2074,29 @@ class MainWindow(QMainWindow):
 
         root = QTreeWidgetItem(["OpenSees Model"])
         root.setIcon(0, studio_icon("model"))
+        root.setData(0, Qt.UserRole, ("model_root", None))
         root.setExpanded(True)
 
         geometry = QTreeWidgetItem(["Geometry"])
         geometry.setIcon(0, studio_icon("grid"))
+        geometry.setData(0, Qt.UserRole, ("geometry_root", None))
         geometry.setExpanded(True)
         root.addChild(geometry)
 
         nodes = QTreeWidgetItem([f"Nodes ({len(self.model.nodes)})"])
         nodes.setIcon(0, studio_icon("node"))
+        nodes.setData(0, Qt.UserRole, ("nodes_root", None))
         lines = QTreeWidgetItem(["Lines (0)"])
         lines.setIcon(0, studio_icon("element"))
+        lines.setData(0, Qt.UserRole, ("lines_root", None))
         frame_grids = QTreeWidgetItem(["Frame Grids (1)" if self.model.nodes else "Frame Grids (0)"])
         frame_grids.setIcon(0, studio_icon("grid"))
+        frame_grids.setData(0, Qt.UserRole, ("frame_grids_root", None))
         geometry.addChildren([nodes, lines, frame_grids])
 
         elements = QTreeWidgetItem([f"Elements ({len(self.model.elements)})"])
         elements.setIcon(0, studio_icon("element"))
+        elements.setData(0, Qt.UserRole, ("elements_root", None))
         elements.setExpanded(True)
         root.addChild(elements)
 
@@ -2108,6 +2114,11 @@ class MainWindow(QMainWindow):
         for element_type in sorted(known_types | set(type_counts)):
             item = QTreeWidgetItem([f"{element_type} ({type_counts.get(element_type, 0)})"])
             item.setIcon(0, studio_icon("element"))
+            item.setData(
+                0,
+                Qt.UserRole,
+                ("element_type_group", element_type),
+            )
             type_items[element_type] = item
             elements.addChild(item)
 
@@ -2130,6 +2141,7 @@ class MainWindow(QMainWindow):
             f"Named Selections ({len(self.project.selection_sets)})"
         ])
         named_sets.setIcon(0, studio_icon("select"))
+        named_sets.setData(0, Qt.UserRole, ("named_sets_root", None))
         named_sets.setExpanded(True)
         root.addChild(named_sets)
 
@@ -2232,6 +2244,11 @@ class MainWindow(QMainWindow):
                 f"{support_type} ({len(tags)})"
             ])
             group_item.setIcon(0, studio_icon("boundary"))
+            group_item.setData(
+                0,
+                Qt.UserRole,
+                ("boundary_group", support_type),
+            )
             group_item.setExpanded(True)
             boundary_root.addChild(group_item)
             for tag in tags:
@@ -2276,6 +2293,11 @@ class MainWindow(QMainWindow):
                 f"{connection_type} ({len(tags)})"
             ])
             group.setIcon(0, studio_icon("element"))
+            group.setData(
+                0,
+                Qt.UserRole,
+                ("connection_group", connection_type),
+            )
             group.setExpanded(True)
             connections_root.addChild(group)
             connection_groups[connection_type] = group
