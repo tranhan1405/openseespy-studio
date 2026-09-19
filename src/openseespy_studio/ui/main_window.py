@@ -5915,6 +5915,11 @@ class MainWindow(QMainWindow):
             initial_node_i=node_i,
             initial_node_j=node_j,
             default_to_ground=to_ground,
+            node_positions={
+                tag: node.xyz
+                for tag, node in self.model.nodes.items()
+            },
+            units=self.project.units,
             parent=self,
         )
         if not dialog.exec():
@@ -5968,6 +5973,11 @@ class MainWindow(QMainWindow):
         dialog = ConnectionDialog(
             self.project.materials,
             connection=connection,
+            node_positions={
+                node_tag: node.xyz
+                for node_tag, node in self.model.nodes.items()
+            },
+            units=self.project.units,
             parent=self,
         )
         if not dialog.exec():
