@@ -160,6 +160,7 @@ class AnalysisTemplateDialog(QDialog):
         self.solver.currentTextChanged.connect(self._update_summary)
         self._initializing = False
         self._sync_template(self.template.currentText())
+        self._update_pushover_preview()
 
     def _build_pushover_page(self) -> QWidget:
         page = QWidget()
