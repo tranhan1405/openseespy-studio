@@ -12,11 +12,13 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPushButton,
     QSpinBox,
     QVBoxLayout,
 )
 
 from ..project import ConnectionData, MaterialData
+from .material_chain_dialog import MaterialChainDialog
 
 
 def _float_spin(value: float) -> QDoubleSpinBox:
@@ -45,7 +47,8 @@ class ConnectionDialog(QDialog):
         self.setWindowTitle("Connection / Spring Editor")
         self.setModal(True)
         self.resize(560, 520)
-        self.materials = materials
+        self.materials = dict(materials)
+        self.pending_materials: list[MaterialData] = []
 
         root = QVBoxLayout(self)
         form = QFormLayout()
@@ -104,6 +107,24 @@ class ConnectionDialog(QDialog):
         )
         hint.setWordWrap(True)
         root.addWidget(hint)
+
+        research_group = QGroupBox("Research nonlinear spring")
+        research_layout = QHBoxLayout(research_group)
+        self.chain_dof = QComboBox()
+        for dof, label in enumerate(self.DOF_LABELS, start=1):
+            self.chain_dof.addItem(f"{label} (dir {dof})", dof)
+        self.chain_button = QPushButton(
+            "Build Steel02 → Fatigue → MinMax..."
+        )
+        self.chain_button.setToolTip(
+            "Build a dependency-safe nonlinear material chain and assign "
+            "the outer material directly to the selected spring DOF."
+        )
+        self.chain_button.clicked.connect(self._build_research_chain)
+        research_layout.addWidget(QLabel("Assign to:"))
+        research_layout.addWidget(self.chain_dof)
+        research_layout.addWidget(self.chain_button, 1)
+        root.addWidget(research_group)
 
         dof_group = QGroupBox("Directional materials")
         dof_layout = QFormLayout(dof_group)
@@ -180,6 +201,61 @@ class ConnectionDialog(QDialog):
         self.to_ground.toggled.connect(self._sync_ground_state)
         self._sync_ground_state(self.to_ground.isChecked())
 
+    def _refresh_material_combos(
+        self,
+        *,
+        select_dof: int | None = None,
+        select_material_tag: int | None = None,
+    ) -> None:
+        for dof, combo in enumerate(self.material_combos, start=1):
+            previous = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            for tag in sorted(self.materials):
+                material = self.materials[tag]
+                suffix = (
+                    " · pending"
+                    if any(item.tag == tag for item in self.pending_materials)
+                    else ""
+                )
+                combo.addItem(
+                    f"{tag} - {material.name} "
+                    f"({material.material_type}){suffix}",
+                    tag,
+                )
+            wanted = (
+                select_material_tag
+                if select_dof == dof and select_material_tag is not None
+                else previous
+            )
+            index = combo.findData(wanted)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+            combo.blockSignals(False)
+
+    def _build_research_chain(self) -> None:
+        dof = int(self.chain_dof.currentData())
+        label = self.DOF_LABELS[dof - 1]
+        dialog = MaterialChainDialog(
+            self.materials,
+            target_dof_label=label,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        result = dialog.chain_result()
+        for material in result.materials:
+            self.materials[material.tag] = material
+            self.pending_materials.append(material)
+
+        self._refresh_material_combos(
+            select_dof=dof,
+            select_material_tag=result.final_tag,
+        )
+        self.dof_checks[dof - 1].setChecked(True)
+        self.connection_type.setCurrentText("zeroLength")
+
     def _sync_ground_state(self, checked: bool) -> None:
         self.node_j.setEnabled(not checked)
 
@@ -213,6 +289,7 @@ class ConnectionDialog(QDialog):
             "orient_x": tuple(spin.value() for spin in self.ox),
             "orient_y": tuple(spin.value() for spin in self.oy),
             "do_rayleigh": self.do_rayleigh.isChecked(),
+            "pending_materials": list(self.pending_materials),
         }
 
     def _validate_and_accept(self) -> None:
