@@ -100,7 +100,7 @@ def test_pushover_height_axis_supports_2d_xy_frames():
     model.add_node(1, 0.0, 0.0, 0.0)
     model.add_node(2, 0.0, 3.0, 0.0)
     model.add_node(3, 0.0, 6.0, 0.0)
-    model.set_fixity(1, (1, 1, 1, 1, 1, 1))
+    model.set_fixity(1, (1, 1, 1))
     project = ProjectDatabase(model=model)
 
     assert infer_height_axis(project) == 2
