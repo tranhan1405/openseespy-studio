@@ -86,7 +86,7 @@ class ModelViewport(QWidget):
             "section_axes": False,
             "load_values": True,
         }
-        self._model_representation = "actual_section"
+        self._model_representation = "tube"
         self._selection_filter = "all"
         self._selected_nodes: set[int] = set()
         self._selected_elements: set[int] = set()
@@ -618,7 +618,7 @@ class ModelViewport(QWidget):
 
     @staticmethod
     def _normalized_model_representation(value: str) -> str:
-        representation = str(value or "actual_section").strip().lower()
+        representation = str(value or "tube").strip().lower()
         aliases = {
             "actual": "actual_section",
             "actual section": "actual_section",
@@ -627,7 +627,7 @@ class ModelViewport(QWidget):
         }
         representation = aliases.get(representation, representation)
         if representation not in {"actual_section", "tube", "centerline"}:
-            return "actual_section"
+            return "tube"
         return representation
 
     def set_model_representation(self, value: str) -> None:
