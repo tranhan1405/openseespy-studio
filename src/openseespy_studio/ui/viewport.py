@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections import OrderedDict
 
 import numpy as np
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, Signal
@@ -72,6 +73,12 @@ class ModelViewport(QWidget):
         self._box_origin: QPoint | None = None
         self._rubber_band: QRubberBand | None = None
         self._result_overlay_active = False
+        self._active_result_view_key: object | None = None
+        self._result_view_cache: OrderedDict[
+            object,
+            list[tuple[object, dict[str, object]]],
+        ] = OrderedDict()
+        self._result_view_cache_limit = 18
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -749,6 +756,11 @@ class ModelViewport(QWidget):
         self._render_model(reset_camera=True)
 
     def _render_model(self, *, reset_camera: bool) -> None:
+        # A model/visibility rebuild invalidates every cached post-processing
+        # mesh because its geometry/scope may no longer match the scene.
+        self._result_view_cache.clear()
+        self._active_result_view_key = None
+        self._result_overlay_active = False
         self.plotter.clear()
         self._reset_scene()
         self._node_actor = None
@@ -1063,8 +1075,69 @@ class ModelViewport(QWidget):
         ):
             self._remove_overlay(name)
         self._result_overlay_active = False
+        self._active_result_view_key = None
         if render:
             self.plotter.render()
+
+    @staticmethod
+    def _result_scope_key(tags: set[int] | None) -> tuple[int, ...]:
+        return tuple(sorted(int(tag) for tag in (tags or ())))
+
+    def _result_view_key(
+        self,
+        source_key: object | None,
+        kind: str,
+        *parts: object,
+    ) -> object | None:
+        if source_key is None:
+            return None
+        try:
+            key = (source_key, str(kind), *parts)
+            hash(key)
+        except TypeError:
+            return None
+        return key
+
+    def _show_cached_result_view(self, key: object | None) -> bool:
+        if key is None:
+            return False
+        if (
+            key == self._active_result_view_key
+            and self._result_overlay_active
+        ):
+            return True
+
+        cached = self._result_view_cache.get(key)
+        if cached is None:
+            return False
+
+        self.clear_result_overlay(render=False)
+        for mesh, raw_kwargs in cached:
+            kwargs = dict(raw_kwargs)
+            kwargs["render"] = False
+            self.plotter.add_mesh(mesh, **kwargs)
+
+        self._result_view_cache.move_to_end(key)
+        self._active_result_view_key = key
+        self._result_overlay_active = True
+        self.plotter.render()
+        return True
+
+    def _remember_result_view(
+        self,
+        key: object | None,
+        entries: list[tuple[object, dict[str, object]]],
+    ) -> None:
+        if key is None or not entries:
+            return
+        self._result_view_cache[key] = [
+            (mesh, dict(kwargs))
+            for mesh, kwargs in entries
+        ]
+        self._result_view_cache.move_to_end(key)
+        while len(self._result_view_cache) > self._result_view_cache_limit:
+            self._result_view_cache.popitem(last=False)
+        self._active_result_view_key = key
 
     def _show_vector_overlay(
         self,
@@ -1074,11 +1147,15 @@ class ModelViewport(QWidget):
         label: str,
         node_tags: set[int] | None = None,
         element_tags: set[int] | None = None,
+        view_cache_key: object | None = None,
     ) -> None:
         if self._model is None or not self._model.elements:
             return
+        if self._show_cached_result_view(view_cache_key):
+            return
 
         self.clear_result_overlay(render=False)
+        entries: list[tuple[object, dict[str, object]]] = []
         points: list[tuple[float, float, float]] = []
         lines: list[int] = []
         magnitudes: list[float] = []
@@ -1129,17 +1206,21 @@ class ModelViewport(QWidget):
                 magnitudes,
                 dtype=float,
             )
+            mesh_kwargs = {
+                "name": "result-overlay",
+                "scalars": "magnitude",
+                "cmap": "turbo",
+                "line_width": 5,
+                "render_lines_as_tubes": True,
+                "pickable": False,
+                "scalar_bar_args": {"title": label},
+            }
             self.plotter.add_mesh(
                 mesh,
-                name="result-overlay",
-                scalars="magnitude",
-                cmap="turbo",
-                line_width=5,
-                render_lines_as_tubes=True,
-                pickable=False,
-                scalar_bar_args={"title": label},
+                **mesh_kwargs,
                 render=False,
             )
+            entries.append((mesh, mesh_kwargs))
 
         result_node_tags = set(self._visible_node_tags())
         if node_tags:
@@ -1167,18 +1248,23 @@ class ModelViewport(QWidget):
                 node_magnitudes,
                 dtype=float,
             )
+            node_kwargs = {
+                "name": "result-nodes",
+                "scalars": "magnitude",
+                "cmap": "turbo",
+                "render_points_as_spheres": True,
+                "point_size": 7,
+                "pickable": False,
+                "show_scalar_bar": False,
+            }
             self.plotter.add_mesh(
                 node_mesh,
-                name="result-nodes",
-                scalars="magnitude",
-                cmap="turbo",
-                render_points_as_spheres=True,
-                point_size=7,
-                pickable=False,
-                show_scalar_bar=False,
+                **node_kwargs,
                 render=False,
             )
+            entries.append((node_mesh, node_kwargs))
 
+        self._remember_result_view(view_cache_key, entries)
         self._result_overlay_active = True
         self.plotter.render()
 
