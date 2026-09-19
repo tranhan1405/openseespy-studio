@@ -7632,6 +7632,16 @@ class MainWindow(QMainWindow):
             evaluate_all.triggered.connect(
                 lambda: self._evaluate_all_solution_results(analysis_tag)
             )
+            clear_display = menu.addAction("Clear Result Display")
+            clear_display.triggered.connect(self._clear_result_display)
+            result_objects = self.project.solution_results_for_analysis(
+                analysis_tag
+            )
+            delete_all = menu.addAction("Delete All Results...")
+            delete_all.setEnabled(bool(result_objects))
+            delete_all.triggered.connect(
+                lambda: self._delete_all_solution_results(analysis_tag)
+            )
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
@@ -7650,7 +7660,9 @@ class MainWindow(QMainWindow):
                 lambda: self._rename_solution_result(tag)
             )
             menu.addSeparator()
-            delete = menu.addAction("Delete")
+            clear_display = menu.addAction("Clear Result Display")
+            clear_display.triggered.connect(self._clear_result_display)
+            delete = menu.addAction("Delete Result...")
             delete.triggered.connect(
                 lambda: self._delete_solution_result(tag)
             )
@@ -7714,6 +7726,12 @@ class MainWindow(QMainWindow):
                     self.results_dock.raise_(),
                 )
             )
+            menu.addSeparator()
+            clear_display = menu.addAction("Clear Result Display")
+            clear_display.triggered.connect(self._clear_result_display)
+            delete_all_jobs = menu.addAction("Delete All Jobs...")
+            delete_all_jobs.setEnabled(bool(self._jobs))
+            delete_all_jobs.triggered.connect(self._delete_all_jobs)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
@@ -7744,10 +7762,18 @@ class MainWindow(QMainWindow):
                 )
 
             menu.addSeparator()
+            clear_display = menu.addAction("Clear Result Display")
+            clear_display.triggered.connect(self._clear_result_display)
             export = menu.addAction("Export Results JSON...")
             export.setEnabled(bool(job and job.results))
             export.triggered.connect(
                 lambda: self._export_job_result_json(job_id)
+            )
+            menu.addSeparator()
+            delete_job = menu.addAction("Delete Job...")
+            delete_job.setEnabled(job is not None and job.status != "Running")
+            delete_job.triggered.connect(
+                lambda: self._delete_job(job_id)
             )
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
@@ -7776,7 +7802,9 @@ class MainWindow(QMainWindow):
                 lambda: self._duplicate_job_plot(job_id, plot_id)
             )
             menu.addSeparator()
-            delete = menu.addAction("Delete")
+            clear_display = menu.addAction("Clear Result Display")
+            clear_display.triggered.connect(self._clear_result_display)
+            delete = menu.addAction("Delete Result...")
             delete.triggered.connect(
                 lambda: self._delete_job_plot(job_id, plot_id)
             )
