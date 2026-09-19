@@ -122,10 +122,23 @@ def infer_fiber_display_geometry(section: SectionData) -> dict[str, object]:
     has_flange = any("flange" in name for name in names)
     has_web = any("web" in name for name in names)
     if not (has_flange and has_web):
-        return {
-            "shape": "Rectangle",
-            "dimensions": {"height": height, "width": flange_width},
+        rectangle_template_names = {
+            "core",
+            "rectangle concrete",
+            "cover - top",
+            "cover - bottom",
+            "cover - left",
+            "cover - right",
         }
+        if all(name in rectangle_template_names for name in names):
+            return {
+                "shape": "Rectangle",
+                "dimensions": {
+                    "height": height,
+                    "width": flange_width,
+                },
+            }
+        return {}
 
     web_bounds = [
         bounds
@@ -251,6 +264,11 @@ def geometry_contours(
                 ],
                 dtype=float,
             )
+            # Elastic T sections use centroidal section axes. Fiber templates
+            # omit this metadata so their explicitly defined y coordinates are
+            # preserved exactly.
+            centroid_y = float(dims.get("centroid_y", 0.0))
+            contour[:, 0] -= centroid_y
             return [contour]
 
         y_top_web = yt - tf
