@@ -651,8 +651,7 @@ def analysis_to_openseespy(
     )
     lines.append(
         "    _studio_disp = "
-        "_studio_results['history']['nodes']"
-        "[str(_studio_monitor_node)]['disp'][-1]"
+        "[float(v) for v in ops.nodeDisp(_studio_monitor_node)]"
     )
     lines.append(
         "    _studio_results['history']['displacement'].append(_studio_disp)"
