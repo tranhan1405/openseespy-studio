@@ -38,7 +38,12 @@ def result_choices_for_analysis(
                 "Mode Shape",
                 "ModeShape",
                 "Mode Shape 1",
-                {"mode": 1, "scale": 1.0},
+                {
+                    "mode": 1,
+                    "scale": 1.0,
+                    "representation": "actual_section",
+                    "smooth_curvature": True,
+                },
             ),
             ResultChoice(
                 "Motion",
@@ -55,7 +60,11 @@ def result_choices_for_analysis(
             "Deformed Shape",
             "DeformedShape",
             "Deformed Shape",
-            {"scale": 10.0},
+            {
+                "scale": 10.0,
+                "representation": "actual_section",
+                "smooth_curvature": True,
+            },
         ),
         ResultChoice(
             "Motion",
