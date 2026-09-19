@@ -538,6 +538,31 @@ def _dynamic_checks(
                 )
 
 
+def _recorder_checks(
+    project: ProjectDatabase,
+    issues: list[ValidationIssue],
+) -> None:
+    for tag in sorted(project.recorders):
+        recorder = project.recorders[tag]
+        try:
+            project._validate_recorder(recorder)
+        except ValueError as exc:
+            entity_kind = (
+                "node" if recorder.recorder_type == "Node" else "element"
+            )
+            entity_tag = recorder.target_tags[0] if recorder.target_tags else None
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Recorder",
+                    f"Recorder {tag} ({recorder.name}): {exc}",
+                    entity_kind,
+                    entity_tag,
+                    "Edit or remove the recorder before running.",
+                )
+            )
+
+
 def validate_project(
     project: ProjectDatabase,
     analysis: AnalysisSettingsData | None = None,
@@ -573,6 +598,7 @@ def validate_project(
     _element_geometry_checks(project, issues)
     _support_and_connectivity_checks(project, issues)
     _element_load_checks(project, issues)
+    _recorder_checks(project, issues)
 
     if analysis is not None:
         _dynamic_checks(project, analysis, issues)
