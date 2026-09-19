@@ -1,5 +1,7 @@
 import math
 
+import pytest
+
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.postprocess import (
     classify_fiber_state,
@@ -423,6 +425,35 @@ def test_cyclic_open_path_does_not_label_work_as_dissipated_energy():
     assert metrics["dissipated_energy"] is None
     assert metrics["signed_work"] > 0.0
 
+
+
+
+def test_cyclic_repeated_amplitude_reports_strength_and_stiffness_ratios():
+    x = [0.0, 1.0, -1.0, 1.0, -1.0, 0.0]
+    y = [0.0, 10.0, -9.0, 8.0, -7.0, 0.0]
+
+    metrics = cyclic_hysteresis_metrics(x, y)
+    reversals = metrics["reversals"]
+
+    positive = [
+        item for item in reversals
+        if item["displacement"] > 0.0
+    ]
+    negative = [
+        item for item in reversals
+        if item["displacement"] < 0.0
+    ]
+
+    assert positive[0]["strength_ratio"] == pytest.approx(1.0)
+    assert positive[1]["strength_ratio"] == pytest.approx(0.8)
+    assert positive[1]["stiffness_ratio"] == pytest.approx(0.8)
+    assert negative[0]["strength_ratio"] == pytest.approx(1.0)
+    assert negative[1]["strength_ratio"] == pytest.approx(7.0 / 9.0)
+    assert metrics["closed_cycle_count"] >= 1
+    assert metrics["cycle_energies"][0]["energy"] > 0.0
+    assert metrics["peak_positive_force"] == 10.0
+    assert metrics["peak_negative_force"] == -9.0
+    assert metrics["residual_displacement"] == 0.0
 
 def test_convergence_dashboard_helpers_summarize_recovery_and_failure():
     result = {
