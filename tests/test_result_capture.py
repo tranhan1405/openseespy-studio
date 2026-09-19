@@ -58,7 +58,7 @@ def test_modal_generator_collects_mode_vectors():
         )
     )
 
-    assert "ops.eigen(3)" in text
+    assert "ops.eigen('-genBandArpack', 3)" in text
     assert "ops.nodeEigenvector(_studio_node, _studio_mode)" in text
     assert "_studio_results['modes']" in text
 
