@@ -42,6 +42,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..analysis_templates import (
+    build_cyclic_template,
+    build_nlth_template,
+    build_pushover_template,
+    default_control_node,
+)
 from ..frame_setup import prepare_frame_grid
 from ..generator import FrameGridSpec, cyclic_displacement_steps, generate_frame_grid, to_openseespy
 from ..jobs import JobRecord
@@ -57,6 +63,7 @@ from ..runtime import build_worker_pythonpath, probe_opensees_runtime
 from ..validation import ValidationIssue, validate_project
 from ..units import UnitSystem
 from .analysis_dialog import AnalysisDialog
+from .analysis_template_dialog import AnalysisTemplateDialog
 from .code_editor import CodeEditor
 from .connection_dialog import ConnectionDialog
 from .constraint_dialog import ConstraintDialog
@@ -1393,6 +1400,13 @@ class MainWindow(QMainWindow):
         self._make_action("nodal_load", "Nodal Load...", "load", self._create_nodal_load, "Create nodal load")
         self._make_action("beam_load", "Beam Load...", "load", self._create_element_load, "Create uniform, point, or self-weight beam load")
         self._make_action("analysis_setup", "Analysis Setup...", "analysis", self._create_analysis, "Create analysis settings")
+        self._make_action(
+            "analysis_template",
+            "Templates",
+            "analysis",
+            self._create_analysis_template,
+            "Create Pushover, Cyclic, or nonlinear time-history workflow",
+        )
         self._make_action("check_model", "Check Model", "analysis", self._check_model, "Validate the model before analysis")
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action(
@@ -1433,6 +1447,7 @@ class MainWindow(QMainWindow):
         menus["Loads"].addAction(self.actions["load_pattern"])
         menus["Loads"].addAction(self.actions["nodal_load"])
         menus["Loads"].addAction(self.actions["beam_load"])
+        menus["Analysis"].addAction(self.actions["analysis_template"])
         menus["Analysis"].addAction(self.actions["analysis_setup"])
         menus["Analysis"].addAction(self.actions["check_model"])
         menus["Analysis"].addAction(self.actions["run"])
@@ -1632,6 +1647,11 @@ class MainWindow(QMainWindow):
         self.ribbon_tabs.addTab(model_page, "Model")
 
         analysis_page = RibbonPage()
+        add_group(
+            analysis_page,
+            "Templates",
+            large=("analysis_template",),
+        )
         add_group(
             analysis_page,
             "Solver",
