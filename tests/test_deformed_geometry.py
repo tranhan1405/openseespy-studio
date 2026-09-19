@@ -141,3 +141,57 @@ def test_generated_circular_fiber_section_can_infer_display_shape():
     inferred = infer_fiber_display_geometry(section)
     assert inferred["shape"] == "Circle"
     assert inferred["dimensions"]["outer_diameter"] == pytest.approx(0.4)
+
+
+def test_t_display_contour_can_be_shifted_to_centroidal_axis():
+    contour = geometry_contours(
+        {
+            "shape": "T",
+            "dimensions": {
+                "height": 0.6,
+                "flange_width": 0.5,
+                "flange_thickness": 0.12,
+                "web_width": 0.2,
+                "centroid_y": 0.08,
+            },
+        }
+    )[0]
+    assert float(np.max(contour[:, 0])) == pytest.approx(0.3 - 0.08)
+    assert float(np.min(contour[:, 0])) == pytest.approx(-0.3 - 0.08)
+
+
+def test_arbitrary_rectangular_fiber_patches_do_not_fake_a_rectangle():
+    section = SectionData(
+        tag=9,
+        name="Custom fiber",
+        section_type="Fiber",
+        fiber_components=[
+            FiberComponentData(
+                "RectPatch",
+                "Patch A",
+                1,
+                {
+                    "y_center": 0.0,
+                    "z_center": -0.2,
+                    "width_y": 0.1,
+                    "depth_z": 0.1,
+                    "n_y": 2,
+                    "n_z": 2,
+                },
+            ),
+            FiberComponentData(
+                "RectPatch",
+                "Patch B",
+                1,
+                {
+                    "y_center": 0.0,
+                    "z_center": 0.2,
+                    "width_y": 0.1,
+                    "depth_z": 0.1,
+                    "n_y": 2,
+                    "n_z": 2,
+                },
+            ),
+        ],
+    )
+    assert infer_fiber_display_geometry(section) == {}
