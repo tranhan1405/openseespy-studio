@@ -11,7 +11,7 @@ from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 14
+PROJECT_FORMAT_VERSION = 15
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -1108,6 +1108,107 @@ class AnalysisSettingsData:
 
 
 @dataclass
+class RecorderData:
+    tag: int
+    name: str
+    recorder_type: str
+    target_tags: list[int] = field(default_factory=list)
+    response: str = "disp"
+    dofs: list[int] = field(default_factory=lambda: [1])
+    file_name: str = ""
+    include_time: bool = True
+    section_number: int = 1
+    fiber_y: float = 0.0
+    fiber_z: float = 0.0
+    material_tag: int | None = None
+
+    def __post_init__(self) -> None:
+        self.tag = int(self.tag)
+        self.name = str(self.name).strip() or f"Recorder {self.tag}"
+        self.recorder_type = str(self.recorder_type)
+        self.target_tags = sorted({int(tag) for tag in self.target_tags})
+        self.response = str(self.response)
+        self.dofs = sorted({int(dof) for dof in self.dofs})
+        self.file_name = str(self.file_name).strip()
+        self.include_time = bool(self.include_time)
+        self.section_number = int(self.section_number)
+        self.fiber_y = float(self.fiber_y)
+        self.fiber_z = float(self.fiber_z)
+        self.material_tag = (
+            int(self.material_tag)
+            if self.material_tag is not None
+            else None
+        )
+        if self.tag <= 0:
+            raise ValueError("Recorder tag must be positive.")
+        if self.recorder_type not in {"Node", "Element", "Section", "Fiber"}:
+            raise ValueError(f"Unsupported recorder type: {self.recorder_type}")
+        if not self.target_tags:
+            raise ValueError("Recorder must target at least one node or element.")
+        if any(tag <= 0 for tag in self.target_tags):
+            raise ValueError("Recorder target tags must be positive.")
+        if not self.file_name:
+            self.file_name = f"recorders/recorder_{self.tag}.out"
+        if self.recorder_type == "Node":
+            if self.response not in {"disp", "vel", "accel", "reaction"}:
+                raise ValueError("Unsupported Node recorder response.")
+            if not self.dofs or any(dof not in range(1, 7) for dof in self.dofs):
+                raise ValueError("Node recorder DOFs must be in 1..6.")
+        elif self.recorder_type == "Element":
+            if self.response not in {"globalForce", "localForce"}:
+                raise ValueError("Unsupported Element recorder response.")
+        elif self.recorder_type == "Section":
+            if self.response not in {"force", "deformation"}:
+                raise ValueError("Unsupported Section recorder response.")
+            if self.section_number < 1:
+                raise ValueError("Section recorder number must be at least 1.")
+        elif self.recorder_type == "Fiber":
+            if self.response not in {"stress", "strain", "stressStrain"}:
+                raise ValueError("Unsupported Fiber recorder response.")
+            if self.section_number < 1:
+                raise ValueError("Fiber recorder section number must be at least 1.")
+            if self.material_tag is not None and self.material_tag <= 0:
+                raise ValueError("Fiber recorder material tag must be positive.")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "recorder_type": self.recorder_type,
+            "target_tags": list(self.target_tags),
+            "response": self.response,
+            "dofs": list(self.dofs),
+            "file_name": self.file_name,
+            "include_time": self.include_time,
+            "section_number": self.section_number,
+            "fiber_y": self.fiber_y,
+            "fiber_z": self.fiber_z,
+            "material_tag": self.material_tag,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RecorderData":
+        return cls(
+            tag=int(data["tag"]),
+            name=str(data.get("name", f"Recorder {data['tag']}")),
+            recorder_type=str(data.get("recorder_type", "Node")),
+            target_tags=[int(tag) for tag in data.get("target_tags", [])],
+            response=str(data.get("response", "disp")),
+            dofs=[int(dof) for dof in data.get("dofs", [1])],
+            file_name=str(data.get("file_name", "")),
+            include_time=bool(data.get("include_time", True)),
+            section_number=int(data.get("section_number", 1)),
+            fiber_y=float(data.get("fiber_y", 0.0)),
+            fiber_z=float(data.get("fiber_z", 0.0)),
+            material_tag=(
+                int(data["material_tag"])
+                if data.get("material_tag") is not None
+                else None
+            ),
+        )
+
+
+@dataclass
 class SelectionSetData:
     name: str
     node_tags: set[int] = field(default_factory=set)
@@ -1147,6 +1248,7 @@ class ProjectDatabase:
     nodal_loads: dict[int, NodalLoadData] = field(default_factory=dict)
     element_loads: dict[int, ElementLoadData] = field(default_factory=dict)
     analyses: dict[int, AnalysisSettingsData] = field(default_factory=dict)
+    recorders: dict[int, RecorderData] = field(default_factory=dict)
     active_analysis_tag: int | None = None
 
     units: dict[str, str] = field(
@@ -1679,6 +1781,83 @@ class ProjectDatabase:
                 removed.append(tag)
         return sorted(removed)
 
+    def next_recorder_tag(self) -> int:
+        return max(self.recorders, default=0) + 1
+
+    def _validate_recorder(self, recorder: RecorderData) -> None:
+        if recorder.recorder_type == "Node":
+            missing = [tag for tag in recorder.target_tags if tag not in self.model.nodes]
+            if missing:
+                raise ValueError(
+                    "Recorder references missing node tag(s): "
+                    + ", ".join(map(str, missing))
+                )
+            return
+        valid_elements = set(self.model.elements) | set(self.connections)
+        missing = [tag for tag in recorder.target_tags if tag not in valid_elements]
+        if missing:
+            raise ValueError(
+                "Recorder references missing element tag(s): "
+                + ", ".join(map(str, missing))
+            )
+        if recorder.recorder_type in {"Section", "Fiber"}:
+            incompatible = [
+                tag
+                for tag in recorder.target_tags
+                if tag not in self.model.elements
+                or self.model.elements[tag].element_type
+                not in {"forceBeamColumn", "dispBeamColumn"}
+            ]
+            if incompatible:
+                raise ValueError(
+                    "Section/Fiber recorders require forceBeamColumn or "
+                    "dispBeamColumn element tag(s): "
+                    + ", ".join(map(str, incompatible))
+                )
+            too_short = [
+                tag
+                for tag in recorder.target_tags
+                if self.model.elements[tag].integration_points
+                < recorder.section_number
+            ]
+            if too_short:
+                raise ValueError(
+                    f"Recorder section {recorder.section_number} exceeds "
+                    "the integration-point count for element tag(s): "
+                    + ", ".join(map(str, too_short))
+                )
+
+    def add_recorder(self, recorder: RecorderData) -> None:
+        if recorder.tag in self.recorders:
+            raise ValueError(f"Recorder tag {recorder.tag} already exists.")
+        self._validate_recorder(recorder)
+        self.recorders[recorder.tag] = recorder
+
+    def update_recorder(self, original_tag: int, recorder: RecorderData) -> None:
+        original_tag = int(original_tag)
+        if original_tag not in self.recorders:
+            raise ValueError(f"Recorder tag {original_tag} does not exist.")
+        if recorder.tag != original_tag and recorder.tag in self.recorders:
+            raise ValueError(f"Recorder tag {recorder.tag} already exists.")
+        self._validate_recorder(recorder)
+        self.recorders.pop(original_tag)
+        self.recorders[recorder.tag] = recorder
+
+    def remove_recorder(self, tag: int) -> None:
+        self.recorders.pop(int(tag), None)
+
+    def prune_recorders(self) -> list[int]:
+        removed: list[int] = []
+        valid_nodes = set(self.model.nodes)
+        valid_elements = set(self.model.elements) | set(self.connections)
+        for tag, recorder in list(self.recorders.items()):
+            valid = valid_nodes if recorder.recorder_type == "Node" else valid_elements
+            recorder.target_tags = [item for item in recorder.target_tags if item in valid]
+            if not recorder.target_tags:
+                self.recorders.pop(tag)
+                removed.append(tag)
+        return sorted(removed)
+
     def next_analysis_tag(self) -> int:
         return max(self.analyses, default=0) + 1
 
@@ -1760,6 +1939,10 @@ class ProjectDatabase:
             "analyses": [
                 self.analyses[tag].to_dict()
                 for tag in sorted(self.analyses)
+            ],
+            "recorders": [
+                self.recorders[tag].to_dict()
+                for tag in sorted(self.recorders)
             ],
             "active_analysis_tag": self.active_analysis_tag,
         }
@@ -1956,6 +2139,17 @@ class ProjectDatabase:
                 result[analysis.tag]=analysis
         return result
 
+    @staticmethod
+    def _load_recorders(raw: Any) -> dict[int, RecorderData]:
+        result: dict[int, RecorderData] = {}
+        if isinstance(raw, list):
+            for item in raw:
+                recorder = RecorderData.from_dict(dict(item))
+                if recorder.tag in result:
+                    raise ValueError(f"Duplicate recorder tag {recorder.tag}.")
+                result[recorder.tag] = recorder
+        return result
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectDatabase":
         project_format = data.get("format")
@@ -1994,6 +2188,7 @@ class ProjectDatabase:
                 data.get("element_loads", [])
             ),
             analyses=cls._load_analyses(data.get("analyses", [])),
+            recorders=cls._load_recorders(data.get("recorders", [])),
             active_analysis_tag=(
                 int(data["active_analysis_tag"])
                 if data.get("active_analysis_tag") is not None

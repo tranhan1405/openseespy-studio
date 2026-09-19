@@ -46,7 +46,7 @@ from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..jobs import JobRecord
 from ..model import StructuralModel, classify_fixity
 from ..postprocess import enrich_member_force_results
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, SectionData, SelectionSetData, TimeSeriesData, TransformationData
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, TimeSeriesData, TransformationData
 from ..runtime import build_worker_pythonpath, probe_opensees_runtime
 from ..validation import ValidationIssue, validate_project
 from ..units import UnitSystem
@@ -67,6 +67,7 @@ from .history import ProjectSnapshotCommand
 from .load_dialogs import ElementLoadDialog, LoadPatternDialog, MassDialog, NodalLoadDialog, TimeSeriesDialog
 from .material_dialog import MaterialDialog
 from .model_check_dialog import ModelCheckDialog
+from .recorder_dialog import RecorderDialog
 from .section_dialog import SectionDialog
 from .transformation_dialog import TransformationDialog
 from .icons import studio_icon
@@ -1095,6 +1096,7 @@ class MainWindow(QMainWindow):
         self.project.prune_connections()
         self.project.prune_nodal_loads()
         self.project.prune_element_loads()
+        self.project.prune_recorders()
 
         if created_transformations:
             names = ", ".join(
@@ -1151,6 +1153,7 @@ class MainWindow(QMainWindow):
                 self.project.analyses,
                 self.project.active_analysis_tag,
                 element_loads=self.project.element_loads,
+                recorders=self.project.recorders,
                 units=self.project.units,
             )
         )
@@ -1465,9 +1468,23 @@ class MainWindow(QMainWindow):
             item.setIcon(0, studio_icon("analysis"))
             item.setData(0, Qt.UserRole, ("analysis", tag))
             analysis.addChild(item)
-        recorders = QTreeWidgetItem(["Recorders (0)"])
+        recorders = QTreeWidgetItem([
+            f"Recorders ({len(self.project.recorders)})"
+        ])
         recorders.setIcon(0, studio_icon("recorder"))
+        recorders.setData(0, Qt.UserRole, ("recorders_root", None))
+        recorders.setExpanded(True)
         analysis.addChild(recorders)
+        for tag in sorted(self.project.recorders):
+            recorder = self.project.recorders[tag]
+            targets = ", ".join(map(str, recorder.target_tags))
+            item = QTreeWidgetItem([
+                f"{recorder.recorder_type} [{tag}] {recorder.name} "
+                f"→ {targets}"
+            ])
+            item.setIcon(0, studio_icon("recorder"))
+            item.setData(0, Qt.UserRole, ("recorder", tag))
+            recorders.addChild(item)
         root.addChild(analysis)
 
         results = QTreeWidgetItem([f"Results / Jobs ({len(self._jobs)})"])
@@ -1497,6 +1514,7 @@ class MainWindow(QMainWindow):
         nodal_load_tag: int | None = None
         element_load_tag: int | None = None
         analysis_tag: int | None = None
+        recorder_tag: int | None = None
 
         for item in self.tree.selectedItems():
             payload = item.data(0, Qt.UserRole)
@@ -1532,6 +1550,8 @@ class MainWindow(QMainWindow):
                 element_load_tag = int(tag)
             elif kind == "analysis":
                 analysis_tag = int(tag)
+            elif kind == "recorder":
+                recorder_tag = int(tag)
 
         self.selection.set_selection(nodes=nodes, elements=elements)
         if material_tag is not None:
@@ -1554,6 +1574,8 @@ class MainWindow(QMainWindow):
             self._show_element_load_properties(element_load_tag)
         elif analysis_tag is not None:
             self._show_analysis_properties(analysis_tag)
+        elif recorder_tag is not None:
+            self._show_recorder_properties(recorder_tag)
 
     def _wire_selection(self) -> None:
         self.selection.changed.connect(self._selection_changed)
@@ -2949,6 +2971,7 @@ class MainWindow(QMainWindow):
         self.project.prune_connections()
         self.project.prune_nodal_loads()
         self.project.prune_element_loads()
+        self.project.prune_recorders()
         self.selection.clear()
         self._refresh_all("Deleted selected entities")
         self._record_project_change("Delete selected entities", before)
@@ -4002,6 +4025,115 @@ class MainWindow(QMainWindow):
                 ])
         self.properties_panel.set_properties("Analysis Settings", rows)
 
+    def _create_recorder(self) -> None:
+        initial_nodes = set(self.selection.nodes)
+        initial_elements = set(self.selection.elements)
+        dialog = RecorderDialog(
+            next_tag=self.project.next_recorder_tag(),
+            initial_node_tags=initial_nodes,
+            initial_element_tags=initial_elements,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            recorder = dialog.data()
+            self.project.add_recorder(recorder)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Recorder", str(exc))
+            return
+        self._refresh_project_metadata(
+            f"Created {recorder.recorder_type} recorder {recorder.tag}"
+        )
+        self._show_recorder_properties(recorder.tag)
+        self._record_project_change(
+            f"Create recorder {recorder.tag}",
+            before,
+        )
+
+    def _edit_recorder(self, tag: int) -> None:
+        recorder = self.project.recorders.get(tag)
+        if recorder is None:
+            return
+        dialog = RecorderDialog(
+            recorder=recorder,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated = dialog.data()
+            self.project.update_recorder(tag, updated)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Recorder", str(exc))
+            return
+        self._refresh_project_metadata(
+            f"Updated recorder {updated.tag}"
+        )
+        self._show_recorder_properties(updated.tag)
+        self._record_project_change(
+            f"Edit recorder {tag}",
+            before,
+        )
+
+    def _delete_recorder(self, tag: int) -> None:
+        recorder = self.project.recorders.get(tag)
+        if recorder is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete Recorder",
+            f"Delete recorder {tag} ({recorder.name})?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        before = self.project.to_dict()
+        self.project.remove_recorder(tag)
+        self._refresh_project_metadata(f"Deleted recorder {tag}")
+        self._record_project_change(
+            f"Delete recorder {tag}",
+            before,
+        )
+
+    def _show_recorder_properties(self, tag: int) -> None:
+        recorder = self.project.recorders.get(tag)
+        if recorder is None:
+            return
+        rows: list[tuple[str, object]] = [
+            ("Tag", recorder.tag),
+            ("Name", recorder.name),
+            ("Type", recorder.recorder_type),
+            (
+                "Targets",
+                ", ".join(map(str, recorder.target_tags)),
+            ),
+            ("Response", recorder.response),
+            ("File", recorder.file_name),
+            ("Include time", "Yes" if recorder.include_time else "No"),
+        ]
+        if recorder.recorder_type == "Node":
+            rows.append(
+                ("DOFs", ", ".join(map(str, recorder.dofs)))
+            )
+        if recorder.recorder_type in {"Section", "Fiber"}:
+            rows.append(("Section/IP", recorder.section_number))
+        if recorder.recorder_type == "Fiber":
+            rows.extend([
+                ("Fiber y", f"{recorder.fiber_y:g}"),
+                ("Fiber z", f"{recorder.fiber_z:g}"),
+                (
+                    "Material",
+                    recorder.material_tag
+                    if recorder.material_tag is not None
+                    else "Nearest fiber",
+                ),
+            ])
+        self.properties_panel.set_properties("Recorder", rows)
+
     def _create_named_selection(self) -> None:
         nodes, elements = self._selection_sets()
         if not nodes and not elements:
@@ -4152,6 +4284,21 @@ class MainWindow(QMainWindow):
             edit.triggered.connect(lambda: self._edit_analysis(tag))
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_analysis(tag))
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "recorders_root":
+            action = menu.addAction("New Recorder...")
+            action.triggered.connect(self._create_recorder)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "recorder":
+            tag = int(value)
+            edit = menu.addAction("Edit...")
+            edit.triggered.connect(lambda: self._edit_recorder(tag))
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(lambda: self._delete_recorder(tag))
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
@@ -4346,6 +4493,8 @@ class MainWindow(QMainWindow):
             self._edit_element_load(int(value))
         elif kind == "analysis":
             self._edit_analysis(int(value))
+        elif kind == "recorder":
+            self._edit_recorder(int(value))
 
     def _select_named_selection(self, name: str) -> None:
         selection_set = self.project.selection_sets.get(name)

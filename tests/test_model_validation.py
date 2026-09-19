@@ -5,6 +5,7 @@ from openseespy_studio.project import (
     ElementLoadData,
     LoadPatternData,
     ProjectDatabase,
+    RecorderData,
     SectionData,
     TimeSeriesData,
     TransformationData,
@@ -355,5 +356,26 @@ def test_elastic_beam_column_with_fiber_section_is_rejected():
         issue.severity == "ERROR"
         and issue.entity_tag == 1
         and "cannot use Fiber section" in issue.message
+        for issue in issues
+    )
+
+
+def test_invalid_recorder_target_blocks_run():
+    project = _frame_project()
+    project.recorders[1] = RecorderData(
+        1,
+        "Missing node recorder",
+        "Node",
+        target_tags=[999],
+        response="disp",
+        dofs=[1],
+    )
+
+    issues = validate_project(project)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Recorder"
+        and "missing node" in issue.message
         for issue in issues
     )
