@@ -418,6 +418,32 @@ def recorder_to_openseespy(recorder: RecorderData) -> list[str]:
     return lines
 
 
+def cyclic_displacement_steps(
+    targets: list[float] | tuple[float, ...],
+    max_increment: float,
+    *,
+    start: float = 0.0,
+) -> list[float]:
+    """Expand absolute cyclic displacement targets into exact increments."""
+    increment = abs(float(max_increment))
+    if increment <= 0.0:
+        raise ValueError("Cyclic max displacement increment must be positive.")
+
+    current = float(start)
+    steps: list[float] = []
+    for raw_target in targets:
+        target = float(raw_target)
+        delta = target - current
+        if abs(delta) <= 1.0e-15:
+            current = target
+            continue
+        count = max(1, int(math.ceil(abs(delta) / increment)))
+        branch_increment = delta / count
+        steps.extend([branch_increment] * count)
+        current = target
+    return steps
+
+
 def analysis_to_openseespy(
     settings: AnalysisSettingsData,
     *,
@@ -435,7 +461,16 @@ def analysis_to_openseespy(
     support_node_tags = list(support_node_tags or [])
     plain_pattern_tags = list(plain_pattern_tags or [])
     fiber_response_specs = dict(fiber_response_specs or {})
-    if monitor_node is None and settings.analysis_type == "Pushover":
+    cyclic_steps = (
+        cyclic_displacement_steps(
+            settings.cyclic_targets,
+            settings.cyclic_increment,
+        )
+        if settings.analysis_type == "Cyclic"
+        else []
+    )
+    total_steps = len(cyclic_steps) if settings.analysis_type == "Cyclic" else settings.steps
+    if monitor_node is None and settings.analysis_type in {"Pushover", "Cyclic"}:
         monitor_node = settings.control_node
     monitor_node = int(monitor_node or (node_tags[0] if node_tags else 1))
 
@@ -458,13 +493,16 @@ def analysis_to_openseespy(
         "    return _iterations, _norm",
         "",
         "_studio_results = {",
-        "    'schema_version': 5,",
+        "    'schema_version': 6,",
         "    'analysis': {",
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
         f"        'type': {settings.analysis_type!r},",
         f"        'control_node': {settings.control_node},",
         f"        'control_dof': {settings.control_dof},",
+        f"        'cyclic_targets': {settings.cyclic_targets!r},",
+        f"        'cyclic_increment': {settings.cyclic_increment:g},",
+        f"        'planned_steps': {total_steps},",
         "    },",
         "    'final': {},",
         "    'history': {'time': [], 'monitor_node': "
@@ -552,6 +590,18 @@ def analysis_to_openseespy(
         )
         analyze_call = "ops.analyze(1)"
         analysis_kind = "Static"
+    elif settings.analysis_type == "Cyclic":
+        if not cyclic_steps:
+            raise ValueError(
+                "Cyclic protocol produced no displacement increments."
+            )
+        lines.append(f"_studio_cyclic_increments = {cyclic_steps!r}")
+        lines.append(
+            f"ops.integrator('DisplacementControl', {settings.control_node}, "
+            f"{settings.control_dof}, _studio_cyclic_increments[0])"
+        )
+        analyze_call = "ops.analyze(1)"
+        analysis_kind = "Static"
     elif settings.analysis_type == "Transient":
         lines.append(
             f"ops.integrator('Newmark', {settings.gamma:g}, "
@@ -566,12 +616,22 @@ def analysis_to_openseespy(
 
     lines.append(f"ops.analysis('{analysis_kind}')")
     lines.append(
-        f"_studio_emit('start', total={settings.steps}, "
+        f"_studio_emit('start', total={total_steps}, "
         f"analysis_type={settings.analysis_type!r}, "
         f"algorithm=_studio_primary_algorithm)"
     )
-    lines.append(f"for _studio_step in range({settings.steps}):")
+    lines.append(f"for _studio_step in range({total_steps}):")
     lines.append("    _studio_step_no = _studio_step + 1")
+    if settings.analysis_type == "Cyclic":
+        lines.append(
+            "    _studio_disp_increment = "
+            "_studio_cyclic_increments[_studio_step]"
+        )
+        lines.append(
+            f"    ops.integrator('DisplacementControl', "
+            f"{settings.control_node}, {settings.control_dof}, "
+            "_studio_disp_increment)"
+        )
     lines.append("    _studio_active_algorithm = _studio_primary_algorithm")
     lines.append(f"    _studio_ok = {analyze_call}")
     lines.append(
@@ -581,7 +641,7 @@ def analysis_to_openseespy(
     lines.append(
         "        _studio_emit('convergence_failed', "
         "step=_studio_step_no, "
-        f"total={settings.steps}, "
+        f"total={total_steps}, "
         "algorithm=_studio_active_algorithm, "
         "iterations=_studio_iterations, norm=_studio_norm, "
         "code=int(_studio_ok))"
@@ -710,7 +770,7 @@ def analysis_to_openseespy(
     lines.append(
         "    _studio_emit('progress', step=_studio_step_no, "
         f"total={settings.steps}, "
-        f"percent=100.0 * _studio_step_no / {settings.steps}, "
+        f"percent=100.0 * _studio_step_no / {total_steps}, "
         "algorithm=_studio_active_algorithm, "
         "iterations=_studio_iterations, norm=_studio_norm, "
         "time=_studio_time, monitor=_studio_monitor, "
@@ -845,7 +905,7 @@ def analysis_to_openseespy(
         "    'load_factors': _studio_load_factors,",
         "}",
         "print('Analysis completed:', "
-        f"{settings.analysis_type!r}, {settings.steps}, 'step(s)')",
+        f"{settings.analysis_type!r}, {total_steps}, 'step(s)')",
     ])
     return lines
 
