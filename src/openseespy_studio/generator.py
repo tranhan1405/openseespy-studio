@@ -427,12 +427,14 @@ def analysis_to_openseespy(
     support_node_tags: list[int] | None = None,
     plain_pattern_tags: list[int] | None = None,
     monitor_node: int | None = None,
+    fiber_response_specs: dict[int, dict[str, object]] | None = None,
 ) -> list[str]:
     node_tags = list(node_tags or [])
     element_tags = list(element_tags or [])
     frame_element_tags = list(frame_element_tags or [])
     support_node_tags = list(support_node_tags or [])
     plain_pattern_tags = list(plain_pattern_tags or [])
+    fiber_response_specs = dict(fiber_response_specs or {})
     if monitor_node is None and settings.analysis_type == "Pushover":
         monitor_node = settings.control_node
     monitor_node = int(monitor_node or (node_tags[0] if node_tags else 1))
@@ -456,7 +458,7 @@ def analysis_to_openseespy(
         "    return _iterations, _norm",
         "",
         "_studio_results = {",
-        "    'schema_version': 4,",
+        "    'schema_version': 5,",
         "    'analysis': {",
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
@@ -482,6 +484,7 @@ def analysis_to_openseespy(
         f"_studio_frame_element_tags = {frame_element_tags!r}",
         f"_studio_support_node_tags = {support_node_tags!r}",
         f"_studio_plain_pattern_tags = {plain_pattern_tags!r}",
+        f"_studio_fiber_response_specs = {fiber_response_specs!r}",
         f"_studio_monitor_node = {monitor_node}",
         f"ops.constraints('{settings.constraints_handler}')",
         f"ops.numberer('{settings.numberer}')",
@@ -769,6 +772,62 @@ def analysis_to_openseespy(
         "            }",
         "    except Exception:",
         "        pass",
+        "_studio_element_fiber_responses = {}",
+        "for _studio_element_raw, _studio_spec in "
+        "_studio_fiber_response_specs.items():",
+        "    _studio_element = int(_studio_element_raw)",
+        "    _studio_section_tag = int(_studio_spec.get('section_tag', 0))",
+        "    _studio_locations = list(_studio_spec.get('locations', []))",
+        "    try:",
+        "        _studio_actual_locations = ops.eleResponse(",
+        "            _studio_element, 'integrationPoints'",
+        "        ) or []",
+        "        if not isinstance(_studio_actual_locations, (list, tuple)):",
+        "            _studio_actual_locations = [_studio_actual_locations]",
+        "        if _studio_actual_locations:",
+        "            _studio_locations = [float(v) for v in _studio_actual_locations]",
+        "    except Exception:",
+        "        pass",
+        "    _studio_fibers = list(_studio_spec.get('fibers', []))",
+        "    _studio_sections = []",
+        "    for _studio_sec_no, _studio_location in "
+        "enumerate(_studio_locations, start=1):",
+        "        _studio_fiber_rows = []",
+        "        for _studio_fiber in _studio_fibers:",
+        "            _studio_y = float(_studio_fiber.get('y', 0.0))",
+        "            _studio_z = float(_studio_fiber.get('z', 0.0))",
+        "            _studio_area = float(_studio_fiber.get('area', 0.0))",
+        "            _studio_mat = int(_studio_fiber.get('material_tag', 0))",
+        "            try:",
+        "                _studio_ss = ops.eleResponse(",
+        "                    _studio_element, 'section', _studio_sec_no,",
+        "                    'fiber', _studio_y, _studio_z, _studio_mat,",
+        "                    'stressStrain'",
+        "                ) or []",
+        "                _studio_ss = [float(v) for v in _studio_ss]",
+        "            except Exception:",
+        "                _studio_ss = []",
+        "            _studio_fiber_rows.append({",
+        "                'y': _studio_y, 'z': _studio_z,",
+        "                'area': _studio_area, 'material_tag': _studio_mat,",
+        "                'stress': (",
+        "                    float(_studio_ss[0])",
+        "                    if len(_studio_ss) >= 1 else None",
+        "                ),",
+        "                'strain': (",
+        "                    float(_studio_ss[1])",
+        "                    if len(_studio_ss) >= 2 else None",
+        "                ),",
+        "            })",
+        "        _studio_sections.append({",
+        "            'number': _studio_sec_no,",
+        "            'location': float(_studio_location),",
+        "            'fibers': _studio_fiber_rows,",
+        "        })",
+        "    _studio_element_fiber_responses[str(_studio_element)] = {",
+        "        'section_tag': _studio_section_tag,",
+        "        'sections': _studio_sections,",
+        "    }",
         "_studio_load_factors = {}",
         "for _studio_pattern in _studio_plain_pattern_tags:",
         "    try:",
@@ -782,6 +841,7 @@ def analysis_to_openseespy(
         "    'element_forces': _studio_element_forces,",
         "    'element_local_forces': _studio_element_local_forces,",
         "    'element_section_forces': _studio_element_section_forces,",
+        "    'element_fiber_responses': _studio_element_fiber_responses,",
         "    'load_factors': _studio_load_factors,",
         "}",
         "print('Analysis completed:', "
@@ -1057,6 +1117,38 @@ def to_openseespy(
             for tag, node in model.nodes.items()
             if any(node.fixity)
         )
+        fiber_response_specs: dict[int, dict[str, object]] = {}
+        for element_tag, element in model.elements.items():
+            if element.element_type not in {"forceBeamColumn", "dispBeamColumn"}:
+                continue
+            if element.section_tag is None or not sections:
+                continue
+            section = sections.get(element.section_tag)
+            if section is None or section.section_type != "Fiber":
+                continue
+            fibers = section.compiled_fibers()
+            if not fibers:
+                continue
+            count = max(int(element.integration_points), 1)
+            locations = (
+                [0.5]
+                if count == 1
+                else [index / (count - 1) for index in range(count)]
+            )
+            fiber_response_specs[int(element_tag)] = {
+                "section_tag": int(section.tag),
+                "locations": locations,
+                "fibers": [
+                    {
+                        "y": float(fiber.y),
+                        "z": float(fiber.z),
+                        "area": float(fiber.area),
+                        "material_tag": int(fiber.material_tag),
+                    }
+                    for fiber in fibers
+                ],
+            }
+
         lines.extend(
             analysis_to_openseespy(
                 active,
@@ -1070,6 +1162,7 @@ def to_openseespy(
                     if pattern.pattern_type == "Plain"
                 ),
                 monitor_node=monitor_node,
+                fiber_response_specs=fiber_response_specs,
             )
         )
 

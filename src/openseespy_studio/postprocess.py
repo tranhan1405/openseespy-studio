@@ -316,6 +316,93 @@ def time_history_series(
     return selected_time, values
 
 
+def fiber_response_element_tags(
+    result: dict[str, Any] | None,
+) -> list[int]:
+    """Return sorted element tags with captured fiber responses."""
+    if not isinstance(result, dict):
+        return []
+    final = result.get("final", {})
+    if not isinstance(final, dict):
+        return []
+    data = final.get("element_fiber_responses", {})
+    if not isinstance(data, dict):
+        return []
+    tags: list[int] = []
+    for raw_tag, payload in data.items():
+        if not isinstance(payload, dict):
+            continue
+        sections = payload.get("sections", [])
+        if not isinstance(sections, list) or not sections:
+            continue
+        try:
+            tags.append(int(raw_tag))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(tags))
+
+
+def fiber_response_sections(
+    result: dict[str, Any] | None,
+    element_tag: int,
+) -> list[dict[str, Any]]:
+    """Return normalized fiber-response sections for one element."""
+    if not isinstance(result, dict):
+        return []
+    final = result.get("final", {})
+    if not isinstance(final, dict):
+        return []
+    data = final.get("element_fiber_responses", {})
+    if not isinstance(data, dict):
+        return []
+    payload = data.get(str(int(element_tag)), data.get(int(element_tag), {}))
+    if not isinstance(payload, dict):
+        return []
+    sections = payload.get("sections", [])
+    if not isinstance(sections, list):
+        return []
+    result_sections: list[dict[str, Any]] = []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        fibers = section.get("fibers", [])
+        if not isinstance(fibers, list):
+            continue
+        result_sections.append(section)
+    return result_sections
+
+
+def fiber_response_range(
+    section: dict[str, Any] | None,
+    quantity: str,
+) -> tuple[float | None, float | None]:
+    """Return finite min/max stress or strain for a fiber section."""
+    if not isinstance(section, dict):
+        return None, None
+    key = str(quantity).strip().lower()
+    if key not in {"stress", "strain"}:
+        raise ValueError(f"Unsupported fiber-response quantity: {quantity}")
+    values: list[float] = []
+    fibers = section.get("fibers", [])
+    if not isinstance(fibers, list):
+        return None, None
+    for fiber in fibers:
+        if not isinstance(fiber, dict):
+            continue
+        raw = fiber.get(key)
+        if raw is None:
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            values.append(value)
+    if not values:
+        return None, None
+    return min(values), max(values)
+
+
 def local_end_actions(
     values: Sequence[float],
 ) -> dict[str, tuple[float, float]]:

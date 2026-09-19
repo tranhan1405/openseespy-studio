@@ -34,7 +34,7 @@ def test_static_generator_collects_results_and_history():
     assert "'element_section_forces': _studio_element_section_forces" in text
     assert "ops.getLoadFactor(_studio_pattern)" in text
     assert "'load_factors': _studio_load_factors" in text
-    assert "'schema_version': 4" in text
+    assert "'schema_version': 5" in text
     assert "'monitor_node': 2" in text
     assert "'base_reactions': []" in text
     assert "'nodes': {}" in text
@@ -57,3 +57,45 @@ def test_modal_generator_collects_mode_vectors():
     assert "ops.eigen(3)" in text
     assert "ops.nodeEigenvector(_studio_node, _studio_mode)" in text
     assert "_studio_results['modes']" in text
+
+
+def test_generator_collects_fiber_stress_strain_at_section_points():
+    settings = AnalysisSettingsData(
+        2,
+        "Push",
+        "Pushover",
+        steps=1,
+        control_node=2,
+        control_dof=1,
+    )
+    specs = {
+        10: {
+            "section_tag": 3,
+            "locations": [0.0, 0.5, 1.0],
+            "fibers": [
+                {
+                    "y": 0.1,
+                    "z": -0.2,
+                    "area": 0.001,
+                    "material_tag": 7,
+                }
+            ],
+        }
+    }
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            settings,
+            node_tags=[1, 2],
+            element_tags=[10],
+            frame_element_tags=[10],
+            support_node_tags=[1],
+            monitor_node=2,
+            fiber_response_specs=specs,
+        )
+    )
+
+    assert "_studio_fiber_response_specs" in text
+    assert "'fiber', _studio_y, _studio_z, _studio_mat" in text
+    assert "'stressStrain'" in text
+    assert "'element_fiber_responses': _studio_element_fiber_responses" in text

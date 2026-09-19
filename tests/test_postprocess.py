@@ -5,6 +5,9 @@ from openseespy_studio.postprocess import (
     component_end_resultants,
     enrich_member_force_results,
     equilibrium_component_samples,
+    fiber_response_element_tags,
+    fiber_response_range,
+    fiber_response_sections,
     local_end_actions,
     member_end_resultants,
     nodal_result_scalar,
@@ -163,6 +166,66 @@ def test_time_history_schema3_monitor_displacement_remains_readable():
     assert time_history_series(
         result, "Base shear", dof=1
     ) == ([1.0, 2.0], [10.0, 20.0])
+
+
+def test_fiber_response_helpers_extract_sections_and_ranges():
+    result = {
+        "final": {
+            "element_fiber_responses": {
+                "12": {
+                    "section_tag": 4,
+                    "sections": [
+                        {
+                            "number": 1,
+                            "location": 0.0,
+                            "fibers": [
+                                {
+                                    "y": -0.1,
+                                    "z": 0.0,
+                                    "area": 0.01,
+                                    "material_tag": 2,
+                                    "stress": -25.0,
+                                    "strain": -0.001,
+                                },
+                                {
+                                    "y": 0.1,
+                                    "z": 0.0,
+                                    "area": 0.01,
+                                    "material_tag": 3,
+                                    "stress": 40.0,
+                                    "strain": 0.002,
+                                },
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    }
+
+    assert fiber_response_element_tags(result) == [12]
+    sections = fiber_response_sections(result, 12)
+    assert len(sections) == 1
+    assert fiber_response_range(sections[0], "stress") == (-25.0, 40.0)
+    assert fiber_response_range(sections[0], "strain") == (-0.001, 0.002)
+
+
+def test_fiber_response_range_ignores_missing_values_and_validates_quantity():
+    section = {
+        "fibers": [
+            {"stress": None, "strain": 0.0},
+            {"stress": 2.5, "strain": None},
+        ]
+    }
+
+    assert fiber_response_range(section, "stress") == (2.5, 2.5)
+    assert fiber_response_range({}, "strain") == (None, None)
+    try:
+        fiber_response_range(section, "energy")
+    except ValueError as exc:
+        assert "Unsupported fiber-response quantity" in str(exc)
+    else:
+        raise AssertionError("Expected unsupported fiber quantity to fail")
 
 def _local_force_vector():
     return [
