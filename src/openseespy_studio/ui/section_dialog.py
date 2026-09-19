@@ -1239,12 +1239,16 @@ class ElasticGeometryDialog(QDialog):
     def display_geometry(self) -> dict[str, object]:
         visible = self._visible_keys()
         dimensions = self.dimensions()
+        props = self.properties()
+        display_dimensions = {
+            key: float(dimensions[key])
+            for key in visible
+        }
+        if abs(float(props.centroid_y)) > 1.0e-14:
+            display_dimensions["centroid_y"] = float(props.centroid_y)
         return {
             "shape": self.shape.currentText(),
-            "dimensions": {
-                key: float(dimensions[key])
-                for key in visible
-            },
+            "dimensions": display_dimensions,
         }
 
     def _update_preview(self, *args) -> None:
