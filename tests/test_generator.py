@@ -1,10 +1,16 @@
 from openseespy_studio.generator import (
     FrameGridSpec,
     generate_frame_grid,
+    material_to_openseespy,
     to_openseespy,
 )
 from openseespy_studio.model import StructuralModel
-from openseespy_studio.project import SectionData, TransformationData
+from openseespy_studio.project import (
+    MATERIAL_DEFAULTS,
+    MaterialData,
+    SectionData,
+    TransformationData,
+)
 
 
 def test_frame_grid_counts():
@@ -74,3 +80,57 @@ def test_generator_does_not_invent_hidden_transformation():
 
     assert "ops.geomTransf(" not in code
     assert "# ERROR: Element 1 has no geometric transformation assigned" in code
+
+
+
+def test_research_material_library_generates_supported_commands():
+    material_types = (
+        "Concrete01",
+        "Concrete04",
+        "Steel01",
+        "ReinforcingSteel",
+        "Hysteretic",
+        "Pinching4",
+        "Bond_SP01",
+        "ElasticPPGap",
+        "FRPConfinedConcrete02",
+    )
+    for tag, material_type in enumerate(material_types, start=100):
+        material = MaterialData(
+            tag,
+            material_type,
+            material_type,
+            parameters=MATERIAL_DEFAULTS[material_type],
+        )
+        command = material_to_openseespy(material)
+        assert f"ops.uniaxialMaterial('{material_type}', {tag}," in command
+
+    frp = MaterialData(
+        200,
+        "FRP Jacket",
+        "FRPConfinedConcrete02",
+        parameters=MATERIAL_DEFAULTS["FRPConfinedConcrete02"],
+    )
+    assert "'-JacketC'" in material_to_openseespy(frp)
+
+    pinching = MaterialData(
+        201,
+        "Pinching",
+        "Pinching4",
+        parameters=MATERIAL_DEFAULTS["Pinching4"],
+    )
+    assert "'cycle'" in material_to_openseespy(pinching)
+
+
+def test_frp_confined_concrete02_supports_ultimate_mode():
+    parameters = dict(MATERIAL_DEFAULTS["FRPConfinedConcrete02"])
+    parameters["mode"] = 1.0
+    material = MaterialData(
+        202,
+        "FRP Ultimate",
+        "FRPConfinedConcrete02",
+        parameters=parameters,
+    )
+    command = material_to_openseespy(material)
+    assert "'-Ultimate'" in command
+    assert "'-JacketC'" not in command
