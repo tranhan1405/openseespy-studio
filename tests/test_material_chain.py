@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from openseespy_studio.generator import ordered_material_tags
+from openseespy_studio.generator import ordered_material_tags, to_openseespy
 from openseespy_studio.material_chain import (
     SpringMaterialChainSpec,
     build_spring_material_chain,
     describe_material_chain,
 )
-from openseespy_studio.project import MaterialData, ProjectDatabase
+from openseespy_studio.model import StructuralModel
+from openseespy_studio.project import (
+    ConnectionData,
+    MaterialData,
+    ProjectDatabase,
+)
 
 
 def elastic(tag: int) -> MaterialData:
@@ -131,3 +136,46 @@ def test_chain_requires_at_least_one_wrapper():
         assert "Fatigue and/or MinMax" in str(exc)
     else:
         raise AssertionError("Expected empty chain to be rejected")
+
+
+
+def test_full_zero_length_chain_generates_before_connection():
+    model = StructuralModel()
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+
+    result = build_spring_material_chain(
+        SpringMaterialChainSpec(
+            create_steel02=True,
+            add_fatigue=True,
+            add_minmax=True,
+            name_prefix="Research spring",
+        ),
+        project.materials,
+    )
+    for material in result.materials:
+        project.add_material(material)
+
+    connection = ConnectionData(
+        tag=10,
+        name="Research zeroLength",
+        connection_type="zeroLength",
+        node_i=1,
+        node_j=2,
+        materials_by_dof={1: result.final_tag},
+    )
+    project.add_connection(connection)
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        connections=project.connections,
+    )
+    steel_pos = script.index("uniaxialMaterial('Steel02'")
+    fatigue_pos = script.index("uniaxialMaterial('Fatigue'")
+    minmax_pos = script.index("uniaxialMaterial('MinMax'")
+    spring_pos = script.index("element('zeroLength'")
+
+    assert steel_pos < fatigue_pos < minmax_pos < spring_pos
+    assert f"'-mat', {result.final_tag}" in script
