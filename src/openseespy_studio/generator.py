@@ -413,7 +413,7 @@ def analysis_to_openseespy(
         "    return _iterations, _norm",
         "",
         "_studio_results = {",
-        "    'schema_version': 3,",
+        "    'schema_version': 4,",
         "    'analysis': {",
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
@@ -424,10 +424,17 @@ def analysis_to_openseespy(
         "    'final': {},",
         "    'history': {'time': [], 'monitor_node': "
         f"{monitor_node}, 'control_dof': {settings.control_dof}, "
-        "'displacement': [], 'base_shear': []}},",
+        "'displacement': [], 'base_shear': [], "
+        "'base_reactions': [], 'nodes': {}}},",
         "    'modes': {},",
         "}",
         f"_studio_node_tags = {node_tags!r}",
+        "_studio_results['history']['nodes'] = {",
+        "    str(_studio_node): {",
+        "        'disp': [], 'vel': [], 'accel': [], 'reaction': []",
+        "    }",
+        "    for _studio_node in _studio_node_tags",
+        "}",
         f"_studio_element_tags = {element_tags!r}",
         f"_studio_frame_element_tags = {frame_element_tags!r}",
         f"_studio_support_node_tags = {support_node_tags!r}",
@@ -577,25 +584,78 @@ def analysis_to_openseespy(
     )
     lines.append("    _studio_time = float(ops.getTime())")
     lines.append(
-        "    _studio_disp = "
-        "[float(v) for v in ops.nodeDisp(_studio_monitor_node)]"
-    )
-    lines.append(
         "    _studio_results['history']['time'].append(_studio_time)"
     )
+    if settings.analysis_type == "Transient":
+        lines.append("    ops.reactions('-dynamic', '-rayleigh')")
+    else:
+        lines.append("    ops.reactions()")
+    lines.append("    _studio_base_reactions = [0.0] * 6")
+    lines.append("    for _studio_support in _studio_support_node_tags:")
     lines.append(
-        "    _studio_results['history']['displacement'].append(_studio_disp)"
+        "        _studio_support_reaction = "
+        "[float(v) for v in ops.nodeReaction(_studio_support)]"
     )
-    lines.append("    _studio_base = 0.0")
-    lines.append("    if _studio_support_node_tags:")
-    lines.append("        ops.reactions()")
-    lines.append("        for _studio_support in _studio_support_node_tags:")
     lines.append(
-        f"            _studio_base += float(ops.nodeReaction("
-        f"_studio_support, {settings.control_dof}))"
+        "        for _studio_dof_index, _studio_value in "
+        "enumerate(_studio_support_reaction[:6]):"
+    )
+    lines.append(
+        "            _studio_base_reactions[_studio_dof_index] += "
+        "_studio_value"
+    )
+    lines.append(
+        "    _studio_results['history']['base_reactions'].append("
+        "_studio_base_reactions)"
+    )
+    lines.append(
+        f"    _studio_base = "
+        f"float(_studio_base_reactions[{settings.control_dof - 1}])"
     )
     lines.append(
         "    _studio_results['history']['base_shear'].append(_studio_base)"
+    )
+    lines.append("    for _studio_node in _studio_node_tags:")
+    lines.append(
+        "        _studio_disp_row = "
+        "[float(v) for v in ops.nodeDisp(_studio_node)]"
+    )
+    lines.append(
+        "        _studio_vel_row = "
+        "[float(v) for v in ops.nodeVel(_studio_node)]"
+    )
+    lines.append(
+        "        _studio_accel_row = "
+        "[float(v) for v in ops.nodeAccel(_studio_node)]"
+    )
+    lines.append(
+        "        _studio_reaction_row = "
+        "[float(v) for v in ops.nodeReaction(_studio_node)]"
+    )
+    lines.append(
+        "        _studio_node_history = "
+        "_studio_results['history']['nodes'][str(_studio_node)]"
+    )
+    lines.append(
+        "        _studio_node_history['disp'].append(_studio_disp_row)"
+    )
+    lines.append(
+        "        _studio_node_history['vel'].append(_studio_vel_row)"
+    )
+    lines.append(
+        "        _studio_node_history['accel'].append(_studio_accel_row)"
+    )
+    lines.append(
+        "        _studio_node_history['reaction'].append("
+        "_studio_reaction_row)"
+    )
+    lines.append(
+        "    _studio_disp = "
+        "_studio_results['history']['nodes']"
+        "[str(_studio_monitor_node)]['disp'][-1]"
+    )
+    lines.append(
+        "    _studio_results['history']['displacement'].append(_studio_disp)"
     )
     lines.append(
         f"    _studio_monitor = "
@@ -612,8 +672,11 @@ def analysis_to_openseespy(
         "base_shear=_studio_base)"
     )
 
+    if settings.analysis_type == "Transient":
+        lines.append("ops.reactions('-dynamic', '-rayleigh')")
+    else:
+        lines.append("ops.reactions()")
     lines.extend([
-        "ops.reactions()",
         "_studio_final_disp = {}",
         "_studio_final_reaction = {}",
         "for _studio_node in _studio_node_tags:",
