@@ -73,7 +73,7 @@ class ModelViewport(QWidget):
             "element_numbers": False,
             "nodal_loads": False,
             "element_loads": False,
-            "load_values": False,
+            "load_values": True,
         }
         self._selection_filter = "all"
         self._selected_nodes: set[int] = set()
@@ -1363,6 +1363,7 @@ class ModelViewport(QWidget):
                 name="display-nodal-load-labels",
                 text_color="#a71919",
                 font_size=10,
+                always_visible=True,
             )
 
     def _element_load_global_vector(
@@ -1521,6 +1522,7 @@ class ModelViewport(QWidget):
                 name="display-element-load-labels",
                 text_color="#9b164a",
                 font_size=10,
+                always_visible=True,
             )
 
     def _update_display_option(
