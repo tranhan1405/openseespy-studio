@@ -697,6 +697,7 @@ def analysis_to_openseespy(
             "'algorithm': _studio_alg, "
             "'iterations': _studio_iterations, "
             "'norm': _studio_norm, "
+            "'norm_history': list(_studio_norm_history), "
             "'code': int(_studio_ok), "
             "'success': bool(_studio_ok == 0)"
             "})"
