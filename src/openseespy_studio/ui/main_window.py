@@ -1752,6 +1752,10 @@ class MainWindow(QMainWindow):
         reset_layout.triggered.connect(self._reset_dock_layout)
         menus["Window"].addAction(reset_layout)
 
+        about_action = QAction("About OpenSeesPy Studio", self)
+        about_action.triggered.connect(self._show_about)
+        menus["Help"].addAction(about_action)
+
         self._make_action(
             "results_manager",
             "Tabular Data",
@@ -9987,6 +9991,29 @@ class MainWindow(QMainWindow):
                 pass
         self._external_log_paths.clear()
         super().closeEvent(event)
+
+    def _show_about(self) -> None:
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("About OpenSeesPy Studio")
+        app = QApplication.instance()
+        if app is not None:
+            dialog.setWindowIcon(app.windowIcon())
+            dialog.setIconPixmap(app.windowIcon().pixmap(72, 72))
+
+        version = QApplication.applicationVersion() or "Development"
+        dialog.setText(
+            "<b style='font-size:16px'>OpenSeesPy Studio</b><br>"
+            "<span style='color:#6f7d8c'>Visual Platform for OpenSeesPy</span>"
+        )
+        dialog.setInformativeText(
+            f"Version {version}\n\n"
+            "A research-focused visual environment for nonlinear structural "
+            "modelling, analysis, and post-processing with OpenSeesPy.\n\n"
+            "Developed by Tran-Van Han.\n"
+            "Built with OpenSeesPy, PySide6, and PyVista."
+        )
+        dialog.setStandardButtons(QMessageBox.Ok)
+        dialog.exec()
 
     def _not_implemented(self) -> None:
         action = self.sender()
