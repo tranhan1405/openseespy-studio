@@ -4714,77 +4714,14 @@ class MainWindow(QMainWindow):
         if result is None:
             return
 
-        kind = result_object.result_type
-        options = dict(result_object.settings)
-        options["_node_scope"] = list(result_object.node_scope)
-        options["_element_scope"] = list(result_object.element_scope)
-        self.results_panel.show_solution_result(kind, options)
-        self.results_dock.show()
-        self.results_dock.raise_()
-
-        if result_object.node_scope:
-            self.selection.set_selection(
-                nodes=set(result_object.node_scope),
-                elements=set(result_object.element_scope),
-            )
-        elif result_object.element_scope:
-            self.selection.set_selection(
-                nodes=set(),
-                elements=set(result_object.element_scope),
-            )
-
-        if kind == "DeformedShape":
-            self.viewport.show_deformed_shape(
-                result,
-                scale=float(options.get("scale", 10.0)),
-                node_tags=set(result_object.node_scope) or None,
-                element_tags=set(result_object.element_scope) or None,
-            )
-        elif kind in {"NodalDisplacement", "NodalReaction"}:
-            quantity = (
-                "Reaction"
-                if kind == "NodalReaction"
-                else "Displacement"
-            )
-            component = str(
-                options.get(
-                    "component",
-                    "FX" if quantity == "Reaction" else "|U|",
-                )
-            )
-            self.viewport.show_node_contour(
-                result,
-                quantity,
-                component,
-                node_tags=set(result_object.node_scope) or None,
-                element_tags=set(result_object.element_scope) or None,
-            )
-        elif kind == "MemberForce":
-            self.viewport.show_member_force_diagram(
-                result,
-                self.project.transformations,
-                str(options.get("component", "Mz")),
-                scale=float(options.get("scale", 1.0)),
-                element_tags=set(result_object.element_scope) or None,
-            )
-        elif kind == "HingeState":
-            self.viewport.show_hinge_states(
-                result,
-                element_tags=set(result_object.element_scope) or None,
-            )
-        elif kind == "ModeShape":
-            modes = result.get("modes", {})
-            mode = int(options.get("mode", 1))
-            if isinstance(modes, dict) and str(mode) not in modes and modes:
-                mode = min(int(key) for key in modes)
-            self.viewport.show_mode_shape(
-                result,
-                mode,
-                scale=float(options.get("scale", 1.0)),
-                node_tags=set(result_object.node_scope) or None,
-                element_tags=set(result_object.element_scope) or None,
-            )
-
+        self._render_result_data(
+            result,
+            result_object.result_type,
+            dict(result_object.settings),
+            node_scope=set(result_object.node_scope),
+            element_scope=set(result_object.element_scope),
+            restore_scope_selection=True,
+        )
         self.status_message.setText(
             f"Evaluated result: {result_object.name}"
         )
