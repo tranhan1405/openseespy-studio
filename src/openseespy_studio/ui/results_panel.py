@@ -110,6 +110,190 @@ class TimeHistoryPlot(QWidget):
         painter.drawText(right - 35, self.height() - 7, f"{xmax:.3g}")
 
 
+class LiveConvergencePlot(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._attempts: list[dict[str, Any]] = []
+        self._tolerance: float | None = None
+        self._empty_message = "Live convergence monitor idle"
+        self.setMinimumHeight(190)
+
+    def set_attempts(
+        self,
+        attempts: list[dict[str, Any]],
+        tolerance: float | None,
+    ) -> None:
+        self._attempts = [
+            {
+                "algorithm": str(attempt.get("algorithm", "-")),
+                "values": [
+                    (int(item[0]), float(item[1]))
+                    for item in attempt.get("values", [])
+                    if (
+                        isinstance(item, (list, tuple))
+                        and len(item) >= 2
+                        and math.isfinite(float(item[1]))
+                    )
+                ],
+            }
+            for attempt in attempts
+            if isinstance(attempt, dict)
+        ]
+        try:
+            parsed_tolerance = (
+                float(tolerance)
+                if tolerance is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            parsed_tolerance = None
+        self._tolerance = (
+            parsed_tolerance
+            if parsed_tolerance is not None
+            and math.isfinite(parsed_tolerance)
+            and parsed_tolerance > 0.0
+            else None
+        )
+        self.update()
+
+    def clear(self) -> None:
+        self._attempts = []
+        self._tolerance = None
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#ffffff"))
+
+        attempt_values = [
+            (
+                attempt.get("algorithm", "-"),
+                [
+                    (iteration, norm)
+                    for iteration, norm in attempt.get("values", [])
+                    if norm > 0.0 and math.isfinite(norm)
+                ],
+            )
+            for attempt in self._attempts
+        ]
+        attempt_values = [
+            (algorithm, values)
+            for algorithm, values in attempt_values
+            if values
+        ]
+        if not attempt_values:
+            painter.setPen(QColor("#718195"))
+            painter.drawText(
+                self.rect(),
+                Qt.AlignCenter,
+                self._empty_message,
+            )
+            return
+
+        norms = [
+            norm
+            for _algorithm, values in attempt_values
+            for _iteration, norm in values
+        ]
+        if self._tolerance is not None:
+            norms.append(self._tolerance)
+
+        logs = [math.log10(max(value, 1.0e-300)) for value in norms]
+        log_min = min(logs)
+        log_max = max(logs)
+        if abs(log_max - log_min) < 1.0e-12:
+            log_min -= 1.0
+            log_max += 1.0
+        else:
+            pad = 0.12 * (log_max - log_min)
+            log_min -= pad
+            log_max += pad
+
+        margin_left, margin_right = 62.0, 18.0
+        margin_top, margin_bottom = 26.0, 34.0
+        left = margin_left
+        right = max(left + 1.0, self.width() - margin_right)
+        top = margin_top
+        bottom = max(top + 1.0, self.height() - margin_bottom)
+
+        total_points = sum(len(values) for _, values in attempt_values)
+        gaps = max(0, len(attempt_values) - 1)
+        xmax = max(total_points + gaps - 1, 1)
+
+        def point(index: float, norm: float) -> QPointF:
+            px = left + index / xmax * (right - left)
+            py = bottom - (
+                math.log10(max(norm, 1.0e-300)) - log_min
+            ) / (log_max - log_min) * (bottom - top)
+            return QPointF(px, py)
+
+        painter.setPen(QPen(QColor("#c7d0da"), 1))
+        painter.drawLine(int(left), int(bottom), int(right), int(bottom))
+        painter.drawLine(int(left), int(top), int(left), int(bottom))
+
+        if self._tolerance is not None:
+            tol_y = point(0.0, self._tolerance).y()
+            painter.setPen(QPen(QColor("#c0392b"), 1, Qt.DashLine))
+            painter.drawLine(
+                int(left),
+                int(tol_y),
+                int(right),
+                int(tol_y),
+            )
+            painter.drawText(
+                int(left + 4),
+                int(max(top + 12, tol_y - 4)),
+                f"tol={self._tolerance:.3e}",
+            )
+
+        palette = (
+            QColor("#2f80ed"),
+            QColor("#f2994a"),
+            QColor("#9b51e0"),
+            QColor("#219653"),
+        )
+        offset = 0
+        for attempt_index, (algorithm, values) in enumerate(attempt_values):
+            color = palette[attempt_index % len(palette)]
+            painter.setPen(QPen(color, 2))
+            previous: QPointF | None = None
+            for local_index, (_iteration, norm) in enumerate(values):
+                x_index = offset + local_index
+                current = point(x_index, norm)
+                if previous is not None:
+                    painter.drawLine(previous, current)
+                painter.setBrush(color)
+                painter.drawEllipse(current, 3.0, 3.0)
+                previous = current
+
+            first = point(offset, values[0][1])
+            painter.setPen(color)
+            painter.drawText(
+                int(first.x() + 4),
+                int(top + 12 + 14 * (attempt_index % 2)),
+                algorithm,
+            )
+            offset += len(values) + 1
+
+        painter.setPen(QColor("#526579"))
+        painter.drawText(
+            4,
+            int(top + 8),
+            f"1e{math.ceil(log_max):g}",
+        )
+        painter.drawText(
+            4,
+            int(bottom),
+            f"1e{math.floor(log_min):g}",
+        )
+        painter.drawText(
+            int(left),
+            self.height() - 7,
+            "Iterations / fallback attempts →",
+        )
+
+
 class FiberResponsePlot(QWidget):
     fiber_selected = Signal(object)
 
@@ -315,6 +499,11 @@ class ResultsPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._result: dict[str, Any] = {}
+        self._live_convergence_attempts: list[dict[str, Any]] = []
+        self._live_convergence_step = 0
+        self._live_convergence_total = 0
+        self._live_convergence_test = ""
+        self._live_convergence_tolerance: float | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 5, 6, 5)
@@ -363,6 +552,7 @@ class ResultsPanel(QWidget):
 
     def _build_convergence_tab(self) -> None:
         page = QWidget()
+        self.convergence_page = page
         layout = QVBoxLayout(page)
         layout.setContentsMargins(4, 4, 4, 4)
 
@@ -372,6 +562,15 @@ class ResultsPanel(QWidget):
         controls.addWidget(export)
         controls.addStretch(1)
         layout.addLayout(controls)
+
+        self.live_convergence_status = QLabel(
+            "Live monitor idle."
+        )
+        self.live_convergence_status.setWordWrap(True)
+        layout.addWidget(self.live_convergence_status)
+
+        self.live_convergence_plot = LiveConvergencePlot()
+        layout.addWidget(self.live_convergence_plot)
 
         self.convergence_info = QLabel(
             "Run a non-modal analysis to inspect solver convergence."
@@ -838,6 +1037,13 @@ class ResultsPanel(QWidget):
         self._result = {}
         self.jobs_table.setRowCount(0)
         self.convergence_table.setRowCount(0)
+        self._live_convergence_attempts = []
+        self._live_convergence_step = 0
+        self._live_convergence_total = 0
+        self._live_convergence_test = ""
+        self._live_convergence_tolerance = None
+        self.live_convergence_status.setText("Live monitor idle.")
+        self.live_convergence_plot.clear()
         self.convergence_iterations_plot.set_series([], [])
         self.convergence_norm_plot.set_series([], [])
         self.convergence_info.setText(
@@ -902,6 +1108,140 @@ class ResultsPanel(QWidget):
         if mode is None:
             return
         self.mode_shape_requested.emit(int(mode), self.mode_scale.value())
+
+    def start_live_convergence(
+        self,
+        *,
+        total: int,
+        test: str,
+        tolerance: float | None,
+        algorithm: str,
+    ) -> None:
+        self._live_convergence_attempts = []
+        self._live_convergence_step = 0
+        self.tabs.setCurrentWidget(self.convergence_page)
+        self._live_convergence_total = int(total)
+        self._live_convergence_test = str(test)
+        self._live_convergence_tolerance = tolerance
+        self.live_convergence_plot.clear()
+        self.live_convergence_status.setText(
+            f"RUNNING · {self._live_convergence_test or 'Convergence test'} "
+            f"· primary {algorithm or '-'}"
+        )
+
+    def begin_live_convergence_step(
+        self,
+        *,
+        step: int,
+        total: int,
+        algorithm: str,
+        test: str = "",
+        tolerance: float | None = None,
+    ) -> None:
+        self._live_convergence_step = int(step)
+        self._live_convergence_total = int(total)
+        if test:
+            self._live_convergence_test = str(test)
+        if tolerance is not None:
+            self._live_convergence_tolerance = float(tolerance)
+        self._live_convergence_attempts = [
+            {"algorithm": str(algorithm), "values": []}
+        ]
+        self.live_convergence_plot.set_attempts(
+            self._live_convergence_attempts,
+            self._live_convergence_tolerance,
+        )
+        self.live_convergence_status.setText(
+            f"RUNNING · Step {step}/{total} · {algorithm} · "
+            f"{self._live_convergence_test or 'test'}"
+        )
+
+    def begin_live_convergence_attempt(
+        self,
+        algorithm: str,
+    ) -> None:
+        algorithm = str(algorithm)
+        if (
+            self._live_convergence_attempts
+            and self._live_convergence_attempts[-1].get("algorithm")
+            == algorithm
+            and not self._live_convergence_attempts[-1].get("values")
+        ):
+            return
+        self._live_convergence_attempts.append(
+            {"algorithm": algorithm, "values": []}
+        )
+        self.live_convergence_plot.set_attempts(
+            self._live_convergence_attempts,
+            self._live_convergence_tolerance,
+        )
+        self.live_convergence_status.setText(
+            f"RUNNING · Step {self._live_convergence_step}/"
+            f"{self._live_convergence_total} · fallback {algorithm}"
+        )
+
+    def append_live_convergence_iteration(
+        self,
+        *,
+        iteration: int,
+        norm: float,
+        tolerance: float | None = None,
+        test: str = "",
+        algorithm: str = "",
+    ) -> None:
+        if tolerance is not None:
+            self._live_convergence_tolerance = float(tolerance)
+        if test:
+            self._live_convergence_test = str(test)
+        if not self._live_convergence_attempts:
+            self._live_convergence_attempts.append(
+                {
+                    "algorithm": str(algorithm or "-"),
+                    "values": [],
+                }
+            )
+        attempt = self._live_convergence_attempts[-1]
+        values = attempt.setdefault("values", [])
+        point = (int(iteration), float(norm))
+        if values and int(values[-1][0]) == point[0]:
+            values[-1] = point
+        else:
+            values.append(point)
+        self.live_convergence_plot.set_attempts(
+            self._live_convergence_attempts,
+            self._live_convergence_tolerance,
+        )
+        tol = self._live_convergence_tolerance
+        status = (
+            "CONVERGED"
+            if tol is not None and norm <= tol
+            else "ITERATING"
+        )
+        self.live_convergence_status.setText(
+            f"{status} · Step {self._live_convergence_step}/"
+            f"{self._live_convergence_total} · "
+            f"{attempt.get('algorithm', algorithm or '-')} · "
+            f"iter {iteration} · norm={norm:.3e}"
+            + (
+                f" · tol={tol:.3e}"
+                if tol is not None
+                else ""
+            )
+        )
+
+    def finish_live_convergence(self, status: str) -> None:
+        if self._live_convergence_step <= 0:
+            return
+        final_status = str(status)
+        if (
+            final_status == "CONVERGED"
+            and len(self._live_convergence_attempts) > 1
+        ):
+            final_status = "RECOVERED"
+        self.live_convergence_status.setText(
+            f"{final_status} · Step {self._live_convergence_step}/"
+            f"{self._live_convergence_total}"
+        )
 
     def add_or_update_job(self, job: JobRecord) -> None:
         row = None
@@ -1115,6 +1455,38 @@ class ResultsPanel(QWidget):
             return
 
         attempts = record.get("attempts", [])
+        if isinstance(attempts, list):
+            plot_attempts: list[dict[str, Any]] = []
+            for attempt in attempts:
+                if not isinstance(attempt, dict):
+                    continue
+                history = attempt.get("norm_history", [])
+                values = []
+                if isinstance(history, (list, tuple)):
+                    for iteration, raw_norm in enumerate(history, start=1):
+                        try:
+                            norm = float(raw_norm)
+                        except (TypeError, ValueError):
+                            continue
+                        if math.isfinite(norm):
+                            values.append((iteration, norm))
+                plot_attempts.append({
+                    "algorithm": str(attempt.get("algorithm", "-")),
+                    "values": values,
+                })
+            convergence = self._result.get("convergence", {})
+            tolerance = (
+                convergence.get("tolerance")
+                if isinstance(convergence, dict)
+                else None
+            )
+            self.live_convergence_plot.set_attempts(
+                plot_attempts,
+                tolerance,
+            )
+            self.live_convergence_status.setText(
+                f"POST-RUN · Selected step {step}"
+            )
         if not isinstance(attempts, list) or not attempts:
             self.convergence_attempt_info.setText(
                 f"Step {step}: no attempt details available."

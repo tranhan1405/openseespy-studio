@@ -11,7 +11,7 @@ from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 16
+PROJECT_FORMAT_VERSION = 17
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -1071,6 +1071,7 @@ class AnalysisSettingsData:
     beta: float = 0.25
     num_modes: int = 3
     recovery: bool = True
+    live_convergence: bool = True
     show_external_console: bool = False
 
     def __post_init__(self) -> None:
@@ -1084,6 +1085,7 @@ class AnalysisSettingsData:
         self.cyclic_increment=abs(float(self.cyclic_increment))
         self.dt=float(self.dt); self.gamma=float(self.gamma); self.beta=float(self.beta)
         self.num_modes=int(self.num_modes); self.recovery=bool(self.recovery)
+        self.live_convergence=bool(self.live_convergence)
         self.show_external_console=bool(self.show_external_console)
         if self.tag<=0: raise ValueError("Analysis tag must be positive.")
         if self.analysis_type not in {"Static","Pushover","Cyclic","Transient","Modal"}:
@@ -1111,7 +1113,7 @@ class AnalysisSettingsData:
             "test","tolerance","max_iterations","algorithm","steps","load_increment",
             "control_node","control_dof","displacement_increment",
             "cyclic_targets","cyclic_increment","dt","gamma","beta",
-            "num_modes","recovery","show_external_console"
+            "num_modes","recovery","live_convergence","show_external_console"
         )}
 
     @classmethod

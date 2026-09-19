@@ -59,6 +59,14 @@ class AnalysisDialog(QDialog):
         self.beta=fs(analysis.beta if analysis else 0.25)
         self.modes=QSpinBox(); self.modes.setRange(1,10000); self.modes.setValue(analysis.num_modes if analysis else 3)
         self.recovery=QCheckBox("Try NewtonLineSearch / ModifiedNewton / Newton on failed step"); self.recovery.setChecked(analysis.recovery if analysis else True)
+        self.live_convergence=QCheckBox("Live convergence monitor (iteration-level)")
+        self.live_convergence.setChecked(
+            analysis.live_convergence if analysis else True
+        )
+        self.live_convergence.setToolTip(
+            "Streams every convergence-test iteration to the GUI. "
+            "Disable for very long analyses if console I/O becomes excessive."
+        )
         self.external_console=QCheckBox("Show external solver terminal (Windows debug)")
         self.external_console.setChecked(analysis.show_external_console if analysis else False)
         self.external_console.setToolTip(
@@ -68,6 +76,7 @@ class AnalysisDialog(QDialog):
         fields=(("Tag",self.tag),("Name",self.name),("Analysis type",self.kind),("Constraints",self.constraints),("Numberer",self.numberer),("System",self.system),("Test",self.test),("Tolerance",self.tol),("Max iterations",self.max_iter),("Algorithm",self.algorithm),("Steps",self.steps),("Load increment",self.load_inc),("Control node",self.control_node),("Control DOF",self.control_dof),("Disp. increment",self.disp_inc),("Cyclic targets",self.cyclic_targets),("Cyclic max increment",self.cyclic_inc),("Time step dt",self.dt),("Newmark gamma",self.gamma),("Newmark beta",self.beta),("Number of modes",self.modes))
         for label,w in fields: form.addRow(label+":",w)
         form.addRow("Recovery:",self.recovery)
+        form.addRow("Live convergence:",self.live_convergence)
         form.addRow("External terminal:",self.external_console)
         root.addLayout(form)
         b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); root.addWidget(b)
@@ -99,5 +108,6 @@ class AnalysisDialog(QDialog):
             cyclic_targets=cyclic_targets,cyclic_increment=self.cyclic_inc.value(),
             dt=self.dt.value(),gamma=self.gamma.value(),beta=self.beta.value(),num_modes=self.modes.value(),
             recovery=self.recovery.isChecked(),
+            live_convergence=self.live_convergence.isChecked(),
             show_external_console=self.external_console.isChecked()
         )
