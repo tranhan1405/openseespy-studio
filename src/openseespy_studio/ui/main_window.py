@@ -5413,7 +5413,10 @@ class MainWindow(QMainWindow):
             elif kind == "Pushover":
                 distribution = str(request["distribution"])
                 distribution_weights = request.get("custom_weights")
-                if distribution == "First-mode proportional":
+                if (
+                    request["driver_pattern_tag"] is None
+                    and distribution == "First-mode proportional"
+                ):
                     distribution_weights = self._first_mode_lateral_weights(
                         mode=int(request["mode_number"]),
                         dof=int(request["control_dof"]),
