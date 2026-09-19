@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import json
 import math
 
-from .generator import material_to_openseespy
+from .generator import material_to_openseespy, ordered_material_tags
 from .project import MaterialData
 from .units import UnitSystem
 
@@ -65,11 +65,23 @@ def _negative_extent(material: MaterialData) -> float:
 def default_material_test_spec(
     material: MaterialData,
     units: dict[str, str] | None = None,
+    materials: dict[int, MaterialData] | None = None,
 ) -> MaterialTestSpec:
     """Choose a useful research-oriented protocol from the material family."""
     p = material.parameters
     unit_system = UnitSystem.from_mapping(units)
     material_type = material.material_type
+
+    if material_type in {"MinMax", "Fatigue"} and materials:
+        base = materials.get(int(material.base_material_tag or 0))
+        if base is not None:
+            return default_material_test_spec(base, units, materials)
+
+    if material_type in {"Parallel", "Series"} and materials:
+        for tag in material.material_tags:
+            base = materials.get(int(tag))
+            if base is not None:
+                return default_material_test_spec(base, units, materials)
 
     if material_type in {
         "Concrete01",
@@ -215,6 +227,7 @@ def build_material_test_script(
     material: MaterialData,
     units: dict[str, str] | None,
     spec: MaterialTestSpec,
+    materials: dict[int, MaterialData] | None = None,
 ) -> str:
     """Build an isolated OpenSees uniaxial material-point test script.
 
@@ -222,14 +235,45 @@ def build_material_test_script(
     UniaxialMaterial constitutive object used by zeroLength and fiber models,
     without introducing a structural equilibrium problem into a material test.
     """
-    command = material_to_openseespy(material, units)
+    material_map = dict(materials or {})
+    material_map[material.tag] = material
+
+    if material.material_type in {"MinMax", "Fatigue", "Parallel", "Series"}:
+        required: set[int] = set()
+
+        def collect(tag: int) -> None:
+            if tag in required:
+                return
+            item = material_map.get(tag)
+            if item is None:
+                raise ValueError(
+                    f"Material test needs referenced material tag {tag}."
+                )
+            required.add(tag)
+            if item.material_type in {"MinMax", "Fatigue"}:
+                if item.base_material_tag is not None:
+                    collect(item.base_material_tag)
+            elif item.material_type in {"Parallel", "Series"}:
+                for dependency in item.material_tags:
+                    collect(dependency)
+
+        collect(material.tag)
+        selected = {tag: material_map[tag] for tag in required}
+        commands = [
+            material_to_openseespy(selected[tag], units)
+            for tag in ordered_material_tags(selected)
+        ]
+    else:
+        commands = [material_to_openseespy(material, units)]
+
     history = material_test_history(spec)
     x_label, y_label = material_test_axis_labels(material, units)
+    command_text = "\n".join(commands)
 
     return (
         "import openseespy.opensees as ops\n"
         "ops.wipe()\n"
-        f"{command}\n"
+        f"{command_text}\n"
         f"ops.testUniaxialMaterial({material.tag})\n"
         f"_studio_history = {json.dumps(history)}\n"
         "_studio_deformation = []\n"
