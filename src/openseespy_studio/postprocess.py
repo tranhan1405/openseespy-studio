@@ -216,7 +216,7 @@ def cyclic_reversal_points(
     displacement: Sequence[float],
     force: Sequence[float],
 ) -> list[dict[str, float]]:
-    """Return displacement reversals and their secant stiffness."""
+    """Return reversals plus repeated-amplitude strength/stiffness ratios."""
     count = min(len(displacement), len(force))
     if count < 3:
         return []
@@ -244,7 +244,108 @@ def cyclic_reversal_points(
             })
         previous_sign = sign
 
+    amplitude_tolerance = max(
+        max((abs(value) for value in x), default=0.0) * 1.0e-6,
+        1.0e-12,
+    )
+    references: list[dict[str, float]] = []
+    for reversal in reversals:
+        u = float(reversal["displacement"])
+        v = float(reversal["force"])
+        stiffness = float(reversal["secant_stiffness"])
+        sign = 1.0 if u >= 0.0 else -1.0
+        amplitude = abs(u)
+
+        reference = next(
+            (
+                item
+                for item in references
+                if item["sign"] == sign
+                and abs(item["amplitude"] - amplitude)
+                <= amplitude_tolerance
+            ),
+            None,
+        )
+        if reference is None:
+            reference = {
+                "sign": sign,
+                "amplitude": amplitude,
+                "force": abs(v),
+                "stiffness": abs(stiffness),
+                "count": 0.0,
+            }
+            references.append(reference)
+
+        reference["count"] += 1.0
+        ref_force = float(reference["force"])
+        ref_stiffness = float(reference["stiffness"])
+        reversal["repeat_index"] = float(reference["count"])
+        reversal["strength_ratio"] = (
+            abs(v) / ref_force
+            if ref_force > 1.0e-15
+            else math.nan
+        )
+        reversal["stiffness_ratio"] = (
+            abs(stiffness) / ref_stiffness
+            if ref_stiffness > 1.0e-15
+            and math.isfinite(ref_stiffness)
+            else math.nan
+        )
+
     return reversals
+
+
+def cyclic_closed_cycle_energies(
+    displacement: Sequence[float],
+    force: Sequence[float],
+    reversals: Sequence[dict[str, float]] | None = None,
+) -> list[dict[str, float]]:
+    """Estimate energy for repeated closed cycles at the same positive peak."""
+    count = min(len(displacement), len(force))
+    if count < 4:
+        return []
+    x = [float(value) for value in displacement[:count]]
+    y = [float(value) for value in force[:count]]
+    points = list(reversals or cyclic_reversal_points(x, y))
+    positives = [
+        item
+        for item in points
+        if float(item.get("displacement", 0.0)) > 1.0e-15
+    ]
+    tolerance = max(
+        max((abs(value) for value in x), default=0.0) * 1.0e-6,
+        1.0e-12,
+    )
+    cycles: list[dict[str, float]] = []
+    last_by_amplitude: list[tuple[float, int]] = []
+    for reversal in positives:
+        amplitude = abs(float(reversal["displacement"]))
+        index = int(round(float(reversal["index"])))
+        match_index = None
+        match_slot = None
+        for slot, (known_amplitude, known_index) in enumerate(
+            last_by_amplitude
+        ):
+            if abs(known_amplitude - amplitude) <= tolerance:
+                match_index = known_index
+                match_slot = slot
+                break
+        if match_index is not None and index > match_index + 1:
+            signed = sum(
+                0.5 * (y[i] + y[i - 1]) * (x[i] - x[i - 1])
+                for i in range(match_index + 1, index + 1)
+            )
+            cycles.append({
+                "amplitude": amplitude,
+                "start_index": float(match_index),
+                "end_index": float(index),
+                "energy": abs(signed),
+            })
+        if match_slot is None:
+            last_by_amplitude.append((amplitude, index))
+        else:
+            last_by_amplitude[match_slot] = (amplitude, index)
+    return cycles
 
 
 def cyclic_hysteresis_metrics(
@@ -274,13 +375,20 @@ def cyclic_hysteresis_metrics(
     tolerance = max(max_abs_displacement, 1.0) * 1.0e-8
     closed_path = abs(x[-1] - x[0]) <= tolerance
 
+    reversals = cyclic_reversal_points(x, y)
+    cycle_energies = cyclic_closed_cycle_energies(x, y, reversals)
     return {
         "signed_work": signed_work,
         "dissipated_energy": abs(signed_work) if closed_path else None,
         "closed_path": closed_path,
         "max_abs_displacement": max_abs_displacement,
         "max_abs_force": max_abs_force,
-        "reversals": cyclic_reversal_points(x, y),
+        "peak_positive_force": max(y),
+        "peak_negative_force": min(y),
+        "residual_displacement": x[-1],
+        "reversals": reversals,
+        "cycle_energies": cycle_energies,
+        "closed_cycle_count": len(cycle_energies),
     }
 
 
