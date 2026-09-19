@@ -254,12 +254,64 @@ def _active_lateral_nodes(project: ProjectDatabase, dof: int) -> list[int]:
     return sorted(tags)
 
 
+def infer_height_axis(project: ProjectDatabase) -> int:
+    """Return a sensible vertical coordinate axis for common frame layouts."""
+    spans = [
+        max(
+            (node.xyz[index] for node in project.model.nodes.values()),
+            default=0.0,
+        )
+        - min(
+            (node.xyz[index] for node in project.model.nodes.values()),
+            default=0.0,
+        )
+        for index in range(3)
+    ]
+    if spans[2] > 1.0e-12:
+        return 3
+    if spans[1] > 1.0e-12:
+        return 2
+    if spans[0] > 1.0e-12:
+        return 1
+    return 3
+
+
+def structure_reference_height(
+    project: ProjectDatabase,
+    *,
+    control_node: int,
+    height_axis: int,
+) -> float:
+    axis = int(height_axis) - 1
+    if axis not in (0, 1, 2):
+        raise ValueError("Height axis must be X, Y or Z.")
+    if int(control_node) not in project.model.nodes:
+        raise ValueError(f"Control node {control_node} does not exist.")
+    values = [
+        float(node.xyz[axis])
+        for node in project.model.nodes.values()
+    ]
+    if not values:
+        raise ValueError("Reference height needs at least one model node.")
+    control_value = float(project.model.nodes[int(control_node)].xyz[axis])
+    base = min(values)
+    height = abs(control_value - base)
+    if height <= 1.0e-15:
+        height = max(values) - min(values)
+    if height <= 1.0e-15:
+        raise ValueError(
+            "Reference height is zero on the selected height axis."
+        )
+    return height
+
+
 def lateral_load_weights(
     project: ProjectDatabase,
     *,
     dof: int,
     distribution: str,
     custom_weights: dict[int, float] | None = None,
+    height_axis: int = 3,
 ) -> dict[int, float]:
     tags = _active_lateral_nodes(project, dof)
     kind = str(distribution)
@@ -267,14 +319,16 @@ def lateral_load_weights(
     if kind == "Uniform":
         raw = {tag: 1.0 for tag in tags}
     elif kind == "Triangular":
-        z_values = [
-            float(project.model.nodes[tag].xyz[2])
-            for tag in tags
-        ]
-        z0 = min(z_values)
+        axis = int(height_axis) - 1
+        if axis not in (0, 1, 2):
+            raise ValueError("Height axis must be X, Y or Z.")
+        h0 = min(
+            float(node.xyz[axis])
+            for node in project.model.nodes.values()
+        )
         raw = {
             tag: max(
-                float(project.model.nodes[tag].xyz[2]) - z0,
+                float(project.model.nodes[tag].xyz[axis]) - h0,
                 0.0,
             )
             for tag in tags
@@ -322,12 +376,14 @@ def _reference_lateral_loading(
     distribution: str,
     prefix: str,
     custom_weights: dict[int, float] | None = None,
+    height_axis: int = 3,
 ) -> tuple[list[TimeSeriesData], list[LoadPatternData], list[NodalLoadData]]:
     weights = lateral_load_weights(
         project,
         dof=dof,
         distribution=distribution,
         custom_weights=custom_weights,
+        height_axis=height_axis,
     )
     series_tag = _next_tag(project.time_series)
     pattern_tag = _next_tag(project.load_patterns)
@@ -457,6 +513,10 @@ def build_pushover_template(
     max_increment: float,
     distribution: str = "Triangular",
     distribution_weights: dict[int, float] | None = None,
+    height_axis: int = 3,
+    driver_pattern_tag: int | None = None,
+    preload_gravity: bool = True,
+    gravity_steps: int = 10,
     solver_preset: str = "Robust",
 ) -> AnalysisTemplatePlan:
     if int(control_node) not in project.model.nodes:
@@ -467,16 +527,41 @@ def build_pushover_template(
         raise ValueError("Pushover target displacement must be nonzero.")
     if max_increment <= 0.0:
         raise ValueError("Pushover increment must be positive.")
+    gravity_steps = int(gravity_steps)
+    if gravity_steps < 1:
+        raise ValueError("Gravity preload steps must be at least 1.")
 
     steps = max(1, int(math.ceil(abs(target) / max_increment)))
     increment = target / steps
-    series, patterns, loads = _reference_lateral_loading(
-        project,
-        dof=int(control_dof),
-        distribution=distribution,
-        prefix="Pushover",
-        custom_weights=distribution_weights,
-    )
+
+    driver_description = f"{distribution} reference pattern"
+    if driver_pattern_tag is None:
+        series, patterns, loads = _reference_lateral_loading(
+            project,
+            dof=int(control_dof),
+            distribution=distribution,
+            prefix="Pushover",
+            custom_weights=distribution_weights,
+            height_axis=int(height_axis),
+        )
+        deferred_pattern_tag = patterns[0].tag
+    else:
+        driver_pattern_tag = int(driver_pattern_tag)
+        pattern = project.load_patterns.get(driver_pattern_tag)
+        if pattern is None:
+            raise ValueError(
+                f"Pushover driving pattern {driver_pattern_tag} does not exist."
+            )
+        if pattern.pattern_type != "Plain":
+            raise ValueError(
+                "Pushover driving pattern must be a Plain load pattern."
+            )
+        series, patterns, loads = [], [], []
+        deferred_pattern_tag = driver_pattern_tag
+        driver_description = (
+            f"existing pattern {driver_pattern_tag} ({pattern.name})"
+        )
+
     tag = project.next_analysis_tag()
     analysis = AnalysisSettingsData(
         tag=tag,
@@ -486,9 +571,9 @@ def build_pushover_template(
         control_node=int(control_node),
         control_dof=int(control_dof),
         displacement_increment=increment,
-        preload_gravity=True,
-        gravity_steps=10,
-        deferred_pattern_tags=[patterns[0].tag],
+        preload_gravity=bool(preload_gravity),
+        gravity_steps=gravity_steps,
+        deferred_pattern_tags=[deferred_pattern_tag],
         **_solver_kwargs(solver_preset),
     )
     component = {1: "FX", 2: "FY", 3: "FZ"}[int(control_dof)]
@@ -512,7 +597,7 @@ def build_pushover_template(
         nodal_loads=loads,
         results=results,
         summary=(
-            f"Pushover · {distribution} reference pattern · "
+            f"Pushover · {driver_description} · "
             f"{steps} step(s) to {target:g}"
         ),
     )

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -29,8 +30,11 @@ from PySide6.QtWidgets import (
 from ..analysis_templates import (
     SOLVER_PRESETS,
     expand_cyclic_protocol,
+    infer_height_axis,
+    lateral_load_weights,
     parse_cyclic_protocol_text,
     parse_node_weight_text,
+    structure_reference_height,
 )
 from ..ground_motion_library import (
     GROUND_MOTION_LIBRARY,
@@ -39,6 +43,7 @@ from ..ground_motion_library import (
     record_preset,
     scale_factor_for_target_pga,
 )
+from ..project import ProjectDatabase
 from ..units import UnitSystem
 
 
@@ -65,6 +70,7 @@ class AnalysisTemplateDialog(QDialog):
         default_node: int,
         units: dict[str, str] | None = None,
         initial_template: str = "Pushover",
+        project: ProjectDatabase | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -75,6 +81,7 @@ class AnalysisTemplateDialog(QDialog):
         self._initializing = True
 
         self.unit_system = UnitSystem.from_mapping(units)
+        self.project = project
         self._ground_motion_values: dict[int, list[float]] = {
             1: [],
             2: [],
@@ -153,13 +160,76 @@ class AnalysisTemplateDialog(QDialog):
         self.solver.currentTextChanged.connect(self._update_summary)
         self._initializing = False
         self._sync_template(self.template.currentText())
+        self._update_pushover_preview()
 
     def _build_pushover_page(self) -> QWidget:
         page = QWidget()
-        form = QFormLayout(page)
+        layout = QVBoxLayout(page)
 
+        target_group = QGroupBox("Target & control")
+        target_form = QFormLayout(target_group)
+
+        self.push_target_mode = QComboBox()
+        self.push_target_mode.addItems(
+            ["Displacement", "Roof drift ratio"]
+        )
         self.push_target = _double(0.10)
+        self.push_drift = _double(2.0, -100.0, 100.0, decimals=4)
+        self.push_height_axis = QComboBox()
+        for axis, label in ((1, "X"), (2, "Y"), (3, "Z")):
+            self.push_height_axis.addItem(label, axis)
+        default_axis = (
+            infer_height_axis(self.project)
+            if self.project is not None
+            else 3
+        )
+        self.push_height_axis.setCurrentIndex(
+            max(0, self.push_height_axis.findData(default_axis))
+        )
+        self.push_auto_height = QCheckBox(
+            "Auto from control node to model base"
+        )
+        self.push_auto_height.setChecked(self.project is not None)
+        self.push_reference_height = _double(
+            1.0, 1.0e-12, 1.0e20
+        )
         self.push_increment = _double(0.001, 1.0e-12)
+
+        target_form.addRow("Target definition:", self.push_target_mode)
+        target_form.addRow(
+            f"Target displacement [{self.unit_system.length}]:",
+            self.push_target,
+        )
+        target_form.addRow("Roof drift ratio [%]:", self.push_drift)
+        target_form.addRow("Height axis:", self.push_height_axis)
+        target_form.addRow("Reference height:", self.push_auto_height)
+        target_form.addRow(
+            f"Height [{self.unit_system.length}]:",
+            self.push_reference_height,
+        )
+        target_form.addRow(
+            f"Maximum increment [{self.unit_system.length}]:",
+            self.push_increment,
+        )
+        layout.addWidget(target_group)
+
+        load_group = QGroupBox("Lateral loading")
+        load_form = QFormLayout(load_group)
+
+        self.push_load_source = QComboBox()
+        self.push_load_source.addItem(
+            "Auto-generate reference pattern",
+            None,
+        )
+        if self.project is not None:
+            for tag in sorted(self.project.load_patterns):
+                pattern = self.project.load_patterns[tag]
+                if pattern.pattern_type == "Plain":
+                    self.push_load_source.addItem(
+                        f"Existing {tag} - {pattern.name}",
+                        int(tag),
+                    )
+
         self.push_distribution = QComboBox()
         self.push_distribution.addItems(
             [
@@ -179,42 +249,93 @@ class AnalysisTemplateDialog(QDialog):
             "101, 0.20\n102, 0.35\n103, 0.45"
         )
         self.push_custom.setMaximumHeight(92)
-        form.addRow(
-            f"Target displacement [{self.unit_system.length}]:",
-            self.push_target,
+        self.push_load_preview = QLabel()
+        self.push_load_preview.setWordWrap(True)
+        self.push_load_preview.setObjectName("Muted")
+
+        load_form.addRow("Load source:", self.push_load_source)
+        load_form.addRow(
+            "Reference load distribution:",
+            self.push_distribution,
         )
-        form.addRow(
-            f"Maximum increment [{self.unit_system.length}]:",
-            self.push_increment,
+        load_form.addRow("Mode number:", self.push_mode)
+        load_form.addRow("Custom node weights:", self.push_custom)
+        load_form.addRow("Preview:", self.push_load_preview)
+        layout.addWidget(load_group)
+
+        gravity_group = QGroupBox("Gravity / staged loading")
+        gravity_form = QFormLayout(gravity_group)
+        self.push_preload_gravity = QCheckBox(
+            "Preload existing Plain patterns and hold with loadConst"
         )
-        form.addRow("Reference load distribution:", self.push_distribution)
-        form.addRow("Mode number:", self.push_mode)
-        form.addRow("Custom node weights:", self.push_custom)
+        self.push_preload_gravity.setChecked(True)
+        self.push_gravity_steps = QSpinBox()
+        self.push_gravity_steps.setRange(1, 100000)
+        self.push_gravity_steps.setValue(10)
+        gravity_note = QLabel(
+            "The selected pushover driving pattern is excluded from the "
+            "gravity stage. Other existing Plain patterns are preloaded first."
+        )
+        gravity_note.setWordWrap(True)
+        gravity_note.setObjectName("Muted")
+        gravity_form.addRow(self.push_preload_gravity)
+        gravity_form.addRow("Gravity steps:", self.push_gravity_steps)
+        gravity_form.addRow(gravity_note)
+        layout.addWidget(gravity_group)
 
         note = QLabel(
-            "Studio creates a normalized lateral reference pattern and uses "
-            "DisplacementControl at the selected node/DOF."
+            "Studio uses DisplacementControl at the selected control node/DOF. "
+            "Adaptive cutback and recovery follow the selected solver strategy."
         )
         note.setWordWrap(True)
-        form.addRow(note)
+        layout.addWidget(note)
 
-        for widget in (
-            self.push_target,
-            self.push_increment,
-            self.push_distribution,
-            self.push_mode,
-        ):
-            if hasattr(widget, "valueChanged"):
-                widget.valueChanged.connect(self._update_summary)
-            if hasattr(widget, "currentTextChanged"):
-                widget.currentTextChanged.connect(self._update_summary)
+        self.push_target_mode.currentTextChanged.connect(
+            self._sync_pushover_target_mode
+        )
+        self.push_target.valueChanged.connect(self._update_summary)
+        self.push_drift.valueChanged.connect(self._update_summary)
+        self.push_height_axis.currentIndexChanged.connect(
+            self._refresh_pushover_reference_height
+        )
+        self.push_height_axis.currentIndexChanged.connect(
+            self._update_pushover_preview
+        )
+        self.push_auto_height.toggled.connect(
+            self._refresh_pushover_reference_height
+        )
+        self.push_reference_height.valueChanged.connect(
+            self._update_summary
+        )
+        self.push_increment.valueChanged.connect(self._update_summary)
+        self.push_load_source.currentIndexChanged.connect(
+            self._sync_pushover_load_source
+        )
         self.push_distribution.currentTextChanged.connect(
             self._sync_pushover_distribution
         )
-        self.push_custom.textChanged.connect(self._update_summary)
-        self._sync_pushover_distribution(
-            self.push_distribution.currentText()
+        self.push_mode.valueChanged.connect(self._update_pushover_preview)
+        self.push_custom.textChanged.connect(self._update_pushover_preview)
+        self.push_preload_gravity.toggled.connect(
+            self._sync_pushover_gravity
         )
+        self.push_gravity_steps.valueChanged.connect(self._update_summary)
+        self.control_node.valueChanged.connect(
+            self._refresh_pushover_reference_height
+        )
+        self.control_node.valueChanged.connect(
+            self._update_pushover_preview
+        )
+        self.direction.currentIndexChanged.connect(
+            self._update_pushover_preview
+        )
+
+        self._sync_pushover_target_mode(
+            self.push_target_mode.currentText()
+        )
+        self._refresh_pushover_reference_height()
+        self._sync_pushover_load_source()
+        self._sync_pushover_gravity()
         return page
 
     def _build_cyclic_page(self) -> QWidget:
@@ -472,11 +593,153 @@ class AnalysisTemplateDialog(QDialog):
         self.direction.setEnabled(not modal)
         self._update_summary()
 
+    def _sync_pushover_target_mode(self, kind: str) -> None:
+        drift = str(kind) == "Roof drift ratio"
+        self.push_target.setEnabled(not drift)
+        self.push_drift.setEnabled(drift)
+        self.push_height_axis.setEnabled(drift or self.push_distribution.currentText() == "Triangular")
+        self.push_auto_height.setEnabled(drift and self.project is not None)
+        self.push_reference_height.setEnabled(
+            drift and not self.push_auto_height.isChecked()
+        )
+        self._update_summary()
+
+    def _refresh_pushover_reference_height(self, *_args) -> None:
+        use_auto = (
+            self.push_auto_height.isChecked()
+            and self.project is not None
+        )
+        self.push_reference_height.setEnabled(
+            self.push_target_mode.currentText() == "Roof drift ratio"
+            and not use_auto
+        )
+        if use_auto:
+            try:
+                height = structure_reference_height(
+                    self.project,
+                    control_node=self.control_node.value(),
+                    height_axis=int(self.push_height_axis.currentData()),
+                )
+            except ValueError:
+                height = None
+            if height is not None:
+                self.push_reference_height.blockSignals(True)
+                self.push_reference_height.setValue(height)
+                self.push_reference_height.blockSignals(False)
+        self._update_summary()
+
+    def _pushover_target_displacement(self) -> float:
+        if self.push_target_mode.currentText() == "Roof drift ratio":
+            return (
+                self.push_drift.value()
+                * 0.01
+                * self.push_reference_height.value()
+            )
+        return self.push_target.value()
+
+    def _sync_pushover_load_source(self, *_args) -> None:
+        automatic = self.push_load_source.currentData() is None
+        self.push_distribution.setEnabled(automatic)
+        self.push_height_axis.setEnabled(
+            self.push_target_mode.currentText() == "Roof drift ratio"
+            or (
+                automatic
+                and self.push_distribution.currentText() == "Triangular"
+            )
+        )
+        self._sync_pushover_distribution(
+            self.push_distribution.currentText()
+        )
+        self._update_pushover_preview()
+
     def _sync_pushover_distribution(self, kind: str) -> None:
-        first_mode = str(kind) == "First-mode proportional"
-        custom = str(kind) == "Custom"
+        automatic = self.push_load_source.currentData() is None
+        first_mode = automatic and str(kind) == "First-mode proportional"
+        custom = automatic and str(kind) == "Custom"
         self.push_mode.setEnabled(first_mode)
         self.push_custom.setEnabled(custom)
+        self.push_height_axis.setEnabled(
+            self.push_target_mode.currentText() == "Roof drift ratio"
+            or (automatic and str(kind) == "Triangular")
+        )
+        self._update_pushover_preview()
+
+    def _sync_pushover_gravity(self, *_args) -> None:
+        self.push_gravity_steps.setEnabled(
+            self.push_preload_gravity.isChecked()
+        )
+        self._update_summary()
+
+    def _update_pushover_preview(self, *_args) -> None:
+        if self._initializing:
+            return
+        driver_tag = self.push_load_source.currentData()
+        if driver_tag is not None:
+            if self.project is None:
+                self.push_load_preview.setText(
+                    f"Existing Plain pattern {driver_tag}."
+                )
+            else:
+                nodal_count = sum(
+                    1
+                    for load in self.project.nodal_loads.values()
+                    if load.pattern_tag == int(driver_tag)
+                )
+                self.push_load_preview.setText(
+                    f"Existing Plain pattern {driver_tag} · "
+                    f"{nodal_count} nodal load(s) · no new reference "
+                    "pattern will be created."
+                )
+            self._update_summary()
+            return
+
+        distribution = self.push_distribution.currentText()
+        if distribution == "First-mode proportional":
+            self.push_load_preview.setText(
+                f"Mode {self.push_mode.value()} weights will be taken from "
+                "the latest compatible Modal job when the template is created."
+            )
+            self._update_summary()
+            return
+        if self.project is None:
+            self.push_load_preview.setText(
+                f"{distribution} normalized reference loading."
+            )
+            self._update_summary()
+            return
+
+        try:
+            custom = (
+                parse_node_weight_text(self.push_custom.toPlainText())
+                if distribution == "Custom"
+                else None
+            )
+            weights = lateral_load_weights(
+                self.project,
+                dof=int(self.direction.currentData()),
+                distribution=distribution,
+                custom_weights=custom,
+                height_axis=int(self.push_height_axis.currentData()),
+            )
+            axis = int(self.push_height_axis.currentData()) - 1
+            ordered = sorted(
+                weights.items(),
+                key=lambda item: (
+                    self.project.model.nodes[item[0]].xyz[axis],
+                    item[0],
+                ),
+            )
+            shown = ", ".join(
+                f"N{tag}={weight:.3g}"
+                for tag, weight in ordered[:10]
+            )
+            if len(ordered) > 10:
+                shown += ", ..."
+            self.push_load_preview.setText(
+                f"{len(weights)} active node(s), Σ|w|=1 · {shown}"
+            )
+        except (TypeError, ValueError) as exc:
+            self.push_load_preview.setText(f"Preview: {exc}")
         self._update_summary()
 
     def _import_protocol(self) -> None:
@@ -748,17 +1011,34 @@ class AnalysisTemplateDialog(QDialog):
                 )
             )
         elif kind == "Pushover":
-            target = self.push_target.value()
+            target = self._pushover_target_displacement()
             increment = self.push_increment.value()
             steps = (
                 max(1, int(abs(target) / increment + 0.999999))
-                if increment > 0.0
+                if increment > 0.0 and abs(target) > 0.0
                 else 0
             )
+            driver_tag = self.push_load_source.currentData()
+            loading = (
+                f"existing pattern {driver_tag}"
+                if driver_tag is not None
+                else self.push_distribution.currentText()
+            )
+            target_note = (
+                f"{self.push_drift.value():g}% drift → "
+                f"{target:g} {self.unit_system.length}"
+                if self.push_target_mode.currentText() == "Roof drift ratio"
+                else f"{target:g} {self.unit_system.length}"
+            )
+            gravity = (
+                f"gravity {self.push_gravity_steps.value()} steps"
+                if self.push_preload_gravity.isChecked()
+                else "gravity preload OFF"
+            )
             text = (
-                f"Pushover · {steps} nominal step(s) · "
-                f"{self.push_distribution.currentText()} loading · "
-                f"{self.solver.currentText()} solver"
+                f"Pushover · target {target_note} · "
+                f"{steps} nominal step(s) · {loading} loading · "
+                f"{gravity} · {self.solver.currentText()} solver"
             )
         elif kind == "Cyclic":
             try:
@@ -812,17 +1092,27 @@ class AnalysisTemplateDialog(QDialog):
         elif kind == "Pushover":
             base.update(
                 {
-                    "target_displacement": self.push_target.value(),
+                    "target_displacement": self._pushover_target_displacement(),
+                    "target_mode": self.push_target_mode.currentText(),
+                    "drift_ratio_percent": self.push_drift.value(),
+                    "reference_height": self.push_reference_height.value(),
+                    "height_axis": int(self.push_height_axis.currentData()),
                     "max_increment": self.push_increment.value(),
+                    "driver_pattern_tag": self.push_load_source.currentData(),
                     "distribution": self.push_distribution.currentText(),
                     "mode_number": self.push_mode.value(),
                     "custom_weights": (
                         parse_node_weight_text(
                             self.push_custom.toPlainText()
                         )
-                        if self.push_distribution.currentText() == "Custom"
+                        if (
+                            self.push_load_source.currentData() is None
+                            and self.push_distribution.currentText() == "Custom"
+                        )
                         else None
                     ),
+                    "preload_gravity": self.push_preload_gravity.isChecked(),
+                    "gravity_steps": self.push_gravity_steps.value(),
                 }
             )
         elif kind == "Cyclic":
@@ -868,6 +1158,22 @@ class AnalysisTemplateDialog(QDialog):
     def _accept(self) -> None:
         try:
             request = self.request()
+            if request["template"] == "Pushover":
+                if abs(float(request["target_displacement"])) <= 1.0e-15:
+                    raise ValueError(
+                        "Pushover target displacement must be nonzero."
+                    )
+                if float(request["max_increment"]) <= 0.0:
+                    raise ValueError(
+                        "Pushover maximum increment must be positive."
+                    )
+                if (
+                    request["target_mode"] == "Roof drift ratio"
+                    and float(request["reference_height"]) <= 0.0
+                ):
+                    raise ValueError(
+                        "Pushover reference height must be positive."
+                    )
             if request["template"] == "Cyclic":
                 expand_cyclic_protocol(request["protocol_rows"])
             if (
