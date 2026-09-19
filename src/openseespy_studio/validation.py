@@ -385,6 +385,87 @@ def _support_and_connectivity_checks(
         )
 
 
+def _prescribed_displacement_checks(
+    project: ProjectDatabase,
+    issues: list[ValidationIssue],
+) -> None:
+    seen: dict[tuple[int, int], int] = {}
+    for tag in sorted(project.prescribed_displacements):
+        displacement = project.prescribed_displacements[tag]
+        node = project.model.nodes.get(displacement.node_tag)
+        if node is None:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Prescribed displacement",
+                    f"Prescribed displacement {tag} references missing node "
+                    f"{displacement.node_tag}.",
+                    "node",
+                    displacement.node_tag,
+                    "Reassign or delete the prescribed displacement.",
+                )
+            )
+            continue
+
+        pattern = project.load_patterns.get(displacement.pattern_tag)
+        if pattern is None or pattern.pattern_type != "Plain":
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Prescribed displacement",
+                    f"Prescribed displacement {tag} must belong to a Plain "
+                    "load pattern.",
+                    "node",
+                    node.tag,
+                    "Assign it to an existing Plain load pattern.",
+                )
+            )
+
+        if displacement.dof > project.model.ndf:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Prescribed displacement",
+                    f"Prescribed displacement {tag} uses unavailable DOF "
+                    f"{displacement.dof} for ndf={project.model.ndf}.",
+                    "node",
+                    node.tag,
+                    "Choose a DOF available in the current model.",
+                )
+            )
+            continue
+
+        if bool(node.fixity[displacement.dof - 1]):
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Prescribed displacement",
+                    f"Node {node.tag} DOF {displacement.dof} is both "
+                    "restrained and prescribed.",
+                    "node",
+                    node.tag,
+                    "Clear the support restraint on this DOF or delete the "
+                    "prescribed displacement.",
+                )
+            )
+
+        key = (node.tag, displacement.dof)
+        if key in seen:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Prescribed displacement",
+                    f"Node {node.tag} DOF {displacement.dof} has multiple "
+                    "prescribed displacement objects.",
+                    "node",
+                    node.tag,
+                    "Keep only one imposed displacement per node/DOF.",
+                )
+            )
+        else:
+            seen[key] = tag
+
+
 def _element_load_checks(
     project: ProjectDatabase,
     issues: list[ValidationIssue],
@@ -597,6 +678,7 @@ def validate_project(
 
     _element_geometry_checks(project, issues)
     _support_and_connectivity_checks(project, issues)
+    _prescribed_displacement_checks(project, issues)
     _element_load_checks(project, issues)
     _recorder_checks(project, issues)
 
