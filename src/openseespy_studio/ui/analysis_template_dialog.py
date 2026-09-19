@@ -70,6 +70,7 @@ class AnalysisTemplateDialog(QDialog):
         self.setWindowTitle("Analysis Template")
         self.setModal(True)
         self.resize(620, 610)
+        self._initializing = True
 
         self.unit_system = UnitSystem.from_mapping(units)
         self._ground_motion_values: dict[int, list[float]] = {
@@ -86,7 +87,7 @@ class AnalysisTemplateDialog(QDialog):
         root = QVBoxLayout(self)
 
         intro = QLabel(
-            "Create a ready-to-run nonlinear workflow. Studio will add the "
+            "Create a ready-to-run analysis workflow. Studio will add the "
             "analysis settings, required excitation/reference load objects, "
             "and a useful default Result set."
         )
@@ -140,6 +141,7 @@ class AnalysisTemplateDialog(QDialog):
         self.template.currentTextChanged.connect(self._sync_template)
         self.direction.currentIndexChanged.connect(self._update_summary)
         self.solver.currentTextChanged.connect(self._update_summary)
+        self._initializing = False
         self._sync_template(self.template.currentText())
 
     def _build_pushover_page(self) -> QWidget:
@@ -722,6 +724,8 @@ class AnalysisTemplateDialog(QDialog):
             self._refresh_ground_motion_preview(direction)
 
     def _update_summary(self, *_args) -> None:
+        if self._initializing:
+            return
         kind = self.template.currentText()
         if kind == "Modal":
             text = (
