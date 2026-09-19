@@ -5559,10 +5559,16 @@ class MainWindow(QMainWindow):
             return
 
         before = self.project.to_dict()
+        added_material_tags: list[int] = []
         try:
+            for pending_material in dialog.pending_materials():
+                self.project.add_material(pending_material)
+                added_material_tags.append(pending_material.tag)
             section = dialog.section_data()
             self.project.add_section(section)
         except ValueError as exc:
+            for material_tag in reversed(added_material_tags):
+                self.project.remove_material(material_tag)
             QMessageBox.warning(self, "Section Editor", str(exc))
             return
 
@@ -5590,7 +5596,11 @@ class MainWindow(QMainWindow):
             return
 
         before = self.project.to_dict()
+        added_material_tags: list[int] = []
         try:
+            for pending_material in dialog.pending_materials():
+                self.project.add_material(pending_material)
+                added_material_tags.append(pending_material.tag)
             updated = dialog.section_data()
             self.project.update_section(tag, updated)
             if updated.tag != tag:
@@ -5598,6 +5608,8 @@ class MainWindow(QMainWindow):
                     if element.section_tag == tag:
                         element.section_tag = updated.tag
         except ValueError as exc:
+            for material_tag in reversed(added_material_tags):
+                self.project.remove_material(material_tag)
             QMessageBox.warning(self, "Section Editor", str(exc))
             return
 
