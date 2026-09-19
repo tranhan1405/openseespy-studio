@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 from .beam_loads import resolve_self_weight_local
 from .units import UnitSystem
