@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..frame_setup import prepare_frame_grid
-from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
+from ..generator import FrameGridSpec, cyclic_displacement_steps, generate_frame_grid, to_openseespy
 from ..jobs import JobRecord
 from ..model import StructuralModel, classify_fixity
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
@@ -4021,6 +4021,21 @@ class MainWindow(QMainWindow):
                     ("Control DOF", settings.control_dof),
                     ("Disp. increment", f"{settings.displacement_increment:g}"),
                 ])
+            elif settings.analysis_type == "Cyclic":
+                expanded = cyclic_displacement_steps(
+                    settings.cyclic_targets,
+                    settings.cyclic_increment,
+                )
+                rows.extend([
+                    ("Control node", settings.control_node),
+                    ("Control DOF", settings.control_dof),
+                    (
+                        "Targets",
+                        ", ".join(f"{value:g}" for value in settings.cyclic_targets),
+                    ),
+                    ("Max increment", f"{settings.cyclic_increment:g}"),
+                    ("Expanded steps", len(expanded)),
+                ])
             elif settings.analysis_type == "Transient":
                 rows.extend([
                     ("dt", f"{settings.dt:g}"), ("gamma", f"{settings.gamma:g}"),
@@ -4771,11 +4786,17 @@ class MainWindow(QMainWindow):
             analysis_type=settings.analysis_type,
         )
         job.start()
-        total = (
-            settings.num_modes
-            if settings.analysis_type == "Modal"
-            else settings.steps
-        )
+        if settings.analysis_type == "Modal":
+            total = settings.num_modes
+        elif settings.analysis_type == "Cyclic":
+            total = len(
+                cyclic_displacement_steps(
+                    settings.cyclic_targets,
+                    settings.cyclic_increment,
+                )
+            )
+        else:
+            total = settings.steps
         job.update_progress(
             0,
             total,

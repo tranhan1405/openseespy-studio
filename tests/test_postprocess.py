@@ -4,6 +4,9 @@ from openseespy_studio.model import StructuralModel
 from openseespy_studio.postprocess import (
     classify_fiber_state,
     component_end_resultants,
+    cyclic_hysteresis_curve,
+    cyclic_hysteresis_metrics,
+    cyclic_reversal_points,
     enrich_fiber_state_results,
     enrich_member_force_results,
     equilibrium_component_samples,
@@ -354,6 +357,67 @@ def test_fiber_state_enrichment_summarizes_hinge_locations():
     assert summary["severity"] == 2
     assert summary["hinge_count"] == 1
     assert sections[1]["controlling_fiber"]["material_tag"] == 2
+
+
+def test_cyclic_hysteresis_curve_uses_control_displacement_and_applied_shear():
+    result = {
+        "analysis": {
+            "type": "Cyclic",
+            "control_node": 8,
+            "control_dof": 1,
+        },
+        "history": {
+            "monitor_node": 8,
+            "control_dof": 1,
+            "displacement": [
+                [0.001, 0, 0, 0, 0, 0],
+                [0.002, 0, 0, 0, 0, 0],
+                [0.001, 0, 0, 0, 0, 0],
+                [0.0, 0, 0, 0, 0, 0],
+            ],
+            "base_shear": [-10.0, -20.0, -5.0, 0.0],
+        },
+    }
+
+    x, y, node, dof = cyclic_hysteresis_curve(result)
+
+    assert x == [0.0, 0.001, 0.002, 0.001, 0.0]
+    assert y == [0.0, 10.0, 20.0, 5.0, -0.0]
+    assert node == 8
+    assert dof == 1
+
+
+def test_cyclic_reversals_and_closed_path_energy():
+    x = [0.0, 1.0, 2.0, 1.0, 0.0, -1.0, 0.0]
+    y = [0.0, 2.0, 4.0, 1.0, 0.0, -1.0, 0.0]
+
+    reversals = cyclic_reversal_points(x, y)
+    assert reversals[0]["displacement"] == 2.0
+    assert reversals[0]["force"] == 4.0
+    assert reversals[0]["secant_stiffness"] == 2.0
+    assert reversals[1]["displacement"] == -1.0
+    assert reversals[1]["force"] == -1.0
+
+    metrics = cyclic_hysteresis_metrics(x, y)
+    assert metrics["closed_path"] is True
+    assert metrics["dissipated_energy"] is not None
+    assert math.isclose(
+        metrics["dissipated_energy"],
+        abs(metrics["signed_work"]),
+    )
+    assert metrics["max_abs_displacement"] == 2.0
+    assert metrics["max_abs_force"] == 4.0
+
+
+def test_cyclic_open_path_does_not_label_work_as_dissipated_energy():
+    metrics = cyclic_hysteresis_metrics(
+        [0.0, 0.01, 0.02],
+        [0.0, 10.0, 15.0],
+    )
+
+    assert metrics["closed_path"] is False
+    assert metrics["dissipated_energy"] is None
+    assert metrics["signed_work"] > 0.0
 
 def _local_force_vector():
     return [

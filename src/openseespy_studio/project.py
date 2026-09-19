@@ -11,7 +11,7 @@ from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 15
+PROJECT_FORMAT_VERSION = 16
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -1062,6 +1062,10 @@ class AnalysisSettingsData:
     control_node: int = 1
     control_dof: int = 1
     displacement_increment: float = 0.001
+    cyclic_targets: list[float] = field(
+        default_factory=lambda: [0.005, -0.005, 0.01, -0.01, 0.0]
+    )
+    cyclic_increment: float = 0.001
     dt: float = 0.01
     gamma: float = 0.5
     beta: float = 0.25
@@ -1076,11 +1080,13 @@ class AnalysisSettingsData:
         self.steps=int(self.steps); self.load_increment=float(self.load_increment)
         self.control_node=int(self.control_node); self.control_dof=int(self.control_dof)
         self.displacement_increment=float(self.displacement_increment)
+        self.cyclic_targets=[float(value) for value in self.cyclic_targets]
+        self.cyclic_increment=abs(float(self.cyclic_increment))
         self.dt=float(self.dt); self.gamma=float(self.gamma); self.beta=float(self.beta)
         self.num_modes=int(self.num_modes); self.recovery=bool(self.recovery)
         self.show_external_console=bool(self.show_external_console)
         if self.tag<=0: raise ValueError("Analysis tag must be positive.")
-        if self.analysis_type not in {"Static","Pushover","Transient","Modal"}:
+        if self.analysis_type not in {"Static","Pushover","Cyclic","Transient","Modal"}:
             raise ValueError(f"Unsupported analysis type: {self.analysis_type}")
         if self.constraints_handler not in {"Transformation","Plain"}:
             raise ValueError("Unsupported constraints handler.")
@@ -1091,6 +1097,11 @@ class AnalysisSettingsData:
         if self.tolerance<=0 or self.max_iterations<1: raise ValueError("Invalid convergence settings.")
         if self.steps<1: raise ValueError("Analysis steps must be at least 1.")
         if self.control_dof not in range(1,7): raise ValueError("Control DOF must be 1..6.")
+        if self.analysis_type == "Cyclic":
+            if not self.cyclic_targets:
+                raise ValueError("Cyclic analysis needs at least one displacement target.")
+            if self.cyclic_increment <= 0.0:
+                raise ValueError("Cyclic max displacement increment must be positive.")
         if self.dt<=0: raise ValueError("Transient dt must be positive.")
         if self.num_modes<1: raise ValueError("Number of modes must be at least 1.")
 
@@ -1098,7 +1109,8 @@ class AnalysisSettingsData:
         return {key:getattr(self,key) for key in (
             "tag","name","analysis_type","constraints_handler","numberer","system",
             "test","tolerance","max_iterations","algorithm","steps","load_increment",
-            "control_node","control_dof","displacement_increment","dt","gamma","beta",
+            "control_node","control_dof","displacement_increment",
+            "cyclic_targets","cyclic_increment","dt","gamma","beta",
             "num_modes","recovery","show_external_console"
         )}
 
@@ -1864,8 +1876,11 @@ class ProjectDatabase:
     def add_analysis(self, analysis: AnalysisSettingsData) -> None:
         if analysis.tag in self.analyses:
             raise ValueError(f"Analysis tag {analysis.tag} already exists.")
-        if analysis.analysis_type == "Pushover" and analysis.control_node not in self.model.nodes:
-            raise ValueError(f"Pushover control node {analysis.control_node} does not exist.")
+        if analysis.analysis_type in {"Pushover", "Cyclic"} and analysis.control_node not in self.model.nodes:
+            raise ValueError(
+                f"{analysis.analysis_type} control node "
+                f"{analysis.control_node} does not exist."
+            )
         self.analyses[analysis.tag]=analysis
         if self.active_analysis_tag is None:
             self.active_analysis_tag=analysis.tag
@@ -1874,8 +1889,11 @@ class ProjectDatabase:
         original_tag=int(original_tag)
         if original_tag not in self.analyses: raise ValueError(f"Analysis tag {original_tag} does not exist.")
         if analysis.tag!=original_tag and analysis.tag in self.analyses: raise ValueError(f"Analysis tag {analysis.tag} already exists.")
-        if analysis.analysis_type=="Pushover" and analysis.control_node not in self.model.nodes:
-            raise ValueError(f"Pushover control node {analysis.control_node} does not exist.")
+        if analysis.analysis_type in {"Pushover", "Cyclic"} and analysis.control_node not in self.model.nodes:
+            raise ValueError(
+                f"{analysis.analysis_type} control node "
+                f"{analysis.control_node} does not exist."
+            )
         self.analyses.pop(original_tag); self.analyses[analysis.tag]=analysis
         if self.active_analysis_tag==original_tag: self.active_analysis_tag=analysis.tag
 
