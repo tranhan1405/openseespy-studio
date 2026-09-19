@@ -5312,6 +5312,8 @@ class MainWindow(QMainWindow):
                 ("Progress", f"{job.progress_percent:.1f}%"),
                 ("Algorithm", job.current_algorithm or "-"),
                 ("Iterations", job.iterations),
+                ("Convergence test", self._job_convergence_test(job) or "-"),
+                ("Saved plots", len(job.plots)),
                 ("Result data", "Available" if job.results else "Not available"),
                 ("Message", job.message or "-"),
             ],
@@ -5704,14 +5706,7 @@ class MainWindow(QMainWindow):
             )
 
             plot_menu = menu.addMenu("Plot")
-            plot_menu.setEnabled(
-                bool(
-                    job
-                    and job.results
-                    and job.analysis_tag is not None
-                    and job.analysis_tag in self.project.analyses
-                )
-            )
+            plot_menu.setEnabled(bool(job and job.results))
             if job is not None:
                 self._populate_result_choice_menu(
                     plot_menu,
@@ -5731,6 +5726,29 @@ class MainWindow(QMainWindow):
             export.setEnabled(bool(job and job.results))
             export.triggered.connect(
                 lambda: self._export_job_result_json(job_id)
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "job_plot":
+            try:
+                job_id = int(value[0])
+                plot_id = int(value[1])
+            except (TypeError, ValueError, IndexError):
+                return
+            job = self._jobs.get(job_id)
+            plot = job.plot(plot_id) if job is not None else None
+            if plot is None:
+                return
+
+            show = menu.addAction("Show")
+            show.triggered.connect(
+                lambda: self._show_job_plot(job_id, plot_id)
+            )
+            menu.addSeparator()
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(
+                lambda: self._delete_job_plot(job_id, plot_id)
             )
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
