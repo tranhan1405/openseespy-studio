@@ -60,7 +60,7 @@ from ..result_catalog import (
     convergence_result_label,
     result_choices_for_analysis,
 )
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData
 from ..runtime import build_worker_pythonpath, probe_opensees_runtime
 from ..validation import ValidationIssue, validate_project
 from ..units import UnitSystem
@@ -79,7 +79,7 @@ from .geometry_dialogs import (
     VectorDialog,
 )
 from .history import ProjectSnapshotCommand
-from .load_dialogs import ElementLoadDialog, LoadPatternDialog, MassDialog, NodalLoadDialog, TimeSeriesDialog
+from .load_dialogs import ElementLoadDialog, LoadPatternDialog, MassDialog, NodalLoadDialog, PrescribedDisplacementDialog, TimeSeriesDialog
 from .material_dialog import MaterialDialog
 from .model_check_dialog import ModelCheckDialog
 from .recorder_dialog import RecorderDialog
@@ -1523,6 +1523,13 @@ class MainWindow(QMainWindow):
         self._make_action("time_series", "Time Series...", "timeseries", self._create_time_series, "Create time series")
         self._make_action("load_pattern", "Load Pattern...", "load", self._create_load_pattern, "Create load pattern or ground motion")
         self._make_action("nodal_load", "Nodal Load...", "load", self._create_nodal_load, "Create nodal load")
+        self._make_action(
+            "prescribed_displacement",
+            "Prescribed Displacement...",
+            "load",
+            self._create_prescribed_displacement,
+            "Create an imposed nodal displacement in a Plain load pattern",
+        )
         self._make_action("beam_load", "Beam Load...", "load", self._create_element_load, "Create uniform, point, or self-weight beam load")
         self._make_action("analysis_setup", "Analysis Setup...", "analysis", self._create_analysis, "Create analysis settings")
         self._make_action(
@@ -1602,6 +1609,7 @@ class MainWindow(QMainWindow):
         menus["Loads"].addAction(self.actions["time_series"])
         menus["Loads"].addAction(self.actions["load_pattern"])
         menus["Loads"].addAction(self.actions["nodal_load"])
+        menus["Loads"].addAction(self.actions["prescribed_displacement"])
         menus["Loads"].addAction(self.actions["beam_load"])
         template_menu = menus["Analysis"].addMenu("Templates")
         template_menu.addAction(self.actions["modal_template"])
@@ -1801,7 +1809,13 @@ class MainWindow(QMainWindow):
             model_page,
             "Loads",
             large=("load_pattern",),
-            small=("mass", "time_series", "nodal_load", "beam_load"),
+            small=(
+                "mass",
+                "time_series",
+                "nodal_load",
+                "prescribed_displacement",
+                "beam_load",
+            ),
         )
         model_page.finish()
         self.ribbon_tabs.addTab(model_page, "Model")
@@ -1955,6 +1969,7 @@ class MainWindow(QMainWindow):
             self.model.nodes
             or self.model.elements
             or self.project.nodal_loads
+            or self.project.prescribed_displacements
             or self.project.element_loads
             or self.project.sections
         )
@@ -2166,6 +2181,7 @@ class MainWindow(QMainWindow):
         self.project.prune_constraints()
         self.project.prune_connections()
         self.project.prune_nodal_loads()
+        self.project.prune_prescribed_displacements()
         self.project.prune_element_loads()
         self.project.prune_recorders()
 
@@ -2266,6 +2282,7 @@ class MainWindow(QMainWindow):
                 self.project.analyses,
                 self.project.active_analysis_tag,
                 element_loads=self.project.element_loads,
+                prescribed_displacements=self.project.prescribed_displacements,
                 recorders=self.project.recorders,
                 units=self.project.units,
             )
