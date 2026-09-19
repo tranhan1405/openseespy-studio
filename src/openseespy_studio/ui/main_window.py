@@ -5581,6 +5581,22 @@ class MainWindow(QMainWindow):
                     ("Control DOF", settings.control_dof),
                     ("Disp. increment", f"{settings.displacement_increment:g}"),
                 ])
+            elif settings.analysis_type == "Transient":
+                rows.extend([
+                    ("Time step", f"{settings.dt:g}"),
+                    ("Newmark gamma", f"{settings.gamma:g}"),
+                    ("Newmark beta", f"{settings.beta:g}"),
+                    (
+                        "Rayleigh damping",
+                        (
+                            f"{settings.rayleigh_damping_ratio:g} "
+                            f"(modes {settings.rayleigh_mode_i}, "
+                            f"{settings.rayleigh_mode_j})"
+                            if settings.rayleigh_damping_ratio > 0.0
+                            else "Off"
+                        ),
+                    ),
+                ])
             elif settings.analysis_type == "Cyclic":
                 expanded = cyclic_displacement_steps(
                     settings.cyclic_targets,
@@ -6691,6 +6707,18 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "analyses_root":
+            template_menu = menu.addMenu("Templates")
+            for template_name in (
+                "Pushover",
+                "Cyclic",
+                "Nonlinear Time History",
+            ):
+                action = template_menu.addAction(template_name)
+                action.triggered.connect(
+                    lambda checked=False, name=template_name:
+                    self._create_analysis_template(name)
+                )
+            menu.addSeparator()
             insert_menu = menu.addMenu("Insert")
             for analysis_type in (
                 "Static",
