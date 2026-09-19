@@ -283,7 +283,7 @@ def load_bundled_ground_motion_record(
             f"{preset.label} is a reference preset and has no bundled record."
         )
     package_root = resources.files("openseespy_studio")
-    target = package_root.joinpath(preset.bundled_resource)
+    target = package_root.joinpath(*preset.bundled_resource.split("/"))
     try:
         text = target.read_text(encoding="utf-8")
     except (FileNotFoundError, OSError) as exc:
