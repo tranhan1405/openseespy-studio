@@ -5,22 +5,22 @@ import re
 from typing import Any
 
 
-_FLOAT = r"[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][-+]?\\d+)?|[-+]?inf|nan"
+_FLOAT = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?|[-+]?inf|nan"
 _ITERATION_RE = re.compile(
-    rf"CTest(?P<test>[A-Za-z0-9_]+)::test\\(\\)\\s*-\\s*"
-    rf"iteration:\\s*(?P<iteration>\\d+)\\s+"
-    rf"current\\s+(?:Norm|EnergyIncr|Energy\\s+Norm):\\s*"
-    rf"(?P<norm>{_FLOAT})\\s*"
-    rf"\\(max:\\s*(?P<tolerance>{_FLOAT})",
+    rf"CTest(?P<test>[A-Za-z0-9_]+)::test\(\)\s*-\s*"
+    rf"iteration:\s*(?P<iteration>\d+)\s+"
+    rf"current\s+(?:Norm|EnergyIncr|Energy\s+Norm):\s*"
+    rf"(?P<norm>{_FLOAT})\s*"
+    rf"\(max:\s*(?P<tolerance>{_FLOAT})",
     re.IGNORECASE,
 )
 _FAILED_RE = re.compile(
-    rf"CTest(?P<test>[A-Za-z0-9_]+)::test\\(\\)\\s*-\\s*"
-    rf"failed\\s+to\\s+converge.*?"
-    rf"(?:after:\\s*(?P<iteration>\\d+)\\s+iterations.*?)?"
-    rf"current\\s+(?:Norm|EnergyIncr|Energy\\s+Norm):\\s*"
-    rf"(?P<norm>{_FLOAT})\\s*"
-    rf"\\(max:\\s*(?P<tolerance>{_FLOAT})",
+    rf"CTest(?P<test>[A-Za-z0-9_]+)::test\(\)\s*-\s*"
+    rf"failed\s+to\s+converge.*?"
+    rf"(?:after:\s*(?P<iteration>\d+)\s+iterations.*?)?"
+    rf"current\s+(?:Norm|EnergyIncr|Energy\s+Norm):\s*"
+    rf"(?P<norm>{_FLOAT})\s*"
+    rf"\(max:\s*(?P<tolerance>{_FLOAT})",
     re.IGNORECASE,
 )
 
