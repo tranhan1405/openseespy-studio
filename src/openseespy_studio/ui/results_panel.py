@@ -1090,15 +1090,15 @@ class ResultsPanel(QWidget):
         row.addWidget(QLabel("Display:"))
         self.deformation_display = QComboBox()
         self.deformation_display.addItem(
-            "Deformed only",
+            "Deformed",
             "deformed_only",
         )
         self.deformation_display.addItem(
-            "Undeformed + Deformed",
+            "Both",
             "both",
         )
         self.deformation_display.addItem(
-            "Undeformed only",
+            "Undeformed",
             "undeformed_only",
         )
         self.deformation_display.setToolTip(
@@ -1145,9 +1145,9 @@ class ResultsPanel(QWidget):
 
         row.addWidget(QLabel("Display:"))
         self.mode_display = QComboBox()
-        self.mode_display.addItem("Deformed only", "deformed_only")
-        self.mode_display.addItem("Undeformed + Deformed", "both")
-        self.mode_display.addItem("Undeformed only", "undeformed_only")
+        self.mode_display.addItem("Deformed", "deformed_only")
+        self.mode_display.addItem("Both", "both")
+        self.mode_display.addItem("Undeformed", "undeformed_only")
         self.mode_display.setToolTip(
             "Choose whether the undeformed frame remains visible behind "
             "the mode shape."
