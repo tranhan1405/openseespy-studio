@@ -1667,8 +1667,8 @@ class MainWindow(QMainWindow):
         add_group(
             home,
             "Geometry",
-            large=("grid",),
-            small=("frame_2d", "node", "line", "frame", "extrude"),
+            large=("frame_2d",),
+            small=("grid", "node", "line", "frame", "extrude"),
         )
         add_group(
             home,
