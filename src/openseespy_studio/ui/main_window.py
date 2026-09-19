@@ -998,6 +998,15 @@ class MainWindow(QMainWindow):
         dock.setMinimumWidth(245)
 
         self.properties_panel = PropertiesPanel()
+        self.properties_panel.solution_result_apply.connect(
+            self._apply_solution_result_details
+        )
+        self.properties_panel.solution_result_evaluate.connect(
+            self._evaluate_solution_result_details
+        )
+        self.properties_panel.solution_scope_from_selection.connect(
+            self._use_current_selection_for_solution_result
+        )
         dock.setWidget(self.properties_panel)
 
         self.splitDockWidget(self.model_tree_dock, dock, Qt.Vertical)
@@ -4513,31 +4522,121 @@ class MainWindow(QMainWindow):
         result = self.project.solution_results.get(int(tag))
         if result is None:
             return
-        settings = self.project.analyses.get(result.analysis_tag)
-        option_text = ", ".join(
-            f"{key}={value}"
-            for key, value in sorted(result.settings.items())
-        ) or "-"
-        self.properties_panel.set_properties(
-            result.name,
-            [
-                ("Tag", result.tag),
-                (
-                    "Analysis",
-                    settings.name if settings else result.analysis_tag,
-                ),
-                ("Result type", result.result_type),
-                (
-                    "Node scope",
-                    ", ".join(map(str, result.node_scope)) or "All",
-                ),
-                (
-                    "Element scope",
-                    ", ".join(map(str, result.element_scope)) or "All",
-                ),
-                ("Settings", option_text),
-                ("Data", "Latest job for analysis"),
-            ],
+        analysis = self.project.analyses.get(result.analysis_tag)
+        self.properties_panel.set_solution_result(
+            result,
+            analysis_name=(
+                analysis.name
+                if analysis is not None
+                else f"Analysis {result.analysis_tag}"
+            ),
+        )
+
+    def _solution_result_from_payload(
+        self,
+        tag: int,
+        payload: object,
+    ) -> SolutionResultData:
+        current = self.project.solution_results.get(int(tag))
+        if current is None:
+            raise ValueError(
+                f"Solution result tag {tag} does not exist."
+            )
+        data = dict(payload) if isinstance(payload, dict) else {}
+        name = str(data.get("name", "")).strip() or current.name
+
+        raw_nodes = str(data.get("node_scope", "") or "").strip()
+        raw_elements = str(
+            data.get("element_scope", "") or ""
+        ).strip()
+        node_scope = sorted(
+            parse_tag_expression(raw_nodes)
+            if raw_nodes
+            else set()
+        )
+        element_scope = sorted(
+            parse_tag_expression(raw_elements)
+            if raw_elements
+            else set()
+        )
+        settings = (
+            dict(data.get("settings", {}))
+            if isinstance(data.get("settings", {}), dict)
+            else {}
+        )
+        return SolutionResultData(
+            tag=current.tag,
+            analysis_tag=current.analysis_tag,
+            name=name,
+            result_type=current.result_type,
+            node_scope=node_scope,
+            element_scope=element_scope,
+            settings=settings,
+        )
+
+    def _apply_solution_result_details(
+        self,
+        tag: int,
+        payload: object,
+    ) -> None:
+        before = self.project.to_dict()
+        try:
+            updated = self._solution_result_from_payload(tag, payload)
+            self.project.update_solution_result(tag, updated)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Solution Result",
+                str(exc),
+            )
+            return
+        self._record_project_change(
+            f"Edit solution result {updated.name}",
+            before,
+        )
+        self._refresh_tree()
+        self._show_solution_result_properties(updated.tag)
+        self.status_message.setText(
+            f"Updated result: {updated.name}"
+        )
+
+    def _evaluate_solution_result_details(
+        self,
+        tag: int,
+        payload: object,
+    ) -> None:
+        before = self.project.to_dict()
+        try:
+            updated = self._solution_result_from_payload(tag, payload)
+            self.project.update_solution_result(tag, updated)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Solution Result",
+                str(exc),
+            )
+            return
+        self._record_project_change(
+            f"Edit and evaluate solution result {updated.name}",
+            before,
+        )
+        self._refresh_tree()
+        self._evaluate_solution_result(updated.tag)
+        self._show_solution_result_properties(updated.tag)
+
+    def _use_current_selection_for_solution_result(
+        self,
+        tag: int,
+    ) -> None:
+        if int(tag) not in self.project.solution_results:
+            return
+        self.properties_panel.set_solution_scope(
+            set(self.selection.nodes),
+            set(self.selection.elements),
+        )
+        self.status_message.setText(
+            "Result scope updated from current selection; "
+            "click Apply or Evaluate to save."
         )
 
     def _load_analysis_result(
@@ -4633,6 +4732,7 @@ class MainWindow(QMainWindow):
         self.status_message.setText(
             f"Evaluated result: {result_object.name}"
         )
+        self._show_solution_result_properties(result_object.tag)
 
     def _evaluate_all_solution_results(self, analysis_tag: int) -> None:
         objects = self.project.solution_results_for_analysis(analysis_tag)
