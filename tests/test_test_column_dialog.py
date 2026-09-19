@@ -8,6 +8,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from openseespy_studio.project import ProjectDatabase, SectionData
+import openseespy_studio.ui.test_column_dialog as test_column_dialog_module
 from openseespy_studio.ui.test_column_dialog import TestColumnWizard
 
 
@@ -90,6 +91,72 @@ def test_test_column_wizard_can_shrink_and_scroll(qapp):
         assert dialog.scroll.widgetResizable() is True
         assert dialog.scroll.verticalScrollBar().maximum() > 0
         assert dialog.buttons.isVisible() is True
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+
+def test_test_column_wizard_can_stage_new_section_without_mutating_project(
+    qapp,
+    monkeypatch,
+):
+    project = ProjectDatabase()
+
+    class FakeSectionDialog:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def exec(self):
+            return 1
+
+        def section_data(self):
+            return SectionData(
+                7,
+                "New test section",
+                "Elastic",
+            )
+
+    monkeypatch.setattr(
+        test_column_dialog_module,
+        "SectionDialog",
+        FakeSectionDialog,
+    )
+
+    dialog = TestColumnWizard(project)
+    try:
+        dialog._create_section()
+        qapp.processEvents()
+
+        assert project.sections == {}
+        assert dialog.section.currentData() == 7
+        assert "new" in dialog.section.currentText().lower()
+        assert dialog.data().section_tag == 7
+
+        staged = dialog.new_sections()
+        assert len(staged) == 1
+        assert staged[0].tag == 7
+        assert staged[0].name == "New test section"
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_test_column_wizard_next_section_tag_accounts_for_staged_sections(
+    qapp,
+):
+    project = ProjectDatabase()
+    project.add_section(SectionData(2, "Existing", "Elastic"))
+    dialog = TestColumnWizard(project)
+    try:
+        dialog._pending_sections[3] = SectionData(
+            3,
+            "Pending",
+            "Elastic",
+        )
+        assert dialog._next_section_tag() == 4
     finally:
         dialog.close()
         dialog.deleteLater()
