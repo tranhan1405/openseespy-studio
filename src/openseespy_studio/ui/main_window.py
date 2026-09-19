@@ -5332,6 +5332,87 @@ class MainWindow(QMainWindow):
             "Right-click the Job → Plot to open a result view."
         )
 
+    def _show_job_plot(
+        self,
+        job_id: int,
+        plot_id: int,
+    ) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None or not job.results:
+            self.status_message.setText(
+                f"Job {job_id} has no captured result data."
+            )
+            return
+        plot = job.plot(plot_id)
+        if plot is None:
+            return
+
+        settings = dict(plot.get("settings", {}))
+        node_scope = {
+            int(tag)
+            for tag in plot.get("node_scope", [])
+        }
+        element_scope = {
+            int(tag)
+            for tag in plot.get("element_scope", [])
+        }
+        self._active_solution_result_tag = None
+        self._render_result_data(
+            dict(job.results),
+            str(plot.get("result_type", "")),
+            settings,
+            node_scope=node_scope,
+            element_scope=element_scope,
+            restore_scope_selection=True,
+        )
+        self.properties_panel.set_properties(
+            str(plot.get("name", f"Result {plot_id}")),
+            [
+                ("Job", job.job_id),
+                ("Analysis", job.analysis_name),
+                ("Type", job.analysis_type),
+                (
+                    "Result Type",
+                    str(plot.get("result_type", "-")),
+                ),
+                (
+                    "Node Scope",
+                    ", ".join(map(str, sorted(node_scope))) or "All",
+                ),
+                (
+                    "Element Scope",
+                    ", ".join(map(str, sorted(element_scope))) or "All",
+                ),
+                (
+                    "Convergence Test",
+                    self._job_convergence_test(job) or "-",
+                ),
+            ],
+        )
+        self.status_message.setText(
+            f"Job {job.job_id} · "
+            f"{plot.get('name', f'Result {plot_id}')}"
+        )
+
+    def _delete_job_plot(
+        self,
+        job_id: int,
+        plot_id: int,
+    ) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None:
+            return
+        plot = job.plot(plot_id)
+        if plot is None:
+            return
+        name = str(plot.get("name", f"Result {plot_id}"))
+        job.remove_plot(plot_id)
+        self.viewport.clear_result_overlay()
+        self._refresh_tree()
+        self.status_message.setText(
+            f"Removed Job {job.job_id} result: {name}"
+        )
+
     def _quick_plot_job_result(
         self,
         job_id: int,
@@ -5345,114 +5426,24 @@ class MainWindow(QMainWindow):
                 f"Job {job_id} has no captured result data."
             )
             return
-        if (
-            job.analysis_tag is None
-            or int(job.analysis_tag) not in self.project.analyses
-        ):
-            QMessageBox.warning(
-                self,
-                "Plot Result",
-                "The analysis used by this job no longer exists, "
-                "so the result cannot be added to Solution.",
-            )
-            return
 
-        analysis_tag = int(job.analysis_tag)
-        before = self.project.to_dict()
-        result_name = self._unique_solution_result_name(
-            analysis_tag,
-            str(name),
-        )
-        result_object = SolutionResultData(
-            tag=self.project.next_solution_result_tag(),
-            analysis_tag=analysis_tag,
-            name=result_name,
-            result_type=str(result_type),
-            node_scope=sorted(self.selection.nodes),
-            element_scope=sorted(self.selection.elements),
-            settings=dict(settings),
-        )
-        try:
-            self.project.add_solution_result(result_object)
-        except ValueError as exc:
-            QMessageBox.warning(self, "Plot Result", str(exc))
-            return
-
-        self._record_project_change(
-            f"Plot Job {job.job_id} result {result_name}",
-            before,
-        )
-        self._refresh_tree()
-        self._select_tree_payload(
-            "solution_result",
-            result_object.tag,
-        )
-
-        self._render_result_data(
-            dict(job.results),
-            result_type,
-            dict(settings),
-            node_scope=set(result_object.node_scope),
-            element_scope=set(result_object.element_scope),
-            restore_scope_selection=True,
-        )
-        self._show_solution_result_properties(result_object.tag)
-        self.status_message.setText(
-            f"Job {job.job_id} · plotted and added to Solution: "
-            f"{result_name}"
-        )
-
-    def _add_job_plot_to_solution(
-        self,
-        job_id: int,
-        result_type: str,
-        name: str,
-        settings: dict[str, object],
-    ) -> None:
-        job = self._jobs.get(int(job_id))
-        if job is None or job.analysis_tag is None:
-            return
-        if job.analysis_tag not in self.project.analyses:
-            QMessageBox.warning(
-                self,
-                "Add Plot to Solution",
-                "The analysis used by this job no longer exists.",
-            )
-            return
-
-        before = self.project.to_dict()
-        result_object = SolutionResultData(
-            tag=self.project.next_solution_result_tag(),
-            analysis_tag=int(job.analysis_tag),
+        plot = job.add_plot(
             name=str(name),
             result_type=str(result_type),
             settings=dict(settings),
+            node_scope=sorted(self.selection.nodes),
+            element_scope=sorted(self.selection.elements),
         )
-        try:
-            self.project.add_solution_result(result_object)
-        except ValueError as exc:
-            QMessageBox.warning(
-                self,
-                "Add Plot to Solution",
-                str(exc),
-            )
-            return
+        plot_id = int(plot["plot_id"])
 
-        self._record_project_change(
-            f"Add Job {job.job_id} plot to Solution",
-            before,
-        )
         self._refresh_tree()
-        if job.results:
-            self._render_result_data(
-                dict(job.results),
-                result_type,
-                settings,
-            )
-        self._show_solution_result_properties(result_object.tag)
+        self._select_tree_payload(
+            "job_plot",
+            (job.job_id, plot_id),
+        )
+        self._show_job_plot(job.job_id, plot_id)
         self.status_message.setText(
-            f"Added {name} to Solution for {job.analysis_name}. "
-            "Future Evaluate uses the latest job for that analysis."
+            f"Job {job.job_id} · added result: {plot['name']}"
         )
 
     def _export_job_result_json(self, job_id: int) -> None:
