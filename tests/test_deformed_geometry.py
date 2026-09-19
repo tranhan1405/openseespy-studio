@@ -232,3 +232,49 @@ def test_section_axis_strength_labels_keep_symmetric_axes_neutral():
         },
     )
     assert section_axis_strength_labels(section) == ("y · Iy", "z · Iz")
+
+
+def test_unsmoothed_member_can_use_two_stations_for_model_view():
+    centerline, _fy, _fz, _m = deformed_member_frames(
+        (0.0, 0.0, 0.0),
+        (2.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, 0.0, 1.0),
+        (0.0,) * 6,
+        (0.0,) * 6,
+        ndm=3,
+        scale=1.0,
+        stations=2,
+        smooth=False,
+    )
+    assert centerline.shape == (2, 3)
+
+
+def test_swept_quad_connectivity_stays_within_point_bounds():
+    section = SectionData(
+        tag=13,
+        name="Model-view rectangle",
+        section_type="Elastic",
+        display_geometry={
+            "shape": "Rectangle",
+            "dimensions": {"height": 0.5, "width": 0.3},
+        },
+    )
+    geometry = build_swept_member_geometry(
+        section,
+        (0.0, 0.0, 0.0),
+        (3.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, 0.0, 1.0),
+        (0.0,) * 6,
+        (0.0,) * 6,
+        ndm=3,
+        scale=1.0,
+        stations=2,
+        smooth=False,
+    )
+    assert geometry is not None
+    records = geometry.faces.reshape((-1, 5))
+    assert np.all(records[:, 0] == 4)
+    assert int(records[:, 1:].min()) >= 0
+    assert int(records[:, 1:].max()) < len(geometry.points)
