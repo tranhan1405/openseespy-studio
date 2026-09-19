@@ -619,6 +619,13 @@ class ResultsPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._result: dict[str, Any] = {}
+        self._node_table_cache: dict[str, list[tuple[str, ...]]] = {}
+        self._element_table_cache: dict[
+            str,
+            tuple[list[tuple[int, float, float, float, str]], str],
+        ] = {}
+        self._node_table_display_key: str | None = None
+        self._element_table_display_key: str | None = None
         # Stable source key (normally ("job", job_id)) used to avoid
         # rebuilding every result table when switching views of one Job.
         self._result_cache_key: object | None = None
@@ -1090,8 +1097,9 @@ class ResultsPanel(QWidget):
             ["Node", "UX", "UY", "UZ", "RX", "RY", "RZ"]
         )
         self.node_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeToContents
+            QHeaderView.Interactive
         )
+        self.node_table.horizontalHeader().setDefaultSectionSize(78)
         self.node_table.horizontalHeader().setStretchLastSection(True)
         self.node_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         layout.addWidget(self.node_table)
@@ -1157,8 +1165,9 @@ class ResultsPanel(QWidget):
             ["Element", "I end", "J end", "Max |diagram|"]
         )
         self.element_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeToContents
+            QHeaderView.Interactive
         )
+        self.element_table.horizontalHeader().setDefaultSectionSize(110)
         self.element_table.horizontalHeader().setStretchLastSection(True)
         self.element_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.element_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -1402,6 +1411,10 @@ class ResultsPanel(QWidget):
     def clear_all(self) -> None:
         self._result = {}
         self._result_cache_key = None
+        self._node_table_cache.clear()
+        self._element_table_cache.clear()
+        self._node_table_display_key = None
+        self._element_table_display_key = None
         self.jobs_table.setRowCount(0)
         self.convergence_table.setRowCount(0)
         self._live_convergence_attempts = []
@@ -1765,6 +1778,10 @@ class ResultsPanel(QWidget):
 
         self._result = dict(result or {})
         self._result_cache_key = cache_key
+        self._node_table_cache.clear()
+        self._element_table_cache.clear()
+        self._node_table_display_key = None
+        self._element_table_display_key = None
         analysis = self._result.get("analysis", {})
         final = self._result.get("final", {})
         displacements = final.get("node_displacements", {})
@@ -2080,144 +2097,187 @@ class ResultsPanel(QWidget):
         )
 
     def _populate_node_table(self) -> None:
-        final = self._result.get("final", {})
         displacement = self.node_quantity.currentText() == "Displacement"
-        key = "node_displacements" if displacement else "node_reactions"
-        self.node_table.setHorizontalHeaderLabels(
-            (
-                ["Node", "UX", "UY", "UZ", "RX", "RY", "RZ"]
-                if displacement
-                else ["Node", "FX", "FY", "FZ", "MX", "MY", "MZ"]
-            )
+        display_key = "Displacement" if displacement else "Reaction"
+        if self._node_table_display_key == display_key:
+            return
+
+        headers = (
+            ["Node", "UX", "UY", "UZ", "RX", "RY", "RZ"]
+            if displacement
+            else ["Node", "FX", "FY", "FZ", "MX", "MY", "MZ"]
         )
-        data = final.get(key, {})
-        if not isinstance(data, dict):
-            data = {}
-        tags = sorted(data, key=lambda value: int(value))
-        self.node_table.setRowCount(len(tags))
-        for row, tag in enumerate(tags):
-            values = list(data[tag])
-            while len(values) < 6:
-                values.append(0.0)
-            self.node_table.setItem(row, 0, QTableWidgetItem(str(tag)))
-            for column, value in enumerate(values[:6], start=1):
-                self.node_table.setItem(
-                    row,
-                    column,
-                    QTableWidgetItem(f"{float(value):.6g}"),
+        rows = self._node_table_cache.get(display_key)
+        if rows is None:
+            final = self._result.get("final", {})
+            key = "node_displacements" if displacement else "node_reactions"
+            data = final.get(key, {}) if isinstance(final, dict) else {}
+            if not isinstance(data, dict):
+                data = {}
+            rows = []
+            for tag in sorted(data, key=lambda value: int(value)):
+                values = list(data[tag])
+                while len(values) < 6:
+                    values.append(0.0)
+                rows.append(
+                    (
+                        str(tag),
+                        *(f"{float(value):.6g}" for value in values[:6]),
+                    )
                 )
+            self._node_table_cache[display_key] = rows
+
+        self.node_table.setUpdatesEnabled(False)
+        try:
+            self.node_table.setHorizontalHeaderLabels(headers)
+            self.node_table.setRowCount(len(rows))
+            for row_index, values in enumerate(rows):
+                for column, value in enumerate(values):
+                    self.node_table.setItem(
+                        row_index,
+                        column,
+                        QTableWidgetItem(value),
+                    )
+        finally:
+            self.node_table.setUpdatesEnabled(True)
+        self._node_table_display_key = display_key
 
     def _populate_element_table(self) -> None:
-        final = self._result.get("final", {})
-        forces = (
-            final.get("element_local_forces", {})
-            if isinstance(final, dict)
-            else {}
-        )
-        diagrams = (
-            final.get("member_force_diagrams", {})
-            if isinstance(final, dict)
-            else {}
-        )
-        if not isinstance(forces, dict):
-            forces = {}
-        if not isinstance(diagrams, dict):
-            diagrams = {}
-
         component = self.element_quantity.currentText()
-        rows: list[tuple[int, float, float, float, str]] = []
-        skipped = 0
-        source_counts: dict[str, int] = {}
+        if self._element_table_display_key == component:
+            return
 
-        tags = set(forces)
-        tags.update(diagrams)
-        for raw_tag in sorted(tags, key=lambda value: int(value)):
-            tag = int(raw_tag)
-            diagram_by_component = diagrams.get(
-                str(tag),
-                diagrams.get(tag, {}),
-            )
-            diagram = (
-                diagram_by_component.get(component, {})
-                if isinstance(diagram_by_component, dict)
+        cached = self._element_table_cache.get(component)
+        if cached is None:
+            final = self._result.get("final", {})
+            forces = (
+                final.get("element_local_forces", {})
+                if isinstance(final, dict)
                 else {}
             )
-
-            if isinstance(diagram, dict):
-                values = diagram.get("values", [])
-                if isinstance(values, (list, tuple)) and values:
-                    numeric = [float(value) for value in values]
-                    source = str(
-                        diagram.get("source", "member distribution")
-                    )
-                    rows.append(
-                        (
-                            tag,
-                            numeric[0],
-                            numeric[-1],
-                            max(abs(value) for value in numeric),
-                            source,
-                        )
-                    )
-                    source_counts[source] = (
-                        source_counts.get(source, 0) + 1
-                    )
-                    continue
-
-            raw = forces.get(str(tag), forces.get(tag, []))
-            end_values = component_end_resultants(
-                raw if isinstance(raw, (list, tuple)) else [],
-                component,
+            diagrams = (
+                final.get("member_force_diagrams", {})
+                if isinstance(final, dict)
+                else {}
             )
-            if end_values is None:
-                skipped += 1
-                continue
-            rows.append(
-                (
-                    tag,
-                    float(end_values[0]),
-                    float(end_values[1]),
-                    max(abs(float(end_values[0])), abs(float(end_values[1]))),
-                    "end-force fallback",
+            if not isinstance(forces, dict):
+                forces = {}
+            if not isinstance(diagrams, dict):
+                diagrams = {}
+
+            rows: list[tuple[int, float, float, float, str]] = []
+            skipped = 0
+            source_counts: dict[str, int] = {}
+
+            tags = set(forces)
+            tags.update(diagrams)
+            for raw_tag in sorted(tags, key=lambda value: int(value)):
+                tag = int(raw_tag)
+                diagram_by_component = diagrams.get(
+                    str(tag),
+                    diagrams.get(tag, {}),
                 )
-            )
-            source_counts["end-force fallback"] = (
-                source_counts.get("end-force fallback", 0) + 1
-            )
+                diagram = (
+                    diagram_by_component.get(component, {})
+                    if isinstance(diagram_by_component, dict)
+                    else {}
+                )
 
-        self.element_table.setRowCount(len(rows))
-        for row, (tag, value_i, value_j, maximum, _source) in enumerate(rows):
-            item = QTableWidgetItem(str(tag))
-            item.setData(Qt.UserRole, tag)
-            self.element_table.setItem(row, 0, item)
-            self.element_table.setItem(
-                row, 1, QTableWidgetItem(f"{value_i:.6g}")
-            )
-            self.element_table.setItem(
-                row, 2, QTableWidgetItem(f"{value_j:.6g}")
-            )
-            self.element_table.setItem(
-                row,
-                3,
-                QTableWidgetItem(f"{maximum:.6g}"),
-            )
+                if isinstance(diagram, dict):
+                    values = diagram.get("values", [])
+                    if isinstance(values, (list, tuple)) and values:
+                        numeric = [float(value) for value in values]
+                        source = str(
+                            diagram.get("source", "member distribution")
+                        )
+                        rows.append(
+                            (
+                                tag,
+                                numeric[0],
+                                numeric[-1],
+                                max(abs(value) for value in numeric),
+                                source,
+                            )
+                        )
+                        source_counts[source] = (
+                            source_counts.get(source, 0) + 1
+                        )
+                        continue
 
-        if rows:
-            details = ", ".join(
-                f"{source}: {count}"
-                for source, count in sorted(source_counts.items())
-            )
-            note = (
-                f"{component}: {len(rows)} member(s). "
-                f"Sources — {details}."
-            )
-            if skipped:
-                note += f" {skipped} element(s) had no usable frame result."
-            self.element_info.setText(note)
-        else:
-            self.element_info.setText(
-                "No local member-force result is available for this job."
-            )
+                raw = forces.get(str(tag), forces.get(tag, []))
+                end_values = component_end_resultants(
+                    raw if isinstance(raw, (list, tuple)) else [],
+                    component,
+                )
+                if end_values is None:
+                    skipped += 1
+                    continue
+                rows.append(
+                    (
+                        tag,
+                        float(end_values[0]),
+                        float(end_values[1]),
+                        max(
+                            abs(float(end_values[0])),
+                            abs(float(end_values[1])),
+                        ),
+                        "end-force fallback",
+                    )
+                )
+                source_counts["end-force fallback"] = (
+                    source_counts.get("end-force fallback", 0) + 1
+                )
+
+            if rows:
+                details = ", ".join(
+                    f"{source}: {count}"
+                    for source, count in sorted(source_counts.items())
+                )
+                note = (
+                    f"{component}: {len(rows)} member(s). "
+                    f"Sources — {details}."
+                )
+                if skipped:
+                    note += (
+                        f" {skipped} element(s) had no usable frame result."
+                    )
+            else:
+                note = (
+                    "No local member-force result is available for this job."
+                )
+            cached = (rows, note)
+            self._element_table_cache[component] = cached
+
+        rows, note = cached
+        self.element_table.setUpdatesEnabled(False)
+        try:
+            self.element_table.setRowCount(len(rows))
+            for row, (tag, value_i, value_j, maximum, _source) in enumerate(
+                rows
+            ):
+                item = QTableWidgetItem(str(tag))
+                item.setData(Qt.UserRole, tag)
+                self.element_table.setItem(row, 0, item)
+                self.element_table.setItem(
+                    row,
+                    1,
+                    QTableWidgetItem(f"{value_i:.6g}"),
+                )
+                self.element_table.setItem(
+                    row,
+                    2,
+                    QTableWidgetItem(f"{value_j:.6g}"),
+                )
+                self.element_table.setItem(
+                    row,
+                    3,
+                    QTableWidgetItem(f"{maximum:.6g}"),
+                )
+        finally:
+            self.element_table.setUpdatesEnabled(True)
+
+        self.element_info.setText(note)
+        self._element_table_display_key = component
 
     def _populate_hinge_table(self) -> None:
         rows: list[tuple[int, dict[str, Any]]] = []
