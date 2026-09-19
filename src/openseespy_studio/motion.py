@@ -10,7 +10,7 @@ class MotionInfo:
     kind: str
     frame_count: int
     mode: int | None
-    reference_magnitude: float
+    reference_magnitude: float | None
     coordinate_name: str
     transient_dt: float | None = None
 
@@ -124,6 +124,7 @@ def motion_info(
     mode: int | None = None,
     modal_frames: int = 48,
     fallback_frames: int = 30,
+    scan_reference: bool = True,
 ) -> MotionInfo:
     analysis = result.get("analysis", {}) if isinstance(result, dict) else {}
     analysis_type = (
@@ -147,9 +148,10 @@ def motion_info(
             kind="Modal",
             frame_count=max(8, int(modal_frames)),
             mode=selected_mode,
-            reference_magnitude=_modal_reference_magnitude(
-                result,
-                selected_mode,
+            reference_magnitude=(
+                _modal_reference_magnitude(result, selected_mode)
+                if scan_reference
+                else None
             ),
             coordinate_name="Phase",
         )
@@ -172,7 +174,11 @@ def motion_info(
             kind=analysis_type or "Analysis",
             frame_count=history_count,
             mode=None,
-            reference_magnitude=_history_reference_magnitude(result),
+            reference_magnitude=(
+                _history_reference_magnitude(result)
+                if scan_reference
+                else None
+            ),
             coordinate_name=(
                 "Time"
                 if analysis_type == "Transient"
@@ -192,7 +198,11 @@ def motion_info(
             kind=analysis_type or "Static",
             frame_count=max(2, int(fallback_frames)),
             mode=None,
-            reference_magnitude=_final_reference_magnitude(result),
+            reference_magnitude=(
+                _final_reference_magnitude(result)
+                if scan_reference
+                else None
+            ),
             coordinate_name="Interpolation",
         )
 
