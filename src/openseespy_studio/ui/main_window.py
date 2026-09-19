@@ -4831,8 +4831,9 @@ class MainWindow(QMainWindow):
         if result is None:
             return
         self.results_panel.show_solution_result("Convergence", {})
-        self.results_dock.show()
-        self.results_dock.raise_()
+        if not self.results_dock.isVisible():
+            self.results_dock.show()
+            self.results_dock.raise_()
 
     def _evaluate_solution_result(self, tag: int) -> None:
         result_object = self.project.solution_results.get(int(tag))
@@ -5266,8 +5267,9 @@ class MainWindow(QMainWindow):
             cache_key=result_cache_key,
         )
         self.results_panel.show_solution_result(result_type, options)
-        self.results_dock.show()
-        self.results_dock.raise_()
+        if not self.results_dock.isVisible():
+            self.results_dock.show()
+            self.results_dock.raise_()
 
         if restore_scope_selection and (nodes or elements):
             self.selection.set_selection(
