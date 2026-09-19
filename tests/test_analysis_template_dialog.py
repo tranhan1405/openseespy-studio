@@ -5,7 +5,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QTableWidgetItem
 
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import ProjectDatabase
@@ -125,6 +125,80 @@ def test_pushover_dialog_converts_roof_drift_to_displacement(qapp):
         assert request["reference_height"] == pytest.approx(6.0)
         assert request["target_displacement"] == pytest.approx(0.12)
         assert "2% drift" in dialog.summary.text()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+
+def test_cyclic_dialog_2d_uses_translational_directions_and_drift(qapp):
+    model = StructuralModel("cyclic-dialog-2d", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 3.0, 0.0)
+    model.add_node(3, 0.0, 6.0, 0.0)
+    model.set_fixity(1, (1, 1, 1))
+    project = ProjectDatabase(model=model)
+
+    dialog = AnalysisTemplateDialog(
+        default_node=3,
+        units={"length": "m", "force": "kN", "time": "s"},
+        initial_template="Cyclic",
+        project=project,
+    )
+    try:
+        assert [
+            dialog.direction.itemData(index)
+            for index in range(dialog.direction.count())
+        ] == [1, 2]
+
+        dialog.cyclic_protocol_unit.setCurrentText("Drift ratio [%]")
+        dialog.cyclic_height_axis.setCurrentIndex(
+            dialog.cyclic_height_axis.findData(2)
+        )
+        dialog.protocol.setItem(0, 0, QTableWidgetItem("1.0"))
+        dialog.protocol.setItem(0, 1, QTableWidgetItem("1"))
+        dialog.protocol.setRowCount(1)
+        qapp.processEvents()
+
+        request = dialog.request()
+        assert request["control_mode"] == "Displacement"
+        assert request["reference_height"] == pytest.approx(6.0)
+        assert request["raw_protocol_targets"] == pytest.approx(
+            [1.0, -1.0, 0.0]
+        )
+        assert request["protocol_targets"] == pytest.approx(
+            [0.06, -0.06, 0.0]
+        )
+        assert "displacement-controlled" in dialog.summary.text()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_cyclic_dialog_absolute_targets_preserve_asymmetry(qapp):
+    dialog = AnalysisTemplateDialog(
+        default_node=1,
+        units={"length": "m", "force": "kN", "time": "s"},
+        initial_template="Cyclic",
+    )
+    try:
+        dialog.cyclic_protocol_mode.setCurrentIndex(
+            dialog.cyclic_protocol_mode.findData("absolute_targets")
+        )
+        dialog.protocol.setRowCount(4)
+        for row, value in enumerate((0.005, -0.003, 0.010, 0.0)):
+            dialog.protocol.setItem(
+                row, 0, QTableWidgetItem(str(value))
+            )
+        qapp.processEvents()
+
+        request = dialog.request()
+        assert request["protocol_targets"] == pytest.approx(
+            [0.005, -0.003, 0.010, 0.0]
+        )
+        assert request["protocol_mode"] == "absolute_targets"
     finally:
         dialog.close()
         dialog.deleteLater()
