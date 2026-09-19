@@ -2085,7 +2085,19 @@ class MainWindow(QMainWindow):
         ):
             self._active_solution_result_tag = None
 
-        self.selection.set_selection(nodes=nodes, elements=elements)
+        # Result objects restore their own saved scope below.  Do not clear
+        # and then immediately re-apply that selection, because each change
+        # rebuilds VTK highlight actors and forces an extra render.
+        result_restores_scope = (
+            solution_result_tag is not None
+            or job_plot_ref is not None
+        )
+        if not result_restores_scope:
+            self.selection.set_selection(
+                nodes=nodes,
+                elements=elements,
+            )
+
         if material_tag is not None:
             self._show_material_properties(material_tag)
         elif section_tag is not None:
@@ -5274,7 +5286,7 @@ class MainWindow(QMainWindow):
             self.results_dock.show()
             self.results_dock.raise_()
 
-        if restore_scope_selection and (nodes or elements):
+        if restore_scope_selection:
             self.selection.set_selection(
                 nodes=nodes,
                 elements=elements,
