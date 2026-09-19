@@ -1045,6 +1045,9 @@ class ResultsPanel(QWidget):
         row = QHBoxLayout()
         row.addWidget(QLabel("Mode:"))
         self.mode_combo = QComboBox()
+        self.mode_combo.currentIndexChanged.connect(
+            self._update_mode_summary
+        )
         row.addWidget(self.mode_combo)
         row.addWidget(QLabel("Scale:"))
         self.mode_scale = QDoubleSpinBox()
@@ -1056,10 +1059,43 @@ class ResultsPanel(QWidget):
         row.addWidget(show)
         row.addStretch(1)
         layout.addLayout(row)
-        self.mode_info = QLabel("Run a Modal analysis to populate mode shapes.")
+
+        self.mode_info = QLabel(
+            "Run a Modal analysis to populate mode shapes."
+        )
         self.mode_info.setWordWrap(True)
         layout.addWidget(self.mode_info)
-        layout.addStretch(1)
+
+        self.modal_summary_table = QTableWidget(0, 10)
+        self.modal_summary_table.setHorizontalHeaderLabels(
+            [
+                "Mode",
+                "Eigenvalue",
+                "Frequency [Hz]",
+                "Period [s]",
+                "UX mass %",
+                "UY mass %",
+                "UZ mass %",
+                "Cum. UX %",
+                "Cum. UY %",
+                "Cum. UZ %",
+            ]
+        )
+        self.modal_summary_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.modal_summary_table.setSelectionBehavior(
+            QAbstractItemView.SelectRows
+        )
+        self.modal_summary_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.Interactive
+        )
+        self.modal_summary_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.modal_summary_table.setMinimumSize(0, 0)
+        layout.addWidget(self.modal_summary_table, 1)
+
         self.tabs.addTab(page, "Mode Shape")
 
     def _build_node_tab(self) -> None:
@@ -1463,6 +1499,7 @@ class ResultsPanel(QWidget):
             "→ Yielding/softening → Plastic/crushing."
         )
         self.mode_combo.clear()
+        self.modal_summary_table.setRowCount(0)
         self.deformation_info.setText(
             "Run a non-modal analysis to view deformation."
         )
@@ -1489,6 +1526,106 @@ class ResultsPanel(QWidget):
             "Run a non-modal analysis to populate time-history data."
         )
         self.history_plot.set_series([], [])
+
+    def _populate_modal_summary(self) -> None:
+        modes = (
+            self._result.get("modes", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        if not isinstance(modes, dict):
+            modes = {}
+        ordered = sorted(modes, key=lambda value: int(value))
+        self.modal_summary_table.setRowCount(len(ordered))
+
+        cumulative = [0.0, 0.0, 0.0]
+        for row, key in enumerate(ordered):
+            mode = modes.get(key, {})
+            eigenvalue = float(mode.get("eigenvalue", 0.0) or 0.0)
+            frequency = mode.get("frequency_hz")
+            period = mode.get("period_s")
+            participation = mode.get("participation", {})
+            ratios: list[float] = []
+            for dof in (1, 2, 3):
+                item = (
+                    participation.get(str(dof), {})
+                    if isinstance(participation, dict)
+                    else {}
+                )
+                ratio = 100.0 * float(
+                    item.get("mass_ratio", 0.0) or 0.0
+                )
+                ratios.append(ratio)
+                cumulative[dof - 1] += ratio
+
+            values = [
+                str(key),
+                f"{eigenvalue:.6g}",
+                (
+                    f"{float(frequency):.6g}"
+                    if frequency is not None
+                    else "-"
+                ),
+                (
+                    f"{float(period):.6g}"
+                    if period is not None
+                    else "-"
+                ),
+                *(f"{value:.3f}" for value in ratios),
+                *(f"{value:.3f}" for value in cumulative),
+            ]
+            for column, value in enumerate(values):
+                self.modal_summary_table.setItem(
+                    row,
+                    column,
+                    QTableWidgetItem(value),
+                )
+
+    def _update_mode_summary(self, *_args) -> None:
+        mode_number = self.mode_combo.currentData()
+        if mode_number is None:
+            self.mode_info.setText(
+                "Run a Modal analysis to populate mode shapes."
+            )
+            return
+        modes = (
+            self._result.get("modes", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        mode = modes.get(str(int(mode_number)), {})
+        eigenvalue = float(mode.get("eigenvalue", 0.0) or 0.0)
+        frequency = mode.get("frequency_hz")
+        period = mode.get("period_s")
+        participation = mode.get("participation", {})
+
+        mass_text: list[str] = []
+        for dof, label in ((1, "UX"), (2, "UY"), (3, "UZ")):
+            item = (
+                participation.get(str(dof), {})
+                if isinstance(participation, dict)
+                else {}
+            )
+            ratio = 100.0 * float(
+                item.get("mass_ratio", 0.0) or 0.0
+            )
+            mass_text.append(f"{label}={ratio:.2f}%")
+
+        frequency_text = (
+            f"{float(frequency):.6g} Hz"
+            if frequency is not None
+            else "-"
+        )
+        period_text = (
+            f"{float(period):.6g} s"
+            if period is not None
+            else "-"
+        )
+        self.mode_info.setText(
+            f"Mode {int(mode_number)} · λ={eigenvalue:.6g} · "
+            f"f={frequency_text} · T={period_text} · "
+            + " · ".join(mass_text)
+        )
 
     def _emit_mode(self) -> None:
         mode = self.mode_combo.currentData()
@@ -1802,11 +1939,8 @@ class ResultsPanel(QWidget):
                 f"Mode {key}  λ={float(eigenvalue):.5g}",
                 int(key),
             )
-        self.mode_info.setText(
-            f"{len(modes)} mode shape(s) available."
-            if modes
-            else "No mode-shape data in this result."
-        )
+        self._populate_modal_summary()
+        self._update_mode_summary()
 
         self._populate_convergence_dashboard()
         self._populate_node_table()

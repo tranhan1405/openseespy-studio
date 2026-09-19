@@ -54,7 +54,7 @@ def test_modal_generator_emits_mode_progress():
 
     assert "_studio_emit('start', total=5" in text
     assert "_studio_emit('progress', step=_studio_mode" in text
-    assert "eigenvalue=float(_studio_lambda)" in text
+    assert "eigenvalue=_studio_lambda" in text
 
 
 def test_external_console_setting_round_trip():

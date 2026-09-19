@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
 from ..analysis_templates import (
     GroundMotionComponentSpec,
     build_cyclic_template,
+    build_modal_template,
     build_nlth_multi_template,
     build_pushover_template,
     default_control_node,
@@ -5306,7 +5307,17 @@ class MainWindow(QMainWindow):
         try:
             request = dialog.request()
             kind = str(request["template"])
-            if kind == "Pushover":
+            if kind == "Modal":
+                plan = build_modal_template(
+                    self.project,
+                    name=str(request["name"]),
+                    num_modes=int(request["num_modes"]),
+                    eigen_solver=str(request["eigen_solver"]),
+                    require_nodal_mass=bool(
+                        request["require_nodal_mass"]
+                    ),
+                )
+            elif kind == "Pushover":
                 distribution = str(request["distribution"])
                 distribution_weights = request.get("custom_weights")
                 if distribution == "First-mode proportional":
@@ -5816,7 +5827,10 @@ class MainWindow(QMainWindow):
             ),
         ]
         if settings.analysis_type == "Modal":
-            rows.append(("Modes", settings.num_modes))
+            rows.extend([
+                ("Modes", settings.num_modes),
+                ("Eigen solver", settings.eigen_solver),
+            ])
         else:
             rows.extend([
                 ("Test", settings.test), ("Tolerance", f"{settings.tolerance:g}"),
@@ -6984,6 +6998,7 @@ class MainWindow(QMainWindow):
         if kind == "analyses_root":
             template_menu = menu.addMenu("Templates")
             for template_name in (
+                "Modal",
                 "Pushover",
                 "Cyclic",
                 "Nonlinear Time History",
@@ -7732,7 +7747,7 @@ class MainWindow(QMainWindow):
             0,
             total,
             algorithm=(
-                "Eigen"
+                settings.eigen_solver
                 if settings.analysis_type == "Modal"
                 else settings.algorithm
             ),

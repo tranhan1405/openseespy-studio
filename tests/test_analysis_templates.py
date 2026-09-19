@@ -3,6 +3,7 @@ import math
 from openseespy_studio.analysis_templates import (
     GroundMotionComponentSpec,
     build_cyclic_template,
+    build_modal_template,
     build_nlth_multi_template,
     build_nlth_template,
     build_pushover_template,
@@ -204,7 +205,10 @@ def test_rayleigh_settings_round_trip_and_generator():
             support_node_tags=[1],
         )
     )
-    assert "_studio_damping_eigs = ops.eigen(3)" in text
+    assert (
+        "_studio_damping_eigs = ops.eigen('-genBandArpack', 3)"
+        in text
+    )
     assert "ops.rayleigh(_studio_alpha_m, 0.0, 0.0, _studio_beta_k)" in text
 
 
@@ -378,3 +382,85 @@ def test_multi_component_nlth_creates_one_excitation_per_axis():
         if result.result_type == "TimeHistory"
     ]
     assert {result.settings["dof"] for result in histories} == {1, 2}
+
+
+
+def test_modal_template_creates_mode_results_and_checks_mass():
+    project = project_with_two_storeys()
+    project.model.set_mass(
+        2,
+        (1.0, 1.0, 1.0, 0.0, 0.0, 0.0),
+    )
+    project.model.set_mass(
+        3,
+        (2.0, 2.0, 2.0, 0.0, 0.0, 0.0),
+    )
+
+    plan = build_modal_template(
+        project,
+        name="Quick Modes",
+        num_modes=4,
+        eigen_solver="-fullGenLapack",
+    )
+
+    assert plan.analysis.analysis_type == "Modal"
+    assert plan.analysis.num_modes == 4
+    assert plan.analysis.eigen_solver == "-fullGenLapack"
+    assert plan.analysis.live_convergence is False
+    assert len(plan.results) == 4
+    assert [result.result_type for result in plan.results] == [
+        "ModeShape",
+        "ModeShape",
+        "ModeShape",
+        "ModeShape",
+    ]
+    assert [result.settings["mode"] for result in plan.results] == [
+        1,
+        2,
+        3,
+        4,
+    ]
+
+
+def test_modal_template_rejects_missing_nodal_mass_by_default():
+    project = project_with_two_storeys()
+    try:
+        build_modal_template(
+            project,
+            name="No Mass",
+            num_modes=3,
+        )
+    except ValueError as exc:
+        assert "no translational nodal mass" in str(exc).lower()
+    else:
+        raise AssertionError("Expected modal mass validation")
+
+
+def test_modal_template_mass_check_can_be_bypassed():
+    project = project_with_two_storeys()
+    plan = build_modal_template(
+        project,
+        name="External Mass",
+        num_modes=2,
+        require_nodal_mass=False,
+    )
+    assert plan.analysis.num_modes == 2
+
+
+def test_modal_eigen_solver_round_trip():
+    project = project_with_two_storeys()
+    project.model.set_mass(
+        2,
+        (1.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    )
+    plan = build_modal_template(
+        project,
+        name="Round Trip Modes",
+        num_modes=2,
+        eigen_solver="-symmBandLapack",
+    )
+    project.add_analysis(plan.analysis)
+
+    restored = ProjectDatabase.from_dict(project.to_dict())
+    analysis = restored.analyses[plan.analysis.tag]
+    assert analysis.eigen_solver == "-symmBandLapack"
