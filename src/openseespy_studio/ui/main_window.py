@@ -6401,18 +6401,55 @@ class MainWindow(QMainWindow):
             properties_action.triggered.connect(
                 lambda: self._show_entity_properties("node", tag)
             )
+
+            menu.addSeparator()
+            zoom = menu.addAction("Zoom to Selection")
+            zoom.triggered.connect(self._zoom_selection)
+            hide = menu.addAction("Hide")
+            hide.triggered.connect(self._hide_selection)
+            isolate = menu.addAction("Isolate")
+            isolate.triggered.connect(self._isolate_selection)
+            show_all = menu.addAction("Show All")
+            show_all.triggered.connect(self._show_all)
+
             menu.addSeparator()
             support_action = menu.addAction("Support / Restraint...")
             support_action.triggered.connect(self._apply_restraint)
             clear_action = menu.addAction("Clear Support")
             clear_action.triggered.connect(self._clear_restraint)
-            menu.addSeparator()
             mass_action = menu.addAction("Assign Mass...")
             mass_action.triggered.connect(self._assign_mass)
             clear_mass = menu.addAction("Clear Mass")
             clear_mass.triggered.connect(self._clear_mass)
             nodal_load = menu.addAction("Create Nodal Load...")
             nodal_load.triggered.connect(self._create_nodal_load)
+
+            constraint = menu.addAction("Create Constraint...")
+            constraint.setEnabled(len(self.selection.nodes) >= 2)
+            constraint.triggered.connect(self._create_constraint)
+            connection = menu.addAction("Create Connection / Spring...")
+            connection.setEnabled(1 <= len(self.selection.nodes) <= 2)
+            connection.triggered.connect(self._create_connection)
+
+            menu.addSeparator()
+            modify = menu.addMenu("Modify")
+            move = modify.addAction("Move...")
+            move.triggered.connect(self._move_selection)
+            copy = modify.addAction("Copy...")
+            copy.triggered.connect(self._copy_selection)
+            rotate = modify.addAction("Rotate...")
+            rotate.triggered.connect(self._rotate_selection)
+            mirror = modify.addAction("Mirror...")
+            mirror.triggered.connect(self._mirror_selection)
+
+            copy_tag = menu.addAction("Copy Tag(s)")
+            copy_tag.triggered.connect(self._copy_selected_tags)
+            named = menu.addAction("Create Named Selection")
+            named.triggered.connect(self._create_named_selection)
+
+            menu.addSeparator()
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(self._delete_selection)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
@@ -6424,22 +6461,66 @@ class MainWindow(QMainWindow):
             properties_action.triggered.connect(
                 lambda: self._show_entity_properties("element", tag)
             )
+
+            menu.addSeparator()
+            zoom = menu.addAction("Zoom to Selection")
+            zoom.triggered.connect(self._zoom_selection)
+            hide = menu.addAction("Hide")
+            hide.triggered.connect(self._hide_selection)
+            isolate = menu.addAction("Isolate")
+            isolate.triggered.connect(self._isolate_selection)
+            show_all = menu.addAction("Show All")
+            show_all.triggered.connect(self._show_all)
+
+            menu.addSeparator()
             formulation = menu.addAction("Element Formulation...")
             formulation.triggered.connect(
                 self._set_element_formulation
             )
-            section_action = menu.addAction("Assign Section...")
+            assign = menu.addMenu("Assign")
+            section_action = assign.addAction("Section...")
             section_action.triggered.connect(
                 self._assign_section_to_selection
             )
-            transformation_action = menu.addAction(
-                "Assign Transformation..."
+            transformation_action = assign.addAction(
+                "Transformation..."
             )
             transformation_action.triggered.connect(
                 self._assign_transformation_to_selection
             )
+            assign.addSeparator()
+            clear_section = assign.addAction("Clear Section")
+            clear_section.triggered.connect(
+                self._clear_section_assignment
+            )
+            clear_transformation = assign.addAction(
+                "Clear Transformation"
+            )
+            clear_transformation.triggered.connect(
+                self._clear_transformation_assignment
+            )
             beam_load = menu.addAction("Create Beam Load...")
             beam_load.triggered.connect(self._create_element_load)
+
+            menu.addSeparator()
+            modify = menu.addMenu("Modify")
+            move = modify.addAction("Move...")
+            move.triggered.connect(self._move_selection)
+            copy = modify.addAction("Copy...")
+            copy.triggered.connect(self._copy_selection)
+            rotate = modify.addAction("Rotate...")
+            rotate.triggered.connect(self._rotate_selection)
+            mirror = modify.addAction("Mirror...")
+            mirror.triggered.connect(self._mirror_selection)
+
+            copy_tag = menu.addAction("Copy Tag(s)")
+            copy_tag.triggered.connect(self._copy_selected_tags)
+            named = menu.addAction("Create Named Selection")
+            named.triggered.connect(self._create_named_selection)
+
+            menu.addSeparator()
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(self._delete_selection)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
