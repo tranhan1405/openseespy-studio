@@ -677,6 +677,7 @@ def analysis_to_openseespy(
             "step=_studio_step_no, "
             f"total={total_steps}, algorithm=_studio_alg)"
         )
+        lines.append("            _studio_active_algorithm = _studio_alg")
         lines.append("            ops.algorithm(_studio_alg)")
         lines.append(f"            _studio_ok = {analyze_call}")
         lines.append(
