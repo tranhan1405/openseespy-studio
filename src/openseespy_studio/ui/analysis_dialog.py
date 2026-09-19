@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QCheckBox,QComboBox,QDialog,QDialogButtonBox,QDoubleSpinBox,QFormLayout,
-    QLineEdit,QSpinBox,QVBoxLayout
+    QLineEdit,QScrollArea,QSpinBox,QVBoxLayout,QWidget
 )
 from ..project import AnalysisSettingsData
 
@@ -19,8 +19,15 @@ class AnalysisDialog(QDialog):
         analysis_type=None,
         parent=None,
     ):
-        super().__init__(parent); self.setWindowTitle("Analysis Settings"); self.setModal(True); self.resize(430,520)
-        root=QVBoxLayout(self); form=QFormLayout()
+        super().__init__(parent)
+        self.setWindowTitle("Analysis Settings")
+        self.setModal(True)
+        self.setSizeGripEnabled(True)
+        self.resize(500,620)
+
+        root=QVBoxLayout(self)
+        form_host=QWidget()
+        form=QFormLayout(form_host)
         self.tag=QSpinBox(); self.tag.setRange(1,2147483647); self.tag.setValue(analysis.tag if analysis else next_tag)
         default_kind = (
             analysis.analysis_type
@@ -167,8 +174,16 @@ class AnalysisDialog(QDialog):
         form.addRow("Grow after easy steps:",self.grow_after)
         form.addRow("Live convergence:",self.live_convergence)
         form.addRow("External terminal:",self.external_console)
-        root.addLayout(form)
-        b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self.accept); b.rejected.connect(self.reject); root.addWidget(b)
+
+        self.scroll=QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setWidget(form_host)
+        root.addWidget(self.scroll,1)
+
+        b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel)
+        b.accepted.connect(self.accept)
+        b.rejected.connect(self.reject)
+        root.addWidget(b)
         self.kind.currentTextChanged.connect(self._sync)
         self.preload_gravity.toggled.connect(
             lambda _checked: self._sync(self.kind.currentText())
