@@ -297,7 +297,6 @@ class GroundMotionPreviewDialog(QDialog):
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.reject)
-        buttons.clicked.connect(self.accept)
         layout.addWidget(buttons)
 
 
