@@ -1,4 +1,4 @@
-from openseespy_studio.generator import analysis_to_openseespy, to_openseespy
+from openseespy_studio.generator import analysis_to_openseespy, cyclic_displacement_steps, to_openseespy
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import AnalysisSettingsData, ProjectDatabase
 
@@ -82,3 +82,78 @@ def test_pushover_control_node_is_validated():
         assert "control node" in str(exc)
     else:
         raise AssertionError("Expected control node validation")
+
+
+def test_cyclic_displacement_steps_hit_each_target_exactly():
+    increments = cyclic_displacement_steps(
+        [0.005, -0.005, 0.01, -0.01, 0.0],
+        0.003,
+    )
+
+    position = 0.0
+    reached = []
+    targets = [0.005, -0.005, 0.01, -0.01, 0.0]
+    target_index = 0
+    for increment in increments:
+        assert abs(increment) <= 0.003 + 1.0e-15
+        position += increment
+        if target_index < len(targets) and abs(position - targets[target_index]) <= 1.0e-12:
+            reached.append(position)
+            target_index += 1
+
+    assert len(reached) == len(targets)
+    assert all(
+        abs(value - target) <= 1.0e-12
+        for value, target in zip(reached, targets)
+    )
+
+
+def test_cyclic_analysis_round_trip_and_generator():
+    analysis = AnalysisSettingsData(
+        3,
+        "Cyclic",
+        "Cyclic",
+        control_node=2,
+        control_dof=1,
+        cyclic_targets=[0.002, -0.002, 0.0],
+        cyclic_increment=0.001,
+    )
+    project = ProjectDatabase(model=model())
+    project.add_analysis(analysis)
+    restored = ProjectDatabase.from_dict(project.to_dict())
+
+    assert restored.analyses[3].analysis_type == "Cyclic"
+    assert restored.analyses[3].cyclic_targets == [0.002, -0.002, 0.0]
+    assert restored.analyses[3].cyclic_increment == 0.001
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            restored.analyses[3],
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
+    assert "_studio_cyclic_increments" in text
+    assert "ops.integrator('DisplacementControl', 2, 1, _studio_disp_increment)" in text
+    assert "analysis_type='Cyclic'" in text
+    assert "'cyclic_targets': [0.002, -0.002, 0.0]" in text
+    assert "'planned_steps': 8" in text
+
+
+def test_cyclic_analysis_requires_valid_control_node():
+    project = ProjectDatabase(model=model())
+    try:
+        project.add_analysis(
+            AnalysisSettingsData(
+                4,
+                "Bad cyclic",
+                "Cyclic",
+                control_node=99,
+                cyclic_targets=[0.01, -0.01],
+                cyclic_increment=0.001,
+            )
+        )
+    except ValueError as exc:
+        assert "Cyclic control node" in str(exc)
+    else:
+        raise AssertionError("Expected cyclic control node validation")
