@@ -45,6 +45,7 @@ from ..frame_setup import prepare_frame_grid
 from ..generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from ..jobs import JobRecord
 from ..model import StructuralModel, classify_fixity
+from ..postprocess import enrich_member_force_results
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MaterialData, NodalLoadData, ProjectDatabase, SectionData, SelectionSetData, TimeSeriesData, TransformationData
 from ..runtime import build_worker_pythonpath, probe_opensees_runtime
 from ..validation import ValidationIssue, validate_project
@@ -5063,6 +5064,23 @@ class MainWindow(QMainWindow):
             self.status_message.setText(
                 f"Analysis failed (exit code {exit_code})"
             )
+
+        if result:
+            try:
+                result = enrich_member_force_results(
+                    result,
+                    self.model,
+                    self.project.element_loads,
+                    self.project.sections,
+                    self.project.materials,
+                    self.project.transformations,
+                    self.project.units,
+                )
+            except ValueError as exc:
+                self._log(
+                    "Member-force post-processing warning: "
+                    + str(exc)
+                )
 
         if job is not None:
             job.finish(

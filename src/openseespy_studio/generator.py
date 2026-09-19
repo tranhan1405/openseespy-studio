@@ -382,12 +382,14 @@ def analysis_to_openseespy(
     element_tags: list[int] | None = None,
     frame_element_tags: list[int] | None = None,
     support_node_tags: list[int] | None = None,
+    plain_pattern_tags: list[int] | None = None,
     monitor_node: int | None = None,
 ) -> list[str]:
     node_tags = list(node_tags or [])
     element_tags = list(element_tags or [])
     frame_element_tags = list(frame_element_tags or [])
     support_node_tags = list(support_node_tags or [])
+    plain_pattern_tags = list(plain_pattern_tags or [])
     monitor_node = int(monitor_node or (node_tags[0] if node_tags else 1))
 
     lines = [
@@ -409,7 +411,7 @@ def analysis_to_openseespy(
         "    return _iterations, _norm",
         "",
         "_studio_results = {",
-        "    'schema_version': 2,",
+        "    'schema_version': 3,",
         "    'analysis': {",
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
@@ -424,6 +426,7 @@ def analysis_to_openseespy(
         f"_studio_element_tags = {element_tags!r}",
         f"_studio_frame_element_tags = {frame_element_tags!r}",
         f"_studio_support_node_tags = {support_node_tags!r}",
+        f"_studio_plain_pattern_tags = {plain_pattern_tags!r}",
         f"_studio_monitor_node = {monitor_node}",
         f"ops.constraints('{settings.constraints_handler}')",
         f"ops.numberer('{settings.numberer}')",
@@ -621,6 +624,7 @@ def analysis_to_openseespy(
         "    except Exception:",
         "        _studio_element_forces[str(_studio_element)] = []",
         "_studio_element_local_forces = {}",
+        "_studio_element_section_forces = {}",
         "for _studio_element in _studio_frame_element_tags:",
         "    try:",
         "        _studio_local = ops.eleResponse("
@@ -629,11 +633,46 @@ def analysis_to_openseespy(
         "[float(v) for v in (_studio_local or [])]",
         "    except Exception:",
         "        _studio_element_local_forces[str(_studio_element)] = []",
+        "    try:",
+        "        _studio_locs = ops.eleResponse("
+        "_studio_element, 'integrationPoints') or []",
+        "        _studio_wts = ops.eleResponse("
+        "_studio_element, 'integrationWeights') or []",
+        "        if not isinstance(_studio_locs, (list, tuple)):",
+        "            _studio_locs = [_studio_locs]",
+        "        if not isinstance(_studio_wts, (list, tuple)):",
+        "            _studio_wts = [_studio_wts]",
+        "        _studio_sec_forces = []",
+        "        for _studio_sec_no in range(1, len(_studio_locs) + 1):",
+        "            try:",
+        "                _studio_sec = ops.eleResponse("
+        "_studio_element, 'section', _studio_sec_no, 'force') or []",
+        "                _studio_sec_forces.append("
+        "[float(v) for v in _studio_sec])",
+        "            except Exception:",
+        "                _studio_sec_forces.append([])",
+        "        if _studio_locs:",
+        "            _studio_element_section_forces[str(_studio_element)] = {",
+        "                'locations': [float(v) for v in _studio_locs],",
+        "                'weights': [float(v) for v in _studio_wts],",
+        "                'forces': _studio_sec_forces,",
+        "            }",
+        "    except Exception:",
+        "        pass",
+        "_studio_load_factors = {}",
+        "for _studio_pattern in _studio_plain_pattern_tags:",
+        "    try:",
+        "        _studio_load_factors[str(_studio_pattern)] = "
+        "float(ops.getLoadFactor(_studio_pattern))",
+        "    except Exception:",
+        "        pass",
         "_studio_results['final'] = {",
         "    'node_displacements': _studio_final_disp,",
         "    'node_reactions': _studio_final_reaction,",
         "    'element_forces': _studio_element_forces,",
         "    'element_local_forces': _studio_element_local_forces,",
+        "    'element_section_forces': _studio_element_section_forces,",
+        "    'load_factors': _studio_load_factors,",
         "}",
         "print('Analysis completed:', "
         f"{settings.analysis_type!r}, {settings.steps}, 'step(s)')",
@@ -904,6 +943,11 @@ def to_openseespy(
                 element_tags=result_element_tags,
                 frame_element_tags=sorted(model.elements),
                 support_node_tags=support_node_tags,
+                plain_pattern_tags=sorted(
+                    tag
+                    for tag, pattern in (load_patterns or {}).items()
+                    if pattern.pattern_type == "Plain"
+                ),
                 monitor_node=monitor_node,
             )
         )

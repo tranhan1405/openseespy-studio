@@ -1163,18 +1163,55 @@ class ModelViewport(QWidget):
             if isinstance(final, dict)
             else {}
         )
-        if not isinstance(local_forces, dict) or not local_forces:
-            self.clear_result_overlay()
-            return
+        diagrams = (
+            final.get("member_force_diagrams", {})
+            if isinstance(final, dict)
+            else {}
+        )
+        if not isinstance(local_forces, dict):
+            local_forces = {}
+        if not isinstance(diagrams, dict):
+            diagrams = {}
 
-        available: dict[int, tuple[float, float]] = {}
+        available: dict[int, tuple[list[float], list[float]]] = {}
         for tag in self._visible_element_tags():
+            by_component = diagrams.get(str(tag), diagrams.get(tag, {}))
+            diagram = (
+                by_component.get(component, {})
+                if isinstance(by_component, dict)
+                else {}
+            )
+            if isinstance(diagram, dict):
+                xs = diagram.get("x", [])
+                values = diagram.get("values", [])
+                if (
+                    isinstance(xs, (list, tuple))
+                    and isinstance(values, (list, tuple))
+                    and len(xs) == len(values)
+                    and len(xs) >= 2
+                ):
+                    available[tag] = (
+                        [float(value) for value in xs],
+                        [float(value) for value in values],
+                    )
+                    continue
+
             raw = local_forces.get(str(tag), local_forces.get(tag))
             if not isinstance(raw, (list, tuple)):
                 continue
-            values = component_end_resultants(raw, component)
-            if values is not None:
-                available[tag] = values
+            ends = component_end_resultants(raw, component)
+            element = self._model.elements.get(tag)
+            if ends is None or element is None:
+                continue
+            p_i = np.asarray(self._model.nodes[element.i].xyz, dtype=float)
+            p_j = np.asarray(self._model.nodes[element.j].xyz, dtype=float)
+            length = float(np.linalg.norm(p_j - p_i))
+            if length <= 1.0e-15:
+                continue
+            available[tag] = (
+                [0.0, length],
+                [float(ends[0]), float(ends[1])],
+            )
 
         if not available:
             self.clear_result_overlay()
@@ -1182,8 +1219,9 @@ class ModelViewport(QWidget):
 
         max_abs = max(
             (
-                max(abs(value_i), abs(value_j))
-                for value_i, value_j in available.values()
+                abs(value)
+                for _xs, values in available.values()
+                for value in values
             ),
             default=0.0,
         )
@@ -1241,25 +1279,28 @@ class ModelViewport(QWidget):
                 self._model.nodes[element.j].xyz,
                 dtype=float,
             )
-            value_i, value_j = available[tag]
+            member_vector = p_j - p_i
+            length = float(np.linalg.norm(member_vector))
+            if length <= 1.0e-15:
+                continue
 
-            sample_count = 17
+            xs, values = available[tag]
             first_index = len(diagram_points)
             sampled_base: list[np.ndarray] = []
             sampled_diagram: list[np.ndarray] = []
-            for index in range(sample_count):
-                ratio = index / (sample_count - 1)
-                base = (1.0 - ratio) * p_i + ratio * p_j
-                value = (
-                    (1.0 - ratio) * value_i
-                    + ratio * value_j
-                )
-                point = base + axis * value * force_scale
+
+            for x, value in zip(xs, values):
+                ratio = min(max(float(x) / length, 0.0), 1.0)
+                base = p_i + ratio * member_vector
+                point = base + axis * float(value) * force_scale
                 sampled_base.append(base)
                 sampled_diagram.append(point)
                 diagram_points.append(point)
-                diagram_values.append(value)
+                diagram_values.append(float(value))
 
+            sample_count = len(sampled_diagram)
+            if sample_count < 2:
+                continue
             diagram_lines.extend(
                 [sample_count]
                 + list(
@@ -1270,7 +1311,12 @@ class ModelViewport(QWidget):
                 )
             )
 
-            for index in (0, sample_count // 2, sample_count - 1):
+            connector_indices = {
+                0,
+                sample_count // 2,
+                sample_count - 1,
+            }
+            for index in sorted(connector_indices):
                 base_index = len(connector_points)
                 connector_points.extend(
                     (

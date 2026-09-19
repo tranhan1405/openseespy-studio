@@ -248,16 +248,16 @@ class ResultsPanel(QWidget):
         layout.addLayout(controls)
 
         self.element_info = QLabel(
-            "Local member resultants use OpenSees localForce. "
-            "I-end actions are reversed so I/J share one internal-section "
-            "sign convention."
+            "Member-force diagrams use equilibrium reconstruction where "
+            "available and actual OpenSees section integration-point "
+            "resultants for displacement-based nonlinear members."
         )
         self.element_info.setWordWrap(True)
         layout.addWidget(self.element_info)
 
         self.element_table = QTableWidget(0, 4)
         self.element_table.setHorizontalHeaderLabels(
-            ["Element", "I end", "J end", "Max |end|"]
+            ["Element", "I end", "J end", "Max |diagram|"]
         )
         self.element_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeToContents
@@ -444,16 +444,59 @@ class ResultsPanel(QWidget):
             if isinstance(final, dict)
             else {}
         )
+        diagrams = (
+            final.get("member_force_diagrams", {})
+            if isinstance(final, dict)
+            else {}
+        )
         if not isinstance(forces, dict):
             forces = {}
+        if not isinstance(diagrams, dict):
+            diagrams = {}
 
         component = self.element_quantity.currentText()
-        rows: list[tuple[int, float, float]] = []
+        rows: list[tuple[int, float, float, float, str]] = []
         skipped = 0
-        for raw_tag in sorted(forces, key=lambda value: int(value)):
-            values = forces[raw_tag]
+        source_counts: dict[str, int] = {}
+
+        tags = set(forces)
+        tags.update(diagrams)
+        for raw_tag in sorted(tags, key=lambda value: int(value)):
+            tag = int(raw_tag)
+            diagram_by_component = diagrams.get(
+                str(tag),
+                diagrams.get(tag, {}),
+            )
+            diagram = (
+                diagram_by_component.get(component, {})
+                if isinstance(diagram_by_component, dict)
+                else {}
+            )
+
+            if isinstance(diagram, dict):
+                values = diagram.get("values", [])
+                if isinstance(values, (list, tuple)) and values:
+                    numeric = [float(value) for value in values]
+                    source = str(
+                        diagram.get("source", "member distribution")
+                    )
+                    rows.append(
+                        (
+                            tag,
+                            numeric[0],
+                            numeric[-1],
+                            max(abs(value) for value in numeric),
+                            source,
+                        )
+                    )
+                    source_counts[source] = (
+                        source_counts.get(source, 0) + 1
+                    )
+                    continue
+
+            raw = forces.get(str(tag), forces.get(tag, []))
             end_values = component_end_resultants(
-                values if isinstance(values, (list, tuple)) else [],
+                raw if isinstance(raw, (list, tuple)) else [],
                 component,
             )
             if end_values is None:
@@ -461,14 +504,19 @@ class ResultsPanel(QWidget):
                 continue
             rows.append(
                 (
-                    int(raw_tag),
+                    tag,
                     float(end_values[0]),
                     float(end_values[1]),
+                    max(abs(float(end_values[0])), abs(float(end_values[1]))),
+                    "end-force fallback",
                 )
+            )
+            source_counts["end-force fallback"] = (
+                source_counts.get("end-force fallback", 0) + 1
             )
 
         self.element_table.setRowCount(len(rows))
-        for row, (tag, value_i, value_j) in enumerate(rows):
+        for row, (tag, value_i, value_j, maximum, _source) in enumerate(rows):
             item = QTableWidgetItem(str(tag))
             item.setData(Qt.UserRole, tag)
             self.element_table.setItem(row, 0, item)
@@ -481,22 +529,24 @@ class ResultsPanel(QWidget):
             self.element_table.setItem(
                 row,
                 3,
-                QTableWidgetItem(
-                    f"{max(abs(value_i), abs(value_j)):.6g}"
-                ),
+                QTableWidgetItem(f"{maximum:.6g}"),
             )
 
         if rows:
+            details = ", ".join(
+                f"{source}: {count}"
+                for source, count in sorted(source_counts.items())
+            )
             note = (
-                f"{component}: {len(rows)} member(s) with 3D local-force "
-                "results."
+                f"{component}: {len(rows)} member(s). "
+                f"Sources — {details}."
             )
             if skipped:
-                note += f" {skipped} element(s) had no 12-DOF localForce."
+                note += f" {skipped} element(s) had no usable frame result."
             self.element_info.setText(note)
         else:
             self.element_info.setText(
-                "No 12-DOF localForce result is available for this job."
+                "No local member-force result is available for this job."
             )
 
     def _update_history_plot(self) -> None:
