@@ -1472,6 +1472,14 @@ def to_openseespy(
         if active_analysis is not None
         else []
     )
+    missing_deferred = sorted(
+        deferred_pattern_tags - set((load_patterns or {}).keys())
+    )
+    if missing_deferred:
+        raise ValueError(
+            "Analysis references missing driving load pattern tag(s): "
+            + ", ".join(map(str, missing_deferred))
+        )
 
     lines: list[str] = [
         "import json",
