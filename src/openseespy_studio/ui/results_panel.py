@@ -1235,6 +1235,20 @@ class ResultsPanel(QWidget):
     def set_live_convergence_message(self, message: str) -> None:
         self.live_convergence_status.setText(str(message))
 
+    def mark_live_adaptive_event(
+        self,
+        event: str,
+        *,
+        old_size: float,
+        new_size: float,
+    ) -> None:
+        label = str(event).upper()
+        self.live_convergence_status.setText(
+            f"{label} · Step {self._live_convergence_step}/"
+            f"{self._live_convergence_total} · "
+            f"|step| {float(old_size):.6g} → {float(new_size):.6g}"
+        )
+
     def finish_live_convergence(self, status: str) -> None:
         if self._live_convergence_step <= 0:
             return
