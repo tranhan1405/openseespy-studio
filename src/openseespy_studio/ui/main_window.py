@@ -1616,10 +1616,10 @@ class MainWindow(QMainWindow):
         )
         self._make_action(
             "connection",
-            "Connection...",
+            "ZeroLength / Link...",
             "element",
             self._create_connection,
-            "Create zeroLength or twoNodeLink spring / link",
+            "Create a research zeroLength spring/interface or twoNodeLink",
         )
         self._make_action(
             "mass",
@@ -3707,7 +3707,7 @@ class MainWindow(QMainWindow):
         constraint_action.setEnabled(len(self.selection.nodes) >= 2)
         constraint_action.triggered.connect(self._create_constraint)
 
-        connection_action = menu.addAction("Create Connection / Spring...")
+        connection_action = menu.addAction("Create ZeroLength / Link...")
         connection_action.setEnabled(1 <= len(self.selection.nodes) <= 2)
         connection_action.triggered.connect(self._create_connection)
 
@@ -8140,7 +8140,7 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "connection_group":
-            create = menu.addAction("New Connection / Spring...")
+            create = menu.addAction("New ZeroLength / Link...")
             create.triggered.connect(self._create_connection)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
@@ -8179,7 +8179,7 @@ class MainWindow(QMainWindow):
             constraint = menu.addAction("Create Constraint...")
             constraint.setEnabled(len(self.selection.nodes) >= 2)
             constraint.triggered.connect(self._create_constraint)
-            connection = menu.addAction("Create Connection / Spring...")
+            connection = menu.addAction("Create ZeroLength / Link...")
             connection.setEnabled(1 <= len(self.selection.nodes) <= 2)
             connection.triggered.connect(self._create_connection)
 
@@ -8296,7 +8296,7 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "connections_root":
-            create_action = menu.addAction("New Connection / Spring...")
+            create_action = menu.addAction("New ZeroLength / Link...")
             create_action.triggered.connect(self._create_connection)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
