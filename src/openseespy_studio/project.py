@@ -1072,6 +1072,9 @@ class AnalysisSettingsData:
     rayleigh_damping_ratio: float = 0.0
     rayleigh_mode_i: int = 1
     rayleigh_mode_j: int = 3
+    preload_gravity: bool = False
+    gravity_steps: int = 10
+    deferred_pattern_tags: list[int] = field(default_factory=list)
     num_modes: int = 3
     recovery: bool = True
     adaptive_step: bool = False
@@ -1096,6 +1099,11 @@ class AnalysisSettingsData:
         self.rayleigh_damping_ratio=float(self.rayleigh_damping_ratio)
         self.rayleigh_mode_i=int(self.rayleigh_mode_i)
         self.rayleigh_mode_j=int(self.rayleigh_mode_j)
+        self.preload_gravity=bool(self.preload_gravity)
+        self.gravity_steps=int(self.gravity_steps)
+        self.deferred_pattern_tags=sorted({
+            int(tag) for tag in self.deferred_pattern_tags
+        })
         self.num_modes=int(self.num_modes); self.recovery=bool(self.recovery)
         self.adaptive_step=bool(self.adaptive_step)
         self.adaptive_cutback_factor=float(self.adaptive_cutback_factor)
@@ -1143,6 +1151,10 @@ class AnalysisSettingsData:
             raise ValueError("Rayleigh damping modes must be positive.")
         if self.rayleigh_mode_i == self.rayleigh_mode_j and self.rayleigh_damping_ratio > 0.0:
             raise ValueError("Rayleigh damping needs two different modes.")
+        if self.gravity_steps < 1:
+            raise ValueError("Gravity preload steps must be at least 1.")
+        if any(tag <= 0 for tag in self.deferred_pattern_tags):
+            raise ValueError("Deferred load-pattern tags must be positive.")
         if self.num_modes<1: raise ValueError("Number of modes must be at least 1.")
 
     def to_dict(self) -> dict[str, Any]:
@@ -1152,6 +1164,7 @@ class AnalysisSettingsData:
             "control_node","control_dof","displacement_increment",
             "cyclic_targets","cyclic_increment","dt","gamma","beta",
             "rayleigh_damping_ratio","rayleigh_mode_i","rayleigh_mode_j",
+            "preload_gravity","gravity_steps","deferred_pattern_tags",
             "num_modes","recovery","adaptive_step",
             "adaptive_cutback_factor","adaptive_min_factor",
             "adaptive_growth_factor","adaptive_easy_iterations",
