@@ -410,6 +410,9 @@ class RibbonGroup(QWidget):
         button = QToolButton()
         button.setObjectName("RibbonSmallButton")
         button.setDefaultAction(action)
+        ribbon_text = action.property("ribbonText")
+        if ribbon_text:
+            button.setText(str(ribbon_text))
         button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         button.setIconSize(QSize(16, 16))
         button.setAutoRaise(True)
@@ -1529,6 +1532,10 @@ class MainWindow(QMainWindow):
             "load",
             self._create_prescribed_displacement,
             "Create an imposed nodal displacement in a Plain load pattern",
+        )
+        self.actions["prescribed_displacement"].setProperty(
+            "ribbonText",
+            "Prescr. Disp.",
         )
         self._make_action("beam_load", "Beam Load...", "load", self._create_element_load, "Create uniform, point, or self-weight beam load")
         self._make_action("analysis_setup", "Analysis Setup...", "analysis", self._create_analysis, "Create analysis settings")
@@ -5888,16 +5895,74 @@ class MainWindow(QMainWindow):
         result = self.project.solution_results.get(int(tag))
         if result is None:
             return
+        answer = QMessageBox.question(
+            self,
+            "Delete Result",
+            (
+                f"Delete result '{result.name}' from this Solution?\n\n"
+                "This removes the result object from the Model Tree. "
+                "Solver Job data is not deleted."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
         before = self.project.to_dict()
         self.project.remove_solution_result(tag)
+        if self._active_solution_result_tag == int(tag):
+            self._active_solution_result_tag = None
         self._record_project_change(
             f"Delete solution result {result.name}",
             before,
         )
+        if hasattr(self, "results_panel"):
+            self.results_panel.stop_motion()
         self.viewport.clear_result_overlay()
         self._refresh_tree()
         self.status_message.setText(
             f"Deleted result: {result.name}"
+        )
+
+    def _delete_all_solution_results(self, analysis_tag: int) -> None:
+        results = self.project.solution_results_for_analysis(analysis_tag)
+        if not results:
+            self.status_message.setText(
+                "Solution contains no result objects to delete."
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Delete All Results",
+            (
+                f"Delete all {len(results)} result object(s) from this "
+                "Solution?\n\n"
+                "Solver Job data is not deleted."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        tags = {result.tag for result in results}
+        before = self.project.to_dict()
+        for result in results:
+            self.project.remove_solution_result(result.tag)
+        if self._active_solution_result_tag in tags:
+            self._active_solution_result_tag = None
+        self._record_project_change(
+            f"Delete all solution results for analysis {analysis_tag}",
+            before,
+        )
+        if hasattr(self, "results_panel"):
+            self.results_panel.stop_motion()
+        self.viewport.clear_result_overlay()
+        self._refresh_tree()
+        self.status_message.setText(
+            f"Deleted {len(results)} result object(s) from Solution"
         )
 
     def _rename_solution_result(self, tag: int) -> None:
@@ -6847,12 +6912,113 @@ class MainWindow(QMainWindow):
         if plot is None:
             return
         name = str(plot.get("name", f"Result {plot_id}"))
+        answer = QMessageBox.question(
+            self,
+            "Delete Result",
+            (
+                f"Delete result view '{name}' from Job {job.job_id}?\n\n"
+                "The underlying solver data for the Job is kept."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
         job.remove_plot(plot_id)
+        if hasattr(self, "results_panel"):
+            self.results_panel.stop_motion()
         self.viewport.clear_result_overlay()
         self._refresh_tree()
         self.status_message.setText(
-            f"Removed Job {job.job_id} result: {name}"
+            f"Deleted Job {job.job_id} result: {name}"
         )
+
+    def _rebuild_results_panel_jobs(self) -> None:
+        self.results_panel.clear_all()
+        for job_id in sorted(self._jobs):
+            self.results_panel.add_or_update_job(self._jobs[job_id])
+
+    def _delete_job(self, job_id: int) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None:
+            return
+        if (
+            self._analysis_process is not None
+            and self._analysis_process.state() != QProcess.NotRunning
+            and self._current_job_id == int(job_id)
+        ):
+            QMessageBox.information(
+                self,
+                "Delete Job",
+                "Stop the running analysis before deleting this Job.",
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Delete Job",
+            (
+                f"Delete Job {job.job_id} and its saved result views?\n\n"
+                "This removes the runtime solver results for this Job."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        self._jobs.pop(job.job_id, None)
+        if self._current_job_id == job.job_id:
+            self._current_job_id = None
+        if self._last_result_cache_key == ("job", job.job_id):
+            self._last_result = {}
+            self._last_result_cache_key = None
+        if hasattr(self, "results_panel"):
+            self.results_panel.stop_motion()
+        self.viewport.clear_result_overlay()
+        self._rebuild_results_panel_jobs()
+        self._refresh_tree()
+        self.status_message.setText(f"Deleted Job {job.job_id}")
+
+    def _delete_all_jobs(self) -> None:
+        if not self._jobs:
+            self.status_message.setText("There are no Jobs to delete.")
+            return
+        if (
+            self._analysis_process is not None
+            and self._analysis_process.state() != QProcess.NotRunning
+        ):
+            QMessageBox.information(
+                self,
+                "Delete All Jobs",
+                "Stop the running analysis before deleting Jobs.",
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Delete All Jobs",
+            (
+                f"Delete all {len(self._jobs)} runtime Jobs and their "
+                "saved result views?\n\n"
+                "Solution result definitions under each Analysis are kept."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        count = len(self._jobs)
+        self._jobs.clear()
+        self._current_job_id = None
+        self._last_result = {}
+        self._last_result_cache_key = None
+        if hasattr(self, "results_panel"):
+            self.results_panel.clear_all()
+        self.viewport.clear_result_overlay()
+        self._refresh_tree()
+        self.status_message.setText(f"Deleted {count} Job(s)")
 
     def _quick_plot_job_result(
         self,
@@ -7466,6 +7632,16 @@ class MainWindow(QMainWindow):
             evaluate_all.triggered.connect(
                 lambda: self._evaluate_all_solution_results(analysis_tag)
             )
+            clear_display = menu.addAction("Clear Result Display")
+            clear_display.triggered.connect(self._clear_result_display)
+            result_objects = self.project.solution_results_for_analysis(
+                analysis_tag
+            )
+            delete_all = menu.addAction("Delete All Results...")
+            delete_all.setEnabled(bool(result_objects))
+            delete_all.triggered.connect(
+                lambda: self._delete_all_solution_results(analysis_tag)
+            )
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
@@ -7484,7 +7660,9 @@ class MainWindow(QMainWindow):
                 lambda: self._rename_solution_result(tag)
             )
             menu.addSeparator()
-            delete = menu.addAction("Delete")
+            clear_display = menu.addAction("Clear Result Display")
+            clear_display.triggered.connect(self._clear_result_display)
+            delete = menu.addAction("Delete Result...")
             delete.triggered.connect(
                 lambda: self._delete_solution_result(tag)
             )
@@ -7548,6 +7726,12 @@ class MainWindow(QMainWindow):
                     self.results_dock.raise_(),
                 )
             )
+            menu.addSeparator()
+            clear_display = menu.addAction("Clear Result Display")
+            clear_display.triggered.connect(self._clear_result_display)
+            delete_all_jobs = menu.addAction("Delete All Jobs...")
+            delete_all_jobs.setEnabled(bool(self._jobs))
+            delete_all_jobs.triggered.connect(self._delete_all_jobs)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
@@ -7578,10 +7762,18 @@ class MainWindow(QMainWindow):
                 )
 
             menu.addSeparator()
+            clear_display = menu.addAction("Clear Result Display")
+            clear_display.triggered.connect(self._clear_result_display)
             export = menu.addAction("Export Results JSON...")
             export.setEnabled(bool(job and job.results))
             export.triggered.connect(
                 lambda: self._export_job_result_json(job_id)
+            )
+            menu.addSeparator()
+            delete_job = menu.addAction("Delete Job...")
+            delete_job.setEnabled(job is not None and job.status != "Running")
+            delete_job.triggered.connect(
+                lambda: self._delete_job(job_id)
             )
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
@@ -7610,7 +7802,9 @@ class MainWindow(QMainWindow):
                 lambda: self._duplicate_job_plot(job_id, plot_id)
             )
             menu.addSeparator()
-            delete = menu.addAction("Delete")
+            clear_display = menu.addAction("Clear Result Display")
+            clear_display.triggered.connect(self._clear_result_display)
+            delete = menu.addAction("Delete Result...")
             delete.triggered.connect(
                 lambda: self._delete_job_plot(job_id, plot_id)
             )
