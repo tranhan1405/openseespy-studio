@@ -139,9 +139,9 @@ def default_control_node(project: ProjectDatabase) -> int:
     node = max(
         candidates,
         key=lambda item: (
-            float(item.z),
-            float(item.y),
-            float(item.x),
+            float(item.xyz[2]),
+            float(item.xyz[1]),
+            float(item.xyz[0]),
             int(item.tag),
         ),
     )
@@ -190,10 +190,16 @@ def lateral_load_weights(
     if kind == "Uniform":
         raw = {tag: 1.0 for tag in tags}
     elif kind == "Triangular":
-        z_values = [float(project.model.nodes[tag].z) for tag in tags]
+        z_values = [
+            float(project.model.nodes[tag].xyz[2])
+            for tag in tags
+        ]
         z0 = min(z_values)
         raw = {
-            tag: max(float(project.model.nodes[tag].z) - z0, 0.0)
+            tag: max(
+                float(project.model.nodes[tag].xyz[2]) - z0,
+                0.0,
+            )
             for tag in tags
         }
         if sum(raw.values()) <= 1.0e-15:
