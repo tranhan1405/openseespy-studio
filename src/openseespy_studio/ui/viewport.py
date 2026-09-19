@@ -1873,10 +1873,16 @@ class ModelViewport(QWidget):
                     center + z_axis * axis_length * 1.08,
                 )
             )
+            def selected_axis_text(axis: str, label: str) -> str:
+                if "·" not in label:
+                    return axis
+                detail = label.split("·", 1)[-1].strip().upper()
+                return f"{axis}  ·  {detail}"
+
             labels.extend(
                 (
-                    f"y  ·  {y_label.split('·', 1)[-1].strip().upper()}",
-                    f"z  ·  {z_label.split('·', 1)[-1].strip().upper()}",
+                    selected_axis_text("y", y_label),
+                    selected_axis_text("z", z_label),
                 )
             )
 
