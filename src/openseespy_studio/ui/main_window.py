@@ -5703,8 +5703,10 @@ class MainWindow(QMainWindow):
             self._edit_nodal_load(int(value))
         elif kind == "element_load":
             self._edit_element_load(int(value))
-        elif kind == "analysis":
+        elif kind in {"analysis", "analysis_settings"}:
             self._edit_analysis(int(value))
+        elif kind == "job":
+            self._activate_job_result(int(value))
         elif kind == "recorder":
             self._edit_recorder(int(value))
 
@@ -6671,10 +6673,12 @@ class MainWindow(QMainWindow):
 
     def _select_job_result(self, job_id: int) -> None:
         job = self._jobs.get(int(job_id))
-        if job is None or not job.results:
+        if job is None:
             return
-        self._last_result = dict(job.results)
-        self.results_panel.set_result(self._last_result)
+        if job.results:
+            self._last_result = dict(job.results)
+            self.results_panel.set_result(self._last_result)
+        self._show_job_properties(job.job_id)
         self.status_message.setText(
             f"Selected Job {job.job_id}: {job.analysis_name}"
         )
