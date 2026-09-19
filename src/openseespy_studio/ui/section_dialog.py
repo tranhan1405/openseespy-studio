@@ -45,6 +45,8 @@ from ..section_visualization import (
     section_preview_bounds,
 )
 from ..units import UnitSystem
+from .frp_column_dialog import FRPColumnWizardDialog
+
 PA_PER_MPA = 1.0e6
 
 
@@ -1348,7 +1350,9 @@ class ShapeTemplateDialog(QDialog):
         parent=None,
     ):
         super().__init__(parent)
-        self.materials = materials
+        self._project_materials = dict(materials)
+        self.materials = dict(materials)
+        self._pending_materials: list[MaterialData] = []
         self.unit_system = UnitSystem.from_mapping(units)
         self.shape = str(shape).upper()
         if self.shape not in {"RECTANGLE", "CIRCLE", "T", "I"}:
@@ -1896,6 +1900,14 @@ class SectionDialog(QDialog):
             template_row_2.addWidget(button)
         left_layout.addLayout(template_row_2)
 
+        frp_wizard_button = QPushButton("RC Column + FRP Retrofit...")
+        frp_wizard_button.setToolTip(
+            "Build RC geometry, reinforcement, FRP-confined concrete and "
+            "Fiber section together."
+        )
+        frp_wizard_button.clicked.connect(self._open_frp_column_wizard)
+        left_layout.addWidget(frp_wizard_button)
+
         add_row_1 = QHBoxLayout()
         for text, kind in (
             ("+ Rectangle", "RectPatch"),
@@ -2004,25 +2016,20 @@ class SectionDialog(QDialog):
 
         frp_form = QFormLayout()
         self.frp_material_combo = QComboBox()
-        for material_tag in sorted(self.materials):
-            material = self.materials[material_tag]
-            if material.material_type == "FRPConfinedConcrete02":
-                mode = (
-                    "JacketC"
-                    if material.parameters.get("mode", 0.0) < 0.5
-                    else "Ultimate"
-                )
-                self.frp_material_combo.addItem(
-                    f"{material_tag} - {material.name} ({mode})",
-                    material_tag,
-                )
-        if self.frp_material_combo.count() == 0:
-            self.frp_material_combo.addItem(
-                "Create an FRPConfinedConcrete02 material first",
-                None,
-            )
+        self._refresh_frp_material_combo()
         frp_form.addRow("FRP-confined concrete:", self.frp_material_combo)
         frp_layout.addLayout(frp_form)
+
+        wizard_row = QHBoxLayout()
+        self.frp_column_wizard_button = QPushButton(
+            "Build Complete RC Column + FRP..."
+        )
+        self.frp_column_wizard_button.clicked.connect(
+            self._open_frp_column_wizard
+        )
+        wizard_row.addWidget(self.frp_column_wizard_button)
+        wizard_row.addStretch(1)
+        frp_layout.addLayout(wizard_row)
 
         frp_buttons = QHBoxLayout()
         self.frp_apply_selected = QPushButton(
@@ -2267,6 +2274,141 @@ class SectionDialog(QDialog):
             self.component_list.setCurrentRow(
                 min(max(current, 0), len(self._components) - 1)
             )
+
+    def _refresh_frp_material_combo(
+        self,
+        select_tag: int | None = None,
+    ) -> None:
+        if not hasattr(self, "frp_material_combo"):
+            return
+        previous = (
+            self.frp_material_combo.currentData()
+            if self.frp_material_combo.count()
+            else None
+        )
+        self.frp_material_combo.clear()
+        for material_tag in sorted(self.materials):
+            material = self.materials[material_tag]
+            if material.material_type != "FRPConfinedConcrete02":
+                continue
+            mode = (
+                "JacketC"
+                if material.parameters.get("mode", 0.0) < 0.5
+                else "Ultimate"
+            )
+            pending = (
+                " · pending"
+                if any(
+                    item.tag == material_tag
+                    for item in self._pending_materials
+                )
+                else ""
+            )
+            self.frp_material_combo.addItem(
+                f"{material_tag} - {material.name} ({mode}){pending}",
+                material_tag,
+            )
+        if self.frp_material_combo.count() == 0:
+            self.frp_material_combo.addItem(
+                "Create an FRPConfinedConcrete02 material first",
+                None,
+            )
+        wanted = select_tag if select_tag is not None else previous
+        if wanted is not None:
+            combo_index = self.frp_material_combo.findData(int(wanted))
+            if combo_index >= 0:
+                self.frp_material_combo.setCurrentIndex(combo_index)
+
+        enabled = self.frp_material_combo.currentData() is not None
+        if hasattr(self, "frp_apply_selected"):
+            self.frp_apply_selected.setEnabled(enabled)
+        if hasattr(self, "frp_apply_all"):
+            self.frp_apply_all.setEnabled(enabled)
+
+    def _clear_pending_frp_wizard_materials(self) -> None:
+        for material in self._pending_materials:
+            self.materials.pop(material.tag, None)
+        self._pending_materials.clear()
+
+    def _open_frp_column_wizard(self) -> None:
+        if not (
+            self.unit_system.length == "mm"
+            and self.unit_system.force == "N"
+        ):
+            QMessageBox.warning(
+                self,
+                "RC Column + FRP Retrofit",
+                "The current FRPConfinedConcrete02 workflow requires project "
+                "units mm - N - s. Change Project Units first so generated "
+                "JacketC/Ultimate parameters stay dimensionally safe.",
+            )
+            return
+
+        # A newly accepted wizard replaces the prior pending wizard batch.
+        # Project materials remain untouched until the Section Editor itself
+        # is accepted.
+        base_materials = dict(self._project_materials)
+        dialog = FRPColumnWizardDialog(
+            base_materials,
+            section_tag=self.tag.value(),
+            section_name=self.name.text().strip()
+            or f"Section {self.tag.value()}",
+            units=self.unit_system.as_mapping(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        try:
+            result = dialog.build_result()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "RC Column + FRP Retrofit",
+                str(exc),
+            )
+            return
+
+        if self._components:
+            answer = QMessageBox.question(
+                self,
+                "RC Column + FRP Retrofit",
+                "Replace the current Fiber Builder components with the "
+                "wizard-generated RC column?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+        self._clear_pending_frp_wizard_materials()
+        for material in result.materials:
+            self.materials[material.tag] = material
+            self._pending_materials.append(material)
+
+        self.section_type.setCurrentText("Fiber")
+        self._components = [
+            FiberComponentData.from_dict(component.to_dict())
+            for component in result.section.fiber_components
+        ]
+        self._display_geometry = {
+            "shape": str(result.section.display_geometry.get("shape", "")),
+            "dimensions": dict(
+                result.section.display_geometry.get("dimensions", {})
+            ),
+        }
+        self._display_geometry_section_type = "Fiber"
+        self.gj.setValue(result.section.parameters["GJ"])
+        self._refresh_frp_material_combo(result.frp_material_tag)
+        self._refresh_component_list()
+        self._update_fiber_outputs()
+        self.fiber_tabs.setCurrentWidget(self.builder_page)
+
+    def pending_materials(self) -> list[MaterialData]:
+        return [
+            MaterialData.from_dict(material.to_dict())
+            for material in self._pending_materials
+        ]
 
     def _selected_frp_material(self) -> MaterialData | None:
         if not hasattr(self, "frp_material_combo"):
