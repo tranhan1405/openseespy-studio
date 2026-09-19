@@ -11,7 +11,7 @@ from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 21
+PROJECT_FORMAT_VERSION = 22
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
@@ -953,6 +953,72 @@ class NodalLoadData:
 
 
 @dataclass
+class PrescribedDisplacementData:
+    tag: int
+    name: str
+    pattern_tag: int
+    node_tag: int
+    dof: int
+    value: float
+
+    def __post_init__(self) -> None:
+        self.tag = int(self.tag)
+        self.name = (
+            str(self.name).strip()
+            or f"Prescribed Displacement {self.tag}"
+        )
+        self.pattern_tag = int(self.pattern_tag)
+        self.node_tag = int(self.node_tag)
+        self.dof = int(self.dof)
+        self.value = float(self.value)
+        if self.tag <= 0:
+            raise ValueError(
+                "Prescribed displacement tag must be positive."
+            )
+        if self.pattern_tag <= 0 or self.node_tag <= 0:
+            raise ValueError(
+                "Prescribed displacement needs valid pattern and node tags."
+            )
+        if self.dof not in range(1, 7):
+            raise ValueError(
+                "Prescribed displacement DOF must be between 1 and 6."
+            )
+        if not math.isfinite(self.value):
+            raise ValueError(
+                "Prescribed displacement value must be finite."
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "pattern_tag": self.pattern_tag,
+            "node_tag": self.node_tag,
+            "dof": self.dof,
+            "value": self.value,
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+    ) -> "PrescribedDisplacementData":
+        return cls(
+            tag=int(data["tag"]),
+            name=str(
+                data.get(
+                    "name",
+                    f"Prescribed Displacement {data['tag']}",
+                )
+            ),
+            pattern_tag=int(data["pattern_tag"]),
+            node_tag=int(data["node_tag"]),
+            dof=int(data.get("dof", 1)),
+            value=float(data.get("value", 0.0)),
+        )
+
+
+@dataclass
 class ElementLoadData:
     tag: int
     name: str
@@ -1398,6 +1464,9 @@ class ProjectDatabase:
     time_series: dict[int, TimeSeriesData] = field(default_factory=dict)
     load_patterns: dict[int, LoadPatternData] = field(default_factory=dict)
     nodal_loads: dict[int, NodalLoadData] = field(default_factory=dict)
+    prescribed_displacements: dict[int, PrescribedDisplacementData] = field(
+        default_factory=dict
+    )
     element_loads: dict[int, ElementLoadData] = field(default_factory=dict)
     analyses: dict[int, AnalysisSettingsData] = field(default_factory=dict)
     recorders: dict[int, RecorderData] = field(default_factory=dict)
@@ -1806,6 +1875,9 @@ class ProjectDatabase:
             for load in self.element_loads.values():
                 if load.pattern_tag == original_tag:
                     load.pattern_tag = pattern.tag
+            for displacement in self.prescribed_displacements.values():
+                if displacement.pattern_tag == original_tag:
+                    displacement.pattern_tag = pattern.tag
 
     def remove_load_pattern(self, tag: int) -> None:
         tag = int(tag)
@@ -1816,6 +1888,11 @@ class ProjectDatabase:
         for load_tag, load in list(self.element_loads.items()):
             if load.pattern_tag == tag:
                 self.element_loads.pop(load_tag)
+        for displacement_tag, displacement in list(
+            self.prescribed_displacements.items()
+        ):
+            if displacement.pattern_tag == tag:
+                self.prescribed_displacements.pop(displacement_tag)
 
     def next_nodal_load_tag(self) -> int:
         return max(self.nodal_loads, default=0) + 1
@@ -1864,6 +1941,114 @@ class ProjectDatabase:
                 or load.pattern_tag not in existing_patterns
             ):
                 self.nodal_loads.pop(tag)
+                removed.append(tag)
+        return sorted(removed)
+
+    def next_prescribed_displacement_tag(self) -> int:
+        return max(self.prescribed_displacements, default=0) + 1
+
+    def _validate_prescribed_displacement(
+        self,
+        displacement: PrescribedDisplacementData,
+        *,
+        original_tag: int | None = None,
+    ) -> None:
+        node = self.model.nodes.get(displacement.node_tag)
+        if node is None:
+            raise ValueError(
+                "Prescribed displacement references missing node "
+                f"{displacement.node_tag}."
+            )
+        pattern = self.load_patterns.get(displacement.pattern_tag)
+        if pattern is None:
+            raise ValueError(
+                "Prescribed displacement references missing pattern "
+                f"{displacement.pattern_tag}."
+            )
+        if pattern.pattern_type != "Plain":
+            raise ValueError(
+                "Prescribed displacements can only be assigned to Plain "
+                "load patterns."
+            )
+        if displacement.dof > int(self.model.ndf):
+            raise ValueError(
+                f"DOF {displacement.dof} is not available for an "
+                f"ndf={self.model.ndf} model."
+            )
+        if (
+            displacement.dof <= len(node.fixity)
+            and bool(node.fixity[displacement.dof - 1])
+        ):
+            raise ValueError(
+                "Cannot prescribe a displacement on a DOF that is already "
+                "restrained by a support."
+            )
+        for tag, existing in self.prescribed_displacements.items():
+            if original_tag is not None and int(tag) == int(original_tag):
+                continue
+            if (
+                existing.node_tag == displacement.node_tag
+                and existing.dof == displacement.dof
+            ):
+                raise ValueError(
+                    "Node "
+                    f"{displacement.node_tag} DOF {displacement.dof} already "
+                    "has a prescribed displacement."
+                )
+
+    def add_prescribed_displacement(
+        self,
+        displacement: PrescribedDisplacementData,
+    ) -> None:
+        if displacement.tag in self.prescribed_displacements:
+            raise ValueError(
+                "Prescribed displacement tag "
+                f"{displacement.tag} already exists."
+            )
+        self._validate_prescribed_displacement(displacement)
+        self.prescribed_displacements[displacement.tag] = displacement
+
+    def update_prescribed_displacement(
+        self,
+        original_tag: int,
+        displacement: PrescribedDisplacementData,
+    ) -> None:
+        original_tag = int(original_tag)
+        if original_tag not in self.prescribed_displacements:
+            raise ValueError(
+                "Prescribed displacement tag "
+                f"{original_tag} does not exist."
+            )
+        if (
+            displacement.tag != original_tag
+            and displacement.tag in self.prescribed_displacements
+        ):
+            raise ValueError(
+                "Prescribed displacement tag "
+                f"{displacement.tag} already exists."
+            )
+        self._validate_prescribed_displacement(
+            displacement,
+            original_tag=original_tag,
+        )
+        self.prescribed_displacements.pop(original_tag)
+        self.prescribed_displacements[displacement.tag] = displacement
+
+    def remove_prescribed_displacement(self, tag: int) -> None:
+        self.prescribed_displacements.pop(int(tag), None)
+
+    def prune_prescribed_displacements(self) -> list[int]:
+        removed: list[int] = []
+        existing_nodes = set(self.model.nodes)
+        existing_patterns = set(self.load_patterns)
+        for tag, displacement in list(
+            self.prescribed_displacements.items()
+        ):
+            if (
+                displacement.node_tag not in existing_nodes
+                or displacement.pattern_tag not in existing_patterns
+            ):
+                self.prescribed_displacements.pop(tag)
                 removed.append(tag)
         return sorted(removed)
 
@@ -2172,6 +2357,10 @@ class ProjectDatabase:
                 self.nodal_loads[tag].to_dict()
                 for tag in sorted(self.nodal_loads)
             ],
+            "prescribed_displacements": [
+                self.prescribed_displacements[tag].to_dict()
+                for tag in sorted(self.prescribed_displacements)
+            ],
             "element_loads": [
                 self.element_loads[tag].to_dict()
                 for tag in sorted(self.element_loads)
@@ -2366,6 +2555,19 @@ class ProjectDatabase:
         return result
 
     @staticmethod
+    def _load_prescribed_displacements(
+        raw: Any,
+    ) -> dict[int, PrescribedDisplacementData]:
+        result: dict[int, PrescribedDisplacementData] = {}
+        if isinstance(raw, list):
+            for item in raw:
+                displacement = PrescribedDisplacementData.from_dict(
+                    dict(item)
+                )
+                result[displacement.tag] = displacement
+        return result
+
+    @staticmethod
     def _load_element_loads(raw: Any) -> dict[int, ElementLoadData]:
         result: dict[int, ElementLoadData] = {}
         if isinstance(raw, list):
@@ -2444,6 +2646,9 @@ class ProjectDatabase:
             time_series=cls._load_time_series(data.get("time_series", [])),
             load_patterns=cls._load_patterns(data.get("load_patterns", [])),
             nodal_loads=cls._load_nodal_loads(data.get("nodal_loads", [])),
+            prescribed_displacements=cls._load_prescribed_displacements(
+                data.get("prescribed_displacements", [])
+            ),
             element_loads=cls._load_element_loads(
                 data.get("element_loads", [])
             ),
