@@ -1517,6 +1517,7 @@ class MainWindow(QMainWindow):
                 tooltip,
                 checkable=True,
             )
+        self.actions["show_load_values"].setChecked(True)
 
         ribbon = QToolBar("Ribbon", self)
         ribbon.setObjectName("Ribbon")
