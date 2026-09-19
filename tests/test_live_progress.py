@@ -138,6 +138,8 @@ def test_adaptive_generator_emits_cutback_growth_and_substep_events():
     assert "_studio_emit('cutback'" in text
     assert "_studio_emit('grow'" in text
     assert "_studio_emit('adaptive_substep'" in text
+    assert "time=float(ops.getTime())" in text
+    assert "'time': float(ops.getTime())" in text
     assert "adaptive_step=True" in text
     assert "'adaptive': True" in text
     assert "'total_iterations': _studio_total_iterations" in text
