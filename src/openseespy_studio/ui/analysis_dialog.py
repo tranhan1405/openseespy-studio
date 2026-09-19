@@ -75,6 +75,15 @@ class AnalysisDialog(QDialog):
         self.dt=fs(analysis.dt if analysis else 0.01,1e-12,1e20)
         self.gamma=fs(analysis.gamma if analysis else 0.5)
         self.beta=fs(analysis.beta if analysis else 0.25)
+        self.damping_ratio=fs(
+            analysis.rayleigh_damping_ratio if analysis else 0.0,
+            0.0,
+            0.999999,
+        )
+        self.damping_mode_i=QSpinBox(); self.damping_mode_i.setRange(1,10000)
+        self.damping_mode_i.setValue(analysis.rayleigh_mode_i if analysis else 1)
+        self.damping_mode_j=QSpinBox(); self.damping_mode_j.setRange(1,10000)
+        self.damping_mode_j.setValue(analysis.rayleigh_mode_j if analysis else 3)
         self.modes=QSpinBox(); self.modes.setRange(1,10000); self.modes.setValue(analysis.num_modes if analysis else 3)
         self.recovery=QCheckBox("Try NewtonLineSearch / ModifiedNewton / Newton on failed step"); self.recovery.setChecked(analysis.recovery if analysis else True)
         self.adaptive=QCheckBox("Adaptive step size / automatic cutback")
@@ -118,7 +127,7 @@ class AnalysisDialog(QDialog):
             "Opens a separate PowerShell window that mirrors the live solver log. "
             "The Studio worker still runs in its isolated process."
         )
-        fields=(("Tag",self.tag),("Name",self.name),("Analysis type",self.kind),("Constraints",self.constraints),("Numberer",self.numberer),("System",self.system),("Test",self.test),("Tolerance",self.tol),("Max iterations",self.max_iter),("Algorithm",self.algorithm),("Steps",self.steps),("Load increment",self.load_inc),("Control node",self.control_node),("Control DOF",self.control_dof),("Disp. increment",self.disp_inc),("Cyclic targets",self.cyclic_targets),("Cyclic max increment",self.cyclic_inc),("Time step dt",self.dt),("Newmark gamma",self.gamma),("Newmark beta",self.beta),("Number of modes",self.modes))
+        fields=(("Tag",self.tag),("Name",self.name),("Analysis type",self.kind),("Constraints",self.constraints),("Numberer",self.numberer),("System",self.system),("Test",self.test),("Tolerance",self.tol),("Max iterations",self.max_iter),("Algorithm",self.algorithm),("Steps",self.steps),("Load increment",self.load_inc),("Control node",self.control_node),("Control DOF",self.control_dof),("Disp. increment",self.disp_inc),("Cyclic targets",self.cyclic_targets),("Cyclic max increment",self.cyclic_inc),("Time step dt",self.dt),("Newmark gamma",self.gamma),("Newmark beta",self.beta),("Rayleigh damping ratio",self.damping_ratio),("Rayleigh mode i",self.damping_mode_i),("Rayleigh mode j",self.damping_mode_j),("Number of modes",self.modes))
         for label,w in fields: form.addRow(label+":",w)
         form.addRow("Recovery:",self.recovery)
         form.addRow("Adaptive step:",self.adaptive)
@@ -142,7 +151,9 @@ class AnalysisDialog(QDialog):
         self.disp_inc.setEnabled(push)
         self.cyclic_targets.setEnabled(cyclic)
         self.cyclic_inc.setEnabled(cyclic)
-        self.dt.setEnabled(transient); self.gamma.setEnabled(transient); self.beta.setEnabled(transient); self.modes.setEnabled(modal)
+        self.dt.setEnabled(transient); self.gamma.setEnabled(transient); self.beta.setEnabled(transient)
+        self.damping_ratio.setEnabled(transient); self.damping_mode_i.setEnabled(transient); self.damping_mode_j.setEnabled(transient)
+        self.modes.setEnabled(modal)
     def data(self):
         cyclic_targets=[]
         for raw in self.cyclic_targets.text().replace(";", ",").split(","):
@@ -157,7 +168,11 @@ class AnalysisDialog(QDialog):
             steps=self.steps.value(),load_increment=self.load_inc.value(),control_node=self.control_node.value(),
             control_dof=int(self.control_dof.currentData()),displacement_increment=self.disp_inc.value(),
             cyclic_targets=cyclic_targets,cyclic_increment=self.cyclic_inc.value(),
-            dt=self.dt.value(),gamma=self.gamma.value(),beta=self.beta.value(),num_modes=self.modes.value(),
+            dt=self.dt.value(),gamma=self.gamma.value(),beta=self.beta.value(),
+            rayleigh_damping_ratio=self.damping_ratio.value(),
+            rayleigh_mode_i=self.damping_mode_i.value(),
+            rayleigh_mode_j=self.damping_mode_j.value(),
+            num_modes=self.modes.value(),
             recovery=self.recovery.isChecked(),
             adaptive_step=self.adaptive.isChecked(),
             adaptive_cutback_factor=self.cutback.value(),
