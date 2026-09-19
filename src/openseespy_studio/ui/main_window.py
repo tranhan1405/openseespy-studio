@@ -946,6 +946,7 @@ class MainWindow(QMainWindow):
             "enabled": False,
         }
         self._last_result: dict[str, object] = {}
+        self._last_result_cache_key: object | None = None
         self._active_solution_result_tag: int | None = None
         self._results_dock_sized_once = False
         self._dirty = False
@@ -4820,9 +4821,10 @@ class MainWindow(QMainWindow):
             return None
         result = dict(job.results)
         self._last_result = result
+        self._last_result_cache_key = ("job", job.job_id)
         self.results_panel.set_result(
             result,
-            cache_key=("job", job.job_id),
+            cache_key=self._last_result_cache_key,
         )
         return result
 
@@ -5262,6 +5264,7 @@ class MainWindow(QMainWindow):
         options["_element_scope"] = sorted(elements)
 
         self._last_result = payload
+        self._last_result_cache_key = result_cache_key
         self.results_panel.set_result(
             payload,
             cache_key=result_cache_key,
@@ -5283,6 +5286,7 @@ class MainWindow(QMainWindow):
                 scale=float(options.get("scale", 10.0)),
                 node_tags=nodes or None,
                 element_tags=elements or None,
+                cache_key=result_cache_key,
             )
         elif result_type in {"NodalDisplacement", "NodalReaction"}:
             quantity = (
@@ -5302,6 +5306,7 @@ class MainWindow(QMainWindow):
                 component,
                 node_tags=nodes or None,
                 element_tags=elements or None,
+                cache_key=result_cache_key,
             )
         elif result_type == "MemberForce":
             self.viewport.show_member_force_diagram(
@@ -5310,11 +5315,13 @@ class MainWindow(QMainWindow):
                 str(options.get("component", "Mz")),
                 scale=float(options.get("scale", 1.0)),
                 element_tags=elements or None,
+                cache_key=result_cache_key,
             )
         elif result_type == "HingeState":
             self.viewport.show_hinge_states(
                 payload,
                 element_tags=elements or None,
+                cache_key=result_cache_key,
             )
         elif result_type == "ModeShape":
             modes = payload.get("modes", {})
@@ -5327,6 +5334,7 @@ class MainWindow(QMainWindow):
                 scale=float(options.get("scale", 1.0)),
                 node_tags=nodes or None,
                 element_tags=elements or None,
+                cache_key=result_cache_key,
             )
 
     def _show_jobs_summary(self) -> None:
@@ -5437,9 +5445,10 @@ class MainWindow(QMainWindow):
             )
             return
         self._last_result = dict(job.results)
+        self._last_result_cache_key = ("job", job.job_id)
         self.results_panel.set_result(
             self._last_result,
-            cache_key=("job", job.job_id),
+            cache_key=self._last_result_cache_key,
         )
         self._show_job_properties(job.job_id)
         self.status_message.setText(
@@ -7019,13 +7028,14 @@ class MainWindow(QMainWindow):
 
         if result:
             self._last_result = result
+            self._last_result_cache_key = (
+                ("job", job.job_id)
+                if job is not None
+                else None
+            )
             self.results_panel.set_result(
                 result,
-                cache_key=(
-                    ("job", job.job_id)
-                    if job is not None
-                    else None
-                ),
+                cache_key=self._last_result_cache_key,
             )
             analysis_type = str(result.get("analysis", {}).get("type", ""))
             if analysis_type == "Modal":
@@ -7036,9 +7046,14 @@ class MainWindow(QMainWindow):
                         result,
                         first_mode,
                         scale=1.0,
+                        cache_key=self._last_result_cache_key,
                     )
             elif result.get("final"):
-                self.viewport.show_deformed_shape(result, scale=10.0)
+                self.viewport.show_deformed_shape(
+                    result,
+                    scale=10.0,
+                    cache_key=self._last_result_cache_key,
+                )
 
         self._append_analysis_log(
             "-" * 72 + "\n"
@@ -7065,6 +7080,7 @@ class MainWindow(QMainWindow):
             "enabled": False,
         }
         self._last_result = {}
+        self._last_result_cache_key = None
         self._active_solution_result_tag = None
         self.viewport.clear_result_overlay()
         self.results_panel.clear_all()
@@ -7075,9 +7091,10 @@ class MainWindow(QMainWindow):
             return
         if job.results:
             self._last_result = dict(job.results)
+            self._last_result_cache_key = ("job", job.job_id)
             self.results_panel.set_result(
                 self._last_result,
-                cache_key=("job", job.job_id),
+                cache_key=self._last_result_cache_key,
             )
         self._show_job_properties(job.job_id)
         self.status_message.setText(
@@ -7091,6 +7108,7 @@ class MainWindow(QMainWindow):
         self.viewport.show_deformed_shape(
             self._last_result,
             scale=float(scale),
+            cache_key=self._last_result_cache_key,
         )
         self.status_message.setText(
             f"Showing deformed shape · scale {float(scale):g}"
@@ -7108,6 +7126,7 @@ class MainWindow(QMainWindow):
             self._last_result,
             str(quantity),
             str(component),
+            cache_key=self._last_result_cache_key,
         )
         self.status_message.setText(
             f"Showing {str(quantity).lower()} contour · {component}"
@@ -7129,7 +7148,10 @@ class MainWindow(QMainWindow):
                 "No fiber-state result available"
             )
             return
-        self.viewport.show_hinge_states(self._last_result)
+        self.viewport.show_hinge_states(
+            self._last_result,
+            cache_key=self._last_result_cache_key,
+        )
         self.status_message.setText(
             "Showing fiber-based plastic hinge / limit states"
         )
@@ -7149,6 +7171,7 @@ class MainWindow(QMainWindow):
             self.project.transformations,
             str(component),
             scale=float(scale),
+            cache_key=self._last_result_cache_key,
         )
         self.status_message.setText(
             f"Showing local {component} diagram · scale "
@@ -7163,6 +7186,7 @@ class MainWindow(QMainWindow):
             self._last_result,
             int(mode),
             scale=float(scale),
+            cache_key=self._last_result_cache_key,
         )
         self.status_message.setText(
             f"Showing mode {int(mode)} · scale {float(scale):g}"
