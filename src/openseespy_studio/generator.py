@@ -270,7 +270,81 @@ def material_to_openseespy(
             + f"{stress(p['ft']):g}, {stress(p['Ets']):g}, 1)"
         )
 
+    if material.material_type == "MinMax":
+        return (
+            "ops.uniaxialMaterial('MinMax', "
+            f"{material.tag}, {material.base_material_tag}, "
+            f"'-min', {p['min']:g}, '-max', {p['max']:g})"
+        )
+
+    if material.material_type == "Fatigue":
+        return (
+            "ops.uniaxialMaterial('Fatigue', "
+            f"{material.tag}, {material.base_material_tag}, "
+            f"'-E0', {p['E0']:g}, '-m', {p['m']:g}, "
+            f"'-min', {p['min']:g}, '-max', {p['max']:g})"
+        )
+
+    if material.material_type == "Parallel":
+        tags = ", ".join(str(tag) for tag in material.material_tags)
+        factors = ", ".join(f"{value:g}" for value in material.factors)
+        return (
+            f"ops.uniaxialMaterial('Parallel', {material.tag}, {tags}, "
+            f"'-factors', {factors})"
+        )
+
+    if material.material_type == "Series":
+        tags = ", ".join(str(tag) for tag in material.material_tags)
+        return f"ops.uniaxialMaterial('Series', {material.tag}, {tags})"
+
     raise ValueError(f"Unsupported material type: {material.material_type}")
+
+
+def ordered_material_tags(
+    materials: dict[int, MaterialData],
+) -> list[int]:
+    """Topologically order material wrappers after their dependencies."""
+    graph: dict[int, list[int]] = {}
+    for tag, material in materials.items():
+        if material.material_type in {"MinMax", "Fatigue"}:
+            deps = (
+                []
+                if material.base_material_tag is None
+                else [material.base_material_tag]
+            )
+        elif material.material_type in {"Parallel", "Series"}:
+            deps = list(material.material_tags)
+        else:
+            deps = []
+        missing = [dependency for dependency in deps if dependency not in materials]
+        if missing:
+            raise ValueError(
+                f"Material {tag} references missing material tag(s): "
+                + ", ".join(map(str, missing))
+            )
+        graph[int(tag)] = deps
+
+    ordered: list[int] = []
+    temporary: set[int] = set()
+    permanent: set[int] = set()
+
+    def visit(tag: int) -> None:
+        if tag in permanent:
+            return
+        if tag in temporary:
+            raise ValueError(
+                "Material wrapper references contain a dependency cycle."
+            )
+        temporary.add(tag)
+        for dependency in graph[tag]:
+            visit(dependency)
+        temporary.remove(tag)
+        permanent.add(tag)
+        ordered.append(tag)
+
+    for tag in sorted(graph):
+        visit(tag)
+    return ordered
 
 
 def elastic_section_parameters_in_model_units(
@@ -1771,7 +1845,7 @@ def to_openseespy(
 
     if materials:
         lines.extend(["", "# Materials"])
-        for tag in sorted(materials):
+        for tag in ordered_material_tags(materials):
             lines.append(material_to_openseespy(materials[tag], units))
 
     if sections:

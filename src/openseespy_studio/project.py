@@ -11,7 +11,7 @@ from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 24
+PROJECT_FORMAT_VERSION = 25
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -26,6 +26,10 @@ MATERIAL_CATEGORIES: dict[str, str] = {
     "Bond_SP01": "Bond / Interface",
     "ElasticPPGap": "Hysteretic / Connection",
     "FRPConfinedConcrete02": "Concrete / FRP",
+    "MinMax": "Wrapper / Composite",
+    "Fatigue": "Wrapper / Composite",
+    "Parallel": "Wrapper / Composite",
+    "Series": "Wrapper / Composite",
 }
 
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
@@ -55,6 +59,10 @@ MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
         "fc0", "Ec", "ec0", "mode", "tfrp", "Efrp", "erup", "R",
         "fcu", "ecu", "ft", "Ets",
     ),
+    "MinMax": ("min", "max"),
+    "Fatigue": ("E0", "m", "min", "max"),
+    "Parallel": (),
+    "Series": (),
 }
 
 MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
@@ -82,6 +90,10 @@ MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
         "Efrp": "stress", "R": "length", "fcu": "stress",
         "ft": "stress", "Ets": "stress",
     },
+    "MinMax": {},
+    "Fatigue": {},
+    "Parallel": {},
+    "Series": {},
 }
 
 MATERIAL_ENGINEERING_DEFAULTS: dict[str, dict[str, float]] = {
@@ -112,6 +124,10 @@ MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
     "Bond_SP01": {"Fy": 5.0e8, "Sy": 0.001, "Fu": 6.5e8, "Su": 0.01, "b": 0.4, "R": 0.8},
     "ElasticPPGap": {"E": 1.0, "Fy": 1.0, "gap": 0.0, "eta": 0.0, "damage": 0.0},
     "FRPConfinedConcrete02": {"fc0": -30.0e6, "Ec": 3.0e10, "ec0": -0.002, "mode": 0.0, "tfrp": 0.000334, "Efrp": 7.2e10, "erup": 0.015, "R": 0.2, "fcu": -45.0e6, "ecu": -0.015, "ft": 3.0e6, "Ets": 1.5e9},
+    "MinMax": {"min": -1.0e16, "max": 1.0e16},
+    "Fatigue": {"E0": 0.191, "m": -0.458, "min": -1.0e16, "max": 1.0e16},
+    "Parallel": {},
+    "Series": {},
 }
 
 
@@ -123,6 +139,9 @@ class MaterialData:
     parameters: dict[str, float] = field(default_factory=dict)
     poisson_ratio: float = 0.3
     density: float = 0.0
+    base_material_tag: int | None = None
+    material_tags: list[int] = field(default_factory=list)
+    factors: list[float] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.tag = int(self.tag)
@@ -138,6 +157,47 @@ class MaterialData:
         for key in MATERIAL_PARAMETER_ORDER[self.material_type]:
             normalized[key] = float(self.parameters.get(key, defaults[key]))
         self.parameters = normalized
+
+        self.base_material_tag = (
+            None
+            if self.base_material_tag is None
+            else int(self.base_material_tag)
+        )
+        self.material_tags = [int(tag) for tag in self.material_tags]
+        self.factors = [float(value) for value in self.factors]
+
+        if self.material_type in {"MinMax", "Fatigue"}:
+            if self.base_material_tag is None or self.base_material_tag <= 0:
+                raise ValueError(
+                    f"{self.material_type} requires a valid base material tag."
+                )
+            self.material_tags = []
+            self.factors = []
+        elif self.material_type in {"Parallel", "Series"}:
+            self.base_material_tag = None
+            if not self.material_tags:
+                raise ValueError(
+                    f"{self.material_type} requires at least one component material."
+                )
+            if any(tag <= 0 for tag in self.material_tags):
+                raise ValueError("Component material tags must be positive.")
+            if len(set(self.material_tags)) != len(self.material_tags):
+                raise ValueError(
+                    f"{self.material_type} component material tags must be unique."
+                )
+            if self.material_type == "Parallel":
+                if not self.factors:
+                    self.factors = [1.0] * len(self.material_tags)
+                if len(self.factors) != len(self.material_tags):
+                    raise ValueError(
+                        "Parallel requires one factor per component material."
+                    )
+            else:
+                self.factors = []
+        else:
+            self.base_material_tag = None
+            self.material_tags = []
+            self.factors = []
 
         engineering_defaults = MATERIAL_ENGINEERING_DEFAULTS[self.material_type]
         if self.poisson_ratio is None:
@@ -185,6 +245,9 @@ class MaterialData:
             "parameters": dict(self.parameters),
             "poisson_ratio": self.poisson_ratio,
             "density": self.density,
+            "base_material_tag": self.base_material_tag,
+            "material_tags": list(self.material_tags),
+            "factors": list(self.factors),
         }
 
     @classmethod
@@ -215,6 +278,17 @@ class MaterialData:
                     ]["density"],
                 )
             ),
+            base_material_tag=(
+                None
+                if data.get("base_material_tag") is None
+                else int(data.get("base_material_tag"))
+            ),
+            material_tags=[
+                int(value) for value in data.get("material_tags", [])
+            ],
+            factors=[
+                float(value) for value in data.get("factors", [])
+            ],
         )
 
 
@@ -1660,12 +1734,80 @@ class ProjectDatabase:
         default_factory=lambda: dict(DEFAULT_PROJECT_UNITS)
     )
 
+    @staticmethod
+    def material_dependencies(material: MaterialData) -> list[int]:
+        if material.material_type in {"MinMax", "Fatigue"}:
+            return (
+                []
+                if material.base_material_tag is None
+                else [material.base_material_tag]
+            )
+        if material.material_type in {"Parallel", "Series"}:
+            return list(material.material_tags)
+        return []
+
+    def _validate_material_dependencies(
+        self,
+        material: MaterialData,
+        *,
+        replacing_tag: int | None = None,
+    ) -> None:
+        dependencies = self.material_dependencies(material)
+        if material.tag in dependencies:
+            raise ValueError("A material cannot reference itself.")
+        available = set(self.materials)
+        if replacing_tag is not None:
+            available.discard(int(replacing_tag))
+        available.add(material.tag)
+        missing = sorted(tag for tag in dependencies if tag not in available)
+        if missing:
+            raise ValueError(
+                f"{material.material_type} references missing material tag(s): "
+                + ", ".join(map(str, missing))
+            )
+
+        graph = {
+            tag: self.material_dependencies(item)
+            for tag, item in self.materials.items()
+            if replacing_tag is None or tag != int(replacing_tag)
+        }
+        graph[material.tag] = dependencies
+
+        visiting: set[int] = set()
+        visited: set[int] = set()
+
+        def visit(tag: int) -> None:
+            if tag in visited:
+                return
+            if tag in visiting:
+                raise ValueError(
+                    "Material wrapper references contain a dependency cycle."
+                )
+            visiting.add(tag)
+            for dependency in graph.get(tag, []):
+                if dependency in graph:
+                    visit(dependency)
+            visiting.remove(tag)
+            visited.add(tag)
+
+        for tag in graph:
+            visit(tag)
+
+    def materials_using_material(self, material_tag: int) -> list[int]:
+        target = int(material_tag)
+        return sorted(
+            material.tag
+            for material in self.materials.values()
+            if target in self.material_dependencies(material)
+        )
+
     def next_material_tag(self) -> int:
         return max(self.materials, default=0) + 1
 
     def add_material(self, material: MaterialData) -> None:
         if material.tag in self.materials:
             raise ValueError(f"Material tag {material.tag} already exists.")
+        self._validate_material_dependencies(material)
         self.materials[material.tag] = material
 
     def update_material(self, original_tag: int, material: MaterialData) -> None:
@@ -1674,6 +1816,10 @@ class ProjectDatabase:
             raise ValueError(f"Material tag {original_tag} does not exist.")
         if material.tag != original_tag and material.tag in self.materials:
             raise ValueError(f"Material tag {material.tag} already exists.")
+        self._validate_material_dependencies(
+            material,
+            replacing_tag=original_tag,
+        )
         self.materials.pop(original_tag)
         self.materials[material.tag] = material
 

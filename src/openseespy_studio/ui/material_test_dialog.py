@@ -157,6 +157,7 @@ class MaterialTestDialog(QDialog):
         material: MaterialData,
         *,
         units=None,
+        materials: dict[int, MaterialData] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -166,13 +167,19 @@ class MaterialTestDialog(QDialog):
 
         self.material = material
         self.units = dict(units or {})
+        self.materials = dict(materials or {})
+        self.materials[material.tag] = material
         self._process: QProcess | None = None
         self._script_path: str | None = None
         self._result_path: str | None = None
         self._output_buffer = ""
         self._result: dict[str, object] | None = None
 
-        default = default_material_test_spec(material, self.units)
+        default = default_material_test_spec(
+            material,
+            self.units,
+            self.materials,
+        )
 
         root = QVBoxLayout(self)
 
@@ -302,6 +309,7 @@ class MaterialTestDialog(QDialog):
                 self.material,
                 self.units,
                 spec,
+                self.materials,
             )
         except ValueError as exc:
             QMessageBox.warning(self, "Material Test Lab", str(exc))
