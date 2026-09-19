@@ -1866,6 +1866,32 @@ class ProjectDatabase:
         if pattern.tag != original_tag and pattern.tag in self.load_patterns:
             raise ValueError(f"Load pattern tag {pattern.tag} already exists.")
         self._validate_load_pattern(pattern)
+        if pattern.pattern_type != "Plain":
+            dependent_nodal = [
+                load.tag
+                for load in self.nodal_loads.values()
+                if load.pattern_tag == original_tag
+            ]
+            dependent_element = [
+                load.tag
+                for load in self.element_loads.values()
+                if load.pattern_tag == original_tag
+            ]
+            dependent_displacement = [
+                displacement.tag
+                for displacement in self.prescribed_displacements.values()
+                if displacement.pattern_tag == original_tag
+            ]
+            if (
+                dependent_nodal
+                or dependent_element
+                or dependent_displacement
+            ):
+                raise ValueError(
+                    "A Plain pattern containing nodal loads, beam loads, "
+                    "or prescribed displacements cannot be changed to "
+                    "UniformExcitation."
+                )
         self.load_patterns.pop(original_tag)
         self.load_patterns[pattern.tag] = pattern
         if pattern.tag != original_tag:
