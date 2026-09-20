@@ -3521,6 +3521,19 @@ class ResultsPanel(QWidget):
         )
         self.history_plot.set_series([], [])
 
+    def _modal_translation_axes(self) -> list[tuple[int, str]]:
+        model_info = self._result.get("model", {})
+        ndm = (
+            int(model_info.get("ndm", 3))
+            if isinstance(model_info, dict)
+            else 3
+        )
+        return (
+            [(1, "UX"), (2, "UY")]
+            if ndm == 2
+            else [(1, "UX"), (2, "UY"), (3, "UZ")]
+        )
+
     def _populate_modal_summary(self) -> None:
         modes = (
             self._result.get("modes", {})
@@ -3529,10 +3542,22 @@ class ResultsPanel(QWidget):
         )
         if not isinstance(modes, dict):
             modes = {}
+        axes = self._modal_translation_axes()
+        headers = [
+            "Mode",
+            "Eigenvalue",
+            "Frequency [Hz]",
+            "Period [s]",
+            *(f"{label} mass %" for _, label in axes),
+            *(f"Cum. {label} %" for _, label in axes),
+        ]
+        self.modal_summary_table.setColumnCount(len(headers))
+        self.modal_summary_table.setHorizontalHeaderLabels(headers)
+
         ordered = sorted(modes, key=lambda value: int(value))
         self.modal_summary_table.setRowCount(len(ordered))
+        cumulative = [0.0] * len(axes)
 
-        cumulative = [0.0, 0.0, 0.0]
         for row, key in enumerate(ordered):
             mode = modes.get(key, {})
             eigenvalue = float(mode.get("eigenvalue", 0.0) or 0.0)
@@ -3540,7 +3565,7 @@ class ResultsPanel(QWidget):
             period = mode.get("period_s")
             participation = mode.get("participation", {})
             ratios: list[float] = []
-            for dof in (1, 2, 3):
+            for index, (dof, _label) in enumerate(axes):
                 item = (
                     participation.get(str(dof), {})
                     if isinstance(participation, dict)
@@ -3550,7 +3575,7 @@ class ResultsPanel(QWidget):
                     item.get("mass_ratio", 0.0) or 0.0
                 )
                 ratios.append(ratio)
-                cumulative[dof - 1] += ratio
+                cumulative[index] += ratio
 
             values = [
                 str(key),
@@ -3594,7 +3619,7 @@ class ResultsPanel(QWidget):
         participation = mode.get("participation", {})
 
         mass_text: list[str] = []
-        for dof, label in ((1, "UX"), (2, "UY"), (3, "UZ")):
+        for dof, label in self._modal_translation_axes():
             item = (
                 participation.get(str(dof), {})
                 if isinstance(participation, dict)
