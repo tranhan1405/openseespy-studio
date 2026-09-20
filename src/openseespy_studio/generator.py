@@ -2338,6 +2338,45 @@ def to_openseespy(
     ])
     for tag in sorted(model.elements):
         e = model.elements[tag]
+
+        if e.element_type == "truss":
+            if e.truss_area <= 0.0:
+                lines.append(
+                    f"# ERROR: Truss element {tag} has non-positive area; "
+                    "element not generated."
+                )
+                continue
+            if e.truss_material_tag is None:
+                lines.append(
+                    f"# ERROR: Truss element {tag} has no material assigned; "
+                    "element not generated."
+                )
+                continue
+            if (
+                materials is None
+                or e.truss_material_tag not in materials
+            ):
+                lines.append(
+                    f"# ERROR: Truss element {tag} references missing material "
+                    f"{e.truss_material_tag}; element not generated."
+                )
+                continue
+
+            args = (
+                "ops.element('Truss', "
+                f"{tag}, {e.i}, {e.j}, {e.truss_area:g}, "
+                f"{e.truss_material_tag}"
+            )
+            if e.mass_per_length > 0.0:
+                args += f", '-rho', {e.mass_per_length:g}"
+            if e.consistent_mass:
+                args += ", '-cMass', 1"
+            if e.truss_do_rayleigh:
+                args += ", '-doRayleigh', 1"
+            args += ")"
+            lines.append(args)
+            continue
+
         transf_tag = e.transf_tag
         if transf_tag is None:
             lines.append(
