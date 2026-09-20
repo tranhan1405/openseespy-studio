@@ -1012,12 +1012,41 @@ class ModelViewport(QWidget):
                 mapping[int(tag)] = self._hex_rgb(color)
             return mapping, []
 
-        keys = {
-            self._element_color_key(self._model.elements[tag])
+        section_material_cache: dict[int, int | None] = {}
+        fiber_material_tags: set[int] = set()
+
+        def key_for_tag(tag: int) -> tuple[str, object]:
+            element = self._model.elements[tag]
+            if self._model_color_mode != "material":
+                return self._element_color_key(element)
+
+            if element.element_type == "truss":
+                return "material", element.truss_material_tag
+            if element.section_tag is None:
+                return "material", None
+
+            section_tag = int(element.section_tag)
+            if section_tag not in section_material_cache:
+                section = self._sections.get(section_tag)
+                if section is None:
+                    section_material_cache[section_tag] = None
+                elif section.section_type == "Elastic":
+                    section_material_cache[section_tag] = section.material_tag
+                elif section.section_type == "Fiber":
+                    section_material_cache[section_tag] = (
+                        self._dominant_fiber_material(section)
+                    )
+                    fiber_material_tags.update(section.fiber_material_tags())
+                else:
+                    section_material_cache[section_tag] = None
+            return "material", section_material_cache[section_tag]
+
+        tag_keys = {
+            int(tag): key_for_tag(int(tag))
             for tag in visible_tags
         }
         ordered_keys = sorted(
-            keys,
+            set(tag_keys.values()),
             key=lambda item: (item[0], str(item[1])),
         )
         palette = self._display_palette()
@@ -1026,38 +1055,24 @@ class ModelViewport(QWidget):
             for index, key in enumerate(ordered_keys)
         }
         mapping = {
-            int(tag): self._hex_rgb(
-                key_colors[self._element_color_key(self._model.elements[tag])]
-            )
-            for tag in visible_tags
+            tag: self._hex_rgb(key_colors[key])
+            for tag, key in tag_keys.items()
         }
         legend = [
             (self._element_color_label(key), key_colors[key])
             for key in ordered_keys
         ]
 
-        # Fiber sections can contain multiple materials. Include all of them in
-        # Material-mode legend even though the member body uses the dominant
-        # area material for readability.
         if self._model_color_mode == "material":
-            material_tags: set[int] = set()
-            for tag in visible_tags:
-                element = self._model.elements[tag]
-                if element.section_tag is None:
-                    if element.truss_material_tag is not None:
-                        material_tags.add(int(element.truss_material_tag))
-                    continue
-                section = self._sections.get(int(element.section_tag))
-                if section is not None and section.section_type == "Fiber":
-                    material_tags.update(section.fiber_material_tags())
             existing = {label for label, _ in legend}
             next_index = len(ordered_keys)
-            for material_tag in sorted(material_tags):
+            for material_tag in sorted(fiber_material_tags):
                 label = self._material_label(material_tag)
                 if label in existing:
                     continue
                 color = palette[next_index % len(palette)]
                 legend.append((label, color))
+                existing.add(label)
                 next_index += 1
 
         return mapping, legend
@@ -1143,7 +1158,10 @@ class ModelViewport(QWidget):
             if (
                 geometry_changed
                 and self._model is not None
-                and self._model_representation == "actual_section"
+                and (
+                    self._model_representation == "actual_section"
+                    or self._model_color_mode in {"material", "section"}
+                )
             ):
                 self._rebuild_visible_scene()
             else:
@@ -1725,6 +1743,7 @@ class ModelViewport(QWidget):
                 mesh,
                 scalars="display_rgb" if has_rgb else None,
                 rgb=has_rgb,
+                show_scalar_bar=False,
                 color=(
                     None
                     if has_rgb
