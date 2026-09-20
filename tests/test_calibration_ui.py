@@ -254,3 +254,90 @@ def test_apply_calibration_case_dialog_displays_old_and_new_values(qapp):
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+
+def test_results_panel_calibration_history_plots_best_score_and_parameter_path(
+    qapp,
+):
+    panel = ResultsPanel()
+    rows = [
+        {
+            "rank": 3,
+            "job_id": 31,
+            "case_id": 1,
+            "round": 1,
+            "round_case": 1,
+            "score": 10.0,
+            "components": {},
+            "matched_reversal_count": 4,
+            "values": {
+                "material:1:Fy": 450.0,
+                "material:2:fpc": -30.0,
+            },
+            "status": "Scored",
+        },
+        {
+            "rank": 2,
+            "job_id": 32,
+            "case_id": 2,
+            "round": 2,
+            "round_case": 1,
+            "score": 6.0,
+            "components": {},
+            "matched_reversal_count": 4,
+            "values": {
+                "material:1:Fy": 500.0,
+                "material:2:fpc": -32.0,
+            },
+            "status": "Scored",
+        },
+        {
+            "rank": 1,
+            "job_id": 33,
+            "case_id": 3,
+            "round": 3,
+            "round_case": 1,
+            "score": 4.0,
+            "components": {},
+            "matched_reversal_count": 4,
+            "values": {
+                "material:1:Fy": 525.0,
+                "material:2:fpc": -33.0,
+            },
+            "status": "Scored",
+        },
+    ]
+    try:
+        panel.set_calibration_results(rows)
+        qapp.processEvents()
+
+        assert panel.calibration_score_plot._x == pytest.approx(
+            [1.0, 2.0, 3.0]
+        )
+        assert panel.calibration_score_plot._y == pytest.approx(
+            [10.0, 6.0, 4.0]
+        )
+        assert "best 4%" in panel.calibration_score_info.text()
+
+        fy_index = panel.calibration_parameter_combo.findData(
+            "material:1:Fy"
+        )
+        assert fy_index >= 0
+        panel.calibration_parameter_combo.setCurrentIndex(fy_index)
+        qapp.processEvents()
+
+        assert panel.calibration_parameter_plot._x == pytest.approx(
+            [1.0, 2.0, 3.0]
+        )
+        assert panel.calibration_parameter_plot._y == pytest.approx(
+            [450.0, 500.0, 525.0]
+        )
+        assert "M1.Fy round-best trajectory" in (
+            panel.calibration_parameter_info.text()
+        )
+        assert "R3 C3: 525" in panel.calibration_parameter_info.text()
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
