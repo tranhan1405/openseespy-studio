@@ -145,19 +145,30 @@ def runtime_self_check() -> dict[str, Any]:
     import pyvistaqt
     import openseespy.opensees as ops
 
+    from .ground_motion_library import (
+        available_ground_motion_presets,
+        load_bundled_ground_motion_record,
+    )
     from .runtime import is_frozen_runtime
 
-    resource = (
-        resources.files("openseespy_studio")
-        .joinpath("resources")
-        .joinpath("ground_motions")
-        .joinpath("elCentro_1940_NS.at2")
-    )
-    if not resource.is_file():
-        raise RuntimeError(
-            "Bundled ground-motion resource is missing: "
-            "elCentro_1940_NS.at2"
+    offline_records = [
+        preset
+        for preset in available_ground_motion_presets(
+            include_custom=False
         )
+        if preset.bundled_resource
+    ]
+    if not offline_records:
+        raise RuntimeError(
+            "No bundled offline ground-motion records are available."
+        )
+    for preset in offline_records:
+        record = load_bundled_ground_motion_record(preset.key)
+        if not record.values or record.dt is None or record.dt <= 0.0:
+            raise RuntimeError(
+                "Bundled ground-motion record is invalid or missing: "
+                f"{preset.key}"
+            )
 
     try:
         ops.wipe()
@@ -206,7 +217,10 @@ def runtime_self_check() -> dict[str, Any]:
         "pyvistaqt": getattr(pyvistaqt, "__version__", "unknown"),
         "opensees": str(opensees_version),
         "solver_smoke_displacement": displacement,
-        "bundled_ground_motion": resource.name,
+        "bundled_ground_motion_count": len(offline_records),
+        "bundled_ground_motions": [
+            preset.key for preset in offline_records
+        ],
         "frozen": is_frozen_runtime(),
         "status": "ok",
     }
