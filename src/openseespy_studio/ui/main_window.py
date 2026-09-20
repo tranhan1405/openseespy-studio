@@ -9915,6 +9915,8 @@ class MainWindow(QMainWindow):
         for choice in result_choices_for_analysis(
             analysis_type,
             convergence_test,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
         ):
             submenu = categories.get(choice.category)
             if submenu is None:
