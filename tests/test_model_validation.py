@@ -132,7 +132,7 @@ def test_zero_length_and_duplicate_geometry_are_detected():
 
 def test_unsupported_element_formulation_blocks_run():
     project = _frame_project()
-    project.model.elements[1].element_type = "truss"
+    project.model.elements[1].element_type = "unsupportedElement"
 
     issues = validate_project(project)
 
