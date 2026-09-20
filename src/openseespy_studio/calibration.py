@@ -68,6 +68,211 @@ class CalibrationWeights:
         return {key: value / total for key, value in raw.items()}
 
 
+CALIBRATION_OBJECTIVE_LABELS: dict[str, str] = {
+    "peak_force": "Peak |V| error [%]",
+    "reversal_nrmse": "Reversal NRMSE [%]",
+    "cycle_energy": "Cycle energy error [%]",
+    "max_displacement": "Max |u| error [%]",
+}
+
+
+def calibration_objective_label(key: str) -> str:
+    return CALIBRATION_OBJECTIVE_LABELS.get(str(key), str(key))
+
+
+def calibration_active_objectives(
+    weights: CalibrationWeights,
+) -> list[str]:
+    values = {
+        "peak_force": float(weights.peak_force),
+        "reversal_nrmse": float(weights.reversal_nrmse),
+        "cycle_energy": float(weights.cycle_energy),
+        "max_displacement": float(weights.max_displacement),
+    }
+    return [
+        key
+        for key, value in values.items()
+        if math.isfinite(value) and value > 0.0
+    ]
+
+
+def _calibration_objective_vector(
+    row: dict[str, Any],
+    objective_keys: Sequence[str],
+) -> tuple[float, ...] | None:
+    components = row.get("components", {})
+    if not isinstance(components, dict):
+        return None
+    vector: list[float] = []
+    for key in objective_keys:
+        value = components.get(str(key))
+        try:
+            number = abs(float(value))
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(number):
+            return None
+        vector.append(number)
+    return tuple(vector)
+
+
+def pareto_rank_calibration_cases(
+    cases: Sequence[dict[str, Any]],
+    objective_keys: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Assign non-dominated Pareto ranks for minimization objectives.
+
+    Rank 1 is the non-dominated set. Cases missing any selected objective
+    component are left unranked rather than receiving an imputed value.
+    """
+    keys = [
+        str(key)
+        for key in objective_keys
+        if str(key) in CALIBRATION_OBJECTIVE_LABELS
+    ]
+    rows = [dict(item) for item in cases]
+    if not keys:
+        for row in rows:
+            row["pareto_rank"] = None
+            row["pareto_front"] = False
+            row["pareto_eligible"] = False
+            row["pareto_objectives"] = []
+        return rows
+
+    vectors: dict[int, tuple[float, ...]] = {}
+    for index, row in enumerate(rows):
+        vector = _calibration_objective_vector(row, keys)
+        if vector is not None:
+            vectors[index] = vector
+
+    remaining = set(vectors)
+    rank = 1
+    while remaining:
+        front: list[int] = []
+        for index in sorted(remaining):
+            candidate = vectors[index]
+            dominated = False
+            for other_index in remaining:
+                if other_index == index:
+                    continue
+                other = vectors[other_index]
+                no_worse = all(
+                    other_value <= candidate_value
+                    for other_value, candidate_value in zip(
+                        other,
+                        candidate,
+                    )
+                )
+                strictly_better = any(
+                    other_value < candidate_value
+                    for other_value, candidate_value in zip(
+                        other,
+                        candidate,
+                    )
+                )
+                if no_worse and strictly_better:
+                    dominated = True
+                    break
+            if not dominated:
+                front.append(index)
+
+        if not front:
+            # Defensive escape for malformed numerical comparisons.
+            break
+        for index in front:
+            rows[index]["pareto_rank"] = rank
+            rows[index]["pareto_front"] = rank == 1
+            rows[index]["pareto_eligible"] = True
+            rows[index]["pareto_objectives"] = list(keys)
+        remaining.difference_update(front)
+        rank += 1
+
+    for index, row in enumerate(rows):
+        if index in vectors and "pareto_rank" in row:
+            continue
+        row["pareto_rank"] = None
+        row["pareto_front"] = False
+        row["pareto_eligible"] = index in vectors
+        row["pareto_objectives"] = list(keys)
+    return rows
+
+
+def calibration_available_objectives(
+    rows: Sequence[dict[str, Any]],
+) -> list[str]:
+    available: list[str] = []
+    for key in CALIBRATION_OBJECTIVE_LABELS:
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            components = row.get("components", {})
+            if not isinstance(components, dict):
+                continue
+            try:
+                value = float(components.get(key))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                available.append(key)
+                break
+    return available
+
+
+def calibration_pareto_projection(
+    rows: Sequence[dict[str, Any]],
+    x_objective: str,
+    y_objective: str,
+) -> list[dict[str, Any]]:
+    """Return finite scatter points and selected-axis non-dominated flags."""
+    x_key = str(x_objective)
+    y_key = str(y_objective)
+    points: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        components = row.get("components", {})
+        if not isinstance(components, dict):
+            continue
+        try:
+            x = abs(float(components.get(x_key)))
+            y = abs(float(components.get(y_key)))
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(x) and math.isfinite(y)):
+            continue
+        points.append({
+            "case_id": int(row.get("case_id", 0) or 0),
+            "job_id": row.get("job_id"),
+            "round": int(row.get("round", 1) or 1),
+            "x": x,
+            "y": y,
+            "pareto_rank": row.get("pareto_rank"),
+            "global_pareto_front": bool(row.get("pareto_front", False)),
+            "projection_front": False,
+        })
+
+    for index, point in enumerate(points):
+        dominated = False
+        for other_index, other in enumerate(points):
+            if other_index == index:
+                continue
+            no_worse = (
+                float(other["x"]) <= float(point["x"])
+                and float(other["y"]) <= float(point["y"])
+            )
+            strictly_better = (
+                float(other["x"]) < float(point["x"])
+                or float(other["y"]) < float(point["y"])
+            )
+            if no_worse and strictly_better:
+                dominated = True
+                break
+        point["projection_front"] = not dominated
+
+    points.sort(key=lambda item: int(item["case_id"]))
+    return points
+
+
 def parameter_key(material_tag: int, parameter: str) -> str:
     return f"material:{int(material_tag)}:{str(parameter)}"
 
