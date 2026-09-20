@@ -3573,25 +3573,9 @@ class ModelViewport(QWidget):
 
         for tag in sorted(available):
             element = self._model.elements.get(tag)
-            if element is None or element.transf_tag is None:
-                continue
-            transformation = transformations.get(element.transf_tag)
-            if transformation is None:
+            if element is None:
                 continue
 
-            try:
-                _, local_y, local_z = element_local_axes(
-                    self._model,
-                    element,
-                    transformation,
-                )
-            except ValueError:
-                continue
-
-            axis = np.asarray(
-                local_y if use_local_y else local_z,
-                dtype=float,
-            )
             p_i = np.asarray(
                 self._model.nodes[element.i].xyz,
                 dtype=float,
@@ -3604,6 +3588,42 @@ class ModelViewport(QWidget):
             length = float(np.linalg.norm(member_vector))
             if length <= 1.0e-15:
                 continue
+
+            if element.element_type == "truss":
+                if component != "N":
+                    continue
+                member_axis = member_vector / length
+                axis = None
+                for reference in (
+                    np.asarray((0.0, 0.0, 1.0)),
+                    np.asarray((0.0, 1.0, 0.0)),
+                    np.asarray((1.0, 0.0, 0.0)),
+                ):
+                    candidate = np.cross(member_axis, reference)
+                    norm = float(np.linalg.norm(candidate))
+                    if norm > 1.0e-9:
+                        axis = candidate / norm
+                        break
+                if axis is None:
+                    continue
+            else:
+                if element.transf_tag is None:
+                    continue
+                transformation = transformations.get(element.transf_tag)
+                if transformation is None:
+                    continue
+                try:
+                    _, local_y, local_z = element_local_axes(
+                        self._model,
+                        element,
+                        transformation,
+                    )
+                except ValueError:
+                    continue
+                axis = np.asarray(
+                    local_y if use_local_y else local_z,
+                    dtype=float,
+                )
 
             xs, values = available[tag]
             first_index = len(diagram_points)
