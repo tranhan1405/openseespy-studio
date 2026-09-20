@@ -780,13 +780,19 @@ class _Importer:
                 int(args[2]),
             )
         elif kind == "UniformExcitation" and len(args) >= 4:
-            rest = args[4:]
+            direction = int(args[2])
+            rest = args[3:]
+            accel_tag = self.flag_value(rest, "-accel")
+            if accel_tag is None:
+                raise ValueError(
+                    "UniformExcitation requires an -accel timeSeries tag"
+                )
             item = LoadPatternData(
                 tag,
                 f"Imported UniformExcitation {tag}",
                 "UniformExcitation",
-                int(self.flag_value(rest, "-accel", args[2])),
-                direction=int(args[3]),
+                int(accel_tag),
+                direction=direction,
                 vel0=float(self.flag_value(rest, "-vel0", 0.0) or 0.0),
                 factor=float(self.flag_value(rest, "-fact", 1.0) or 1.0),
             )
@@ -948,7 +954,13 @@ class _Importer:
                     target.id for target in stmt.targets
                     if isinstance(target, ast.Name)
                 ]
-                if not names or not all(name.startswith("_studio_") for name in names):
+                if (
+                    not self._studio_source
+                    and (
+                        not names
+                        or not all(name.startswith("_studio_") for name in names)
+                    )
+                ):
                     self.issue(
                         "WARNING", stmt, "assignment",
                         "Assignment could not be resolved safely.",
