@@ -2118,7 +2118,53 @@ class ResultsPanel(QWidget):
             self._update_specimen_view
         )
         controls.addWidget(self.specimen_quantity, 1)
+        import_specimen_experiment = QPushButton("Import Experiment CSV")
+        import_specimen_experiment.clicked.connect(
+            self._import_cyclic_experiment_csv
+        )
+        controls.addWidget(import_specimen_experiment)
         layout.addLayout(controls)
+
+        experiment_controls = QHBoxLayout()
+        experiment_controls.addWidget(QLabel("Exp X:"))
+        self.specimen_exp_x_column = QComboBox()
+        self.specimen_exp_x_column.currentIndexChanged.connect(
+            self._update_specimen_view
+        )
+        experiment_controls.addWidget(self.specimen_exp_x_column, 1)
+        experiment_controls.addWidget(QLabel("×"))
+        self.specimen_exp_x_scale = QDoubleSpinBox()
+        self.specimen_exp_x_scale.setRange(-1.0e9, 1.0e9)
+        self.specimen_exp_x_scale.setDecimals(8)
+        self.specimen_exp_x_scale.setValue(1.0)
+        self.specimen_exp_x_scale.valueChanged.connect(
+            self._update_specimen_view
+        )
+        experiment_controls.addWidget(self.specimen_exp_x_scale)
+
+        experiment_controls.addWidget(QLabel("Exp Y:"))
+        self.specimen_exp_y_column = QComboBox()
+        self.specimen_exp_y_column.currentIndexChanged.connect(
+            self._update_specimen_view
+        )
+        experiment_controls.addWidget(self.specimen_exp_y_column, 1)
+        experiment_controls.addWidget(QLabel("×"))
+        self.specimen_exp_y_scale = QDoubleSpinBox()
+        self.specimen_exp_y_scale.setRange(-1.0e9, 1.0e9)
+        self.specimen_exp_y_scale.setDecimals(8)
+        self.specimen_exp_y_scale.setValue(1.0)
+        self.specimen_exp_y_scale.valueChanged.connect(
+            self._update_specimen_view
+        )
+        experiment_controls.addWidget(self.specimen_exp_y_scale)
+        layout.addLayout(experiment_controls)
+
+        self.specimen_experiment_info = QLabel(
+            "Experimental overlay is optional. For M–κ select curvature "
+            "as X and moment as Y."
+        )
+        self.specimen_experiment_info.setWordWrap(True)
+        layout.addWidget(self.specimen_experiment_info)
 
         self.specimen_info = QLabel(
             "Quick 1D Column instrumentation is captured automatically when "
@@ -3656,6 +3702,7 @@ class ResultsPanel(QWidget):
                 "independently to avoid hiding strain-penetration deformation."
             )
             self.specimen_plot.set_series(x, y)
+            self._update_specimen_experiment_overlay()
             return
 
         if selected == "interface_moment_rotation":
@@ -3691,6 +3738,7 @@ class ResultsPanel(QWidget):
                 "decomposition, not direct integration of section curvature."
             )
             self.specimen_plot.set_series(list(x), list(y))
+            self._update_specimen_experiment_overlay()
             return
 
         item = next(
@@ -3703,6 +3751,7 @@ class ResultsPanel(QWidget):
         )
         if item is None:
             self.specimen_plot.set_series([], [])
+            self.specimen_plot.clear_overlay()
             return
         self.specimen_info.setText(
             f"{item.get('source', '-')} · {item.get('label', '-')} · "
@@ -3719,6 +3768,62 @@ class ResultsPanel(QWidget):
         self.specimen_plot.set_series(
             list(item.get("x", [])),
             list(item.get("y", [])),
+        )
+        self._update_specimen_experiment_overlay()
+
+    def _update_specimen_experiment_overlay(self) -> None:
+        if not self._cyclic_experiment_dataset:
+            self.specimen_plot.clear_overlay()
+            self.specimen_experiment_info.setText(
+                "Experimental overlay is optional. For M–κ select "
+                "curvature as X and moment as Y."
+            )
+            return
+
+        x_column = self.specimen_exp_x_column.currentData()
+        y_column = self.specimen_exp_y_column.currentData()
+        if x_column is None or y_column is None:
+            self.specimen_plot.clear_overlay()
+            return
+        try:
+            x_index = int(x_column)
+            y_index = int(y_column)
+        except (TypeError, ValueError):
+            self.specimen_plot.clear_overlay()
+            return
+        if x_index < 0 or y_index < 0:
+            self.specimen_plot.clear_overlay()
+            self.specimen_experiment_info.setText(
+                "Experimental file loaded. Select Exp X and Exp Y to "
+                "overlay a specimen response such as M–κ."
+            )
+            return
+
+        x, y = experimental_csv_series(
+            self._cyclic_experiment_dataset,
+            x_index,
+            y_index,
+            x_scale=float(self.specimen_exp_x_scale.value()),
+            y_scale=float(self.specimen_exp_y_scale.value()),
+        )
+        if not x or not y:
+            self.specimen_plot.clear_overlay()
+            self.specimen_experiment_info.setText(
+                "Selected experimental X/Y columns contain no paired "
+                "numeric data."
+            )
+            return
+
+        self.specimen_plot.set_overlay(x, y, label="Experiment")
+        filename = (
+            self._cyclic_experiment_path.replace("\\", "/").split("/")[-1]
+            if self._cyclic_experiment_path
+            else "experimental data"
+        )
+        self.specimen_experiment_info.setText(
+            f"{filename} · {len(x)} point(s) · "
+            f"X={self.specimen_exp_x_column.currentText()} · "
+            f"Y={self.specimen_exp_y_column.currentText()}."
         )
 
     def _populate_history_nodes(self) -> None:
@@ -3814,7 +3919,52 @@ class ResultsPanel(QWidget):
 
         self.cyclic_exp_x_column.blockSignals(False)
         self.cyclic_exp_y_column.blockSignals(False)
+
+        if hasattr(self, "specimen_exp_x_column"):
+            self.specimen_exp_x_column.blockSignals(True)
+            self.specimen_exp_y_column.blockSignals(True)
+            self.specimen_exp_x_column.clear()
+            self.specimen_exp_y_column.clear()
+            self.specimen_exp_x_column.addItem("(none)", -1)
+            self.specimen_exp_y_column.addItem("(none)", -1)
+            for index, header in enumerate(headers):
+                label = str(header)
+                self.specimen_exp_x_column.addItem(label, index)
+                self.specimen_exp_y_column.addItem(label, index)
+
+            curvature_index = next(
+                (
+                    index
+                    for index, header in enumerate(headers)
+                    if any(
+                        token in str(header).strip().lower()
+                        for token in ("curvature", "kappa", "κ")
+                    )
+                ),
+                None,
+            )
+            moment_index = next(
+                (
+                    index
+                    for index, header in enumerate(headers)
+                    if "moment" in str(header).strip().lower()
+                ),
+                None,
+            )
+            if curvature_index is not None:
+                self.specimen_exp_x_column.setCurrentIndex(
+                    curvature_index + 1
+                )
+            if moment_index is not None:
+                self.specimen_exp_y_column.setCurrentIndex(
+                    moment_index + 1
+                )
+            self.specimen_exp_x_column.blockSignals(False)
+            self.specimen_exp_y_column.blockSignals(False)
+
         self._update_cyclic_plot()
+        if hasattr(self, "specimen_plot"):
+            self._update_specimen_view()
 
     def _import_cyclic_experiment_csv(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -3849,6 +3999,16 @@ class ResultsPanel(QWidget):
         self._cyclic_experiment_path = ""
         self.cyclic_exp_x_column.clear()
         self.cyclic_exp_y_column.clear()
+        if hasattr(self, "specimen_exp_x_column"):
+            self.specimen_exp_x_column.clear()
+            self.specimen_exp_y_column.clear()
+            self.specimen_exp_x_column.addItem("(none)", -1)
+            self.specimen_exp_y_column.addItem("(none)", -1)
+            self.specimen_plot.clear_overlay()
+            self.specimen_experiment_info.setText(
+                "Experimental overlay is optional. For M–κ select "
+                "curvature as X and moment as Y."
+            )
         self.cyclic_compare_table.setRowCount(0)
         self.cyclic_compare_table.hide()
         self.cyclic_plot.clear_overlay()
