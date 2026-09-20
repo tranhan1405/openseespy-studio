@@ -548,3 +548,89 @@ def test_generated_script_declares_consistent_project_units():
 
     assert "# Consistent model units: m, kN, s" in script
     assert "Material stress/modulus inputs are stored in Pa" in script
+
+
+def test_2d_uniform_element_load_uses_ndm2_opensees_syntax():
+    model = StructuralModel("2d-load", ndm=2, ndf=3)
+    load = ElementLoadData(
+        1,
+        "UDL 2D",
+        1,
+        5,
+        "Uniform",
+        wx=1.0,
+        wy=-2.0,
+        wz=0.0,
+    )
+
+    assert element_load_to_openseespy(load, model) == (
+        "ops.eleLoad('-ele', 5, '-type', '-beamUniform', -2, 1)"
+    )
+
+
+def test_2d_point_element_load_uses_ndm2_opensees_syntax():
+    model = StructuralModel("2d-point", ndm=2, ndf=3)
+    load = ElementLoadData(
+        1,
+        "Point 2D",
+        1,
+        5,
+        "Point",
+        px=4.0,
+        py=-5.0,
+        pz=0.0,
+        x_over_l=0.25,
+    )
+
+    assert element_load_to_openseespy(load, model) == (
+        "ops.eleLoad('-ele', 5, '-type', '-beamPoint', -5, 0.25, 4)"
+    )
+
+
+def test_2d_beam_load_rejects_nonzero_local_z_component():
+    model = StructuralModel("2d-invalid-load", ndm=2, ndf=3)
+
+    with pytest.raises(ValueError, match="nonzero local Wz"):
+        element_load_to_openseespy(
+            ElementLoadData(
+                1, "Bad UDL", 1, 5, "Uniform", wy=-2.0, wz=-3.0
+            ),
+            model,
+        )
+
+    with pytest.raises(ValueError, match="nonzero local Pz"):
+        element_load_to_openseespy(
+            ElementLoadData(
+                2,
+                "Bad point",
+                1,
+                5,
+                "Point",
+                py=-5.0,
+                pz=-6.0,
+                x_over_l=0.25,
+            ),
+            model,
+        )
+
+
+def test_beam_element_load_rejects_truss_target():
+    model = StructuralModel("truss-load", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    model.add_element(
+        5,
+        1,
+        2,
+        element_type="truss",
+        truss_area=1.0,
+        truss_material_tag=1,
+    )
+
+    with pytest.raises(ValueError, match="cannot be applied to Truss"):
+        element_load_to_openseespy(
+            ElementLoadData(
+                1, "Invalid truss UDL", 1, 5, "Uniform", wy=-1.0
+            ),
+            model,
+        )
