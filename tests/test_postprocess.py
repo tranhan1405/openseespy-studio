@@ -1452,3 +1452,42 @@ def test_cyclic_curve_comparison_reports_peaks_energy_and_reversal_nrmse():
         (20.0 - 19.0) / 19.0 * 100.0
     )
     assert metrics["closed_cycle_energy_sum"]["simulation"] >= 0.0
+
+
+def test_enrichment_builds_axial_force_diagram_for_truss():
+    model = StructuralModel()
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 3.0, 4.0, 0.0)
+    model.add_element(
+        9,
+        1,
+        2,
+        element_type="truss",
+        group="truss",
+        truss_area=0.002,
+        truss_material_tag=1,
+    )
+    result = {
+        "analysis": {"type": "Static"},
+        "final": {
+            "element_axial_forces": {"9": 125.0},
+            "element_local_forces": {},
+            "element_section_forces": {},
+            "load_factors": {},
+        },
+    }
+
+    enriched = enrich_member_force_results(
+        result,
+        model,
+        {},
+        {},
+        {1: MaterialData(1, "Steel", "Elastic", {"E": 200.0e9})},
+        {},
+        {"length": "m", "force": "kN", "time": "s"},
+    )
+
+    diagram = enriched["final"]["member_force_diagrams"]["9"]["N"]
+    assert diagram["source"] == "truss axialForce"
+    assert diagram["x"] == [0.0, 5.0]
+    assert diagram["values"] == [125.0, 125.0]
