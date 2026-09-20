@@ -47,7 +47,7 @@ def test_analysis_template_dialog_opens_for_every_template(
         initial_template=template_name,
     )
     try:
-        assert dialog.windowTitle() == "Analysis Template"
+        assert dialog.windowTitle() == "Analysis Wizard"
         assert dialog.template.currentText() == template_name
         assert dialog.pages.currentIndex() == page_index
         assert dialog.summary.text().strip()
