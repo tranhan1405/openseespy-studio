@@ -64,6 +64,9 @@ class CalibrationDialog(QDialog):
         self.parameter_table.horizontalHeader().setStretchLastSection(True)
         root.addWidget(self.parameter_table)
 
+        self.case_info = QLabel("")
+        self.case_info.setWordWrap(True)
+
         for row in range(3):
             enabled = QCheckBox()
             enabled.setChecked(row == 0)
@@ -110,8 +113,6 @@ class CalibrationDialog(QDialog):
             maximum.valueChanged.connect(self._update_case_count)
             self._material_changed(row)
 
-        self.case_info = QLabel("")
-        self.case_info.setWordWrap(True)
         root.addWidget(self.case_info)
 
         experiment_title = QLabel("Experimental cyclic reference")
