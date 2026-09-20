@@ -199,7 +199,7 @@ def test_disp_beam_column_uses_real_beam_integration():
     )
 
 
-def test_truss_is_not_silently_replaced_by_elastic_beam():
+def test_unknown_element_is_not_silently_replaced_by_elastic_beam():
     model = StructuralModel()
     model.add_node(1, 0, 0, 0)
     model.add_node(2, 1, 0, 0)
@@ -207,7 +207,7 @@ def test_truss_is_not_silently_replaced_by_elastic_beam():
         1,
         1,
         2,
-        element_type="truss",
+        element_type="unsupportedElement",
         section_tag=3,
         transf_tag=4,
     )
@@ -218,7 +218,7 @@ def test_truss_is_not_silently_replaced_by_elastic_beam():
         transformations={4: transformation(4)},
     )
 
-    assert "type 'truss' is not implemented" in script
+    assert "type 'unsupportedElement' is not implemented" in script
     assert "ops.element('elasticBeamColumn', 1" not in script
 
 
