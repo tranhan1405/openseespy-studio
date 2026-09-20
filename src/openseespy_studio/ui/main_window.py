@@ -3453,14 +3453,14 @@ class MainWindow(QMainWindow):
 
             solution_results = self.project.solution_results_for_analysis(tag)
             solution = QTreeWidgetItem([
-                f"Solution ({len(solution_results)})"
+                f"Result Requests ({len(solution_results)})"
             ])
             solution.setIcon(0, studio_icon("results"))
             solution.setData(0, Qt.UserRole, ("solution_root", tag))
             solution.setExpanded(True)
             item.addChild(solution)
 
-            information = QTreeWidgetItem(["Solution Information"])
+            information = QTreeWidgetItem(["Analysis Information"])
             information.setIcon(0, studio_icon("results"))
             information.setData(
                 0,
@@ -3717,7 +3717,7 @@ class MainWindow(QMainWindow):
         elif solution_information_tag is not None:
             self._show_solution_information(
                 solution_information_tag,
-                "Solution Information",
+                "Analysis Information",
             )
         elif job_plot_ref is not None:
             self._show_job_plot(
@@ -7088,7 +7088,7 @@ class MainWindow(QMainWindow):
         try:
             self.project.add_solution_result(result)
         except ValueError as exc:
-            QMessageBox.warning(self, "Solution Result", str(exc))
+            QMessageBox.warning(self, "Result Request", str(exc))
             return
         self._record_project_change(
             f"Insert solution result {result.name}",
@@ -7109,7 +7109,7 @@ class MainWindow(QMainWindow):
             self,
             "Delete Result",
             (
-                f"Delete result '{result.name}' from this Solution?\n\n"
+                f"Delete result request '{result.name}'?\n\n"
                 "This removes the result object from the Model Tree. "
                 "Solver Job data is not deleted."
             ),
@@ -7139,16 +7139,16 @@ class MainWindow(QMainWindow):
         results = self.project.solution_results_for_analysis(analysis_tag)
         if not results:
             self.status_message.setText(
-                "Solution contains no result objects to delete."
+                "There are no result requests to delete."
             )
             return
 
         answer = QMessageBox.question(
             self,
-            "Delete All Results",
+            "Delete All Result Requests",
             (
                 f"Delete all {len(results)} result object(s) from this "
-                "Solution?\n\n"
+                "Result Requests?\n\n"
                 "Solver Job data is not deleted."
             ),
             QMessageBox.Yes | QMessageBox.No,
@@ -7172,7 +7172,7 @@ class MainWindow(QMainWindow):
         self.viewport.clear_result_overlay()
         self._refresh_tree()
         self.status_message.setText(
-            f"Deleted {len(results)} result object(s) from Solution"
+            f"Deleted {len(results)} result request(s)"
         )
 
     def _rename_solution_result(self, tag: int) -> None:
@@ -7271,7 +7271,7 @@ class MainWindow(QMainWindow):
         current = self.project.solution_results.get(int(tag))
         if current is None:
             raise ValueError(
-                f"Solution result tag {tag} does not exist."
+                f"Result request tag {tag} does not exist."
             )
         data = dict(payload) if isinstance(payload, dict) else {}
         name = str(data.get("name", "")).strip() or current.name
@@ -7317,7 +7317,7 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError) as exc:
             QMessageBox.warning(
                 self,
-                "Solution Result",
+                "Result Request",
                 str(exc),
             )
             return
@@ -7343,7 +7343,7 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError) as exc:
             QMessageBox.warning(
                 self,
-                "Solution Result",
+                "Result Request",
                 str(exc),
             )
             return
@@ -7431,13 +7431,13 @@ class MainWindow(QMainWindow):
         objects = self.project.solution_results_for_analysis(analysis_tag)
         if not objects:
             self.status_message.setText(
-                "Solution contains no inserted result objects."
+                "There are no result requests to evaluate."
             )
             return
         for result in objects:
             self._evaluate_solution_result(result.tag)
         self.status_message.setText(
-            f"Evaluated {len(objects)} solution result object(s)"
+            f"Evaluated {len(objects)} result request(s)"
         )
 
     def _delete_analysis(self, tag: int) -> None:
@@ -8247,7 +8247,7 @@ class MainWindow(QMainWindow):
             (
                 f"Delete all {len(self._jobs)} runtime Jobs and their "
                 "saved result views?\n\n"
-                "Solution result definitions under each Analysis are kept."
+                "Result request definitions under each Analysis are kept."
             ),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
@@ -8840,7 +8840,7 @@ class MainWindow(QMainWindow):
                     self._create_analysis_template(name)
                 )
             menu.addSeparator()
-            insert_menu = menu.addMenu("Insert")
+            insert_menu = menu.addMenu("Add Result Request")
             for analysis_type in (
                 "Static",
                 "Pushover",
@@ -8890,7 +8890,7 @@ class MainWindow(QMainWindow):
                 if analysis_settings is not None
                 else ""
             )
-            insert_menu = menu.addMenu("Insert")
+            insert_menu = menu.addMenu("Add Result Request")
             self._populate_result_choice_menu(
                 insert_menu,
                 analysis_type,
@@ -8909,7 +8909,7 @@ class MainWindow(QMainWindow):
             )
 
             menu.addSeparator()
-            evaluate_all = menu.addAction("Evaluate All Results")
+            evaluate_all = menu.addAction("Evaluate All Result Requests")
             evaluate_all.triggered.connect(
                 lambda: self._evaluate_all_solution_results(analysis_tag)
             )
@@ -8918,7 +8918,7 @@ class MainWindow(QMainWindow):
             result_objects = self.project.solution_results_for_analysis(
                 analysis_tag
             )
-            delete_all = menu.addAction("Delete All Results...")
+            delete_all = menu.addAction("Delete All Result Requests...")
             delete_all.setEnabled(bool(result_objects))
             delete_all.triggered.connect(
                 lambda: self._delete_all_solution_results(analysis_tag)
