@@ -12,8 +12,6 @@ from PySide6.QtWidgets import (
 
 from ..ground_motion_library import (
     available_ground_motion_presets,
-    download_fema_p695_farfield_library,
-    fema_p695_library_installed,
     load_ground_motion_record,
     parse_ground_motion_record_text,
     pga_in_g,
@@ -280,13 +278,10 @@ class GroundMotionDialog(QDialog):
         self.source_mode.addItem("Manual / Paste", "manual")
 
         self.library = QComboBox()
-        self.library_download = QPushButton()
-        self.library_download.clicked.connect(self._download_fema_library)
         self.library_host = QWidget()
         library_layout = QHBoxLayout(self.library_host)
         library_layout.setContentsMargins(0, 0, 0, 0)
         library_layout.addWidget(self.library, 1)
-        library_layout.addWidget(self.library_download)
         self._populate_library()
 
         self.library_info = QLabel()
@@ -436,13 +431,8 @@ class GroundMotionDialog(QDialog):
         for preset in available_ground_motion_presets(
             include_custom=False
         ):
-            status = (
-                "FEMA P695 local"
-                if preset.local_path
-                else "Bundled"
-            )
             self.library.addItem(
-                f"{preset.label}  [{status}]",
+                f"{preset.label}  [Offline]",
                 preset.key,
             )
         if current:
@@ -450,60 +440,6 @@ class GroundMotionDialog(QDialog):
             if index >= 0:
                 self.library.setCurrentIndex(index)
         self.library.blockSignals(False)
-        installed = fema_p695_library_installed()
-        self.library_download.setText(
-            "Refresh FEMA P695"
-            if installed
-            else "Download FEMA P695 FF22"
-        )
-        self.library_download.setToolTip(
-            "Download the full FEMA P695 far-field record set to the "
-            "OpenSeesPy Studio local cache. After that the records work "
-            "offline and do not need manual import."
-        )
-
-    def _download_fema_library(self) -> None:
-        answer = QMessageBox.question(
-            self,
-            "FEMA P695 Ground Motion Library",
-            (
-                "Download the full FEMA P695 far-field ground-motion "
-                "archive to this computer?\n\n"
-                "Studio downloads the original AT2 archive directly from "
-                "the public SP3/HB-Risk research-data host and stores it "
-                "in your local application-data cache. The raw records are "
-                "not copied into the Studio source repository."
-            ),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
-        )
-        if answer != QMessageBox.Yes:
-            return
-        self.library_download.setEnabled(False)
-        self.library_download.setText("Downloading...")
-        try:
-            records = download_fema_p695_farfield_library()
-        except ValueError as exc:
-            QMessageBox.warning(
-                self,
-                "FEMA P695 Ground Motion Library",
-                str(exc),
-            )
-            self._populate_library()
-            return
-        finally:
-            self.library_download.setEnabled(True)
-        selected = records[0].key if records else None
-        self._populate_library(selected)
-        QMessageBox.information(
-            self,
-            "FEMA P695 Ground Motion Library",
-            (
-                f"Installed {len(records)} horizontal FEMA P695 "
-                "component(s). They are now available offline."
-            ),
-        )
-        self._library_changed()
 
     def _library_changed(self, *_args) -> None:
         key = str(self.library.currentData() or "")
