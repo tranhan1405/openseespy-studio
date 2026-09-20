@@ -221,7 +221,10 @@ class CalibrationDialog(QDialog):
         note = QLabel(
             "Score = weighted mean of available absolute percentage errors. "
             "Lower score means closer agreement with the imported experiment; "
-            "it is a calibration metric, not an acceptance criterion."
+            "it is a calibration metric, not an acceptance criterion. "
+            "Pareto analysis treats every objective with weight > 0 as an "
+            "active minimization objective; weight magnitude affects the "
+            "scalar score but not Pareto dominance."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color: #617080;")
