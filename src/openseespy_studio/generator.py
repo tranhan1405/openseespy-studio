@@ -1048,6 +1048,8 @@ def analysis_to_openseespy(
     monitor_node: int | None = None,
     fiber_response_specs: dict[int, dict[str, object]] | None = None,
     specimen_response_spec: dict[str, object] | None = None,
+    ndm: int = 3,
+    ndf: int = 6,
 ) -> list[str]:
     node_tags = list(node_tags or [])
     element_tags = list(element_tags or [])
@@ -1103,6 +1105,8 @@ def analysis_to_openseespy(
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
         f"        'type': {settings.analysis_type!r},",
+        f"        'ndm': {int(ndm)},",
+        f"        'ndf': {int(ndf)},",
         f"        'constraints_handler': {settings.constraints_handler!r},",
         f"        'numberer': {settings.numberer!r},",
         f"        'system': {settings.system!r},",
@@ -2973,6 +2977,8 @@ def to_openseespy(
                 monitor_node=monitor_node,
                 fiber_response_specs=fiber_response_specs,
                 specimen_response_spec=specimen_response_spec,
+                ndm=model.ndm,
+                ndf=model.ndf,
             )
         )
 
