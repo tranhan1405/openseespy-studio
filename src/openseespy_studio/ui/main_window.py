@@ -10678,7 +10678,15 @@ class MainWindow(QMainWindow):
         if process is not None and process.state() != QProcess.NotRunning:
             process.kill()
             process.waitForFinished(1000)
+        calibration = self._calibration_process
+        if (
+            calibration is not None
+            and calibration.state() != QProcess.NotRunning
+        ):
+            calibration.kill()
+            calibration.waitForFinished(1000)
         self._cleanup_analysis_files()
+        self._cleanup_calibration_files()
         for path in self._external_log_paths:
             try:
                 Path(path).unlink(missing_ok=True)
