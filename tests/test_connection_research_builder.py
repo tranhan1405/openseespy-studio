@@ -97,7 +97,7 @@ def test_connection_generator_preserves_dof_material_mapping_order():
     assert "'-doRayleigh', 1" in command
 
 
-def test_builder_default_axial_preset_prefers_bond_material():
+def test_builder_default_axial_preset_prefers_macro_slip_material():
     _app()
     dialog = ConnectionDialog(
         _materials(),
@@ -110,12 +110,12 @@ def test_builder_default_axial_preset_prefers_bond_material():
         },
         units={"length": "mm", "force": "N", "time": "s"},
     )
-    assert dialog.preset.currentText() == "Axial / bond-slip spring"
+    assert dialog.preset.currentText() == "Axial / translational slip spring"
     assert dialog.dof_checks[0].isChecked()
     assert not dialog.dof_checks[1].isChecked()
-    assert dialog.material_combos[0].currentData() == 2
+    assert dialog.material_combos[0].currentData() in {1, 3}
     spec = dialog.spec()
-    assert spec["materials_by_dof"] == {1: 2}
+    assert spec["materials_by_dof"][1] in {1, 3}
     dialog.close()
 
 
@@ -156,4 +156,33 @@ def test_builder_blocks_separated_zero_length_nodes():
         assert "requires coincident nodes" in str(exc)
     else:
         raise AssertionError("Expected separated zeroLength pair to fail")
+    dialog.close()
+
+
+
+def test_builder_rejects_direct_bond_sp01_zero_length_assignment():
+    _app()
+    dialog = ConnectionDialog(
+        _materials(),
+        next_tag=1,
+        initial_node_i=1,
+        initial_node_j=2,
+        node_positions={
+            1: (0.0, 0.0, 0.0),
+            2: (0.0, 0.0, 0.0),
+        },
+        units={"length": "mm", "force": "N", "time": "s"},
+    )
+    dialog.preset.setCurrentIndex(0)
+    dialog.dof_checks[0].setChecked(True)
+    index = dialog.material_combos[0].findData(2)
+    dialog.material_combos[0].setCurrentIndex(index)
+
+    try:
+        dialog.spec()
+    except ValueError as exc:
+        assert "zeroLengthSection" in str(exc)
+        assert "Bond_SP01" in str(exc)
+    else:
+        raise AssertionError("Expected direct Bond_SP01 zeroLength use to fail")
     dialog.close()

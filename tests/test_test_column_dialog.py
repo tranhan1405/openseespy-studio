@@ -213,11 +213,11 @@ def test_rotational_base_interface_auto_selects_bending_rotation(qapp):
         qapp.processEvents()
 
 
-def test_bond_slip_base_interface_prefers_bond_sp01(qapp):
+def test_translational_slip_interface_prefers_macro_spring(qapp):
     project = ProjectDatabase()
     project.add_material(
         MaterialData(
-            3,
+            30,
             "Generic",
             "Elastic",
             parameters={"E": 1000.0},
@@ -230,13 +230,20 @@ def test_bond_slip_base_interface_prefers_bond_sp01(qapp):
             "Bond_SP01",
         )
     )
+    project.add_material(
+        MaterialData(
+            3,
+            "Macro slip",
+            "Pinching4",
+        )
+    )
     dialog = TestColumnWizard(project)
     try:
-        dialog.base_interface.setCurrentText("Bond-slip")
+        dialog.base_interface.setCurrentText("Translational slip spring")
         qapp.processEvents()
 
         spec = dialog.data()
-        assert spec.base_interface_materials == {1: 8}
+        assert spec.base_interface_materials[1] == 3
         assert spec.base_interface_rayleigh is False
     finally:
         dialog.close()

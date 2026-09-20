@@ -252,7 +252,7 @@ def test_test_column_bond_slip_interface_can_release_lateral_translation():
             axis=3,
             lateral_direction=1,
             planar=True,
-            base_interface_type="Bond-slip",
+            base_interface_type="Translational slip spring",
             base_interface_materials={1: 11},
         ),
     )

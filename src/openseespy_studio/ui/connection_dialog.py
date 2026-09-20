@@ -160,7 +160,7 @@ class ConnectionDialog(QDialog):
 
     PRESETS = (
         ("Custom", ()),
-        ("Axial / bond-slip spring", (1,)),
+        ("Axial / translational slip spring", (1,)),
         ("Shear spring Y", (2,)),
         ("Rotational hinge RZ", (6,)),
         ("Planar joint UX-UY-RZ", (1, 2, 6)),
@@ -195,7 +195,7 @@ class ConnectionDialog(QDialog):
         intro = QLabel(
             "Research spring/interface builder. Assign one UniaxialMaterial "
             "per active local DOF; nonlinear materials such as Pinching4, "
-            "Bond_SP01, Fatigue, MinMax, Parallel and Series can be tested "
+            "Hysteretic, Fatigue, MinMax, Parallel and Series can be tested "
             "directly before assignment. Use Chain... on any DOF to build "
             "Steel02 → Fatigue → MinMax in one research workflow."
         )
@@ -459,8 +459,11 @@ class ConnectionDialog(QDialog):
             check.setChecked(dof in dofs)
 
         label = self.preset.itemText(index)
-        if "bond-slip" in label.lower():
-            self._select_material_type(0, {"Bond_SP01"})
+        if "translational slip" in label.lower():
+            self._select_material_type(
+                0,
+                {"Pinching4", "Hysteretic", "ElasticPPGap", "Steel02", "Elastic"},
+            )
         elif "rotational hinge" in label.lower():
             self._select_material_type(
                 5,
@@ -769,6 +772,24 @@ class ConnectionDialog(QDialog):
 
         if not materials_by_dof:
             raise ValueError("Enable at least one connection DOF.")
+
+        if self.connection_type.currentText() == "zeroLength":
+            bond_tags = sorted(
+                material_tag
+                for material_tag in materials_by_dof.values()
+                if (
+                    material_tag in self.materials
+                    and self.materials[material_tag].material_type == "Bond_SP01"
+                )
+            )
+            if bond_tags:
+                raise ValueError(
+                    "Bond_SP01 represents rebar stress-slip for strain "
+                    "penetration and should be used in a Fiber zeroLengthSection, "
+                    "not directly as a force-deformation zeroLength DOF. "
+                    "Use a calibrated Pinching4/Hysteretic macro spring here "
+                    "or the dedicated strain-penetration workflow."
+                )
 
         x, y = self._axis_values()
         nx = _norm(x)
