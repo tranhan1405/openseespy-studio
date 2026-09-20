@@ -1294,7 +1294,7 @@ class MainWindow(QMainWindow):
         self._results_dock_sized_once = False
         self._dirty = False
         self._measure_first_node_tag: int | None = None
-        self._line_first_node_tag: int | None = None
+        self._frame_first_node_tag: int | None = None
         self._job_ui_timer = QTimer(self)
         self._job_ui_timer.setInterval(1000)
         self._job_ui_timer.timeout.connect(self._refresh_running_job_ui)
@@ -1560,19 +1560,19 @@ class MainWindow(QMainWindow):
 
         self._make_action("node", "Node", "node", self._create_node, "Create node")
         self._make_action(
-            "line",
-            "Line",
+            "frame_pick",
+            "Create by Picking",
             "element",
-            self._activate_line_tool,
-            "Click two nodes in the viewport to create a quick line member",
+            self._activate_frame_pick_tool,
+            "Click two nodes in the viewport to create a frame member",
             checkable=True,
         )
         self._make_action(
-            "frame",
-            "Frame",
+            "frame_input",
+            "Create by Input...",
             "element",
             self._create_frame,
-            "Create a fully assigned structural frame member",
+            "Create a frame member by entering nodes and assignments",
         )
         self._make_action("grid", "Grid", "grid", self._show_frame_grid, "Create frame grid")
         self._make_action(
@@ -1904,9 +1904,11 @@ class MainWindow(QMainWindow):
         ])
 
         geometry_menu = menus["Geometry"]
-        geometry_menu.addActions([
-            self.actions["node"], self.actions["line"], self.actions["frame"],
-        ])
+        geometry_menu.addAction(self.actions["node"])
+        frame_menu = geometry_menu.addMenu("Frame")
+        frame_menu.setIcon(studio_icon("element"))
+        frame_menu.addAction(self.actions["frame_pick"])
+        frame_menu.addAction(self.actions["frame_input"])
         geometry_menu.addSeparator()
         geometry_menu.addActions([
             self.actions["column_1d"],
@@ -2293,6 +2295,20 @@ class MainWindow(QMainWindow):
             widgets=(self.unit_combo,),
         )
 
+        frame_button = QToolButton()
+        frame_button.setObjectName("RibbonLargeButton")
+        frame_button.setDefaultAction(self.actions["frame_pick"])
+        frame_button.setText("Frame")
+        frame_button.setIcon(self.actions["frame_pick"].icon())
+        frame_button.setIconSize(QSize(28, 28))
+        frame_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        frame_button.setPopupMode(QToolButton.MenuButtonPopup)
+        frame_button.setAutoRaise(True)
+        frame_popup = QMenu(frame_button)
+        frame_popup.addAction(self.actions["frame_pick"])
+        frame_popup.addAction(self.actions["frame_input"])
+        frame_button.setMenu(frame_popup)
+
         add_group(
             home,
             "Geometry",
@@ -2301,10 +2317,9 @@ class MainWindow(QMainWindow):
                 "column_1d",
                 "grid",
                 "node",
-                "line",
-                "frame",
                 "extrude",
             ),
+            widgets=(frame_button,),
         )
         add_group(
             home,
@@ -3844,17 +3859,17 @@ class MainWindow(QMainWindow):
             action.setChecked(False)
         self.viewport.set_selection_filter(self.selection.filter)
 
-    def _leave_line_mode(self) -> None:
-        self._line_first_node_tag = None
-        self.viewport.clear_line_anchor(render=False)
-        action = self.actions.get("line")
+    def _leave_frame_pick_mode(self) -> None:
+        self._frame_first_node_tag = None
+        self.viewport.clear_frame_anchor(render=False)
+        action = self.actions.get("frame_pick")
         if action is not None:
             action.setChecked(False)
         self.viewport.set_selection_filter(self.selection.filter)
 
     def _activate_select_tool(self) -> None:
         self._leave_measure_mode()
-        self._leave_line_mode()
+        self._leave_frame_pick_mode()
         self.viewport.set_interaction_tool("select")
         self.actions["select"].setChecked(True)
         self.actions["box"].setChecked(False)
@@ -3863,7 +3878,7 @@ class MainWindow(QMainWindow):
 
     def _activate_box_tool(self) -> None:
         self._leave_measure_mode()
-        self._leave_line_mode()
+        self._leave_frame_pick_mode()
         self.viewport.set_interaction_tool("box")
         self.actions["select"].setChecked(False)
         self.actions["box"].setChecked(True)
@@ -3872,8 +3887,8 @@ class MainWindow(QMainWindow):
             "Box select: left→right = window, right→left = crossing"
         )
 
-    def _activate_line_tool(self, checked: bool = True) -> None:
-        action = self.actions.get("line")
+    def _activate_frame_pick_tool(self, checked: bool = True) -> None:
+        action = self.actions.get("frame_pick")
         if action is not None and not action.isChecked() and not checked:
             self._activate_select_tool()
             return
@@ -3881,13 +3896,13 @@ class MainWindow(QMainWindow):
             if action is not None:
                 action.setChecked(False)
             self.status_message.setText(
-                "Create Line requires at least two model nodes"
+                "Create Frame requires at least two model nodes"
             )
             return
 
         self._leave_measure_mode()
-        self._line_first_node_tag = None
-        self.viewport.clear_line_anchor(render=False)
+        self._frame_first_node_tag = None
+        self.viewport.clear_frame_anchor(render=False)
         self.viewport.set_interaction_tool("select")
         self.viewport.set_selection_filter("node")
         self.actions["select"].setChecked(False)
@@ -3896,7 +3911,7 @@ class MainWindow(QMainWindow):
             action.setChecked(True)
         self.viewport.plotter.render()
         self.status_message.setText(
-            "Create Line: click the first node"
+            "Create Frame: click the first node"
         )
 
     def _activate_measure_distance(self, checked: bool = True) -> None:
@@ -3912,7 +3927,7 @@ class MainWindow(QMainWindow):
             )
             return
 
-        self._leave_line_mode()
+        self._leave_frame_pick_mode()
         self._measure_first_node_tag = None
         self.viewport.clear_measure_anchor(render=False)
         self.viewport.set_interaction_tool("select")
@@ -3947,8 +3962,8 @@ class MainWindow(QMainWindow):
             self._activate_select_tool()
             return
         if (
-            self.actions.get("line") is not None
-            and self.actions["line"].isChecked()
+            self.actions.get("frame_pick") is not None
+            and self.actions["frame_pick"].isChecked()
         ):
             self._activate_select_tool()
             return
@@ -3961,7 +3976,7 @@ class MainWindow(QMainWindow):
         value = text.lower()
         self.selection.set_filter(value)
         measure_action = self.actions.get("measure_distance")
-        line_action = self.actions.get("line")
+        frame_pick_action = self.actions.get("frame_pick")
         if measure_action is not None and measure_action.isChecked():
             self.viewport.set_selection_filter("node")
             self.status_message.setText(
@@ -3969,11 +3984,11 @@ class MainWindow(QMainWindow):
                 "Measure Distance temporarily snaps to nodes"
             )
             return
-        if line_action is not None and line_action.isChecked():
+        if frame_pick_action is not None and frame_pick_action.isChecked():
             self.viewport.set_selection_filter("node")
             self.status_message.setText(
                 f"Selection filter saved as {text}; "
-                "Create Line temporarily snaps to nodes"
+                "Create Frame temporarily snaps to nodes"
             )
             return
         self.viewport.set_selection_filter(value)
@@ -3986,37 +4001,37 @@ class MainWindow(QMainWindow):
         tag = payload.get("tag")
         mode = payload.get("mode", "replace")
 
-        line_action = self.actions.get("line")
-        if line_action is not None and line_action.isChecked():
+        frame_pick_action = self.actions.get("frame_pick")
+        if frame_pick_action is not None and frame_pick_action.isChecked():
             if kind != "node" or tag is None:
                 self.status_message.setText(
-                    "Create Line: click a model node"
+                    "Create Frame: click a model node"
                 )
                 return
 
             node_tag = int(tag)
-            if self._line_first_node_tag is None:
-                self._line_first_node_tag = node_tag
-                self.viewport.show_line_anchor(node_tag)
+            if self._frame_first_node_tag is None:
+                self._frame_first_node_tag = node_tag
+                self.viewport.show_frame_anchor(node_tag)
                 self.status_message.setText(
-                    f"Create Line: node {node_tag} selected · "
+                    f"Create Frame: node {node_tag} selected · "
                     "click the second node"
                 )
                 return
 
-            if node_tag == self._line_first_node_tag:
+            if node_tag == self._frame_first_node_tag:
                 self.status_message.setText(
-                    "Create Line: choose a different second node"
+                    "Create Frame: choose a different second node"
                 )
                 return
 
-            first_tag = self._line_first_node_tag
-            self._line_first_node_tag = None
-            self.viewport.clear_line_anchor(render=False)
-            self._create_line_between_nodes(first_tag, node_tag)
-            if line_action.isChecked():
+            first_tag = self._frame_first_node_tag
+            self._frame_first_node_tag = None
+            self.viewport.clear_frame_anchor(render=False)
+            self._create_frame_between_nodes(first_tag, node_tag)
+            if frame_pick_action.isChecked():
                 self.status_message.setText(
-                    f"Created line {first_tag} → {node_tag} · "
+                    f"Created frame {first_tag} → {node_tag} · "
                     "click another first node"
                 )
             return
@@ -5514,22 +5529,22 @@ class MainWindow(QMainWindow):
         self._record_project_change(f"Create node {tag}", before)
 
     def _create_line(self) -> None:
-        """Backward-compatible command using exactly two selected nodes."""
+        """Compatibility alias: the old Line command is now Frame picking."""
         selected_nodes = sorted(self.selection.nodes)
         if len(selected_nodes) != 2:
-            self._activate_line_tool(True)
+            self._activate_frame_pick_tool(True)
             return
-        self._create_line_between_nodes(
+        self._create_frame_between_nodes(
             selected_nodes[0],
             selected_nodes[1],
         )
 
-    def _create_line_between_nodes(
+    def _create_frame_between_nodes(
         self,
         node_i: int,
         node_j: int,
     ) -> None:
-        """Create one quick elastic line between two existing nodes."""
+        """Create one quick frame member between two existing nodes."""
         tag = self.model.next_element_tag()
 
         section_tag = next(
@@ -5558,10 +5573,10 @@ class MainWindow(QMainWindow):
                 element_type="elasticBeamColumn",
                 section_tag=section_tag,
                 transf_tag=transf_tag,
-                group="line",
+                group="frame",
             )
         except ValueError as exc:
-            QMessageBox.warning(self, "Create Line", str(exc))
+            QMessageBox.warning(self, "Create Frame", str(exc))
             return
 
         assignments: list[str] = []
@@ -5577,18 +5592,18 @@ class MainWindow(QMainWindow):
             if transf_tag is None:
                 missing.append("transformation")
             message = (
-                f"Created line {tag}: node {node_i} → {node_j} · "
+                f"Created frame {tag}: node {node_i} → {node_j} · "
                 f"assign {' + '.join(missing)} before analysis"
             )
         else:
             message = (
-                f"Created line {tag}: node {node_i} → {node_j} · "
+                f"Created frame {tag}: node {node_i} → {node_j} · "
                 + " · ".join(assignments)
             )
 
         self._refresh_all(message)
         self.selection.select("element", tag, "replace")
-        self._record_project_change(f"Create line {tag}", before)
+        self._record_project_change(f"Create frame {tag}", before)
 
     def _create_frame(self) -> None:
         """Create a solver-ready frame member with explicit assignments."""
@@ -8993,7 +9008,7 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "lines_root":
-            create = menu.addAction("New Line / Element...")
+            create = menu.addAction("New Frame...")
             create.triggered.connect(self._create_element)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
