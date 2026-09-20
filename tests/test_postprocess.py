@@ -10,9 +10,14 @@ from openseespy_studio.postprocess import (
     convergence_steps,
     convergence_trace,
     convergence_summary,
+    cyclic_backbone_curve,
+    cyclic_curve_comparison,
     cyclic_hysteresis_curve,
     cyclic_hysteresis_metrics,
+    cyclic_reversal_comparison,
     cyclic_reversal_points,
+    experimental_csv_series,
+    parse_experimental_csv_text,
     column_cyclic_cycle_metrics,
     column_cyclic_reversal_metrics,
     enrich_fiber_state_results,
@@ -1353,3 +1358,97 @@ def test_column_cyclic_cycle_metrics_returns_compact_closed_cycle_rows():
     assert cycles[0]["stiffness_ratio"] == pytest.approx(0.8)
     assert cycles[0]["energy"] > 0.0
     assert cycles[0]["interface_energy"] is not None
+
+
+
+def test_parse_experimental_csv_supports_headers_and_semicolon_decimal_comma():
+    dataset = parse_experimental_csv_text(
+        "Displacement;Force;Note\n"
+        "0,0;0,0;start\n"
+        "1,5;12,0;peak\n"
+        "-1,5;-10,0;peak\n"
+    )
+
+    assert dataset["headers"] == ["Displacement", "Force", "Note"]
+    assert dataset["delimiter"] == ";"
+    assert dataset["rows"][1][0] == pytest.approx(1.5)
+    assert dataset["rows"][1][1] == pytest.approx(12.0)
+    assert dataset["rows"][1][2] is None
+
+    x, y = experimental_csv_series(
+        dataset,
+        0,
+        1,
+        x_scale=2.0,
+        y_scale=-1.0,
+    )
+    assert x == pytest.approx([0.0, 3.0, -3.0])
+    assert y == pytest.approx([0.0, -12.0, 10.0])
+
+
+def test_parse_experimental_csv_supports_headerless_numeric_files():
+    dataset = parse_experimental_csv_text(
+        "0,0\n"
+        "1,10\n"
+        "-1,-9\n"
+    )
+
+    assert dataset["headers"] == ["Column 1", "Column 2"]
+    x, y = experimental_csv_series(dataset, 0, 1)
+    assert x == pytest.approx([0.0, 1.0, -1.0])
+    assert y == pytest.approx([0.0, 10.0, -9.0])
+
+
+def test_cyclic_backbone_uses_strongest_repeated_reversal_at_each_amplitude():
+    x = [0.0, 2.0, 0.0, -2.0, 0.0, 2.0, 0.0, -2.0, 0.0]
+    y = [0.0, 20.0, 0.0, -18.0, 0.0, 16.0, 0.0, -15.0, 0.0]
+
+    backbone_x, backbone_y = cyclic_backbone_curve(x, y)
+
+    assert backbone_x == pytest.approx([-2.0, 0.0, 2.0])
+    assert backbone_y == pytest.approx([-18.0, 0.0, 20.0])
+
+
+def test_cyclic_reversal_comparison_matches_sign_amplitude_and_repeat_index():
+    sim_x = [0.0, 2.0, 0.0, -2.0, 0.0, 2.0, 0.0]
+    sim_y = [0.0, 20.0, 0.0, -18.0, 0.0, 16.0, 0.0]
+    exp_x = [0.0, 2.02, 0.0, -1.98, 0.0, 2.01, 0.0]
+    exp_y = [0.0, 19.0, 0.0, -17.0, 0.0, 15.0, 0.0]
+
+    rows = cyclic_reversal_comparison(sim_x, sim_y, exp_x, exp_y)
+
+    assert len(rows) == 3
+    assert rows[0]["simulation_reversal"] == 1
+    assert rows[0]["experiment_reversal"] == 1
+    assert rows[0]["repeat_index"] == 1
+    assert rows[0]["force_error_percent"] == pytest.approx(
+        (20.0 - 19.0) / 19.0 * 100.0
+    )
+    assert rows[2]["repeat_index"] == 2
+    assert rows[2]["simulation_strength_ratio"] == pytest.approx(0.8)
+    assert rows[2]["experiment_strength_ratio"] == pytest.approx(15.0 / 19.0)
+
+
+def test_cyclic_curve_comparison_reports_peaks_energy_and_reversal_nrmse():
+    sim_x = [0.0, 2.0, 0.0, -2.0, 0.0, 2.0, 0.0]
+    sim_y = [0.0, 20.0, 0.0, -18.0, 0.0, 16.0, 0.0]
+    exp_x = [0.0, 2.0, 0.0, -2.0, 0.0, 2.0, 0.0]
+    exp_y = [0.0, 19.0, 0.0, -17.0, 0.0, 15.0, 0.0]
+
+    comparison = cyclic_curve_comparison(sim_x, sim_y, exp_x, exp_y)
+
+    assert comparison["matched_reversal_count"] == 3
+    assert comparison["simulation_reversal_count"] == 3
+    assert comparison["experiment_reversal_count"] == 3
+    assert comparison["reversal_force_nrmse_percent"] is not None
+
+    metrics = {
+        row["key"]: row
+        for row in comparison["metrics"]
+    }
+    assert metrics["peak_positive_force"]["simulation"] == pytest.approx(20.0)
+    assert metrics["peak_positive_force"]["experiment"] == pytest.approx(19.0)
+    assert metrics["peak_abs_force"]["difference_percent"] == pytest.approx(
+        (20.0 - 19.0) / 19.0 * 100.0
+    )
+    assert metrics["closed_cycle_energy_sum"]["simulation"] >= 0.0
