@@ -273,6 +273,39 @@ def test_generated_modal_runs_in_real_opensees(tmp_path: Path):
     assert "1" in results["modes"]
 
 
+
+
+def test_modal_properties_include_distributed_element_mass_in_real_opensees(
+    tmp_path: Path,
+):
+    model, sections, transformations = _elastic_cantilever()
+    model.elements[1].mass_per_length = 50.0
+    model.elements[1].consistent_mass = True
+
+    analysis = AnalysisSettingsData(
+        1,
+        "Modal distributed mass",
+        analysis_type="Modal",
+        num_modes=1,
+        eigen_solver="-fullGenLapack",
+        live_convergence=False,
+    )
+    results = _run_real_generated(
+        tmp_path,
+        "modal-element-mass",
+        model=model,
+        sections=sections,
+        transformations=transformations,
+        analysis=analysis,
+    )
+
+    summary = results["modal_summary"]
+    assert summary["mass_basis"].startswith("OpenSees modalProperties")
+    assert float(summary["total_lumped_mass"]["1"]) > 0.0
+    assert float(summary["total_lumped_mass"]["2"]) > 0.0
+    assert set(results["modes"]["1"]["participation"]) == {"1", "2", "3"}
+
+
 def test_generated_pushover_runs_in_real_opensees(tmp_path: Path):
     model, sections, transformations = _elastic_cantilever()
     series = {
