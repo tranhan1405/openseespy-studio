@@ -31,9 +31,12 @@ from PySide6.QtWidgets import (
 )
 
 from ..calibration import (
+    calibration_available_objectives,
     calibration_best_score_history,
+    calibration_objective_label,
     calibration_parameter_keys,
     calibration_parameter_label,
+    calibration_pareto_projection,
     calibration_round_best_parameter_series,
 )
 from ..jobs import JobRecord
@@ -205,6 +208,198 @@ class TimeHistoryPlot(QWidget):
         painter.drawText(4, bottom, f"{ymin:.3g}")
         painter.drawText(left, self.height() - 7, f"{xmin:.3g}")
         painter.drawText(right - 35, self.height() - 7, f"{xmax:.3g}")
+
+
+class CalibrationParetoPlot(QWidget):
+    point_selected = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._points: list[dict[str, Any]] = []
+        self._x_label = "Objective X"
+        self._y_label = "Objective Y"
+        self._selected_job_id: int | None = None
+        self._screen_points: list[tuple[float, float, int | None]] = []
+        self.setMinimumHeight(135)
+
+    def set_points(
+        self,
+        points: list[dict[str, Any]],
+        *,
+        x_label: str,
+        y_label: str,
+    ) -> None:
+        self._points = [
+            dict(point)
+            for point in points
+            if isinstance(point, dict)
+        ]
+        self._x_label = str(x_label)
+        self._y_label = str(y_label)
+        self.update()
+
+    def clear(self) -> None:
+        self._points = []
+        self._screen_points = []
+        self._selected_job_id = None
+        self.update()
+
+    def set_selected_job(self, job_id: int | None) -> None:
+        self._selected_job_id = (
+            None if job_id is None else int(job_id)
+        )
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#ffffff"))
+        self._screen_points = []
+
+        if not self._points:
+            painter.setPen(QColor("#718195"))
+            painter.drawText(
+                self.rect(),
+                Qt.AlignCenter,
+                "No finite Pareto objective pairs",
+            )
+            return
+
+        left = 62.0
+        right = max(left + 1.0, self.width() - 18.0)
+        top = 22.0
+        bottom = max(top + 1.0, self.height() - 36.0)
+        xs = [float(point["x"]) for point in self._points]
+        ys = [float(point["y"]) for point in self._points]
+        xmin, xmax = min(xs), max(xs)
+        ymin, ymax = min(ys), max(ys)
+        if abs(xmax - xmin) < 1.0e-15:
+            pad = max(abs(xmax), 1.0) * 0.05
+            xmin -= pad
+            xmax += pad
+        if abs(ymax - ymin) < 1.0e-15:
+            pad = max(abs(ymax), 1.0) * 0.05
+            ymin -= pad
+            ymax += pad
+
+        def map_point(x: float, y: float) -> QPointF:
+            px = left + (x - xmin) / (xmax - xmin) * (right - left)
+            py = bottom - (y - ymin) / (ymax - ymin) * (bottom - top)
+            return QPointF(px, py)
+
+        painter.setPen(QPen(QColor("#c7d0da"), 1))
+        painter.drawLine(int(left), int(bottom), int(right), int(bottom))
+        painter.drawLine(int(left), int(top), int(left), int(bottom))
+
+        projected = sorted(
+            (
+                point
+                for point in self._points
+                if bool(point.get("projection_front"))
+            ),
+            key=lambda point: (float(point["x"]), float(point["y"])),
+        )
+        if len(projected) >= 2:
+            painter.setPen(QPen(QColor("#d35400"), 2))
+            previous = map_point(
+                float(projected[0]["x"]),
+                float(projected[0]["y"]),
+            )
+            for point in projected[1:]:
+                current = map_point(
+                    float(point["x"]),
+                    float(point["y"]),
+                )
+                painter.drawLine(previous, current)
+                previous = current
+
+        for point in self._points:
+            screen = map_point(
+                float(point["x"]),
+                float(point["y"]),
+            )
+            job_id_raw = point.get("job_id")
+            try:
+                job_id = (
+                    int(job_id_raw)
+                    if job_id_raw is not None
+                    else None
+                )
+            except (TypeError, ValueError):
+                job_id = None
+            self._screen_points.append(
+                (screen.x(), screen.y(), job_id)
+            )
+
+            global_front = bool(
+                point.get("global_pareto_front")
+            )
+            projected_front = bool(point.get("projection_front"))
+            if global_front:
+                painter.setPen(QPen(QColor("#1565c0"), 2))
+                painter.setBrush(QColor("#ffffff"))
+                radius = 5.0
+            elif projected_front:
+                painter.setPen(QPen(QColor("#d35400"), 2))
+                painter.setBrush(QColor("#ffffff"))
+                radius = 4.0
+            else:
+                painter.setPen(QPen(QColor("#7f8c8d"), 1))
+                painter.setBrush(QColor("#bdc3c7"))
+                radius = 3.0
+            painter.drawEllipse(screen, radius, radius)
+
+            if (
+                self._selected_job_id is not None
+                and job_id == self._selected_job_id
+            ):
+                painter.setPen(QPen(QColor("#c62828"), 2))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawEllipse(screen, 8.0, 8.0)
+
+        painter.setPen(QColor("#526579"))
+        painter.drawText(4, int(top + 8), f"{ymax:.3g}")
+        painter.drawText(4, int(bottom), f"{ymin:.3g}")
+        painter.drawText(int(left), self.height() - 7, f"{xmin:.3g}")
+        painter.drawText(
+            int(right - 40),
+            self.height() - 7,
+            f"{xmax:.3g}",
+        )
+        painter.drawText(
+            int(left + 8),
+            15,
+            "Blue ring: global P1 · orange line: selected-axis front",
+        )
+        painter.drawText(
+            int((left + right) / 2 - 80),
+            self.height() - 7,
+            self._x_label,
+        )
+        painter.save()
+        painter.translate(13, (top + bottom) / 2 + 70)
+        painter.rotate(-90)
+        painter.drawText(0, 0, self._y_label)
+        painter.restore()
+
+    def mousePressEvent(self, event) -> None:
+        if not self._screen_points:
+            return
+        position = event.position()
+        best_job: int | None = None
+        best_distance = 9.0
+        for x, y, job_id in self._screen_points:
+            if job_id is None:
+                continue
+            distance = math.hypot(
+                position.x() - x,
+                position.y() - y,
+            )
+            if distance <= best_distance:
+                best_distance = distance
+                best_job = job_id
+        if best_job is not None:
+            self.point_selected.emit(best_job)
 
 
 class ConvergenceOverviewPlot(QWidget):
@@ -2313,9 +2508,46 @@ class ResultsPanel(QWidget):
 
         history_splitter.setStretchFactor(0, 1)
         history_splitter.setStretchFactor(1, 1)
-        layout.addWidget(history_splitter)
 
-        self.calibration_table = QTableWidget(0, 10)
+        analytics_tabs = QTabWidget()
+        analytics_tabs.setMaximumHeight(235)
+        history_page = QWidget()
+        history_page_layout = QVBoxLayout(history_page)
+        history_page_layout.setContentsMargins(0, 0, 0, 0)
+        history_page_layout.addWidget(history_splitter)
+        analytics_tabs.addTab(history_page, "History")
+
+        pareto_page = QWidget()
+        pareto_layout = QVBoxLayout(pareto_page)
+        pareto_layout.setContentsMargins(2, 2, 2, 2)
+        pareto_controls = QHBoxLayout()
+        pareto_controls.addWidget(QLabel("X:"))
+        self.calibration_pareto_x = QComboBox()
+        self.calibration_pareto_x.currentIndexChanged.connect(
+            self._update_calibration_pareto_plot
+        )
+        pareto_controls.addWidget(self.calibration_pareto_x, 1)
+        pareto_controls.addWidget(QLabel("Y:"))
+        self.calibration_pareto_y = QComboBox()
+        self.calibration_pareto_y.currentIndexChanged.connect(
+            self._update_calibration_pareto_plot
+        )
+        pareto_controls.addWidget(self.calibration_pareto_y, 1)
+        pareto_layout.addLayout(pareto_controls)
+        self.calibration_pareto_info = QLabel(
+            "Pareto rank uses all active nonzero-weight objectives."
+        )
+        self.calibration_pareto_info.setWordWrap(True)
+        pareto_layout.addWidget(self.calibration_pareto_info)
+        self.calibration_pareto_plot = CalibrationParetoPlot()
+        self.calibration_pareto_plot.point_selected.connect(
+            self._calibration_pareto_job_selected
+        )
+        pareto_layout.addWidget(self.calibration_pareto_plot, 1)
+        analytics_tabs.addTab(pareto_page, "Pareto")
+        layout.addWidget(analytics_tabs)
+
+        self.calibration_table = QTableWidget(0, 11)
         self.calibration_table.setHorizontalHeaderLabels(
             [
                 "Rank",
@@ -2327,6 +2559,7 @@ class ResultsPanel(QWidget):
                 "Cycle energy err [%]",
                 "Matched rev.",
                 "Parameters",
+                "Pareto",
                 "Status",
             ]
         )
@@ -2435,6 +2668,11 @@ class ResultsPanel(QWidget):
                 ),
                 str(row.get("matched_reversal_count", 0)),
                 parameter_text or "-",
+                (
+                    f"P{int(row.get('pareto_rank'))}"
+                    if row.get("pareto_rank") is not None
+                    else "-"
+                ),
                 str(row.get("status", "-")),
             ]
             for column, value in enumerate(values):
@@ -2462,9 +2700,19 @@ class ResultsPanel(QWidget):
             if max_round > 1
             else ""
         )
+        pareto_front_count = sum(
+            1
+            for row in self._calibration_rows
+            if bool(row.get("pareto_front"))
+        )
+        pareto_text = (
+            f" · {pareto_front_count} global Pareto P1 case(s)"
+            if pareto_front_count
+            else ""
+        )
         self.calibration_info.setText(
             f"{len(self._calibration_rows)} case(s) · "
-            f"{successful} scored case(s){round_text}. "
+            f"{successful} scored case(s){round_text}{pareto_text}. "
             "Double-click a row to activate its result; select a scored "
             "row to preview/apply its parameters to the model."
         )
@@ -2527,6 +2775,118 @@ class ResultsPanel(QWidget):
             self.calibration_parameter_combo.setCurrentIndex(0)
         self.calibration_parameter_combo.blockSignals(False)
         self._update_calibration_parameter_plot()
+        self._update_calibration_pareto_controls()
+
+    def _update_calibration_pareto_controls(self) -> None:
+        objectives = calibration_available_objectives(
+            self._calibration_rows
+        )
+        current_x = self.calibration_pareto_x.currentData()
+        current_y = self.calibration_pareto_y.currentData()
+        self.calibration_pareto_x.blockSignals(True)
+        self.calibration_pareto_y.blockSignals(True)
+        self.calibration_pareto_x.clear()
+        self.calibration_pareto_y.clear()
+        for key in objectives:
+            label = calibration_objective_label(key)
+            self.calibration_pareto_x.addItem(label, key)
+            self.calibration_pareto_y.addItem(label, key)
+
+        if objectives:
+            x_key = (
+                str(current_x)
+                if current_x in objectives
+                else (
+                    "peak_force"
+                    if "peak_force" in objectives
+                    else objectives[0]
+                )
+            )
+            y_default = (
+                "cycle_energy"
+                if "cycle_energy" in objectives
+                else (
+                    "reversal_nrmse"
+                    if "reversal_nrmse" in objectives
+                    else objectives[min(1, len(objectives) - 1)]
+                )
+            )
+            y_key = (
+                str(current_y)
+                if current_y in objectives
+                else y_default
+            )
+            self.calibration_pareto_x.setCurrentIndex(
+                objectives.index(x_key)
+            )
+            self.calibration_pareto_y.setCurrentIndex(
+                objectives.index(y_key)
+            )
+        self.calibration_pareto_x.blockSignals(False)
+        self.calibration_pareto_y.blockSignals(False)
+        self._update_calibration_pareto_plot()
+
+    def _update_calibration_pareto_plot(
+        self,
+        *_args,
+    ) -> None:
+        x_key = self.calibration_pareto_x.currentData()
+        y_key = self.calibration_pareto_y.currentData()
+        if not x_key or not y_key:
+            self.calibration_pareto_plot.clear()
+            self.calibration_pareto_info.setText(
+                "Pareto plot needs finite objective components."
+            )
+            return
+
+        points = calibration_pareto_projection(
+            self._calibration_rows,
+            str(x_key),
+            str(y_key),
+        )
+        self.calibration_pareto_plot.set_points(
+            points,
+            x_label=calibration_objective_label(str(x_key)),
+            y_label=calibration_objective_label(str(y_key)),
+        )
+        global_front = sum(
+            1
+            for point in points
+            if bool(point.get("global_pareto_front"))
+        )
+        projection_front = sum(
+            1
+            for point in points
+            if bool(point.get("projection_front"))
+        )
+        objective_keys: list[str] = []
+        for row in self._calibration_rows:
+            raw = row.get("pareto_objectives", [])
+            if isinstance(raw, list) and raw:
+                objective_keys = [str(key) for key in raw]
+                break
+        objective_text = ", ".join(
+            calibration_objective_label(key)
+            for key in objective_keys
+        ) or "none"
+        self.calibration_pareto_info.setText(
+            f"{len(points)} finite case(s) · global P1: {global_front} · "
+            f"selected-axis front: {projection_front}. "
+            f"Global Pareto objectives: {objective_text}."
+        )
+
+    def _calibration_pareto_job_selected(self, job_id: int) -> None:
+        target = int(job_id)
+        for row_index, row in enumerate(self._calibration_rows):
+            try:
+                row_job = int(row.get("job_id"))
+            except (TypeError, ValueError):
+                continue
+            if row_job != target:
+                continue
+            self.calibration_table.selectRow(row_index)
+            break
+        self.job_selected.emit(target)
 
     def _update_calibration_parameter_plot(
         self,
@@ -2618,6 +2978,13 @@ class ResultsPanel(QWidget):
                 and bool(values)
             )
         self.calibration_apply.setEnabled(valid)
+        selected_job = None
+        if isinstance(row, dict) and row.get("job_id") is not None:
+            try:
+                selected_job = int(row.get("job_id"))
+            except (TypeError, ValueError):
+                selected_job = None
+        self.calibration_pareto_plot.set_selected_job(selected_job)
 
     def _request_apply_calibration_case(self) -> None:
         row = self._selected_calibration_row()
@@ -2695,6 +3062,10 @@ class ResultsPanel(QWidget):
             "cycle_energy_error_percent",
             "max_displacement_error_percent",
             "matched_reversal_count",
+            "pareto_rank",
+            "pareto_front",
+            "pareto_eligible",
+            "pareto_objectives",
             "status",
             *parameter_keys,
         ]
@@ -2731,6 +3102,16 @@ class ResultsPanel(QWidget):
                         "matched_reversal_count",
                         0,
                     ),
+                    "pareto_rank": row.get("pareto_rank"),
+                    "pareto_front": bool(row.get("pareto_front")),
+                    "pareto_eligible": bool(row.get("pareto_eligible")),
+                    "pareto_objectives": ";".join(
+                        str(key)
+                        for key in row.get("pareto_objectives", [])
+                    ) if isinstance(
+                        row.get("pareto_objectives"),
+                        list,
+                    ) else "",
                     "status": row.get("status"),
                 }
                 for key in parameter_keys:
@@ -2914,6 +3295,12 @@ class ResultsPanel(QWidget):
         self.calibration_score_plot.set_series([], [])
         self.calibration_parameter_plot.set_series([], [])
         self.calibration_parameter_combo.clear()
+        self.calibration_pareto_x.clear()
+        self.calibration_pareto_y.clear()
+        self.calibration_pareto_plot.clear()
+        self.calibration_pareto_info.setText(
+            "Pareto rank uses all active nonzero-weight objectives."
+        )
         self.calibration_score_info.setText(
             "Best score vs cumulative analyses"
         )
