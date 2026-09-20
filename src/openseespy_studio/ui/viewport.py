@@ -254,22 +254,22 @@ class ModelViewport(QWidget):
     def interaction_tool(self) -> str:
         return self._interaction_tool
 
-    def clear_line_anchor(self, *, render: bool = True) -> None:
-        """Remove the temporary first-node marker for the Line tool."""
-        self._remove_overlay("line-anchor")
+    def clear_frame_anchor(self, *, render: bool = True) -> None:
+        """Remove the temporary first-node marker for Frame picking."""
+        self._remove_overlay("frame-anchor")
         if render:
             self.plotter.render()
 
-    def show_line_anchor(self, node_tag: int) -> None:
-        """Highlight the first node selected by the interactive Line tool."""
-        self.clear_line_anchor(render=False)
+    def show_frame_anchor(self, node_tag: int) -> None:
+        """Highlight the first node selected by the interactive Frame tool."""
+        self.clear_frame_anchor(render=False)
         if self._model is None or int(node_tag) not in self._model.nodes:
             self.plotter.render()
             return
         point = self._model.nodes[int(node_tag)].xyz
         self.plotter.add_mesh(
             pv.PolyData([point]),
-            name="line-anchor",
+            name="frame-anchor",
             color="#087ff5",
             render_points_as_spheres=True,
             point_size=16,
@@ -277,6 +277,14 @@ class ModelViewport(QWidget):
             render=False,
         )
         self.plotter.render()
+
+    # Compatibility aliases for projects/extensions written against the short-lived
+    # Line tool API. The Studio UI now exposes a single Frame object.
+    def clear_line_anchor(self, *, render: bool = True) -> None:
+        self.clear_frame_anchor(render=render)
+
+    def show_line_anchor(self, node_tag: int) -> None:
+        self.show_frame_anchor(node_tag)
 
     def clear_measure_anchor(self, *, render: bool = True) -> None:
         """Remove the temporary first-point marker for the Measure tool."""
