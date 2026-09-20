@@ -17,6 +17,7 @@ class AnalysisDialog(QDialog):
         next_tag=1,
         default_node=1,
         analysis_type=None,
+        ndf=6,
         parent=None,
     ):
         super().__init__(parent)
@@ -28,6 +29,9 @@ class AnalysisDialog(QDialog):
         root=QVBoxLayout(self)
         form_host=QWidget()
         form=QFormLayout(form_host)
+        self.form = form
+        self._row_widgets = {}
+        self.ndf = max(1, min(int(ndf), 6))
         self.tag=QSpinBox(); self.tag.setRange(1,2147483647); self.tag.setValue(analysis.tag if analysis else next_tag)
         default_kind = (
             analysis.analysis_type
@@ -52,7 +56,14 @@ class AnalysisDialog(QDialog):
         self.load_inc=fs(analysis.load_increment if analysis else 0.1,-1e20,1e20)
         self.control_node=QSpinBox(); self.control_node.setRange(1,2147483647); self.control_node.setValue(analysis.control_node if analysis else default_node)
         self.control_dof=QComboBox()
-        for i,n in enumerate(("UX","UY","UZ","RX","RY","RZ"),1): self.control_dof.addItem(f"{n} ({i})",i)
+        dof_names=("UX","UY","UZ","RX","RY","RZ")
+        for i,n in enumerate(dof_names[:self.ndf],1):
+            self.control_dof.addItem(f"{n} ({i})",i)
+        if analysis and analysis.control_dof > self.ndf:
+            self.control_dof.addItem(
+                f"DOF {analysis.control_dof} (outside current ndf={self.ndf})",
+                analysis.control_dof,
+            )
         if analysis:
             i=self.control_dof.findData(analysis.control_dof)
             if i>=0:self.control_dof.setCurrentIndex(i)
@@ -160,20 +171,48 @@ class AnalysisDialog(QDialog):
             "Opens a separate PowerShell window that mirrors the live solver log. "
             "The Studio worker still runs in its isolated process."
         )
-        fields=(("Tag",self.tag),("Name",self.name),("Analysis type",self.kind),("Constraints",self.constraints),("Numberer",self.numberer),("System",self.system),("Test",self.test),("Tolerance",self.tol),("Max iterations",self.max_iter),("Algorithm",self.algorithm),("Steps",self.steps),("Load increment",self.load_inc),("Control node",self.control_node),("Control DOF",self.control_dof),("Disp. increment",self.disp_inc),("Cyclic targets",self.cyclic_targets),("Cyclic max increment",self.cyclic_inc),("Time step dt",self.dt),("Newmark gamma",self.gamma),("Newmark beta",self.beta),("Rayleigh damping ratio",self.damping_ratio),("Rayleigh mode i",self.damping_mode_i),("Rayleigh mode j",self.damping_mode_j),("Number of modes",self.modes),("Eigen solver",self.eigen_solver))
-        for label,w in fields: form.addRow(label+":",w)
-        form.addRow("Gravity preload:",self.preload_gravity)
-        form.addRow("Gravity preload steps:",self.gravity_steps)
-        form.addRow("Driving pattern tag(s):",self.deferred_patterns)
-        form.addRow("Recovery:",self.recovery)
-        form.addRow("Adaptive step:",self.adaptive)
-        form.addRow("Cutback factor:",self.cutback)
-        form.addRow("Minimum factor:",self.min_factor)
-        form.addRow("Growth factor:",self.growth)
-        form.addRow("Easy if iterations <=",self.easy_iter)
-        form.addRow("Grow after easy steps:",self.grow_after)
-        form.addRow("Live convergence:",self.live_convergence)
-        form.addRow("External terminal:",self.external_console)
+        fields=(
+            ("tag","Tag",self.tag),
+            ("name","Name",self.name),
+            ("kind","Analysis type",self.kind),
+            ("constraints","Constraints",self.constraints),
+            ("numberer","Numberer",self.numberer),
+            ("system","System",self.system),
+            ("test","Test",self.test),
+            ("tol","Tolerance",self.tol),
+            ("max_iter","Max iterations",self.max_iter),
+            ("algorithm","Algorithm",self.algorithm),
+            ("steps","Steps",self.steps),
+            ("load_inc","Load increment",self.load_inc),
+            ("control_node","Control node",self.control_node),
+            ("control_dof","Control DOF",self.control_dof),
+            ("disp_inc","Disp. increment",self.disp_inc),
+            ("cyclic_targets","Cyclic targets",self.cyclic_targets),
+            ("cyclic_inc","Cyclic max increment",self.cyclic_inc),
+            ("dt","Time step dt",self.dt),
+            ("gamma","Newmark gamma",self.gamma),
+            ("beta","Newmark beta",self.beta),
+            ("damping_ratio","Rayleigh damping ratio",self.damping_ratio),
+            ("damping_mode_i","Rayleigh mode i",self.damping_mode_i),
+            ("damping_mode_j","Rayleigh mode j",self.damping_mode_j),
+            ("modes","Number of modes",self.modes),
+            ("eigen_solver","Eigen solver",self.eigen_solver),
+            ("preload_gravity","Gravity preload",self.preload_gravity),
+            ("gravity_steps","Gravity preload steps",self.gravity_steps),
+            ("deferred_patterns","Driving pattern tag(s)",self.deferred_patterns),
+            ("recovery","Recovery",self.recovery),
+            ("adaptive","Adaptive step",self.adaptive),
+            ("cutback","Cutback factor",self.cutback),
+            ("min_factor","Minimum factor",self.min_factor),
+            ("growth","Growth factor",self.growth),
+            ("easy_iter","Easy if iterations <=",self.easy_iter),
+            ("grow_after","Grow after easy steps",self.grow_after),
+            ("live_convergence","Live convergence",self.live_convergence),
+            ("external_console","External terminal",self.external_console),
+        )
+        for key,label,w in fields:
+            form.addRow(label+":",w)
+            self._row_widgets[key]=w
 
         self.scroll=QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -188,25 +227,78 @@ class AnalysisDialog(QDialog):
         self.preload_gravity.toggled.connect(
             lambda _checked: self._sync(self.kind.currentText())
         )
+        self.adaptive.toggled.connect(
+            lambda _checked: self._sync(self.kind.currentText())
+        )
+        self.damping_ratio.valueChanged.connect(
+            lambda _value: self._sync(self.kind.currentText())
+        )
         self._sync(self.kind.currentText())
+
+    def _set_row_visible(self, key, visible):
+        widget=self._row_widgets[key]
+        widget.setVisible(bool(visible))
+        label=self.form.labelForField(widget)
+        if label is not None:
+            label.setVisible(bool(visible))
+
     def _sync(self,kind):
-        modal=kind=="Modal"; transient=kind=="Transient"; push=kind=="Pushover"; cyclic=kind=="Cyclic"; static=kind=="Static"
-        for w in (self.test,self.tol,self.max_iter,self.algorithm,self.steps,self.recovery,self.adaptive,self.cutback,self.min_factor,self.growth,self.easy_iter,self.grow_after): w.setEnabled(not modal)
-        self.steps.setEnabled(not modal and not cyclic)
-        self.load_inc.setEnabled(static)
-        self.control_node.setEnabled(push or cyclic)
-        self.control_dof.setEnabled(push or cyclic)
-        self.disp_inc.setEnabled(push)
-        self.cyclic_targets.setEnabled(cyclic)
-        self.cyclic_inc.setEnabled(cyclic)
-        self.dt.setEnabled(transient); self.gamma.setEnabled(transient); self.beta.setEnabled(transient)
-        self.damping_ratio.setEnabled(transient); self.damping_mode_i.setEnabled(transient); self.damping_mode_j.setEnabled(transient)
-        staged = push or cyclic or transient
-        self.preload_gravity.setEnabled(staged)
-        self.gravity_steps.setEnabled(staged and self.preload_gravity.isChecked())
-        self.deferred_patterns.setEnabled(staged)
-        self.modes.setEnabled(modal)
-        self.eigen_solver.setEnabled(modal)
+        modal=kind=="Modal"
+        transient=kind=="Transient"
+        push=kind=="Pushover"
+        cyclic=kind=="Cyclic"
+        static=kind=="Static"
+        non_modal=not modal
+        staged=push or cyclic or transient
+
+        # Identity and core solver configuration are common to every analysis.
+        common={
+            "tag","name","kind","constraints","numberer","system",
+            "external_console",
+        }
+        visible=set(common)
+
+        # Convergence/solution strategy is irrelevant to a pure eigen analysis.
+        if non_modal:
+            visible.update({
+                "test","tol","max_iter","algorithm",
+                "recovery","adaptive","live_convergence",
+            })
+
+        if static:
+            visible.update({"steps","load_inc"})
+        elif push:
+            visible.update({
+                "steps","control_node","control_dof","disp_inc",
+            })
+        elif cyclic:
+            visible.update({
+                "control_node","control_dof",
+                "cyclic_targets","cyclic_inc",
+            })
+        elif transient:
+            visible.update({
+                "steps","dt","gamma","beta",
+                "damping_ratio",
+            })
+            if self.damping_ratio.value() > 0.0:
+                visible.update({"damping_mode_i","damping_mode_j"})
+        elif modal:
+            visible.update({"modes","eigen_solver"})
+
+        if staged:
+            visible.update({"preload_gravity","deferred_patterns"})
+            if self.preload_gravity.isChecked():
+                visible.add("gravity_steps")
+
+        if non_modal and self.adaptive.isChecked():
+            visible.update({
+                "cutback","min_factor","growth",
+                "easy_iter","grow_after",
+            })
+
+        for key in self._row_widgets:
+            self._set_row_visible(key,key in visible)
     def data(self):
         cyclic_targets=[]
         for raw in self.cyclic_targets.text().replace(";", ",").split(","):
