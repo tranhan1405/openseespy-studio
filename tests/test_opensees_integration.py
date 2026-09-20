@@ -715,3 +715,103 @@ def test_batched_centerline_mesh_contains_only_line_cells():
     assert mesh.n_verts == 0
     assert mesh.n_cells == 2
     assert list(mesh.cell_data["element_tag"]) == [11, 12]
+
+
+def test_generated_truss_runs_and_captures_axial_force_in_real_opensees(
+    tmp_path: Path,
+):
+    model = StructuralModel("truss-real-opensees")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 2.0, 0.0, 0.0)
+    model.set_fixity(1, (1, 1, 1, 1, 1, 1))
+    model.set_fixity(2, (0, 1, 1, 1, 1, 1))
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="truss",
+        group="truss",
+        truss_area=0.01,
+        truss_material_tag=1,
+    )
+
+    materials = {
+        1: MaterialData(
+            1,
+            "Elastic truss steel",
+            "Elastic",
+            parameters={"E": 200.0e9},
+        )
+    }
+    series = {
+        1: TimeSeriesData(1, "Axial", "Linear", factor=1.0)
+    }
+    patterns = {
+        1: LoadPatternData(1, "Axial", "Plain", time_series_tag=1)
+    }
+    loads = {
+        1: NodalLoadData(
+            1,
+            "Axial tension",
+            pattern_tag=1,
+            node_tag=2,
+            values=(1000.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        )
+    }
+    analysis = AnalysisSettingsData(
+        1,
+        "Truss static",
+        analysis_type="Static",
+        constraints_handler="Plain",
+        numberer="Plain",
+        system="BandGeneral",
+        test="NormDispIncr",
+        tolerance=1.0e-12,
+        max_iterations=20,
+        algorithm="Newton",
+        steps=1,
+        load_increment=1.0,
+        control_node=2,
+        control_dof=1,
+        recovery=False,
+        adaptive_step=False,
+        live_convergence=False,
+    )
+
+    script = to_openseespy(
+        model,
+        materials=materials,
+        time_series=series,
+        load_patterns=patterns,
+        nodal_loads=loads,
+        analyses={1: analysis},
+        active_analysis_tag=1,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    assert "# ERROR:" not in script
+    assert "ops.element('Truss', 1, 1, 2, 0.01, 1)" in script
+    assert "'element_axial_forces': _studio_element_axial_forces" in script
+
+    script_path = tmp_path / "truss-static.py"
+    result_path = tmp_path / "truss-static-result.json"
+    script_path.write_text(script, encoding="utf-8")
+
+    exit_code = run_script(script_path, result_path)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0, payload.get("error", "")
+    assert payload["status"] == "completed"
+
+    results = payload["results"]
+    displacement = results["final"]["node_displacements"]["2"][0]
+    assert displacement == pytest.approx(1.0e-6, rel=1.0e-6)
+
+    axial_force = results["final"]["element_axial_forces"]["1"]
+    assert abs(float(axial_force)) == pytest.approx(1000.0, rel=1.0e-8)
+
+    global_force = results["final"]["element_forces"]["1"]
+    assert len(global_force) >= 6
+    assert max(abs(float(value)) for value in global_force) == pytest.approx(
+        1000.0,
+        rel=1.0e-8,
+    )
