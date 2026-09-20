@@ -469,13 +469,13 @@ def run_plan(plan_path: Path, result_path: Path) -> int:
         return 2
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="OpenSeesPy Studio calibration worker"
     )
     parser.add_argument("plan", type=Path)
     parser.add_argument("--result-file", type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     return run_plan(args.plan, args.result_file)
 
 
