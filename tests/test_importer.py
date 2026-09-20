@@ -1,0 +1,193 @@
+from openseespy_studio.generator import to_openseespy
+from openseespy_studio.importer import import_openseespy_source
+from openseespy_studio.model import StructuralModel
+from openseespy_studio.project import (
+    AnalysisSettingsData,
+    LoadPatternData,
+    NodalLoadData,
+    SectionData,
+    TimeSeriesData,
+    TransformationData,
+)
+
+
+def test_safe_import_resolves_variables_and_range_loops():
+    source = """
+import openseespy.opensees as ops
+
+L = 3.0
+E = 200.0e9
+ops.model('basic', '-ndm', 3, '-ndf', 6)
+for i in range(3):
+    ops.node(i + 1, 0.0, 0.0, i * L)
+ops.fix(1, 1, 1, 1, 1, 1, 1)
+ops.uniaxialMaterial('Elastic', 1, E)
+ops.section('Elastic', 1, E, 0.02, 8e-5, 8e-5, 80e9, 1e-4)
+ops.geomTransf('Linear', 1, 1.0, 0.0, 0.0)
+ops.element('elasticBeamColumn', 1, 1, 2, 0.02, E, 80e9, 1e-4, 8e-5, 8e-5, 1)
+ops.element('elasticBeamColumn', 2, 2, 3, 0.02, E, 80e9, 1e-4, 8e-5, 8e-5, 1)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="loop_model.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    assert set(result.project.model.nodes) == {1, 2, 3}
+    assert set(result.project.model.elements) == {1, 2}
+    assert result.project.model.nodes[3].xyz == (0.0, 0.0, 6.0)
+    assert result.project.materials[1].parameters["E"] == 200.0e9
+    assert result.project.model.elements[1].section_tag == 1
+    assert result.project.model.elements[2].transf_tag == 1
+
+
+def test_safe_import_reconstructs_fiber_section_primitives():
+    source = """
+from openseespy.opensees import *
+model('basic', '-ndm', 3, '-ndf', 6)
+node(1, 0, 0, 0)
+node(2, 0, 0, 3)
+fix(1, 1, 1, 1, 1, 1, 1)
+uniaxialMaterial('Concrete02', 1, -30e6, -0.002, -6e6, -0.006, 0.1, 3e6, 2e8)
+uniaxialMaterial('Steel02', 2, 500e6, 200e9, 0.01, 20.0, 0.925, 0.15)
+section('Fiber', 10, '-GJ', 1e6)
+patch('rect', 1, 8, 8, -0.2, -0.2, 0.2, 0.2)
+layer('straight', 2, 4, 0.0002, -0.15, -0.15, 0.15, -0.15)
+geomTransf('PDelta', 1, 1, 0, 0)
+beamIntegration('Lobatto', 20, 10, 5)
+element('forceBeamColumn', 1, 1, 2, 1, 20, '-iter', 20, 1e-10)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="fiber.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    section = result.project.sections[10]
+    assert section.section_type == "Fiber"
+    assert len(section.fiber_components) == 2
+    element = result.project.model.elements[1]
+    assert element.element_type == "forceBeamColumn"
+    assert element.section_tag == 10
+    assert element.integration_points == 5
+    assert element.force_max_iter == 20
+
+
+def test_studio_generated_static_script_round_trips_to_project():
+    model = StructuralModel("roundtrip")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0, 3.0)
+    model.set_fixity(1, (1, 1, 1, 1, 1, 1))
+    model.add_element(1, 1, 2, section_tag=1, transf_tag=1)
+
+    sections = {
+        1: SectionData(
+            1,
+            "Column",
+            "Elastic",
+            parameters={
+                "E": 200e9,
+                "A": 0.02,
+                "Iz": 8e-5,
+                "Iy": 8e-5,
+                "G": 80e9,
+                "J": 1e-4,
+            },
+        )
+    }
+    transformations = {
+        1: TransformationData(1, "Column", "Linear", (1.0, 0.0, 0.0))
+    }
+    time_series = {
+        1: TimeSeriesData(1, "Load", "Linear", factor=1.0)
+    }
+    patterns = {
+        1: LoadPatternData(1, "Load", "Plain", time_series_tag=1)
+    }
+    loads = {
+        1: NodalLoadData(
+            1,
+            "Top load",
+            1,
+            2,
+            (1000.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        )
+    }
+    analysis = AnalysisSettingsData(
+        1,
+        "Static",
+        "Static",
+        constraints_handler="Plain",
+        numberer="Plain",
+        system="BandGeneral",
+        steps=1,
+        load_increment=1.0,
+        live_convergence=False,
+    )
+
+    script = to_openseespy(
+        model,
+        sections=sections,
+        transformations=transformations,
+        time_series=time_series,
+        load_patterns=patterns,
+        nodal_loads=loads,
+        analyses={1: analysis},
+        active_analysis_tag=1,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    imported = import_openseespy_source(
+        script,
+        source_name="studio_export.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert imported.error_count == 0
+    assert len(imported.project.model.nodes) == 2
+    assert len(imported.project.model.elements) == 1
+    assert len(imported.project.sections) == 1
+    assert len(imported.project.transformations) == 1
+    assert len(imported.project.nodal_loads) == 1
+    assert imported.project.active_analysis_tag == 1
+
+    regenerated = to_openseespy(
+        imported.project.model,
+        imported.project.materials,
+        imported.project.sections,
+        imported.project.transformations,
+        imported.project.constraints,
+        imported.project.connections,
+        imported.project.time_series,
+        imported.project.load_patterns,
+        imported.project.nodal_loads,
+        imported.project.analyses,
+        imported.project.active_analysis_tag,
+        units=imported.project.units,
+    )
+    assert "# ERROR:" not in regenerated
+    compile(regenerated, "<roundtrip>", "exec")
+
+
+def test_importer_never_executes_custom_python(tmp_path):
+    target = tmp_path / "must-not-exist.txt"
+    source = f"""
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 3, '-ndf', 6)
+ops.node(1, 0, 0, 0)
+open({str(target)!r}, 'w').write('unsafe')
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="unsafe.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert not target.exists()
+    assert len(result.project.model.nodes) == 1
+    assert result.unsupported_count >= 1
