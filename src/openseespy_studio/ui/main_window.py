@@ -42,6 +42,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..calibration import (
+    CalibrationCase,
+    apply_calibration_case,
+    calibration_case_script,
+)
 from ..analysis_templates import (
     GroundMotionComponentSpec,
     build_cyclic_template,
@@ -68,6 +73,7 @@ from ..validation import ValidationIssue, validate_project
 from ..units import UnitSystem
 from .analysis_dialog import AnalysisDialog
 from .analysis_template_dialog import AnalysisTemplateDialog
+from .calibration_dialog import CalibrationDialog
 from .code_editor import CodeEditor
 from .connection_dialog import ConnectionDialog
 from .constraint_dialog import ConstraintDialog
@@ -1231,6 +1237,13 @@ class MainWindow(QMainWindow):
         self._tree_element_items: dict[int, QTreeWidgetItem] = {}
         self._shortcuts: list[QShortcut] = []
         self._analysis_process: QProcess | None = None
+        self._calibration_process: QProcess | None = None
+        self._calibration_plan_path: str | None = None
+        self._calibration_result_path: str | None = None
+        self._calibration_output_buffer = ""
+        self._calibration_active_analysis_tag: int | None = None
+        self._calibration_project_snapshot: dict[str, object] | None = None
+        self._calibration_stop_requested = False
         self._analysis_script_path: str | None = None
         self._analysis_result_path: str | None = None
         self._analysis_log_path: str | None = None
@@ -1691,6 +1704,13 @@ class MainWindow(QMainWindow):
         self._make_action("check_model", "Check Model", "analysis", self._check_model, "Validate the model before analysis")
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action(
+            "calibration",
+            "Calibration...",
+            "analysis",
+            self._open_calibration,
+            "Run a grid parameter study against experimental cyclic data",
+        )
+        self._make_action(
             "plot",
             "Plot",
             "plot",
@@ -1739,6 +1759,7 @@ class MainWindow(QMainWindow):
         menus["Analysis"].addAction(self.actions["analysis_setup"])
         menus["Analysis"].addAction(self.actions["check_model"])
         menus["Analysis"].addAction(self.actions["run"])
+        menus["Analysis"].addAction(self.actions["calibration"])
         menus["Results"].addAction(self.actions["plot"])
 
         menus["Window"].addAction(self.model_tree_dock.toggleViewAction())
@@ -2015,6 +2036,11 @@ class MainWindow(QMainWindow):
             "Solver",
             large=("run",),
             small=("analysis_setup", "check_model", "solver_output_view"),
+        )
+        add_group(
+            analysis_page,
+            "Research",
+            large=("calibration",),
         )
         add_group(
             analysis_page,
@@ -9075,7 +9101,537 @@ class MainWindow(QMainWindow):
             return
         self._show_model_check(issues, allow_run=False)
 
+    def _open_calibration(self) -> None:
+        process = self._calibration_process
+        if process is not None and process.state() != QProcess.NotRunning:
+            self._calibration_stop_requested = True
+            self.console.appendPlainText(
+                ">> Stopping calibration worker..."
+            )
+            self.status_message.setText("Stopping calibration...")
+            process.terminate()
+            QTimer.singleShot(
+                2000,
+                self._kill_calibration_if_needed,
+            )
+            return
+
+        if (
+            self._analysis_process is not None
+            and self._analysis_process.state() != QProcess.NotRunning
+        ):
+            QMessageBox.information(
+                self,
+                "Calibration",
+                "Stop the active analysis before starting a calibration batch.",
+            )
+            return
+
+        active_tag = self.project.active_analysis_tag
+        settings = self.project.analyses.get(active_tag)
+        if settings is None:
+            QMessageBox.information(
+                self,
+                "Calibration",
+                "Create an Analysis Settings object and set it Active first.",
+            )
+            return
+        if settings.analysis_type != "Cyclic":
+            QMessageBox.information(
+                self,
+                "Calibration",
+                "The first calibration workflow currently requires an "
+                "active Cyclic analysis so the model can be compared with "
+                "experimental force-displacement hysteresis.",
+            )
+            return
+
+        issues = self._model_check_issues(settings)
+        errors = [
+            issue for issue in issues
+            if issue.severity == "ERROR"
+        ]
+        warnings = [
+            issue for issue in issues
+            if issue.severity == "WARNING"
+        ]
+        if errors:
+            self._show_model_check(issues, allow_run=False)
+            self.status_message.setText(
+                f"Calibration blocked: {len(errors)} model error(s)"
+            )
+            return
+        if warnings and not self._show_model_check(
+            issues,
+            allow_run=True,
+        ):
+            self.status_message.setText(
+                "Calibration cancelled after model check"
+            )
+            return
+
+        runtime_ok, runtime_detail = probe_opensees_runtime(
+            sys.executable
+        )
+        if not runtime_ok:
+            QMessageBox.critical(
+                self,
+                "OpenSeesPy Runtime",
+                "OpenSeesPy cannot start in the current Python environment.\n\n"
+                + runtime_detail,
+            )
+            return
+
+        dialog = CalibrationDialog(self.project, self)
+        if not dialog.exec():
+            return
+        try:
+            request = dialog.request()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Calibration",
+                str(exc),
+            )
+            return
+
+        cases = request.get("cases", [])
+        weights = request.get("weights")
+        experiment_x = request.get("experiment_x", [])
+        experiment_y = request.get("experiment_y", [])
+        if not isinstance(cases, list) or not cases:
+            QMessageBox.warning(
+                self,
+                "Calibration",
+                "No parameter-study cases were created.",
+            )
+            return
+
+        self._calibration_project_snapshot = self.project.to_dict()
+        snapshot_project = ProjectDatabase.from_dict(
+            self._calibration_project_snapshot
+        )
+        plan_cases: list[dict[str, object]] = []
+        try:
+            for case in cases:
+                if not isinstance(case, CalibrationCase):
+                    continue
+                plan_cases.append({
+                    "case_id": case.case_id,
+                    "values": dict(case.values),
+                    "script": calibration_case_script(
+                        snapshot_project,
+                        case,
+                    ),
+                })
+        except ValueError as exc:
+            self._calibration_project_snapshot = None
+            QMessageBox.warning(
+                self,
+                "Calibration",
+                f"Could not build calibration cases:\n{exc}",
+            )
+            return
+
+        if not plan_cases:
+            self._calibration_project_snapshot = None
+            return
+
+        plan_fd, plan_path = tempfile.mkstemp(
+            prefix="openseespy_studio_calibration_",
+            suffix=".json",
+            text=True,
+        )
+        os.close(plan_fd)
+        result_fd, result_path = tempfile.mkstemp(
+            prefix="openseespy_studio_calibration_result_",
+            suffix=".json",
+            text=True,
+        )
+        os.close(result_fd)
+
+        weight_payload = {
+            "peak_force": float(weights.peak_force),
+            "reversal_nrmse": float(weights.reversal_nrmse),
+            "cycle_energy": float(weights.cycle_energy),
+            "max_displacement": float(weights.max_displacement),
+        }
+        plan = {
+            "analysis_tag": int(settings.tag),
+            "analysis_name": str(settings.name),
+            "experiment": {
+                "x": [float(value) for value in experiment_x],
+                "y": [float(value) for value in experiment_y],
+                "source": str(request.get("experiment_path", "")),
+            },
+            "weights": weight_payload,
+            "cases": plan_cases,
+        }
+        Path(plan_path).write_text(
+            json.dumps(plan, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        self._calibration_plan_path = plan_path
+        self._calibration_result_path = result_path
+        self._calibration_output_buffer = ""
+        self._calibration_active_analysis_tag = int(settings.tag)
+        self._calibration_stop_requested = False
+
+        process = QProcess(self)
+        environment = QProcessEnvironment.systemEnvironment()
+        environment.insert(
+            "PYTHONPATH",
+            build_worker_pythonpath(
+                environment.value("PYTHONPATH")
+            ),
+        )
+        process.setProcessEnvironment(environment)
+        process.setProgram(sys.executable)
+        process.setArguments([
+            "-m",
+            "openseespy_studio.calibration_worker",
+            plan_path,
+            "--result-file",
+            result_path,
+        ])
+        process.setProcessChannelMode(QProcess.MergedChannels)
+        process.readyReadStandardOutput.connect(
+            self._read_calibration_stdout
+        )
+        process.finished.connect(self._calibration_finished)
+        process.errorOccurred.connect(
+            self._calibration_process_error
+        )
+        self._calibration_process = process
+
+        self.console_dock.show()
+        self.console.appendPlainText(
+            f">> Calibration: starting {len(plan_cases)} cyclic case(s)"
+        )
+        self.console.appendPlainText(
+            ">> Experimental reference: "
+            + (
+                Path(str(request.get("experiment_path", ""))).name
+                or "imported data"
+            )
+        )
+        self.status_message.setText(
+            f"Calibration · 0/{len(plan_cases)} cases"
+        )
+        self.actions["calibration"].setText("Stop Calibration")
+        self.actions["run"].setEnabled(False)
+        process.start()
+
+    def _kill_calibration_if_needed(self) -> None:
+        process = self._calibration_process
+        if process is not None and process.state() != QProcess.NotRunning:
+            process.kill()
+
+    def _consume_calibration_line(self, line: str) -> None:
+        text_line = str(line).strip()
+        if not text_line:
+            return
+        prefix = "@@STUDIO_CALIBRATION@@"
+        if not text_line.startswith(prefix):
+            self.console.appendPlainText(text_line)
+            return
+        try:
+            payload = json.loads(text_line[len(prefix):])
+        except json.JSONDecodeError:
+            self.console.appendPlainText(text_line)
+            return
+        event = str(payload.get("event", ""))
+        current = int(payload.get("current", 0) or 0)
+        total = int(payload.get("total", 0) or 0)
+        if event == "case_start":
+            case_id = int(payload.get("case_id", current) or current)
+            self.status_message.setText(
+                f"Calibration · case {current}/{total} · #{case_id}"
+            )
+        elif event == "case_finish":
+            case_id = int(payload.get("case_id", current) or current)
+            score = payload.get("score")
+            score_text = (
+                f"{float(score):.4g}%"
+                if score is not None
+                else "unavailable"
+            )
+            self.console.appendPlainText(
+                f">> Calibration case {case_id}: "
+                f"{payload.get('status', '-')} · score={score_text}"
+            )
+            self.status_message.setText(
+                f"Calibration · {current}/{total} cases"
+            )
+        elif event == "start":
+            self.status_message.setText(
+                f"Calibration · 0/{total} cases"
+            )
+
+    def _read_calibration_stdout(self) -> None:
+        process = self._calibration_process
+        if process is None:
+            return
+        text_data = bytes(
+            process.readAllStandardOutput()
+        ).decode("utf-8", errors="replace")
+        if not text_data:
+            return
+        self._calibration_output_buffer += text_data
+        while "\n" in self._calibration_output_buffer:
+            line, self._calibration_output_buffer = (
+                self._calibration_output_buffer.split("\n", 1)
+            )
+            self._consume_calibration_line(line)
+
+    def _calibration_process_error(self, _error) -> None:
+        process = self._calibration_process
+        if process is None:
+            return
+        self.console.appendPlainText(
+            ">> Calibration worker process error: "
+            + process.errorString()
+        )
+
+    def _read_calibration_result(self) -> dict[str, object]:
+        path = self._calibration_result_path
+        if not path:
+            return {}
+        try:
+            payload = json.loads(
+                Path(path).read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return {}
+        return dict(payload) if isinstance(payload, dict) else {}
+
+    def _calibration_finished(
+        self,
+        exit_code: int,
+        exit_status,
+    ) -> None:
+        if self._calibration_output_buffer.strip():
+            self._consume_calibration_line(
+                self._calibration_output_buffer
+            )
+        self._calibration_output_buffer = ""
+
+        crashed = exit_status == QProcess.CrashExit
+        payload = self._read_calibration_result()
+        rows = payload.get("cases", [])
+        if not isinstance(rows, list):
+            rows = []
+
+        if self._calibration_stop_requested:
+            self.console.appendPlainText(
+                ">> Calibration stopped by user."
+            )
+            self.status_message.setText("Calibration stopped")
+        elif crashed or exit_code != 0:
+            error = str(payload.get("error", "") or "")
+            self.console.appendPlainText(
+                ">> Calibration worker failed"
+                + (f": {error.splitlines()[-1]}" if error else "")
+            )
+            self.status_message.setText("Calibration failed")
+        else:
+            self.console.appendPlainText(
+                f">> Calibration completed: {len(rows)} case(s)"
+            )
+
+        display_rows: list[dict[str, object]] = []
+        snapshot = self._calibration_project_snapshot
+        base_project = (
+            ProjectDatabase.from_dict(snapshot)
+            if isinstance(snapshot, dict)
+            else None
+        )
+        analysis_tag = self._calibration_active_analysis_tag
+        analysis = (
+            base_project.analyses.get(analysis_tag)
+            if base_project is not None and analysis_tag is not None
+            else None
+        )
+
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            result = row.get("result", {})
+            if not isinstance(result, dict):
+                result = {}
+            case_id = int(row.get("case_id", 0) or 0)
+            values = row.get("values", {})
+            if not isinstance(values, dict):
+                values = {}
+
+            if result and base_project is not None:
+                try:
+                    case_project = apply_calibration_case(
+                        base_project,
+                        CalibrationCase(
+                            case_id=case_id,
+                            values={
+                                str(key): float(value)
+                                for key, value in values.items()
+                            },
+                        ),
+                    )
+                    result = enrich_member_force_results(
+                        result,
+                        case_project.model,
+                        case_project.element_loads,
+                        case_project.sections,
+                        case_project.materials,
+                        case_project.transformations,
+                        case_project.units,
+                    )
+                    result = enrich_fiber_state_results(
+                        result,
+                        case_project.materials,
+                    )
+                except (TypeError, ValueError) as exc:
+                    self.console.appendPlainText(
+                        f">> Calibration case {case_id} "
+                        f"post-processing warning: {exc}"
+                    )
+
+            self._job_counter += 1
+            job = JobRecord(
+                job_id=self._job_counter,
+                analysis_tag=analysis_tag,
+                analysis_name=(
+                    f"{analysis.name} · Calibration {case_id}"
+                    if analysis is not None
+                    else f"Calibration {case_id}"
+                ),
+                analysis_type=(
+                    analysis.analysis_type
+                    if analysis is not None
+                    else "Cyclic"
+                ),
+            )
+            job.start()
+            score = row.get("score")
+            execution_status = str(
+                row.get("execution_status", "failed")
+            )
+            job_status = (
+                "Completed"
+                if execution_status == "completed" and result
+                else "Failed"
+            )
+            score_text = (
+                f"{float(score):.6g}%"
+                if score is not None
+                else "unavailable"
+            )
+            job.finish(
+                job_status,
+                exit_code=0 if job_status == "Completed" else 1,
+                message=f"Calibration score {score_text}",
+                results=result,
+            )
+            self._jobs[job.job_id] = job
+            self.results_panel.add_or_update_job(job)
+
+            display_row = {
+                key: value
+                for key, value in row.items()
+                if key not in {"result", "comparison"}
+            }
+            display_row["job_id"] = job.job_id
+            display_row["status"] = (
+                "Scored"
+                if row.get("score") is not None
+                else execution_status.title()
+            )
+            display_rows.append(display_row)
+
+        if display_rows:
+            display_rows.sort(
+                key=lambda item: (
+                    item.get("rank") is None,
+                    int(item.get("rank") or 10**9),
+                    int(item.get("case_id", 0) or 0),
+                )
+            )
+            self.results_panel.set_calibration_results(
+                display_rows
+            )
+            self.results_panel.show_calibration()
+            self.results_dock.show()
+            self.results_dock.raise_()
+
+            best = next(
+                (
+                    item
+                    for item in display_rows
+                    if item.get("rank") == 1
+                    and item.get("job_id") is not None
+                ),
+                None,
+            )
+            if best is not None:
+                job = self._jobs.get(int(best["job_id"]))
+                if job is not None and job.results:
+                    self._last_result = dict(job.results)
+                    self._last_result_cache_key = (
+                        "job",
+                        job.job_id,
+                    )
+                    self.results_panel.set_result(
+                        self._last_result,
+                        cache_key=self._last_result_cache_key,
+                    )
+                    self.results_panel.set_calibration_results(
+                        display_rows
+                    )
+                    self.results_panel.show_calibration()
+                    self.status_message.setText(
+                        "Calibration completed · "
+                        f"best case #{best.get('case_id')} · "
+                        f"score {float(best.get('score')):.4g}%"
+                    )
+        elif not self._calibration_stop_requested:
+            self.status_message.setText(
+                "Calibration finished without scored cases"
+            )
+
+        self.actions["calibration"].setText("Calibration...")
+        self.actions["run"].setEnabled(True)
+        self._calibration_process = None
+        self._calibration_stop_requested = False
+        self._refresh_tree()
+        self._cleanup_calibration_files()
+
+    def _cleanup_calibration_files(self) -> None:
+        paths = (
+            self._calibration_plan_path,
+            self._calibration_result_path,
+        )
+        self._calibration_plan_path = None
+        self._calibration_result_path = None
+        for path in paths:
+            if path:
+                try:
+                    Path(path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+        self._calibration_active_analysis_tag = None
+        self._calibration_project_snapshot = None
+
     def _toggle_analysis(self) -> None:
+        if (
+            self._calibration_process is not None
+            and self._calibration_process.state() != QProcess.NotRunning
+        ):
+            QMessageBox.information(
+                self,
+                "Run",
+                "Stop the calibration batch before starting a normal analysis.",
+            )
+            return
         if self._analysis_process is not None:
             if self._analysis_process.state() != QProcess.NotRunning:
                 self._stop_analysis()
@@ -9894,6 +10450,21 @@ class MainWindow(QMainWindow):
         self._refresh_tree()
 
     def _reset_runtime_results(self) -> None:
+        calibration = self._calibration_process
+        if (
+            calibration is not None
+            and calibration.state() != QProcess.NotRunning
+        ):
+            calibration.kill()
+            calibration.waitForFinished(1000)
+        self._calibration_process = None
+        self._calibration_stop_requested = False
+        self._cleanup_calibration_files()
+        if "calibration" in self.actions:
+            self.actions["calibration"].setText("Calibration...")
+        if "run" in self.actions:
+            self.actions["run"].setEnabled(True)
+
         self._jobs.clear()
         self._job_counter = 0
         self._current_job_id = None
@@ -10122,7 +10693,15 @@ class MainWindow(QMainWindow):
         if process is not None and process.state() != QProcess.NotRunning:
             process.kill()
             process.waitForFinished(1000)
+        calibration = self._calibration_process
+        if (
+            calibration is not None
+            and calibration.state() != QProcess.NotRunning
+        ):
+            calibration.kill()
+            calibration.waitForFinished(1000)
         self._cleanup_analysis_files()
+        self._cleanup_calibration_files()
         for path in self._external_log_paths:
             try:
                 Path(path).unlink(missing_ok=True)
