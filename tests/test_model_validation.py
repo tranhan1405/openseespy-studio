@@ -2,8 +2,11 @@ from openseespy_studio.generator import FrameGridSpec, generate_frame_grid
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
     AnalysisSettingsData,
+    ConnectionData,
+    ConstraintData,
     ElementLoadData,
     LoadPatternData,
+    MaterialData,
     ProjectDatabase,
     RecorderData,
     SectionData,
@@ -465,5 +468,49 @@ def test_dynamic_model_check_accepts_distributed_element_mass():
     assert not any(
         issue.severity == "ERROR"
         and issue.category == "Mass"
+        for issue in issues
+    )
+
+
+def test_2d_connection_and_equal_dof_reject_out_of_range_dofs():
+    model = StructuralModel("2d-links", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    model.set_fixity(1, (1, 1, 1))
+    project = ProjectDatabase(model=model)
+    project.add_material(
+        MaterialData(1, "Spring", "Elastic", {"E": 1000.0})
+    )
+    project.add_connection(
+        ConnectionData(
+            1,
+            "Bad rotational spring",
+            "zeroLength",
+            1,
+            2,
+            materials_by_dof={4: 1},
+        )
+    )
+    project.add_constraint(
+        ConstraintData(
+            1,
+            "Bad equalDOF",
+            "equalDOF",
+            1,
+            [2],
+            dofs=(1, 4),
+        )
+    )
+
+    issues = validate_project(project)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Connection DOF"
+        for issue in issues
+    )
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Constraint DOF"
         for issue in issues
     )
