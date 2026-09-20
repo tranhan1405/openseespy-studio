@@ -61,6 +61,7 @@ from ..analysis_templates import (
 )
 from ..frame_setup import prepare_frame_grid
 from ..generator import FrameGridSpec, cyclic_displacement_steps, generate_frame_grid, to_openseespy
+from ..importer import import_openseespy_source
 from ..jobs import JobRecord
 from ..live_convergence import parse_opensees_convergence_line
 from ..model import StructuralModel, classify_fixity
@@ -98,6 +99,7 @@ from .geometry_dialogs import (
     VectorDialog,
 )
 from .history import ProjectSnapshotCommand
+from .import_report_dialog import ImportReportDialog
 from .load_dialogs import ElementLoadDialog, LoadPatternDialog, MassDialog, NodalLoadDialog, PrescribedDisplacementDialog, TimeSeriesDialog
 from .material_dialog import MaterialDialog
 from .mass_source_dialog import MassSourceDialog
@@ -1512,6 +1514,13 @@ class MainWindow(QMainWindow):
 
         self._make_action("new", "New", "new", self._new_model, "New project")
         self._make_action("open", "Open", "open", self._open_project, "Open project")
+        self._make_action(
+            "import_py",
+            "Import OpenSeesPy...",
+            "open",
+            self._import_openseespy_script,
+            "Safely reconstruct a Studio project from an OpenSeesPy script",
+        )
         self._make_action("save", "Save", "save", self._save_project, "Save project")
         self._make_action("undo", "Undo", "undo", self.undo_stack.undo, "Undo")
         self._make_action("redo", "Redo", "redo", self.undo_stack.redo, "Redo")
@@ -1828,7 +1837,11 @@ class MainWindow(QMainWindow):
         )
 
         file_menu = menus["File"]
-        file_menu.addActions([self.actions["new"], self.actions["open"]])
+        file_menu.addActions([
+            self.actions["new"],
+            self.actions["open"],
+            self.actions["import_py"],
+        ])
         self.recent_projects_menu = file_menu.addMenu("Recent Projects")
         self.recent_projects_menu.aboutToShow.connect(
             self._refresh_recent_projects_menu
@@ -5729,6 +5742,80 @@ class MainWindow(QMainWindow):
         self._set_dirty(False)
         self._remember_recent_project(self._project_path)
         self._refresh_all(f"Opened {self._project_path.name}")
+
+    def _import_openseespy_script(self) -> None:
+        if not self._maybe_save_changes():
+            return
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import OpenSeesPy Script",
+            "",
+            "Python (*.py);;All Files (*)",
+        )
+        if not path:
+            return
+
+        labels = [label for label, _units in UNIT_PRESETS]
+        current_units = dict(self.project.units)
+        current_index = 0
+        for index, (_label, units) in enumerate(UNIT_PRESETS):
+            if units == current_units:
+                current_index = index
+                break
+
+        label, ok = QInputDialog.getItem(
+            self,
+            "OpenSeesPy Import Units",
+            (
+                "OpenSees is unitless. Select the consistent unit system "
+                "used by this script:"
+            ),
+            labels,
+            current_index,
+            False,
+        )
+        if not ok:
+            return
+
+        selected_units = dict(UNIT_PRESETS[labels.index(label)][1])
+        try:
+            source = Path(path).read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            QMessageBox.critical(
+                self,
+                "Import OpenSeesPy",
+                f"Could not read the Python file:\n\n{exc}",
+            )
+            return
+
+        result = import_openseespy_source(
+            source,
+            source_name=Path(path).name,
+            units=selected_units,
+        )
+        report = ImportReportDialog(result, parent=self)
+        if report.exec() != QDialog.Accepted:
+            return
+
+        self.selection.clear()
+        self.project = result.project
+        self.model = self.project.model
+        self._project_path = None
+        self._reset_runtime_results()
+        self.undo_stack.clear()
+        self.undo_stack.setClean()
+        self._set_dirty(True)
+        self._refresh_all(
+            f"Imported OpenSeesPy: {Path(path).name} · "
+            f"{result.imported_total} recovered object(s) · "
+            f"{result.unsupported_count} unsupported"
+        )
+        self._log(
+            f"OpenSeesPy import: {Path(path).name}; "
+            f"errors={result.error_count}, warnings={result.warning_count}, "
+            f"unsupported={result.unsupported_count}"
+        )
 
     def _maybe_save_changes(self) -> bool:
         if not self._dirty:
