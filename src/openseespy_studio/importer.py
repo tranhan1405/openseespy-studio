@@ -1335,49 +1335,109 @@ class _Importer:
             "tag": int(meta.get("tag", 1) or 1),
             "name": str(meta.get("name", "Imported Analysis")),
             "analysis_type": analysis_type,
-            "constraints_handler": str(state.get("constraints", "Transformation")),
-            "numberer": str(state.get("numberer", "RCM")),
-            "system": str(state.get("system", "UmfPack")),
-            "test": str(state.get("test", "NormDispIncr")),
-            "tolerance": float(state.get("tolerance", 1e-8)),
-            "max_iterations": int(state.get("max_iterations", 50)),
-            "algorithm": str(state.get("algorithm", "Newton")),
-            "steps": max(1, int(meta.get("planned_steps", state.get("steps", 1)) or 1)),
+            "constraints_handler": str(
+                meta.get(
+                    "constraints_handler",
+                    state.get("constraints", "Transformation"),
+                )
+            ),
+            "numberer": str(meta.get("numberer", state.get("numberer", "RCM"))),
+            "system": str(meta.get("system", state.get("system", "UmfPack"))),
+            "test": str(meta.get("test", state.get("test", "NormDispIncr"))),
+            "tolerance": float(
+                meta.get("tolerance", state.get("tolerance", 1e-8))
+            ),
+            "max_iterations": int(
+                meta.get(
+                    "max_iterations",
+                    state.get("max_iterations", 50),
+                )
+            ),
+            "algorithm": str(
+                meta.get("algorithm", state.get("algorithm", "Newton"))
+            ),
+            "steps": max(
+                1,
+                int(meta.get("steps", state.get("steps", 1)) or 1),
+            ),
+            "load_increment": float(meta.get("load_increment", 0.1)),
             "control_node": int(
-                meta.get("control_node", min(self.project.model.nodes, default=1)) or 1
+                meta.get(
+                    "control_node",
+                    min(self.project.model.nodes, default=1),
+                )
+                or 1
             ),
             "control_dof": int(meta.get("control_dof", 1) or 1),
-            "live_convergence": False,
+            "displacement_increment": float(
+                meta.get("displacement_increment", 0.001)
+            ),
+            "cyclic_increment": float(meta.get("cyclic_increment", 0.001)),
+            "dt": float(meta.get("dt", state.get("dt", 0.01)) or 0.01),
+            "gamma": float(meta.get("gamma", 0.5)),
+            "beta": float(meta.get("beta", 0.25)),
+            "rayleigh_damping_ratio": float(
+                meta.get("rayleigh_damping_ratio", 0.0)
+            ),
+            "rayleigh_mode_i": int(meta.get("rayleigh_mode_i", 1)),
+            "rayleigh_mode_j": int(meta.get("rayleigh_mode_j", 3)),
+            "preload_gravity": bool(meta.get("preload_gravity", False)),
+            "gravity_steps": int(meta.get("gravity_steps", 10)),
+            "deferred_pattern_tags": [
+                int(value)
+                for value in meta.get("deferred_pattern_tags", [])
+            ],
+            "num_modes": int(meta.get("num_modes", state.get("num_modes", 1))),
+            "eigen_solver": str(
+                meta.get(
+                    "eigen_solver",
+                    state.get("eigen_solver", "-genBandArpack"),
+                )
+            ),
+            "recovery": bool(meta.get("recovery", True)),
+            "adaptive_step": bool(meta.get("adaptive_step", False)),
+            "adaptive_cutback_factor": float(
+                meta.get("adaptive_cutback_factor", 0.5)
+            ),
+            "adaptive_min_factor": float(
+                meta.get("adaptive_min_factor", 0.125)
+            ),
+            "adaptive_growth_factor": float(
+                meta.get("adaptive_growth_factor", 1.5)
+            ),
+            "adaptive_easy_iterations": int(
+                meta.get("adaptive_easy_iterations", 4)
+            ),
+            "adaptive_growth_after": int(
+                meta.get("adaptive_growth_after", 3)
+            ),
+            "live_convergence": bool(meta.get("live_convergence", False)),
         }
 
         integrator = state.get("integrator")
         values = list(state.get("integrator_args", []))
         if analysis_type == "Static" and integrator == "LoadControl" and values:
-            kwargs["load_increment"] = float(values[0])
+            if "load_increment" not in meta:
+                kwargs["load_increment"] = float(values[0])
         elif analysis_type == "Pushover" and integrator == "DisplacementControl":
             if len(values) >= 3:
-                kwargs["control_node"] = int(values[0])
-                kwargs["control_dof"] = int(values[1])
-                kwargs["displacement_increment"] = float(values[2])
+                if "control_node" not in meta:
+                    kwargs["control_node"] = int(values[0])
+                if "control_dof" not in meta:
+                    kwargs["control_dof"] = int(values[1])
+                if "displacement_increment" not in meta:
+                    kwargs["displacement_increment"] = float(values[2])
         elif analysis_type == "Cyclic":
             if meta.get("cyclic_targets"):
                 kwargs["cyclic_targets"] = [
                     float(value) for value in meta["cyclic_targets"]
                 ]
-            kwargs["cyclic_increment"] = float(meta.get("cyclic_increment", 0.001))
         elif analysis_type == "Transient":
-            kwargs["dt"] = float(state.get("dt", 0.01))
             if integrator == "Newmark" and len(values) >= 2:
-                kwargs["gamma"] = float(values[0])
-                kwargs["beta"] = float(values[1])
-        elif analysis_type == "Modal":
-            kwargs["num_modes"] = int(state.get("num_modes", 1))
-            kwargs["eigen_solver"] = str(
-                meta.get(
-                    "eigen_solver",
-                    state.get("eigen_solver", "-genBandArpack"),
-                )
-            )
+                if "gamma" not in meta:
+                    kwargs["gamma"] = float(values[0])
+                if "beta" not in meta:
+                    kwargs["beta"] = float(values[1])
 
         try:
             analysis = AnalysisSettingsData(**kwargs)
