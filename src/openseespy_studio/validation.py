@@ -18,6 +18,7 @@ SUPPORTED_ELEMENT_TYPES = {
     "elasticBeamColumn",
     "forceBeamColumn",
     "dispBeamColumn",
+    "truss",
 }
 
 
@@ -146,6 +147,43 @@ def _element_geometry_checks(
                     "formulation generator.",
                 )
             )
+
+        if element.element_type == "truss":
+            if element.truss_area <= 0.0:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Truss",
+                        f"Truss element {tag} has non-positive area.",
+                        "element",
+                        tag,
+                        "Assign a positive cross-sectional area.",
+                    )
+                )
+            if element.truss_material_tag is None:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Material",
+                        f"Truss element {tag} has no material assigned.",
+                        "element",
+                        tag,
+                        "Assign a uniaxial material before running.",
+                    )
+                )
+            elif element.truss_material_tag not in project.materials:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Material",
+                        f"Truss element {tag} references missing material "
+                        f"{element.truss_material_tag}.",
+                        "element",
+                        tag,
+                        "Assign an existing uniaxial material.",
+                    )
+                )
+            continue
 
         if element.element_type not in FRAME_ELEMENT_TYPES:
             continue
