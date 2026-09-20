@@ -69,7 +69,8 @@ class TestColumnBuildResult:
 
 BASE_INTERFACE_TYPES = {
     "Fixed base",
-    "Bond-slip",
+    "Translational slip spring",
+    "Bond-slip",  # legacy alias for pre-v0.1 research scripts
     "Rotational spring",
     "Custom zeroLength",
 }
