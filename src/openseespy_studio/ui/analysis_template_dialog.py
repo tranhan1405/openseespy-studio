@@ -41,8 +41,6 @@ from ..analysis_templates import (
 from ..ground_motion_library import (
     available_ground_motion_presets,
     common_scale_factor_for_target_pga,
-    download_fema_p695_farfield_library,
-    fema_p695_library_installed,
     load_ground_motion_record,
     pga_in_g,
     parse_ground_motion_record_text,
@@ -858,15 +856,10 @@ class AnalysisTemplateDialog(QDialog):
         motion_layout = QVBoxLayout(motion_group)
         shared = QFormLayout()
         self.gm_library = QComboBox()
-        self.gm_library_download = QPushButton()
-        self.gm_library_download.clicked.connect(
-            self._download_fema_library
-        )
         self.gm_library_host = QWidget()
         gm_library_layout = QHBoxLayout(self.gm_library_host)
         gm_library_layout.setContentsMargins(0, 0, 0, 0)
         gm_library_layout.addWidget(self.gm_library, 1)
-        gm_library_layout.addWidget(self.gm_library_download)
         self._populate_ground_motion_library()
 
         self.gm_library_info = QLabel()
@@ -1860,13 +1853,9 @@ class AnalysisTemplateDialog(QDialog):
         self.gm_library.clear()
         for preset in available_ground_motion_presets():
             status = (
-                "FEMA P695 local"
-                if preset.local_path
-                else (
-                    "Custom"
-                    if preset.key == "custom"
-                    else "Bundled"
-                )
+                "Custom"
+                if preset.key == "custom"
+                else "Offline"
             )
             self.gm_library.addItem(
                 f"{preset.label}  [{status}]",
@@ -1877,53 +1866,6 @@ class AnalysisTemplateDialog(QDialog):
             if index >= 0:
                 self.gm_library.setCurrentIndex(index)
         self.gm_library.blockSignals(False)
-        installed = fema_p695_library_installed()
-        self.gm_library_download.setText(
-            "Refresh FEMA P695"
-            if installed
-            else "Download FEMA P695 FF22"
-        )
-
-    def _download_fema_library(self) -> None:
-        answer = QMessageBox.question(
-            self,
-            "FEMA P695 Ground Motion Library",
-            (
-                "Download the full FEMA P695 far-field ground-motion "
-                "archive to the OpenSeesPy Studio local cache?\n\n"
-                "After installation the records can be selected here "
-                "without manual import and will work offline."
-            ),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
-        )
-        if answer != QMessageBox.Yes:
-            return
-        self.gm_library_download.setEnabled(False)
-        self.gm_library_download.setText("Downloading...")
-        try:
-            records = download_fema_p695_farfield_library()
-        except ValueError as exc:
-            QMessageBox.warning(
-                self,
-                "FEMA P695 Ground Motion Library",
-                str(exc),
-            )
-            self._populate_ground_motion_library()
-            return
-        finally:
-            self.gm_library_download.setEnabled(True)
-        selected = records[0].key if records else None
-        self._populate_ground_motion_library(selected)
-        QMessageBox.information(
-            self,
-            "FEMA P695 Ground Motion Library",
-            (
-                f"Installed {len(records)} horizontal FEMA P695 "
-                "component(s). They are now available offline."
-            ),
-        )
-        self._record_library_changed()
 
     def _record_library_changed(self, *_args) -> None:
         key = str(self.gm_library.currentData() or "custom")
@@ -1938,11 +1880,7 @@ class AnalysisTemplateDialog(QDialog):
             return
 
         year = f" ({preset.year})" if preset.year is not None else ""
-        availability = (
-            "FEMA P695 local cache; loads automatically."
-            if preset.local_path
-            else "Bundled record; loads automatically."
-        )
+        availability = "Offline bundled record; loads automatically."
         self.gm_library_info.setText(
             f"{preset.event}{year} · {preset.station} · "
             f"Source: {preset.source}. {availability} {preset.notes}"
@@ -1951,7 +1889,7 @@ class AnalysisTemplateDialog(QDialog):
         if not current or current.startswith("NLTH"):
             self.name.setText(f"NLTH · {preset.label.split(' · ')[0]}")
 
-        if preset.bundled_resource or preset.local_path:
+        if preset.bundled_resource:
             direction = int(self.direction.currentData() or 1)
             if direction not in self._nlth_directions:
                 direction = int(self._nlth_directions[0])
