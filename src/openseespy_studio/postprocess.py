@@ -392,6 +392,328 @@ def cyclic_hysteresis_metrics(
     }
 
 
+
+def test_column_moment_curvature_curve(
+    result: dict[str, Any] | None,
+) -> tuple[list[float], list[float], str]:
+    """Return base-section curvature and moment for a Quick 1D Column."""
+    if not isinstance(result, dict):
+        return [], [], ""
+    specimen = result.get("specimen", {})
+    history = result.get("history", {})
+    if not isinstance(specimen, dict) or not isinstance(history, dict):
+        return [], [], ""
+    specimen_history = history.get("specimen", {})
+    if not isinstance(specimen_history, dict):
+        return [], [], ""
+
+    try:
+        index = int(specimen.get("moment_index", 1))
+        sign = float(specimen.get("moment_sign", 1.0))
+    except (TypeError, ValueError):
+        return [], [], ""
+    force_rows = specimen_history.get("section_force", [])
+    deformation_rows = specimen_history.get("section_deformation", [])
+    if not isinstance(force_rows, (list, tuple)):
+        return [], [], ""
+    if not isinstance(deformation_rows, (list, tuple)):
+        return [], [], ""
+
+    curvature: list[float] = []
+    moment: list[float] = []
+    for force_row, deformation_row in zip(force_rows, deformation_rows):
+        if (
+            not isinstance(force_row, (list, tuple))
+            or not isinstance(deformation_row, (list, tuple))
+            or len(force_row) <= index
+            or len(deformation_row) <= index
+        ):
+            continue
+        try:
+            force_value = sign * float(force_row[index])
+            deformation_value = sign * float(deformation_row[index])
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(force_value) and math.isfinite(deformation_value):
+            curvature.append(deformation_value)
+            moment.append(force_value)
+
+    if curvature and (
+        abs(curvature[0]) > 1.0e-15 or abs(moment[0]) > 1.0e-15
+    ):
+        curvature.insert(0, 0.0)
+        moment.insert(0, 0.0)
+    return curvature, moment, str(specimen.get("moment_component", ""))
+
+
+def test_column_rotation_decomposition(
+    result: dict[str, Any] | None,
+) -> dict[str, list[float]]:
+    """Split total drift angle into member, interface-rotation and slip parts.
+
+    The member contribution is drift-equivalent: total top drift angle minus
+    rigid interface rotation minus lateral interface slip divided by height.
+    This is a kinematic diagnostic, not a section-curvature integration.
+    """
+    empty = {
+        "time": [],
+        "total": [],
+        "column": [],
+        "interface_rotation": [],
+        "interface_slip": [],
+    }
+    if not isinstance(result, dict):
+        return empty
+    specimen = result.get("specimen", {})
+    history = result.get("history", {})
+    if not isinstance(specimen, dict) or not isinstance(history, dict):
+        return empty
+    specimen_history = history.get("specimen", {})
+    nodes = history.get("nodes", {})
+    times = history.get("time", [])
+    if (
+        not isinstance(specimen_history, dict)
+        or not isinstance(nodes, dict)
+        or not isinstance(times, (list, tuple))
+    ):
+        return empty
+
+    try:
+        height = abs(float(specimen.get("height", 0.0)))
+        lateral_index = int(specimen.get("lateral_direction", 1)) - 1
+        rotation_index = int(specimen.get("bending_rotation_dof", 4)) - 1
+        moment_index = int(specimen.get("moment_index", 1))
+        sign = float(specimen.get("moment_sign", 1.0))
+        top_node = int(specimen.get("top_node"))
+        base_node = int(specimen.get("base_node"))
+    except (TypeError, ValueError):
+        return empty
+    if height <= 1.0e-15 or lateral_index not in range(3):
+        return empty
+
+    ground_raw = specimen.get("ground_node")
+    try:
+        ground_node = int(ground_raw) if ground_raw is not None else None
+    except (TypeError, ValueError):
+        ground_node = None
+
+    def displacement_rows(node_tag: int | None) -> list[Any]:
+        if node_tag is None:
+            return []
+        payload = nodes.get(str(node_tag), nodes.get(node_tag, {}))
+        if not isinstance(payload, dict):
+            return []
+        rows = payload.get("disp", [])
+        return list(rows) if isinstance(rows, (list, tuple)) else []
+
+    top_rows = displacement_rows(top_node)
+    base_rows = displacement_rows(base_node)
+    ground_rows = displacement_rows(ground_node)
+    interface_rows = specimen_history.get("interface_deformation", [])
+    if not isinstance(interface_rows, (list, tuple)):
+        interface_rows = []
+
+    result_rows = {
+        "time": [],
+        "total": [],
+        "column": [],
+        "interface_rotation": [],
+        "interface_slip": [],
+    }
+    count = min(len(times), len(top_rows))
+    for index in range(count):
+        top = top_rows[index]
+        if not isinstance(top, (list, tuple)) or len(top) <= lateral_index:
+            continue
+        base = (
+            base_rows[index]
+            if index < len(base_rows)
+            and isinstance(base_rows[index], (list, tuple))
+            else []
+        )
+        ground = (
+            ground_rows[index]
+            if index < len(ground_rows)
+            and isinstance(ground_rows[index], (list, tuple))
+            else []
+        )
+
+        try:
+            top_u = float(top[lateral_index])
+            base_u = (
+                float(base[lateral_index])
+                if len(base) > lateral_index
+                else 0.0
+            )
+            ground_u = (
+                float(ground[lateral_index])
+                if len(ground) > lateral_index
+                else 0.0
+            )
+            time_value = float(times[index])
+        except (TypeError, ValueError):
+            continue
+
+        total = (top_u - ground_u) / height
+        slip = (base_u - ground_u) / height
+
+        interface_rotation = 0.0
+        row = (
+            interface_rows[index]
+            if index < len(interface_rows)
+            and isinstance(interface_rows[index], (list, tuple))
+            else []
+        )
+        interface_type = str(specimen.get("interface_type", ""))
+        if (
+            interface_type == "zeroLengthSection"
+            and len(row) > moment_index
+        ):
+            try:
+                interface_rotation = sign * float(row[moment_index])
+            except (TypeError, ValueError):
+                interface_rotation = 0.0
+        elif ground_node is not None:
+            try:
+                base_r = (
+                    float(base[rotation_index])
+                    if len(base) > rotation_index
+                    else 0.0
+                )
+                ground_r = (
+                    float(ground[rotation_index])
+                    if len(ground) > rotation_index
+                    else 0.0
+                )
+                interface_rotation = base_r - ground_r
+            except (TypeError, ValueError):
+                interface_rotation = 0.0
+
+        values = (time_value, total, interface_rotation, slip)
+        if not all(math.isfinite(value) for value in values):
+            continue
+        column = total - interface_rotation - slip
+        result_rows["time"].append(time_value)
+        result_rows["total"].append(total)
+        result_rows["interface_rotation"].append(interface_rotation)
+        result_rows["interface_slip"].append(slip)
+        result_rows["column"].append(column)
+
+    return result_rows
+
+
+def test_column_fiber_history_catalog(
+    result: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Return selectable critical-fiber histories captured for the specimen."""
+    if not isinstance(result, dict):
+        return []
+    history = result.get("history", {})
+    if not isinstance(history, dict):
+        return []
+    specimen_history = history.get("specimen", {})
+    times = history.get("time", [])
+    if (
+        not isinstance(specimen_history, dict)
+        or not isinstance(times, (list, tuple))
+    ):
+        return []
+
+    catalog: list[dict[str, Any]] = []
+    for source, history_key, quantities in (
+        ("Base section", "base_fibers", ("stress", "strain")),
+        ("Bond interface", "interface_fibers", ("stress", "slip")),
+    ):
+        snapshots = specimen_history.get(history_key, [])
+        if not isinstance(snapshots, (list, tuple)) or not snapshots:
+            continue
+
+        identities: dict[str, dict[str, Any]] = {}
+        for snapshot in snapshots:
+            if not isinstance(snapshot, list):
+                continue
+            for fiber in snapshot:
+                if not isinstance(fiber, dict):
+                    continue
+                label = str(fiber.get("label", "") or "")
+                if label and label not in identities:
+                    identities[label] = dict(fiber)
+
+        for label, metadata in sorted(identities.items()):
+            for quantity in quantities:
+                x: list[float] = []
+                y: list[float] = []
+                for time_value, snapshot in zip(times, snapshots):
+                    if not isinstance(snapshot, list):
+                        continue
+                    match = next(
+                        (
+                            fiber
+                            for fiber in snapshot
+                            if isinstance(fiber, dict)
+                            and str(fiber.get("label", "")) == label
+                        ),
+                        None,
+                    )
+                    if match is None or match.get(quantity) is None:
+                        continue
+                    try:
+                        tx = float(time_value)
+                        value = float(match[quantity])
+                    except (TypeError, ValueError):
+                        continue
+                    if math.isfinite(tx) and math.isfinite(value):
+                        x.append(tx)
+                        y.append(value)
+                if not y:
+                    continue
+                catalog.append({
+                    "key": f"{history_key}:{label}:{quantity}",
+                    "source": source,
+                    "label": label,
+                    "quantity": quantity,
+                    "x": x,
+                    "y": y,
+                    "material_tag": metadata.get("material_tag"),
+                    "material_type": metadata.get("material_type"),
+                    "y_coord": metadata.get("y"),
+                    "z_coord": metadata.get("z"),
+                    "latest": y[-1],
+                })
+    return catalog
+
+
+def test_column_response_summary(
+    result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Summarize the specialized 1D-column instrumentation."""
+    curvature, moment, component = test_column_moment_curvature_curve(result)
+    rotations = test_column_rotation_decomposition(result)
+    fibers = test_column_fiber_history_catalog(result)
+
+    def maximum_absolute(values: Sequence[float]) -> float | None:
+        finite = [
+            abs(float(value))
+            for value in values
+            if math.isfinite(float(value))
+        ]
+        return max(finite) if finite else None
+
+    return {
+        "moment_component": component,
+        "max_abs_moment": maximum_absolute(moment),
+        "max_abs_curvature": maximum_absolute(curvature),
+        "max_abs_total_drift": maximum_absolute(rotations["total"]),
+        "max_abs_interface_rotation": maximum_absolute(
+            rotations["interface_rotation"]
+        ),
+        "max_abs_interface_slip_drift": maximum_absolute(
+            rotations["interface_slip"]
+        ),
+        "critical_fibers": fibers,
+    }
+
+
 def convergence_steps(
     result: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
