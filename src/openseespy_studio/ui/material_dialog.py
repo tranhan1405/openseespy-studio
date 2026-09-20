@@ -1022,6 +1022,32 @@ class MaterialDialog(QDialog):
             self.material_note.setStyleSheet(
                 "padding: 7px; background: #eef4fb; color: #40566c;"
             )
+        elif material_type in {
+            "Steel01",
+            "Steel02",
+            "ReinforcingSteel",
+            "Concrete01",
+            "Concrete02",
+            "Concrete04",
+            "Bond_SP01",
+            "Elastic",
+            "ElasticPPGap",
+        }:
+            response_name = (
+                "stress-slip"
+                if material_type == "Bond_SP01"
+                else "force-deformation"
+                if material_type == "ElasticPPGap"
+                else "stress-strain"
+            )
+            self.material_note.setText(
+                f"The diagram is a live {response_name} parameter guide built "
+                "from the current inputs. For cyclic/path-dependent behavior "
+                "and exact OpenSees constitutive response, use Test Material."
+            )
+            self.material_note.setStyleSheet(
+                "padding: 7px; background: #eef4fb; color: #40566c;"
+            )
         else:
             self.material_note.setText(
                 "Parameters are stored in research-friendly engineering units. "
