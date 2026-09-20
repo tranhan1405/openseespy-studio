@@ -394,21 +394,39 @@ class _Importer:
         kind = str(args[0])
         tag = int(args[1])
         if kind == "Elastic":
-            if len(args) < 8:
-                raise ValueError("Elastic section has too few arguments")
+            if int(self.project.model.ndm) == 2:
+                if len(args) < 5:
+                    raise ValueError(
+                        "2D Elastic section needs E, A and Iz"
+                    )
+                e = float(args[2])
+                parameters = {
+                    "E": self.stress_to_pa(e),
+                    "A": float(args[3]),
+                    "Iz": float(args[4]),
+                    "Iy": 0.0,
+                    "G": self.stress_to_pa(e / 2.6),
+                    "J": 0.0,
+                }
+            else:
+                if len(args) < 8:
+                    raise ValueError(
+                        "3D Elastic section needs E, A, Iz, Iy, G and J"
+                    )
+                parameters = {
+                    "E": self.stress_to_pa(args[2]),
+                    "A": float(args[3]),
+                    "Iz": float(args[4]),
+                    "Iy": float(args[5]),
+                    "G": self.stress_to_pa(args[6]),
+                    "J": float(args[7]),
+                }
             self.project.add_section(
                 SectionData(
                     tag,
                     f"Imported Elastic {tag}",
                     "Elastic",
-                    parameters={
-                        "E": self.stress_to_pa(args[2]),
-                        "A": float(args[3]),
-                        "Iz": float(args[4]),
-                        "Iy": float(args[5]),
-                        "G": self.stress_to_pa(args[6]),
-                        "J": float(args[7]),
-                    },
+                    parameters=parameters,
                 )
             )
             self.current_fiber_section = None
