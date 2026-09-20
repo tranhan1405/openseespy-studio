@@ -43,6 +43,8 @@ from ..postprocess import (
     convergence_summary,
     cyclic_hysteresis_curve,
     cyclic_hysteresis_metrics,
+    column_cyclic_cycle_metrics,
+    column_cyclic_reversal_metrics,
     fiber_response_element_tags,
     fiber_response_range,
     fiber_response_sections,
@@ -1536,15 +1538,39 @@ class ResultsPanel(QWidget):
         )
         layout.addWidget(self.cyclic_plot, 1)
 
-        self.cyclic_reversal_table = QTableWidget(0, 6)
+        research_row = QHBoxLayout()
+        self.cyclic_research_info = QLabel(
+            "1D-column research metrics appear here when specimen "
+            "instrumentation is available."
+        )
+        self.cyclic_research_info.setWordWrap(True)
+        research_row.addWidget(self.cyclic_research_info, 1)
+        export_research = QPushButton("Export Research CSV")
+        export_research.clicked.connect(
+            self._export_cyclic_research_csv
+        )
+        research_row.addWidget(export_research)
+        layout.addLayout(research_row)
+
+        self.cyclic_reversal_table = QTableWidget(0, 16)
         self.cyclic_reversal_table.setHorizontalHeaderLabels(
             [
-                "Reversal",
+                "Rev",
                 "u",
                 "V",
+                "Drift",
+                "M",
+                "κ",
+                "εs",
+                "εc",
+                "Bond slip",
+                "θint",
                 "|Ksec|",
                 "Strength / 1st",
                 "Ksec / 1st",
+                "E branch",
+                "Cycle",
+                "E cycle",
             ]
         )
         self.cyclic_reversal_table.horizontalHeader().setSectionResizeMode(
@@ -1556,7 +1582,38 @@ class ResultsPanel(QWidget):
         self.cyclic_reversal_table.setEditTriggers(
             QAbstractItemView.NoEditTriggers
         )
+        self.cyclic_reversal_table.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded
+        )
         layout.addWidget(self.cyclic_reversal_table)
+
+        self.cyclic_cycle_table = QTableWidget(0, 8)
+        self.cyclic_cycle_table.setHorizontalHeaderLabels(
+            [
+                "Cycle",
+                "End rev",
+                "|u|",
+                "Repeat",
+                "E loop",
+                "E interface",
+                "Strength / 1st",
+                "Ksec / 1st",
+            ]
+        )
+        self.cyclic_cycle_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.cyclic_cycle_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.cyclic_cycle_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.cyclic_cycle_table.setMaximumHeight(130)
+        self.cyclic_cycle_table.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded
+        )
+        layout.addWidget(self.cyclic_cycle_table)
 
         self.tabs.addTab(page, "Cyclic Hysteresis")
 
@@ -3596,6 +3653,10 @@ class ResultsPanel(QWidget):
             )
             self.cyclic_plot.set_series([], [])
             self.cyclic_reversal_table.setRowCount(0)
+            self.cyclic_cycle_table.setRowCount(0)
+            self.cyclic_research_info.setText(
+                "No cyclic reversal research data is available."
+            )
             return
 
         metrics = cyclic_hysteresis_metrics(x, y)
@@ -3631,40 +3692,73 @@ class ResultsPanel(QWidget):
         )
         self.cyclic_plot.set_series(x, y)
 
-        reversals = metrics.get("reversals", [])
-        if not isinstance(reversals, list):
-            reversals = []
-        self.cyclic_reversal_table.setRowCount(len(reversals))
-        for row, reversal in enumerate(reversals, start=0):
-            if not isinstance(reversal, dict):
-                continue
-            stiffness = reversal.get("secant_stiffness")
-            stiffness_text = (
-                f"{float(stiffness):.6g}"
-                if stiffness is not None and math.isfinite(float(stiffness))
-                else "-"
+        specimen_rows = column_cyclic_reversal_metrics(
+            self._result
+        )
+        if specimen_rows:
+            reversal_rows = specimen_rows
+            self.cyclic_research_info.setText(
+                f"{len(specimen_rows)} synchronized reversal(s): "
+                "global V–u + drift + base M–κ + critical steel/concrete "
+                "strain + Bond_SP01 slip + interface rotation + energy."
             )
-            strength_ratio = reversal.get("strength_ratio")
-            stiffness_ratio = reversal.get("stiffness_ratio")
-            strength_ratio_text = (
-                f"{float(strength_ratio):.4f}"
-                if strength_ratio is not None
-                and math.isfinite(float(strength_ratio))
-                else "-"
+        else:
+            raw_reversals = metrics.get("reversals", [])
+            if not isinstance(raw_reversals, list):
+                raw_reversals = []
+            reversal_rows = [
+                {
+                    "reversal": index + 1,
+                    "displacement": reversal.get("displacement"),
+                    "base_shear": reversal.get("force"),
+                    "secant_stiffness": reversal.get(
+                        "secant_stiffness"
+                    ),
+                    "strength_ratio": reversal.get("strength_ratio"),
+                    "stiffness_ratio": reversal.get(
+                        "stiffness_ratio"
+                    ),
+                }
+                for index, reversal in enumerate(raw_reversals)
+                if isinstance(reversal, dict)
+            ]
+            self.cyclic_research_info.setText(
+                "Global reversal metrics are available. Build/run a Quick "
+                "1D Column specimen to add M–κ, fiber, Bond_SP01 and "
+                "interface-response columns."
             )
-            stiffness_ratio_text = (
-                f"{float(stiffness_ratio):.4f}"
-                if stiffness_ratio is not None
-                and math.isfinite(float(stiffness_ratio))
-                else "-"
-            )
+
+        def metric_text(value: Any, decimals: int = 6) -> str:
+            if value is None:
+                return "-"
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return "-"
+            if not math.isfinite(number):
+                return "-"
+            return f"{number:.{decimals}g}"
+
+        self.cyclic_reversal_table.setRowCount(len(reversal_rows))
+        for row, reversal in enumerate(reversal_rows):
+            cycle = reversal.get("closed_cycle_number")
             values = [
-                str(row + 1),
-                f"{float(reversal.get('displacement', 0.0)):.6g}",
-                f"{float(reversal.get('force', 0.0)):.6g}",
-                stiffness_text,
-                strength_ratio_text,
-                stiffness_ratio_text,
+                str(reversal.get("reversal", row + 1)),
+                metric_text(reversal.get("displacement")),
+                metric_text(reversal.get("base_shear")),
+                metric_text(reversal.get("drift_angle")),
+                metric_text(reversal.get("moment")),
+                metric_text(reversal.get("curvature")),
+                metric_text(reversal.get("steel_strain")),
+                metric_text(reversal.get("concrete_strain")),
+                metric_text(reversal.get("bond_slip")),
+                metric_text(reversal.get("interface_rotation")),
+                metric_text(reversal.get("secant_stiffness")),
+                metric_text(reversal.get("strength_ratio"), 4),
+                metric_text(reversal.get("stiffness_ratio"), 4),
+                metric_text(reversal.get("branch_energy")),
+                str(int(cycle)) if cycle is not None else "-",
+                metric_text(reversal.get("closed_cycle_energy")),
             ]
             for column, value in enumerate(values):
                 self.cyclic_reversal_table.setItem(
@@ -3672,6 +3766,86 @@ class ResultsPanel(QWidget):
                     column,
                     QTableWidgetItem(value),
                 )
+
+        cycle_rows = column_cyclic_cycle_metrics(self._result)
+        self.cyclic_cycle_table.setRowCount(len(cycle_rows))
+        for row, cycle in enumerate(cycle_rows):
+            values = [
+                str(cycle.get("cycle", row + 1)),
+                str(cycle.get("end_reversal", "-")),
+                metric_text(cycle.get("amplitude")),
+                str(cycle.get("repeat_index", "-")),
+                metric_text(cycle.get("energy")),
+                metric_text(cycle.get("interface_energy")),
+                metric_text(cycle.get("strength_ratio"), 4),
+                metric_text(cycle.get("stiffness_ratio"), 4),
+            ]
+            for column, value in enumerate(values):
+                self.cyclic_cycle_table.setItem(
+                    row,
+                    column,
+                    QTableWidgetItem(value),
+                )
+
+    def _export_cyclic_research_csv(self) -> None:
+        reversal_rows = column_cyclic_reversal_metrics(self._result)
+        if not reversal_rows:
+            self.cyclic_research_info.setText(
+                "No synchronized 1D-column cyclic research metrics are "
+                "available to export."
+            )
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Cyclic Research Metrics",
+            "column_cyclic_research_metrics.csv",
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+
+        fields = [
+            "reversal",
+            "history_step",
+            "time",
+            "repeat_index",
+            "displacement",
+            "base_shear",
+            "drift_angle",
+            "member_drift",
+            "interface_rotation",
+            "interface_slip_drift",
+            "interface_slip",
+            "moment",
+            "curvature",
+            "steel_strain",
+            "concrete_strain",
+            "bond_slip",
+            "secant_stiffness",
+            "strength_ratio",
+            "stiffness_ratio",
+            "branch_energy",
+            "interface_branch_energy",
+            "closed_cycle_number",
+            "closed_cycle_energy",
+            "interface_closed_cycle_energy",
+        ]
+        with open(path, "w", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(stream, fieldnames=fields)
+            writer.writeheader()
+            for row in reversal_rows:
+                writer.writerow({
+                    field: row.get(field)
+                    for field in fields
+                })
+
+        self.cyclic_research_info.setText(
+            f"Exported {len(reversal_rows)} synchronized reversal row(s) "
+            f"to {path}"
+        )
 
     def _update_history_plot(self) -> None:
         time, values, quantity, node_tag, dof = self._history_selection()

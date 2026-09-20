@@ -393,6 +393,439 @@ def cyclic_hysteresis_metrics(
 
 
 
+
+def column_cyclic_reversal_metrics(
+    result: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Return synchronized cyclic research metrics at every reversal.
+
+    Global force-displacement reversals are used as the indexing backbone.
+    Each reversal is synchronized to the captured Quick 1D Column specimen
+    histories from the same converged analysis step, so section, fiber and
+    base-interface quantities can be compared directly with laboratory data.
+    """
+    if not isinstance(result, dict):
+        return []
+    analysis = result.get("analysis", {})
+    history = result.get("history", {})
+    specimen = result.get("specimen", {})
+    if (
+        not isinstance(analysis, dict)
+        or str(analysis.get("type", "")) != "Cyclic"
+        or not isinstance(history, dict)
+        or not isinstance(specimen, dict)
+        or specimen.get("kind") != "test-column"
+    ):
+        return []
+
+    try:
+        control_dof = int(
+            history.get("control_dof", analysis.get("control_dof", 1))
+        )
+    except (TypeError, ValueError):
+        control_dof = 1
+    if control_dof not in range(1, 7):
+        control_dof = 1
+    control_index = control_dof - 1
+
+    displacement_rows = history.get("displacement", [])
+    shear_rows = history.get("base_shear", [])
+    times = history.get("time", [])
+    if not isinstance(displacement_rows, (list, tuple)):
+        return []
+    if not isinstance(shear_rows, (list, tuple)):
+        return []
+    if not isinstance(times, (list, tuple)):
+        times = []
+
+    # Keep the original converged-step index attached to each valid global
+    # hysteresis point. This avoids assuming every captured step is usable.
+    samples: list[dict[str, Any]] = [{
+        "step": None,
+        "time": 0.0,
+        "displacement": 0.0,
+        "force": 0.0,
+    }]
+    for step, (disp_row, raw_shear) in enumerate(
+        zip(displacement_rows, shear_rows)
+    ):
+        if (
+            not isinstance(disp_row, (list, tuple))
+            or len(disp_row) <= control_index
+        ):
+            continue
+        try:
+            displacement = float(disp_row[control_index])
+            force = -float(raw_shear)
+            time_value = (
+                float(times[step])
+                if step < len(times)
+                else float(step + 1)
+            )
+        except (TypeError, ValueError):
+            continue
+        if not all(
+            math.isfinite(value)
+            for value in (displacement, force, time_value)
+        ):
+            continue
+        samples.append({
+            "step": step,
+            "time": time_value,
+            "displacement": displacement,
+            "force": force,
+        })
+
+    if len(samples) < 4:
+        return []
+
+    displacement = [float(row["displacement"]) for row in samples]
+    force = [float(row["force"]) for row in samples]
+    reversals = cyclic_reversal_points(displacement, force)
+    if not reversals:
+        return []
+    cycles = cyclic_closed_cycle_energies(
+        displacement,
+        force,
+        reversals,
+    )
+    cycle_by_end = {
+        int(round(float(item["end_index"]))): dict(item)
+        for item in cycles
+        if isinstance(item, dict) and item.get("end_index") is not None
+    }
+
+    specimen_history = history.get("specimen", {})
+    if not isinstance(specimen_history, dict):
+        specimen_history = {}
+
+    try:
+        moment_index = int(specimen.get("moment_index", 1))
+        moment_sign = float(specimen.get("moment_sign", 1.0))
+        height = abs(float(specimen.get("height", 0.0)))
+    except (TypeError, ValueError):
+        moment_index = 1
+        moment_sign = 1.0
+        height = 0.0
+
+    section_force_rows = specimen_history.get("section_force", [])
+    section_deformation_rows = specimen_history.get(
+        "section_deformation",
+        [],
+    )
+    base_fiber_rows = specimen_history.get("base_fibers", [])
+    interface_fiber_rows = specimen_history.get("interface_fibers", [])
+    interface_force_rows = specimen_history.get("interface_force", [])
+    interface_deformation_rows = specimen_history.get(
+        "interface_deformation",
+        [],
+    )
+    rotations = column_rotation_decomposition(result)
+    total_rotation = list(rotations.get("total", []))
+    member_rotation = list(rotations.get("column", []))
+    interface_rotation = list(
+        rotations.get("interface_rotation", [])
+    )
+    interface_slip_drift = list(
+        rotations.get("interface_slip", [])
+    )
+
+    def vector_value(
+        rows: Any,
+        step: int,
+        index: int,
+        *,
+        sign: float = 1.0,
+    ) -> float | None:
+        if (
+            not isinstance(rows, (list, tuple))
+            or step < 0
+            or step >= len(rows)
+        ):
+            return None
+        row = rows[step]
+        if (
+            not isinstance(row, (list, tuple))
+            or index < 0
+            or index >= len(row)
+        ):
+            return None
+        try:
+            value = sign * float(row[index])
+        except (TypeError, ValueError):
+            return None
+        return value if math.isfinite(value) else None
+
+    def series_value(values: list[float], step: int) -> float | None:
+        if step < 0 or step >= len(values):
+            return None
+        try:
+            value = float(values[step])
+        except (TypeError, ValueError):
+            return None
+        return value if math.isfinite(value) else None
+
+    def critical_fiber_value(
+        rows: Any,
+        step: int,
+        *,
+        quantity: str,
+        material_types: set[str] | None = None,
+    ) -> float | None:
+        if (
+            not isinstance(rows, (list, tuple))
+            or step < 0
+            or step >= len(rows)
+        ):
+            return None
+        snapshot = rows[step]
+        if not isinstance(snapshot, (list, tuple)):
+            return None
+        candidates: list[float] = []
+        for fiber in snapshot:
+            if not isinstance(fiber, dict):
+                continue
+            if (
+                material_types is not None
+                and str(fiber.get("material_type", ""))
+                not in material_types
+            ):
+                continue
+            raw = fiber.get(quantity)
+            if raw is None:
+                continue
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                candidates.append(value)
+        if not candidates:
+            return None
+        return max(candidates, key=abs)
+
+    # Build a synthetic-origin interface M-theta path with the same global
+    # sample indexing. Missing interface responses stay as None so energy is
+    # only integrated across valid adjacent points.
+    interface_theta_path: list[float | None] = [0.0]
+    interface_moment_path: list[float | None] = [0.0]
+    for sample in samples[1:]:
+        step = int(sample["step"])
+        interface_theta_path.append(
+            vector_value(
+                interface_deformation_rows,
+                step,
+                moment_index,
+                sign=moment_sign,
+            )
+        )
+        interface_moment_path.append(
+            vector_value(
+                interface_force_rows,
+                step,
+                moment_index,
+                sign=moment_sign,
+            )
+        )
+
+    def path_energy(
+        x_values: Sequence[Any],
+        y_values: Sequence[Any],
+        start: int,
+        end: int,
+    ) -> float | None:
+        if end <= start:
+            return None
+        work = 0.0
+        usable = 0
+        for index in range(start + 1, end + 1):
+            if (
+                index >= len(x_values)
+                or index >= len(y_values)
+            ):
+                break
+            try:
+                x0 = float(x_values[index - 1])
+                x1 = float(x_values[index])
+                y0 = float(y_values[index - 1])
+                y1 = float(y_values[index])
+            except (TypeError, ValueError):
+                continue
+            if not all(
+                math.isfinite(value)
+                for value in (x0, x1, y0, y1)
+            ):
+                continue
+            work += 0.5 * (y0 + y1) * (x1 - x0)
+            usable += 1
+        return abs(work) if usable else None
+
+    rows: list[dict[str, Any]] = []
+    previous_reversal_index = 0
+    cycle_number = 0
+    for reversal_number, reversal in enumerate(reversals, start=1):
+        point_index = int(round(float(reversal["index"])))
+        if point_index <= 0 or point_index >= len(samples):
+            continue
+        step_raw = samples[point_index].get("step")
+        if step_raw is None:
+            continue
+        step = int(step_raw)
+
+        closed_cycle = cycle_by_end.get(point_index)
+        if closed_cycle is not None:
+            cycle_number += 1
+
+        moment = vector_value(
+            section_force_rows,
+            step,
+            moment_index,
+            sign=moment_sign,
+        )
+        curvature = vector_value(
+            section_deformation_rows,
+            step,
+            moment_index,
+            sign=moment_sign,
+        )
+        steel_strain = critical_fiber_value(
+            base_fiber_rows,
+            step,
+            quantity="strain",
+            material_types={
+                "Steel01",
+                "Steel02",
+                "ReinforcingSteel",
+            },
+        )
+        concrete_strain = critical_fiber_value(
+            base_fiber_rows,
+            step,
+            quantity="strain",
+            material_types={
+                "Concrete01",
+                "Concrete02",
+                "Concrete04",
+                "FRPConfinedConcrete02",
+            },
+        )
+        bond_slip = critical_fiber_value(
+            interface_fiber_rows,
+            step,
+            quantity="slip",
+            material_types={"Bond_SP01"},
+        )
+
+        cycle_start = (
+            int(round(float(closed_cycle["start_index"])))
+            if closed_cycle is not None
+            else None
+        )
+        interface_cycle_energy = (
+            path_energy(
+                interface_theta_path,
+                interface_moment_path,
+                cycle_start,
+                point_index,
+            )
+            if cycle_start is not None
+            else None
+        )
+
+        row = {
+            "reversal": reversal_number,
+            "sample_index": point_index,
+            "history_step": step,
+            "time": float(samples[point_index]["time"]),
+            "repeat_index": int(
+                round(float(reversal.get("repeat_index", 1.0)))
+            ),
+            "displacement": float(reversal["displacement"]),
+            "base_shear": float(reversal["force"]),
+            "drift_angle": series_value(total_rotation, step),
+            "member_drift": series_value(member_rotation, step),
+            "interface_rotation": series_value(
+                interface_rotation,
+                step,
+            ),
+            "interface_slip_drift": series_value(
+                interface_slip_drift,
+                step,
+            ),
+            "interface_slip": (
+                series_value(interface_slip_drift, step) * height
+                if height > 0.0
+                and series_value(interface_slip_drift, step) is not None
+                else None
+            ),
+            "moment": moment,
+            "curvature": curvature,
+            "steel_strain": steel_strain,
+            "concrete_strain": concrete_strain,
+            "bond_slip": bond_slip,
+            "secant_stiffness": float(
+                reversal.get("secant_stiffness", math.nan)
+            ),
+            "strength_ratio": float(
+                reversal.get("strength_ratio", math.nan)
+            ),
+            "stiffness_ratio": float(
+                reversal.get("stiffness_ratio", math.nan)
+            ),
+            "branch_energy": path_energy(
+                displacement,
+                force,
+                previous_reversal_index,
+                point_index,
+            ),
+            "interface_branch_energy": path_energy(
+                interface_theta_path,
+                interface_moment_path,
+                previous_reversal_index,
+                point_index,
+            ),
+            "closed_cycle_number": (
+                cycle_number if closed_cycle is not None else None
+            ),
+            "closed_cycle_energy": (
+                float(closed_cycle["energy"])
+                if closed_cycle is not None
+                else None
+            ),
+            "interface_closed_cycle_energy": interface_cycle_energy,
+        }
+        rows.append(row)
+        previous_reversal_index = point_index
+
+    return rows
+
+
+def column_cyclic_cycle_metrics(
+    result: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Return one compact row for each detected closed repeated cycle."""
+    reversal_rows = column_cyclic_reversal_metrics(result)
+    cycles: list[dict[str, Any]] = []
+    for row in reversal_rows:
+        if row.get("closed_cycle_number") is None:
+            continue
+        cycles.append({
+            "cycle": int(row["closed_cycle_number"]),
+            "end_reversal": int(row["reversal"]),
+            "amplitude": abs(float(row["displacement"])),
+            "repeat_index": int(row.get("repeat_index", 1)),
+            "energy": row.get("closed_cycle_energy"),
+            "interface_energy": row.get(
+                "interface_closed_cycle_energy"
+            ),
+            "strength_ratio": row.get("strength_ratio"),
+            "stiffness_ratio": row.get("stiffness_ratio"),
+            "drift_angle": row.get("drift_angle"),
+        })
+    return cycles
+
+
+
 def column_moment_curvature_curve(
     result: dict[str, Any] | None,
 ) -> tuple[list[float], list[float], str]:

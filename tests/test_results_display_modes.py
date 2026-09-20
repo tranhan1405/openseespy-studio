@@ -221,3 +221,159 @@ def test_specimen_response_tab_loads_moment_curvature_and_fiber_choices(qapp):
         panel.close()
         panel.deleteLater()
         qapp.processEvents()
+
+
+
+def test_cyclic_tab_shows_synchronized_column_reversal_and_cycle_metrics(qapp):
+    displacement = [1.0, 2.0, 1.0, 0.0, -1.0, -2.0, -1.0, 0.0, 1.0, 2.0, 1.0]
+    shear = [10.0, 20.0, 8.0, 0.0, -10.0, -18.0, -7.0, 0.0, 9.0, 16.0, 6.0]
+    moments = [30.0, 60.0, 24.0, 0.0, -30.0, -54.0, -21.0, 0.0, 27.0, 48.0, 18.0]
+    curvature = [0.001, 0.002, 0.001, 0.0, -0.001, -0.002, -0.001, 0.0, 0.001, 0.002, 0.001]
+    interface_rotation = [
+        0.0001, 0.0002, 0.0001, 0.0, -0.0001, -0.0002,
+        -0.0001, 0.0, 0.0001, 0.0002, 0.0001,
+    ]
+    result = {
+        "analysis": {
+            "type": "Cyclic",
+            "control_node": 2,
+            "control_dof": 1,
+        },
+        "specimen": {
+            "kind": "test-column",
+            "element_tag": 10,
+            "base_node": 1,
+            "top_node": 2,
+            "ground_node": 3,
+            "height": 1000.0,
+            "lateral_direction": 1,
+            "bending_rotation_dof": 5,
+            "moment_component": "My",
+            "moment_index": 2,
+            "moment_sign": -1.0,
+            "interface_type": "zeroLengthSection",
+            "interface_name": "Bond_SP01 strain penetration",
+        },
+        "history": {
+            "time": [float(index + 1) for index in range(len(displacement))],
+            "control_dof": 1,
+            "displacement": [
+                [value, 0.0, 0.0, 0.0, 0.0, 0.0]
+                for value in displacement
+            ],
+            "base_shear": [-value for value in shear],
+            "nodes": {
+                "1": {
+                    "disp": [
+                        [0.0, 0.0, 0.0, 0.0, theta, 0.0]
+                        for theta in interface_rotation
+                    ]
+                },
+                "2": {
+                    "disp": [
+                        [value, 0.0, 0.0, 0.0, theta, 0.0]
+                        for value, theta in zip(
+                            displacement,
+                            interface_rotation,
+                        )
+                    ]
+                },
+                "3": {
+                    "disp": [
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                        for _ in displacement
+                    ]
+                },
+            },
+            "specimen": {
+                "section_force": [
+                    [100.0, 0.0, -value, 0.0]
+                    for value in moments
+                ],
+                "section_deformation": [
+                    [0.0, 0.0, -value, 0.0]
+                    for value in curvature
+                ],
+                "interface_force": [
+                    [100.0, 0.0, -0.9 * value, 0.0]
+                    for value in moments
+                ],
+                "interface_deformation": [
+                    [0.0, 0.0, -value, 0.0]
+                    for value in interface_rotation
+                ],
+                "base_fibers": [
+                    [
+                        {
+                            "label": "steel_max",
+                            "material_tag": 2,
+                            "material_type": "ReinforcingSteel",
+                            "y": 0.0,
+                            "z": 0.15,
+                            "stress": 200.0 * value,
+                            "strain": 0.001 * value,
+                        },
+                        {
+                            "label": "concrete_min",
+                            "material_tag": 4,
+                            "material_type": "Concrete02",
+                            "y": 0.0,
+                            "z": -0.15,
+                            "stress": -15.0 * abs(value),
+                            "strain": -0.0015 * abs(value),
+                        },
+                    ]
+                    for value in displacement
+                ],
+                "interface_fibers": [
+                    [
+                        {
+                            "label": "bond_max",
+                            "material_tag": 3,
+                            "material_type": "Bond_SP01",
+                            "y": 0.0,
+                            "z": 0.15,
+                            "stress": 150.0 * value,
+                            "slip": 0.1 * value,
+                        }
+                    ]
+                    for value in displacement
+                ],
+            },
+        },
+        "final": {},
+        "convergence": {"steps": []},
+        "modes": {},
+    }
+
+    panel = ResultsPanel()
+    try:
+        panel.set_result(result)
+        panel.show_solution_result("CyclicHysteresis")
+        qapp.processEvents()
+
+        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Cyclic Hysteresis"
+        assert panel.cyclic_reversal_table.columnCount() == 16
+        assert panel.cyclic_reversal_table.rowCount() == 3
+        assert panel.cyclic_cycle_table.rowCount() == 1
+
+        assert panel.cyclic_reversal_table.item(0, 3).text() == "0.002"
+        assert panel.cyclic_reversal_table.item(0, 4).text() == "60"
+        assert panel.cyclic_reversal_table.item(0, 5).text() == "0.002"
+        assert panel.cyclic_reversal_table.item(0, 6).text() == "0.002"
+        assert panel.cyclic_reversal_table.item(0, 7).text() == "-0.003"
+        assert panel.cyclic_reversal_table.item(0, 8).text() == "0.2"
+        assert panel.cyclic_reversal_table.item(0, 9).text() == "0.0002"
+
+        assert panel.cyclic_reversal_table.item(2, 11).text() == "0.8"
+        assert panel.cyclic_reversal_table.item(2, 12).text() == "0.8"
+        assert panel.cyclic_reversal_table.item(2, 14).text() == "1"
+        assert float(panel.cyclic_reversal_table.item(2, 15).text()) > 0.0
+
+        assert panel.cyclic_cycle_table.item(0, 0).text() == "1"
+        assert panel.cyclic_cycle_table.item(0, 1).text() == "3"
+        assert panel.cyclic_cycle_table.item(0, 2).text() == "2"
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
