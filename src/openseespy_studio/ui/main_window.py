@@ -2090,6 +2090,21 @@ class MainWindow(QMainWindow):
                     )
                 )
             )
+        color_menu = view_menu.addMenu("Color By")
+        for label, mode in (
+            ("Uniform", "uniform"),
+            ("Element Type", "element_type"),
+            ("Material", "material"),
+            ("Section", "section"),
+        ):
+            action = color_menu.addAction(label)
+            action.triggered.connect(
+                lambda checked=False, value=mode: (
+                    self.model_color_combo.setCurrentIndex(
+                        self.model_color_combo.findData(value)
+                    )
+                )
+            )
         self.view_show_menu = view_menu.addMenu("Show")
         view_menu.addSeparator()
         view_menu.addActions([
@@ -2626,6 +2641,23 @@ class MainWindow(QMainWindow):
             )
         )
 
+        self.model_color_combo = QComboBox()
+        self.model_color_combo.setFixedWidth(132)
+        self.model_color_combo.addItem("Uniform", "uniform")
+        self.model_color_combo.addItem("Element Type", "element_type")
+        self.model_color_combo.addItem("Material", "material")
+        self.model_color_combo.addItem("Section", "section")
+        self.model_color_combo.setToolTip(
+            "Color the model by element formulation, assigned material, "
+            "or assigned section. In Actual Section + Material mode, "
+            "Fiber sections also show multi-material fiber markers."
+        )
+        self.model_color_combo.currentIndexChanged.connect(
+            lambda _index: self.viewport.set_model_color_mode(
+                str(self.model_color_combo.currentData())
+            )
+        )
+
         display_page = RibbonPage()
         add_group(
             display_page,
@@ -2637,7 +2669,10 @@ class MainWindow(QMainWindow):
             display_page,
             "Section View",
             small=("show_section_axes",),
-            widgets=(self.model_representation_combo,),
+            widgets=(
+                self.model_representation_combo,
+                self.model_color_combo,
+            ),
         )
         add_group(
             display_page,
