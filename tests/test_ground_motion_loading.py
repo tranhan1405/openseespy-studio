@@ -164,6 +164,7 @@ def test_ground_motion_dialog_loads_bundled_el_centro_and_converts_to_model_unit
         next_series_tag=10,
         next_pattern_tag=11,
         units={"length": "m", "force": "N", "time": "s"},
+        initial_source="builtin",
     )
     try:
         index = dialog.library.findData("el-centro-1940")
