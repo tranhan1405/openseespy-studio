@@ -446,6 +446,236 @@ def column_moment_curvature_curve(
     return curvature, moment, str(specimen.get("moment_component", ""))
 
 
+
+def column_interface_moment_rotation_curve(
+    result: dict[str, Any] | None,
+) -> tuple[list[float], list[float], str]:
+    """Return zeroLengthSection interface rotation and moment histories.
+
+    This is primarily intended for Bond_SP01 strain-penetration interfaces.
+    It keeps the interface loop separate from the beam-column base section
+    M-kappa response.
+    """
+    if not isinstance(result, dict):
+        return [], [], ""
+    specimen = result.get("specimen", {})
+    history = result.get("history", {})
+    if not isinstance(specimen, dict) or not isinstance(history, dict):
+        return [], [], ""
+    if str(specimen.get("interface_type", "")) != "zeroLengthSection":
+        return [], [], str(specimen.get("moment_component", ""))
+
+    specimen_history = history.get("specimen", {})
+    if not isinstance(specimen_history, dict):
+        return [], [], str(specimen.get("moment_component", ""))
+
+    try:
+        index = int(specimen.get("moment_index", 1))
+        sign = float(specimen.get("moment_sign", 1.0))
+    except (TypeError, ValueError):
+        return [], [], ""
+
+    force_rows = specimen_history.get("interface_force", [])
+    deformation_rows = specimen_history.get("interface_deformation", [])
+    if not isinstance(force_rows, (list, tuple)):
+        return [], [], str(specimen.get("moment_component", ""))
+    if not isinstance(deformation_rows, (list, tuple)):
+        return [], [], str(specimen.get("moment_component", ""))
+
+    rotation: list[float] = []
+    moment: list[float] = []
+    for force_row, deformation_row in zip(force_rows, deformation_rows):
+        if (
+            not isinstance(force_row, (list, tuple))
+            or not isinstance(deformation_row, (list, tuple))
+            or len(force_row) <= index
+            or len(deformation_row) <= index
+        ):
+            continue
+        try:
+            moment_value = sign * float(force_row[index])
+            rotation_value = sign * float(deformation_row[index])
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(moment_value) and math.isfinite(rotation_value):
+            rotation.append(rotation_value)
+            moment.append(moment_value)
+
+    if rotation and (
+        abs(rotation[0]) > 1.0e-15 or abs(moment[0]) > 1.0e-15
+    ):
+        rotation.insert(0, 0.0)
+        moment.insert(0, 0.0)
+    return rotation, moment, str(specimen.get("moment_component", ""))
+
+
+def _signed_path_work(
+    x: Sequence[float],
+    y: Sequence[float],
+) -> float | None:
+    count = min(len(x), len(y))
+    if count < 2:
+        return None
+    work = 0.0
+    usable = 0
+    for index in range(1, count):
+        try:
+            x0 = float(x[index - 1])
+            x1 = float(x[index])
+            y0 = float(y[index - 1])
+            y1 = float(y[index])
+        except (TypeError, ValueError):
+            continue
+        if not all(math.isfinite(value) for value in (x0, x1, y0, y1)):
+            continue
+        work += 0.5 * (y0 + y1) * (x1 - x0)
+        usable += 1
+    return work if usable else None
+
+
+def column_specimen_research_metrics(
+    result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Research-oriented scalar diagnostics for Quick 1D Column results.
+
+    These are descriptive response metrics, not code checks and not an
+    automatic yield/ductility definition.
+    """
+    if not isinstance(result, dict):
+        return {}
+
+    curvature, moment, component = column_moment_curvature_curve(result)
+    rotations = column_rotation_decomposition(result)
+    interface_rotation, interface_moment, _ = (
+        column_interface_moment_rotation_curve(result)
+    )
+    fibers = column_fiber_history_catalog(result)
+
+    def peak_abs(values: Sequence[float]) -> float | None:
+        finite = []
+        for value in values:
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(number):
+                finite.append(abs(number))
+        return max(finite) if finite else None
+
+    finite_moment = [
+        float(value)
+        for value in moment
+        if math.isfinite(float(value))
+    ]
+    positive_values = [value for value in finite_moment if value > 0.0]
+    negative_values = [value for value in finite_moment if value < 0.0]
+    positive_moment = max(positive_values) if positive_values else None
+    negative_moment = min(negative_values) if negative_values else None
+
+    total = list(rotations.get("total", []))
+    column = list(rotations.get("column", []))
+    interface = list(rotations.get("interface_rotation", []))
+    slip = list(rotations.get("interface_slip", []))
+
+    peak_drift_index: int | None = None
+    if total:
+        peak_drift_index = max(
+            range(len(total)),
+            key=lambda index: abs(float(total[index])),
+        )
+
+    interface_share = None
+    if peak_drift_index is not None:
+        try:
+            total_peak = float(total[peak_drift_index])
+            interface_peak = (
+                float(interface[peak_drift_index])
+                if peak_drift_index < len(interface)
+                else 0.0
+            )
+            slip_peak = (
+                float(slip[peak_drift_index])
+                if peak_drift_index < len(slip)
+                else 0.0
+            )
+            if abs(total_peak) > 1.0e-15:
+                interface_share = (
+                    abs(interface_peak + slip_peak)
+                    / abs(total_peak)
+                    * 100.0
+                )
+        except (TypeError, ValueError):
+            interface_share = None
+
+    critical: dict[str, float | None] = {
+        "steel_strain": None,
+        "concrete_strain": None,
+        "bond_slip": None,
+    }
+
+    def update_peak(key: str, values: Any) -> None:
+        if not isinstance(values, (list, tuple)):
+            return
+        candidate = peak_abs(values)
+        if candidate is None:
+            return
+        current = critical.get(key)
+        if current is None or candidate > current:
+            critical[key] = candidate
+
+    for item in fibers:
+        if not isinstance(item, dict):
+            continue
+        source = str(item.get("source", ""))
+        quantity = str(item.get("quantity", "")).lower()
+        material_type = str(item.get("material_type", ""))
+        values = item.get("y", [])
+
+        if source == "Base section" and quantity == "strain":
+            if material_type in {
+                "Steel01",
+                "Steel02",
+                "ReinforcingSteel",
+            }:
+                update_peak("steel_strain", values)
+            elif material_type in {
+                "Concrete01",
+                "Concrete02",
+                "Concrete04",
+                "FRPConfinedConcrete02",
+            }:
+                update_peak("concrete_strain", values)
+        elif source == "Bond interface" and quantity == "slip":
+            update_peak("bond_slip", values)
+
+    interface_work = _signed_path_work(
+        interface_rotation,
+        interface_moment,
+    )
+    return {
+        "moment_component": component,
+        "peak_positive_moment": positive_moment,
+        "peak_negative_moment": negative_moment,
+        "peak_abs_moment": peak_abs(moment),
+        "peak_abs_curvature": peak_abs(curvature),
+        "peak_abs_total_drift": peak_abs(total),
+        "peak_abs_column_drift": peak_abs(column),
+        "peak_abs_interface_rotation": peak_abs(interface),
+        "peak_abs_interface_slip_drift": peak_abs(slip),
+        "interface_share_at_peak_drift_percent": interface_share,
+        "peak_abs_steel_strain": critical["steel_strain"],
+        "peak_abs_concrete_strain": critical["concrete_strain"],
+        "peak_abs_bond_slip": critical["bond_slip"],
+        "interface_signed_work": interface_work,
+        "interface_path_energy": (
+            abs(interface_work)
+            if interface_work is not None
+            else None
+        ),
+    }
+
+
+
 def column_rotation_decomposition(
     result: dict[str, Any] | None,
 ) -> dict[str, list[float]]:

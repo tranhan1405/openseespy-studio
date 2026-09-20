@@ -29,9 +29,11 @@ from openseespy_studio.postprocess import (
     time_history_node_tags,
     time_history_series,
     column_fiber_history_catalog,
+    column_interface_moment_rotation_curve,
     column_moment_curvature_curve,
     column_response_summary,
     column_rotation_decomposition,
+    column_specimen_research_metrics,
 )
 from openseespy_studio.project import (
     ElementLoadData,
@@ -1147,3 +1149,34 @@ def test_test_column_response_summary_reports_peak_diagnostics():
     assert summary["max_abs_total_drift"] == pytest.approx(0.01)
     assert summary["max_abs_interface_rotation"] == pytest.approx(0.0002)
     assert summary["max_abs_interface_slip_drift"] == pytest.approx(0.001)
+
+
+def test_test_column_interface_moment_rotation_is_separate_from_member_response():
+    rotation, moment, component = column_interface_moment_rotation_curve(
+        _specimen_history_result()
+    )
+
+    assert component == "My"
+    assert rotation == pytest.approx([0.0, 0.0001, 0.0002])
+    assert moment == pytest.approx([0.0, 9.0, 18.0])
+
+
+def test_test_column_research_metrics_capture_interface_share_and_bond_slip():
+    metrics = column_specimen_research_metrics(
+        _specimen_history_result()
+    )
+
+    assert metrics["moment_component"] == "My"
+    assert metrics["peak_positive_moment"] == pytest.approx(20.0)
+    assert metrics["peak_negative_moment"] is None
+    assert metrics["peak_abs_curvature"] == pytest.approx(0.002)
+    assert metrics["peak_abs_total_drift"] == pytest.approx(0.01)
+    assert metrics["peak_abs_column_drift"] == pytest.approx(0.0088)
+    assert metrics["peak_abs_interface_rotation"] == pytest.approx(0.0002)
+    assert metrics["peak_abs_interface_slip_drift"] == pytest.approx(0.001)
+    assert metrics["interface_share_at_peak_drift_percent"] == pytest.approx(12.0)
+    assert metrics["peak_abs_steel_strain"] == pytest.approx(0.002)
+    assert metrics["peak_abs_concrete_strain"] is None
+    assert metrics["peak_abs_bond_slip"] == pytest.approx(1.0)
+    assert metrics["interface_signed_work"] == pytest.approx(0.0018)
+    assert metrics["interface_path_energy"] == pytest.approx(0.0018)

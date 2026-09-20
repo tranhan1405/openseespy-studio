@@ -202,8 +202,21 @@ def test_specimen_response_tab_loads_moment_curvature_and_fiber_choices(qapp):
             >= 0
         )
         assert panel.specimen_fiber_table.rowCount() == 4
+        assert panel.specimen_research_table.rowCount() >= 6
+        assert panel.specimen_quantity.findData(
+            "interface_moment_rotation"
+        ) >= 0
         assert panel.specimen_plot._x == pytest.approx([0.0, 0.002])
         assert panel.specimen_plot._y == pytest.approx([0.0, 20.0])
+
+        panel.specimen_quantity.setCurrentIndex(
+            panel.specimen_quantity.findData(
+                "interface_moment_rotation"
+            )
+        )
+        qapp.processEvents()
+        assert panel.specimen_plot._x == pytest.approx([0.0, 0.0002])
+        assert panel.specimen_plot._y == pytest.approx([0.0, 18.0])
     finally:
         panel.close()
         panel.deleteLater()
