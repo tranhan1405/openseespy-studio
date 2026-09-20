@@ -101,7 +101,7 @@ from .geometry_dialogs import (
 )
 from .history import ProjectSnapshotCommand
 from .import_report_dialog import ImportReportDialog
-from .load_dialogs import ElementLoadDialog, LoadPatternDialog, MassDialog, NodalLoadDialog, PrescribedDisplacementDialog, TimeSeriesDialog
+from .load_dialogs import ElementLoadDialog, GroundMotionDialog, LoadPatternDialog, MassDialog, NodalLoadDialog, PrescribedDisplacementDialog, TimeSeriesDialog
 from .material_dialog import MaterialDialog
 from .mass_source_dialog import MassSourceDialog
 from .model_check_dialog import ModelCheckDialog
@@ -1904,7 +1904,14 @@ class MainWindow(QMainWindow):
             "Generate seismic mass from self mass and selected load patterns",
         )
         self._make_action("time_series", "Time Series...", "timeseries", self._create_time_series, "Create time series")
-        self._make_action("load_pattern", "Load Pattern...", "load", self._create_load_pattern, "Create load pattern or ground motion")
+        self._make_action("load_pattern", "Load Pattern...", "load", self._create_load_pattern, "Create a Plain load pattern")
+        self._make_action(
+            "ground_motion",
+            "Ground Motion...",
+            "timeseries",
+            self._create_ground_motion,
+            "Create a Path record with UniformExcitation for NLTH",
+        )
         self._make_action("nodal_load", "Nodal Load...", "load", self._create_nodal_load, "Create nodal load")
         self._make_action(
             "prescribed_displacement",
@@ -2105,6 +2112,7 @@ class MainWindow(QMainWindow):
         loads_menu.addSeparator()
         loads_menu.addAction(self.actions["time_series"])
         loads_menu.addAction(self.actions["load_pattern"])
+        loads_menu.addAction(self.actions["ground_motion"])
         loads_menu.addAction(self.actions["nodal_load"])
         loads_menu.addAction(self.actions["prescribed_displacement"])
         loads_menu.addAction(self.actions["beam_load"])
@@ -2496,6 +2504,7 @@ class MainWindow(QMainWindow):
                 "mass",
                 "mass_source",
                 "time_series",
+                "ground_motion",
                 "nodal_load",
                 "prescribed_displacement",
                 "beam_load",
@@ -5686,6 +5695,156 @@ class MainWindow(QMainWindow):
                 ),
             ))
         self.properties_panel.set_properties("Load Pattern", rows)
+
+    def _ground_motion_pair(
+        self,
+        pattern_tag: int,
+    ) -> tuple[TimeSeriesData, LoadPatternData] | None:
+        pattern = self.project.load_patterns.get(int(pattern_tag))
+        if (
+            pattern is None
+            or pattern.pattern_type != "UniformExcitation"
+        ):
+            return None
+        series = self.project.time_series.get(pattern.time_series_tag)
+        if series is None or series.series_type != "Path":
+            return None
+        return series, pattern
+
+    def _create_ground_motion(self) -> None:
+        dialog = GroundMotionDialog(
+            next_series_tag=self.project.next_time_series_tag(),
+            next_pattern_tag=self.project.next_load_pattern_tag(),
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            series, pattern = dialog.data()
+            if series.tag in self.project.time_series:
+                raise ValueError(
+                    f"Time series tag {series.tag} already exists."
+                )
+            if pattern.tag in self.project.load_patterns:
+                raise ValueError(
+                    f"Load pattern tag {pattern.tag} already exists."
+                )
+            self.project.add_time_series(series)
+            try:
+                self.project.add_load_pattern(pattern)
+            except Exception:
+                self.project.time_series.pop(series.tag, None)
+                raise
+        except ValueError as exc:
+            QMessageBox.warning(self, "Ground Motion Editor", str(exc))
+            return
+        self._refresh_project_metadata(
+            f"Created ground motion {pattern.tag}: {pattern.name}"
+        )
+        self._show_ground_motion_properties(pattern.tag)
+        self._record_project_change(
+            f"Create ground motion {pattern.tag}",
+            before,
+        )
+
+    def _edit_ground_motion(self, pattern_tag: int) -> None:
+        pair = self._ground_motion_pair(pattern_tag)
+        if pair is None:
+            QMessageBox.warning(
+                self,
+                "Ground Motion Editor",
+                "This UniformExcitation pattern does not reference a valid "
+                "Path time series.",
+            )
+            return
+        series, pattern = pair
+        dialog = GroundMotionDialog(
+            series=series,
+            pattern=pattern,
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated_series, updated_pattern = dialog.data()
+            self.project.update_time_series(
+                series.tag,
+                updated_series,
+            )
+            self.project.update_load_pattern(
+                pattern.tag,
+                updated_pattern,
+            )
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Ground Motion Editor", str(exc))
+            self._refresh_all()
+            return
+        self._refresh_project_metadata(
+            f"Updated ground motion {updated_pattern.tag}"
+        )
+        self._show_ground_motion_properties(updated_pattern.tag)
+        self._record_project_change(
+            f"Edit ground motion {pattern.tag}",
+            before,
+        )
+
+    def _delete_ground_motion(self, pattern_tag: int) -> None:
+        pair = self._ground_motion_pair(pattern_tag)
+        if pair is None:
+            return
+        series, pattern = pair
+        before = self.project.to_dict()
+        self.project.remove_load_pattern(pattern.tag)
+        if not any(
+            item.time_series_tag == series.tag
+            for item in self.project.load_patterns.values()
+        ):
+            self.project.remove_time_series(series.tag)
+        self._refresh_project_metadata(
+            f"Deleted ground motion {pattern.tag}"
+        )
+        self._record_project_change(
+            f"Delete ground motion {pattern.tag}",
+            before,
+        )
+
+    def _show_ground_motion_properties(self, pattern_tag: int) -> None:
+        pair = self._ground_motion_pair(pattern_tag)
+        if pair is None:
+            return
+        series, pattern = pair
+        axis = {1: "X", 2: "Y", 3: "Z"}.get(
+            pattern.direction,
+            f"DOF {pattern.direction}",
+        )
+        total_scale = float(series.factor) * float(pattern.factor)
+        duration = (
+            max(0, len(series.values) - 1) * series.dt
+            if series.values
+            else 0.0
+        )
+        unit_system = UnitSystem.from_mapping(self.project.units)
+        self.properties_panel.set_properties(
+            "Ground Motion",
+            [
+                ("Pattern Tag", pattern.tag),
+                ("Path Series Tag", series.tag),
+                ("Name", pattern.name),
+                ("Excitation", "UniformExcitation"),
+                ("Direction", axis),
+                ("dt", f"{series.dt:g} {unit_system.time}"),
+                ("Points", len(series.values)),
+                ("Duration", f"{duration:g} {unit_system.time}"),
+                ("Scale Factor", f"{total_scale:g}"),
+                ("Initial Velocity", f"{pattern.vel0:g}"),
+            ],
+        )
 
     def _create_nodal_load(self) -> None:
         plain = {
