@@ -813,6 +813,7 @@ class ElementLoadDialog(QDialog):
         next_tag=1,
         element_tag=1,
         units=None,
+        ndm=3,
         parent=None,
     ):
         super().__init__(parent)
@@ -820,6 +821,7 @@ class ElementLoadDialog(QDialog):
         self.setModal(True)
         self.resize(500, 500)
         self.unit_system = UnitSystem.from_mapping(units)
+        self.ndm = int(ndm)
 
         root = QVBoxLayout(self)
         form = QFormLayout()
@@ -868,7 +870,9 @@ class ElementLoadDialog(QDialog):
 
         self.wx = _spin(load.wx if load else 0.0)
         self.wy = _spin(load.wy if load else 0.0)
-        self.wz = _spin(load.wz if load else 0.0)
+        self.wz = _spin(
+            0.0 if self.ndm == 2 else (load.wz if load else 0.0)
+        )
         line_unit = self.unit_system.line_load_label
         form.addRow(f"Uniform Wx (local x) [{line_unit}]:", self.wx)
         form.addRow(f"Uniform Wy (local y) [{line_unit}]:", self.wy)
@@ -876,7 +880,9 @@ class ElementLoadDialog(QDialog):
 
         self.px = _spin(load.px if load else 0.0)
         self.py = _spin(load.py if load else 0.0)
-        self.pz = _spin(load.pz if load else 0.0)
+        self.pz = _spin(
+            0.0 if self.ndm == 2 else (load.pz if load else 0.0)
+        )
         self.x_over_l = _spin(
             load.x_over_l if load else 0.5,
             0.0,
@@ -888,7 +894,13 @@ class ElementLoadDialog(QDialog):
         form.addRow(f"Point Pz (local z) [{force_unit}]:", self.pz)
         form.addRow("Location x/L:", self.x_over_l)
 
-        gravity = load.gravity if load else (0.0, 0.0, -9.81)
+        gravity = (
+            load.gravity
+            if load is not None
+            else ((0.0, -9.81, 0.0) if self.ndm == 2 else (0.0, 0.0, -9.81))
+        )
+        if self.ndm == 2:
+            gravity = (float(gravity[0]), float(gravity[1]), 0.0)
         self.gx = _spin(gravity[0])
         self.gy = _spin(gravity[1])
         self.gz = _spin(gravity[2])
@@ -928,12 +940,17 @@ class ElementLoadDialog(QDialog):
         point = kind == "Point"
         self_weight = kind == "SelfWeight"
 
-        for widget in (self.wx, self.wy, self.wz):
-            widget.setEnabled(uniform)
-        for widget in (self.px, self.py, self.pz, self.x_over_l):
-            widget.setEnabled(point)
-        for widget in (self.gx, self.gy, self.gz, self.density):
-            widget.setEnabled(self_weight)
+        self.wx.setEnabled(uniform)
+        self.wy.setEnabled(uniform)
+        self.wz.setEnabled(uniform and self.ndm >= 3)
+        self.px.setEnabled(point)
+        self.py.setEnabled(point)
+        self.pz.setEnabled(point and self.ndm >= 3)
+        self.x_over_l.setEnabled(point)
+        self.gx.setEnabled(self_weight)
+        self.gy.setEnabled(self_weight)
+        self.gz.setEnabled(self_weight and self.ndm >= 3)
+        self.density.setEnabled(self_weight)
 
     def data(self):
         if self.pattern.currentData() is None:
