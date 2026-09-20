@@ -451,74 +451,186 @@ def cyclic_reversal_comparison(
 ) -> list[dict[str, Any]]:
     """Match cyclic reversals for strength/stiffness degradation comparison.
 
-    Reversals are paired by loading sign and repeated-amplitude occurrence.
-    Within that group the nearest amplitude is selected, with a default 15%
-    amplitude tolerance to avoid silently comparing different protocol levels.
+    Repeated amplitudes in laboratory data are rarely numerically identical.
+    This routine therefore builds sign-specific amplitude families using a
+    relative tolerance, assigns a repeat count within each family, and then
+    pairs OpenSees/experiment reversals by sign, family amplitude and repeat.
     """
-    simulation = cyclic_reversal_points(
+    simulation_raw = cyclic_reversal_points(
         simulation_displacement,
         simulation_force,
     )
-    experiment = cyclic_reversal_points(
+    experiment_raw = cyclic_reversal_points(
         experiment_displacement,
         experiment_force,
     )
-    if not simulation or not experiment:
+    if not simulation_raw or not experiment_raw:
         return []
 
+    ratio = max(float(amplitude_tolerance_ratio), 0.0)
     max_amplitude = max(
         [
             abs(float(item["displacement"]))
-            for item in simulation + experiment
+            for item in simulation_raw + experiment_raw
         ],
         default=0.0,
     )
     absolute_tolerance = max(max_amplitude * 1.0e-9, 1.0e-12)
-    ratio = max(float(amplitude_tolerance_ratio), 0.0)
+
+    def annotate(
+        reversals: list[dict[str, float]],
+    ) -> list[dict[str, Any]]:
+        families: list[dict[str, Any]] = []
+        annotated: list[dict[str, Any]] = []
+        for number, source in enumerate(reversals, start=1):
+            item: dict[str, Any] = dict(source)
+            displacement = float(item["displacement"])
+            amplitude = abs(displacement)
+            sign = 1 if displacement >= 0.0 else -1
+
+            candidates: list[tuple[float, int, dict[str, Any]]] = []
+            for family_index, family in enumerate(families):
+                if int(family["sign"]) != sign:
+                    continue
+                reference_amplitude = float(family["amplitude"])
+                scale = max(
+                    amplitude,
+                    reference_amplitude,
+                    absolute_tolerance,
+                )
+                difference = abs(
+                    amplitude - reference_amplitude
+                ) / scale
+                if (
+                    difference <= ratio
+                    or abs(amplitude - reference_amplitude)
+                    <= absolute_tolerance
+                ):
+                    candidates.append(
+                        (difference, family_index, family)
+                    )
+
+            if candidates:
+                _difference, family_index, family = min(
+                    candidates,
+                    key=lambda entry: entry[0],
+                )
+            else:
+                family_index = len(families)
+                family = {
+                    "sign": sign,
+                    "amplitude": amplitude,
+                    "count": 0,
+                    "reference_force": abs(float(item["force"])),
+                    "reference_stiffness": abs(
+                        float(item.get("secant_stiffness", math.nan))
+                    ),
+                }
+                families.append(family)
+
+            family["count"] = int(family["count"]) + 1
+            repeat_index = int(family["count"])
+            reference_force = float(family["reference_force"])
+            reference_stiffness = float(
+                family["reference_stiffness"]
+            )
+            stiffness = float(
+                item.get("secant_stiffness", math.nan)
+            )
+
+            item["_comparison_number"] = number
+            item["_comparison_family"] = family_index
+            item["_comparison_repeat_index"] = repeat_index
+            item["_comparison_strength_ratio"] = (
+                abs(float(item["force"])) / reference_force
+                if reference_force > 1.0e-15
+                else math.nan
+            )
+            item["_comparison_stiffness_ratio"] = (
+                abs(stiffness) / reference_stiffness
+                if reference_stiffness > 1.0e-15
+                and math.isfinite(reference_stiffness)
+                else math.nan
+            )
+            annotated.append(item)
+        return annotated
+
+    simulation = annotate(simulation_raw)
+    experiment = annotate(experiment_raw)
     used: set[int] = set()
     rows: list[dict[str, Any]] = []
 
-    for sim_number, sim in enumerate(simulation, start=1):
+    for sim in simulation:
+        sim_number = int(sim["_comparison_number"])
         sim_u = float(sim["displacement"])
         sim_sign = 1 if sim_u >= 0.0 else -1
-        sim_repeat = int(round(float(sim.get("repeat_index", 1.0))))
+        sim_repeat = int(sim["_comparison_repeat_index"])
         sim_amp = abs(sim_u)
 
-        candidates: list[tuple[float, int, dict[str, float]]] = []
+        candidates: list[
+            tuple[float, int, dict[str, Any]]
+        ] = []
         for exp_index, exp in enumerate(experiment):
             if exp_index in used:
                 continue
             exp_u = float(exp["displacement"])
             exp_sign = 1 if exp_u >= 0.0 else -1
-            exp_repeat = int(round(float(exp.get("repeat_index", 1.0))))
+            exp_repeat = int(exp["_comparison_repeat_index"])
             if exp_sign != sim_sign or exp_repeat != sim_repeat:
                 continue
             exp_amp = abs(exp_u)
             scale = max(sim_amp, exp_amp, absolute_tolerance)
             amplitude_error = abs(sim_amp - exp_amp) / scale
-            if amplitude_error <= ratio or abs(sim_amp - exp_amp) <= absolute_tolerance:
-                candidates.append((amplitude_error, exp_index, exp))
+            if (
+                amplitude_error <= ratio
+                or abs(sim_amp - exp_amp) <= absolute_tolerance
+            ):
+                candidates.append(
+                    (amplitude_error, exp_index, exp)
+                )
 
         if not candidates:
             continue
 
         amplitude_error, exp_index, exp = min(
             candidates,
-            key=lambda item: item[0],
+            key=lambda entry: entry[0],
         )
         used.add(exp_index)
         sim_force = float(sim["force"])
         exp_force = float(exp["force"])
-        sim_stiffness = float(sim.get("secant_stiffness", math.nan))
-        exp_stiffness = float(exp.get("secant_stiffness", math.nan))
+        sim_stiffness = float(
+            sim.get("secant_stiffness", math.nan)
+        )
+        exp_stiffness = float(
+            exp.get("secant_stiffness", math.nan)
+        )
+        sim_strength_ratio = sim.get(
+            "_comparison_strength_ratio"
+        )
+        exp_strength_ratio = exp.get(
+            "_comparison_strength_ratio"
+        )
+        sim_stiffness_ratio = sim.get(
+            "_comparison_stiffness_ratio"
+        )
+        exp_stiffness_ratio = exp.get(
+            "_comparison_stiffness_ratio"
+        )
         rows.append({
             "simulation_reversal": sim_number,
-            "experiment_reversal": exp_index + 1,
+            "experiment_reversal": int(
+                exp["_comparison_number"]
+            ),
             "sign": sim_sign,
             "repeat_index": sim_repeat,
             "simulation_displacement": sim_u,
-            "experiment_displacement": float(exp["displacement"]),
-            "amplitude_difference_percent": amplitude_error * 100.0,
+            "experiment_displacement": float(
+                exp["displacement"]
+            ),
+            "amplitude_difference_percent": (
+                amplitude_error * 100.0
+            ),
             "simulation_force": sim_force,
             "experiment_force": exp_force,
             "force_error_percent": _comparison_percent(
@@ -533,24 +645,27 @@ def cyclic_reversal_comparison(
                 exp_stiffness,
                 magnitude=True,
             ),
-            "simulation_strength_ratio": sim.get("strength_ratio"),
-            "experiment_strength_ratio": exp.get("strength_ratio"),
-            "strength_degradation_difference_percent": _comparison_percent(
-                sim.get("strength_ratio"),
-                exp.get("strength_ratio"),
-                magnitude=False,
+            "simulation_strength_ratio": sim_strength_ratio,
+            "experiment_strength_ratio": exp_strength_ratio,
+            "strength_degradation_difference_percent": (
+                _comparison_percent(
+                    sim_strength_ratio,
+                    exp_strength_ratio,
+                    magnitude=False,
+                )
             ),
-            "simulation_stiffness_ratio": sim.get("stiffness_ratio"),
-            "experiment_stiffness_ratio": exp.get("stiffness_ratio"),
-            "stiffness_degradation_difference_percent": _comparison_percent(
-                sim.get("stiffness_ratio"),
-                exp.get("stiffness_ratio"),
-                magnitude=False,
+            "simulation_stiffness_ratio": sim_stiffness_ratio,
+            "experiment_stiffness_ratio": exp_stiffness_ratio,
+            "stiffness_degradation_difference_percent": (
+                _comparison_percent(
+                    sim_stiffness_ratio,
+                    exp_stiffness_ratio,
+                    magnitude=False,
+                )
             ),
         })
 
     return rows
-
 
 def cyclic_curve_comparison(
     simulation_displacement: Sequence[float],
