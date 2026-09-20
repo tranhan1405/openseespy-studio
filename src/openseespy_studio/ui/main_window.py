@@ -5659,13 +5659,21 @@ class MainWindow(QMainWindow):
             for element in self.model.elements.values()
             if element.section_tag == tag
         )
-        if used_by:
+        connection_uses = self.project.connections_using_section(tag)
+        if used_by or connection_uses:
             QMessageBox.warning(
                 self,
                 "Delete Section",
-                "Section is assigned to element(s): "
-                + ", ".join(map(str, used_by[:20]))
-                + ("..." if len(used_by) > 20 else ""),
+                (
+                    "Section is assigned to element(s): "
+                    + ", ".join(map(str, used_by[:20]))
+                    + ("..." if len(used_by) > 20 else "")
+                    if used_by
+                    else
+                    "Section is assigned to zeroLengthSection connection(s): "
+                    + ", ".join(map(str, connection_uses[:20]))
+                    + ("..." if len(connection_uses) > 20 else "")
+                ),
             )
             return
 
@@ -5987,6 +5995,18 @@ class MainWindow(QMainWindow):
         connection = self.project.connections.get(tag)
         if connection is None:
             return
+        if connection.connection_type == "zeroLengthSection":
+            QMessageBox.information(
+                self,
+                "Strain Penetration Interface",
+                "This zeroLengthSection was created by the specimen-level "
+                "strain-penetration workflow. Edit/rebuild it through "
+                "Quick 1D Column / Test Specimen so its Fiber section, "
+                "Bond_SP01 material, base restraints, and orientation stay "
+                "consistent.",
+            )
+            self._show_connection_properties(tag)
+            return
 
         dialog = ConnectionDialog(
             self.project.materials,
@@ -6134,7 +6154,23 @@ class MainWindow(QMainWindow):
                 "To ground",
                 "Yes" if connection.generated_ground_node else "No",
             ),
-            ("DOF materials", "; ".join(material_text)),
+            (
+                "Section",
+                (
+                    f"{connection.section_tag} - "
+                    f"{self.project.sections[connection.section_tag].name}"
+                    if (
+                        connection.section_tag is not None
+                        and connection.section_tag in self.project.sections
+                    )
+                    else (
+                        str(connection.section_tag)
+                        if connection.section_tag is not None
+                        else "-"
+                    )
+                ),
+            ),
+            ("DOF materials", "; ".join(material_text) or "-"),
             ("Rayleigh", "Yes" if connection.do_rayleigh else "No"),
             ("Local X", connection.orient_x),
             ("Local Y", connection.orient_y),

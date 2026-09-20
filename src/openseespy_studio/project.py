@@ -11,7 +11,7 @@ from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 25
+PROJECT_FORMAT_VERSION = 26
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -902,6 +902,8 @@ class ConnectionData:
     orient_y: tuple[float, float, float] = (0.0, 1.0, 0.0)
     do_rayleigh: bool = False
     generated_ground_node: int | None = None
+    section_tag: int | None = None
+    generated_section_tag: int | None = None
 
     def __post_init__(self) -> None:
         self.tag = int(self.tag)
@@ -921,10 +923,22 @@ class ConnectionData:
             if self.generated_ground_node is None
             else int(self.generated_ground_node)
         )
+        self.section_tag = (
+            None if self.section_tag is None else int(self.section_tag)
+        )
+        self.generated_section_tag = (
+            None
+            if self.generated_section_tag is None
+            else int(self.generated_section_tag)
+        )
 
         if self.tag <= 0:
             raise ValueError("Connection tag must be a positive integer.")
-        if self.connection_type not in {"zeroLength", "twoNodeLink"}:
+        if self.connection_type not in {
+            "zeroLength",
+            "twoNodeLink",
+            "zeroLengthSection",
+        }:
             raise ValueError(
                 f"Unsupported connection type: {self.connection_type}"
             )
@@ -932,10 +946,21 @@ class ConnectionData:
             raise ValueError("Connection node tags must be positive.")
         if self.node_i == self.node_j:
             raise ValueError("Connection needs two different node tags.")
-        if not self.materials_by_dof:
-            raise ValueError("Connection needs at least one active DOF.")
-        if any(dof < 1 or dof > 6 for dof in self.materials_by_dof):
-            raise ValueError("Connection DOFs must be in the range 1..6.")
+        if self.connection_type == "zeroLengthSection":
+            if self.section_tag is None or self.section_tag <= 0:
+                raise ValueError(
+                    "zeroLengthSection requires a valid section tag."
+                )
+            if self.materials_by_dof:
+                raise ValueError(
+                    "zeroLengthSection uses one Section object, not "
+                    "materials_by_dof."
+                )
+        else:
+            if not self.materials_by_dof:
+                raise ValueError("Connection needs at least one active DOF.")
+            if any(dof < 1 or dof > 6 for dof in self.materials_by_dof):
+                raise ValueError("Connection DOFs must be in the range 1..6.")
         if len(self.orient_x) != 3 or len(self.orient_y) != 3:
             raise ValueError("Connection orientation vectors need 3 values.")
         if sum(v * v for v in self.orient_x) <= 1.0e-24:
@@ -973,6 +998,8 @@ class ConnectionData:
             "orient_y": list(self.orient_y),
             "do_rayleigh": self.do_rayleigh,
             "generated_ground_node": self.generated_ground_node,
+            "section_tag": self.section_tag,
+            "generated_section_tag": self.generated_section_tag,
         }
 
     @classmethod
@@ -999,6 +1026,8 @@ class ConnectionData:
             ),
             do_rayleigh=bool(data.get("do_rayleigh", False)),
             generated_ground_node=data.get("generated_ground_node"),
+            section_tag=data.get("section_tag"),
+            generated_section_tag=data.get("generated_section_tag"),
         )
 
 
@@ -1860,6 +1889,14 @@ class ProjectDatabase:
         self.sections.pop(original_tag)
         self.sections[section.tag] = section
 
+    def connections_using_section(self, section_tag: int) -> list[int]:
+        target = int(section_tag)
+        return sorted(
+            connection.tag
+            for connection in self.connections.values()
+            if connection.section_tag == target
+        )
+
     def remove_section(self, tag: int) -> None:
         self.sections.pop(int(tag), None)
 
@@ -2032,8 +2069,16 @@ class ProjectDatabase:
                 "Connection references missing material tag(s): "
                 + ", ".join(map(str, missing_materials))
             )
+        if (
+            connection.connection_type == "zeroLengthSection"
+            and connection.section_tag not in self.sections
+        ):
+            raise ValueError(
+                "zeroLengthSection references missing section tag "
+                f"{connection.section_tag}."
+            )
 
-        if connection.connection_type == "zeroLength":
+        if connection.connection_type in {"zeroLength", "zeroLengthSection"}:
             a = self.model.nodes[connection.node_i].xyz
             b = self.model.nodes[connection.node_j].xyz
             distance2 = sum((x - y) ** 2 for x, y in zip(a, b))
@@ -2113,6 +2158,21 @@ class ProjectDatabase:
             and not self._ground_node_in_use_elsewhere(ground_tag)
         ):
             self.model.remove_node(ground_tag, cascade=True)
+
+        generated_section = connection.generated_section_tag
+        if (
+            generated_section is not None
+            and generated_section in self.sections
+            and not any(
+                element.section_tag == generated_section
+                for element in self.model.elements.values()
+            )
+            and not any(
+                other.section_tag == generated_section
+                for other in self.connections.values()
+            )
+        ):
+            self.sections.pop(generated_section, None)
 
     def create_ground_node(self, source_node_tag: int) -> int:
         source_node_tag = int(source_node_tag)
