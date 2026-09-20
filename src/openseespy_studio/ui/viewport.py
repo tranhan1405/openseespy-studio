@@ -88,6 +88,7 @@ class ModelViewport(QWidget):
             "load_values": True,
         }
         self._model_representation = "tube"
+        self._model_color_mode = "uniform"
         self._selection_filter = "all"
         self._selected_nodes: set[int] = set()
         self._selected_elements: set[int] = set()
@@ -177,6 +178,17 @@ class ModelViewport(QWidget):
         info.addWidget(self.material_label)
         info.addWidget(self.section_label)
         header.addLayout(info)
+
+        self.color_legend = QLabel()
+        self.color_legend.setObjectName("ModelColorLegend")
+        self.color_legend.setTextFormat(Qt.RichText)
+        self.color_legend.setWordWrap(True)
+        self.color_legend.setMaximumWidth(520)
+        self.color_legend.setStyleSheet(
+            "color: #34495e; padding: 2px 8px;"
+        )
+        self.color_legend.hide()
+        header.addWidget(self.color_legend)
 
         header.addStretch(1)
 
@@ -868,6 +880,235 @@ class ModelViewport(QWidget):
     def model_representation(self) -> str:
         return self._model_representation
 
+    @staticmethod
+    def _normalized_model_color_mode(value: str) -> str:
+        mode = str(value or "uniform").strip().lower().replace(" ", "_")
+        aliases = {
+            "type": "element_type",
+            "element": "element_type",
+            "elementtype": "element_type",
+            "mat": "material",
+            "sec": "section",
+        }
+        mode = aliases.get(mode, mode)
+        if mode not in {"uniform", "element_type", "material", "section"}:
+            return "uniform"
+        return mode
+
+    def set_model_color_mode(self, value: str) -> None:
+        mode = self._normalized_model_color_mode(value)
+        if mode == self._model_color_mode:
+            return
+        self._model_color_mode = mode
+        if self._model is not None:
+            self._rebuild_visible_scene()
+
+    def model_color_mode(self) -> str:
+        return self._model_color_mode
+
+    @staticmethod
+    def _display_palette() -> tuple[str, ...]:
+        return (
+            "#2f80ed",
+            "#e67e22",
+            "#27ae60",
+            "#9b51e0",
+            "#eb5757",
+            "#00a8a8",
+            "#f2c94c",
+            "#6c757d",
+            "#8d6e63",
+            "#d81b60",
+            "#3949ab",
+            "#7cb342",
+        )
+
+    @staticmethod
+    def _hex_rgb(value: str) -> tuple[int, int, int]:
+        text = str(value).strip().lstrip("#")
+        if len(text) != 6:
+            return 116, 136, 155
+        return tuple(int(text[index:index + 2], 16) for index in (0, 2, 4))
+
+    def _material_label(self, tag: int | None) -> str:
+        if tag is None:
+            return "Unassigned material"
+        material = self._materials.get(int(tag))
+        if material is None:
+            return f"Material {int(tag)}"
+        return f"{material.name} [{material.tag}]"
+
+    def _section_label(self, tag: int | None) -> str:
+        if tag is None:
+            return "Unassigned section"
+        section = self._sections.get(int(tag))
+        if section is None:
+            return f"Section {int(tag)}"
+        return f"{section.name} [{section.tag}]"
+
+    def _dominant_fiber_material(self, section: SectionData) -> int | None:
+        totals: dict[int, float] = {}
+        for fiber in section.compiled_fibers():
+            totals[int(fiber.material_tag)] = (
+                totals.get(int(fiber.material_tag), 0.0)
+                + max(float(fiber.area), 0.0)
+            )
+        if not totals:
+            return None
+        return max(totals, key=lambda tag: (totals[tag], -tag))
+
+    def _element_material_tag(self, element) -> int | None:
+        if element.element_type == "truss":
+            return element.truss_material_tag
+        if element.section_tag is None:
+            return None
+        section = self._sections.get(int(element.section_tag))
+        if section is None:
+            return None
+        if section.section_type == "Elastic":
+            return section.material_tag
+        if section.section_type == "Fiber":
+            return self._dominant_fiber_material(section)
+        return None
+
+    def _element_color_key(self, element) -> tuple[str, object]:
+        mode = self._model_color_mode
+        if mode == "element_type":
+            return "element_type", str(element.element_type)
+        if mode == "section":
+            return "section", element.section_tag
+        if mode == "material":
+            return "material", self._element_material_tag(element)
+        return "uniform", (
+            "column" if element.group == "column" else "beam"
+        )
+
+    def _element_color_label(self, key: tuple[str, object]) -> str:
+        kind, value = key
+        if kind == "element_type":
+            return str(value)
+        if kind == "section":
+            return self._section_label(
+                None if value is None else int(value)
+            )
+        if kind == "material":
+            return self._material_label(
+                None if value is None else int(value)
+            )
+        return "Column" if value == "column" else "Beam / Truss"
+
+    def _color_map_for_elements(
+        self,
+        visible_tags: set[int],
+    ) -> tuple[dict[int, tuple[int, int, int]], list[tuple[str, str]]]:
+        if self._model is None:
+            return {}, []
+
+        if self._model_color_mode == "uniform":
+            mapping = {}
+            for tag in visible_tags:
+                element = self._model.elements[tag]
+                color = "#687d90" if element.group == "column" else "#74889b"
+                mapping[int(tag)] = self._hex_rgb(color)
+            return mapping, []
+
+        keys = {
+            self._element_color_key(self._model.elements[tag])
+            for tag in visible_tags
+        }
+        ordered_keys = sorted(
+            keys,
+            key=lambda item: (item[0], str(item[1])),
+        )
+        palette = self._display_palette()
+        key_colors = {
+            key: palette[index % len(palette)]
+            for index, key in enumerate(ordered_keys)
+        }
+        mapping = {
+            int(tag): self._hex_rgb(
+                key_colors[self._element_color_key(self._model.elements[tag])]
+            )
+            for tag in visible_tags
+        }
+        legend = [
+            (self._element_color_label(key), key_colors[key])
+            for key in ordered_keys
+        ]
+
+        # Fiber sections can contain multiple materials. Include all of them in
+        # Material-mode legend even though the member body uses the dominant
+        # area material for readability.
+        if self._model_color_mode == "material":
+            material_tags: set[int] = set()
+            for tag in visible_tags:
+                element = self._model.elements[tag]
+                if element.section_tag is None:
+                    if element.truss_material_tag is not None:
+                        material_tags.add(int(element.truss_material_tag))
+                    continue
+                section = self._sections.get(int(element.section_tag))
+                if section is not None and section.section_type == "Fiber":
+                    material_tags.update(section.fiber_material_tags())
+            existing = {label for label, _ in legend}
+            next_index = len(ordered_keys)
+            for material_tag in sorted(material_tags):
+                label = self._material_label(material_tag)
+                if label in existing:
+                    continue
+                color = palette[next_index % len(palette)]
+                legend.append((label, color))
+                next_index += 1
+
+        return mapping, legend
+
+    def _apply_element_colors(
+        self,
+        mesh,
+        element_colors: dict[int, tuple[int, int, int]],
+    ) -> bool:
+        tags = np.asarray(mesh.cell_data.get("element_tag", []), dtype=np.int64)
+        if not len(tags):
+            return False
+        rgb = np.asarray(
+            [
+                element_colors.get(
+                    int(tag),
+                    self._hex_rgb("#74889b"),
+                )
+                for tag in tags
+            ],
+            dtype=np.uint8,
+        )
+        mesh.cell_data["display_rgb"] = rgb
+        return True
+
+    def _update_model_color_legend(
+        self,
+        legend: list[tuple[str, str]],
+    ) -> None:
+        if not legend or self._model_color_mode == "uniform":
+            self.color_legend.clear()
+            self.color_legend.hide()
+            return
+        title = {
+            "element_type": "Element Type",
+            "material": "Material",
+            "section": "Section",
+        }.get(self._model_color_mode, "Color By")
+        entries = []
+        for label, color in legend[:12]:
+            entries.append(
+                f'<span style="color:{color};font-size:15px;">■</span> '
+                f'{label}'
+            )
+        if len(legend) > 12:
+            entries.append(f"+{len(legend) - 12} more")
+        self.color_legend.setText(
+            f"<b>Color By · {title}</b><br>" + " &nbsp; ".join(entries)
+        )
+        self.color_legend.show()
+
     def set_display_data(
         self,
         *,
@@ -1298,6 +1539,102 @@ class ModelViewport(QWidget):
                 )
         return combined
 
+    def _fiber_material_points(
+        self,
+        visible_tags: set[int],
+        *,
+        max_total_points: int = 12000,
+        max_points_per_element: int = 180,
+    ) -> dict[int, list[tuple[float, float, float]]]:
+        if (
+            self._model is None
+            or self._model_color_mode != "material"
+            or self._model_representation != "actual_section"
+        ):
+            return {}
+
+        grouped: dict[int, list[tuple[float, float, float]]] = {}
+        total = 0
+        for tag in sorted(visible_tags):
+            if total >= max_total_points:
+                break
+            element = self._model.elements[tag]
+            if element.section_tag is None or element.transf_tag is None:
+                continue
+            section = self._sections.get(int(element.section_tag))
+            transformation = self._transformations.get(int(element.transf_tag))
+            if (
+                section is None
+                or section.section_type != "Fiber"
+                or transformation is None
+            ):
+                continue
+            fibers = section.compiled_fibers()
+            if not fibers:
+                continue
+            try:
+                _, local_y, local_z = element_local_axes(
+                    self._model,
+                    element,
+                    transformation,
+                )
+            except ValueError:
+                continue
+            node_i = self._model.nodes.get(element.i)
+            node_j = self._model.nodes.get(element.j)
+            if node_i is None or node_j is None:
+                continue
+            center = 0.5 * (
+                np.asarray(node_i.xyz, dtype=float)
+                + np.asarray(node_j.xyz, dtype=float)
+            )
+            y_axis = np.asarray(local_y, dtype=float)
+            z_axis = np.asarray(local_z, dtype=float)
+
+            stride = max(1, math.ceil(len(fibers) / max_points_per_element))
+            for fiber in fibers[::stride]:
+                if total >= max_total_points:
+                    break
+                point = (
+                    center
+                    + y_axis * float(fiber.y)
+                    + z_axis * float(fiber.z)
+                )
+                grouped.setdefault(int(fiber.material_tag), []).append(
+                    tuple(float(value) for value in point)
+                )
+                total += 1
+        return grouped
+
+    def _draw_fiber_material_markers(
+        self,
+        visible_tags: set[int],
+        legend: list[tuple[str, str]],
+    ) -> None:
+        grouped = self._fiber_material_points(visible_tags)
+        if not grouped:
+            return
+        label_colors = dict(legend)
+        palette = self._display_palette()
+        for index, material_tag in enumerate(sorted(grouped)):
+            points = grouped[material_tag]
+            if not points:
+                continue
+            color = label_colors.get(
+                self._material_label(material_tag),
+                palette[index % len(palette)],
+            )
+            self.plotter.add_mesh(
+                pv.PolyData(points),
+                name=f"fiber-material-{material_tag}",
+                color=color,
+                render_points_as_spheres=True,
+                point_size=7,
+                opacity=0.95,
+                pickable=False,
+                render=False,
+            )
+
     def draw_model(
         self,
         model: StructuralModel,
@@ -1350,7 +1687,10 @@ class ModelViewport(QWidget):
 
         visible_elements = self._visible_element_tags()
         group_meshes = self._combined_element_meshes(visible_elements, span)
-        group_colors = {"column": "#687d90", "beam": "#74889b"}
+        element_colors, color_legend = self._color_map_for_elements(
+            visible_elements
+        )
+        self._update_model_color_legend(color_legend)
 
         # For large models keep a single, cheap centerline actor ready for
         # rotate/pan/zoom.  The detailed tube/section geometry is hidden only
@@ -1380,9 +1720,18 @@ class ModelViewport(QWidget):
         self._cell_picker.PickFromListOn()
 
         for group_name, mesh in group_meshes.items():
+            has_rgb = self._apply_element_colors(mesh, element_colors)
             actor = self.plotter.add_mesh(
                 mesh,
-                color=group_colors[group_name],
+                scalars="display_rgb" if has_rgb else None,
+                rgb=has_rgb,
+                color=(
+                    None
+                    if has_rgb
+                    else "#687d90"
+                    if group_name == "column"
+                    else "#74889b"
+                ),
                 edge_color="#243b52",
                 show_edges=(
                     self._model_representation == "tube"
@@ -1401,6 +1750,11 @@ class ModelViewport(QWidget):
             self._element_actor_data[self._actor_key(actor)] = (mesh, tags)
             self._undeformed_element_actors.append(actor)
             self._cell_picker.AddPickList(actor)
+
+        self._draw_fiber_material_markers(
+            visible_elements,
+            color_legend,
+        )
 
         self._point_picker.InitializePickList()
         self._point_picker.PickFromListOn()
