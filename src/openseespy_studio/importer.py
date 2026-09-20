@@ -394,21 +394,39 @@ class _Importer:
         kind = str(args[0])
         tag = int(args[1])
         if kind == "Elastic":
-            if len(args) < 8:
-                raise ValueError("Elastic section has too few arguments")
+            if int(self.project.model.ndm) == 2:
+                if len(args) < 5:
+                    raise ValueError(
+                        "2D Elastic section needs E, A and Iz"
+                    )
+                parameters = {
+                    "E": self.stress_to_pa(args[2]),
+                    "A": float(args[3]),
+                    "Iz": float(args[4]),
+                }
+                # OpenSees also permits optional G/alphaY for 2D sections.
+                # Studio stores G when present; alphaY is not yet modeled.
+                if len(args) > 5 and not isinstance(args[5], str):
+                    parameters["G"] = self.stress_to_pa(args[5])
+            else:
+                if len(args) < 8:
+                    raise ValueError(
+                        "3D Elastic section needs E, A, Iz, Iy, G and J"
+                    )
+                parameters = {
+                    "E": self.stress_to_pa(args[2]),
+                    "A": float(args[3]),
+                    "Iz": float(args[4]),
+                    "Iy": float(args[5]),
+                    "G": self.stress_to_pa(args[6]),
+                    "J": float(args[7]),
+                }
             self.project.add_section(
                 SectionData(
                     tag,
                     f"Imported Elastic {tag}",
                     "Elastic",
-                    parameters={
-                        "E": self.stress_to_pa(args[2]),
-                        "A": float(args[3]),
-                        "Iz": float(args[4]),
-                        "Iy": float(args[5]),
-                        "G": self.stress_to_pa(args[6]),
-                        "J": float(args[7]),
-                    },
+                    parameters=parameters,
                 )
             )
             self.current_fiber_section = None
@@ -653,6 +671,43 @@ class _Importer:
         self.count("Sections")
         return tag
 
+    def elastic_section_for_2d(
+        self,
+        a: float,
+        e: float,
+        iz: float,
+    ) -> int:
+        for tag, section in self.project.sections.items():
+            if section.section_type != "Elastic":
+                continue
+            p = section.parameters
+            current = (
+                p["A"],
+                self.units.stress_from_pa(p["E"]),
+                p["Iz"],
+            )
+            target = (a, e, iz)
+            if all(
+                math.isclose(x, y, rel_tol=1e-9, abs_tol=1e-12)
+                for x, y in zip(current, target)
+            ):
+                return tag
+        tag = max(self.project.sections, default=0) + 1
+        self.project.add_section(
+            SectionData(
+                tag,
+                f"Imported inline 2D elastic section {tag}",
+                "Elastic",
+                parameters={
+                    "A": a,
+                    "E": self.stress_to_pa(e),
+                    "Iz": iz,
+                },
+            )
+        )
+        self.count("Sections")
+        return tag
+
     def add_element(self, node: ast.Call, args: list[Any]) -> None:
         if len(args) < 4:
             raise ValueError("element has too few arguments")
@@ -687,23 +742,37 @@ class _Importer:
             return
 
         if kind == "elasticBeamColumn":
-            if len(args) < 11:
-                self.issue(
-                    "UNSUPPORTED", node, kind,
-                    "Only the 3D elasticBeamColumn signature is imported in this pass.",
+            if int(self.project.model.ndm) == 2:
+                if len(args) < 8:
+                    raise ValueError(
+                        "2D elasticBeamColumn needs A, E, Iz and transfTag"
+                    )
+                a, e, iz = map(float, args[4:7])
+                section_tag = self.elastic_section_for_2d(a, e, iz)
+                transf_tag = int(args[7])
+                rest = args[8:]
+            else:
+                if len(args) < 11:
+                    raise ValueError(
+                        "3D elasticBeamColumn needs A, E, G, J, Iy, Iz "
+                        "and transfTag"
+                    )
+                a, e, g, j, iy, iz = map(float, args[4:10])
+                section_tag = self.elastic_section_for(
+                    a, e, g, j, iy, iz
                 )
-                return
-            a, e, g, j, iy, iz = map(float, args[4:10])
-            section_tag = self.elastic_section_for(a, e, g, j, iy, iz)
-            rest = args[11:]
+                transf_tag = int(args[10])
+                rest = args[11:]
             self.project.model.add_element(
                 tag,
                 ni,
                 nj,
                 "elasticBeamColumn",
                 section_tag=section_tag,
-                transf_tag=int(args[10]),
-                mass_per_length=float(self.flag_value(rest, "-mass", 0.0) or 0.0),
+                transf_tag=transf_tag,
+                mass_per_length=float(
+                    self.flag_value(rest, "-mass", 0.0) or 0.0
+                ),
                 consistent_mass="-cMass" in rest,
             )
             self.count("Elements")
@@ -984,13 +1053,22 @@ class _Importer:
             raise ValueError("eleLoad target/type could not be resolved")
         load_type = str(args[type_index + 1])
         payload = list(args[type_index + 2:])
+        is_2d = int(self.project.model.ndm) == 2
+
         for element_tag in element_tags:
             if load_type == "-beamUniform":
-                if len(payload) < 2:
-                    raise ValueError("beamUniform needs Wy and Wz")
-                wy = float(payload[0])
-                wz = float(payload[1])
-                wx = float(payload[2]) if len(payload) > 2 else 0.0
+                if is_2d:
+                    if len(payload) < 1:
+                        raise ValueError("2D beamUniform needs Wy")
+                    wy = float(payload[0])
+                    wx = float(payload[1]) if len(payload) > 1 else 0.0
+                    wz = 0.0
+                else:
+                    if len(payload) < 2:
+                        raise ValueError("3D beamUniform needs Wy and Wz")
+                    wy = float(payload[0])
+                    wz = float(payload[1])
+                    wx = float(payload[2]) if len(payload) > 2 else 0.0
                 item = ElementLoadData(
                     self._next_element_load,
                     f"Imported uniform load {self._next_element_load}",
@@ -1002,18 +1080,32 @@ class _Importer:
                     wz=wz,
                 )
             elif load_type == "-beamPoint":
-                if len(payload) < 3:
-                    raise ValueError("beamPoint needs Py, Pz and x/L")
+                if is_2d:
+                    if len(payload) < 2:
+                        raise ValueError("2D beamPoint needs Py and x/L")
+                    py = float(payload[0])
+                    pz = 0.0
+                    x_over_l = float(payload[1])
+                    px = float(payload[2]) if len(payload) > 2 else 0.0
+                else:
+                    if len(payload) < 3:
+                        raise ValueError(
+                            "3D beamPoint needs Py, Pz and x/L"
+                        )
+                    py = float(payload[0])
+                    pz = float(payload[1])
+                    x_over_l = float(payload[2])
+                    px = float(payload[3]) if len(payload) > 3 else 0.0
                 item = ElementLoadData(
                     self._next_element_load,
                     f"Imported point load {self._next_element_load}",
                     self.current_pattern,
                     element_tag,
                     "Point",
-                    py=float(payload[0]),
-                    pz=float(payload[1]),
-                    x_over_l=float(payload[2]),
-                    px=float(payload[3]) if len(payload) > 3 else 0.0,
+                    py=py,
+                    pz=pz,
+                    x_over_l=x_over_l,
+                    px=px,
                 )
             else:
                 self.issue(
