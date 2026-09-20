@@ -906,7 +906,7 @@ class AnalysisTemplateDialog(QDialog):
         )
         self.gm_dt = _double(0.01, 1.0e-12)
         self.gm_unit = QComboBox()
-        self.gm_unit.addItems(["g", "m/s²", "cm/s²"])
+        self.gm_unit.addItems(["g", "m/s²", "cm/s²", "mm/s²"])
 
         self.gm_scale_mode = QComboBox()
         self.gm_scale_mode.addItem("Direct factor", "factor")
