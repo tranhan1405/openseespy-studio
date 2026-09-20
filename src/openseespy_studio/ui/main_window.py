@@ -6054,7 +6054,6 @@ class MainWindow(QMainWindow):
             plain,
             load=load,
             units=self.project.units,
-            ndm=self.model.ndm,
             parent=self,
         )
         if not dialog.exec():
@@ -8434,6 +8433,8 @@ class MainWindow(QMainWindow):
                 for tag, node in self.model.nodes.items()
             },
             units=self.project.units,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
             parent=self,
         )
         if not dialog.exec():
@@ -8511,6 +8512,8 @@ class MainWindow(QMainWindow):
                 for node_tag, node in self.model.nodes.items()
             },
             units=self.project.units,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
             parent=self,
         )
         if not dialog.exec():
