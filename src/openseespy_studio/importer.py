@@ -659,6 +659,33 @@ class _Importer:
         kind = str(args[0])
         tag, ni, nj = map(int, args[1:4])
 
+        if kind.lower() == "truss":
+            if len(args) < 6:
+                raise ValueError("truss needs area and material tag")
+            rest = args[6:]
+            self.project.model.add_element(
+                tag,
+                ni,
+                nj,
+                element_type="truss",
+                group="truss",
+                mass_per_length=float(
+                    self.flag_value(rest, "-rho", 0.0) or 0.0
+                ),
+                consistent_mass=bool(
+                    int(self.flag_value(rest, "-cMass", 0) or 0)
+                )
+                if "-cMass" in rest
+                else False,
+                truss_area=float(args[4]),
+                truss_material_tag=int(args[5]),
+                truss_do_rayleigh=bool(
+                    int(self.flag_value(rest, "-doRayleigh", 0) or 0)
+                ),
+            )
+            self.count("Elements")
+            return
+
         if kind == "elasticBeamColumn":
             if len(args) < 11:
                 self.issue(
