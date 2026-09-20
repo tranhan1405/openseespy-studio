@@ -102,7 +102,7 @@ def run_plan(plan_path: Path, result_path: Path) -> int:
             row = {
                 "case_id": case_id,
                 "values": values,
-                "status": "completed",
+                "execution_status": "completed",
                 "error": "",
                 "result": result,
                 **scored,
@@ -112,10 +112,12 @@ def run_plan(plan_path: Path, result_path: Path) -> int:
             row = {
                 "case_id": case_id,
                 "values": values,
-                "status": "failed",
+                "execution_status": "failed",
                 "error": error,
                 "result": {},
                 "score": None,
+                "status": "unavailable",
+                "reason": "Solver execution failed.",
                 "components": {},
                 "comparison": {},
             }
@@ -127,7 +129,7 @@ def run_plan(plan_path: Path, result_path: Path) -> int:
                 "case_id": case_id,
                 "current": index,
                 "total": total,
-                "status": row["status"],
+                "status": row.get("execution_status", "failed"),
                 "score": row.get("score"),
             }
         )
