@@ -734,6 +734,7 @@ class ResultsPanel(QWidget):
         self._motion_timer.timeout.connect(self._advance_motion)
         self._motion_info = None
         self._motion_frame_index = 0
+        self._calibration_rows: list[dict[str, Any]] = []
         self._cyclic_experiment_dataset: dict[str, Any] = {}
         self._cyclic_experiment_path = ""
 
@@ -768,6 +769,7 @@ class ResultsPanel(QWidget):
         self._build_pushover_tab()
         self._build_cyclic_tab()
         self._build_specimen_tab()
+        self._build_calibration_tab()
         self._build_history_tab()
         self._build_motion_tab()
 
@@ -2226,6 +2228,254 @@ class ResultsPanel(QWidget):
 
         self.tabs.addTab(page, "Specimen Response")
 
+    def _build_calibration_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        self.calibration_info = QLabel(
+            "Run a Calibration / Parameter Study to compare batch cases "
+            "against experimental cyclic data."
+        )
+        self.calibration_info.setWordWrap(True)
+        layout.addWidget(self.calibration_info)
+
+        controls = QHBoxLayout()
+        export = QPushButton("Export Calibration CSV")
+        export.clicked.connect(self._export_calibration_csv)
+        controls.addWidget(export)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.calibration_table = QTableWidget(0, 9)
+        self.calibration_table.setHorizontalHeaderLabels(
+            [
+                "Rank",
+                "Job",
+                "Score [%]",
+                "Peak |V| err [%]",
+                "Reversal NRMSE [%]",
+                "Cycle energy err [%]",
+                "Matched rev.",
+                "Parameters",
+                "Status",
+            ]
+        )
+        self.calibration_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.calibration_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.calibration_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.calibration_table.setSelectionBehavior(
+            QAbstractItemView.SelectRows
+        )
+        self.calibration_table.setSelectionMode(
+            QAbstractItemView.SingleSelection
+        )
+        self.calibration_table.cellDoubleClicked.connect(
+            self._calibration_row_activated
+        )
+        layout.addWidget(self.calibration_table, 1)
+
+        note = QLabel(
+            "Score is the weighted mean of available absolute percentage "
+            "errors. Lower is closer to the imported experiment; no "
+            "pass/fail criterion is implied."
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        self.tabs.addTab(page, "Calibration")
+
+    def show_calibration(self) -> None:
+        self._select_tab("Calibration")
+
+    @staticmethod
+    def _calibration_metric_text(value: Any) -> str:
+        if value is None:
+            return "-"
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return "-"
+        if not math.isfinite(number):
+            return "-"
+        return f"{number:.6g}"
+
+    def set_calibration_results(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> None:
+        self._calibration_rows = [
+            dict(row)
+            for row in rows
+            if isinstance(row, dict)
+        ]
+        self.calibration_table.setRowCount(
+            len(self._calibration_rows)
+        )
+        successful = 0
+        for row_index, row in enumerate(self._calibration_rows):
+            components = row.get("components", {})
+            if not isinstance(components, dict):
+                components = {}
+            score = row.get("score")
+            if score is not None:
+                try:
+                    if math.isfinite(float(score)):
+                        successful += 1
+                except (TypeError, ValueError):
+                    pass
+            parameters = row.get("values", {})
+            if isinstance(parameters, dict):
+                parameter_text = ", ".join(
+                    f"{key.split(':')[-1]}={float(value):.6g}"
+                    for key, value in sorted(parameters.items())
+                )
+            else:
+                parameter_text = "-"
+            values = [
+                (
+                    str(row.get("rank"))
+                    if row.get("rank") is not None
+                    else "-"
+                ),
+                (
+                    str(row.get("job_id"))
+                    if row.get("job_id") is not None
+                    else "-"
+                ),
+                self._calibration_metric_text(score),
+                self._calibration_metric_text(
+                    components.get("peak_force")
+                ),
+                self._calibration_metric_text(
+                    components.get("reversal_nrmse")
+                ),
+                self._calibration_metric_text(
+                    components.get("cycle_energy")
+                ),
+                str(row.get("matched_reversal_count", 0)),
+                parameter_text or "-",
+                str(row.get("status", "-")),
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 1 and row.get("job_id") is not None:
+                    item.setData(
+                        Qt.UserRole,
+                        int(row["job_id"]),
+                    )
+                self.calibration_table.setItem(
+                    row_index,
+                    column,
+                    item,
+                )
+
+        self.calibration_info.setText(
+            f"{len(self._calibration_rows)} case(s) · "
+            f"{successful} scored case(s). "
+            "Double-click a row to activate that case as the result source."
+        )
+
+    def _calibration_row_activated(
+        self,
+        row: int,
+        _column: int,
+    ) -> None:
+        item = self.calibration_table.item(row, 1)
+        if item is None:
+            return
+        job_id = item.data(Qt.UserRole)
+        if job_id is not None:
+            self.job_selected.emit(int(job_id))
+
+    def _export_calibration_csv(self) -> None:
+        if not self._calibration_rows:
+            self.calibration_info.setText(
+                "No calibration results are available to export."
+            )
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Calibration Results",
+            "calibration_results.csv",
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+
+        parameter_keys = sorted(
+            {
+                str(key)
+                for row in self._calibration_rows
+                for key in (
+                    row.get("values", {}).keys()
+                    if isinstance(row.get("values"), dict)
+                    else []
+                )
+            }
+        )
+        fields = [
+            "rank",
+            "job_id",
+            "case_id",
+            "score_percent",
+            "peak_force_error_percent",
+            "reversal_force_nrmse_percent",
+            "cycle_energy_error_percent",
+            "max_displacement_error_percent",
+            "matched_reversal_count",
+            "status",
+            *parameter_keys,
+        ]
+        with open(path, "w", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(stream, fieldnames=fields)
+            writer.writeheader()
+            for row in self._calibration_rows:
+                components = row.get("components", {})
+                if not isinstance(components, dict):
+                    components = {}
+                values = row.get("values", {})
+                if not isinstance(values, dict):
+                    values = {}
+                output = {
+                    "rank": row.get("rank"),
+                    "job_id": row.get("job_id"),
+                    "case_id": row.get("case_id"),
+                    "score_percent": row.get("score"),
+                    "peak_force_error_percent": components.get(
+                        "peak_force"
+                    ),
+                    "reversal_force_nrmse_percent": components.get(
+                        "reversal_nrmse"
+                    ),
+                    "cycle_energy_error_percent": components.get(
+                        "cycle_energy"
+                    ),
+                    "max_displacement_error_percent": components.get(
+                        "max_displacement"
+                    ),
+                    "matched_reversal_count": row.get(
+                        "matched_reversal_count",
+                        0,
+                    ),
+                    "status": row.get("status"),
+                }
+                for key in parameter_keys:
+                    output[key] = values.get(key)
+                writer.writerow(output)
+        self.calibration_info.setText(
+            f"Exported {len(self._calibration_rows)} calibration case(s) "
+            f"to {path}"
+        )
+
     def _build_history_tab(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -2392,6 +2642,12 @@ class ResultsPanel(QWidget):
         self.cyclic_metrics.setText(
             "Peak |u|: -   +Vpeak: -   -Vpeak: -   "
             "Hysteretic energy: -   Closed cycles: -"
+        )
+        self._calibration_rows = []
+        self.calibration_table.setRowCount(0)
+        self.calibration_info.setText(
+            "Run a Calibration / Parameter Study to compare batch cases "
+            "against experimental cyclic data."
         )
         self.history_node.clear()
         self.history_label.setText(
