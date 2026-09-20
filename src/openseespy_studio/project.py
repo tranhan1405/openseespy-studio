@@ -1429,6 +1429,7 @@ class AnalysisSettingsData:
     tolerance: float = 1.0e-8
     max_iterations: int = 50
     algorithm: str = "Newton"
+    integrator: str = "Auto"
     steps: int = 10
     load_increment: float = 0.1
     control_node: int = 1
@@ -1441,6 +1442,11 @@ class AnalysisSettingsData:
     dt: float = 0.01
     gamma: float = 0.5
     beta: float = 0.25
+    hht_alpha: float = 0.9
+    generalized_alpha_m: float = 1.0
+    generalized_alpha_f: float = 1.0
+    arc_length_s: float = 0.01
+    arc_length_alpha: float = 1.0
     rayleigh_damping_ratio: float = 0.0
     rayleigh_mode_i: int = 1
     rayleigh_mode_j: int = 3
@@ -1462,6 +1468,7 @@ class AnalysisSettingsData:
     def __post_init__(self) -> None:
         self.tag=int(self.tag); self.name=str(self.name).strip() or f"Analysis {self.tag}"
         self.analysis_type=str(self.analysis_type)
+        self.integrator=str(self.integrator or "Auto")
         self.tolerance=float(self.tolerance); self.max_iterations=int(self.max_iterations)
         self.steps=int(self.steps); self.load_increment=float(self.load_increment)
         self.control_node=int(self.control_node); self.control_dof=int(self.control_dof)
@@ -1469,6 +1476,11 @@ class AnalysisSettingsData:
         self.cyclic_targets=[float(value) for value in self.cyclic_targets]
         self.cyclic_increment=abs(float(self.cyclic_increment))
         self.dt=float(self.dt); self.gamma=float(self.gamma); self.beta=float(self.beta)
+        self.hht_alpha=float(self.hht_alpha)
+        self.generalized_alpha_m=float(self.generalized_alpha_m)
+        self.generalized_alpha_f=float(self.generalized_alpha_f)
+        self.arc_length_s=float(self.arc_length_s)
+        self.arc_length_alpha=float(self.arc_length_alpha)
         self.rayleigh_damping_ratio=float(self.rayleigh_damping_ratio)
         self.rayleigh_mode_i=int(self.rayleigh_mode_i)
         self.rayleigh_mode_j=int(self.rayleigh_mode_j)
@@ -1491,6 +1503,27 @@ class AnalysisSettingsData:
         if self.tag<=0: raise ValueError("Analysis tag must be positive.")
         if self.analysis_type not in {"Static","Pushover","Cyclic","Transient","Modal"}:
             raise ValueError(f"Unsupported analysis type: {self.analysis_type}")
+        default_integrators = {
+            "Static": "LoadControl",
+            "Pushover": "DisplacementControl",
+            "Cyclic": "DisplacementControl",
+            "Transient": "Newmark",
+            "Modal": "None",
+        }
+        if self.integrator in {"", "Auto"}:
+            self.integrator = default_integrators[self.analysis_type]
+        allowed_integrators = {
+            "Static": {"LoadControl", "DisplacementControl", "ArcLength"},
+            "Pushover": {"DisplacementControl"},
+            "Cyclic": {"DisplacementControl"},
+            "Transient": {"Newmark", "HHT", "GeneralizedAlpha"},
+            "Modal": {"None"},
+        }
+        if self.integrator not in allowed_integrators[self.analysis_type]:
+            raise ValueError(
+                f"Integrator {self.integrator!r} is not valid for "
+                f"{self.analysis_type} analysis."
+            )
         if self.constraints_handler not in {"Transformation","Plain"}:
             raise ValueError("Unsupported constraints handler.")
         if self.numberer not in {"RCM","Plain"}: raise ValueError("Unsupported numberer.")
@@ -1510,8 +1543,27 @@ class AnalysisSettingsData:
             raise ValueError("Adaptive easy-iteration threshold must be positive.")
         if self.adaptive_growth_after < 1:
             raise ValueError("Adaptive growth-after count must be positive.")
-        if self.adaptive_step and self.analysis_type == "Static" and abs(self.load_increment) <= 1.0e-30:
+        if (
+            self.adaptive_step
+            and self.analysis_type == "Static"
+            and self.integrator == "LoadControl"
+            and abs(self.load_increment) <= 1.0e-30
+        ):
             raise ValueError("Adaptive static analysis needs a nonzero load increment.")
+        if (
+            self.adaptive_step
+            and self.analysis_type == "Static"
+            and self.integrator == "DisplacementControl"
+            and abs(self.displacement_increment) <= 1.0e-30
+        ):
+            raise ValueError(
+                "Adaptive static DisplacementControl needs a nonzero "
+                "displacement increment."
+            )
+        if self.arc_length_s <= 0.0:
+            raise ValueError("ArcLength s must be positive.")
+        if self.arc_length_alpha <= 0.0:
+            raise ValueError("ArcLength alpha must be positive.")
         if self.adaptive_step and self.analysis_type == "Pushover" and abs(self.displacement_increment) <= 1.0e-30:
             raise ValueError("Adaptive pushover needs a nonzero displacement increment.")
         if self.analysis_type == "Cyclic":
@@ -1541,9 +1593,11 @@ class AnalysisSettingsData:
     def to_dict(self) -> dict[str, Any]:
         return {key:getattr(self,key) for key in (
             "tag","name","analysis_type","constraints_handler","numberer","system",
-            "test","tolerance","max_iterations","algorithm","steps","load_increment",
-            "control_node","control_dof","displacement_increment",
-            "cyclic_targets","cyclic_increment","dt","gamma","beta",
+            "test","tolerance","max_iterations","algorithm","integrator",
+            "steps","load_increment","control_node","control_dof",
+            "displacement_increment","cyclic_targets","cyclic_increment",
+            "dt","gamma","beta","hht_alpha","generalized_alpha_m",
+            "generalized_alpha_f","arc_length_s","arc_length_alpha",
             "rayleigh_damping_ratio","rayleigh_mode_i","rayleigh_mode_j",
             "preload_gravity","gravity_steps","deferred_pattern_tags",
             "num_modes","eigen_solver","recovery","adaptive_step",
@@ -2705,7 +2759,13 @@ class ProjectDatabase:
     def add_analysis(self, analysis: AnalysisSettingsData) -> None:
         if analysis.tag in self.analyses:
             raise ValueError(f"Analysis tag {analysis.tag} already exists.")
-        if analysis.analysis_type in {"Pushover", "Cyclic"} and analysis.control_node not in self.model.nodes:
+        if (
+            analysis.analysis_type in {"Pushover", "Cyclic"}
+            or (
+                analysis.analysis_type == "Static"
+                and analysis.integrator == "DisplacementControl"
+            )
+        ) and analysis.control_node not in self.model.nodes:
             raise ValueError(
                 f"{analysis.analysis_type} control node "
                 f"{analysis.control_node} does not exist."
@@ -2718,7 +2778,13 @@ class ProjectDatabase:
         original_tag=int(original_tag)
         if original_tag not in self.analyses: raise ValueError(f"Analysis tag {original_tag} does not exist.")
         if analysis.tag!=original_tag and analysis.tag in self.analyses: raise ValueError(f"Analysis tag {analysis.tag} already exists.")
-        if analysis.analysis_type in {"Pushover", "Cyclic"} and analysis.control_node not in self.model.nodes:
+        if (
+            analysis.analysis_type in {"Pushover", "Cyclic"}
+            or (
+                analysis.analysis_type == "Static"
+                and analysis.integrator == "DisplacementControl"
+            )
+        ) and analysis.control_node not in self.model.nodes:
             raise ValueError(
                 f"{analysis.analysis_type} control node "
                 f"{analysis.control_node} does not exist."
