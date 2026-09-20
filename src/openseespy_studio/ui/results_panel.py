@@ -1770,7 +1770,10 @@ class ResultsPanel(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(5)
 
+        # Keep the essential cyclic summary visible regardless of which
+        # detail page is active.
         self.cyclic_info = QLabel(
             "Run a Cyclic analysis to plot applied base shear versus "
             "control displacement."
@@ -1785,39 +1788,69 @@ class ResultsPanel(QWidget):
         self.cyclic_metrics.setWordWrap(True)
         layout.addWidget(self.cyclic_metrics)
 
-        experiment_row = QHBoxLayout()
-        import_experiment = QPushButton("Import Experiment CSV")
-        import_experiment.clicked.connect(
-            self._import_cyclic_experiment_csv
-        )
-        experiment_row.addWidget(import_experiment)
+        self.cyclic_detail_tabs = QTabWidget()
+        self.cyclic_detail_tabs.setDocumentMode(True)
+        layout.addWidget(self.cyclic_detail_tabs, 1)
 
-        clear_experiment = QPushButton("Clear Experiment")
-        clear_experiment.clicked.connect(
-            self._clear_cyclic_experiment
-        )
-        experiment_row.addWidget(clear_experiment)
+        # --------------------------------------------------------------
+        # CURVE
+        # --------------------------------------------------------------
+        curve_page = QWidget()
+        curve_layout = QVBoxLayout(curve_page)
+        curve_layout.setContentsMargins(4, 4, 4, 4)
+        curve_layout.setSpacing(4)
 
-        experiment_row.addWidget(QLabel("View:"))
+        curve_controls = QHBoxLayout()
+        curve_controls.addWidget(QLabel("View:"))
         self.cyclic_compare_view = QComboBox()
         self.cyclic_compare_view.addItem("Hysteresis", "hysteresis")
         self.cyclic_compare_view.addItem("Backbone / envelope", "backbone")
         self.cyclic_compare_view.currentIndexChanged.connect(
             self._update_cyclic_plot
         )
-        experiment_row.addWidget(self.cyclic_compare_view)
-        experiment_row.addStretch(1)
-        layout.addLayout(experiment_row)
+        curve_controls.addWidget(self.cyclic_compare_view)
+        curve_controls.addStretch(1)
+        curve_layout.addLayout(curve_controls)
 
-        column_row = QHBoxLayout()
-        column_row.addWidget(QLabel("Exp X:"))
+        self.cyclic_plot = TimeHistoryPlot(
+            empty_message="No cyclic hysteresis data"
+        )
+        self.cyclic_plot.setMinimumHeight(220)
+        curve_layout.addWidget(self.cyclic_plot, 1)
+
+        self.cyclic_detail_tabs.addTab(curve_page, "Curve")
+
+        # --------------------------------------------------------------
+        # EXPERIMENT
+        # --------------------------------------------------------------
+        experiment_page = QWidget()
+        experiment_layout = QVBoxLayout(experiment_page)
+        experiment_layout.setContentsMargins(4, 4, 4, 4)
+        experiment_layout.setSpacing(5)
+
+        experiment_buttons = QHBoxLayout()
+        import_experiment = QPushButton("Import Experiment CSV")
+        import_experiment.clicked.connect(
+            self._import_cyclic_experiment_csv
+        )
+        experiment_buttons.addWidget(import_experiment)
+
+        clear_experiment = QPushButton("Clear Experiment")
+        clear_experiment.clicked.connect(
+            self._clear_cyclic_experiment
+        )
+        experiment_buttons.addWidget(clear_experiment)
+        experiment_buttons.addStretch(1)
+        experiment_layout.addLayout(experiment_buttons)
+
+        x_row = QHBoxLayout()
+        x_row.addWidget(QLabel("Exp X:"))
         self.cyclic_exp_x_column = QComboBox()
         self.cyclic_exp_x_column.currentIndexChanged.connect(
             self._update_cyclic_plot
         )
-        column_row.addWidget(self.cyclic_exp_x_column, 1)
-
-        column_row.addWidget(QLabel("×"))
+        x_row.addWidget(self.cyclic_exp_x_column, 1)
+        x_row.addWidget(QLabel("×"))
         self.cyclic_exp_x_scale = QDoubleSpinBox()
         self.cyclic_exp_x_scale.setRange(-1.0e9, 1.0e9)
         self.cyclic_exp_x_scale.setDecimals(8)
@@ -1825,16 +1858,18 @@ class ResultsPanel(QWidget):
         self.cyclic_exp_x_scale.valueChanged.connect(
             self._update_cyclic_plot
         )
-        column_row.addWidget(self.cyclic_exp_x_scale)
+        self.cyclic_exp_x_scale.setMaximumWidth(120)
+        x_row.addWidget(self.cyclic_exp_x_scale)
+        experiment_layout.addLayout(x_row)
 
-        column_row.addWidget(QLabel("Exp Y:"))
+        y_row = QHBoxLayout()
+        y_row.addWidget(QLabel("Exp Y:"))
         self.cyclic_exp_y_column = QComboBox()
         self.cyclic_exp_y_column.currentIndexChanged.connect(
             self._update_cyclic_plot
         )
-        column_row.addWidget(self.cyclic_exp_y_column, 1)
-
-        column_row.addWidget(QLabel("×"))
+        y_row.addWidget(self.cyclic_exp_y_column, 1)
+        y_row.addWidget(QLabel("×"))
         self.cyclic_exp_y_scale = QDoubleSpinBox()
         self.cyclic_exp_y_scale.setRange(-1.0e9, 1.0e9)
         self.cyclic_exp_y_scale.setDecimals(8)
@@ -1842,15 +1877,16 @@ class ResultsPanel(QWidget):
         self.cyclic_exp_y_scale.valueChanged.connect(
             self._update_cyclic_plot
         )
-        column_row.addWidget(self.cyclic_exp_y_scale)
-        layout.addLayout(column_row)
+        self.cyclic_exp_y_scale.setMaximumWidth(120)
+        y_row.addWidget(self.cyclic_exp_y_scale)
+        experiment_layout.addLayout(y_row)
 
         self.cyclic_experiment_info = QLabel(
             "Optional: import experimental displacement-force CSV for "
             "overlay and descriptive validation metrics."
         )
         self.cyclic_experiment_info.setWordWrap(True)
-        layout.addWidget(self.cyclic_experiment_info)
+        experiment_layout.addWidget(self.cyclic_experiment_info)
 
         self.cyclic_compare_table = QTableWidget(0, 4)
         self.cyclic_compare_table.setHorizontalHeaderLabels(
@@ -1865,14 +1901,19 @@ class ResultsPanel(QWidget):
         self.cyclic_compare_table.setEditTriggers(
             QAbstractItemView.NoEditTriggers
         )
-        self.cyclic_compare_table.setMaximumHeight(145)
+        self.cyclic_compare_table.setAlternatingRowColors(True)
         self.cyclic_compare_table.hide()
-        layout.addWidget(self.cyclic_compare_table)
+        experiment_layout.addWidget(self.cyclic_compare_table, 1)
 
-        self.cyclic_plot = TimeHistoryPlot(
-            empty_message="No cyclic hysteresis data"
-        )
-        layout.addWidget(self.cyclic_plot, 1)
+        self.cyclic_detail_tabs.addTab(experiment_page, "Experiment")
+
+        # --------------------------------------------------------------
+        # REVERSALS
+        # --------------------------------------------------------------
+        reversal_page = QWidget()
+        reversal_layout = QVBoxLayout(reversal_page)
+        reversal_layout.setContentsMargins(4, 4, 4, 4)
+        reversal_layout.setSpacing(4)
 
         research_row = QHBoxLayout()
         self.cyclic_research_info = QLabel(
@@ -1881,12 +1922,13 @@ class ResultsPanel(QWidget):
         )
         self.cyclic_research_info.setWordWrap(True)
         research_row.addWidget(self.cyclic_research_info, 1)
+
         export_research = QPushButton("Export Research CSV")
         export_research.clicked.connect(
             self._export_cyclic_research_csv
         )
         research_row.addWidget(export_research)
-        layout.addLayout(research_row)
+        reversal_layout.addLayout(research_row)
 
         self.cyclic_reversal_table = QTableWidget(0, 20)
         self.cyclic_reversal_table.setHorizontalHeaderLabels(
@@ -1925,7 +1967,18 @@ class ResultsPanel(QWidget):
         self.cyclic_reversal_table.setHorizontalScrollBarPolicy(
             Qt.ScrollBarAsNeeded
         )
-        layout.addWidget(self.cyclic_reversal_table)
+        self.cyclic_reversal_table.setAlternatingRowColors(True)
+        self.cyclic_reversal_table.verticalHeader().setVisible(False)
+        reversal_layout.addWidget(self.cyclic_reversal_table, 1)
+
+        self.cyclic_detail_tabs.addTab(reversal_page, "Reversals")
+
+        # --------------------------------------------------------------
+        # CYCLES
+        # --------------------------------------------------------------
+        cycle_page = QWidget()
+        cycle_layout = QVBoxLayout(cycle_page)
+        cycle_layout.setContentsMargins(4, 4, 4, 4)
 
         self.cyclic_cycle_table = QTableWidget(0, 8)
         self.cyclic_cycle_table.setHorizontalHeaderLabels(
@@ -1949,11 +2002,14 @@ class ResultsPanel(QWidget):
         self.cyclic_cycle_table.setEditTriggers(
             QAbstractItemView.NoEditTriggers
         )
-        self.cyclic_cycle_table.setMaximumHeight(130)
         self.cyclic_cycle_table.setHorizontalScrollBarPolicy(
             Qt.ScrollBarAsNeeded
         )
-        layout.addWidget(self.cyclic_cycle_table)
+        self.cyclic_cycle_table.setAlternatingRowColors(True)
+        self.cyclic_cycle_table.verticalHeader().setVisible(False)
+        cycle_layout.addWidget(self.cyclic_cycle_table, 1)
+
+        self.cyclic_detail_tabs.addTab(cycle_page, "Cycles")
 
         self.tabs.addTab(page, "Cyclic Hysteresis")
 
