@@ -278,6 +278,30 @@ class ModelViewport(QWidget):
         )
         self.plotter.render()
 
+    def clear_truss_anchor(self, *, render: bool = True) -> None:
+        """Remove the temporary first-node marker for Truss picking."""
+        self._remove_overlay("truss-anchor")
+        if render:
+            self.plotter.render()
+
+    def show_truss_anchor(self, node_tag: int) -> None:
+        """Highlight the first node selected by the interactive Truss tool."""
+        self.clear_truss_anchor(render=False)
+        if self._model is None or int(node_tag) not in self._model.nodes:
+            self.plotter.render()
+            return
+        point = self._model.nodes[int(node_tag)].xyz
+        self.plotter.add_mesh(
+            pv.PolyData([point]),
+            name="truss-anchor",
+            color="#c96b12",
+            render_points_as_spheres=True,
+            point_size=16,
+            pickable=False,
+            render=False,
+        )
+        self.plotter.render()
+
     # Compatibility aliases for projects/extensions written against the short-lived
     # Line tool API. The Studio UI now exposes a single Frame object.
     def clear_line_anchor(self, *, render: bool = True) -> None:
