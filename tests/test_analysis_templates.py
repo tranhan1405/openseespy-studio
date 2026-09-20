@@ -717,7 +717,7 @@ def test_modal_template_rejects_missing_nodal_mass_by_default():
             num_modes=3,
         )
     except ValueError as exc:
-        assert "no translational nodal mass" in str(exc).lower()
+        assert "no positive translational mass" in str(exc).lower()
     else:
         raise AssertionError("Expected modal mass validation")
 
@@ -753,11 +753,12 @@ def test_modal_eigen_solver_round_trip():
 
 
 def test_modal_template_accepts_positive_distributed_element_mass():
-    project = _base_project()
+    project = project_with_two_storeys()
+    project.model.add_element(
+        1, 1, 2, mass_per_length=25.0
+    )
     for node in project.model.nodes.values():
         node.mass = (0.0,) * 6
-    for element in project.model.elements.values():
-        element.mass_per_length = 25.0
 
     plan = build_modal_template(
         project,
@@ -771,11 +772,12 @@ def test_modal_template_accepts_positive_distributed_element_mass():
 
 
 def test_nlth_template_accepts_positive_distributed_element_mass():
-    project = _base_project()
+    project = project_with_two_storeys()
+    project.model.add_element(
+        1, 1, 2, mass_per_length=25.0
+    )
     for node in project.model.nodes.values():
         node.mass = (0.0,) * 6
-    for element in project.model.elements.values():
-        element.mass_per_length = 25.0
 
     plan = build_nlth_multi_template(
         project,
@@ -799,7 +801,7 @@ def test_nlth_template_accepts_positive_distributed_element_mass():
 
 
 def test_nlth_template_converts_mm_per_s2_to_model_units():
-    project = _base_project()
+    project = project_with_two_storeys()
     project.units = {"length": "m", "force": "N", "time": "s"}
 
     plan = build_nlth_multi_template(
