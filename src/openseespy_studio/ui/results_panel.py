@@ -2074,6 +2074,8 @@ class ResultsPanel(QWidget):
             ("1×", 1.0),
             ("2×", 2.0),
             ("4×", 4.0),
+            ("8×", 8.0),
+            ("16×", 16.0),
         ):
             self.motion_speed.addItem(label, speed)
         self.motion_speed.setCurrentIndex(2)
