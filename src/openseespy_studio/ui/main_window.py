@@ -3946,6 +3946,7 @@ class MainWindow(QMainWindow):
         connection_tag: int | None = None
         time_series_tag: int | None = None
         load_pattern_tag: int | None = None
+        ground_motion_tag: int | None = None
         nodal_load_tag: int | None = None
         prescribed_displacement_tag: int | None = None
         element_load_tag: int | None = None
@@ -3990,6 +3991,8 @@ class MainWindow(QMainWindow):
                 time_series_tag = int(tag)
             elif kind == "load_pattern":
                 load_pattern_tag = int(tag)
+            elif kind == "ground_motion":
+                ground_motion_tag = int(tag)
             elif kind == "nodal_load":
                 nodal_load_tag = int(tag)
             elif kind == "prescribed_displacement":
@@ -4060,6 +4063,8 @@ class MainWindow(QMainWindow):
             self._show_time_series_properties(time_series_tag)
         elif load_pattern_tag is not None:
             self._show_load_pattern_properties(load_pattern_tag)
+        elif ground_motion_tag is not None:
+            self._show_ground_motion_properties(ground_motion_tag)
         elif nodal_load_tag is not None:
             self._show_nodal_load_properties(nodal_load_tag)
         elif prescribed_displacement_tag is not None:
@@ -11265,6 +11270,40 @@ class MainWindow(QMainWindow):
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
+        if kind == "loading_root":
+            new_pattern = menu.addAction("New Load Pattern...")
+            new_pattern.triggered.connect(self._create_load_pattern)
+            new_motion = menu.addAction("New Ground Motion...")
+            new_motion.triggered.connect(self._create_ground_motion)
+            new_series = menu.addAction("New Time Series...")
+            new_series.triggered.connect(self._create_time_series)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "ground_motions_root":
+            action = menu.addAction("New Ground Motion...")
+            action.triggered.connect(self._create_ground_motion)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "ground_motion":
+            tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_ground_motion_properties(tag)
+            )
+            edit = menu.addAction("Edit...")
+            edit.triggered.connect(
+                lambda: self._edit_ground_motion(tag)
+            )
+            menu.addSeparator()
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(
+                lambda: self._delete_ground_motion(tag)
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
         if kind == "load_patterns_root":
             action = menu.addAction("New Load Pattern...")
             action.triggered.connect(self._create_load_pattern)
@@ -11446,6 +11485,8 @@ class MainWindow(QMainWindow):
             self._edit_time_series(int(value))
         elif kind == "load_pattern":
             self._edit_load_pattern(int(value))
+        elif kind == "ground_motion":
+            self._edit_ground_motion(int(value))
         elif kind == "nodal_load":
             self._edit_nodal_load(int(value))
         elif kind == "prescribed_displacement":
