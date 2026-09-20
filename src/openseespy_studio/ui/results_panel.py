@@ -51,6 +51,10 @@ from ..postprocess import (
     pushover_capacity_curve,
     time_history_node_tags,
     time_history_series,
+    test_column_fiber_history_catalog,
+    test_column_moment_curvature_curve,
+    test_column_response_summary,
+    test_column_rotation_decomposition,
 )
 
 
@@ -711,6 +715,7 @@ class ResultsPanel(QWidget):
         self._build_hinge_tab()
         self._build_pushover_tab()
         self._build_cyclic_tab()
+        self._build_specimen_tab()
         self._build_history_tab()
         self._build_motion_tab()
 
@@ -853,6 +858,9 @@ class ResultsPanel(QWidget):
             return
         if kind == "CyclicHysteresis":
             self._select_tab("Cyclic Hysteresis")
+            return
+        if kind == "SpecimenResponse":
+            self._select_tab("Specimen Response")
             return
         if kind == "TimeHistory":
             node = options.get("node")
@@ -1903,6 +1911,62 @@ class ResultsPanel(QWidget):
             frame.label,
         )
 
+    def _build_specimen_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Response:"))
+        self.specimen_quantity = QComboBox()
+        self.specimen_quantity.currentIndexChanged.connect(
+            self._update_specimen_view
+        )
+        controls.addWidget(self.specimen_quantity, 1)
+        layout.addLayout(controls)
+
+        self.specimen_info = QLabel(
+            "Quick 1D Column instrumentation is captured automatically when "
+            "a test-column specimen is present."
+        )
+        self.specimen_info.setWordWrap(True)
+        layout.addWidget(self.specimen_info)
+
+        self.specimen_metrics = QLabel(
+            "Mmax: -   κmax: -   drift: -   interface rotation: -"
+        )
+        self.specimen_metrics.setWordWrap(True)
+        layout.addWidget(self.specimen_metrics)
+
+        self.specimen_plot = TimeHistoryPlot(
+            empty_message="No 1D-column specimen response data"
+        )
+        layout.addWidget(self.specimen_plot, 1)
+
+        self.specimen_fiber_table = QTableWidget(0, 7)
+        self.specimen_fiber_table.setHorizontalHeaderLabels([
+            "Source",
+            "Fiber",
+            "Material",
+            "y",
+            "z",
+            "Response",
+            "Latest",
+        ])
+        self.specimen_fiber_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.specimen_fiber_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.specimen_fiber_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.specimen_fiber_table.setMaximumHeight(150)
+        layout.addWidget(self.specimen_fiber_table)
+
+        self.tabs.addTab(page, "Specimen Response")
+
     def _build_history_tab(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -2489,6 +2553,7 @@ class ResultsPanel(QWidget):
         self._populate_history_nodes()
         self._update_pushover_plot()
         self._update_cyclic_plot()
+        self._populate_specimen_response()
         self._update_history_plot()
         self._refresh_motion_controls()
         return True
@@ -3169,6 +3234,167 @@ class ResultsPanel(QWidget):
             f"ufinal: {x[-1]:.6g}"
         )
         self.pushover_plot.set_series(x, y)
+
+    def _populate_specimen_response(self) -> None:
+        previous = self.specimen_quantity.currentData()
+        self.specimen_quantity.blockSignals(True)
+        self.specimen_quantity.clear()
+        self.specimen_quantity.addItem(
+            "Moment–curvature · base section",
+            "moment_curvature",
+        )
+        for label, key in (
+            ("Drift angle · total", "rotation:total"),
+            ("Drift angle · member contribution", "rotation:column"),
+            ("Interface rotation", "rotation:interface_rotation"),
+            ("Interface lateral-slip drift", "rotation:interface_slip"),
+        ):
+            self.specimen_quantity.addItem(label, key)
+
+        fibers = test_column_fiber_history_catalog(self._result)
+        for item in fibers:
+            self.specimen_quantity.addItem(
+                f"{item.get('source', '-')} · "
+                f"{item.get('label', '-')} · "
+                f"{str(item.get('quantity', '')).title()}",
+                str(item.get("key", "")),
+            )
+
+        if previous is not None:
+            index = self.specimen_quantity.findData(previous)
+            if index >= 0:
+                self.specimen_quantity.setCurrentIndex(index)
+        self.specimen_quantity.blockSignals(False)
+
+        self.specimen_fiber_table.setRowCount(len(fibers))
+        for row, item in enumerate(fibers):
+            material = (
+                f"{item.get('material_type', '-')} "
+                f"[{item.get('material_tag', '-')}]"
+            )
+            values = [
+                str(item.get("source", "-")),
+                str(item.get("label", "-")),
+                material,
+                f"{float(item.get('y_coord', 0.0)):.6g}",
+                f"{float(item.get('z_coord', 0.0)):.6g}",
+                str(item.get("quantity", "-")),
+                f"{float(item.get('latest', 0.0)):.6g}",
+            ]
+            for column, value in enumerate(values):
+                self.specimen_fiber_table.setItem(
+                    row,
+                    column,
+                    QTableWidgetItem(value),
+                )
+        self._update_specimen_view()
+
+    def _update_specimen_view(self, *_args) -> None:
+        specimen = self._result.get("specimen", {})
+        if not isinstance(specimen, dict) or not specimen:
+            self.specimen_info.setText(
+                "No Quick 1D Column instrumentation is available in this "
+                "result. Create/run a 1D test specimen first."
+            )
+            self.specimen_metrics.setText(
+                "Mmax: -   κmax: -   drift: -   interface rotation: -"
+            )
+            self.specimen_plot.set_series([], [])
+            self.specimen_fiber_table.setRowCount(0)
+            return
+
+        summary = test_column_response_summary(self._result)
+        interface_name = str(specimen.get("interface_name", "Fixed base"))
+        element_tag = specimen.get("element_tag", "-")
+        selected = str(
+            self.specimen_quantity.currentData() or "moment_curvature"
+        )
+
+        max_m = summary.get("max_abs_moment")
+        max_k = summary.get("max_abs_curvature")
+        max_drift = summary.get("max_abs_total_drift")
+        max_interface = summary.get("max_abs_interface_rotation")
+        self.specimen_metrics.setText(
+            "Mmax: "
+            + (f"{float(max_m):.6g}" if max_m is not None else "-")
+            + "   κmax: "
+            + (f"{float(max_k):.6g}" if max_k is not None else "-")
+            + "   max |drift angle|: "
+            + (
+                f"{float(max_drift):.6g}"
+                if max_drift is not None
+                else "-"
+            )
+            + "   max |interface rotation|: "
+            + (
+                f"{float(max_interface):.6g}"
+                if max_interface is not None
+                else "-"
+            )
+        )
+
+        if selected == "moment_curvature":
+            x, y, component = test_column_moment_curvature_curve(
+                self._result
+            )
+            self.specimen_info.setText(
+                f"Element {element_tag} · base IP · {component or 'M'}–κ · "
+                f"base interface: {interface_name}. "
+                "The section history and interface history are captured "
+                "independently to avoid hiding strain-penetration deformation."
+            )
+            self.specimen_plot.set_series(x, y)
+            return
+
+        if selected.startswith("rotation:"):
+            key = selected.split(":", 1)[1]
+            decomposition = test_column_rotation_decomposition(
+                self._result
+            )
+            x = decomposition.get("time", [])
+            y = decomposition.get(key, [])
+            labels = {
+                "total": "total top-drift angle",
+                "column": "member contribution = total − interface rotation − slip",
+                "interface_rotation": "base-interface rotation",
+                "interface_slip": "lateral interface slip / column height",
+            }
+            self.specimen_info.setText(
+                f"Element {element_tag} · {labels.get(key, key)} · "
+                f"base interface: {interface_name}. "
+                "The member contribution is a drift-equivalent kinematic "
+                "decomposition, not direct integration of section curvature."
+            )
+            self.specimen_plot.set_series(list(x), list(y))
+            return
+
+        item = next(
+            (
+                row
+                for row in test_column_fiber_history_catalog(self._result)
+                if str(row.get("key", "")) == selected
+            ),
+            None,
+        )
+        if item is None:
+            self.specimen_plot.set_series([], [])
+            return
+        self.specimen_info.setText(
+            f"{item.get('source', '-')} · {item.get('label', '-')} · "
+            f"{item.get('material_type', '-')} "
+            f"[{item.get('material_tag', '-')}] · "
+            f"y={float(item.get('y_coord', 0.0)):.6g}, "
+            f"z={float(item.get('z_coord', 0.0)):.6g}. "
+            + (
+                "For Bond_SP01, the material deformation is slip."
+                if str(item.get("quantity", "")) == "slip"
+                else ""
+            )
+        )
+        self.specimen_plot.set_series(
+            list(item.get("x", [])),
+            list(item.get("y", [])),
+        )
 
     def _populate_history_nodes(self) -> None:
         previous = self.history_node.currentData()
