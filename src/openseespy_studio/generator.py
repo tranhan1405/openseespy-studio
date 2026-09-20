@@ -810,7 +810,7 @@ def _critical_section_fibers(
     return rows
 
 
-def test_column_response_spec(
+def column_response_spec(
     model: StructuralModel,
     *,
     sections: dict[int, SectionData] | None = None,
@@ -2677,7 +2677,7 @@ def to_openseespy(
                 ],
             }
 
-        specimen_response_spec = test_column_response_spec(
+        specimen_response_spec = column_response_spec(
             model,
             sections=sections,
             materials=materials,
