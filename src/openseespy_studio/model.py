@@ -47,6 +47,11 @@ class Element:
     force_tolerance: float = 1.0e-12
     mass_per_length: float = 0.0
     consistent_mass: bool = False
+    hinge_i_section_tag: int | None = None
+    hinge_j_section_tag: int | None = None
+    interior_section_tag: int | None = None
+    hinge_i_length: float = 0.0
+    hinge_j_length: float = 0.0
 
     def __post_init__(self) -> None:
         self.tag = int(self.tag)
@@ -60,6 +65,17 @@ class Element:
         self.force_tolerance = float(self.force_tolerance)
         self.mass_per_length = float(self.mass_per_length)
         self.consistent_mass = bool(self.consistent_mass)
+        self.hinge_i_section_tag = (
+            None if self.hinge_i_section_tag is None else int(self.hinge_i_section_tag)
+        )
+        self.hinge_j_section_tag = (
+            None if self.hinge_j_section_tag is None else int(self.hinge_j_section_tag)
+        )
+        self.interior_section_tag = (
+            None if self.interior_section_tag is None else int(self.interior_section_tag)
+        )
+        self.hinge_i_length = float(self.hinge_i_length)
+        self.hinge_j_length = float(self.hinge_j_length)
         self.section_tag = (
             None if self.section_tag is None else int(self.section_tag)
         )
@@ -67,12 +83,48 @@ class Element:
             None if self.transf_tag is None else int(self.transf_tag)
         )
 
-        if self.integration_type not in {"Lobatto", "Legendre"}:
+        if self.integration_type not in {
+            "Lobatto",
+            "Legendre",
+            "Radau",
+            "HingeRadau",
+            "HingeRadauTwo",
+            "HingeMidpoint",
+            "HingeEndpoint",
+            "ConcentratedPlasticity",
+        }:
             raise ValueError(
                 f"Unsupported beam integration type: {self.integration_type}"
             )
-        if self.integration_points < 2:
-            raise ValueError("Beam integration needs at least 2 points.")
+        hinge_types = {
+            "HingeRadau",
+            "HingeRadauTwo",
+            "HingeMidpoint",
+            "HingeEndpoint",
+        }
+        if self.integration_type in {"Lobatto", "Legendre", "Radau"}:
+            if self.integration_points < 2:
+                raise ValueError("Beam integration needs at least 2 points.")
+        elif self.integration_type in hinge_types:
+            if (
+                self.hinge_i_section_tag is None
+                or self.hinge_j_section_tag is None
+                or self.interior_section_tag is None
+            ):
+                raise ValueError(
+                    f"{self.integration_type} requires I-end, J-end, and interior sections."
+                )
+            if self.hinge_i_length < 0.0 or self.hinge_j_length < 0.0:
+                raise ValueError("Plastic hinge lengths cannot be negative.")
+        elif self.integration_type == "ConcentratedPlasticity":
+            if (
+                self.hinge_i_section_tag is None
+                or self.hinge_j_section_tag is None
+                or self.interior_section_tag is None
+            ):
+                raise ValueError(
+                    "ConcentratedPlasticity requires I-end, J-end, and interior sections."
+                )
         if self.force_max_iter < 1:
             raise ValueError("Force-based element max iterations must be >= 1.")
         if self.force_tolerance <= 0.0:
@@ -115,6 +167,11 @@ class StructuralModel:
         force_tolerance: float = 1.0e-12,
         mass_per_length: float = 0.0,
         consistent_mass: bool = False,
+        hinge_i_section_tag: int | None = None,
+        hinge_j_section_tag: int | None = None,
+        interior_section_tag: int | None = None,
+        hinge_i_length: float = 0.0,
+        hinge_j_length: float = 0.0,
     ) -> Element:
         if tag in self.elements:
             raise ValueError(f"Element tag {tag} already exists")
@@ -134,6 +191,11 @@ class StructuralModel:
             force_tolerance,
             mass_per_length,
             consistent_mass,
+            hinge_i_section_tag,
+            hinge_j_section_tag,
+            interior_section_tag,
+            hinge_i_length,
+            hinge_j_length,
         )
         self.elements[tag] = ele
         return ele
@@ -259,6 +321,11 @@ class StructuralModel:
         force_tolerance: float = 1.0e-12,
         mass_per_length: float = 0.0,
         consistent_mass: bool = False,
+        hinge_i_section_tag: int | None = None,
+        hinge_j_section_tag: int | None = None,
+        interior_section_tag: int | None = None,
+        hinge_i_length: float = 0.0,
+        hinge_j_length: float = 0.0,
     ) -> set[int]:
         updated: set[int] = set()
         for tag in element_tags:
@@ -279,6 +346,11 @@ class StructuralModel:
                 force_tolerance=force_tolerance,
                 mass_per_length=mass_per_length,
                 consistent_mass=consistent_mass,
+                hinge_i_section_tag=hinge_i_section_tag,
+                hinge_j_section_tag=hinge_j_section_tag,
+                interior_section_tag=interior_section_tag,
+                hinge_i_length=hinge_i_length,
+                hinge_j_length=hinge_j_length,
             )
             self.elements[element.tag] = candidate
             updated.add(element.tag)
@@ -480,6 +552,11 @@ class StructuralModel:
                     source.force_tolerance,
                     source.mass_per_length,
                     source.consistent_mass,
+                    source.hinge_i_section_tag,
+                    source.hinge_j_section_tag,
+                    source.interior_section_tag,
+                    source.hinge_i_length,
+                    source.hinge_j_length,
                 )
                 created_elements.add(new_tag)
 
@@ -514,6 +591,11 @@ class StructuralModel:
                     "force_tolerance": element.force_tolerance,
                     "mass_per_length": element.mass_per_length,
                     "consistent_mass": element.consistent_mass,
+                    "hinge_i_section_tag": element.hinge_i_section_tag,
+                    "hinge_j_section_tag": element.hinge_j_section_tag,
+                    "interior_section_tag": element.interior_section_tag,
+                    "hinge_i_length": element.hinge_i_length,
+                    "hinge_j_length": element.hinge_j_length,
                 }
                 for element in sorted(self.elements.values(), key=lambda item: item.tag)
             ],
@@ -567,6 +649,11 @@ class StructuralModel:
                 float(item.get("force_tolerance", 1.0e-12)),
                 float(item.get("mass_per_length", 0.0)),
                 bool(item.get("consistent_mass", False)),
+                item.get("hinge_i_section_tag"),
+                item.get("hinge_j_section_tag"),
+                item.get("interior_section_tag"),
+                float(item.get("hinge_i_length", 0.0)),
+                float(item.get("hinge_j_length", 0.0)),
             )
 
         return model
