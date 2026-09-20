@@ -2052,6 +2052,38 @@ class ProjectDatabase:
                 + ", ".join(map(str, sorted(set(missing))))
             )
 
+        if constraint.constraint_type == "equalDOF":
+            invalid = [
+                dof
+                for dof in constraint.dofs
+                if dof < 1 or dof > int(self.model.ndf)
+            ]
+            if invalid:
+                raise ValueError(
+                    f"equalDOF DOF(s) {invalid} exceed model "
+                    f"ndf={self.model.ndf}."
+                )
+        elif constraint.constraint_type == "rigidDiaphragm":
+            if int(self.model.ndm) == 2:
+                if int(self.model.ndf) != 3:
+                    raise ValueError(
+                        "2D rigidDiaphragm requires ndf=3."
+                    )
+                if constraint.perp_dirn not in {1, 2}:
+                    raise ValueError(
+                        "2D rigidDiaphragm direction must be 1 (X) "
+                        "or 2 (Y)."
+                    )
+            elif int(self.model.ndm) == 3:
+                if int(self.model.ndf) != 6:
+                    raise ValueError(
+                        "3D rigidDiaphragm requires ndf=6."
+                    )
+                if constraint.perp_dirn not in {1, 2, 3}:
+                    raise ValueError(
+                        "3D rigidDiaphragm direction must be 1, 2, or 3."
+                    )
+
     def add_constraint(self, constraint: ConstraintData) -> None:
         if constraint.tag in self.constraints:
             raise ValueError(
@@ -2124,6 +2156,18 @@ class ProjectDatabase:
                 "Connection references missing node tag(s): "
                 + ", ".join(map(str, missing_nodes))
             )
+        if connection.connection_type != "zeroLengthSection":
+            invalid_dofs = sorted(
+                dof
+                for dof in connection.materials_by_dof
+                if dof < 1 or dof > int(self.model.ndf)
+            )
+            if invalid_dofs:
+                raise ValueError(
+                    f"Connection DOF(s) {invalid_dofs} exceed model "
+                    f"ndf={self.model.ndf}."
+                )
+
         missing_materials = sorted({
             material_tag
             for material_tag in connection.materials_by_dof.values()
