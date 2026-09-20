@@ -1677,7 +1677,12 @@ class SectionDialog(QDialog):
         self.setWindowTitle("Section Editor")
         self.setModal(True)
         self.resize(1040, 700)
-        self.materials = materials
+        # Keep project materials immutable while the editor is open.
+        # FRP/section wizards may stage new materials, which are committed
+        # only after the Section Editor itself is accepted.
+        self._project_materials = dict(materials)
+        self.materials = dict(materials)
+        self._pending_materials: list[MaterialData] = []
         self.unit_system = UnitSystem.from_mapping(units)
         self._initial_section = section
         self._display_geometry = (
