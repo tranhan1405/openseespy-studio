@@ -903,6 +903,7 @@ class ConnectionData:
     do_rayleigh: bool = False
     generated_ground_node: int | None = None
     section_tag: int | None = None
+    generated_section_tag: int | None = None
 
     def __post_init__(self) -> None:
         self.tag = int(self.tag)
@@ -924,6 +925,11 @@ class ConnectionData:
         )
         self.section_tag = (
             None if self.section_tag is None else int(self.section_tag)
+        )
+        self.generated_section_tag = (
+            None
+            if self.generated_section_tag is None
+            else int(self.generated_section_tag)
         )
 
         if self.tag <= 0:
@@ -993,6 +999,7 @@ class ConnectionData:
             "do_rayleigh": self.do_rayleigh,
             "generated_ground_node": self.generated_ground_node,
             "section_tag": self.section_tag,
+            "generated_section_tag": self.generated_section_tag,
         }
 
     @classmethod
@@ -1020,6 +1027,7 @@ class ConnectionData:
             do_rayleigh=bool(data.get("do_rayleigh", False)),
             generated_ground_node=data.get("generated_ground_node"),
             section_tag=data.get("section_tag"),
+            generated_section_tag=data.get("generated_section_tag"),
         )
 
 
@@ -2150,6 +2158,21 @@ class ProjectDatabase:
             and not self._ground_node_in_use_elsewhere(ground_tag)
         ):
             self.model.remove_node(ground_tag, cascade=True)
+
+        generated_section = connection.generated_section_tag
+        if (
+            generated_section is not None
+            and generated_section in self.sections
+            and not any(
+                element.section_tag == generated_section
+                for element in self.model.elements.values()
+            )
+            and not any(
+                other.section_tag == generated_section
+                for other in self.connections.values()
+            )
+        ):
+            self.sections.pop(generated_section, None)
 
     def create_ground_node(self, source_node_tag: int) -> int:
         source_node_tag = int(source_node_tag)
