@@ -2468,13 +2468,13 @@ class MainWindow(QMainWindow):
 
         measure_menu_button = QToolButton()
         measure_menu_button.setObjectName("RibbonLargeButton")
+        measure_menu_button.setDefaultAction(self.actions["measure_distance"])
         measure_menu_button.setText("Measure")
         measure_menu_button.setIcon(self.actions["measure_distance"].icon())
         measure_menu_button.setIconSize(QSize(28, 28))
         measure_menu_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         measure_menu_button.setPopupMode(QToolButton.MenuButtonPopup)
         measure_menu_button.setAutoRaise(True)
-        measure_menu_button.setDefaultAction(self.actions["measure_distance"])
         measure_popup = QMenu(measure_menu_button)
         measure_popup.addAction(self.actions["measure_distance"])
         measure_popup.addAction(self.actions["clear_measurements"])
@@ -3902,6 +3902,14 @@ class MainWindow(QMainWindow):
     def _set_selection_filter(self, text: str) -> None:
         value = text.lower()
         self.selection.set_filter(value)
+        measure_action = self.actions.get("measure_distance")
+        if measure_action is not None and measure_action.isChecked():
+            self.viewport.set_selection_filter("node")
+            self.status_message.setText(
+                f"Selection filter saved as {text}; "
+                "Measure Distance temporarily snaps to nodes"
+            )
+            return
         self.viewport.set_selection_filter(value)
         self.status_message.setText(f"Selection filter: {text}")
 
