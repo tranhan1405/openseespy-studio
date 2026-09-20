@@ -1293,6 +1293,7 @@ class MainWindow(QMainWindow):
         self._active_solution_result_tag: int | None = None
         self._results_dock_sized_once = False
         self._dirty = False
+        self._measure_first_node_tag: int | None = None
         self._job_ui_timer = QTimer(self)
         self._job_ui_timer.setInterval(1000)
         self._job_ui_timer.timeout.connect(self._refresh_running_job_ui)
@@ -1640,6 +1641,21 @@ class MainWindow(QMainWindow):
             "Fit the selected nodes/elements in the viewport",
         )
         self._make_action(
+            "measure_distance",
+            "Distance",
+            "select",
+            self._activate_measure_distance,
+            "Measure distance and XYZ offsets between two nodes",
+            checkable=True,
+        )
+        self._make_action(
+            "clear_measurements",
+            "Clear Measurements",
+            "delete",
+            self._clear_measurements,
+            "Remove all measurement overlays from the viewport",
+        )
+        self._make_action(
             "hide_selection",
             "Hide Selection",
             "display",
@@ -1966,6 +1982,11 @@ class MainWindow(QMainWindow):
         menus["Analysis"].addAction(self.actions["calibration"])
 
         menus["Results"].addAction(self.actions["plot"])
+
+        measure_menu = menus["Tools"].addMenu("Measure")
+        measure_menu.addAction(self.actions["measure_distance"])
+        measure_menu.addAction(self.actions["clear_measurements"])
+        menus["Tools"].addSeparator()
 
         units_menu = menus["Tools"].addMenu("Units")
         for index, (label, _mapping) in enumerate(UNIT_PRESETS):
@@ -2443,6 +2464,26 @@ class MainWindow(QMainWindow):
                 "show_prescribed_displacements",
                 "show_load_values",
             ),
+        )
+
+        measure_menu_button = QToolButton()
+        measure_menu_button.setObjectName("RibbonLargeButton")
+        measure_menu_button.setText("Measure")
+        measure_menu_button.setIcon(self.actions["measure_distance"].icon())
+        measure_menu_button.setIconSize(QSize(28, 28))
+        measure_menu_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        measure_menu_button.setPopupMode(QToolButton.MenuButtonPopup)
+        measure_menu_button.setAutoRaise(True)
+        measure_menu_button.setDefaultAction(self.actions["measure_distance"])
+        measure_popup = QMenu(measure_menu_button)
+        measure_popup.addAction(self.actions["measure_distance"])
+        measure_popup.addAction(self.actions["clear_measurements"])
+        measure_menu_button.setMenu(measure_popup)
+
+        add_group(
+            display_page,
+            "Inspect",
+            widgets=(measure_menu_button,),
         )
         display_page.finish()
         self.ribbon_tabs.addTab(display_page, "Display")
@@ -3769,7 +3810,7 @@ class MainWindow(QMainWindow):
 
     def _install_shortcuts(self) -> None:
         bindings = (
-            ("Escape", self.selection.clear),
+            ("Escape", self._cancel_current_tool),
             ("Delete", self._delete_selection),
             ("F", self._zoom_selection),
             ("H", self._hide_selection),
@@ -3781,19 +3822,82 @@ class MainWindow(QMainWindow):
             shortcut.activated.connect(callback)
             self._shortcuts.append(shortcut)
 
+    def _leave_measure_mode(self) -> None:
+        self._measure_first_node_tag = None
+        self.viewport.clear_measure_anchor(render=False)
+        action = self.actions.get("measure_distance")
+        if action is not None:
+            action.setChecked(False)
+        self.viewport.set_selection_filter(self.selection.filter)
+
     def _activate_select_tool(self) -> None:
+        self._leave_measure_mode()
         self.viewport.set_interaction_tool("select")
         self.actions["select"].setChecked(True)
         self.actions["box"].setChecked(False)
+        self.viewport.plotter.render()
         self.status_message.setText("Select tool active")
 
     def _activate_box_tool(self) -> None:
+        self._leave_measure_mode()
         self.viewport.set_interaction_tool("box")
         self.actions["select"].setChecked(False)
         self.actions["box"].setChecked(True)
+        self.viewport.plotter.render()
         self.status_message.setText(
             "Box select: left→right = window, right→left = crossing"
         )
+
+    def _activate_measure_distance(self, checked: bool = True) -> None:
+        action = self.actions.get("measure_distance")
+        if action is not None and not action.isChecked() and not checked:
+            self._activate_select_tool()
+            return
+        if not self.model.nodes:
+            if action is not None:
+                action.setChecked(False)
+            self.status_message.setText(
+                "Measure Distance requires at least two model nodes"
+            )
+            return
+
+        self._measure_first_node_tag = None
+        self.viewport.clear_measure_anchor(render=False)
+        self.viewport.set_interaction_tool("select")
+        self.viewport.set_selection_filter("node")
+        self.actions["select"].setChecked(False)
+        self.actions["box"].setChecked(False)
+        if action is not None:
+            action.setChecked(True)
+        self.viewport.plotter.render()
+        self.status_message.setText(
+            "Measure Distance: click the first node"
+        )
+
+    def _clear_measurements(self) -> None:
+        self._measure_first_node_tag = None
+        self.viewport.clear_measurements()
+        if (
+            self.actions.get("measure_distance") is not None
+            and self.actions["measure_distance"].isChecked()
+        ):
+            self.status_message.setText(
+                "Measurements cleared · click the first node"
+            )
+        else:
+            self.status_message.setText("Measurements cleared")
+
+    def _cancel_current_tool(self) -> None:
+        if (
+            self.actions.get("measure_distance") is not None
+            and self.actions["measure_distance"].isChecked()
+        ):
+            self._activate_select_tool()
+            return
+        if self.viewport.interaction_tool() == "box":
+            self._activate_select_tool()
+            return
+        self.selection.clear()
 
     def _set_selection_filter(self, text: str) -> None:
         value = text.lower()
@@ -3807,6 +3911,54 @@ class MainWindow(QMainWindow):
         kind = payload.get("kind")
         tag = payload.get("tag")
         mode = payload.get("mode", "replace")
+
+        measure_action = self.actions.get("measure_distance")
+        if measure_action is not None and measure_action.isChecked():
+            if kind != "node" or tag is None:
+                self.status_message.setText(
+                    "Measure Distance: click a model node"
+                )
+                return
+
+            node_tag = int(tag)
+            if self._measure_first_node_tag is None:
+                self._measure_first_node_tag = node_tag
+                self.viewport.show_measure_anchor(node_tag)
+                self.status_message.setText(
+                    f"Measure Distance: node {node_tag} selected · "
+                    "click the second node"
+                )
+                return
+
+            if node_tag == self._measure_first_node_tag:
+                self.status_message.setText(
+                    "Measure Distance: choose a different second node"
+                )
+                return
+
+            first_tag = self._measure_first_node_tag
+            try:
+                measurement = self.viewport.add_distance_measurement(
+                    first_tag,
+                    node_tag,
+                )
+            except ValueError as exc:
+                self.status_message.setText(str(exc))
+                return
+
+            self._measure_first_node_tag = None
+            unit = str(self.project.units.get("length", "")).strip()
+            suffix = f" {unit}" if unit else ""
+            self.status_message.setText(
+                f"Measured node {first_tag} → {node_tag}: "
+                f"L={measurement['distance']:.4g}{suffix}, "
+                f"ΔX={measurement['dx']:.4g}, "
+                f"ΔY={measurement['dy']:.4g}, "
+                f"ΔZ={measurement['dz']:.4g} · "
+                "click another first node"
+            )
+            return
+
         if kind is None:
             if mode == "replace":
                 self.selection.clear()
