@@ -48,6 +48,8 @@ from ..calibration import (
     apply_calibration_case,
     calibration_case_changes,
     calibration_case_script,
+    calibration_grid_size,
+    calibration_parameter_payload,
 )
 from ..analysis_templates import (
     GroundMotionComponentSpec,
@@ -9203,15 +9205,34 @@ class MainWindow(QMainWindow):
             )
             return
 
+        strategy = str(request.get("strategy", "grid") or "grid")
         cases = request.get("cases", [])
+        parameters = request.get("parameters", [])
         weights = request.get("weights")
         experiment_x = request.get("experiment_x", [])
         experiment_y = request.get("experiment_y", [])
-        if not isinstance(cases, list) or not cases:
+
+        if strategy == "grid":
+            if not isinstance(cases, list) or not cases:
+                QMessageBox.warning(
+                    self,
+                    "Calibration",
+                    "No parameter-study cases were created.",
+                )
+                return
+        elif strategy == "adaptive":
+            if not isinstance(parameters, list) or not parameters:
+                QMessageBox.warning(
+                    self,
+                    "Calibration",
+                    "Adaptive calibration needs at least one parameter.",
+                )
+                return
+        else:
             QMessageBox.warning(
                 self,
                 "Calibration",
-                "No parameter-study cases were created.",
+                f"Unsupported calibration strategy: {strategy}",
             )
             return
 
@@ -9220,30 +9241,31 @@ class MainWindow(QMainWindow):
             self._calibration_project_snapshot
         )
         plan_cases: list[dict[str, object]] = []
-        try:
-            for case in cases:
-                if not isinstance(case, CalibrationCase):
-                    continue
-                plan_cases.append({
-                    "case_id": case.case_id,
-                    "values": dict(case.values),
-                    "script": calibration_case_script(
-                        snapshot_project,
-                        case,
-                    ),
-                })
-        except ValueError as exc:
-            self._calibration_project_snapshot = None
-            QMessageBox.warning(
-                self,
-                "Calibration",
-                f"Could not build calibration cases:\n{exc}",
-            )
-            return
+        if strategy == "grid":
+            try:
+                for case in cases:
+                    if not isinstance(case, CalibrationCase):
+                        continue
+                    plan_cases.append({
+                        "case_id": case.case_id,
+                        "values": dict(case.values),
+                        "script": calibration_case_script(
+                            snapshot_project,
+                            case,
+                        ),
+                    })
+            except ValueError as exc:
+                self._calibration_project_snapshot = None
+                QMessageBox.warning(
+                    self,
+                    "Calibration",
+                    f"Could not build calibration cases:\n{exc}",
+                )
+                return
 
-        if not plan_cases:
-            self._calibration_project_snapshot = None
-            return
+            if not plan_cases:
+                self._calibration_project_snapshot = None
+                return
 
         plan_fd, plan_path = tempfile.mkstemp(
             prefix="openseespy_studio_calibration_",
@@ -9265,6 +9287,7 @@ class MainWindow(QMainWindow):
             "max_displacement": float(weights.max_displacement),
         }
         plan = {
+            "strategy": strategy,
             "analysis_tag": int(settings.tag),
             "analysis_name": str(settings.name),
             "experiment": {
@@ -9273,8 +9296,25 @@ class MainWindow(QMainWindow):
                 "source": str(request.get("experiment_path", "")),
             },
             "weights": weight_payload,
-            "cases": plan_cases,
         }
+        if strategy == "adaptive":
+            rounds = int(request.get("adaptive_rounds", 3) or 3)
+            shrink_ratio = float(
+                request.get("adaptive_shrink_ratio", 0.5) or 0.5
+            )
+            plan.update({
+                "project": self._calibration_project_snapshot,
+                "parameters": calibration_parameter_payload(parameters),
+                "rounds": rounds,
+                "shrink_ratio": shrink_ratio,
+                "max_total_cases": 96,
+            })
+            planned_case_count = (
+                calibration_grid_size(parameters) * rounds
+            )
+        else:
+            plan["cases"] = plan_cases
+            planned_case_count = len(plan_cases)
         Path(plan_path).write_text(
             json.dumps(plan, ensure_ascii=False),
             encoding="utf-8",
@@ -9314,9 +9354,17 @@ class MainWindow(QMainWindow):
         self._calibration_process = process
 
         self.console_dock.show()
-        self.console.appendPlainText(
-            f">> Calibration: starting {len(plan_cases)} cyclic case(s)"
-        )
+        if strategy == "adaptive":
+            self.console.appendPlainText(
+                f">> Adaptive calibration: up to {planned_case_count} "
+                f"cyclic case(s) across {rounds} round(s), "
+                f"shrink={shrink_ratio:.3g}"
+            )
+        else:
+            self.console.appendPlainText(
+                f">> Grid calibration: starting {planned_case_count} "
+                "cyclic case(s)"
+            )
         self.console.appendPlainText(
             ">> Experimental reference: "
             + (
@@ -9325,7 +9373,7 @@ class MainWindow(QMainWindow):
             )
         )
         self.status_message.setText(
-            f"Calibration · 0/{len(plan_cases)} cases"
+            f"Calibration · 0/{planned_case_count} planned cases"
         )
         self.actions["calibration"].setText("Stop Calibration")
         self.actions["run"].setEnabled(False)
