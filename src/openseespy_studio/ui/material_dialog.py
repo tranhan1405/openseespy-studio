@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
@@ -39,8 +41,17 @@ from .material_test_dialog import MaterialTestDialog
 PA_PER_MPA = 1.0e6
 
 PREVIEW_MATERIAL_TYPES = {
+    "Elastic",
+    "Steel01",
+    "Steel02",
+    "ReinforcingSteel",
+    "Concrete01",
+    "Concrete02",
+    "Concrete04",
     "Hysteretic",
     "Pinching4",
+    "Bond_SP01",
+    "ElasticPPGap",
     "FRPConfinedConcrete02",
 }
 
@@ -77,9 +88,204 @@ class MaterialEnvelopePreview(QWidget):
         self._parameters = dict(parameters)
         self.update()
 
-    def _curve(self) -> tuple[list[tuple[float, float]], str]:
+    def _curve(
+        self,
+    ) -> tuple[
+        list[tuple[float, float]],
+        str,
+        list[tuple[float, float, str]],
+    ]:
+        """Return a compact engineering diagram from the current inputs.
+
+        The preview is intentionally a parameter diagram. For path-dependent
+        materials, the exact OpenSees response remains available through
+        Material Test, while the editor diagram highlights the meaning and
+        relative location of the entered parameters.
+        """
         p = self._parameters
-        if self._material_type == "Hysteretic":
+        material_type = self._material_type
+
+        if material_type == "Elastic":
+            modulus = p.get("E", 0.0)
+            eps = 0.002
+            pts = [(-eps, -modulus * eps), (0.0, 0.0), (eps, modulus * eps)]
+            return pts, "Linear stress-strain diagram · slope = E", [
+                (eps * 0.62, modulus * eps * 0.62, "E"),
+            ]
+
+        if material_type == "Steel01":
+            fy = abs(p.get("Fy", 0.0))
+            e0 = abs(p.get("E0", 0.0))
+            b = p.get("b", 0.0)
+            if e0 <= 1.0e-15:
+                return [], "E0 must be non-zero to draw the Steel01 diagram.", []
+            ey = fy / e0
+            emax = max(6.0 * ey, 0.01)
+            def stress(eps: float) -> float:
+                sign = -1.0 if eps < 0.0 else 1.0
+                value = abs(eps)
+                if value <= ey:
+                    return e0 * eps
+                return sign * (fy + b * e0 * (value - ey))
+            samples = [-emax, -ey, 0.0, ey, emax]
+            pts = [(eps, stress(eps)) for eps in samples]
+            return pts, (
+                "Steel01 bilinear backbone · a1-a4 control cyclic isotropic hardening"
+            ), [
+                (ey, fy, "Fy, εy=Fy/E0"),
+                (emax, stress(emax), "b·E0"),
+            ]
+
+        if material_type == "Steel02":
+            fy = abs(p.get("Fy", 0.0))
+            e0 = abs(p.get("E0", 0.0))
+            b = p.get("b", 0.0)
+            r0 = max(abs(p.get("R0", 20.0)), 1.0e-6)
+            if e0 <= 1.0e-15 or fy <= 1.0e-15:
+                return [], "Fy and E0 must be non-zero to draw Steel02.", []
+            ey = fy / e0
+            emax = max(6.0 * ey, 0.01)
+            pts = []
+            for index in range(41):
+                eps = -emax + 2.0 * emax * index / 40.0
+                ratio = abs(e0 * eps / fy)
+                transition = (1.0 + ratio**r0) ** (1.0 / r0)
+                sigma = b * e0 * eps + (1.0 - b) * e0 * eps / transition
+                pts.append((eps, sigma))
+            return pts, (
+                "Steel02 Menegotto-Pinto monotonic guide · R0/cR1/cR2 govern cyclic transition"
+            ), [
+                (ey, fy, "Fy / E0"),
+                (0.62 * emax, dict(pts).get(0.62 * emax, 0.0), "b"),
+            ]
+
+        if material_type == "ReinforcingSteel":
+            fy = abs(p.get("fy", 0.0))
+            fu = abs(p.get("fu", fy))
+            es = abs(p.get("Es", 0.0))
+            esh = p.get("Esh", 0.0)
+            eps_sh = max(p.get("eps_sh", 0.0), 0.0)
+            eps_ult = max(p.get("eps_ult", eps_sh), eps_sh)
+            if es <= 1.0e-15:
+                return [], "Es must be non-zero to draw ReinforcingSteel.", []
+            ey = fy / es
+            yield_plateau_end = max(eps_sh, ey)
+            sigma_sh = fy
+            sigma_ult = min(fu, sigma_sh + esh * max(eps_ult - yield_plateau_end, 0.0))
+            pts = [
+                (0.0, 0.0),
+                (ey, fy),
+                (yield_plateau_end, sigma_sh),
+                (eps_ult, sigma_ult),
+            ]
+            return pts, "Rebar tension backbone · elastic, yield, hardening and ultimate regions", [
+                (ey, fy, "fy"),
+                (yield_plateau_end, sigma_sh, "eps_sh"),
+                (eps_ult, sigma_ult, "eps_ult / fu"),
+            ]
+
+        if material_type in {"Concrete01", "Concrete02"}:
+            fpc = p.get("fpc", 0.0)
+            epsc0 = p.get("epsc0", 0.0)
+            fpcu = p.get("fpcu", fpc)
+            eps_u = p.get("epsU", epsc0)
+            if abs(epsc0) <= 1.0e-15:
+                return [], "epsc0 must be non-zero to draw the concrete diagram.", []
+
+            compression = []
+            # Descending branch, ordered from ultimate strain toward peak.
+            for index in range(7):
+                t = index / 6.0
+                eps = eps_u + t * (epsc0 - eps_u)
+                sigma = fpcu + t * (fpc - fpcu)
+                compression.append((eps, sigma))
+            # Parabolic ascending branch from peak back to the origin.
+            for index in range(1, 10):
+                t = index / 9.0
+                eps = epsc0 * (1.0 - t)
+                ratio = eps / epsc0
+                sigma = fpc * (2.0 * ratio - ratio * ratio)
+                compression.append((eps, sigma))
+
+            annotations = [
+                (epsc0, fpc, "epsc0 / fpc"),
+                (eps_u, fpcu, "epsU / fpcu"),
+            ]
+            note = "Concrete compression parameter diagram"
+            if material_type == "Concrete02":
+                ft = max(p.get("ft", 0.0), 0.0)
+                ets = abs(p.get("Ets", 0.0))
+                ec0 = abs(2.0 * fpc / epsc0)
+                eps_t = ft / ec0 if ec0 > 1.0e-15 else 0.0
+                eps_zero = eps_t + (ft / ets if ets > 1.0e-15 else max(eps_t, 0.001))
+                compression.extend([(eps_t, ft), (eps_zero, 0.0)])
+                annotations.extend([
+                    (eps_t, ft, "ft"),
+                    (eps_zero, 0.0, "Ets"),
+                ])
+                note = (
+                    "Concrete02 compression + tension guide · λ affects unloading/reloading"
+                )
+            return compression, note, annotations
+
+        if material_type == "Concrete04":
+            fc = p.get("fc", 0.0)
+            epsc = p.get("epsc", 0.0)
+            epscu = p.get("epscu", epsc)
+            ec = abs(p.get("Ec", 0.0))
+            fct = max(p.get("fct", 0.0), 0.0)
+            et = max(p.get("et", 0.0), 0.0)
+            beta = max(p.get("beta", 0.0), 0.0)
+            if abs(epsc) <= 1.0e-15:
+                return [], "epsc must be non-zero to draw Concrete04.", []
+            pts = [(epscu, beta * fc), (epsc, fc), (0.0, 0.0)]
+            if fct > 0.0:
+                eps_t = et if et > 0.0 else (fct / ec if ec > 1.0e-15 else 0.0001)
+                pts.extend([(eps_t, fct), (5.0 * eps_t, beta * fct)])
+            return pts, (
+                "Concrete04 key-point diagram · use Material Test for the exact Popovics response"
+            ), [
+                (epsc, fc, "epsc / fc"),
+                (epscu, beta * fc, "epscu"),
+                *(([(eps_t, fct, "et / fct")] if fct > 0.0 else [])),
+            ]
+
+        if material_type == "Bond_SP01":
+            fy = p.get("Fy", 0.0)
+            sy = abs(p.get("Sy", 0.0))
+            fu = p.get("Fu", fy)
+            su = abs(p.get("Su", sy))
+            pts = [
+                (-su, -fu),
+                (-sy, -fy),
+                (0.0, 0.0),
+                (sy, fy),
+                (su, fu),
+            ]
+            return pts, "Bond_SP01 stress-slip backbone · b and R shape the transition", [
+                (sy, fy, "Sy / Fy"),
+                (su, fu, "Su / Fu"),
+            ]
+
+        if material_type == "ElasticPPGap":
+            e = p.get("E", 0.0)
+            fy = p.get("Fy", 0.0)
+            gap = p.get("gap", 0.0)
+            eta = p.get("eta", 0.0)
+            dy = abs(fy / e) if abs(e) > 1.0e-15 else 1.0
+            sign = -1.0 if fy < 0.0 else 1.0
+            x1 = gap
+            x2 = gap + sign * dy
+            x3 = gap + sign * 2.5 * dy
+            y3 = fy + eta * e * (x3 - x2)
+            pts = [(0.0, 0.0), (gap, 0.0), (x2, fy), (x3, y3)]
+            return pts, "ElasticPPGap force-deformation parameter diagram", [
+                (gap, 0.0, "gap"),
+                (x2, fy, "Fy"),
+                (x3, y3, "η·E"),
+            ]
+
+        if material_type == "Hysteretic":
             pts = [
                 (p.get("e3n", 0.0), p.get("s3n", 0.0)),
                 (p.get("e2n", 0.0), p.get("s2n", 0.0)),
@@ -89,9 +295,13 @@ class MaterialEnvelopePreview(QWidget):
                 (p.get("e2p", 0.0), p.get("s2p", 0.0)),
                 (p.get("e3p", 0.0), p.get("s3p", 0.0)),
             ]
-            return pts, "Envelope preview · response vs deformation"
+            return pts, "Hysteretic envelope · cyclic pinching/damage parameters act on this backbone", [
+                (p.get("e1p", 0.0), p.get("s1p", 0.0), "e1p/s1p"),
+                (p.get("e2p", 0.0), p.get("s2p", 0.0), "e2p/s2p"),
+                (p.get("e3p", 0.0), p.get("s3p", 0.0), "e3p/s3p"),
+            ]
 
-        if self._material_type == "Pinching4":
+        if material_type == "Pinching4":
             pts = [
                 (p.get("eNd4", 0.0), p.get("eNf4", 0.0)),
                 (p.get("eNd3", 0.0), p.get("eNf3", 0.0)),
@@ -103,17 +313,26 @@ class MaterialEnvelopePreview(QWidget):
                 (p.get("ePd3", 0.0), p.get("ePf3", 0.0)),
                 (p.get("ePd4", 0.0), p.get("ePf4", 0.0)),
             ]
-            return pts, "Envelope preview · Pinching4 cyclic rules use this backbone"
+            return pts, "Pinching4 envelope · pinching/degradation rules use this backbone", [
+                (p.get("ePd1", 0.0), p.get("ePf1", 0.0), "P1"),
+                (p.get("ePd4", 0.0), p.get("ePf4", 0.0), "P4"),
+            ]
 
-        if self._material_type == "FRPConfinedConcrete02":
+        if material_type == "FRPConfinedConcrete02":
             fc0 = p.get("fc0", 0.0)
             ec0 = p.get("ec0", 0.0)
             pts = [(0.0, 0.0), (ec0, fc0)]
+            annotations = [(ec0, fc0, "ec0 / fc0")]
             if p.get("mode", 0.0) >= 0.5:
-                pts.append((p.get("ecu", ec0), p.get("fcu", fc0)))
-            return pts, "Compression backbone input · OpenSees evaluates the full FRP law"
+                ecu = p.get("ecu", ec0)
+                fcu = p.get("fcu", fc0)
+                pts.append((ecu, fcu))
+                annotations.append((ecu, fcu, "ecu / fcu"))
+            return pts, (
+                "FRP concrete input backbone · jacket parameters define confinement in JacketC mode"
+            ), annotations
 
-        return [], "Live envelope preview is available for Hysteretic, Pinching4 and FRP concrete."
+        return [], "No independent material-response diagram for this wrapper/composite.", []
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -129,7 +348,7 @@ class MaterialEnvelopePreview(QWidget):
         painter.setFont(font)
         painter.drawText(title_rect, Qt.AlignLeft | Qt.AlignVCenter, self._material_type or "Material Preview")
 
-        points, note = self._curve()
+        points, note, annotations = self._curve()
         font.setBold(False)
         painter.setFont(font)
         painter.setPen(QColor("#647486"))
@@ -194,6 +413,25 @@ class MaterialEnvelopePreview(QWidget):
         for point in points:
             q = map_point(*point)
             painter.drawEllipse(q, 3.2, 3.2)
+
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor("#40566c"), 1))
+        small_font = painter.font()
+        small_font.setPointSize(max(7, small_font.pointSize() - 1))
+        painter.setFont(small_font)
+        for x, y, label in annotations:
+            q = map_point(float(x), float(y))
+            text_rect = QRectF(
+                min(q.x() + 6.0, plot.right() - 112.0),
+                max(plot.top(), q.y() - 20.0),
+                108.0,
+                18.0,
+            )
+            painter.drawText(
+                text_rect,
+                Qt.AlignLeft | Qt.AlignVCenter,
+                str(label),
+            )
 
 
 class MaterialDialog(QDialog):
@@ -278,7 +516,7 @@ class MaterialDialog(QDialog):
         self.preview_host = QWidget()
         preview_layout = QVBoxLayout(self.preview_host)
         preview_layout.setContentsMargins(6, 0, 0, 0)
-        self.preview_title = QLabel("Research response preview")
+        self.preview_title = QLabel("Material response / parameter diagram")
         self.preview_title.setStyleSheet(
             "font-weight: 700; color: #17356d;"
         )
@@ -780,6 +1018,32 @@ class MaterialDialog(QDialog):
                 "Envelope points are shown live. These materials may represent "
                 "stress-strain or force-deformation response depending on where "
                 "they are assigned (fiber vs zeroLength/link)."
+            )
+            self.material_note.setStyleSheet(
+                "padding: 7px; background: #eef4fb; color: #40566c;"
+            )
+        elif material_type in {
+            "Steel01",
+            "Steel02",
+            "ReinforcingSteel",
+            "Concrete01",
+            "Concrete02",
+            "Concrete04",
+            "Bond_SP01",
+            "Elastic",
+            "ElasticPPGap",
+        }:
+            response_name = (
+                "stress-slip"
+                if material_type == "Bond_SP01"
+                else "force-deformation"
+                if material_type == "ElasticPPGap"
+                else "stress-strain"
+            )
+            self.material_note.setText(
+                f"The diagram is a live {response_name} parameter guide built "
+                "from the current inputs. For cyclic/path-dependent behavior "
+                "and exact OpenSees constitutive response, use Test Material."
             )
             self.material_note.setStyleSheet(
                 "padding: 7px; background: #eef4fb; color: #40566c;"
