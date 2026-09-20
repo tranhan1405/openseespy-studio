@@ -4006,9 +4006,18 @@ class MainWindow(QMainWindow):
             action.setChecked(False)
         self.viewport.set_selection_filter(self.selection.filter)
 
+    def _leave_truss_pick_mode(self) -> None:
+        self._truss_first_node_tag = None
+        self.viewport.clear_truss_anchor(render=False)
+        action = self.actions.get("truss_pick")
+        if action is not None:
+            action.setChecked(False)
+        self.viewport.set_selection_filter(self.selection.filter)
+
     def _activate_select_tool(self) -> None:
         self._leave_measure_mode()
         self._leave_frame_pick_mode()
+        self._leave_truss_pick_mode()
         self.viewport.set_interaction_tool("select")
         self.actions["select"].setChecked(True)
         self.actions["box"].setChecked(False)
@@ -4018,6 +4027,7 @@ class MainWindow(QMainWindow):
     def _activate_box_tool(self) -> None:
         self._leave_measure_mode()
         self._leave_frame_pick_mode()
+        self._leave_truss_pick_mode()
         self.viewport.set_interaction_tool("box")
         self.actions["select"].setChecked(False)
         self.actions["box"].setChecked(True)
@@ -4040,6 +4050,7 @@ class MainWindow(QMainWindow):
             return
 
         self._leave_measure_mode()
+        self._leave_truss_pick_mode()
         self._frame_first_node_tag = None
         self.viewport.clear_frame_anchor(render=False)
         self.viewport.set_interaction_tool("select")
@@ -4051,6 +4062,44 @@ class MainWindow(QMainWindow):
         self.viewport.plotter.render()
         self.status_message.setText(
             "Create Frame: click the first node"
+        )
+
+    def _activate_truss_pick_tool(self, checked: bool = True) -> None:
+        action = self.actions.get("truss_pick")
+        if action is not None and not action.isChecked() and not checked:
+            self._activate_select_tool()
+            return
+        if len(self.model.nodes) < 2:
+            if action is not None:
+                action.setChecked(False)
+            self.status_message.setText(
+                "Create Truss requires at least two model nodes"
+            )
+            return
+        if not self.project.materials:
+            if action is not None:
+                action.setChecked(False)
+            QMessageBox.information(
+                self,
+                "Create Truss",
+                "Create a uniaxial Material first. Truss elements require "
+                "an area and material assignment.",
+            )
+            return
+
+        self._leave_measure_mode()
+        self._leave_frame_pick_mode()
+        self._truss_first_node_tag = None
+        self.viewport.clear_truss_anchor(render=False)
+        self.viewport.set_interaction_tool("select")
+        self.viewport.set_selection_filter("node")
+        self.actions["select"].setChecked(False)
+        self.actions["box"].setChecked(False)
+        if action is not None:
+            action.setChecked(True)
+        self.viewport.plotter.render()
+        self.status_message.setText(
+            "Create Truss: click the first node"
         )
 
     def _activate_measure_distance(self, checked: bool = True) -> None:
@@ -4067,6 +4116,7 @@ class MainWindow(QMainWindow):
             return
 
         self._leave_frame_pick_mode()
+        self._leave_truss_pick_mode()
         self._measure_first_node_tag = None
         self.viewport.clear_measure_anchor(render=False)
         self.viewport.set_interaction_tool("select")
@@ -4106,6 +4156,12 @@ class MainWindow(QMainWindow):
         ):
             self._activate_select_tool()
             return
+        if (
+            self.actions.get("truss_pick") is not None
+            and self.actions["truss_pick"].isChecked()
+        ):
+            self._activate_select_tool()
+            return
         if self.viewport.interaction_tool() == "box":
             self._activate_select_tool()
             return
@@ -4116,6 +4172,7 @@ class MainWindow(QMainWindow):
         self.selection.set_filter(value)
         measure_action = self.actions.get("measure_distance")
         frame_pick_action = self.actions.get("frame_pick")
+        truss_pick_action = self.actions.get("truss_pick")
         if measure_action is not None and measure_action.isChecked():
             self.viewport.set_selection_filter("node")
             self.status_message.setText(
@@ -4130,6 +4187,13 @@ class MainWindow(QMainWindow):
                 "Create Frame temporarily snaps to nodes"
             )
             return
+        if truss_pick_action is not None and truss_pick_action.isChecked():
+            self.viewport.set_selection_filter("node")
+            self.status_message.setText(
+                f"Selection filter saved as {text}; "
+                "Create Truss temporarily snaps to nodes"
+            )
+            return
         self.viewport.set_selection_filter(value)
         self.status_message.setText(f"Selection filter: {text}")
 
@@ -4139,6 +4203,41 @@ class MainWindow(QMainWindow):
         kind = payload.get("kind")
         tag = payload.get("tag")
         mode = payload.get("mode", "replace")
+
+        truss_pick_action = self.actions.get("truss_pick")
+        if truss_pick_action is not None and truss_pick_action.isChecked():
+            if kind != "node" or tag is None:
+                self.status_message.setText(
+                    "Create Truss: click a model node"
+                )
+                return
+
+            node_tag = int(tag)
+            if self._truss_first_node_tag is None:
+                self._truss_first_node_tag = node_tag
+                self.viewport.show_truss_anchor(node_tag)
+                self.status_message.setText(
+                    f"Create Truss: node {node_tag} selected · "
+                    "click the second node"
+                )
+                return
+
+            if node_tag == self._truss_first_node_tag:
+                self.status_message.setText(
+                    "Create Truss: choose a different second node"
+                )
+                return
+
+            first_tag = self._truss_first_node_tag
+            self._truss_first_node_tag = None
+            self.viewport.clear_truss_anchor(render=False)
+            self._create_truss_between_nodes(first_tag, node_tag)
+            if truss_pick_action.isChecked():
+                self.status_message.setText(
+                    f"Created Truss {first_tag} → {node_tag} · "
+                    "click another first node"
+                )
+            return
 
         frame_pick_action = self.actions.get("frame_pick")
         if frame_pick_action is not None and frame_pick_action.isChecked():
