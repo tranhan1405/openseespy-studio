@@ -4289,6 +4289,158 @@ class MainWindow(QMainWindow):
         else:
             self.status_message.setText("Ready")
 
+    def _apply_direct_property_edit(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        context = payload.get("context")
+        if not isinstance(context, dict):
+            return
+        kind = str(context.get("kind", ""))
+        try:
+            tag = int(context.get("tag"))
+        except (TypeError, ValueError):
+            return
+        property_id = str(payload.get("id", ""))
+        value = payload.get("value")
+        if not property_id:
+            return
+
+        before = self.project.to_dict()
+        try:
+            if kind == "node":
+                node = self.model.nodes.get(tag)
+                if node is None:
+                    return
+
+                if property_id in {"x", "y", "z"}:
+                    axis = {"x": 0, "y": 1, "z": 2}[property_id]
+                    xyz = list(node.xyz)
+                    xyz[axis] = float(value)
+                    node.xyz = tuple(xyz)
+                elif property_id.startswith("fixity_"):
+                    index = int(property_id.rsplit("_", 1)[1])
+                    values = list(node.fixity)
+                    values[index] = 1 if int(value) else 0
+                    node.fixity = tuple(values)
+                elif property_id == "mass":
+                    text = str(value).replace(";", ",")
+                    parts = [
+                        part.strip()
+                        for chunk in text.split(",")
+                        for part in chunk.split()
+                        if part.strip()
+                    ]
+                    masses = tuple(float(part) for part in parts)
+                    if len(masses) != self.model.ndf:
+                        raise ValueError(
+                            f"Mass requires {self.model.ndf} values."
+                        )
+                    if any(item < 0.0 for item in masses):
+                        raise ValueError("Nodal mass values cannot be negative.")
+                    node.mass = masses
+                else:
+                    return
+
+            elif kind == "element":
+                element = self.model.elements.get(tag)
+                if element is None:
+                    return
+
+                if property_id == "element_type":
+                    new_type = str(value)
+                    if new_type not in {
+                        "elasticBeamColumn",
+                        "forceBeamColumn",
+                        "dispBeamColumn",
+                    }:
+                        raise ValueError(
+                            f"Unsupported frame formulation: {new_type}"
+                        )
+                    element.element_type = new_type
+                    if new_type == "elasticBeamColumn":
+                        section = self.project.sections.get(
+                            element.section_tag
+                        )
+                        if (
+                            section is not None
+                            and section.section_type != "Elastic"
+                        ):
+                            element.section_tag = None
+                elif property_id == "group":
+                    element.group = str(value).strip() or "frame"
+                elif property_id == "section_tag":
+                    section_tag = None if value is None else int(value)
+                    if section_tag is not None:
+                        section = self.project.sections.get(section_tag)
+                        if section is None:
+                            raise ValueError(
+                                f"Section {section_tag} does not exist."
+                            )
+                        if (
+                            element.element_type == "elasticBeamColumn"
+                            and section.section_type != "Elastic"
+                        ):
+                            raise ValueError(
+                                "elasticBeamColumn requires an Elastic section."
+                            )
+                    element.section_tag = section_tag
+                elif property_id == "transf_tag":
+                    transf_tag = None if value is None else int(value)
+                    if (
+                        transf_tag is not None
+                        and transf_tag not in self.project.transformations
+                    ):
+                        raise ValueError(
+                            f"Transformation {transf_tag} does not exist."
+                        )
+                    element.transf_tag = transf_tag
+                elif property_id == "integration_type":
+                    element.integration_type = str(value)
+                elif property_id == "integration_points":
+                    element.integration_points = int(str(value).strip())
+                elif property_id == "force_max_iter":
+                    element.force_max_iter = int(str(value).strip())
+                elif property_id == "force_tolerance":
+                    element.force_tolerance = float(str(value).strip())
+                elif property_id == "mass_per_length":
+                    element.mass_per_length = float(str(value).strip())
+                elif property_id == "consistent_mass":
+                    if isinstance(value, bool):
+                        element.consistent_mass = value
+                    else:
+                        element.consistent_mass = (
+                            str(value).strip().lower()
+                            in {"1", "true", "yes", "consistent"}
+                        )
+                else:
+                    return
+
+                # Re-run Element's own normalization and validity checks after
+                # an in-place Details-pane edit.
+                element.__post_init__()
+
+            else:
+                return
+
+        except (TypeError, ValueError, IndexError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Invalid Property Value",
+                str(exc),
+            )
+            return
+
+        self._refresh_all(
+            f"Updated {kind} {tag}: {property_id}"
+        )
+        self._record_project_change(
+            f"Edit {kind} {tag} property {property_id}",
+            before,
+        )
+
     def _show_entity_properties(self, kind: str, tag: int) -> None:
         if kind == "node":
             node = self.model.nodes.get(tag)
