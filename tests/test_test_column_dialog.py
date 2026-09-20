@@ -249,3 +249,87 @@ def test_translational_slip_interface_prefers_macro_spring(qapp):
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+
+def test_bond_sp01_strain_penetration_mode_uses_section_not_dof_spring(qapp):
+    project = ProjectDatabase()
+    project.add_material(
+        MaterialData(
+            1,
+            "Concrete",
+            "Concrete02",
+        )
+    )
+    project.add_material(
+        MaterialData(
+            2,
+            "Steel",
+            "ReinforcingSteel",
+        )
+    )
+    project.add_material(
+        MaterialData(
+            3,
+            "Bond",
+            "Bond_SP01",
+        )
+    )
+    from openseespy_studio.project import FiberComponentData
+
+    project.add_section(
+        SectionData(
+            1,
+            "RC Fiber",
+            "Fiber",
+            fiber_components=[
+                FiberComponentData(
+                    "RectPatch",
+                    "Concrete",
+                    1,
+                    {
+                        "width_y": 0.4,
+                        "depth_z": 0.4,
+                        "n_y": 4,
+                        "n_z": 4,
+                    },
+                ),
+                FiberComponentData(
+                    "StraightLayer",
+                    "Rebar",
+                    2,
+                    {
+                        "y_i": -0.15,
+                        "z_i": 0.15,
+                        "y_j": 0.15,
+                        "z_j": 0.15,
+                        "n_bars": 4,
+                        "bar_area": 0.0002,
+                    },
+                ),
+            ],
+        )
+    )
+
+    dialog = TestColumnWizard(project)
+    try:
+        dialog.section.setCurrentIndex(dialog.section.findData(1))
+        dialog.base_interface.setCurrentText(
+            "Bond_SP01 strain penetration"
+        )
+        qapp.processEvents()
+
+        spec = dialog.data()
+        assert spec.base_interface_type == "Bond_SP01 strain penetration"
+        assert spec.base_interface_materials == {}
+        assert spec.strain_penetration_bond_material_tag == 3
+        assert dialog.strain_penetration_group.isVisible() is False or True
+        assert all(
+            not check.isChecked()
+            for check, _combo in dialog.interface_rows.values()
+        )
+        assert spec.base_interface_rayleigh is False
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
