@@ -10,6 +10,7 @@ from openseespy_studio.calibration import (
     CalibrationWeights,
     apply_calibration_case,
     build_grid_cases,
+    calibration_case_changes,
     rank_calibration_cases,
     score_cyclic_calibration,
 )
@@ -201,3 +202,55 @@ def test_calibration_worker_isolates_failed_cases_and_ranks_successes(tmp_path):
     )
     assert failed["execution_status"] == "failed"
     assert failed["rank"] is None
+
+
+
+def test_calibration_case_changes_reports_current_and_new_values():
+    project = ProjectDatabase()
+    project.add_material(
+        MaterialData(
+            tag=1,
+            name="Concrete",
+            material_type="Concrete02",
+            parameters={"fpc": -30.0, "epsc0": -0.002},
+        )
+    )
+    case = CalibrationCase(
+        case_id=7,
+        values={
+            "material:1:fpc": -33.0,
+            "material:1:epsc0": -0.002,
+        },
+    )
+
+    changes = calibration_case_changes(project, case)
+
+    assert len(changes) == 2
+    fpc = next(item for item in changes if item["parameter"] == "fpc")
+    epsc0 = next(
+        item for item in changes if item["parameter"] == "epsc0"
+    )
+    assert fpc["material_name"] == "Concrete"
+    assert fpc["old_value"] == pytest.approx(-30.0)
+    assert fpc["new_value"] == pytest.approx(-33.0)
+    assert fpc["changed"] is True
+    assert epsc0["changed"] is False
+
+
+def test_calibration_case_changes_rejects_case_after_material_schema_changed():
+    project = ProjectDatabase()
+    project.add_material(
+        MaterialData(
+            tag=1,
+            name="Elastic",
+            material_type="Elastic",
+            parameters={"E": 200.0},
+        )
+    )
+    case = CalibrationCase(
+        case_id=3,
+        values={"material:1:Fy": 500.0},
+    )
+
+    with pytest.raises(ValueError, match="no longer has parameter"):
+        calibration_case_changes(project, case)
