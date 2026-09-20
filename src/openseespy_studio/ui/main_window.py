@@ -4412,6 +4412,26 @@ class MainWindow(QMainWindow):
                             str(value).strip().lower()
                             in {"1", "true", "yes", "consistent"}
                         )
+                elif property_id == "truss_area":
+                    element.truss_area = float(str(value).strip())
+                elif property_id == "truss_material_tag":
+                    material_tag = None if value is None else int(value)
+                    if (
+                        material_tag is not None
+                        and material_tag not in self.project.materials
+                    ):
+                        raise ValueError(
+                            f"Material {material_tag} does not exist."
+                        )
+                    element.truss_material_tag = material_tag
+                elif property_id == "truss_do_rayleigh":
+                    if isinstance(value, bool):
+                        element.truss_do_rayleigh = value
+                    else:
+                        element.truss_do_rayleigh = (
+                            str(value).strip().lower()
+                            in {"1", "true", "yes", "on"}
+                        )
                 else:
                     return
 
@@ -4595,6 +4615,117 @@ class MainWindow(QMainWindow):
         if kind == "element":
             element = self.model.elements.get(tag)
             if element is None:
+                return
+
+            if element.element_type == "truss":
+                material_text = "Unassigned"
+                if element.truss_material_tag is not None:
+                    material = self.project.materials.get(
+                        element.truss_material_tag
+                    )
+                    material_text = (
+                        f"{element.truss_material_tag} - {material.name}"
+                        if material is not None
+                        else f"{element.truss_material_tag} (missing)"
+                    )
+                material_choices = [("Unassigned", None)]
+                material_choices.extend(
+                    (
+                        f"{material_tag} - {material.name} "
+                        f"({material.material_type})",
+                        int(material_tag),
+                    )
+                    for material_tag, material in sorted(
+                        self.project.materials.items()
+                    )
+                )
+                self.properties_panel.set_properties(
+                    "Truss Element",
+                    [
+                        ("Tag", tag),
+                        ("Type", "truss"),
+                        ("Nodes", f"{element.i}, {element.j}"),
+                        (
+                            "Group",
+                            element.group,
+                            {
+                                "id": "group",
+                                "editable": True,
+                                "kind": "text",
+                            },
+                        ),
+                        (
+                            "Area",
+                            f"{element.truss_area:g}",
+                            {
+                                "id": "truss_area",
+                                "editable": True,
+                                "kind": "float",
+                            },
+                        ),
+                        (
+                            "Material",
+                            material_text,
+                            {
+                                "id": "truss_material_tag",
+                                "editable": True,
+                                "kind": "choice",
+                                "current": element.truss_material_tag,
+                                "choices": material_choices,
+                            },
+                        ),
+                        ("Section", "Not used by Truss"),
+                        ("Transformation", "Not used by Truss"),
+                        (
+                            "Mass / length (rho)",
+                            f"{element.mass_per_length:g}",
+                            {
+                                "id": "mass_per_length",
+                                "editable": True,
+                                "kind": "float",
+                            },
+                        ),
+                        (
+                            "Mass matrix",
+                            (
+                                "Consistent"
+                                if element.consistent_mass
+                                else "Lumped"
+                            ),
+                            {
+                                "id": "consistent_mass",
+                                "editable": True,
+                                "kind": "choice",
+                                "current": bool(element.consistent_mass),
+                                "choices": [
+                                    ("Lumped", False),
+                                    ("Consistent", True),
+                                ],
+                            },
+                        ),
+                        (
+                            "Rayleigh damping",
+                            (
+                                "On"
+                                if element.truss_do_rayleigh
+                                else "Off"
+                            ),
+                            {
+                                "id": "truss_do_rayleigh",
+                                "editable": True,
+                                "kind": "choice",
+                                "current": bool(
+                                    element.truss_do_rayleigh
+                                ),
+                                "choices": [
+                                    ("Off", False),
+                                    ("On", True),
+                                ],
+                            },
+                        ),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
                 return
 
             section_text = "-"
