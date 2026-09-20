@@ -1044,7 +1044,13 @@ def analysis_to_openseespy(
         else []
     )
     total_steps = len(cyclic_steps) if settings.analysis_type == "Cyclic" else settings.steps
-    if monitor_node is None and settings.analysis_type in {"Pushover", "Cyclic"}:
+    if monitor_node is None and (
+        settings.analysis_type in {"Pushover", "Cyclic"}
+        or (
+            settings.analysis_type == "Static"
+            and settings.integrator == "DisplacementControl"
+        )
+    ):
         monitor_node = settings.control_node
     monitor_node = int(monitor_node or (node_tags[0] if node_tags else 1))
 
@@ -1082,6 +1088,7 @@ def analysis_to_openseespy(
         f"        'tolerance': {settings.tolerance:g},",
         f"        'max_iterations': {settings.max_iterations},",
         f"        'algorithm': {settings.algorithm!r},",
+        f"        'integrator': {settings.integrator!r},",
         f"        'steps': {settings.steps},",
         f"        'load_increment': {settings.load_increment:g},",
         f"        'control_node': {settings.control_node},",
@@ -1092,6 +1099,11 @@ def analysis_to_openseespy(
         f"        'dt': {settings.dt:g},",
         f"        'gamma': {settings.gamma:g},",
         f"        'beta': {settings.beta:g},",
+        f"        'hht_alpha': {settings.hht_alpha:g},",
+        f"        'generalized_alpha_m': {settings.generalized_alpha_m:g},",
+        f"        'generalized_alpha_f': {settings.generalized_alpha_f:g},",
+        f"        'arc_length_s': {settings.arc_length_s:g},",
+        f"        'arc_length_alpha': {settings.arc_length_alpha:g},",
         f"        'preload_gravity': {settings.preload_gravity!r},",
         f"        'gravity_steps': {settings.gravity_steps},",
         f"        'deferred_pattern_tags': {settings.deferred_pattern_tags!r},",
@@ -1319,9 +1331,24 @@ def analysis_to_openseespy(
     lines.append(f"_studio_primary_algorithm = {settings.algorithm!r}")
 
     if settings.analysis_type == "Static":
-        lines.append(
-            f"ops.integrator('LoadControl', {settings.load_increment:g})"
-        )
+        if settings.integrator == "LoadControl":
+            lines.append(
+                f"ops.integrator('LoadControl', {settings.load_increment:g})"
+            )
+        elif settings.integrator == "DisplacementControl":
+            lines.append(
+                f"ops.integrator('DisplacementControl', {settings.control_node}, "
+                f"{settings.control_dof}, {settings.displacement_increment:g})"
+            )
+        elif settings.integrator == "ArcLength":
+            lines.append(
+                f"ops.integrator('ArcLength', {settings.arc_length_s:g}, "
+                f"{settings.arc_length_alpha:g})"
+            )
+        else:
+            raise ValueError(
+                f"Unsupported Static integrator: {settings.integrator}"
+            )
         analyze_call = "ops.analyze(1)"
         analysis_kind = "Static"
     elif settings.analysis_type == "Pushover":
@@ -1344,10 +1371,25 @@ def analysis_to_openseespy(
         analyze_call = "ops.analyze(1)"
         analysis_kind = "Static"
     elif settings.analysis_type == "Transient":
-        lines.append(
-            f"ops.integrator('Newmark', {settings.gamma:g}, "
-            f"{settings.beta:g})"
-        )
+        if settings.integrator == "Newmark":
+            lines.append(
+                f"ops.integrator('Newmark', {settings.gamma:g}, "
+                f"{settings.beta:g})"
+            )
+        elif settings.integrator == "HHT":
+            lines.append(
+                f"ops.integrator('HHT', {settings.hht_alpha:g})"
+            )
+        elif settings.integrator == "GeneralizedAlpha":
+            lines.append(
+                f"ops.integrator('GeneralizedAlpha', "
+                f"{settings.generalized_alpha_m:g}, "
+                f"{settings.generalized_alpha_f:g})"
+            )
+        else:
+            raise ValueError(
+                f"Unsupported Transient integrator: {settings.integrator}"
+            )
         analyze_call = f"ops.analyze(1, {settings.dt:g})"
         analysis_kind = "Transient"
     else:
@@ -1359,6 +1401,7 @@ def analysis_to_openseespy(
     lines.append(
         f"_studio_emit('start', total={total_steps}, "
         f"analysis_type={settings.analysis_type!r}, "
+        f"integrator={settings.integrator!r}, "
         f"algorithm=_studio_primary_algorithm, "
         f"test={settings.test!r}, tolerance={settings.tolerance:g}, "
         f"live_convergence={settings.live_convergence!r}, "
@@ -1366,8 +1409,20 @@ def analysis_to_openseespy(
     )
     if settings.adaptive_step:
         if settings.analysis_type == "Static":
-            adaptive_initial = abs(settings.load_increment)
-            nominal_source = f"{settings.load_increment:g}"
+            if settings.integrator == "LoadControl":
+                adaptive_initial = abs(settings.load_increment)
+                nominal_source = f"{settings.load_increment:g}"
+            elif settings.integrator == "DisplacementControl":
+                adaptive_initial = abs(settings.displacement_increment)
+                nominal_source = f"{settings.displacement_increment:g}"
+            elif settings.integrator == "ArcLength":
+                adaptive_initial = abs(settings.arc_length_s)
+                nominal_source = f"{settings.arc_length_s:g}"
+            else:
+                raise ValueError(
+                    f"Unsupported adaptive Static integrator: "
+                    f"{settings.integrator}"
+                )
             adaptive_analyze_call = "ops.analyze(1)"
         elif settings.analysis_type == "Pushover":
             adaptive_initial = abs(settings.displacement_increment)
@@ -1451,10 +1506,22 @@ def analysis_to_openseespy(
         lines.append("        ops.algorithm(_studio_primary_algorithm)")
 
         if settings.analysis_type == "Static":
-            lines.append(
-                "        ops.integrator('LoadControl', "
-                "_studio_trial_increment)"
-            )
+            if settings.integrator == "LoadControl":
+                lines.append(
+                    "        ops.integrator('LoadControl', "
+                    "_studio_trial_increment)"
+                )
+            elif settings.integrator == "DisplacementControl":
+                lines.append(
+                    f"        ops.integrator('DisplacementControl', "
+                    f"{settings.control_node}, {settings.control_dof}, "
+                    "_studio_trial_increment)"
+                )
+            elif settings.integrator == "ArcLength":
+                lines.append(
+                    f"        ops.integrator('ArcLength', "
+                    f"_studio_trial_size, {settings.arc_length_alpha:g})"
+                )
         elif settings.analysis_type in {"Pushover", "Cyclic"}:
             lines.append(
                 f"        ops.integrator('DisplacementControl', "
