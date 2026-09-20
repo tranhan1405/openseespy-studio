@@ -133,7 +133,7 @@ class ElementDialog(_BaseDialog):
         for tag in sorted(self._transformations):
             item = self._transformations[tag]
             self.transformation.addItem(
-                f"{tag} - {item.name} ({item.transf_type})",
+                f"{tag} - {item.name} ({item.transformation_type})",
                 int(tag),
             )
 
