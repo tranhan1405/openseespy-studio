@@ -237,7 +237,7 @@ class TestColumnWizard(QDialog):
         strain_form = QFormLayout(self.strain_penetration_group)
         self.strain_bond_material = QComboBox()
         self.strain_bond_material.currentIndexChanged.connect(
-            self._update_preview
+            self._strain_bond_changed
         )
         strain_form.addRow("Bond_SP01 material:", self.strain_bond_material)
 
@@ -475,6 +475,12 @@ class TestColumnWizard(QDialog):
                 if bond_index >= 0:
                     self.strain_bond_material.setCurrentIndex(bond_index)
             self.strain_bond_material.blockSignals(False)
+            if hasattr(self, "test_bond_material"):
+                self.test_bond_material.setEnabled(
+                    self.base_interface.currentText()
+                    == "Bond_SP01 strain penetration"
+                    and self.strain_bond_material.currentData() is not None
+                )
 
     def _preferred_material_tag(
         self,
@@ -516,6 +522,15 @@ class TestColumnWizard(QDialog):
             bond_index = self.strain_bond_material.findData(material.tag)
             if bond_index >= 0:
                 self.strain_bond_material.setCurrentIndex(bond_index)
+        self._update_preview()
+
+    def _strain_bond_changed(self, *_args) -> None:
+        if hasattr(self, "test_bond_material"):
+            self.test_bond_material.setEnabled(
+                self.base_interface.currentText()
+                == "Bond_SP01 strain penetration"
+                and self.strain_bond_material.currentData() is not None
+            )
         self._update_preview()
 
     def _create_bond_sp01_material(self) -> None:
