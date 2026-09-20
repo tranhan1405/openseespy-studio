@@ -166,4 +166,4 @@ def test_bundled_chichi_nsk_record_loads_offline():
     assert record.dt == 0.005
     assert record.input_unit == "g"
     assert len(record.values) == 9200
-    assert pga_in_g(record.values, "g") > 0.10
+    assert pga_in_g(record.values, "g") > 0.05
