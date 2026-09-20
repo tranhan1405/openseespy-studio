@@ -2723,6 +2723,7 @@ class ModelViewport(QWidget):
             "result-nodes",
             "result-force-diagram",
             "result-force-connectors",
+            "result-force-labels",
             "result-contour",
             "result-contour-nodes",
             "result-hinge-members",
@@ -3143,9 +3144,9 @@ class ModelViewport(QWidget):
             self._result_scope_key(node_tags),
             self._result_scope_key(element_tags),
         )
-        if self._show_cached_result_view(view_key):
-            return
-
+        # Member-force views include sparse numeric labels. Rebuild this
+        # lightweight overlay so labels stay in sync with the active result,
+        # component, scope, and scale instead of restoring only cached meshes.
         final = result.get("final", {}) if isinstance(result, dict) else {}
         if not isinstance(final, dict):
             self.clear_result_overlay()
@@ -3568,6 +3569,7 @@ class ModelViewport(QWidget):
         diagram_values: list[float] = []
         connector_points: list[np.ndarray] = []
         connector_lines: list[int] = []
+        label_candidates: list[tuple[float, np.ndarray, float]] = []
 
         use_local_y = component in {"N", "Vy", "T", "Mz"}
 
@@ -3652,6 +3654,43 @@ class ModelViewport(QWidget):
                 )
             )
 
+            # One sparse numeric annotation per member. For a constant
+            # Truss axial-force diagram, use the visual midpoint; otherwise
+            # label the sampled point with the largest absolute resultant.
+            numeric_values = [float(value) for value in values]
+            if numeric_values:
+                spread = max(numeric_values) - min(numeric_values)
+                tolerance = max(
+                    max(abs(value) for value in numeric_values) * 1.0e-9,
+                    1.0e-12,
+                )
+                if abs(spread) <= tolerance:
+                    if sample_count == 2:
+                        label_point = (
+                            sampled_diagram[0] + sampled_diagram[1]
+                        ) * 0.5
+                        label_value = 0.5 * (
+                            numeric_values[0] + numeric_values[-1]
+                        )
+                    else:
+                        label_index = sample_count // 2
+                        label_point = sampled_diagram[label_index]
+                        label_value = numeric_values[label_index]
+                else:
+                    label_index = max(
+                        range(sample_count),
+                        key=lambda index: abs(numeric_values[index]),
+                    )
+                    label_point = sampled_diagram[label_index]
+                    label_value = numeric_values[label_index]
+                label_candidates.append(
+                    (
+                        abs(float(label_value)),
+                        np.asarray(label_point, dtype=float),
+                        float(label_value),
+                    )
+                )
+
             connector_indices = {
                 0,
                 sample_count // 2,
@@ -3724,6 +3763,40 @@ class ModelViewport(QWidget):
                 render=False,
             )
             entries.append((connectors, connector_kwargs))
+
+        if label_candidates:
+            # Keep the strongest labels if the model is dense. This preserves
+            # readability while still giving direct numerical values on the
+            # force diagram itself.
+            selected_labels = sorted(
+                label_candidates,
+                key=lambda item: item[0],
+                reverse=True,
+            )[:12]
+            selected_labels.sort(key=lambda item: tuple(item[1]))
+
+            force_unit = str(self._units.get("force", "")).strip()
+            length_unit = str(self._units.get("length", "")).strip()
+            if component in {"T", "My", "Mz"}:
+                unit_text = (
+                    f" {force_unit}·{length_unit}"
+                    if force_unit and length_unit
+                    else ""
+                )
+            else:
+                unit_text = f" {force_unit}" if force_unit else ""
+
+            self._add_annotation_labels(
+                [item[1] for item in selected_labels],
+                [
+                    f"{item[2]:.4g}{unit_text}"
+                    for item in selected_labels
+                ],
+                name="result-force-labels",
+                text_color="#263746",
+                font_size=10,
+                always_visible=False,
+            )
 
         self._remember_result_view(view_key, entries)
         self._result_overlay_active = True
