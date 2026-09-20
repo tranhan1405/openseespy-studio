@@ -101,7 +101,7 @@ from .geometry_dialogs import (
 )
 from .history import ProjectSnapshotCommand
 from .import_report_dialog import ImportReportDialog
-from .load_dialogs import ElementLoadDialog, LoadPatternDialog, MassDialog, NodalLoadDialog, PrescribedDisplacementDialog, TimeSeriesDialog
+from .load_dialogs import ElementLoadDialog, GroundMotionDialog, LoadPatternDialog, MassDialog, NodalLoadDialog, PrescribedDisplacementDialog, TimeSeriesDialog
 from .material_dialog import MaterialDialog
 from .mass_source_dialog import MassSourceDialog
 from .model_check_dialog import ModelCheckDialog
@@ -1904,7 +1904,14 @@ class MainWindow(QMainWindow):
             "Generate seismic mass from self mass and selected load patterns",
         )
         self._make_action("time_series", "Time Series...", "timeseries", self._create_time_series, "Create time series")
-        self._make_action("load_pattern", "Load Pattern...", "load", self._create_load_pattern, "Create load pattern or ground motion")
+        self._make_action("load_pattern", "Load Pattern...", "load", self._create_load_pattern, "Create a Plain load pattern")
+        self._make_action(
+            "ground_motion",
+            "Ground Motion...",
+            "timeseries",
+            self._create_ground_motion,
+            "Create a Path record with UniformExcitation for NLTH",
+        )
         self._make_action("nodal_load", "Nodal Load...", "load", self._create_nodal_load, "Create nodal load")
         self._make_action(
             "prescribed_displacement",
@@ -2105,6 +2112,7 @@ class MainWindow(QMainWindow):
         loads_menu.addSeparator()
         loads_menu.addAction(self.actions["time_series"])
         loads_menu.addAction(self.actions["load_pattern"])
+        loads_menu.addAction(self.actions["ground_motion"])
         loads_menu.addAction(self.actions["nodal_load"])
         loads_menu.addAction(self.actions["prescribed_displacement"])
         loads_menu.addAction(self.actions["beam_load"])
@@ -2496,6 +2504,7 @@ class MainWindow(QMainWindow):
                 "mass",
                 "mass_source",
                 "time_series",
+                "ground_motion",
                 "nodal_load",
                 "prescribed_displacement",
                 "beam_load",
@@ -3653,26 +3662,60 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("mass_source", tag))
             mass_sources_root.addChild(item)
 
-        series_root = QTreeWidgetItem([f"Time Series ({len(self.project.time_series)})"])
+        loading_root = QTreeWidgetItem(["Loading"])
+        loading_root.setIcon(0, studio_icon("load"))
+        loading_root.setData(0, Qt.UserRole, ("loading_root", None))
+        loading_root.setExpanded(True)
+        root.addChild(loading_root)
+
+        ground_motion_patterns = {
+            tag: pattern
+            for tag, pattern in self.project.load_patterns.items()
+            if pattern.pattern_type == "UniformExcitation"
+        }
+        ground_motion_series_tags = {
+            pattern.time_series_tag
+            for pattern in ground_motion_patterns.values()
+        }
+        standalone_series = {
+            tag: series
+            for tag, series in self.project.time_series.items()
+            if tag not in ground_motion_series_tags
+        }
+        plain_patterns = {
+            tag: pattern
+            for tag, pattern in self.project.load_patterns.items()
+            if pattern.pattern_type == "Plain"
+        }
+
+        series_root = QTreeWidgetItem([
+            f"Time Series ({len(standalone_series)})"
+        ])
         series_root.setIcon(0, studio_icon("timeseries"))
         series_root.setData(0, Qt.UserRole, ("time_series_root", None))
         series_root.setExpanded(True)
-        root.addChild(series_root)
-        for tag in sorted(self.project.time_series):
-            series = self.project.time_series[tag]
-            item = QTreeWidgetItem([f"{series.series_type} [{tag}]  {series.name}"])
+        loading_root.addChild(series_root)
+        for tag in sorted(standalone_series):
+            series = standalone_series[tag]
+            item = QTreeWidgetItem([
+                f"{series.series_type} [{tag}]  {series.name}"
+            ])
             item.setIcon(0, studio_icon("timeseries"))
             item.setData(0, Qt.UserRole, ("time_series", tag))
             series_root.addChild(item)
 
-        patterns_root = QTreeWidgetItem([f"Load Patterns ({len(self.project.load_patterns)})"])
+        patterns_root = QTreeWidgetItem([
+            f"Load Patterns ({len(plain_patterns)})"
+        ])
         patterns_root.setIcon(0, studio_icon("load"))
         patterns_root.setData(0, Qt.UserRole, ("load_patterns_root", None))
         patterns_root.setExpanded(True)
-        root.addChild(patterns_root)
-        for tag in sorted(self.project.load_patterns):
-            pattern = self.project.load_patterns[tag]
-            item = QTreeWidgetItem([f"{pattern.pattern_type} [{tag}]  {pattern.name}"])
+        loading_root.addChild(patterns_root)
+        for tag in sorted(plain_patterns):
+            pattern = plain_patterns[tag]
+            item = QTreeWidgetItem([
+                f"Plain [{tag}]  {pattern.name}"
+            ])
             item.setIcon(0, studio_icon("load"))
             item.setData(0, Qt.UserRole, ("load_pattern", tag))
             item.setExpanded(True)
@@ -3681,9 +3724,15 @@ class MainWindow(QMainWindow):
                 load = self.project.nodal_loads[load_tag]
                 if load.pattern_tag != tag:
                     continue
-                load_item = QTreeWidgetItem([f"{load.name} [{load.tag}] → Node {load.node_tag}"])
+                load_item = QTreeWidgetItem([
+                    f"{load.name} [{load.tag}] → Node {load.node_tag}"
+                ])
                 load_item.setIcon(0, studio_icon("load"))
-                load_item.setData(0, Qt.UserRole, ("nodal_load", load.tag))
+                load_item.setData(
+                    0,
+                    Qt.UserRole,
+                    ("nodal_load", load.tag),
+                )
                 item.addChild(load_item)
             for displacement_tag in sorted(
                 self.project.prescribed_displacements
@@ -3722,6 +3771,39 @@ class MainWindow(QMainWindow):
                     ("element_load", load.tag),
                 )
                 item.addChild(load_item)
+
+        ground_motions_root = QTreeWidgetItem([
+            f"Ground Motions ({len(ground_motion_patterns)})"
+        ])
+        ground_motions_root.setIcon(0, studio_icon("timeseries"))
+        ground_motions_root.setData(
+            0,
+            Qt.UserRole,
+            ("ground_motions_root", None),
+        )
+        ground_motions_root.setExpanded(True)
+        loading_root.addChild(ground_motions_root)
+        axis_name = {1: "X", 2: "Y", 3: "Z"}
+        for tag in sorted(ground_motion_patterns):
+            pattern = ground_motion_patterns[tag]
+            series = self.project.time_series.get(
+                pattern.time_series_tag
+            )
+            axis = axis_name.get(
+                pattern.direction,
+                f"DOF {pattern.direction}",
+            )
+            points = (
+                len(series.values)
+                if series is not None and series.series_type == "Path"
+                else 0
+            )
+            item = QTreeWidgetItem([
+                f"{pattern.name} [{tag}] · {axis} · {points} pts"
+            ])
+            item.setIcon(0, studio_icon("timeseries"))
+            item.setData(0, Qt.UserRole, ("ground_motion", tag))
+            ground_motions_root.addChild(item)
 
         analysis = QTreeWidgetItem([f"Analysis ({len(self.project.analyses)})"])
         analysis.setIcon(0, studio_icon("analysis"))
@@ -3864,6 +3946,7 @@ class MainWindow(QMainWindow):
         connection_tag: int | None = None
         time_series_tag: int | None = None
         load_pattern_tag: int | None = None
+        ground_motion_tag: int | None = None
         nodal_load_tag: int | None = None
         prescribed_displacement_tag: int | None = None
         element_load_tag: int | None = None
@@ -3908,6 +3991,8 @@ class MainWindow(QMainWindow):
                 time_series_tag = int(tag)
             elif kind == "load_pattern":
                 load_pattern_tag = int(tag)
+            elif kind == "ground_motion":
+                ground_motion_tag = int(tag)
             elif kind == "nodal_load":
                 nodal_load_tag = int(tag)
             elif kind == "prescribed_displacement":
@@ -3978,6 +4063,8 @@ class MainWindow(QMainWindow):
             self._show_time_series_properties(time_series_tag)
         elif load_pattern_tag is not None:
             self._show_load_pattern_properties(load_pattern_tag)
+        elif ground_motion_tag is not None:
+            self._show_ground_motion_properties(ground_motion_tag)
         elif nodal_load_tag is not None:
             self._show_nodal_load_properties(nodal_load_tag)
         elif prescribed_displacement_tag is not None:
@@ -5602,6 +5689,7 @@ class MainWindow(QMainWindow):
         dialog = LoadPatternDialog(
             self.project.time_series,
             next_tag=self.project.next_load_pattern_tag(),
+            allow_uniform_excitation=False,
             parent=self,
         )
         if not dialog.exec():
@@ -5622,7 +5710,10 @@ class MainWindow(QMainWindow):
         if pattern is None:
             return
         dialog = LoadPatternDialog(
-            self.project.time_series, pattern=pattern, parent=self
+            self.project.time_series,
+            pattern=pattern,
+            allow_uniform_excitation=False,
+            parent=self,
         )
         if not dialog.exec():
             return
@@ -5686,6 +5777,156 @@ class MainWindow(QMainWindow):
                 ),
             ))
         self.properties_panel.set_properties("Load Pattern", rows)
+
+    def _ground_motion_pair(
+        self,
+        pattern_tag: int,
+    ) -> tuple[TimeSeriesData, LoadPatternData] | None:
+        pattern = self.project.load_patterns.get(int(pattern_tag))
+        if (
+            pattern is None
+            or pattern.pattern_type != "UniformExcitation"
+        ):
+            return None
+        series = self.project.time_series.get(pattern.time_series_tag)
+        if series is None:
+            return None
+        return series, pattern
+
+    def _create_ground_motion(self) -> None:
+        dialog = GroundMotionDialog(
+            next_series_tag=self.project.next_time_series_tag(),
+            next_pattern_tag=self.project.next_load_pattern_tag(),
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            series, pattern = dialog.data()
+            if series.tag in self.project.time_series:
+                raise ValueError(
+                    f"Time series tag {series.tag} already exists."
+                )
+            if pattern.tag in self.project.load_patterns:
+                raise ValueError(
+                    f"Load pattern tag {pattern.tag} already exists."
+                )
+            self.project.add_time_series(series)
+            try:
+                self.project.add_load_pattern(pattern)
+            except Exception:
+                self.project.time_series.pop(series.tag, None)
+                raise
+        except ValueError as exc:
+            QMessageBox.warning(self, "Ground Motion Editor", str(exc))
+            return
+        self._refresh_project_metadata(
+            f"Created ground motion {pattern.tag}: {pattern.name}"
+        )
+        self._show_ground_motion_properties(pattern.tag)
+        self._record_project_change(
+            f"Create ground motion {pattern.tag}",
+            before,
+        )
+
+    def _edit_ground_motion(self, pattern_tag: int) -> None:
+        pair = self._ground_motion_pair(pattern_tag)
+        if pair is None:
+            QMessageBox.warning(
+                self,
+                "Ground Motion Editor",
+                "This UniformExcitation pattern does not reference a valid "
+                "Path time series.",
+            )
+            return
+        series, pattern = pair
+        dialog = GroundMotionDialog(
+            series=series,
+            pattern=pattern,
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated_series, updated_pattern = dialog.data()
+            self.project.update_time_series(
+                series.tag,
+                updated_series,
+            )
+            self.project.update_load_pattern(
+                pattern.tag,
+                updated_pattern,
+            )
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Ground Motion Editor", str(exc))
+            self._refresh_all()
+            return
+        self._refresh_project_metadata(
+            f"Updated ground motion {updated_pattern.tag}"
+        )
+        self._show_ground_motion_properties(updated_pattern.tag)
+        self._record_project_change(
+            f"Edit ground motion {pattern.tag}",
+            before,
+        )
+
+    def _delete_ground_motion(self, pattern_tag: int) -> None:
+        pair = self._ground_motion_pair(pattern_tag)
+        if pair is None:
+            return
+        series, pattern = pair
+        before = self.project.to_dict()
+        self.project.remove_load_pattern(pattern.tag)
+        if not any(
+            item.time_series_tag == series.tag
+            for item in self.project.load_patterns.values()
+        ):
+            self.project.remove_time_series(series.tag)
+        self._refresh_project_metadata(
+            f"Deleted ground motion {pattern.tag}"
+        )
+        self._record_project_change(
+            f"Delete ground motion {pattern.tag}",
+            before,
+        )
+
+    def _show_ground_motion_properties(self, pattern_tag: int) -> None:
+        pair = self._ground_motion_pair(pattern_tag)
+        if pair is None:
+            return
+        series, pattern = pair
+        axis = {1: "X", 2: "Y", 3: "Z"}.get(
+            pattern.direction,
+            f"DOF {pattern.direction}",
+        )
+        total_scale = float(series.factor) * float(pattern.factor)
+        duration = (
+            max(0, len(series.values) - 1) * series.dt
+            if series.values
+            else 0.0
+        )
+        unit_system = UnitSystem.from_mapping(self.project.units)
+        self.properties_panel.set_properties(
+            "Ground Motion",
+            [
+                ("Pattern Tag", pattern.tag),
+                ("Path Series Tag", series.tag),
+                ("Name", pattern.name),
+                ("Excitation", "UniformExcitation"),
+                ("Direction", axis),
+                ("dt", f"{series.dt:g} {unit_system.time}"),
+                ("Points", len(series.values)),
+                ("Duration", f"{duration:g} {unit_system.time}"),
+                ("Scale Factor", f"{total_scale:g}"),
+                ("Initial Velocity", f"{pattern.vel0:g}"),
+            ],
+        )
 
     def _create_nodal_load(self) -> None:
         plain = {
@@ -11033,6 +11274,40 @@ class MainWindow(QMainWindow):
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
+        if kind == "loading_root":
+            new_pattern = menu.addAction("New Load Pattern...")
+            new_pattern.triggered.connect(self._create_load_pattern)
+            new_motion = menu.addAction("New Ground Motion...")
+            new_motion.triggered.connect(self._create_ground_motion)
+            new_series = menu.addAction("New Time Series...")
+            new_series.triggered.connect(self._create_time_series)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "ground_motions_root":
+            action = menu.addAction("New Ground Motion...")
+            action.triggered.connect(self._create_ground_motion)
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
+        if kind == "ground_motion":
+            tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_ground_motion_properties(tag)
+            )
+            edit = menu.addAction("Edit...")
+            edit.triggered.connect(
+                lambda: self._edit_ground_motion(tag)
+            )
+            menu.addSeparator()
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(
+                lambda: self._delete_ground_motion(tag)
+            )
+            menu.exec(self.tree.viewport().mapToGlobal(position))
+            return
+
         if kind == "load_patterns_root":
             action = menu.addAction("New Load Pattern...")
             action.triggered.connect(self._create_load_pattern)
@@ -11214,6 +11489,8 @@ class MainWindow(QMainWindow):
             self._edit_time_series(int(value))
         elif kind == "load_pattern":
             self._edit_load_pattern(int(value))
+        elif kind == "ground_motion":
+            self._edit_ground_motion(int(value))
         elif kind == "nodal_load":
             self._edit_nodal_load(int(value))
         elif kind == "prescribed_displacement":
