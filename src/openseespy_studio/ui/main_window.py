@@ -3912,6 +3912,7 @@ class MainWindow(QMainWindow):
             )
             return
 
+        self._leave_line_mode()
         self._measure_first_node_tag = None
         self.viewport.clear_measure_anchor(render=False)
         self.viewport.set_interaction_tool("select")
