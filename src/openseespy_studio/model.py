@@ -52,6 +52,9 @@ class Element:
     interior_section_tag: int | None = None
     hinge_i_length: float = 0.0
     hinge_j_length: float = 0.0
+    truss_area: float = 0.0
+    truss_material_tag: int | None = None
+    truss_do_rayleigh: bool = False
 
     def __post_init__(self) -> None:
         self.tag = int(self.tag)
@@ -76,6 +79,13 @@ class Element:
         )
         self.hinge_i_length = float(self.hinge_i_length)
         self.hinge_j_length = float(self.hinge_j_length)
+        self.truss_area = float(self.truss_area)
+        self.truss_material_tag = (
+            None
+            if self.truss_material_tag is None
+            else int(self.truss_material_tag)
+        )
+        self.truss_do_rayleigh = bool(self.truss_do_rayleigh)
         self.section_tag = (
             None if self.section_tag is None else int(self.section_tag)
         )
@@ -131,6 +141,13 @@ class Element:
             raise ValueError("Force-based element tolerance must be positive.")
         if self.mass_per_length < 0.0:
             raise ValueError("Element mass per length cannot be negative.")
+        if self.truss_area < 0.0:
+            raise ValueError("Truss area cannot be negative.")
+        if (
+            self.truss_material_tag is not None
+            and self.truss_material_tag <= 0
+        ):
+            raise ValueError("Truss material tag must be positive.")
 
 
 @dataclass
@@ -172,6 +189,9 @@ class StructuralModel:
         interior_section_tag: int | None = None,
         hinge_i_length: float = 0.0,
         hinge_j_length: float = 0.0,
+        truss_area: float = 0.0,
+        truss_material_tag: int | None = None,
+        truss_do_rayleigh: bool = False,
     ) -> Element:
         if tag in self.elements:
             raise ValueError(f"Element tag {tag} already exists")
@@ -196,6 +216,9 @@ class StructuralModel:
             interior_section_tag,
             hinge_i_length,
             hinge_j_length,
+            truss_area,
+            truss_material_tag,
+            truss_do_rayleigh,
         )
         self.elements[tag] = ele
         return ele
@@ -351,6 +374,9 @@ class StructuralModel:
                 interior_section_tag=interior_section_tag,
                 hinge_i_length=hinge_i_length,
                 hinge_j_length=hinge_j_length,
+                truss_area=element.truss_area,
+                truss_material_tag=element.truss_material_tag,
+                truss_do_rayleigh=element.truss_do_rayleigh,
             )
             self.elements[element.tag] = candidate
             updated.add(element.tag)
@@ -557,6 +583,9 @@ class StructuralModel:
                     source.interior_section_tag,
                     source.hinge_i_length,
                     source.hinge_j_length,
+                    source.truss_area,
+                    source.truss_material_tag,
+                    source.truss_do_rayleigh,
                 )
                 created_elements.add(new_tag)
 
@@ -596,6 +625,9 @@ class StructuralModel:
                     "interior_section_tag": element.interior_section_tag,
                     "hinge_i_length": element.hinge_i_length,
                     "hinge_j_length": element.hinge_j_length,
+                    "truss_area": element.truss_area,
+                    "truss_material_tag": element.truss_material_tag,
+                    "truss_do_rayleigh": element.truss_do_rayleigh,
                 }
                 for element in sorted(self.elements.values(), key=lambda item: item.tag)
             ],
@@ -654,6 +686,9 @@ class StructuralModel:
                 item.get("interior_section_tag"),
                 float(item.get("hinge_i_length", 0.0)),
                 float(item.get("hinge_j_length", 0.0)),
+                float(item.get("truss_area", 0.0)),
+                item.get("truss_material_tag"),
+                bool(item.get("truss_do_rayleigh", False)),
             )
 
         return model
