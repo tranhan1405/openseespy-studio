@@ -103,5 +103,7 @@ class ImportReportDialog(QDialog):
             or len(result.project.materials) > 0
             or len(result.project.sections) > 0
         )
-        self.import_button.setEnabled(recoverable and result.error_count == 0)
+        self.import_button.setEnabled(recoverable)
+        if result.error_count or result.unsupported_count:
+            self.import_button.setText("Import Partial Model")
         root.addWidget(buttons)
