@@ -497,6 +497,7 @@ def build_test_column(
                     node_i=ground_node,
                     node_j=result.base_node,
                     section_tag=penetration.section.tag,
+                    generated_section_tag=penetration.section.tag,
                     orient_x=tuple(axis_vector),
                     orient_y=tuple(lateral_vector),
                     do_rayleigh=bool(spec.base_interface_rayleigh),
