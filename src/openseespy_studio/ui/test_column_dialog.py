@@ -19,10 +19,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..project import MaterialData, ProjectDatabase, SectionData
+from ..project import MATERIAL_DEFAULTS, MaterialData, ProjectDatabase, SectionData
 from ..test_column import TestColumnSpec, bending_rotation_dof
 from ..units import UnitSystem
 from .material_dialog import MaterialDialog
+from .material_test_dialog import MaterialTestDialog
 from .section_dialog import SectionDialog
 
 
@@ -236,9 +237,25 @@ class TestColumnWizard(QDialog):
         strain_form = QFormLayout(self.strain_penetration_group)
         self.strain_bond_material = QComboBox()
         self.strain_bond_material.currentIndexChanged.connect(
-            self._update_preview
+            self._strain_bond_changed
         )
         strain_form.addRow("Bond_SP01 material:", self.strain_bond_material)
+
+        strain_buttons = QHBoxLayout()
+        self.new_bond_material = QPushButton("New Bond_SP01...")
+        self.test_bond_material = QPushButton("Test Bond_SP01...")
+        self.new_bond_material.clicked.connect(
+            self._create_bond_sp01_material
+        )
+        self.test_bond_material.clicked.connect(
+            self._test_bond_sp01_material
+        )
+        strain_buttons.addWidget(self.new_bond_material)
+        strain_buttons.addWidget(self.test_bond_material)
+        strain_buttons.addStretch(1)
+        strain_button_holder = QWidget()
+        strain_button_holder.setLayout(strain_buttons)
+        strain_form.addRow("", strain_button_holder)
 
         self.strain_note = QLabel(
             "Studio clones the selected column Fiber section, keeps its "
@@ -458,6 +475,12 @@ class TestColumnWizard(QDialog):
                 if bond_index >= 0:
                     self.strain_bond_material.setCurrentIndex(bond_index)
             self.strain_bond_material.blockSignals(False)
+            if hasattr(self, "test_bond_material"):
+                self.test_bond_material.setEnabled(
+                    self.base_interface.currentText()
+                    == "Bond_SP01 strain penetration"
+                    and self.strain_bond_material.currentData() is not None
+                )
 
     def _preferred_material_tag(
         self,
@@ -500,6 +523,76 @@ class TestColumnWizard(QDialog):
             if bond_index >= 0:
                 self.strain_bond_material.setCurrentIndex(bond_index)
         self._update_preview()
+
+    def _strain_bond_changed(self, *_args) -> None:
+        if hasattr(self, "test_bond_material"):
+            self.test_bond_material.setEnabled(
+                self.base_interface.currentText()
+                == "Bond_SP01 strain penetration"
+                and self.strain_bond_material.currentData() is not None
+            )
+        self._update_preview()
+
+    def _create_bond_sp01_material(self) -> None:
+        tag = self._next_material_tag()
+        material = MaterialData(
+            tag=tag,
+            name="Bond_SP01 · strain penetration",
+            material_type="Bond_SP01",
+            parameters=MATERIAL_DEFAULTS["Bond_SP01"],
+        )
+        dialog = MaterialDialog(
+            material=material,
+            units=self.project.units,
+            materials=self._combined_materials(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            created = dialog.material_data()
+            if created.material_type != "Bond_SP01":
+                raise ValueError(
+                    "Strain penetration requires a Bond_SP01 material."
+                )
+            if created.tag in self.project.materials:
+                raise ValueError(
+                    f"Material tag {created.tag} already exists in the project."
+                )
+            if created.tag in self._pending_materials:
+                raise ValueError(
+                    f"Material tag {created.tag} is already staged in this wizard."
+                )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Bond_SP01", str(exc))
+            return
+
+        self._pending_materials[created.tag] = created
+        self._refresh_interface_material_combos(created.tag)
+        index = self.strain_bond_material.findData(created.tag)
+        if index >= 0:
+            self.strain_bond_material.setCurrentIndex(index)
+        self._update_preview()
+
+    def _test_bond_sp01_material(self) -> None:
+        tag = self.strain_bond_material.currentData()
+        if tag is None:
+            QMessageBox.information(
+                self,
+                "Bond_SP01",
+                "Create or select a Bond_SP01 material first.",
+            )
+            return
+        material = self._combined_materials().get(int(tag))
+        if material is None:
+            return
+        dialog = MaterialTestDialog(
+            material,
+            units=self.project.units,
+            materials=self._combined_materials(),
+            parent=self,
+        )
+        dialog.exec()
 
     def new_materials(self) -> list[MaterialData]:
         return [
@@ -544,6 +637,10 @@ class TestColumnWizard(QDialog):
         strain_mode = interface == "Bond_SP01 strain penetration"
         self.interface_dofs_group.setVisible(active and not strain_mode)
         self.strain_penetration_group.setVisible(strain_mode)
+        self.new_bond_material.setEnabled(strain_mode)
+        self.test_bond_material.setEnabled(
+            strain_mode and self.strain_bond_material.currentData() is not None
+        )
 
         for check, combo in self.interface_rows.values():
             check.setEnabled(active and not strain_mode)
