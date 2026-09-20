@@ -703,6 +703,7 @@ class ResultsPanel(QWidget):
     hinge_state_requested = Signal()
     element_selected = Signal(int)
     job_selected = Signal(int)
+    calibration_case_apply_requested = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2241,6 +2242,17 @@ class ResultsPanel(QWidget):
         layout.addWidget(self.calibration_info)
 
         controls = QHBoxLayout()
+        self.calibration_apply = QPushButton("Apply Selected to Model...")
+        self.calibration_apply.setEnabled(False)
+        self.calibration_apply.setToolTip(
+            "Preview and apply the selected scored calibration case "
+            "to the project material parameters"
+        )
+        self.calibration_apply.clicked.connect(
+            self._request_apply_calibration_case
+        )
+        controls.addWidget(self.calibration_apply)
+
         export = QPushButton("Export Calibration CSV")
         export.clicked.connect(self._export_calibration_csv)
         controls.addWidget(export)
@@ -2278,6 +2290,9 @@ class ResultsPanel(QWidget):
         )
         self.calibration_table.cellDoubleClicked.connect(
             self._calibration_row_activated
+        )
+        self.calibration_table.itemSelectionChanged.connect(
+            self._calibration_selection_changed
         )
         layout.addWidget(self.calibration_table, 1)
 
@@ -2385,8 +2400,64 @@ class ResultsPanel(QWidget):
         self.calibration_info.setText(
             f"{len(self._calibration_rows)} case(s) · "
             f"{successful} scored case(s). "
-            "Double-click a row to activate that case as the result source."
+            "Double-click a row to activate its result; select a scored "
+            "row to preview/apply its parameters to the model."
         )
+        self.calibration_apply.setEnabled(False)
+
+    def _selected_calibration_row(self) -> dict[str, Any] | None:
+        selected = self.calibration_table.selectionModel().selectedRows()
+        if not selected:
+            return None
+        row = int(selected[0].row())
+        if row < 0 or row >= len(self._calibration_rows):
+            return None
+        item = self._calibration_rows[row]
+        return dict(item) if isinstance(item, dict) else None
+
+    def _calibration_selection_changed(self) -> None:
+        row = self._selected_calibration_row()
+        valid = False
+        if isinstance(row, dict):
+            score = row.get("score")
+            values = row.get("values")
+            try:
+                valid_score = score is not None and math.isfinite(
+                    float(score)
+                )
+            except (TypeError, ValueError):
+                valid_score = False
+            valid = (
+                valid_score
+                and str(row.get("status", "")).lower() == "scored"
+                and isinstance(values, dict)
+                and bool(values)
+            )
+        self.calibration_apply.setEnabled(valid)
+
+    def _request_apply_calibration_case(self) -> None:
+        row = self._selected_calibration_row()
+        if row is None:
+            self.calibration_info.setText(
+                "Select a scored calibration case before applying it."
+            )
+            return
+        score = row.get("score")
+        try:
+            valid_score = score is not None and math.isfinite(float(score))
+        except (TypeError, ValueError):
+            valid_score = False
+        if (
+            not valid_score
+            or str(row.get("status", "")).lower() != "scored"
+            or not isinstance(row.get("values"), dict)
+            or not row.get("values")
+        ):
+            self.calibration_info.setText(
+                "Only a successfully scored calibration case can be applied."
+            )
+            return
+        self.calibration_case_apply_requested.emit(row)
 
     def _calibration_row_activated(
         self,
@@ -2651,6 +2722,7 @@ class ResultsPanel(QWidget):
         )
         self._calibration_rows = []
         self.calibration_table.setRowCount(0)
+        self.calibration_apply.setEnabled(False)
         self.calibration_info.setText(
             "Run a Calibration / Parameter Study to compare batch cases "
             "against experimental cyclic data."
