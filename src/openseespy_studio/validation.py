@@ -605,6 +605,41 @@ def _element_load_checks(
                 )
 
 
+def _constraint_handler_checks(
+    project: ProjectDatabase,
+    analysis: AnalysisSettingsData,
+    issues: list[ValidationIssue],
+) -> None:
+    if analysis.analysis_type == "Modal":
+        return
+    if analysis.constraints_handler != "Plain":
+        return
+
+    incompatible = sorted(
+        constraint.tag
+        for constraint in project.constraints.values()
+        if constraint.constraint_type in {"rigidLink", "rigidDiaphragm"}
+    )
+    if not incompatible:
+        return
+
+    preview = ", ".join(str(tag) for tag in incompatible[:8])
+    suffix = "..." if len(incompatible) > 8 else ""
+    issues.append(
+        ValidationIssue(
+            "ERROR",
+            "Constraint handler",
+            "Plain ConstraintHandler cannot faithfully enforce "
+            "rigidLink/rigidDiaphragm multi-point constraints "
+            f"(constraint tag(s): {preview}{suffix}).",
+            suggestion=(
+                "Set Analysis Settings > Constraints to Transformation "
+                "for analyses using rigidLink or rigidDiaphragm."
+            ),
+        )
+    )
+
+
 def _driving_load_checks(
     project: ProjectDatabase,
     analysis: AnalysisSettingsData,
@@ -875,6 +910,7 @@ def validate_project(
     _recorder_checks(project, issues)
 
     if analysis is not None:
+        _constraint_handler_checks(project, analysis, issues)
         _driving_load_checks(project, analysis, issues)
         _dynamic_checks(project, analysis, issues)
 
