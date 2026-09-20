@@ -3210,10 +3210,13 @@ def enrich_member_force_results(
         return enriched
 
     local_forces = final.get("element_local_forces", {})
+    axial_forces = final.get("element_axial_forces", {})
     section_forces = final.get("element_section_forces", {})
     load_factors = final.get("load_factors", {})
     if not isinstance(local_forces, dict):
-        return enriched
+        local_forces = {}
+    if not isinstance(axial_forces, dict):
+        axial_forces = {}
     if not isinstance(section_forces, dict):
         section_forces = {}
     if not isinstance(load_factors, dict):
@@ -3228,9 +3231,6 @@ def enrich_member_force_results(
 
     for tag in sorted(model.elements):
         element = model.elements[tag]
-        raw = local_forces.get(str(tag), local_forces.get(tag))
-        if not isinstance(raw, (list, tuple)) or len(raw) < 12:
-            continue
 
         node_i = model.nodes.get(element.i)
         node_j = model.nodes.get(element.j)
@@ -3241,6 +3241,33 @@ def enrich_member_force_results(
             for a, b in zip(node_i.xyz, node_j.xyz)
         ))
         if length <= 1.0e-15:
+            continue
+
+        if element.element_type == "truss":
+            axial = axial_forces.get(
+                str(tag),
+                axial_forces.get(tag),
+            )
+            if axial is None:
+                continue
+            try:
+                axial_value = float(axial)
+            except (TypeError, ValueError):
+                continue
+            diagrams[str(tag)] = {
+                "N": {
+                    "x": [0.0, float(length)],
+                    "values": [axial_value, axial_value],
+                    "source": "truss axialForce",
+                    "section_points": [],
+                    "verification_max_abs_difference": None,
+                    "analysis_type": analysis_type,
+                }
+            }
+            continue
+
+        raw = local_forces.get(str(tag), local_forces.get(tag))
+        if not isinstance(raw, (list, tuple)) or len(raw) < 12:
             continue
 
         active_loads = _active_local_element_loads(
