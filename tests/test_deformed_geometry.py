@@ -49,6 +49,26 @@ def test_beam_rotations_create_curved_centerline():
     assert abs(float(centerline[4, 1])) > 1.0e-6
 
 
+def test_2d_rotations_create_curved_displaced_centerline():
+    centerline, _fy, _fz, magnitudes = deformed_member_frames(
+        (0.0, 0.0, 0.0),
+        (3.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, 0.0, 1.0),
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.12),
+        ndm=2,
+        scale=5.0,
+        stations=11,
+        smooth=True,
+    )
+    assert centerline.shape == (11, 3)
+    assert centerline[0] == pytest.approx((0.0, 0.0, 0.0))
+    assert centerline[-1] == pytest.approx((3.0, 0.0, 0.0))
+    assert abs(float(centerline[5, 1])) > 1.0e-6
+    assert magnitudes[-1] == pytest.approx(0.0)
+
+
 def test_rectangle_section_sweeps_along_curved_member():
     section = SectionData(
         tag=1,
