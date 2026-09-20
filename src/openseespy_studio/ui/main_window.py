@@ -1294,6 +1294,7 @@ class MainWindow(QMainWindow):
         self._results_dock_sized_once = False
         self._dirty = False
         self._measure_first_node_tag: int | None = None
+        self._line_first_node_tag: int | None = None
         self._job_ui_timer = QTimer(self)
         self._job_ui_timer.setInterval(1000)
         self._job_ui_timer.timeout.connect(self._refresh_running_job_ui)
@@ -1562,8 +1563,9 @@ class MainWindow(QMainWindow):
             "line",
             "Line",
             "element",
-            self._create_line,
-            "Quick-connect exactly two selected nodes",
+            self._activate_line_tool,
+            "Click two nodes in the viewport to create a quick line member",
+            checkable=True,
         )
         self._make_action(
             "frame",
@@ -3842,8 +3844,17 @@ class MainWindow(QMainWindow):
             action.setChecked(False)
         self.viewport.set_selection_filter(self.selection.filter)
 
+    def _leave_line_mode(self) -> None:
+        self._line_first_node_tag = None
+        self.viewport.clear_line_anchor(render=False)
+        action = self.actions.get("line")
+        if action is not None:
+            action.setChecked(False)
+        self.viewport.set_selection_filter(self.selection.filter)
+
     def _activate_select_tool(self) -> None:
         self._leave_measure_mode()
+        self._leave_line_mode()
         self.viewport.set_interaction_tool("select")
         self.actions["select"].setChecked(True)
         self.actions["box"].setChecked(False)
@@ -3852,12 +3863,40 @@ class MainWindow(QMainWindow):
 
     def _activate_box_tool(self) -> None:
         self._leave_measure_mode()
+        self._leave_line_mode()
         self.viewport.set_interaction_tool("box")
         self.actions["select"].setChecked(False)
         self.actions["box"].setChecked(True)
         self.viewport.plotter.render()
         self.status_message.setText(
             "Box select: left→right = window, right→left = crossing"
+        )
+
+    def _activate_line_tool(self, checked: bool = True) -> None:
+        action = self.actions.get("line")
+        if action is not None and not action.isChecked() and not checked:
+            self._activate_select_tool()
+            return
+        if len(self.model.nodes) < 2:
+            if action is not None:
+                action.setChecked(False)
+            self.status_message.setText(
+                "Create Line requires at least two model nodes"
+            )
+            return
+
+        self._leave_measure_mode()
+        self._line_first_node_tag = None
+        self.viewport.clear_line_anchor(render=False)
+        self.viewport.set_interaction_tool("select")
+        self.viewport.set_selection_filter("node")
+        self.actions["select"].setChecked(False)
+        self.actions["box"].setChecked(False)
+        if action is not None:
+            action.setChecked(True)
+        self.viewport.plotter.render()
+        self.status_message.setText(
+            "Create Line: click the first node"
         )
 
     def _activate_measure_distance(self, checked: bool = True) -> None:
@@ -3906,6 +3945,12 @@ class MainWindow(QMainWindow):
         ):
             self._activate_select_tool()
             return
+        if (
+            self.actions.get("line") is not None
+            and self.actions["line"].isChecked()
+        ):
+            self._activate_select_tool()
+            return
         if self.viewport.interaction_tool() == "box":
             self._activate_select_tool()
             return
@@ -3915,11 +3960,19 @@ class MainWindow(QMainWindow):
         value = text.lower()
         self.selection.set_filter(value)
         measure_action = self.actions.get("measure_distance")
+        line_action = self.actions.get("line")
         if measure_action is not None and measure_action.isChecked():
             self.viewport.set_selection_filter("node")
             self.status_message.setText(
                 f"Selection filter saved as {text}; "
                 "Measure Distance temporarily snaps to nodes"
+            )
+            return
+        if line_action is not None and line_action.isChecked():
+            self.viewport.set_selection_filter("node")
+            self.status_message.setText(
+                f"Selection filter saved as {text}; "
+                "Create Line temporarily snaps to nodes"
             )
             return
         self.viewport.set_selection_filter(value)
@@ -3931,6 +3984,41 @@ class MainWindow(QMainWindow):
         kind = payload.get("kind")
         tag = payload.get("tag")
         mode = payload.get("mode", "replace")
+
+        line_action = self.actions.get("line")
+        if line_action is not None and line_action.isChecked():
+            if kind != "node" or tag is None:
+                self.status_message.setText(
+                    "Create Line: click a model node"
+                )
+                return
+
+            node_tag = int(tag)
+            if self._line_first_node_tag is None:
+                self._line_first_node_tag = node_tag
+                self.viewport.show_line_anchor(node_tag)
+                self.status_message.setText(
+                    f"Create Line: node {node_tag} selected · "
+                    "click the second node"
+                )
+                return
+
+            if node_tag == self._line_first_node_tag:
+                self.status_message.setText(
+                    "Create Line: choose a different second node"
+                )
+                return
+
+            first_tag = self._line_first_node_tag
+            self._line_first_node_tag = None
+            self.viewport.clear_line_anchor(render=False)
+            self._create_line_between_nodes(first_tag, node_tag)
+            if line_action.isChecked():
+                self.status_message.setText(
+                    f"Created line {first_tag} → {node_tag} · "
+                    "click another first node"
+                )
+            return
 
         measure_action = self.actions.get("measure_distance")
         if measure_action is not None and measure_action.isChecked():
@@ -5425,25 +5513,23 @@ class MainWindow(QMainWindow):
         self._record_project_change(f"Create node {tag}", before)
 
     def _create_line(self) -> None:
-        """Quick-connect exactly two selected nodes.
-
-        Line is intentionally lightweight: it uses an elastic beam-column
-        formulation and adopts the first compatible Elastic section and
-        geometric transformation when available. Missing assignments remain
-        explicit so Model Check / Export can tell the user what still needs
-        to be assigned.
-        """
+        """Backward-compatible command using exactly two selected nodes."""
         selected_nodes = sorted(self.selection.nodes)
         if len(selected_nodes) != 2:
-            QMessageBox.information(
-                self,
-                "Create Line",
-                "Select exactly two nodes, then choose Line.",
-            )
+            self._activate_line_tool(True)
             return
+        self._create_line_between_nodes(
+            selected_nodes[0],
+            selected_nodes[1],
+        )
 
+    def _create_line_between_nodes(
+        self,
+        node_i: int,
+        node_j: int,
+    ) -> None:
+        """Create one quick elastic line between two existing nodes."""
         tag = self.model.next_element_tag()
-        node_i, node_j = selected_nodes
 
         section_tag = next(
             (
