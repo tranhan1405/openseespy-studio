@@ -165,3 +165,38 @@ def test_transient_integrator_switches_parameter_rows():
         assert not _shown(dialog.gamma)
     finally:
         _close(dialog)
+
+
+def test_pushover_new_analysis_defaults_to_safe_auto_driving_load():
+    dialog = AnalysisDialog(
+        analysis_type="Pushover",
+        plain_patterns={4: "Existing lateral"},
+    )
+    try:
+        assert _shown(dialog.driver_mode)
+        assert _shown(dialog.driver_distribution)
+        assert not _shown(dialog.driver_pattern)
+        assert not _shown(dialog.deferred_patterns)
+        assert dialog.driver_mode.currentData() == "auto"
+        assert dialog.driver_distribution.currentText() == "Triangular"
+        assert dialog.data().deferred_pattern_tags == []
+    finally:
+        _close(dialog)
+
+
+def test_cyclic_can_use_existing_plain_driving_pattern():
+    dialog = AnalysisDialog(
+        analysis_type="Cyclic",
+        plain_patterns={7: "Cyclic reference"},
+    )
+    try:
+        index = dialog.driver_mode.findData("existing")
+        dialog.driver_mode.setCurrentIndex(index)
+        _APP.processEvents()
+        assert _shown(dialog.driver_pattern)
+        assert not _shown(dialog.driver_distribution)
+        pattern_index = dialog.driver_pattern.findData(7)
+        dialog.driver_pattern.setCurrentIndex(pattern_index)
+        assert dialog.data().deferred_pattern_tags == [7]
+    finally:
+        _close(dialog)

@@ -57,6 +57,7 @@ from ..analysis_templates import (
     build_modal_template,
     build_nlth_multi_template,
     build_pushover_template,
+    build_reference_lateral_loading,
     default_control_node,
 )
 from ..frame_setup import prepare_frame_grid
@@ -1928,10 +1929,10 @@ class MainWindow(QMainWindow):
         self._make_action("analysis_setup", "Analysis Setup...", "analysis", self._create_analysis, "Create analysis settings")
         self._make_action(
             "analysis_template",
-            "Templates...",
+            "Analysis Wizard...",
             "analysis",
             lambda checked=False: self._create_analysis_template("Pushover"),
-            "Open analysis templates",
+            "Guided setup that creates analysis, required loading/protocol, and default results",
         )
         self._make_action(
             "modal_template",
@@ -2117,7 +2118,7 @@ class MainWindow(QMainWindow):
         loads_menu.addAction(self.actions["prescribed_displacement"])
         loads_menu.addAction(self.actions["beam_load"])
 
-        template_menu = menus["Analysis"].addMenu("Templates")
+        template_menu = menus["Analysis"].addMenu("Analysis Wizard")
         template_menu.addAction(self.actions["modal_template"])
         template_menu.addAction(self.actions["pushover_template"])
         template_menu.addAction(self.actions["cyclic_template"])
@@ -2516,7 +2517,7 @@ class MainWindow(QMainWindow):
         analysis_page = RibbonPage()
         add_group(
             analysis_page,
-            "Templates",
+            "Analysis Wizard",
             large=("analysis_template",),
             small=(
                 "modal_template",
@@ -9035,6 +9036,69 @@ class MainWindow(QMainWindow):
         self._select_tree_payload("analysis", plan.analysis.tag)
         self._show_analysis_properties(plan.analysis.tag)
 
+    def _plain_pattern_choices(self) -> dict[int, str]:
+        return {
+            int(tag): pattern.name
+            for tag, pattern in self.project.load_patterns.items()
+            if pattern.pattern_type == "Plain"
+        }
+
+    def _apply_analysis_driving_load(
+        self,
+        settings: AnalysisSettingsData,
+        dialog: AnalysisDialog,
+    ) -> None:
+        """Ensure Pushover/Cyclic always have a valid reference load."""
+        if settings.analysis_type not in {"Pushover", "Cyclic"}:
+            return
+
+        config = dialog.driving_load_config()
+        mode = str(config.get("mode", "auto"))
+        if mode == "existing":
+            pattern_tag = config.get("pattern_tag")
+            if pattern_tag is None:
+                raise ValueError(
+                    "Choose an existing Plain driving load pattern."
+                )
+            pattern = self.project.load_patterns.get(int(pattern_tag))
+            if pattern is None:
+                raise ValueError(
+                    f"Driving load pattern {pattern_tag} does not exist."
+                )
+            if pattern.pattern_type != "Plain":
+                raise ValueError(
+                    "Pushover/Cyclic driving load must be a Plain pattern."
+                )
+            settings.deferred_pattern_tags = [int(pattern_tag)]
+            return
+
+        if mode != "auto":
+            raise ValueError(f"Unsupported driving-load mode: {mode}")
+
+        distribution = str(
+            config.get(
+                "distribution",
+                "Triangular"
+                if settings.analysis_type == "Pushover"
+                else "Uniform",
+            )
+        )
+        height_axis = 2 if self.model.ndm == 2 else 3
+        series, patterns, loads = build_reference_lateral_loading(
+            self.project,
+            dof=settings.control_dof,
+            distribution=distribution,
+            prefix=settings.analysis_type,
+            height_axis=height_axis,
+        )
+        for item in series:
+            self.project.add_time_series(item)
+        for item in patterns:
+            self.project.add_load_pattern(item)
+        for item in loads:
+            self.project.add_nodal_load(item)
+        settings.deferred_pattern_tags = [patterns[0].tag]
+
     def _create_analysis(self) -> None:
         self._create_analysis_of_type(None)
 
@@ -9048,6 +9112,7 @@ class MainWindow(QMainWindow):
             default_node=default_node,
             analysis_type=analysis_type,
             ndf=self.model.ndf,
+            plain_patterns=self._plain_pattern_choices(),
             parent=self,
         )
         if not dialog.exec():
@@ -9055,9 +9120,13 @@ class MainWindow(QMainWindow):
         before = self.project.to_dict()
         try:
             settings = dialog.data()
+            self._apply_analysis_driving_load(settings, dialog)
             self.project.add_analysis(settings)
         except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
             QMessageBox.warning(self, "Analysis Settings", str(exc))
+            self._refresh_all()
             return
         self._refresh_project_metadata(f"Created analysis {settings.tag}")
         self._show_analysis_properties(settings.tag)
@@ -9070,6 +9139,7 @@ class MainWindow(QMainWindow):
         dialog = AnalysisDialog(
             analysis=settings,
             ndf=self.model.ndf,
+            plain_patterns=self._plain_pattern_choices(),
             parent=self,
         )
         if not dialog.exec():
@@ -9077,9 +9147,13 @@ class MainWindow(QMainWindow):
         before = self.project.to_dict()
         try:
             updated = dialog.data()
+            self._apply_analysis_driving_load(updated, dialog)
             self.project.update_analysis(tag, updated)
         except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
             QMessageBox.warning(self, "Analysis Settings", str(exc))
+            self._refresh_all()
             return
         self._refresh_project_metadata(f"Updated analysis {updated.tag}")
         self._show_analysis_properties(updated.tag)
@@ -10943,7 +11017,7 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "analyses_root":
-            template_menu = menu.addMenu("Templates")
+            template_menu = menu.addMenu("Analysis Wizard")
             for template_name in (
                 "Modal",
                 "Pushover",

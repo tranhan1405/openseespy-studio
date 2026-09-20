@@ -584,6 +584,94 @@ def _element_load_checks(
                 )
 
 
+def _driving_load_checks(
+    project: ProjectDatabase,
+    analysis: AnalysisSettingsData,
+    issues: list[ValidationIssue],
+) -> None:
+    if analysis.analysis_type not in {"Pushover", "Cyclic"}:
+        return
+
+    driver_tags = list(analysis.deferred_pattern_tags)
+    if not driver_tags:
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Driving load",
+                f"{analysis.analysis_type} analysis has no driving/reference "
+                "load pattern.",
+                suggestion=(
+                    "Edit Analysis Settings and use Auto-generate reference "
+                    "pattern, or select an existing Plain pattern."
+                ),
+            )
+        )
+        return
+
+    for tag in driver_tags:
+        pattern = project.load_patterns.get(int(tag))
+        if pattern is None:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Driving load",
+                    f"{analysis.analysis_type} analysis references missing "
+                    f"driving pattern {tag}.",
+                    suggestion="Select or auto-generate a valid Plain pattern.",
+                )
+            )
+            continue
+        if pattern.pattern_type != "Plain":
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Driving load",
+                    f"Driving pattern {tag} is {pattern.pattern_type}; "
+                    "Pushover/Cyclic require a Plain reference-load pattern.",
+                    suggestion="Use a Plain force pattern as the driver.",
+                )
+            )
+            continue
+
+        has_nodal_reference = any(
+            load.pattern_tag == int(tag)
+            and any(abs(float(value)) > 1.0e-15 for value in load.values)
+            for load in project.nodal_loads.values()
+        )
+        has_element_reference = any(
+            load.pattern_tag == int(tag)
+            for load in project.element_loads.values()
+        )
+        if not has_nodal_reference and not has_element_reference:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Driving load",
+                    f"Driving pattern {tag} contains no nonzero reference "
+                    "force load.",
+                    suggestion=(
+                        "Auto-generate the reference pattern or add a nonzero "
+                        "nodal/element load to the selected Plain pattern."
+                    ),
+                )
+            )
+
+        if any(
+            item.pattern_tag == int(tag)
+            for item in project.prescribed_displacements.values()
+        ):
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Driving load",
+                    f"Driving pattern {tag} contains Prescribed Displacement "
+                    "objects. DisplacementControl requires a force reference "
+                    "pattern instead.",
+                    suggestion="Move prescribed displacements to another pattern.",
+                )
+            )
+
+
 def _dynamic_checks(
     project: ProjectDatabase,
     analysis: AnalysisSettingsData,
@@ -744,6 +832,7 @@ def validate_project(
     _recorder_checks(project, issues)
 
     if analysis is not None:
+        _driving_load_checks(project, analysis, issues)
         _dynamic_checks(project, analysis, issues)
 
     severity_order = {"ERROR": 0, "WARNING": 1, "INFO": 2}

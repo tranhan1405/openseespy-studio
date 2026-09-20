@@ -18,6 +18,7 @@ class AnalysisDialog(QDialog):
         default_node=1,
         analysis_type=None,
         ndf=6,
+        plain_patterns=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -32,6 +33,10 @@ class AnalysisDialog(QDialog):
         self.form = form
         self._row_widgets = {}
         self.ndf = max(1, min(int(ndf), 6))
+        self.plain_patterns = {
+            int(tag): str(name)
+            for tag, name in dict(plain_patterns or {}).items()
+        }
         self.tag=QSpinBox(); self.tag.setRange(1,2147483647); self.tag.setValue(analysis.tag if analysis else next_tag)
         default_kind = (
             analysis.analysis_type
@@ -144,6 +149,52 @@ class AnalysisDialog(QDialog):
         self.deferred_patterns.setPlaceholderText(
             "e.g. 3  (driving lateral / excitation pattern)"
         )
+        self.driver_mode=QComboBox()
+        self.driver_mode.addItem(
+            "Auto-generate reference pattern",
+            "auto",
+        )
+        self.driver_mode.addItem(
+            "Use existing Plain pattern",
+            "existing",
+        )
+        self.driver_mode.setToolTip(
+            "Pushover/Cyclic require a nonzero reference load pattern for "
+            "DisplacementControl. Auto-generate is the safe default."
+        )
+        self.driver_pattern=QComboBox()
+        for pattern_tag, pattern_name in sorted(self.plain_patterns.items()):
+            self.driver_pattern.addItem(
+                f"{pattern_tag} · {pattern_name}",
+                pattern_tag,
+            )
+        self.driver_distribution=QComboBox()
+        self.driver_distribution.addItems(
+            ["Uniform", "Triangular", "Mass proportional"]
+        )
+        initial_driver_tag = None
+        if (
+            analysis is not None
+            and analysis.analysis_type in {"Pushover", "Cyclic"}
+            and analysis.deferred_pattern_tags
+        ):
+            initial_driver_tag = int(analysis.deferred_pattern_tags[0])
+        if initial_driver_tag in self.plain_patterns:
+            self.driver_mode.setCurrentIndex(
+                self.driver_mode.findData("existing")
+            )
+            index = self.driver_pattern.findData(initial_driver_tag)
+            if index >= 0:
+                self.driver_pattern.setCurrentIndex(index)
+        else:
+            self.driver_mode.setCurrentIndex(
+                self.driver_mode.findData("auto")
+            )
+        self.driver_distribution.setCurrentText(
+            "Triangular"
+            if default_kind == "Pushover"
+            else "Uniform"
+        )
         self.modes=QSpinBox(); self.modes.setRange(1,10000); self.modes.setValue(analysis.num_modes if analysis else 3)
         self.eigen_solver=QComboBox()
         self.eigen_solver.addItem("ARPACK · general / sparse", "-genBandArpack")
@@ -228,7 +279,10 @@ class AnalysisDialog(QDialog):
             ("eigen_solver","Eigen solver",self.eigen_solver),
             ("preload_gravity","Gravity preload",self.preload_gravity),
             ("gravity_steps","Gravity preload steps",self.gravity_steps),
-            ("deferred_patterns","Driving pattern tag(s)",self.deferred_patterns),
+            ("driver_mode","Driving load",self.driver_mode),
+            ("driver_pattern","Existing Plain pattern",self.driver_pattern),
+            ("driver_distribution","Auto load distribution",self.driver_distribution),
+            ("deferred_patterns","Excitation pattern tag(s)",self.deferred_patterns),
             ("recovery","Recovery",self.recovery),
             ("adaptive","Adaptive step",self.adaptive),
             ("cutback","Cutback factor",self.cutback),
@@ -258,6 +312,9 @@ class AnalysisDialog(QDialog):
         )
         self.preload_gravity.toggled.connect(
             lambda _checked: self._sync(self.kind.currentText())
+        )
+        self.driver_mode.currentIndexChanged.connect(
+            lambda _index: self._sync(self.kind.currentText())
         )
         self.adaptive.toggled.connect(
             lambda _checked: self._sync(self.kind.currentText())
@@ -363,7 +420,15 @@ class AnalysisDialog(QDialog):
             visible.update({"modes","eigen_solver"})
 
         if staged:
-            visible.update({"preload_gravity","deferred_patterns"})
+            visible.add("preload_gravity")
+            if push or cyclic:
+                visible.add("driver_mode")
+                if self.driver_mode.currentData() == "existing":
+                    visible.add("driver_pattern")
+                else:
+                    visible.add("driver_distribution")
+            elif transient:
+                visible.add("deferred_patterns")
             if self.preload_gravity.isChecked():
                 visible.add("gravity_steps")
 
@@ -375,6 +440,24 @@ class AnalysisDialog(QDialog):
 
         for key in self._row_widgets:
             self._set_row_visible(key,key in visible)
+    def driving_load_config(self) -> dict[str, object]:
+        kind = self.kind.currentText()
+        if kind not in {"Pushover", "Cyclic"}:
+            return {"mode": "none"}
+        mode = str(self.driver_mode.currentData() or "auto")
+        return {
+            "mode": mode,
+            "distribution": self.driver_distribution.currentText(),
+            "pattern_tag": (
+                int(self.driver_pattern.currentData())
+                if (
+                    mode == "existing"
+                    and self.driver_pattern.currentData() is not None
+                )
+                else None
+            ),
+        }
+
     def data(self):
         cyclic_targets=[]
         for raw in self.cyclic_targets.text().replace(";", ",").split(","):
@@ -382,15 +465,26 @@ class AnalysisDialog(QDialog):
             if value:
                 cyclic_targets.append(float(value))
         deferred_pattern_tags=[]
-        for raw in (
-            self.deferred_patterns.text()
-            .replace(";", ",")
-            .replace(" ", ",")
-            .split(",")
-        ):
-            value=raw.strip()
-            if value:
-                deferred_pattern_tags.append(int(value))
+        kind = self.kind.currentText()
+        if kind == "Transient":
+            for raw in (
+                self.deferred_patterns.text()
+                .replace(";", ",")
+                .replace(" ", ",")
+                .split(",")
+            ):
+                value=raw.strip()
+                if value:
+                    deferred_pattern_tags.append(int(value))
+        elif kind in {"Pushover", "Cyclic"}:
+            driver = self.driving_load_config()
+            if driver["mode"] == "existing":
+                pattern_tag = driver.get("pattern_tag")
+                if pattern_tag is None:
+                    raise ValueError(
+                        "Choose an existing Plain driving load pattern."
+                    )
+                deferred_pattern_tags.append(int(pattern_tag))
         return AnalysisSettingsData(
             tag=self.tag.value(),name=self.name.text().strip() or f"Analysis {self.tag.value()}",
             analysis_type=self.kind.currentText(),constraints_handler=self.constraints.currentText(),

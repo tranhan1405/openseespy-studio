@@ -314,7 +314,7 @@ class AnalysisTemplateDialog(QDialog):
         parent=None,
     ):
         super().__init__(parent)
-        self.setWindowTitle("Analysis Template")
+        self.setWindowTitle("Analysis Wizard")
         self.setModal(True)
         self.setSizeGripEnabled(True)
         self.resize(640, 620)
@@ -372,7 +372,7 @@ class AnalysisTemplateDialog(QDialog):
         for dof, name in directions:
             self.direction.addItem(name, dof)
 
-        top.addRow("Template:", self.template)
+        top.addRow("Workflow:", self.template)
         top.addRow("Name:", self.name)
         top.addRow("Solver strategy:", self.solver)
         top.addRow("Control / monitor node:", self.control_node)
