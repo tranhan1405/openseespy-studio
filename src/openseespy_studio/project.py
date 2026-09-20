@@ -1429,7 +1429,6 @@ class AnalysisSettingsData:
     tolerance: float = 1.0e-8
     max_iterations: int = 50
     algorithm: str = "Newton"
-    integrator: str = "Auto"
     steps: int = 10
     load_increment: float = 0.1
     control_node: int = 1
@@ -1442,11 +1441,6 @@ class AnalysisSettingsData:
     dt: float = 0.01
     gamma: float = 0.5
     beta: float = 0.25
-    hht_alpha: float = 0.9
-    generalized_alpha_m: float = 1.0
-    generalized_alpha_f: float = 1.0
-    arc_length_s: float = 0.01
-    arc_length_alpha: float = 1.0
     rayleigh_damping_ratio: float = 0.0
     rayleigh_mode_i: int = 1
     rayleigh_mode_j: int = 3
@@ -1464,6 +1458,14 @@ class AnalysisSettingsData:
     adaptive_growth_after: int = 3
     live_convergence: bool = True
     show_external_console: bool = False
+    # Keep new integrator fields at the end so existing positional
+    # AnalysisSettingsData construction remains backward compatible.
+    integrator: str = "Auto"
+    hht_alpha: float = 0.9
+    generalized_alpha_m: float = 1.0
+    generalized_alpha_f: float = 1.0
+    arc_length_s: float = 0.01
+    arc_length_alpha: float = 1.0
 
     def __post_init__(self) -> None:
         self.tag=int(self.tag); self.name=str(self.name).strip() or f"Analysis {self.tag}"
