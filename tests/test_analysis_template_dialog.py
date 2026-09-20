@@ -358,6 +358,7 @@ def test_nlth_bundled_el_centro_can_create_request_without_browse(qapp):
         index = dialog.gm_library.findData("el-centro-1940")
         assert index >= 0
         dialog.gm_library.setCurrentIndex(index)
+        dialog._assign_library_ground_motion()
         qapp.processEvents()
 
         assert len(dialog._ground_motion_values[1]) == 1559
@@ -374,7 +375,7 @@ def test_nlth_bundled_el_centro_can_create_request_without_browse(qapp):
         qapp.processEvents()
 
 
-def test_nlth_library_is_offline_only_and_custom_clears_auto_record(qapp):
+def test_nlth_library_is_offline_only_and_custom_keeps_assigned_record(qapp):
     model = StructuralModel("nlth-library")
     model.add_node(1, 0.0, 0.0, 0.0)
     project = ProjectDatabase(model=model)
@@ -394,6 +395,7 @@ def test_nlth_library_is_offline_only_and_custom_clears_auto_record(qapp):
         dialog.gm_library.setCurrentIndex(
             dialog.gm_library.findData("el-centro-1940")
         )
+        dialog._assign_library_ground_motion()
         qapp.processEvents()
         assert dialog._ground_motion_values[1]
 
@@ -401,7 +403,8 @@ def test_nlth_library_is_offline_only_and_custom_clears_auto_record(qapp):
             dialog.gm_library.findData("custom")
         )
         qapp.processEvents()
-        assert not dialog._ground_motion_values[1]
+        assert dialog._ground_motion_values[1]
+        assert not dialog.gm_library_assign.isEnabled()
         assert "Custom / Local Record" in dialog.gm_library_info.text()
     finally:
         dialog.close()
@@ -424,6 +427,7 @@ def test_nlth_plot_payload_uses_scaled_parsed_record(qapp):
     try:
         index = dialog.gm_library.findData("el-centro-1940")
         dialog.gm_library.setCurrentIndex(index)
+        dialog._assign_library_ground_motion()
         dialog.gm_scales[1].setValue(2.0)
         qapp.processEvents()
 
@@ -494,6 +498,7 @@ def test_nlth_clear_disables_component_plot_button(qapp):
         dialog.gm_library.setCurrentIndex(
             dialog.gm_library.findData("el-centro-1940")
         )
+        dialog._assign_library_ground_motion()
         qapp.processEvents()
         assert dialog.gm_plot_buttons[1].isEnabled()
 
@@ -566,6 +571,7 @@ def test_nlth_template_can_select_project_mass_source(qapp):
         dialog.gm_library.setCurrentIndex(
             dialog.gm_library.findData("el-centro-1940")
         )
+        dialog._assign_library_ground_motion()
         qapp.processEvents()
         assert dialog.nlth_generate_mass.isChecked()
         request = dialog.request()
@@ -638,6 +644,79 @@ def test_manual_pushover_height_edit_disables_auto_height(qapp):
         dialog.push_auto_height.setChecked(True)
         qapp.processEvents()
         assert dialog.push_reference_height.value() == pytest.approx(6.0)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_nlth_offline_record_can_be_assigned_to_y_direction(qapp):
+    model = StructuralModel("nlth-y-direction", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+
+    dialog = AnalysisTemplateDialog(
+        default_node=1,
+        units={"length": "m", "force": "kN", "time": "s"},
+        initial_template="Nonlinear Time History",
+        project=project,
+    )
+    try:
+        dialog.gm_library.setCurrentIndex(
+            dialog.gm_library.findData("el-centro-1940")
+        )
+        y_index = dialog.gm_library_direction.findData(2)
+        assert y_index >= 0
+        dialog.gm_library_direction.setCurrentIndex(y_index)
+        dialog._assign_library_ground_motion()
+        qapp.processEvents()
+
+        assert not dialog._ground_motion_values[1]
+        assert len(dialog._ground_motion_values[2]) == 1559
+        assert dialog.gm_files[2].text().startswith("[Library]")
+
+        request = dialog.request()
+        assert len(request["components"]) == 1
+        assert request["components"][0]["direction"] == 2
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_nlth_assigning_second_offline_record_preserves_first_direction(qapp):
+    model = StructuralModel("nlth-xy-library", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+
+    dialog = AnalysisTemplateDialog(
+        default_node=1,
+        units={"length": "m", "force": "kN", "time": "s"},
+        initial_template="Nonlinear Time History",
+        project=project,
+    )
+    try:
+        dialog.gm_library.setCurrentIndex(
+            dialog.gm_library.findData("el-centro-1940")
+        )
+        dialog.gm_library_direction.setCurrentIndex(
+            dialog.gm_library_direction.findData(1)
+        )
+        dialog._assign_library_ground_motion()
+
+        dialog.gm_library.setCurrentIndex(
+            dialog.gm_library.findData("northridge-1994-arleta-360")
+        )
+        dialog.gm_library_direction.setCurrentIndex(
+            dialog.gm_library_direction.findData(2)
+        )
+        dialog._assign_library_ground_motion()
+        qapp.processEvents()
+
+        assert len(dialog._ground_motion_values[1]) == 1559
+        assert len(dialog._ground_motion_values[2]) == 2000
+        request = dialog.request()
+        assert [item["direction"] for item in request["components"]] == [1, 2]
     finally:
         dialog.close()
         dialog.deleteLater()
