@@ -3683,10 +3683,16 @@ class ModelViewport(QWidget):
                     )
                     label_point = sampled_diagram[label_index]
                     label_value = numeric_values[label_index]
+                # Push the annotation a little beyond the force diagram so
+                # it does not sit directly on top of a member/diagram line.
+                label_point = (
+                    np.asarray(label_point, dtype=float)
+                    + axis * (0.018 * model_span)
+                )
                 label_candidates.append(
                     (
                         abs(float(label_value)),
-                        np.asarray(label_point, dtype=float),
+                        label_point,
                         float(label_value),
                     )
                 )
@@ -3793,9 +3799,9 @@ class ModelViewport(QWidget):
                     for item in selected_labels
                 ],
                 name="result-force-labels",
-                text_color="#263746",
-                font_size=10,
-                always_visible=False,
+                text_color="#182533",
+                font_size=13,
+                always_visible=True,
             )
 
         self._remember_result_view(view_key, entries)
