@@ -74,6 +74,7 @@ def test_pga_conversion_to_g_for_supported_units():
     assert pga_in_g([0.0, -0.5], "g") == 0.5
     assert abs(pga_in_g([0.0, 9.80665], "m/s²") - 1.0) < 1.0e-12
     assert abs(pga_in_g([0.0, 980.665], "cm/s²") - 1.0) < 1.0e-12
+    assert abs(pga_in_g([0.0, 9806.65], "mm/s²") - 1.0) < 1.0e-12
 
 
 def test_target_pga_scale_factor():
