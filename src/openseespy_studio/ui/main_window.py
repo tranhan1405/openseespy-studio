@@ -4419,6 +4419,96 @@ class MainWindow(QMainWindow):
                 # an in-place Details-pane edit.
                 element.__post_init__()
 
+            elif kind == "material":
+                material = self.project.materials.get(tag)
+                if material is None:
+                    return
+                data = material.to_dict()
+                if property_id == "name":
+                    data["name"] = str(value).strip()
+                elif property_id == "poisson_ratio":
+                    data["poisson_ratio"] = float(str(value).strip())
+                elif property_id == "density":
+                    data["density"] = float(str(value).strip())
+                elif property_id.startswith("parameter:"):
+                    parameter = property_id.split(":", 1)[1]
+                    if parameter not in material.parameters:
+                        raise ValueError(
+                            f"Material parameter {parameter!r} does not exist."
+                        )
+                    raw_value = float(str(value).strip())
+                    from ..project import MATERIAL_PARAMETER_KINDS
+                    parameter_kind = MATERIAL_PARAMETER_KINDS.get(
+                        material.material_type, {}
+                    ).get(parameter, "raw")
+                    if parameter_kind == "stress":
+                        raw_value *= 1.0e6
+                    elif parameter_kind == "length":
+                        raw_value = UnitSystem.from_mapping(
+                            self.project.units
+                        ).length_to_m_value(raw_value)
+                    parameters = dict(data["parameters"])
+                    parameters[parameter] = raw_value
+                    data["parameters"] = parameters
+                else:
+                    return
+                updated = MaterialData.from_dict(data)
+                self.project.update_material(tag, updated)
+
+            elif kind == "section":
+                section = self.project.sections.get(tag)
+                if section is None:
+                    return
+                data = section.to_dict()
+                if property_id == "name":
+                    data["name"] = str(value).strip()
+                elif property_id == "material_tag":
+                    data["material_tag"] = (
+                        None if value is None else int(value)
+                    )
+                elif property_id.startswith("parameter:"):
+                    parameter = property_id.split(":", 1)[1]
+                    if parameter not in section.parameters:
+                        raise ValueError(
+                            f"Section parameter {parameter!r} does not exist."
+                        )
+                    raw_value = float(str(value).strip())
+                    if parameter in {"E", "G"}:
+                        raw_value *= 1.0e6
+                    parameters = dict(data["parameters"])
+                    parameters[parameter] = raw_value
+                    data["parameters"] = parameters
+                else:
+                    return
+                updated = SectionData.from_dict(data)
+                self.project.update_section(tag, updated)
+
+            elif kind == "transformation":
+                transformation = self.project.transformations.get(tag)
+                if transformation is None:
+                    return
+                name = transformation.name
+                transformation_type = transformation.transformation_type
+                vecxz = list(transformation.vecxz)
+                if property_id == "name":
+                    name = str(value).strip()
+                elif property_id == "transformation_type":
+                    transformation_type = str(value)
+                elif property_id.startswith("vecxz_"):
+                    index = {"vecxz_x": 0, "vecxz_y": 1, "vecxz_z": 2}[
+                        property_id
+                    ]
+                    vecxz[index] = float(str(value).strip())
+                else:
+                    return
+                updated = TransformationData(
+                    tag=tag,
+                    name=name,
+                    transformation_type=transformation_type,
+                    vecxz=tuple(vecxz),
+                )
+                self.project.update_transformation(tag, updated)
+
             else:
                 return
 
