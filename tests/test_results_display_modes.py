@@ -451,3 +451,82 @@ def test_cyclic_tab_shows_synchronized_column_reversal_and_cycle_metrics(qapp):
         panel.close()
         panel.deleteLater()
         qapp.processEvents()
+
+
+def test_results_panel_uses_native_2d_dof_labels(qapp):
+    panel = ResultsPanel()
+    result = {
+        "analysis": {
+            "type": "Static",
+            "ndm": 2,
+            "ndf": 3,
+            "control_node": 2,
+            "control_dof": 2,
+        },
+        "final": {
+            "node_displacements": {
+                "1": [0.0, 0.0, 0.0],
+                "2": [0.01, -0.02, 0.003],
+            },
+            "node_reactions": {
+                "1": [10.0, 20.0, 30.0],
+                "2": [0.0, 0.0, 0.0],
+            },
+            "element_local_forces": {},
+            "member_force_diagrams": {},
+        },
+        "history": {
+            "time": [1.0],
+            "monitor_node": 2,
+            "control_dof": 2,
+            "nodes": {
+                "2": {
+                    "disp": [[0.01, -0.02, 0.003]],
+                    "vel": [[0.0, 0.0, 0.0]],
+                    "accel": [[0.0, 0.0, 0.0]],
+                    "reaction": [[0.0, 0.0, 0.0]],
+                }
+            },
+            "base_reactions": [[10.0, 20.0, 30.0]],
+        },
+        "convergence": {"steps": []},
+        "modes": {},
+    }
+    try:
+        panel.set_result(result)
+        qapp.processEvents()
+
+        assert [
+            panel.node_table.horizontalHeaderItem(index).text()
+            for index in range(panel.node_table.columnCount())
+        ] == ["Node", "UX", "UY", "RZ"]
+
+        assert [
+            panel.node_contour_component.itemText(index)
+            for index in range(panel.node_contour_component.count())
+        ] == ["|U|", "UX", "UY", "|R|", "RZ"]
+
+        assert [
+            panel.element_quantity.itemText(index)
+            for index in range(panel.element_quantity.count())
+        ] == ["N", "Vy", "Mz"]
+
+        assert [
+            panel.force_disp_dof.itemText(index)
+            for index in range(panel.force_disp_dof.count())
+        ] == ["UX", "UY", "RZ"]
+        assert [
+            panel.force_disp_force_dof.itemText(index)
+            for index in range(panel.force_disp_force_dof.count())
+        ] == ["FX", "FY", "MZ"]
+
+        panel.history_quantity.setCurrentText("Reaction")
+        qapp.processEvents()
+        assert [
+            panel.history_dof.itemText(index)
+            for index in range(panel.history_dof.count())
+        ] == ["FX", "FY", "MZ"]
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
