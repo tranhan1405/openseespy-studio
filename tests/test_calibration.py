@@ -10,6 +10,8 @@ from openseespy_studio.calibration import (
     CalibrationWeights,
     apply_calibration_case,
     build_grid_cases,
+    calibration_active_objectives,
+    calibration_available_objectives,
     calibration_best_score_history,
     calibration_case_changes,
     calibration_grid_size,
@@ -503,3 +505,180 @@ def test_round_best_parameter_series_tracks_best_case_in_each_round():
     )
     assert series["scores"] == pytest.approx([7.0, 5.0, 4.0])
     assert series["case_ids"] == [2, 3, 6]
+
+
+
+def test_pareto_rank_calibration_cases_finds_non_dominated_fronts():
+    rows = [
+        {
+            "case_id": 1,
+            "components": {
+                "peak_force": 3.0,
+                "reversal_nrmse": 8.0,
+                "cycle_energy": 7.0,
+            },
+        },
+        {
+            "case_id": 2,
+            "components": {
+                "peak_force": 5.0,
+                "reversal_nrmse": 5.0,
+                "cycle_energy": 5.0,
+            },
+        },
+        {
+            "case_id": 3,
+            "components": {
+                "peak_force": 8.0,
+                "reversal_nrmse": 3.0,
+                "cycle_energy": 4.0,
+            },
+        },
+        {
+            "case_id": 4,
+            "components": {
+                "peak_force": 9.0,
+                "reversal_nrmse": 9.0,
+                "cycle_energy": 9.0,
+            },
+        },
+        {
+            "case_id": 5,
+            "components": {
+                "peak_force": 2.0,
+                "reversal_nrmse": None,
+                "cycle_energy": 2.0,
+            },
+        },
+    ]
+
+    ranked = pareto_rank_calibration_cases(
+        rows,
+        ["peak_force", "reversal_nrmse", "cycle_energy"],
+    )
+    by_case = {row["case_id"]: row for row in ranked}
+
+    assert by_case[1]["pareto_rank"] == 1
+    assert by_case[2]["pareto_rank"] == 1
+    assert by_case[3]["pareto_rank"] == 1
+    assert by_case[4]["pareto_rank"] == 2
+    assert by_case[5]["pareto_rank"] is None
+    assert by_case[5]["pareto_eligible"] is False
+    assert by_case[1]["pareto_front"] is True
+
+
+def test_pareto_active_objectives_follow_positive_weights():
+    weights = CalibrationWeights(
+        peak_force=1.0,
+        reversal_nrmse=0.0,
+        cycle_energy=2.0,
+        max_displacement=0.0,
+    )
+
+    assert calibration_active_objectives(weights) == [
+        "peak_force",
+        "cycle_energy",
+    ]
+    assert calibration_objective_label("peak_force").startswith("Peak")
+
+
+def test_pareto_projection_marks_selected_axis_front_independently():
+    rows = pareto_rank_calibration_cases(
+        [
+            {
+                "case_id": 1,
+                "components": {
+                    "peak_force": 2.0,
+                    "reversal_nrmse": 9.0,
+                    "cycle_energy": 7.0,
+                },
+            },
+            {
+                "case_id": 2,
+                "components": {
+                    "peak_force": 4.0,
+                    "reversal_nrmse": 4.0,
+                    "cycle_energy": 4.0,
+                },
+            },
+            {
+                "case_id": 3,
+                "components": {
+                    "peak_force": 7.0,
+                    "reversal_nrmse": 2.0,
+                    "cycle_energy": 3.0,
+                },
+            },
+            {
+                "case_id": 4,
+                "components": {
+                    "peak_force": 8.0,
+                    "reversal_nrmse": 8.0,
+                    "cycle_energy": 8.0,
+                },
+            },
+        ],
+        ["peak_force", "reversal_nrmse", "cycle_energy"],
+    )
+
+    assert calibration_available_objectives(rows) == [
+        "peak_force",
+        "reversal_nrmse",
+        "cycle_energy",
+    ]
+    points = calibration_pareto_projection(
+        rows,
+        "peak_force",
+        "cycle_energy",
+    )
+    by_case = {point["case_id"]: point for point in points}
+
+    assert by_case[1]["projection_front"] is True
+    assert by_case[2]["projection_front"] is True
+    assert by_case[3]["projection_front"] is True
+    assert by_case[4]["projection_front"] is False
+    assert by_case[4]["global_pareto_front"] is False
+
+
+def test_calibration_worker_adds_pareto_metadata(tmp_path):
+    experiment_x = [0.0, 2.0, 0.0, -2.0, 0.0, 2.0, 0.0]
+    experiment_y = [0.0, 20.0, 0.0, -18.0, 0.0, 16.0, 0.0]
+    plan = {
+        "strategy": "grid",
+        "experiment": {"x": experiment_x, "y": experiment_y},
+        "weights": {
+            "peak_force": 1.0,
+            "reversal_nrmse": 1.0,
+            "cycle_energy": 0.0,
+            "max_displacement": 0.0,
+        },
+        "cases": [
+            {
+                "case_id": 1,
+                "values": {"material:1:E": 1.0},
+                "script": f"_studio_results = {repr(_cyclic_result(1.0))}",
+            },
+            {
+                "case_id": 2,
+                "values": {"material:1:E": 0.8},
+                "script": f"_studio_results = {repr(_cyclic_result(0.8))}",
+            },
+        ],
+    }
+    plan_path = tmp_path / "pareto-plan.json"
+    result_path = tmp_path / "pareto-result.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+
+    exit_code = run_plan(plan_path, result_path)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert payload["pareto_objectives"] == [
+        "peak_force",
+        "reversal_nrmse",
+    ]
+    assert payload["pareto_front_count"] == 1
+    assert payload["cases"][0]["case_id"] == 1
+    assert payload["cases"][0]["pareto_rank"] == 1
+    assert payload["cases"][0]["pareto_front"] is True
+    assert payload["cases"][1]["pareto_rank"] == 2
