@@ -9059,6 +9059,7 @@ class MainWindow(QMainWindow):
         rows = [
             ("Tag", settings.tag), ("Name", settings.name),
             ("Type", settings.analysis_type),
+            ("Integrator", settings.integrator),
             ("Active", "Yes" if tag == self.project.active_analysis_tag else "No"),
             ("Constraints", settings.constraints_handler),
             ("Numberer", settings.numberer), ("System", settings.system),
@@ -9116,7 +9117,27 @@ class MainWindow(QMainWindow):
                 ),
             ])
             if settings.analysis_type == "Static":
-                rows.append(("Load increment", f"{settings.load_increment:g}"))
+                if settings.integrator == "LoadControl":
+                    rows.append(
+                        ("Load increment", f"{settings.load_increment:g}")
+                    )
+                elif settings.integrator == "DisplacementControl":
+                    rows.extend([
+                        ("Control node", settings.control_node),
+                        ("Control DOF", settings.control_dof),
+                        (
+                            "Disp. increment",
+                            f"{settings.displacement_increment:g}",
+                        ),
+                    ])
+                elif settings.integrator == "ArcLength":
+                    rows.extend([
+                        ("ArcLength s", f"{settings.arc_length_s:g}"),
+                        (
+                            "ArcLength alpha",
+                            f"{settings.arc_length_alpha:g}",
+                        ),
+                    ])
             elif settings.analysis_type == "Pushover":
                 rows.extend([
                     ("Control node", settings.control_node),
@@ -9124,10 +9145,28 @@ class MainWindow(QMainWindow):
                     ("Disp. increment", f"{settings.displacement_increment:g}"),
                 ])
             elif settings.analysis_type == "Transient":
+                rows.append(("Time step", f"{settings.dt:g}"))
+                if settings.integrator == "Newmark":
+                    rows.extend([
+                        ("Newmark gamma", f"{settings.gamma:g}"),
+                        ("Newmark beta", f"{settings.beta:g}"),
+                    ])
+                elif settings.integrator == "HHT":
+                    rows.append(
+                        ("HHT alpha", f"{settings.hht_alpha:g}")
+                    )
+                elif settings.integrator == "GeneralizedAlpha":
+                    rows.extend([
+                        (
+                            "Generalized-alpha alphaM",
+                            f"{settings.generalized_alpha_m:g}",
+                        ),
+                        (
+                            "Generalized-alpha alphaF",
+                            f"{settings.generalized_alpha_f:g}",
+                        ),
+                    ])
                 rows.extend([
-                    ("Time step", f"{settings.dt:g}"),
-                    ("Newmark gamma", f"{settings.gamma:g}"),
-                    ("Newmark beta", f"{settings.beta:g}"),
                     (
                         "Rayleigh damping",
                         (
