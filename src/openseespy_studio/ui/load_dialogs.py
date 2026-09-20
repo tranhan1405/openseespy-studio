@@ -214,6 +214,7 @@ class GroundMotionDialog(QDialog):
         next_series_tag=1,
         next_pattern_tag=1,
         units=None,
+        initial_source="builtin",
         parent=None,
     ):
         super().__init__(parent)
@@ -238,6 +239,7 @@ class GroundMotionDialog(QDialog):
 
         root = QVBoxLayout(self)
         form = QFormLayout()
+        self.form = form
 
         self.pattern_tag = QSpinBox()
         self.pattern_tag.setRange(1, 2147483647)
@@ -389,15 +391,19 @@ class GroundMotionDialog(QDialog):
         self.dt.valueChanged.connect(self._refresh_preview)
         self.input_unit.currentTextChanged.connect(self._refresh_preview)
         self.scale.valueChanged.connect(self._refresh_preview)
-        self._sync_source_mode()
         if series is None:
+            source_index = self.source_mode.findData(str(initial_source))
+            if source_index >= 0:
+                self.source_mode.setCurrentIndex(source_index)
+        self._sync_source_mode()
+        if series is None and self.source_mode.currentData() == "builtin":
             self._library_changed()
         else:
             self._refresh_preview()
 
     def _set_form_row_visible(self, widget: QWidget, visible: bool) -> None:
         widget.setVisible(bool(visible))
-        label = self.layout().itemAt(0).layout().labelForField(widget)
+        label = self.form.labelForField(widget)
         if label is not None:
             label.setVisible(bool(visible))
 
