@@ -6052,6 +6052,7 @@ class MainWindow(QMainWindow):
             plain,
             load=load,
             units=self.project.units,
+            ndm=self.model.ndm,
             parent=self,
         )
         if not dialog.exec():
@@ -6286,6 +6287,7 @@ class MainWindow(QMainWindow):
             next_tag=self.project.next_element_load_tag(),
             element_tag=selected[0],
             units=self.project.units,
+            ndm=self.model.ndm,
             parent=self,
         )
         if not dialog.exec():
