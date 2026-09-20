@@ -207,3 +207,25 @@ def test_ground_motion_dialog_converts_g_to_mm_per_s2_model_units():
         dialog.close()
         dialog.deleteLater()
         app.processEvents()
+
+
+def test_ground_motion_dialog_library_is_offline_only_without_download_button():
+    app = QApplication.instance() or QApplication([])
+    dialog = GroundMotionDialog(
+        units={"length": "m", "force": "N", "time": "s"},
+        initial_source="builtin",
+    )
+    try:
+        assert not hasattr(dialog, "library_download")
+        assert dialog.library.findData("el-centro-1940") >= 0
+        assert dialog.library.findData("northridge-1994-rinaldi") >= 0
+        assert dialog.library.findData("northridge-1994-arleta-360") >= 0
+        assert dialog.library.findData("chi-chi-1999-nsk-e") >= 0
+        assert all(
+            "[Offline]" in dialog.library.itemText(index)
+            for index in range(dialog.library.count())
+        )
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        app.processEvents()
