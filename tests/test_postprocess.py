@@ -4,6 +4,7 @@ import pytest
 
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.postprocess import (
+    canonical_nodal_vector,
     classify_fiber_state,
     component_end_resultants,
     convergence_series,
@@ -50,6 +51,19 @@ from openseespy_studio.project import (
     TransformationData,
 )
 
+
+
+
+
+def test_canonical_nodal_vector_maps_2d_frame_rotation_to_rz():
+    raw = [1.0, 2.0, 0.03]
+    canonical = canonical_nodal_vector(raw, ndm=2, ndf=3)
+
+    assert canonical == [1.0, 2.0, 0.0, 0.0, 0.0, 0.03]
+    assert nodal_result_scalar(raw, "UY", ndm=2, ndf=3) == 2.0
+    assert nodal_result_scalar(raw, "RZ", ndm=2, ndf=3) == 0.03
+    assert nodal_result_scalar(raw, "UZ", ndm=2, ndf=3) is None
+    assert nodal_result_scalar(raw, "FZ", ndm=2, ndf=3) is None
 
 
 def test_nodal_result_scalar_keeps_force_and_moment_groups_separate():
