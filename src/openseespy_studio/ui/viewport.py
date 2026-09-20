@@ -30,6 +30,7 @@ except ImportError:
 from ..beam_loads import element_local_axes, resolve_self_weight_local
 from ..deformed_geometry import (
     build_swept_member_geometry,
+    deformed_member_frames,
     section_axis_strength_labels,
 )
 from ..model import StructuralModel, classify_fixity
@@ -2759,6 +2760,95 @@ class ModelViewport(QWidget):
                             rendered_surface = True
 
             if rendered_surface:
+                continue
+
+            # Centerline/Tube views must honor the same smooth-curvature
+            # option as Actual Section.  Previously these representations
+            # always connected displaced end nodes with one straight chord,
+            # even when rotational DOFs were available and the UI explicitly
+            # requested cubic beam interpolation.
+            curved = None
+            curved_magnitudes = None
+            if smooth_curvature:
+                try:
+                    transformation = (
+                        self._transformations.get(element.transf_tag)
+                        if element.transf_tag is not None
+                        else None
+                    )
+                    if transformation is not None:
+                        _, local_y, local_z = element_local_axes(
+                            self._model,
+                            element,
+                            transformation,
+                        )
+                    else:
+                        start = np.asarray(
+                            self._model.nodes[element.i].xyz,
+                            dtype=float,
+                        )
+                        end = np.asarray(
+                            self._model.nodes[element.j].xyz,
+                            dtype=float,
+                        )
+                        axis = end - start
+                        length = float(np.linalg.norm(axis))
+                        if length <= 1.0e-12:
+                            raise ValueError("Zero-length member.")
+                        axis /= length
+                        reference = (
+                            np.asarray((0.0, 0.0, 1.0), dtype=float)
+                            if abs(float(axis[2])) < 0.90
+                            else np.asarray((0.0, 1.0, 0.0), dtype=float)
+                        )
+                        local_y = np.cross(axis, reference)
+                        norm_y = float(np.linalg.norm(local_y))
+                        if norm_y <= 1.0e-12:
+                            reference = np.asarray(
+                                (1.0, 0.0, 0.0),
+                                dtype=float,
+                            )
+                            local_y = np.cross(axis, reference)
+                            norm_y = float(np.linalg.norm(local_y))
+                        local_y /= max(norm_y, 1.0e-12)
+                        local_z = np.cross(axis, local_y)
+                        local_z /= max(
+                            float(np.linalg.norm(local_z)),
+                            1.0e-12,
+                        )
+
+                    curved, _frame_y, _frame_z, curved_magnitudes = (
+                        deformed_member_frames(
+                            self._model.nodes[element.i].xyz,
+                            self._model.nodes[element.j].xyz,
+                            local_y,
+                            local_z,
+                            raw_vector(element.i),
+                            raw_vector(element.j),
+                            ndm=self._model.ndm,
+                            scale=float(scale),
+                            stations=max(3, int(stations)),
+                            smooth=True,
+                        )
+                    )
+                except (KeyError, TypeError, ValueError):
+                    curved = None
+                    curved_magnitudes = None
+
+            if curved is not None and curved_magnitudes is not None:
+                index = len(points)
+                count = int(curved.shape[0])
+                points.extend(
+                    tuple(float(value) for value in row)
+                    for row in curved
+                )
+                magnitudes.extend(
+                    float(value)
+                    for value in curved_magnitudes
+                )
+                lines.extend(
+                    (count, *range(index, index + count))
+                )
                 continue
 
             p1, m1 = displaced(element.i)
