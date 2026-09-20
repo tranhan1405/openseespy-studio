@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from openseespy_studio.project import ProjectDatabase, SectionData
+from openseespy_studio.project import MaterialData, ProjectDatabase, SectionData
 import openseespy_studio.ui.test_column_dialog as test_column_dialog_module
 from openseespy_studio.ui.test_column_dialog import TestColumnWizard
 
@@ -157,6 +157,87 @@ def test_test_column_wizard_next_section_tag_accounts_for_staged_sections(
             "Elastic",
         )
         assert dialog._next_section_tag() == 4
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+
+def test_cyclic_pushover_nlth_specimen_base_interface_defaults_fixed(qapp):
+    project = ProjectDatabase()
+    dialog = TestColumnWizard(project)
+    try:
+        for preset in (
+            "Cantilever Cyclic Test",
+            "Cantilever Pushover",
+            "Dynamic / Shake-table Column",
+        ):
+            dialog.preset.setCurrentText(preset)
+            qapp.processEvents()
+            spec = dialog.data()
+            assert spec.base_interface_type == "Fixed base"
+            assert spec.base_interface_materials == {}
+            assert spec.base_interface_rayleigh is False
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_rotational_base_interface_auto_selects_bending_rotation(qapp):
+    project = ProjectDatabase()
+    project.add_material(
+        MaterialData(
+            7,
+            "Pinching spring",
+            "Pinching4",
+        )
+    )
+    dialog = TestColumnWizard(project)
+    try:
+        dialog.axis.setCurrentIndex(dialog.axis.findData(3))
+        dialog.lateral.setCurrentIndex(dialog.lateral.findData(1))
+        dialog.base_interface.setCurrentText("Rotational spring")
+        qapp.processEvents()
+
+        spec = dialog.data()
+        assert spec.base_interface_type == "Rotational spring"
+        assert spec.base_support == "Fixed"
+        assert spec.base_interface_materials == {5: 7}
+        assert spec.base_interface_rayleigh is False
+        assert dialog.base_support.isEnabled() is False
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_bond_slip_base_interface_prefers_bond_sp01(qapp):
+    project = ProjectDatabase()
+    project.add_material(
+        MaterialData(
+            3,
+            "Generic",
+            "Elastic",
+            parameters={"E": 1000.0},
+        )
+    )
+    project.add_material(
+        MaterialData(
+            8,
+            "Bond",
+            "Bond_SP01",
+        )
+    )
+    dialog = TestColumnWizard(project)
+    try:
+        dialog.base_interface.setCurrentText("Bond-slip")
+        qapp.processEvents()
+
+        spec = dialog.data()
+        assert spec.base_interface_materials == {1: 8}
+        assert spec.base_interface_rayleigh is False
     finally:
         dialog.close()
         dialog.deleteLater()
