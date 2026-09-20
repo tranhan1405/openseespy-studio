@@ -11,7 +11,7 @@ from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 26
+PROJECT_FORMAT_VERSION = 27
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -904,6 +904,7 @@ class ConnectionData:
     generated_ground_node: int | None = None
     section_tag: int | None = None
     generated_section_tag: int | None = None
+    generated_constraint_tag: int | None = None
 
     def __post_init__(self) -> None:
         self.tag = int(self.tag)
@@ -930,6 +931,11 @@ class ConnectionData:
             None
             if self.generated_section_tag is None
             else int(self.generated_section_tag)
+        )
+        self.generated_constraint_tag = (
+            None
+            if self.generated_constraint_tag is None
+            else int(self.generated_constraint_tag)
         )
 
         if self.tag <= 0:
@@ -1000,6 +1006,7 @@ class ConnectionData:
             "generated_ground_node": self.generated_ground_node,
             "section_tag": self.section_tag,
             "generated_section_tag": self.generated_section_tag,
+            "generated_constraint_tag": self.generated_constraint_tag,
         }
 
     @classmethod
@@ -1028,6 +1035,7 @@ class ConnectionData:
             generated_ground_node=data.get("generated_ground_node"),
             section_tag=data.get("section_tag"),
             generated_section_tag=data.get("generated_section_tag"),
+            generated_constraint_tag=data.get("generated_constraint_tag"),
         )
 
 
@@ -2151,6 +2159,10 @@ class ProjectDatabase:
         connection = self.connections.pop(tag, None)
         if connection is None or not cleanup_ground:
             return
+        generated_constraint = connection.generated_constraint_tag
+        if generated_constraint is not None:
+            self.constraints.pop(generated_constraint, None)
+
         ground_tag = connection.generated_ground_node
         if (
             ground_tag is not None
