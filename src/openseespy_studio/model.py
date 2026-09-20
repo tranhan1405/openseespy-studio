@@ -338,6 +338,22 @@ class StructuralModel:
             assigned.add(element.tag)
         return assigned
 
+    def assign_truss_material(
+        self,
+        element_tags: Iterable[int],
+        material_tag: int | None,
+    ) -> set[int]:
+        """Assign a uniaxial material only to Truss elements."""
+        assigned: set[int] = set()
+        value = None if material_tag is None else int(material_tag)
+        for tag in element_tags:
+            element = self.elements.get(int(tag))
+            if element is None or element.element_type != "truss":
+                continue
+            element.truss_material_tag = value
+            assigned.add(element.tag)
+        return assigned
+
     def assign_element_formulation(
         self,
         element_tags: Iterable[int],
