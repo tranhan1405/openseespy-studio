@@ -67,7 +67,6 @@ class CalibrationDialog(QDialog):
             "Adaptive refinement · coarse → refine → refine",
             "adaptive",
         )
-        self.strategy.setCurrentIndex(1)
         self.strategy.currentIndexChanged.connect(
             self._strategy_changed
         )
@@ -97,6 +96,7 @@ class CalibrationDialog(QDialog):
         )
         strategy_row.addWidget(self.adaptive_shrink)
         root.addLayout(strategy_row)
+        self.strategy.setCurrentIndex(1)
 
         self.parameter_table = QTableWidget(3, 6)
         self.parameter_table.setHorizontalHeaderLabels(
