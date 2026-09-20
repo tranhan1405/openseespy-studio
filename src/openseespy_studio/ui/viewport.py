@@ -254,6 +254,30 @@ class ModelViewport(QWidget):
     def interaction_tool(self) -> str:
         return self._interaction_tool
 
+    def clear_line_anchor(self, *, render: bool = True) -> None:
+        """Remove the temporary first-node marker for the Line tool."""
+        self._remove_overlay("line-anchor")
+        if render:
+            self.plotter.render()
+
+    def show_line_anchor(self, node_tag: int) -> None:
+        """Highlight the first node selected by the interactive Line tool."""
+        self.clear_line_anchor(render=False)
+        if self._model is None or int(node_tag) not in self._model.nodes:
+            self.plotter.render()
+            return
+        point = self._model.nodes[int(node_tag)].xyz
+        self.plotter.add_mesh(
+            pv.PolyData([point]),
+            name="line-anchor",
+            color="#087ff5",
+            render_points_as_spheres=True,
+            point_size=16,
+            pickable=False,
+            render=False,
+        )
+        self.plotter.render()
+
     def clear_measure_anchor(self, *, render: bool = True) -> None:
         """Remove the temporary first-point marker for the Measure tool."""
         self._remove_overlay("measure-anchor")
