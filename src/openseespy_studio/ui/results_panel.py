@@ -30,6 +30,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..calibration import (
+    calibration_best_score_history,
+    calibration_parameter_keys,
+    calibration_parameter_label,
+    calibration_round_best_parameter_series,
+)
 from ..jobs import JobRecord
 from ..motion import (
     available_modal_modes,
@@ -2259,6 +2265,56 @@ class ResultsPanel(QWidget):
         controls.addStretch(1)
         layout.addLayout(controls)
 
+        history_splitter = QSplitter(Qt.Horizontal)
+
+        score_page = QWidget()
+        score_layout = QVBoxLayout(score_page)
+        score_layout.setContentsMargins(0, 0, 0, 0)
+        self.calibration_score_info = QLabel(
+            "Best score vs cumulative analyses"
+        )
+        self.calibration_score_info.setWordWrap(True)
+        score_layout.addWidget(self.calibration_score_info)
+        self.calibration_score_plot = TimeHistoryPlot(
+            empty_message="No scored calibration history"
+        )
+        self.calibration_score_plot.setMinimumHeight(150)
+        score_layout.addWidget(self.calibration_score_plot, 1)
+        history_splitter.addWidget(score_page)
+
+        parameter_page = QWidget()
+        parameter_layout = QVBoxLayout(parameter_page)
+        parameter_layout.setContentsMargins(0, 0, 0, 0)
+        parameter_controls = QHBoxLayout()
+        parameter_controls.addWidget(QLabel("Round-best parameter:"))
+        self.calibration_parameter_combo = QComboBox()
+        self.calibration_parameter_combo.currentIndexChanged.connect(
+            self._update_calibration_parameter_plot
+        )
+        parameter_controls.addWidget(
+            self.calibration_parameter_combo,
+            1,
+        )
+        parameter_layout.addLayout(parameter_controls)
+        self.calibration_parameter_info = QLabel(
+            "Select a parameter to inspect its best-case path by round."
+        )
+        self.calibration_parameter_info.setWordWrap(True)
+        parameter_layout.addWidget(self.calibration_parameter_info)
+        self.calibration_parameter_plot = TimeHistoryPlot(
+            empty_message="Need at least two round-best points"
+        )
+        self.calibration_parameter_plot.setMinimumHeight(150)
+        parameter_layout.addWidget(
+            self.calibration_parameter_plot,
+            1,
+        )
+        history_splitter.addWidget(parameter_page)
+
+        history_splitter.setStretchFactor(0, 1)
+        history_splitter.setStretchFactor(1, 1)
+        layout.addWidget(history_splitter)
+
         self.calibration_table = QTableWidget(0, 10)
         self.calibration_table.setHorizontalHeaderLabels(
             [
@@ -2348,14 +2404,9 @@ class ResultsPanel(QWidget):
                     pass
             parameters = row.get("values", {})
             if isinstance(parameters, dict):
-                def parameter_label(key: str) -> str:
-                    parts = str(key).split(":", 2)
-                    if len(parts) == 3 and parts[0] == "material":
-                        return f"M{parts[1]}.{parts[2]}"
-                    return str(key)
-
                 parameter_text = ", ".join(
-                    f"{parameter_label(str(key))}={float(value):.6g}"
+                    f"{calibration_parameter_label(str(key))}="
+                    f"{float(value):.6g}"
                     for key, value in sorted(parameters.items())
                 )
             else:
@@ -2418,6 +2469,125 @@ class ResultsPanel(QWidget):
             "row to preview/apply its parameters to the model."
         )
         self.calibration_apply.setEnabled(False)
+        self._update_calibration_history()
+
+    def _update_calibration_history(self) -> None:
+        history = calibration_best_score_history(
+            self._calibration_rows
+        )
+        x = [
+            float(value)
+            for value in history.get(
+                "cumulative_analyses",
+                [],
+            )
+        ]
+        y = [
+            float(value)
+            for value in history.get("best_score", [])
+        ]
+        self.calibration_score_plot.set_series(x, y)
+        self.calibration_score_plot.clear_overlay()
+
+        if y:
+            initial = y[0]
+            final = y[-1]
+            improvement = (
+                (initial - final) / abs(initial) * 100.0
+                if abs(initial) > 1.0e-15
+                else 0.0
+            )
+            self.calibration_score_info.setText(
+                "Best score vs cumulative analyses · "
+                f"initial {initial:.6g}% → best {final:.6g}% · "
+                f"relative improvement {improvement:.3g}%"
+            )
+        else:
+            self.calibration_score_info.setText(
+                "Best score vs cumulative analyses · "
+                "no valid scored case"
+            )
+
+        current_key = self.calibration_parameter_combo.currentData()
+        self.calibration_parameter_combo.blockSignals(True)
+        self.calibration_parameter_combo.clear()
+        keys = calibration_parameter_keys(
+            self._calibration_rows
+        )
+        for key in keys:
+            self.calibration_parameter_combo.addItem(
+                calibration_parameter_label(key),
+                key,
+            )
+        if current_key in keys:
+            self.calibration_parameter_combo.setCurrentIndex(
+                keys.index(current_key)
+            )
+        elif keys:
+            self.calibration_parameter_combo.setCurrentIndex(0)
+        self.calibration_parameter_combo.blockSignals(False)
+        self._update_calibration_parameter_plot()
+
+    def _update_calibration_parameter_plot(
+        self,
+        *_args,
+    ) -> None:
+        key = self.calibration_parameter_combo.currentData()
+        if not key:
+            self.calibration_parameter_plot.set_series([], [])
+            self.calibration_parameter_info.setText(
+                "No calibration parameter history is available."
+            )
+            return
+
+        series = calibration_round_best_parameter_series(
+            self._calibration_rows,
+            str(key),
+        )
+        rounds = [
+            float(value)
+            for value in series.get("rounds", [])
+        ]
+        values = [
+            float(value)
+            for value in series.get("values", [])
+        ]
+        case_ids = [
+            int(value)
+            for value in series.get("case_ids", [])
+        ]
+        scores = [
+            float(value)
+            for value in series.get("scores", [])
+        ]
+        self.calibration_parameter_plot.set_series(
+            rounds,
+            values,
+        )
+        self.calibration_parameter_plot.clear_overlay()
+
+        label = calibration_parameter_label(str(key))
+        if not values:
+            self.calibration_parameter_info.setText(
+                f"{label} · no scored round-best history"
+            )
+            return
+        path = " → ".join(
+            f"R{int(round_index)} C{case_id}: {value:.6g}"
+            for round_index, case_id, value in zip(
+                rounds,
+                case_ids,
+                values,
+            )
+        )
+        score_tail = (
+            f" · final round-best score {scores[-1]:.6g}%"
+            if scores
+            else ""
+        )
+        self.calibration_parameter_info.setText(
+            f"{label} round-best trajectory · {path}{score_tail}"
+        )
 
     def _selected_calibration_row(self) -> dict[str, Any] | None:
         selected = self.calibration_table.selectionModel().selectedRows()
@@ -2741,6 +2911,15 @@ class ResultsPanel(QWidget):
         self._calibration_rows = []
         self.calibration_table.setRowCount(0)
         self.calibration_apply.setEnabled(False)
+        self.calibration_score_plot.set_series([], [])
+        self.calibration_parameter_plot.set_series([], [])
+        self.calibration_parameter_combo.clear()
+        self.calibration_score_info.setText(
+            "Best score vs cumulative analyses"
+        )
+        self.calibration_parameter_info.setText(
+            "Select a parameter to inspect its best-case path by round."
+        )
         self.calibration_info.setText(
             "Run a Calibration / Parameter Study to compare batch cases "
             "against experimental cyclic data."

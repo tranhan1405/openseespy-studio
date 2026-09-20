@@ -466,3 +466,154 @@ def rank_calibration_cases(
         else:
             item["rank"] = None
     return rows
+
+
+
+def _calibration_execution_rows(
+    rows: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    copied = [
+        dict(row)
+        for row in rows
+        if isinstance(row, dict)
+    ]
+
+    def execution_key(row: dict[str, Any]) -> tuple[int, int, int]:
+        case_id = int(row.get("case_id", 0) or 0)
+        round_index = int(row.get("round", 1) or 1)
+        round_case = int(row.get("round_case", case_id) or case_id)
+        return (
+            case_id if case_id > 0 else 10**9,
+            round_index,
+            round_case,
+        )
+
+    copied.sort(key=execution_key)
+    return copied
+
+
+def calibration_best_score_history(
+    rows: Sequence[dict[str, Any]],
+) -> dict[str, list[Any]]:
+    """Best-so-far objective history against cumulative executed cases.
+
+    Failed/unscored cases still advance the cumulative-analysis coordinate.
+    No synthetic score is created before the first valid scored case.
+    """
+    x: list[float] = []
+    y: list[float] = []
+    case_ids: list[int] = []
+    rounds: list[int] = []
+    best = math.inf
+
+    for cumulative, row in enumerate(
+        _calibration_execution_rows(rows),
+        start=1,
+    ):
+        score = row.get("score")
+        try:
+            numeric = float(score)
+        except (TypeError, ValueError):
+            numeric = math.inf
+        if math.isfinite(numeric):
+            best = min(best, numeric)
+        if not math.isfinite(best):
+            continue
+        x.append(float(cumulative))
+        y.append(float(best))
+        case_ids.append(int(row.get("case_id", 0) or 0))
+        rounds.append(int(row.get("round", 1) or 1))
+
+    return {
+        "cumulative_analyses": x,
+        "best_score": y,
+        "case_ids": case_ids,
+        "rounds": rounds,
+    }
+
+
+def calibration_parameter_keys(
+    rows: Sequence[dict[str, Any]],
+) -> list[str]:
+    keys: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        values = row.get("values", {})
+        if not isinstance(values, dict):
+            continue
+        for key, value in values.items():
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(numeric):
+                keys.add(str(key))
+    return sorted(keys)
+
+
+def calibration_parameter_label(key: str) -> str:
+    parts = str(key).split(":", 2)
+    if len(parts) == 3 and parts[0] == "material":
+        return f"M{parts[1]}.{parts[2]}"
+    return str(key)
+
+
+def calibration_round_best_parameter_series(
+    rows: Sequence[dict[str, Any]],
+    parameter: str,
+) -> dict[str, list[Any]]:
+    """Return the selected parameter from the best scored case per round."""
+    best_by_round: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        score = row.get("score")
+        try:
+            numeric_score = float(score)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(numeric_score):
+            continue
+        round_index = int(row.get("round", 1) or 1)
+        current = best_by_round.get(round_index)
+        if current is None:
+            best_by_round[round_index] = dict(row)
+            continue
+        try:
+            current_score = float(current.get("score"))
+        except (TypeError, ValueError):
+            current_score = math.inf
+        if numeric_score < current_score:
+            best_by_round[round_index] = dict(row)
+
+    round_values: list[float] = []
+    parameter_values: list[float] = []
+    scores: list[float] = []
+    case_ids: list[int] = []
+    for round_index in sorted(best_by_round):
+        row = best_by_round[round_index]
+        values = row.get("values", {})
+        if not isinstance(values, dict) or parameter not in values:
+            continue
+        try:
+            parameter_value = float(values[parameter])
+            score = float(row["score"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if not (
+            math.isfinite(parameter_value)
+            and math.isfinite(score)
+        ):
+            continue
+        round_values.append(float(round_index))
+        parameter_values.append(parameter_value)
+        scores.append(score)
+        case_ids.append(int(row.get("case_id", 0) or 0))
+
+    return {
+        "rounds": round_values,
+        "values": parameter_values,
+        "scores": scores,
+        "case_ids": case_ids,
+    }
