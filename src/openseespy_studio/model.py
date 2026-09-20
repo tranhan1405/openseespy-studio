@@ -165,7 +165,12 @@ class StructuralModel:
     def add_node(self, tag: int, x: float, y: float, z: float = 0.0) -> Node:
         if tag in self.nodes:
             raise ValueError(f"Node tag {tag} already exists")
-        node = Node(tag, (float(x), float(y), float(z)))
+        node = Node(
+            tag,
+            (float(x), float(y), float(z)),
+            fixity=(0,) * self.ndf,
+            mass=(0.0,) * self.ndf,
+        )
         self.nodes[tag] = node
         return node
 
