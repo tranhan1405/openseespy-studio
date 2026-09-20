@@ -6314,6 +6314,154 @@ class MainWindow(QMainWindow):
             selected_nodes[1],
         )
 
+    def _default_truss_area(self) -> float:
+        unit_system = UnitSystem.from_mapping(self.project.units)
+        return 1.0e-3 / (unit_system.length_to_m ** 2)
+
+    def _create_truss_between_nodes(
+        self,
+        node_i: int,
+        node_j: int,
+    ) -> None:
+        """Create one quick axial Truss using current/default assignments."""
+        if not self.project.materials:
+            QMessageBox.information(
+                self,
+                "Create Truss",
+                "Create a uniaxial Material first.",
+            )
+            return
+
+        tag = self.model.next_element_tag()
+        material_tag = min(self.project.materials)
+        area = self._default_truss_area()
+        before = self.project.to_dict()
+
+        try:
+            if tag in self.project.connections:
+                raise ValueError(
+                    f"Element tag {tag} is already used by a connection."
+                )
+            self.model.add_element(
+                tag,
+                int(node_i),
+                int(node_j),
+                element_type="truss",
+                group="truss",
+                truss_area=area,
+                truss_material_tag=material_tag,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Create Truss", str(exc))
+            return
+
+        unit_system = UnitSystem.from_mapping(self.project.units)
+        self._refresh_all(
+            f"Created Truss {tag}: node {node_i} → {node_j} · "
+            f"A={area:g} {unit_system.length}² · material {material_tag}"
+        )
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(f"Create Truss {tag}", before)
+
+    def _create_truss(self) -> None:
+        """Create a fully specified axial Truss element by input."""
+        if len(self.model.nodes) < 2:
+            QMessageBox.information(
+                self,
+                "Create Truss Element",
+                "Create at least two nodes first.",
+            )
+            return
+        if not self.project.materials:
+            QMessageBox.information(
+                self,
+                "Create Truss Element",
+                "Create a uniaxial Material first. Truss elements require "
+                "an area and material assignment.",
+            )
+            return
+
+        selected_nodes = sorted(self.selection.nodes)
+        node_i = (
+            selected_nodes[0]
+            if len(selected_nodes) >= 1
+            else min(self.model.nodes)
+        )
+        node_j = (
+            selected_nodes[1]
+            if len(selected_nodes) >= 2
+            else next(
+                node_tag
+                for node_tag in sorted(self.model.nodes)
+                if node_tag != node_i
+            )
+        )
+
+        dialog = TrussDialog(
+            self.model.next_element_tag(),
+            node_i=node_i,
+            node_j=node_j,
+            materials=self.project.materials,
+            units=self.project.units,
+            default_area=self._default_truss_area(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        try:
+            (
+                tag,
+                i,
+                j,
+                area,
+                material_tag,
+                group,
+                rho,
+                consistent_mass,
+                do_rayleigh,
+            ) = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Create Truss Element",
+                str(exc),
+            )
+            return
+
+        before = self.project.to_dict()
+        try:
+            if tag in self.project.connections:
+                raise ValueError(
+                    f"Element tag {tag} is already used by a connection."
+                )
+            self.model.add_element(
+                tag,
+                i,
+                j,
+                element_type="truss",
+                group=group,
+                mass_per_length=rho,
+                consistent_mass=consistent_mass,
+                truss_area=area,
+                truss_material_tag=material_tag,
+                truss_do_rayleigh=do_rayleigh,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Create Truss Element",
+                str(exc),
+            )
+            return
+
+        self._refresh_all(
+            f"Created Truss {tag}: node {i} → {j} · "
+            f"A={area:g} · material {material_tag}"
+        )
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(f"Create Truss {tag}", before)
+
     def _create_frame_between_nodes(
         self,
         node_i: int,
