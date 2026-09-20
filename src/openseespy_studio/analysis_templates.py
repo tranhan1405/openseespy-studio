@@ -466,6 +466,37 @@ def build_reference_lateral_loading(
     )
 
 
+def _positive_dynamic_mass_directions(
+    project: ProjectDatabase,
+) -> set[int]:
+    """Return translational DOFs with a positive supported mass source.
+
+    Nodal mass is direction-specific. Positive distributed element mass
+    contributes translational inertia in every spatial translation supported
+    by the model.
+    """
+    directions: set[int] = set()
+    translational = range(1, min(3, int(project.model.ndf)) + 1)
+    for direction in translational:
+        index = direction - 1
+        if any(
+            index < len(node.mass)
+            and max(0.0, float(node.mass[index])) > 1.0e-15
+            for node in project.model.nodes.values()
+        ):
+            directions.add(direction)
+
+    has_element_mass = any(
+        max(0.0, float(element.mass_per_length)) > 1.0e-15
+        for element in project.model.elements.values()
+    )
+    if has_element_mass:
+        directions.update(
+            range(1, min(3, int(project.model.ndm)) + 1)
+        )
+    return directions
+
+
 def _result_objects(
     project: ProjectDatabase,
     analysis_tag: int,
@@ -501,15 +532,12 @@ def build_modal_template(
     if num_modes < 1:
         raise ValueError("Number of modes must be at least 1.")
 
-    has_translational_mass = any(
-        any(abs(float(value)) > 1.0e-15 for value in node.mass[:3])
-        for node in project.model.nodes.values()
-    )
+    mass_directions = _positive_dynamic_mass_directions(project)
+    has_translational_mass = bool(mass_directions)
     if require_nodal_mass and not has_translational_mass:
         raise ValueError(
-            "Modal template found no translational nodal mass. "
-            "Assign nodal mass first, or disable the mass check if mass is "
-            "provided by another supported modeling mechanism."
+            "Modal template found no positive translational mass. "
+            "Assign nodal mass or positive distributed element mass first."
         )
 
     tag = project.next_analysis_tag()
@@ -539,7 +567,7 @@ def build_modal_template(
     ]
     results = _result_objects(project, tag, result_specs)
     mass_note = (
-        "nodal mass detected"
+        "dynamic mass detected"
         if has_translational_mass
         else "mass check bypassed"
     )
@@ -777,6 +805,8 @@ def _acceleration_to_model_units(
         si = float(value)
     elif unit == "cm/s²":
         si = float(value) * 0.01
+    elif unit == "mm/s²":
+        si = float(value) * 0.001
     else:
         raise ValueError(f"Unsupported acceleration unit: {input_unit}")
     return UnitSystem.from_mapping(units).acceleration_from_m_per_s2(si)
@@ -825,25 +855,19 @@ def build_nlth_multi_template(
         raise ValueError("NLTH gravity steps must be at least 1.")
 
     if require_nodal_mass:
-        missing_mass_directions = []
-        for direction in directions:
-            index = direction - 1
-            total_mass = sum(
-                max(0.0, float(node.mass[index]))
-                for node in project.model.nodes.values()
-                if index < len(node.mass)
-                and not bool(node.fixity[index])
-            )
-            if total_mass <= 1.0e-15:
-                missing_mass_directions.append(
-                    {1: "X", 2: "Y", 3: "Z"}[direction]
-                )
+        available_mass_directions = _positive_dynamic_mass_directions(project)
+        missing_mass_directions = [
+            {1: "X", 2: "Y", 3: "Z"}[direction]
+            for direction in directions
+            if direction not in available_mass_directions
+        ]
         if missing_mass_directions:
             raise ValueError(
-                "NLTH needs positive translational nodal mass in excitation "
+                "NLTH needs positive translational mass in excitation "
                 "direction(s): "
                 + ", ".join(missing_mass_directions)
-                + ". Assign nodal mass first or disable the template mass check."
+                + ". Assign nodal mass or positive distributed element mass "
+                "before creating the analysis."
             )
 
     next_series = _next_tag(project.time_series)
