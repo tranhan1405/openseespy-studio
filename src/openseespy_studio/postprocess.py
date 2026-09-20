@@ -2440,6 +2440,151 @@ def time_history_series(
     return selected_time, values
 
 
+def force_displacement_curve(
+    result: dict[str, Any] | None,
+    *,
+    displacement_node: int | None = None,
+    displacement_dof: int | None = None,
+    force_source: str = "Base shear",
+    force_node: int | None = None,
+    force_dof: int | None = None,
+) -> tuple[
+    list[float],
+    list[float],
+    int | None,
+    int,
+    str,
+    int | None,
+    int,
+]:
+    """Return a generic force-displacement response curve.
+
+    X is a nodal displacement. Y may be applied-equivalent base shear
+    (-sum of support reactions) or a native OpenSees nodal reaction.
+    The default node/DOF follows the recorded monitor/control settings.
+    """
+    if not isinstance(result, dict):
+        return [], [], None, 1, str(force_source), None, 1
+    analysis = result.get("analysis", {})
+    history = result.get("history", {})
+    if not isinstance(analysis, dict):
+        analysis = {}
+    if not isinstance(history, dict):
+        history = {}
+
+    if displacement_node is None:
+        raw = history.get("monitor_node", analysis.get("control_node"))
+        try:
+            displacement_node = int(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            displacement_node = None
+    if displacement_dof is None:
+        raw = history.get("control_dof", analysis.get("control_dof", 1))
+        try:
+            displacement_dof = int(raw)
+        except (TypeError, ValueError):
+            displacement_dof = 1
+    try:
+        displacement_dof = int(displacement_dof)
+    except (TypeError, ValueError):
+        displacement_dof = 1
+    if displacement_dof not in range(1, 7):
+        displacement_dof = 1
+
+    normalized_source = str(force_source or "Base shear").strip().lower()
+    source_label = (
+        "Node reaction"
+        if normalized_source in {"reaction", "node reaction", "nodal reaction"}
+        else "Base shear"
+    )
+    if force_dof is None:
+        force_dof = displacement_dof
+    try:
+        force_dof = int(force_dof)
+    except (TypeError, ValueError):
+        force_dof = displacement_dof
+    if force_dof not in range(1, 7):
+        force_dof = displacement_dof
+
+    if source_label == "Node reaction":
+        if force_node is None:
+            force_node = displacement_node
+        try:
+            force_node = int(force_node) if force_node is not None else None
+        except (TypeError, ValueError):
+            force_node = None
+    else:
+        force_node = None
+
+    tx, displacement = time_history_series(
+        result,
+        "Displacement",
+        node_tag=displacement_node,
+        dof=displacement_dof,
+    )
+    ty, force = time_history_series(
+        result,
+        "Reaction" if source_label == "Node reaction" else "Base shear",
+        node_tag=force_node,
+        dof=force_dof,
+    )
+    if not tx or not ty or not displacement or not force:
+        return (
+            [],
+            [],
+            displacement_node,
+            displacement_dof,
+            source_label,
+            force_node,
+            force_dof,
+        )
+
+    if len(tx) == len(ty) and all(
+        math.isclose(float(a), float(b), rel_tol=1.0e-12, abs_tol=1.0e-14)
+        for a, b in zip(tx, ty)
+    ):
+        count = min(len(displacement), len(force))
+        return (
+            list(displacement[:count]),
+            list(force[:count]),
+            displacement_node,
+            displacement_dof,
+            source_label,
+            force_node,
+            force_dof,
+        )
+
+    force_by_time = {
+        round(float(time_value), 12): float(value)
+        for time_value, value in zip(ty, force)
+        if math.isfinite(float(time_value)) and math.isfinite(float(value))
+    }
+    x: list[float] = []
+    y: list[float] = []
+    for time_value, value in zip(tx, displacement):
+        key = round(float(time_value), 12)
+        if key not in force_by_time:
+            continue
+        try:
+            x_value = float(value)
+            y_value = float(force_by_time[key])
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(x_value) and math.isfinite(y_value):
+            x.append(x_value)
+            y.append(y_value)
+
+    return (
+        x,
+        y,
+        displacement_node,
+        displacement_dof,
+        source_label,
+        force_node,
+        force_dof,
+    )
+
+
 def fiber_response_element_tags(
     result: dict[str, Any] | None,
 ) -> list[int]:
