@@ -687,23 +687,47 @@ class _Importer:
             return
 
         if kind == "elasticBeamColumn":
-            if len(args) < 11:
-                self.issue(
-                    "UNSUPPORTED", node, kind,
-                    "Only the 3D elasticBeamColumn signature is imported in this pass.",
+            if int(self.project.model.ndm) == 2:
+                if len(args) < 8:
+                    raise ValueError(
+                        "2D elasticBeamColumn needs A, E, Iz and transfTag"
+                    )
+                a = float(args[4])
+                e = float(args[5])
+                iz = float(args[6])
+                # Studio stores one common Elastic-section schema. The 2D
+                # generator only consumes A/E/Iz; the remaining values are
+                # harmless placeholders retained for round-trip persistence.
+                g = e / 2.6
+                j = 0.0
+                iy = 0.0
+                section_tag = self.elastic_section_for(
+                    a, e, g, j, iy, iz
                 )
-                return
-            a, e, g, j, iy, iz = map(float, args[4:10])
-            section_tag = self.elastic_section_for(a, e, g, j, iy, iz)
-            rest = args[11:]
+                transf_tag = int(args[7])
+                rest = args[8:]
+            else:
+                if len(args) < 11:
+                    raise ValueError(
+                        "3D elasticBeamColumn needs A, E, G, J, Iy, Iz "
+                        "and transfTag"
+                    )
+                a, e, g, j, iy, iz = map(float, args[4:10])
+                section_tag = self.elastic_section_for(
+                    a, e, g, j, iy, iz
+                )
+                transf_tag = int(args[10])
+                rest = args[11:]
             self.project.model.add_element(
                 tag,
                 ni,
                 nj,
                 "elasticBeamColumn",
                 section_tag=section_tag,
-                transf_tag=int(args[10]),
-                mass_per_length=float(self.flag_value(rest, "-mass", 0.0) or 0.0),
+                transf_tag=transf_tag,
+                mass_per_length=float(
+                    self.flag_value(rest, "-mass", 0.0) or 0.0
+                ),
                 consistent_mass="-cMass" in rest,
             )
             self.count("Elements")
@@ -986,11 +1010,18 @@ class _Importer:
         payload = list(args[type_index + 2:])
         for element_tag in element_tags:
             if load_type == "-beamUniform":
-                if len(payload) < 2:
-                    raise ValueError("beamUniform needs Wy and Wz")
-                wy = float(payload[0])
-                wz = float(payload[1])
-                wx = float(payload[2]) if len(payload) > 2 else 0.0
+                if int(self.project.model.ndm) == 2:
+                    if len(payload) < 1:
+                        raise ValueError("2D beamUniform needs Wy")
+                    wy = float(payload[0])
+                    wz = 0.0
+                    wx = float(payload[1]) if len(payload) > 1 else 0.0
+                else:
+                    if len(payload) < 2:
+                        raise ValueError("3D beamUniform needs Wy and Wz")
+                    wy = float(payload[0])
+                    wz = float(payload[1])
+                    wx = float(payload[2]) if len(payload) > 2 else 0.0
                 item = ElementLoadData(
                     self._next_element_load,
                     f"Imported uniform load {self._next_element_load}",
@@ -1002,18 +1033,30 @@ class _Importer:
                     wz=wz,
                 )
             elif load_type == "-beamPoint":
-                if len(payload) < 3:
-                    raise ValueError("beamPoint needs Py, Pz and x/L")
+                if int(self.project.model.ndm) == 2:
+                    if len(payload) < 2:
+                        raise ValueError("2D beamPoint needs Py and x/L")
+                    py = float(payload[0])
+                    pz = 0.0
+                    x_over_l = float(payload[1])
+                    px = float(payload[2]) if len(payload) > 2 else 0.0
+                else:
+                    if len(payload) < 3:
+                        raise ValueError("3D beamPoint needs Py, Pz and x/L")
+                    py = float(payload[0])
+                    pz = float(payload[1])
+                    x_over_l = float(payload[2])
+                    px = float(payload[3]) if len(payload) > 3 else 0.0
                 item = ElementLoadData(
                     self._next_element_load,
                     f"Imported point load {self._next_element_load}",
                     self.current_pattern,
                     element_tag,
                     "Point",
-                    py=float(payload[0]),
-                    pz=float(payload[1]),
-                    x_over_l=float(payload[2]),
-                    px=float(payload[3]) if len(payload) > 3 else 0.0,
+                    py=py,
+                    pz=pz,
+                    x_over_l=x_over_l,
+                    px=px,
                 )
             else:
                 self.issue(
@@ -1492,12 +1535,11 @@ class _Importer:
             self.statement(stmt)
         self.finish_analysis()
 
-        if self.project.model.ndm != 3 or self.project.model.ndf != 6:
+        if self.project.model.ndm not in {2, 3}:
             self.issue(
                 "WARNING", None, "model dimensions",
                 f"Imported ndm={self.project.model.ndm}, ndf={self.project.model.ndf}. "
-                "Review 2D re-export carefully because Studio is strongest on "
-                "its 3D/6-DOF backend.",
+                "Only 2D and 3D structural models are supported by Studio.",
             )
 
         return OpenSeesImportResult(
