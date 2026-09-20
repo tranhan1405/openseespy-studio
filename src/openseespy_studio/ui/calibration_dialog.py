@@ -6,6 +6,7 @@ from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -491,8 +492,8 @@ class ApplyCalibrationCaseDialog(QDialog):
             QHeaderView.ResizeToContents
         )
         table.horizontalHeader().setStretchLastSection(True)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-        table.setSelectionMode(QTableWidget.NoSelection)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setSelectionMode(QAbstractItemView.NoSelection)
 
         changed_count = 0
         for row, change in enumerate(changes):
