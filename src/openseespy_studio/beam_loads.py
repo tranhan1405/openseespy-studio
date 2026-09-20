@@ -55,7 +55,15 @@ def element_local_axes(
         node_j.xyz[index] - node_i.xyz[index]
         for index in range(3)
     ))
-    # OpenSees defines local y = vecxz x local x, then z = x x y.
+    if int(model.ndm) == 2:
+        # In a 2D OpenSees model the member lies in the global XY plane.
+        # Local z is out of plane and vecxz is not an input to geomTransf.
+        local_z = (0.0, 0.0, 1.0)
+        local_y = _unit(_cross(local_z, local_x))
+        return local_x, local_y, local_z
+
+    # In 3D OpenSees defines local y = vecxz x local x,
+    # then local z = local x x local y.
     local_y = _unit(_cross(transformation.vecxz, local_x))
     local_z = _unit(_cross(local_x, local_y))
     return local_x, local_y, local_z
