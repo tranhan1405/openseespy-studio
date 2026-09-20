@@ -217,6 +217,38 @@ def test_specimen_response_tab_loads_moment_curvature_and_fiber_choices(qapp):
         qapp.processEvents()
         assert panel.specimen_plot._x == pytest.approx([0.0, 0.0002])
         assert panel.specimen_plot._y == pytest.approx([0.0, 18.0])
+
+        panel._set_cyclic_experiment_dataset(
+            {
+                "headers": [
+                    "Displacement",
+                    "Force",
+                    "Curvature",
+                    "Moment",
+                ],
+                "rows": [
+                    [0.0, 0.0, 0.0, 0.0],
+                    [0.01, 18.0, 0.002, 19.0],
+                ],
+                "delimiter": ",",
+                "skipped_rows": 0,
+            },
+            path="/tmp/specimen_response.csv",
+        )
+        panel.specimen_quantity.setCurrentIndex(
+            panel.specimen_quantity.findData("moment_curvature")
+        )
+        qapp.processEvents()
+
+        assert panel.specimen_exp_x_column.currentText() == "Curvature"
+        assert panel.specimen_exp_y_column.currentText() == "Moment"
+        assert panel.specimen_plot._overlay_x == pytest.approx(
+            [0.0, 0.002]
+        )
+        assert panel.specimen_plot._overlay_y == pytest.approx(
+            [0.0, 19.0]
+        )
+        assert "specimen_response.csv" in panel.specimen_experiment_info.text()
     finally:
         panel.close()
         panel.deleteLater()
@@ -353,7 +385,7 @@ def test_cyclic_tab_shows_synchronized_column_reversal_and_cycle_metrics(qapp):
         qapp.processEvents()
 
         assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Cyclic Hysteresis"
-        assert panel.cyclic_reversal_table.columnCount() == 16
+        assert panel.cyclic_reversal_table.columnCount() == 20
         assert panel.cyclic_reversal_table.rowCount() == 3
         assert panel.cyclic_cycle_table.rowCount() == 1
 
@@ -373,6 +405,48 @@ def test_cyclic_tab_shows_synchronized_column_reversal_and_cycle_metrics(qapp):
         assert panel.cyclic_cycle_table.item(0, 0).text() == "1"
         assert panel.cyclic_cycle_table.item(0, 1).text() == "3"
         assert panel.cyclic_cycle_table.item(0, 2).text() == "2"
+
+        experimental_force = [
+            9.5, 19.0, 7.5, 0.0, -9.5, -17.0,
+            -6.5, 0.0, 8.5, 15.0, 5.5,
+        ]
+        panel._set_cyclic_experiment_dataset(
+            {
+                "headers": ["Displacement [mm]", "Force [kN]"],
+                "rows": [
+                    [0.0, 0.0],
+                    *[
+                        [u, force]
+                        for u, force in zip(
+                            displacement,
+                            experimental_force,
+                        )
+                    ],
+                ],
+                "delimiter": ",",
+                "skipped_rows": 0,
+            },
+            path="/tmp/specimen_test.csv",
+        )
+        qapp.processEvents()
+
+        assert not panel.cyclic_compare_table.isHidden()
+        assert panel.cyclic_compare_table.rowCount() == 5
+        assert len(panel.cyclic_plot._overlay_x) == len(displacement) + 1
+        assert len(panel.cyclic_plot._overlay_y) == len(displacement) + 1
+        assert panel.cyclic_reversal_table.item(0, 16).text() == "19"
+        assert float(panel.cyclic_reversal_table.item(0, 17).text()) > 5.0
+        assert panel.cyclic_reversal_table.item(0, 18).text() != "-"
+        assert "matched reversals 3/3" in panel.cyclic_experiment_info.text()
+
+        panel.cyclic_compare_view.setCurrentIndex(
+            panel.cyclic_compare_view.findData("backbone")
+        )
+        qapp.processEvents()
+        assert panel.cyclic_plot._x == pytest.approx([-2.0, 0.0, 2.0])
+        assert panel.cyclic_plot._overlay_x == pytest.approx(
+            [-2.0, 0.0, 2.0]
+        )
     finally:
         panel.close()
         panel.deleteLater()

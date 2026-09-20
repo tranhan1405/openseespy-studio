@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import csv
+import io
 import math
 from collections.abc import Sequence
 from typing import Any
@@ -210,6 +212,598 @@ def cyclic_hysteresis_curve(
     if len(x) == 1:
         return [], [], node, dof
     return x, y, node, dof
+
+
+
+def parse_experimental_csv_text(text: str) -> dict[str, Any]:
+    """Parse a small experimental CSV/TSV payload into numeric columns.
+
+    The parser accepts comma, semicolon and tab delimiters, tolerates a
+    header-less numeric file, and supports decimal commas when semicolon is
+    the field delimiter. Non-numeric cells are preserved as missing values
+    so X/Y extraction can skip only the affected row.
+    """
+    raw = str(text or "").lstrip("\ufeff")
+    lines = [
+        line
+        for line in raw.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if not lines:
+        return {
+            "headers": [],
+            "rows": [],
+            "delimiter": ",",
+            "skipped_rows": 0,
+        }
+
+    sample = "\n".join(lines[:20])
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
+        delimiter = str(dialect.delimiter)
+    except csv.Error:
+        delimiter = (
+            ";"
+            if sample.count(";") > max(sample.count(","), sample.count("\t"))
+            else "\t"
+            if sample.count("\t") > sample.count(",")
+            else ","
+        )
+
+    reader = csv.reader(io.StringIO("\n".join(lines)), delimiter=delimiter)
+    source_rows = [
+        [str(cell).strip() for cell in row]
+        for row in reader
+        if any(str(cell).strip() for cell in row)
+    ]
+    if not source_rows:
+        return {
+            "headers": [],
+            "rows": [],
+            "delimiter": delimiter,
+            "skipped_rows": 0,
+        }
+
+    width = max(len(row) for row in source_rows)
+
+    def number(token: Any) -> float | None:
+        value = str(token).strip()
+        if not value:
+            return None
+        # Semicolon-separated European exports commonly use decimal commas.
+        if delimiter == ";" and "," in value and "." not in value:
+            value = value.replace(",", ".")
+        value = value.replace("\u00a0", "").replace(" ", "")
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if math.isfinite(parsed) else None
+
+    first = source_rows[0] + [""] * (width - len(source_rows[0]))
+    first_numeric = [number(cell) for cell in first]
+    has_header = any(value is None for value in first_numeric)
+
+    if has_header:
+        raw_headers = first
+        data_rows = source_rows[1:]
+    else:
+        raw_headers = [f"Column {index + 1}" for index in range(width)]
+        data_rows = source_rows
+
+    headers: list[str] = []
+    used: dict[str, int] = {}
+    for index, raw_header in enumerate(raw_headers):
+        base = str(raw_header).strip() or f"Column {index + 1}"
+        count = used.get(base, 0) + 1
+        used[base] = count
+        headers.append(base if count == 1 else f"{base} ({count})")
+
+    numeric_rows: list[list[float | None]] = []
+    skipped_rows = 0
+    for row in data_rows:
+        padded = row + [""] * (width - len(row))
+        values = [number(cell) for cell in padded[:width]]
+        if not any(value is not None for value in values):
+            skipped_rows += 1
+            continue
+        numeric_rows.append(values)
+
+    return {
+        "headers": headers,
+        "rows": numeric_rows,
+        "delimiter": delimiter,
+        "skipped_rows": skipped_rows,
+    }
+
+
+def experimental_csv_series(
+    dataset: dict[str, Any] | None,
+    x_column: int,
+    y_column: int,
+    *,
+    x_scale: float = 1.0,
+    y_scale: float = 1.0,
+) -> tuple[list[float], list[float]]:
+    """Extract a scaled numeric X/Y pair from parsed experimental CSV data."""
+    if not isinstance(dataset, dict):
+        return [], []
+    rows = dataset.get("rows", [])
+    if not isinstance(rows, (list, tuple)):
+        return [], []
+    try:
+        x_index = int(x_column)
+        y_index = int(y_column)
+        sx = float(x_scale)
+        sy = float(y_scale)
+    except (TypeError, ValueError):
+        return [], []
+    if x_index < 0 or y_index < 0:
+        return [], []
+    if not math.isfinite(sx) or not math.isfinite(sy):
+        return [], []
+
+    x: list[float] = []
+    y: list[float] = []
+    for row in rows:
+        if (
+            not isinstance(row, (list, tuple))
+            or x_index >= len(row)
+            or y_index >= len(row)
+        ):
+            continue
+        raw_x = row[x_index]
+        raw_y = row[y_index]
+        if raw_x is None or raw_y is None:
+            continue
+        try:
+            x_value = float(raw_x) * sx
+            y_value = float(raw_y) * sy
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(x_value) and math.isfinite(y_value):
+            x.append(x_value)
+            y.append(y_value)
+    return x, y
+
+
+def cyclic_backbone_curve(
+    displacement: Sequence[float],
+    force: Sequence[float],
+) -> tuple[list[float], list[float]]:
+    """Return a reversal-based cyclic envelope/backbone.
+
+    Repeated reversals at effectively the same signed amplitude are grouped
+    and the largest absolute force is retained. This is descriptive envelope
+    extraction; it does not impose a code-specific backbone idealization.
+    """
+    reversals = cyclic_reversal_points(displacement, force)
+    if not reversals:
+        return [], []
+
+    max_amplitude = max(
+        (abs(float(item["displacement"])) for item in reversals),
+        default=0.0,
+    )
+    tolerance = max(max_amplitude * 1.0e-6, 1.0e-12)
+    groups: list[dict[str, float]] = []
+    for item in reversals:
+        u = float(item["displacement"])
+        v = float(item["force"])
+        match = next(
+            (
+                group
+                for group in groups
+                if (group["u"] >= 0.0) == (u >= 0.0)
+                and abs(abs(group["u"]) - abs(u)) <= tolerance
+            ),
+            None,
+        )
+        if match is None:
+            groups.append({"u": u, "v": v})
+        elif abs(v) > abs(match["v"]):
+            match["u"] = u
+            match["v"] = v
+
+    groups.sort(key=lambda item: float(item["u"]))
+    x = [float(item["u"]) for item in groups]
+    y = [float(item["v"]) for item in groups]
+    if x and min(x) < 0.0 < max(x):
+        insert = next(
+            (index for index, value in enumerate(x) if value > 0.0),
+            len(x),
+        )
+        x.insert(insert, 0.0)
+        y.insert(insert, 0.0)
+    return x, y
+
+
+def _comparison_percent(
+    simulation: float | None,
+    experiment: float | None,
+    *,
+    magnitude: bool = False,
+) -> float | None:
+    if simulation is None or experiment is None:
+        return None
+    try:
+        sim = float(simulation)
+        exp = float(experiment)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(sim) or not math.isfinite(exp):
+        return None
+    if magnitude:
+        sim = abs(sim)
+        exp = abs(exp)
+    if abs(exp) <= 1.0e-15:
+        return None
+    return (sim - exp) / abs(exp) * 100.0
+
+
+def cyclic_reversal_comparison(
+    simulation_displacement: Sequence[float],
+    simulation_force: Sequence[float],
+    experiment_displacement: Sequence[float],
+    experiment_force: Sequence[float],
+    *,
+    amplitude_tolerance_ratio: float = 0.15,
+) -> list[dict[str, Any]]:
+    """Match cyclic reversals for strength/stiffness degradation comparison.
+
+    Repeated amplitudes in laboratory data are rarely numerically identical.
+    This routine therefore builds sign-specific amplitude families using a
+    relative tolerance, assigns a repeat count within each family, and then
+    pairs OpenSees/experiment reversals by sign, family amplitude and repeat.
+    """
+    simulation_raw = cyclic_reversal_points(
+        simulation_displacement,
+        simulation_force,
+    )
+    experiment_raw = cyclic_reversal_points(
+        experiment_displacement,
+        experiment_force,
+    )
+    if not simulation_raw or not experiment_raw:
+        return []
+
+    ratio = max(float(amplitude_tolerance_ratio), 0.0)
+    max_amplitude = max(
+        [
+            abs(float(item["displacement"]))
+            for item in simulation_raw + experiment_raw
+        ],
+        default=0.0,
+    )
+    absolute_tolerance = max(max_amplitude * 1.0e-9, 1.0e-12)
+
+    def annotate(
+        reversals: list[dict[str, float]],
+    ) -> list[dict[str, Any]]:
+        families: list[dict[str, Any]] = []
+        annotated: list[dict[str, Any]] = []
+        for number, source in enumerate(reversals, start=1):
+            item: dict[str, Any] = dict(source)
+            displacement = float(item["displacement"])
+            amplitude = abs(displacement)
+            sign = 1 if displacement >= 0.0 else -1
+
+            candidates: list[tuple[float, int, dict[str, Any]]] = []
+            for family_index, family in enumerate(families):
+                if int(family["sign"]) != sign:
+                    continue
+                reference_amplitude = float(family["amplitude"])
+                scale = max(
+                    amplitude,
+                    reference_amplitude,
+                    absolute_tolerance,
+                )
+                difference = abs(
+                    amplitude - reference_amplitude
+                ) / scale
+                if (
+                    difference <= ratio
+                    or abs(amplitude - reference_amplitude)
+                    <= absolute_tolerance
+                ):
+                    candidates.append(
+                        (difference, family_index, family)
+                    )
+
+            if candidates:
+                _difference, family_index, family = min(
+                    candidates,
+                    key=lambda entry: entry[0],
+                )
+            else:
+                family_index = len(families)
+                family = {
+                    "sign": sign,
+                    "amplitude": amplitude,
+                    "count": 0,
+                    "reference_force": abs(float(item["force"])),
+                    "reference_stiffness": abs(
+                        float(item.get("secant_stiffness", math.nan))
+                    ),
+                }
+                families.append(family)
+
+            family["count"] = int(family["count"]) + 1
+            repeat_index = int(family["count"])
+            reference_force = float(family["reference_force"])
+            reference_stiffness = float(
+                family["reference_stiffness"]
+            )
+            stiffness = float(
+                item.get("secant_stiffness", math.nan)
+            )
+
+            item["_comparison_number"] = number
+            item["_comparison_family"] = family_index
+            item["_comparison_repeat_index"] = repeat_index
+            item["_comparison_strength_ratio"] = (
+                abs(float(item["force"])) / reference_force
+                if reference_force > 1.0e-15
+                else math.nan
+            )
+            item["_comparison_stiffness_ratio"] = (
+                abs(stiffness) / reference_stiffness
+                if reference_stiffness > 1.0e-15
+                and math.isfinite(reference_stiffness)
+                else math.nan
+            )
+            annotated.append(item)
+        return annotated
+
+    simulation = annotate(simulation_raw)
+    experiment = annotate(experiment_raw)
+    used: set[int] = set()
+    rows: list[dict[str, Any]] = []
+
+    for sim in simulation:
+        sim_number = int(sim["_comparison_number"])
+        sim_u = float(sim["displacement"])
+        sim_sign = 1 if sim_u >= 0.0 else -1
+        sim_repeat = int(sim["_comparison_repeat_index"])
+        sim_amp = abs(sim_u)
+
+        candidates: list[
+            tuple[float, int, dict[str, Any]]
+        ] = []
+        for exp_index, exp in enumerate(experiment):
+            if exp_index in used:
+                continue
+            exp_u = float(exp["displacement"])
+            exp_sign = 1 if exp_u >= 0.0 else -1
+            exp_repeat = int(exp["_comparison_repeat_index"])
+            if exp_sign != sim_sign or exp_repeat != sim_repeat:
+                continue
+            exp_amp = abs(exp_u)
+            scale = max(sim_amp, exp_amp, absolute_tolerance)
+            amplitude_error = abs(sim_amp - exp_amp) / scale
+            if (
+                amplitude_error <= ratio
+                or abs(sim_amp - exp_amp) <= absolute_tolerance
+            ):
+                candidates.append(
+                    (amplitude_error, exp_index, exp)
+                )
+
+        if not candidates:
+            continue
+
+        amplitude_error, exp_index, exp = min(
+            candidates,
+            key=lambda entry: entry[0],
+        )
+        used.add(exp_index)
+        sim_force = float(sim["force"])
+        exp_force = float(exp["force"])
+        sim_stiffness = float(
+            sim.get("secant_stiffness", math.nan)
+        )
+        exp_stiffness = float(
+            exp.get("secant_stiffness", math.nan)
+        )
+        sim_strength_ratio = sim.get(
+            "_comparison_strength_ratio"
+        )
+        exp_strength_ratio = exp.get(
+            "_comparison_strength_ratio"
+        )
+        sim_stiffness_ratio = sim.get(
+            "_comparison_stiffness_ratio"
+        )
+        exp_stiffness_ratio = exp.get(
+            "_comparison_stiffness_ratio"
+        )
+        rows.append({
+            "simulation_reversal": sim_number,
+            "experiment_reversal": int(
+                exp["_comparison_number"]
+            ),
+            "sign": sim_sign,
+            "repeat_index": sim_repeat,
+            "simulation_displacement": sim_u,
+            "experiment_displacement": float(
+                exp["displacement"]
+            ),
+            "amplitude_difference_percent": (
+                amplitude_error * 100.0
+            ),
+            "simulation_force": sim_force,
+            "experiment_force": exp_force,
+            "force_error_percent": _comparison_percent(
+                sim_force,
+                exp_force,
+                magnitude=True,
+            ),
+            "simulation_secant_stiffness": sim_stiffness,
+            "experiment_secant_stiffness": exp_stiffness,
+            "stiffness_error_percent": _comparison_percent(
+                sim_stiffness,
+                exp_stiffness,
+                magnitude=True,
+            ),
+            "simulation_strength_ratio": sim_strength_ratio,
+            "experiment_strength_ratio": exp_strength_ratio,
+            "strength_degradation_difference_percent": (
+                _comparison_percent(
+                    sim_strength_ratio,
+                    exp_strength_ratio,
+                    magnitude=False,
+                )
+            ),
+            "simulation_stiffness_ratio": sim_stiffness_ratio,
+            "experiment_stiffness_ratio": exp_stiffness_ratio,
+            "stiffness_degradation_difference_percent": (
+                _comparison_percent(
+                    sim_stiffness_ratio,
+                    exp_stiffness_ratio,
+                    magnitude=False,
+                )
+            ),
+        })
+
+    return rows
+
+def cyclic_curve_comparison(
+    simulation_displacement: Sequence[float],
+    simulation_force: Sequence[float],
+    experiment_displacement: Sequence[float],
+    experiment_force: Sequence[float],
+) -> dict[str, Any]:
+    """Summarize descriptive OpenSees-versus-experiment cyclic differences."""
+    if (
+        min(len(simulation_displacement), len(simulation_force)) < 2
+        or min(len(experiment_displacement), len(experiment_force)) < 2
+    ):
+        return {}
+
+    sim = cyclic_hysteresis_metrics(
+        simulation_displacement,
+        simulation_force,
+    )
+    exp = cyclic_hysteresis_metrics(
+        experiment_displacement,
+        experiment_force,
+    )
+    matches = cyclic_reversal_comparison(
+        simulation_displacement,
+        simulation_force,
+        experiment_displacement,
+        experiment_force,
+    )
+
+    sim_cycle_energy = sum(
+        float(item.get("energy", 0.0))
+        for item in sim.get("cycle_energies", [])
+        if isinstance(item, dict)
+    )
+    exp_cycle_energy = sum(
+        float(item.get("energy", 0.0))
+        for item in exp.get("cycle_energies", [])
+        if isinstance(item, dict)
+    )
+
+    peak_sim_abs = float(sim.get("max_abs_force", 0.0))
+    peak_exp_abs = float(exp.get("max_abs_force", 0.0))
+
+    normalized_rmse = None
+    if matches and peak_exp_abs > 1.0e-15:
+        square_errors = [
+            (
+                abs(float(item["simulation_force"]))
+                - abs(float(item["experiment_force"]))
+            ) ** 2
+            for item in matches
+        ]
+        normalized_rmse = (
+            math.sqrt(sum(square_errors) / len(square_errors))
+            / peak_exp_abs
+            * 100.0
+        )
+
+    metrics = [
+        {
+            "key": "peak_positive_force",
+            "label": "Peak +V",
+            "simulation": sim.get("peak_positive_force"),
+            "experiment": exp.get("peak_positive_force"),
+            "difference_percent": _comparison_percent(
+                sim.get("peak_positive_force"),
+                exp.get("peak_positive_force"),
+            ),
+        },
+        {
+            "key": "peak_negative_force",
+            "label": "Peak |−V|",
+            "simulation": (
+                abs(float(sim.get("peak_negative_force", 0.0)))
+                if sim.get("peak_negative_force") is not None
+                else None
+            ),
+            "experiment": (
+                abs(float(exp.get("peak_negative_force", 0.0)))
+                if exp.get("peak_negative_force") is not None
+                else None
+            ),
+            "difference_percent": _comparison_percent(
+                sim.get("peak_negative_force"),
+                exp.get("peak_negative_force"),
+                magnitude=True,
+            ),
+        },
+        {
+            "key": "peak_abs_force",
+            "label": "Peak |V|",
+            "simulation": peak_sim_abs,
+            "experiment": peak_exp_abs,
+            "difference_percent": _comparison_percent(
+                peak_sim_abs,
+                peak_exp_abs,
+                magnitude=True,
+            ),
+        },
+        {
+            "key": "max_abs_displacement",
+            "label": "Max |u|",
+            "simulation": sim.get("max_abs_displacement"),
+            "experiment": exp.get("max_abs_displacement"),
+            "difference_percent": _comparison_percent(
+                sim.get("max_abs_displacement"),
+                exp.get("max_abs_displacement"),
+                magnitude=True,
+            ),
+        },
+        {
+            "key": "closed_cycle_energy_sum",
+            "label": "Σ closed-cycle energy",
+            "simulation": sim_cycle_energy,
+            "experiment": exp_cycle_energy,
+            "difference_percent": _comparison_percent(
+                sim_cycle_energy,
+                exp_cycle_energy,
+                magnitude=True,
+            ),
+        },
+    ]
+
+    return {
+        "metrics": metrics,
+        "reversal_matches": matches,
+        "matched_reversal_count": len(matches),
+        "simulation_reversal_count": len(sim.get("reversals", [])),
+        "experiment_reversal_count": len(exp.get("reversals", [])),
+        "simulation_closed_cycle_count": int(
+            sim.get("closed_cycle_count", 0)
+        ),
+        "experiment_closed_cycle_count": int(
+            exp.get("closed_cycle_count", 0)
+        ),
+        "reversal_force_nrmse_percent": normalized_rmse,
+    }
+
 
 
 def cyclic_reversal_points(
