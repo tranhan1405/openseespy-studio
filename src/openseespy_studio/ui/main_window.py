@@ -1618,6 +1618,35 @@ class MainWindow(QMainWindow):
             )
 
         self._make_action(
+            "zoom_selection",
+            "Zoom to Selection",
+            "fit",
+            self._zoom_selection,
+            "Fit the selected nodes/elements in the viewport",
+        )
+        self._make_action(
+            "hide_selection",
+            "Hide Selection",
+            "display",
+            self._hide_selection,
+            "Hide the selected nodes/elements",
+        )
+        self._make_action(
+            "isolate_selection",
+            "Isolate Selection",
+            "select",
+            self._isolate_selection,
+            "Show only the selected nodes/elements",
+        )
+        self._make_action(
+            "show_all",
+            "Show All",
+            "display",
+            self._show_all,
+            "Restore all hidden model entities",
+        )
+
+        self._make_action(
             "new_material",
             "New Material...",
             "material",
@@ -1847,7 +1876,7 @@ class MainWindow(QMainWindow):
 
         view_menu = menus["View"]
         view_menu.addAction(self.actions["fit_view"])
-        view_menu.addAction(self.actions["byid"])
+        view_menu.addAction(self.actions["zoom_selection"])
         view_menu.addSeparator()
         view_menu.addActions([
             self.actions["xy"],
@@ -1872,11 +1901,11 @@ class MainWindow(QMainWindow):
             )
         self.view_show_menu = view_menu.addMenu("Show")
         view_menu.addSeparator()
-        for action in (
-            self.actions["hide_selection"] if "hide_selection" in self.actions else None,
-        ):
-            if action is not None:
-                view_menu.addAction(action)
+        view_menu.addActions([
+            self.actions["hide_selection"],
+            self.actions["isolate_selection"],
+            self.actions["show_all"],
+        ])
 
         model_menu = menus["Model"]
         model_menu.addAction(self.actions["new_material"])
@@ -2139,14 +2168,6 @@ class MainWindow(QMainWindow):
             self.actions["show_load_values"],
             self.actions["show_section_axes"],
         ])
-        self.view_show_menu.addSeparator()
-        hide_selection_action = self.view_show_menu.addAction("Hide Selection")
-        hide_selection_action.triggered.connect(self._hide_selection)
-        isolate_selection_action = self.view_show_menu.addAction("Isolate Selection")
-        isolate_selection_action.triggered.connect(self._isolate_selection)
-        show_all_action = self.view_show_menu.addAction("Show All")
-        show_all_action.triggered.connect(self._show_all)
-
         self._refresh_recent_projects_menu()
 
         ribbon = QToolBar("Ribbon", self)
