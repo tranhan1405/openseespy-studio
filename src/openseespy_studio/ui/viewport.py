@@ -112,6 +112,8 @@ class ModelViewport(QWidget):
         self._nav_mode: str | None = None
         self._nav_last_pos: tuple[float, float] | None = None
         self._interaction_tool = "select"
+        self._measurement_actor_names: set[str] = set()
+        self._measurement_counter = 0
         self._box_origin: QPoint | None = None
         self._rubber_band: QRubberBand | None = None
         self._result_overlay_active = False
@@ -251,6 +253,111 @@ class ModelViewport(QWidget):
 
     def interaction_tool(self) -> str:
         return self._interaction_tool
+
+    def clear_measure_anchor(self, *, render: bool = True) -> None:
+        """Remove the temporary first-point marker for the Measure tool."""
+        self._remove_overlay("measure-anchor")
+        if render:
+            self.plotter.render()
+
+    def show_measure_anchor(self, node_tag: int) -> None:
+        """Highlight the first node selected for a distance measurement."""
+        self.clear_measure_anchor(render=False)
+        if self._model is None or int(node_tag) not in self._model.nodes:
+            self.plotter.render()
+            return
+        point = self._model.nodes[int(node_tag)].xyz
+        self.plotter.add_mesh(
+            pv.PolyData([point]),
+            name="measure-anchor",
+            color="#6f42c1",
+            render_points_as_spheres=True,
+            point_size=16,
+            pickable=False,
+            render=False,
+        )
+        self.plotter.render()
+
+    def add_distance_measurement(
+        self,
+        first_node_tag: int,
+        second_node_tag: int,
+    ) -> dict[str, float]:
+        """Draw and return a node-to-node distance measurement."""
+        if self._model is None:
+            raise ValueError("No model is currently displayed.")
+        first_tag = int(first_node_tag)
+        second_tag = int(second_node_tag)
+        if first_tag not in self._model.nodes or second_tag not in self._model.nodes:
+            raise ValueError("Measure nodes must exist in the current model.")
+
+        p1 = np.asarray(self._model.nodes[first_tag].xyz, dtype=float)
+        p2 = np.asarray(self._model.nodes[second_tag].xyz, dtype=float)
+        delta = p2 - p1
+        distance = float(np.linalg.norm(delta))
+        unit = str(self._units.get("length", "")).strip()
+        suffix = f" {unit}" if unit else ""
+
+        self._measurement_counter += 1
+        prefix = f"measure-{self._measurement_counter}"
+        line_name = f"{prefix}-line"
+        point_name = f"{prefix}-points"
+        label_name = f"{prefix}-label"
+
+        self.plotter.add_mesh(
+            pv.Line(p1, p2),
+            name=line_name,
+            color="#6f42c1",
+            line_width=3,
+            pickable=False,
+            render=False,
+        )
+        self.plotter.add_mesh(
+            pv.PolyData(np.vstack((p1, p2))),
+            name=point_name,
+            color="#6f42c1",
+            render_points_as_spheres=True,
+            point_size=11,
+            pickable=False,
+            render=False,
+        )
+
+        midpoint = (p1 + p2) * 0.5
+        label = (
+            f"L = {distance:.4g}{suffix}\n"
+            f"ΔX = {delta[0]:.4g}{suffix}   "
+            f"ΔY = {delta[1]:.4g}{suffix}   "
+            f"ΔZ = {delta[2]:.4g}{suffix}"
+        )
+        self._add_annotation_labels(
+            [midpoint],
+            [label],
+            name=label_name,
+            text_color="#4f2f86",
+            font_size=11,
+            always_visible=True,
+        )
+        self._measurement_actor_names.update(
+            {line_name, point_name, label_name}
+        )
+        self.clear_measure_anchor(render=False)
+        self.plotter.render()
+
+        return {
+            "distance": distance,
+            "dx": float(delta[0]),
+            "dy": float(delta[1]),
+            "dz": float(delta[2]),
+        }
+
+    def clear_measurements(self, *, render: bool = True) -> None:
+        """Remove all persistent Measure overlays from the viewport."""
+        self.clear_measure_anchor(render=False)
+        for name in tuple(self._measurement_actor_names):
+            self._remove_overlay(name)
+        self._measurement_actor_names.clear()
+        if render:
+            self.plotter.render()
 
     def _install_mouse_observers(self) -> None:
         # All viewport mouse input is handled through Qt so the default VTK
@@ -1159,6 +1266,9 @@ class ModelViewport(QWidget):
         self._active_result_view_key = None
         self._result_overlay_active = False
         self.plotter.clear()
+        self._measurement_actor_names.clear()
+        self._measurement_counter = 0
+        self._annotation_label_actors.clear()
         self._reset_scene()
         self._node_actor = None
         self._node_tags = []
