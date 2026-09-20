@@ -333,3 +333,62 @@ def test_bond_sp01_strain_penetration_mode_uses_section_not_dof_spring(qapp):
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+def test_test_column_wizard_hinge_radau_enforces_single_member_element(qapp):
+    project = ProjectDatabase()
+    project.add_section(SectionData(1, "RC column", "Elastic"))
+    project.add_section(SectionData(2, "Elastic interior", "Elastic"))
+    dialog = TestColumnWizard(project)
+    try:
+        dialog.section.setCurrentIndex(dialog.section.findData(1))
+        dialog.elements.setValue(4)
+        dialog.integration.setCurrentIndex(
+            dialog.integration.findData("HingeRadau")
+        )
+        qapp.processEvents()
+
+        assert dialog.elements.value() == 1
+        assert dialog.elements.isEnabled() is False
+        assert dialog.integration_points.isEnabled() is False
+        assert dialog.hinge_group.isHidden() is False
+
+        dialog.interior_section.setCurrentIndex(
+            dialog.interior_section.findData(2)
+        )
+        dialog.hinge_i_length.setValue(0.30)
+        dialog.hinge_j_length.setValue(0.10)
+        spec = dialog.data()
+
+        assert spec.integration_type == "HingeRadau"
+        assert spec.hinge_i_section_tag is None
+        assert spec.hinge_j_section_tag is None
+        assert spec.interior_section_tag == 2
+        assert spec.hinge_i_length == pytest.approx(0.30)
+        assert spec.hinge_j_length == pytest.approx(0.10)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_test_column_wizard_radau_keeps_integration_points(qapp):
+    project = ProjectDatabase()
+    project.add_section(SectionData(1, "RC column", "Elastic"))
+    dialog = TestColumnWizard(project)
+    try:
+        dialog.section.setCurrentIndex(dialog.section.findData(1))
+        dialog.integration.setCurrentIndex(
+            dialog.integration.findData("Radau")
+        )
+        dialog.integration_points.setValue(6)
+        qapp.processEvents()
+
+        assert dialog.integration_points.isEnabled() is True
+        assert dialog.elements.isEnabled() is True
+        assert dialog.data().integration_type == "Radau"
+        assert dialog.data().integration_points == 6
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
