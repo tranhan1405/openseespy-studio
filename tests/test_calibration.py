@@ -10,8 +10,12 @@ from openseespy_studio.calibration import (
     CalibrationWeights,
     apply_calibration_case,
     build_grid_cases,
+    calibration_best_score_history,
     calibration_case_changes,
     calibration_grid_size,
+    calibration_parameter_keys,
+    calibration_parameter_label,
+    calibration_round_best_parameter_series,
     calibration_parameter_payload,
     rank_calibration_cases,
     refine_calibration_parameters,
@@ -376,3 +380,126 @@ def test_calibration_worker_adaptive_refines_around_best_case(
         1.0
     )
     assert payload["cases"][0]["score"] == pytest.approx(0.0)
+
+
+
+def test_calibration_best_score_history_uses_execution_order_and_holds_best():
+    rows = [
+        {
+            "case_id": 4,
+            "round": 2,
+            "score": 5.0,
+            "values": {"material:1:Fy": 520.0},
+        },
+        {
+            "case_id": 1,
+            "round": 1,
+            "score": None,
+            "values": {"material:1:Fy": 450.0},
+        },
+        {
+            "case_id": 3,
+            "round": 1,
+            "score": 8.0,
+            "values": {"material:1:Fy": 500.0},
+        },
+        {
+            "case_id": 2,
+            "round": 1,
+            "score": 10.0,
+            "values": {"material:1:Fy": 475.0},
+        },
+        {
+            "case_id": 5,
+            "round": 2,
+            "score": 6.0,
+            "values": {"material:1:Fy": 540.0},
+        },
+    ]
+
+    history = calibration_best_score_history(rows)
+
+    assert history["cumulative_analyses"] == pytest.approx(
+        [2.0, 3.0, 4.0, 5.0]
+    )
+    assert history["best_score"] == pytest.approx(
+        [10.0, 8.0, 5.0, 5.0]
+    )
+    assert history["case_ids"] == [2, 3, 4, 5]
+
+
+def test_round_best_parameter_series_tracks_best_case_in_each_round():
+    rows = [
+        {
+            "case_id": 1,
+            "round": 1,
+            "score": 10.0,
+            "values": {
+                "material:1:Fy": 450.0,
+                "material:2:fpc": -30.0,
+            },
+        },
+        {
+            "case_id": 2,
+            "round": 1,
+            "score": 7.0,
+            "values": {
+                "material:1:Fy": 500.0,
+                "material:2:fpc": -32.0,
+            },
+        },
+        {
+            "case_id": 3,
+            "round": 2,
+            "score": 5.0,
+            "values": {
+                "material:1:Fy": 525.0,
+                "material:2:fpc": -33.0,
+            },
+        },
+        {
+            "case_id": 4,
+            "round": 2,
+            "score": 6.0,
+            "values": {
+                "material:1:Fy": 550.0,
+                "material:2:fpc": -34.0,
+            },
+        },
+        {
+            "case_id": 5,
+            "round": 3,
+            "score": None,
+            "values": {
+                "material:1:Fy": 537.5,
+                "material:2:fpc": -33.5,
+            },
+        },
+        {
+            "case_id": 6,
+            "round": 3,
+            "score": 4.0,
+            "values": {
+                "material:1:Fy": 531.25,
+                "material:2:fpc": -33.25,
+            },
+        },
+    ]
+
+    assert calibration_parameter_keys(rows) == [
+        "material:1:Fy",
+        "material:2:fpc",
+    ]
+    assert calibration_parameter_label("material:1:Fy") == "M1.Fy"
+
+    series = calibration_round_best_parameter_series(
+        rows,
+        "material:1:Fy",
+    )
+
+    assert series["rounds"] == pytest.approx([1.0, 2.0, 3.0])
+    assert series["values"] == pytest.approx(
+        [500.0, 525.0, 531.25]
+    )
+    assert series["scores"] == pytest.approx([7.0, 5.0, 4.0])
+    assert series["case_ids"] == [2, 3, 6]
