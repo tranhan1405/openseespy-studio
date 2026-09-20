@@ -567,8 +567,10 @@ def column_specimen_research_metrics(
         for value in moment
         if math.isfinite(float(value))
     ]
-    positive_moment = max(finite_moment) if finite_moment else None
-    negative_moment = min(finite_moment) if finite_moment else None
+    positive_values = [value for value in finite_moment if value > 0.0]
+    negative_values = [value for value in finite_moment if value < 0.0]
+    positive_moment = max(positive_values) if positive_values else None
+    negative_moment = min(negative_values) if negative_values else None
 
     total = list(rotations.get("total", []))
     column = list(rotations.get("column", []))
