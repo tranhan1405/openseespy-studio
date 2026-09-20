@@ -11,7 +11,10 @@ from openseespy_studio.calibration import (
     apply_calibration_case,
     build_grid_cases,
     calibration_case_changes,
+    calibration_grid_size,
+    calibration_parameter_payload,
     rank_calibration_cases,
+    refine_calibration_parameters,
     score_cyclic_calibration,
 )
 from openseespy_studio.calibration_worker import run_plan
@@ -254,3 +257,122 @@ def test_calibration_case_changes_rejects_case_after_material_schema_changed():
 
     with pytest.raises(ValueError, match="no longer has parameter"):
         calibration_case_changes(project, case)
+
+
+
+def test_refine_calibration_parameters_centers_and_clips_window():
+    parameters = [
+        CalibrationParameter(
+            material_tag=1,
+            parameter="Fy",
+            minimum=400.0,
+            maximum=600.0,
+            points=3,
+        )
+    ]
+
+    centered = refine_calibration_parameters(
+        parameters,
+        {"material:1:Fy": 500.0},
+        shrink_ratio=0.5,
+    )
+    assert centered[0].minimum == pytest.approx(450.0)
+    assert centered[0].maximum == pytest.approx(550.0)
+
+    edge = refine_calibration_parameters(
+        parameters,
+        {"material:1:Fy": 600.0},
+        shrink_ratio=0.5,
+    )
+    assert edge[0].minimum == pytest.approx(500.0)
+    assert edge[0].maximum == pytest.approx(600.0)
+
+
+def test_adaptive_grid_budget_uses_points_per_round():
+    parameters = [
+        CalibrationParameter(1, "fpc", -36.0, -24.0, 3),
+        CalibrationParameter(2, "Fy", 450.0, 550.0, 3),
+    ]
+
+    assert calibration_grid_size(parameters) == 9
+    payload = calibration_parameter_payload(parameters)
+    assert payload[0]["material_tag"] == 1
+    assert payload[1]["points"] == 3
+
+
+def test_calibration_worker_adaptive_refines_around_best_case(
+    tmp_path,
+    monkeypatch,
+):
+    from openseespy_studio import calibration_worker
+
+    project = ProjectDatabase()
+    project.add_material(
+        MaterialData(
+            tag=1,
+            name="Elastic",
+            material_type="Elastic",
+            parameters={"E": 1.0},
+        )
+    )
+
+    def fake_case_script(_project, case):
+        scale = float(case.values["material:1:E"])
+        return f"_studio_results = {repr(_cyclic_result(scale))}"
+
+    monkeypatch.setattr(
+        calibration_worker,
+        "calibration_case_script",
+        fake_case_script,
+    )
+
+    experiment_x = [0.0, 2.0, 0.0, -2.0, 0.0, 2.0, 0.0]
+    experiment_y = [0.0, 20.0, 0.0, -18.0, 0.0, 16.0, 0.0]
+    plan = {
+        "strategy": "adaptive",
+        "project": project.to_dict(),
+        "parameters": [
+            {
+                "material_tag": 1,
+                "parameter": "E",
+                "minimum": 0.6,
+                "maximum": 1.0,
+                "points": 3,
+            }
+        ],
+        "rounds": 3,
+        "shrink_ratio": 0.5,
+        "max_total_cases": 96,
+        "experiment": {
+            "x": experiment_x,
+            "y": experiment_y,
+        },
+        "weights": {
+            "peak_force": 1.0,
+            "reversal_nrmse": 1.0,
+            "cycle_energy": 0.0,
+            "max_displacement": 0.0,
+        },
+    }
+    plan_path = tmp_path / "adaptive-plan.json"
+    result_path = tmp_path / "adaptive-result.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+
+    exit_code = calibration_worker.run_plan(
+        plan_path,
+        result_path,
+    )
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert payload["strategy"] == "adaptive"
+    assert payload["rounds_completed"] == 3
+    assert payload["planned_case_count"] == 9
+    # The best center value from earlier rounds is not re-run.
+    assert payload["case_count"] < payload["planned_case_count"]
+    assert max(row["round"] for row in payload["cases"]) == 3
+    assert payload["cases"][0]["rank"] == 1
+    assert payload["cases"][0]["values"]["material:1:E"] == pytest.approx(
+        1.0
+    )
+    assert payload["cases"][0]["score"] == pytest.approx(0.0)
