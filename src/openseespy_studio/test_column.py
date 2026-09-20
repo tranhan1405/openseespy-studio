@@ -33,6 +33,11 @@ class TestColumnSpec:
     integration_points: int = 5
     force_max_iter: int = 10
     force_tolerance: float = 1.0e-12
+    hinge_i_section_tag: int | None = None
+    hinge_j_section_tag: int | None = None
+    interior_section_tag: int | None = None
+    hinge_i_length: float = 0.0
+    hinge_j_length: float = 0.0
 
     base_support: str = "Fixed"
     top_support: str = "Free"
@@ -281,8 +286,90 @@ def build_test_column(
         raise ValueError(
             f"Unsupported test-column element type: {spec.element_type}"
         )
-    if int(spec.integration_points) < 2:
-        raise ValueError("Beam integration needs at least 2 points.")
+    distributed_integrations = {"Lobatto", "Legendre", "Radau"}
+    hinge_integrations = {
+        "HingeRadau",
+        "HingeRadauTwo",
+        "HingeMidpoint",
+        "HingeEndpoint",
+    }
+    supported_integrations = (
+        distributed_integrations
+        | hinge_integrations
+        | {"ConcentratedPlasticity"}
+    )
+    if spec.integration_type not in supported_integrations:
+        raise ValueError(
+            f"Unsupported beam integration type: {spec.integration_type}"
+        )
+    if spec.integration_type in distributed_integrations:
+        if int(spec.integration_points) < 2:
+            raise ValueError("Beam integration needs at least 2 points.")
+    elif spec.element_type in {"forceBeamColumn", "dispBeamColumn"}:
+        if count != 1:
+            raise ValueError(
+                "Plastic-hinge integration in Quick 1D Column represents one "
+                "physical member and currently requires Number of elements = 1. "
+                "Use Lobatto/Radau for a subdivided distributed-plasticity column."
+            )
+        if spec.section_tag is None:
+            raise ValueError(
+                "Plastic-hinge integration requires a column section."
+            )
+        if spec.integration_type in hinge_integrations:
+            if (
+                float(spec.hinge_i_length) < 0.0
+                or float(spec.hinge_j_length) < 0.0
+            ):
+                raise ValueError("Plastic hinge lengths cannot be negative.")
+            if (
+                float(spec.hinge_i_length) <= 0.0
+                and float(spec.hinge_j_length) <= 0.0
+            ):
+                raise ValueError(
+                    "Plastic-hinge integration requires a positive hinge length "
+                    "at the base, top, or both."
+                )
+    hinge_i_section_tag = (
+        int(spec.hinge_i_section_tag)
+        if spec.hinge_i_section_tag is not None
+        else int(spec.section_tag)
+        if spec.section_tag is not None
+        else None
+    )
+    hinge_j_section_tag = (
+        int(spec.hinge_j_section_tag)
+        if spec.hinge_j_section_tag is not None
+        else int(spec.section_tag)
+        if spec.section_tag is not None
+        else None
+    )
+    interior_section_tag = (
+        int(spec.interior_section_tag)
+        if spec.interior_section_tag is not None
+        else int(spec.section_tag)
+        if spec.section_tag is not None
+        else None
+    )
+    if spec.integration_type in hinge_integrations | {"ConcentratedPlasticity"}:
+        integration_sections = {
+            tag
+            for tag in (
+                hinge_i_section_tag,
+                hinge_j_section_tag,
+                interior_section_tag,
+            )
+            if tag is not None
+        }
+        missing_sections = sorted(
+            tag for tag in integration_sections if tag not in project.sections
+        )
+        if missing_sections:
+            raise ValueError(
+                "Plastic-hinge integration references missing section tag(s): "
+                + ", ".join(map(str, missing_sections))
+            )
+
     if float(spec.top_mass) < 0.0:
         raise ValueError("Top mass cannot be negative.")
     if any(int(dof) not in (1, 2, 3) for dof in spec.top_mass_directions):
@@ -413,6 +500,31 @@ def build_test_column(
             integration_points=int(spec.integration_points),
             force_max_iter=int(spec.force_max_iter),
             force_tolerance=float(spec.force_tolerance),
+            hinge_i_section_tag=(
+                hinge_i_section_tag
+                if spec.integration_type in hinge_integrations | {"ConcentratedPlasticity"}
+                else None
+            ),
+            hinge_j_section_tag=(
+                hinge_j_section_tag
+                if spec.integration_type in hinge_integrations | {"ConcentratedPlasticity"}
+                else None
+            ),
+            interior_section_tag=(
+                interior_section_tag
+                if spec.integration_type in hinge_integrations | {"ConcentratedPlasticity"}
+                else None
+            ),
+            hinge_i_length=(
+                float(spec.hinge_i_length)
+                if spec.integration_type in hinge_integrations
+                else 0.0
+            ),
+            hinge_j_length=(
+                float(spec.hinge_j_length)
+                if spec.integration_type in hinge_integrations
+                else 0.0
+            ),
         )
         element_tags.append(next_element)
         next_element += 1
