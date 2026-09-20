@@ -188,6 +188,24 @@ def _element_geometry_checks(
         if element.element_type not in FRAME_ELEMENT_TYPES:
             continue
 
+        expected_frame_ndf = 3 if int(model.ndm) == 2 else 6
+        if int(model.ndm) in {2, 3} and int(model.ndf) != expected_frame_ndf:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Model DOF",
+                    f"Frame element {tag} uses an ndm={model.ndm} model "
+                    f"with ndf={model.ndf}; OpenSees beam-column elements "
+                    f"require ndf={expected_frame_ndf} in this dimension.",
+                    "element",
+                    tag,
+                    (
+                        "Use ndm=2, ndf=3 for planar frames or "
+                        "ndm=3, ndf=6 for spatial frames."
+                    ),
+                )
+            )
+
         if element.section_tag is None:
             issues.append(
                 ValidationIssue(
@@ -801,6 +819,28 @@ def validate_project(
     analysis: AnalysisSettingsData | None = None,
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
+
+    if int(project.model.ndm) not in {2, 3}:
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Model dimension",
+                f"Studio frame/truss workflows currently support ndm=2 or "
+                f"ndm=3; this project uses ndm={project.model.ndm}.",
+                suggestion="Use a 2D or 3D BasicBuilder model.",
+            )
+        )
+
+    if int(project.model.ndf) < int(project.model.ndm):
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Model DOF",
+                f"Model ndf={project.model.ndf} is smaller than "
+                f"ndm={project.model.ndm}.",
+                suggestion="Choose a compatible BasicBuilder ndm/ndf pair.",
+            )
+        )
 
     try:
         UnitSystem.from_mapping(project.units)
