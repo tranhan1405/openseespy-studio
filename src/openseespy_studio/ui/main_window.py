@@ -5789,7 +5789,7 @@ class MainWindow(QMainWindow):
         ):
             return None
         series = self.project.time_series.get(pattern.time_series_tag)
-        if series is None or series.series_type != "Path":
+        if series is None:
             return None
         return series, pattern
 
