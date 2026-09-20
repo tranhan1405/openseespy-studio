@@ -220,3 +220,64 @@ def test_truss_is_not_silently_replaced_by_elastic_beam():
 
     assert "type 'truss' is not implemented" in script
     assert "ops.element('elasticBeamColumn', 1" not in script
+
+
+def test_force_beam_column_generates_hinge_radau_integration():
+    model = StructuralModel()
+    model.add_node(1, 0, 0, 0)
+    model.add_node(2, 0, 0, 3)
+    model.add_element(
+        20,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=2,
+        transf_tag=4,
+        integration_type="HingeRadau",
+        hinge_i_section_tag=2,
+        hinge_j_section_tag=2,
+        interior_section_tag=3,
+        hinge_i_length=0.35,
+        hinge_j_length=0.15,
+    )
+    sections = {
+        2: elastic_section(2),
+        3: elastic_section(3),
+    }
+    transformations = {4: transformation(4)}
+
+    script = to_openseespy(
+        model,
+        sections=sections,
+        transformations=transformations,
+    )
+
+    assert (
+        "ops.beamIntegration('HingeRadau', 20, 2, 0.35, 2, 0.15, 3)"
+        in script
+    )
+    assert "ops.element('forceBeamColumn', 20, 1, 2, 4, 20" in script
+
+
+def test_force_beam_column_generates_radau_distributed_integration():
+    model = StructuralModel()
+    model.add_node(1, 0, 0, 0)
+    model.add_node(2, 0, 0, 3)
+    model.add_element(
+        21,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=3,
+        transf_tag=4,
+        integration_type="Radau",
+        integration_points=5,
+    )
+
+    script = to_openseespy(
+        model,
+        sections={3: elastic_section(3)},
+        transformations={4: transformation(4)},
+    )
+
+    assert "ops.beamIntegration('Radau', 21, 3, 5)" in script
