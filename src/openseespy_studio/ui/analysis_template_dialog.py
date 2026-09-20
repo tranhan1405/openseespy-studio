@@ -856,15 +856,46 @@ class AnalysisTemplateDialog(QDialog):
         motion_layout = QVBoxLayout(motion_group)
         shared = QFormLayout()
         self.gm_library = QComboBox()
+        self.gm_library_direction = QComboBox()
+        for direction in self._nlth_directions:
+            axis = {1: "X", 2: "Y", 3: "Z"}[direction]
+            self.gm_library_direction.addItem(axis, int(direction))
+        current_direction = int(self.direction.currentData() or 1)
+        direction_index = self.gm_library_direction.findData(
+            current_direction
+        )
+        if direction_index >= 0:
+            self.gm_library_direction.setCurrentIndex(direction_index)
+
+        self.gm_library_assign = QPushButton("Assign")
+        self.gm_library_assign.setToolTip(
+            "Assign the selected offline record to the chosen excitation "
+            "direction. Existing records on the other directions are kept."
+        )
+        self.gm_library_assign.clicked.connect(
+            self._assign_library_ground_motion
+        )
+
         self.gm_library_host = QWidget()
         gm_library_layout = QHBoxLayout(self.gm_library_host)
         gm_library_layout.setContentsMargins(0, 0, 0, 0)
         gm_library_layout.addWidget(self.gm_library, 1)
+        gm_library_layout.addWidget(QLabel("to"))
+        gm_library_layout.addWidget(self.gm_library_direction)
+        gm_library_layout.addWidget(self.gm_library_assign)
         self._populate_ground_motion_library()
 
         self.gm_library_info = QLabel()
         self.gm_library_info.setWordWrap(True)
         self.gm_library_info.setObjectName("Muted")
+
+        self.gm_direction_note = QLabel(
+            "Excitation direction is assigned with the X/Y/Z selector above. "
+            "The top Direction field is the monitor/control DOF for NLTH "
+            "results; it does not choose the ground-motion direction."
+        )
+        self.gm_direction_note.setWordWrap(True)
+        self.gm_direction_note.setObjectName("Muted")
 
         self.gm_column = QSpinBox()
         self.gm_column.setRange(1, 100)
@@ -895,8 +926,9 @@ class AnalysisTemplateDialog(QDialog):
             "factor so the strongest component reaches the target."
         )
 
-        shared.addRow("Ground-motion library:", self.gm_library_host)
+        shared.addRow("Offline record:", self.gm_library_host)
         shared.addRow("", self.gm_library_info)
+        shared.addRow("", self.gm_direction_note)
         shared.addRow("Acceleration column:", self.gm_column)
         shared.addRow("Record dt [s]:", self.gm_dt)
         shared.addRow("Input acceleration unit:", self.gm_unit)
@@ -1048,6 +1080,9 @@ class AnalysisTemplateDialog(QDialog):
 
         self.gm_library.currentIndexChanged.connect(
             self._record_library_changed
+        )
+        self.gm_library_direction.currentIndexChanged.connect(
+            self._update_summary
         )
         self.gm_column.valueChanged.connect(
             self._reload_all_ground_motions
@@ -1826,20 +1861,6 @@ class AnalysisTemplateDialog(QDialog):
             self.protocol.removeRow(row)
         self._update_cyclic_preview()
 
-    def _clear_auto_loaded_ground_motions(self) -> None:
-        changed = False
-        for direction in self._nlth_directions:
-            if not self._ground_motion_builtin_keys.get(direction):
-                continue
-            self._ground_motion_builtin_keys[direction] = ""
-            self._ground_motion_values[direction] = []
-            self._ground_motion_formats[direction] = ""
-            self.gm_files[direction].clear()
-            self.gm_scales[direction].setValue(1.0)
-            changed = True
-        if changed:
-            self._refresh_all_ground_motion_previews()
-
     def _populate_ground_motion_library(
         self,
         select_key: str | None = None,
@@ -1870,30 +1891,41 @@ class AnalysisTemplateDialog(QDialog):
     def _record_library_changed(self, *_args) -> None:
         key = str(self.gm_library.currentData() or "custom")
         preset = record_preset(key)
-        self._clear_auto_loaded_ground_motions()
-        if preset.key == "custom":
+        custom = preset.key == "custom"
+        self.gm_library_assign.setEnabled(not custom)
+
+        if custom:
             self.gm_library_info.setText(
-                "Custom / Local Record · Browse a local file for at least "
-                "one active direction."
+                "Custom / Local Record · use Browse X/Y/Z below to assign "
+                "a local file to a specific excitation direction."
             )
             self._update_summary()
             return
 
         year = f" ({preset.year})" if preset.year is not None else ""
-        availability = "Offline bundled record; loads automatically."
         self.gm_library_info.setText(
             f"{preset.event}{year} · {preset.station} · "
-            f"Source: {preset.source}. {availability} {preset.notes}"
+            f"Source: {preset.source}. Offline bundled record. "
+            "Choose X/Y/Z and press Assign. "
+            f"{preset.notes}"
         )
         current = self.name.text().strip()
         if not current or current.startswith("NLTH"):
             self.name.setText(f"NLTH · {preset.label.split(' · ')[0]}")
+        self._update_summary()
 
-        if preset.bundled_resource:
-            direction = int(self.direction.currentData() or 1)
-            if direction not in self._nlth_directions:
-                direction = int(self._nlth_directions[0])
-            self._load_bundled_ground_motion(direction, key)
+    def _assign_library_ground_motion(self) -> None:
+        key = str(self.gm_library.currentData() or "custom")
+        preset = record_preset(key)
+        if preset.key == "custom" or not preset.bundled_resource:
+            return
+        direction_data = self.gm_library_direction.currentData()
+        if direction_data is None:
+            return
+        direction = int(direction_data)
+        if direction not in self._nlth_directions:
+            return
+        self._load_bundled_ground_motion(direction, key)
         self._update_summary()
 
     def _load_bundled_ground_motion(
