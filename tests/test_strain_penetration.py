@@ -233,6 +233,7 @@ def test_full_generator_places_section_before_zero_length_section_element():
         materials=project.materials,
         sections=project.sections,
         transformations=project.transformations,
+        constraints=project.constraints,
         connections=project.connections,
         units=project.units,
     )
@@ -243,6 +244,8 @@ def test_full_generator_places_section_before_zero_length_section_element():
     assert section_text in script
     assert element_text in script
     assert script.index(section_text) < script.index(element_text)
+    assert "ops.equalDOF(" in script
+    assert script.index("ops.equalDOF(") < script.index(element_text)
     assert "ops.uniaxialMaterial('Bond_SP01', 3," in script
 
 
@@ -329,3 +332,29 @@ def test_3d_strain_penetration_constrains_both_transverse_shear_dofs():
     assert connection.connection_type == "zeroLengthSection"
     assert connection.orient_x == pytest.approx((0.0, 0.0, 1.0))
     assert connection.orient_y == pytest.approx((0.0, -1.0, 0.0))
+
+
+
+def test_generated_constraint_metadata_round_trip():
+    project = ProjectDatabase(
+        units={"length": "mm", "force": "N", "time": "s"}
+    )
+    for material in _materials().values():
+        project.add_material(material)
+    project.add_section(_fiber_section())
+
+    result = build_test_column(
+        project,
+        TestColumnSpec(
+            height=3000.0,
+            section_tag=1,
+            base_interface_type="Bond_SP01 strain penetration",
+            strain_penetration_bond_material_tag=3,
+        ),
+    )
+
+    restored = ProjectDatabase.from_dict(project.to_dict())
+    connection = restored.connections[result.base_connection_tag]
+    assert connection.generated_constraint_tag == result.base_constraint_tag
+    assert connection.generated_section_tag == result.base_section_tag
+    assert result.base_constraint_tag in restored.constraints
