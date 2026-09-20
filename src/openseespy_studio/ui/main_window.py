@@ -5118,30 +5118,58 @@ class MainWindow(QMainWindow):
         displacement_action.triggered.connect(
             self._create_prescribed_displacement
         )
+        selected_elements = [
+            self.model.elements[element_tag]
+            for element_tag in self.selection.elements
+            if element_tag in self.model.elements
+        ]
+        has_truss = any(
+            element.element_type == "truss"
+            for element in selected_elements
+        )
+        has_frame = any(
+            element.element_type != "truss"
+            for element in selected_elements
+        )
+
         beam_load_action = menu.addAction("Create Beam Load...")
-        beam_load_action.setEnabled(bool(self.selection.elements))
+        beam_load_action.setEnabled(has_frame and not has_truss)
         beam_load_action.triggered.connect(self._create_element_load)
         formulation_action = menu.addAction(
             "Element Formulation..."
         )
-        formulation_action.setEnabled(bool(self.selection.elements))
+        formulation_action.setEnabled(has_frame and not has_truss)
         formulation_action.triggered.connect(
             self._set_element_formulation
         )
 
         menu.addSeparator()
         assign_menu = menu.addMenu("Assign")
-        assign_menu.setEnabled(bool(self.selection.elements))
+        assign_menu.setEnabled(bool(selected_elements))
+        assign_material = assign_menu.addAction("Material (Truss)...")
+        assign_material.setEnabled(has_truss)
+        assign_material.triggered.connect(
+            self._assign_truss_material_to_selection
+        )
         assign_section = assign_menu.addAction("Section...")
+        assign_section.setEnabled(has_frame)
         assign_section.triggered.connect(self._assign_section_to_selection)
         assign_transformation = assign_menu.addAction("Transformation...")
+        assign_transformation.setEnabled(has_frame)
         assign_transformation.triggered.connect(
             self._assign_transformation_to_selection
         )
         assign_menu.addSeparator()
+        clear_material = assign_menu.addAction("Clear Material (Truss)")
+        clear_material.setEnabled(has_truss)
+        clear_material.triggered.connect(
+            self._clear_truss_material_assignment
+        )
         clear_section = assign_menu.addAction("Clear Section")
+        clear_section.setEnabled(has_frame)
         clear_section.triggered.connect(self._clear_section_assignment)
         clear_transformation = assign_menu.addAction("Clear Transformation")
+        clear_transformation.setEnabled(has_frame)
         clear_transformation.triggered.connect(
             self._clear_transformation_assignment
         )
@@ -6206,6 +6234,109 @@ class MainWindow(QMainWindow):
         )
         self._record_project_change(
             f"Assign section {section_tag}",
+            before,
+        )
+
+    def _assign_truss_material_to_selection(self) -> None:
+        element_tags = self._selected_element_tags(
+            "Assign Truss Material"
+        )
+        if element_tags is None:
+            return
+        truss_tags = {
+            tag
+            for tag in element_tags
+            if tag in self.model.elements
+            and self.model.elements[tag].element_type == "truss"
+        }
+        if not truss_tags:
+            QMessageBox.information(
+                self,
+                "Assign Truss Material",
+                "Select at least one Truss element first.",
+            )
+            return
+        if not self.project.materials:
+            QMessageBox.information(
+                self,
+                "Assign Truss Material",
+                "No uniaxial materials exist yet. Create a material first.",
+            )
+            return
+
+        tags = sorted(self.project.materials)
+        labels = [
+            (
+                f"{tag} - {self.project.materials[tag].name} "
+                f"({self.project.materials[tag].material_type})"
+            )
+            for tag in tags
+        ]
+        existing = {
+            self.model.elements[tag].truss_material_tag
+            for tag in truss_tags
+        }
+        current_index = 0
+        if len(existing) == 1:
+            current_tag = next(iter(existing))
+            if current_tag in tags:
+                current_index = tags.index(current_tag)
+
+        label, ok = QInputDialog.getItem(
+            self,
+            "Assign Truss Material",
+            f"Assign to {len(truss_tags)} selected Truss element(s):",
+            labels,
+            current_index,
+            False,
+        )
+        if not ok:
+            return
+        material_tag = tags[labels.index(label)]
+
+        before = self.project.to_dict()
+        assigned = self.model.assign_truss_material(
+            truss_tags,
+            material_tag,
+        )
+        self._refresh_project_metadata(
+            f"Assigned material {material_tag} to "
+            f"{len(assigned)} Truss element(s)"
+        )
+        self._record_project_change(
+            f"Assign Truss material {material_tag}",
+            before,
+        )
+
+    def _clear_truss_material_assignment(self) -> None:
+        element_tags = self._selected_element_tags(
+            "Clear Truss Material"
+        )
+        if element_tags is None:
+            return
+        truss_tags = {
+            tag
+            for tag in element_tags
+            if tag in self.model.elements
+            and self.model.elements[tag].element_type == "truss"
+        }
+        if not truss_tags:
+            QMessageBox.information(
+                self,
+                "Clear Truss Material",
+                "Select at least one Truss element first.",
+            )
+            return
+        before = self.project.to_dict()
+        assigned = self.model.assign_truss_material(
+            truss_tags,
+            None,
+        )
+        self._refresh_project_metadata(
+            f"Cleared material on {len(assigned)} Truss element(s)"
+        )
+        self._record_project_change(
+            "Clear Truss material assignment",
             before,
         )
 
@@ -10168,8 +10299,9 @@ class MainWindow(QMainWindow):
                 self._select_all_tree_elements(t)
             )
             menu.addSeparator()
+            is_truss_group = element_type == "truss"
             formulation = menu.addAction("Element Formulation...")
-            formulation.setEnabled(bool(tags))
+            formulation.setEnabled(bool(tags) and not is_truss_group)
             formulation.triggered.connect(
                 lambda checked=False, t=element_type: (
                     self._select_all_tree_elements(t),
@@ -10178,7 +10310,16 @@ class MainWindow(QMainWindow):
             )
             assign = menu.addMenu("Assign")
             assign.setEnabled(bool(tags))
+            material = assign.addAction("Material (Truss)...")
+            material.setEnabled(bool(tags) and is_truss_group)
+            material.triggered.connect(
+                lambda checked=False, t=element_type: (
+                    self._select_all_tree_elements(t),
+                    self._assign_truss_material_to_selection(),
+                )
+            )
             section = assign.addAction("Section...")
+            section.setEnabled(bool(tags) and not is_truss_group)
             section.triggered.connect(
                 lambda checked=False, t=element_type: (
                     self._select_all_tree_elements(t),
@@ -10186,14 +10327,23 @@ class MainWindow(QMainWindow):
                 )
             )
             transformation = assign.addAction("Transformation...")
+            transformation.setEnabled(bool(tags) and not is_truss_group)
             transformation.triggered.connect(
                 lambda checked=False, t=element_type: (
                     self._select_all_tree_elements(t),
                     self._assign_transformation_to_selection(),
                 )
             )
+            if is_truss_group:
+                clear_material = assign.addAction("Clear Material")
+                clear_material.triggered.connect(
+                    lambda checked=False, t=element_type: (
+                        self._select_all_tree_elements(t),
+                        self._clear_truss_material_assignment(),
+                    )
+                )
             beam_load = menu.addAction("Create Beam Load...")
-            beam_load.setEnabled(bool(tags))
+            beam_load.setEnabled(bool(tags) and not is_truss_group)
             beam_load.triggered.connect(
                 lambda checked=False, t=element_type: (
                     self._select_all_tree_elements(t),
@@ -10369,34 +10519,64 @@ class MainWindow(QMainWindow):
             show_all = menu.addAction("Show All")
             show_all.triggered.connect(self._show_all)
 
+            selected_elements = [
+                self.model.elements[element_tag]
+                for element_tag in self.selection.elements
+                if element_tag in self.model.elements
+            ]
+            has_truss = any(
+                element.element_type == "truss"
+                for element in selected_elements
+            )
+            has_frame = any(
+                element.element_type != "truss"
+                for element in selected_elements
+            )
+
             menu.addSeparator()
             formulation = menu.addAction("Element Formulation...")
+            formulation.setEnabled(has_frame and not has_truss)
             formulation.triggered.connect(
                 self._set_element_formulation
             )
             assign = menu.addMenu("Assign")
+            material_action = assign.addAction("Material (Truss)...")
+            material_action.setEnabled(has_truss)
+            material_action.triggered.connect(
+                self._assign_truss_material_to_selection
+            )
             section_action = assign.addAction("Section...")
+            section_action.setEnabled(has_frame)
             section_action.triggered.connect(
                 self._assign_section_to_selection
             )
             transformation_action = assign.addAction(
                 "Transformation..."
             )
+            transformation_action.setEnabled(has_frame)
             transformation_action.triggered.connect(
                 self._assign_transformation_to_selection
             )
             assign.addSeparator()
+            clear_material = assign.addAction("Clear Material (Truss)")
+            clear_material.setEnabled(has_truss)
+            clear_material.triggered.connect(
+                self._clear_truss_material_assignment
+            )
             clear_section = assign.addAction("Clear Section")
+            clear_section.setEnabled(has_frame)
             clear_section.triggered.connect(
                 self._clear_section_assignment
             )
             clear_transformation = assign.addAction(
                 "Clear Transformation"
             )
+            clear_transformation.setEnabled(has_frame)
             clear_transformation.triggered.connect(
                 self._clear_transformation_assignment
             )
             beam_load = menu.addAction("Create Beam Load...")
+            beam_load.setEnabled(has_frame and not has_truss)
             beam_load.triggered.connect(self._create_element_load)
 
             menu.addSeparator()
