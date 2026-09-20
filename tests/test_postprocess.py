@@ -32,6 +32,7 @@ from openseespy_studio.postprocess import (
     local_end_actions,
     member_end_resultants,
     normalize_frame_local_force,
+    nodal_dof_component_labels,
     nodal_result_scalar,
     pushover_capacity_curve,
     section_component_samples,
@@ -1637,3 +1638,30 @@ def test_member_force_enrichment_supports_native_2d_six_value_local_force():
     assert len(diagrams["N"]["x"]) == 2
     assert len(diagrams["Vy"]["values"]) == 2
     assert len(diagrams["Mz"]["values"]) == 2
+
+
+def test_2d_nodal_result_mapping_keeps_rz_out_of_translation_magnitude():
+    values = [3.0, 4.0, 12.0]
+
+    assert nodal_dof_component_labels(
+        ndm=2, ndf=3, quantity="Displacement"
+    ) == ["UX", "UY", "RZ"]
+    assert nodal_dof_component_labels(
+        ndm=2, ndf=3, quantity="Reaction"
+    ) == ["FX", "FY", "MZ"]
+
+    assert nodal_result_scalar(
+        values, "|U|", ndm=2, ndf=3
+    ) == pytest.approx(5.0)
+    assert nodal_result_scalar(
+        values, "RZ", ndm=2, ndf=3
+    ) == pytest.approx(12.0)
+    assert nodal_result_scalar(
+        values, "MZ", ndm=2, ndf=3
+    ) == pytest.approx(12.0)
+    assert nodal_result_scalar(
+        values, "UZ", ndm=2, ndf=3
+    ) is None
+    assert nodal_result_scalar(
+        values, "FZ", ndm=2, ndf=3
+    ) is None
