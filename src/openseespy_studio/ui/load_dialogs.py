@@ -214,7 +214,7 @@ class GroundMotionDialog(QDialog):
         next_series_tag=1,
         next_pattern_tag=1,
         units=None,
-        initial_source="builtin",
+        initial_source="manual",
         parent=None,
     ):
         super().__init__(parent)
