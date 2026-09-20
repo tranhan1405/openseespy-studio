@@ -3802,11 +3802,11 @@ class ResultsPanel(QWidget):
 
         if headers:
             x_index = best_column(
-                ("displacement", "disp", "drift", "stroke", " u", "u "),
+                ("displacement", "disp", "drift", "stroke", "position", "u"),
                 0,
             )
             y_index = best_column(
-                ("force", "load", "shear", "base shear", " v", "v "),
+                ("force", "load", "shear", "base shear"),
                 1 if len(headers) > 1 else 0,
             )
             self.cyclic_exp_x_column.setCurrentIndex(x_index)
@@ -3943,6 +3943,9 @@ class ResultsPanel(QWidget):
                 "Hysteretic energy: -   Closed cycles: -"
             )
             self.cyclic_plot.set_series([], [])
+            self.cyclic_plot.clear_overlay()
+            self.cyclic_compare_table.setRowCount(0)
+            self.cyclic_compare_table.hide()
             self.cyclic_reversal_table.setRowCount(0)
             self.cyclic_cycle_table.setRowCount(0)
             self.cyclic_research_info.setText(
@@ -3981,7 +3984,69 @@ class ResultsPanel(QWidget):
             f"Residual u: "
             f"{float(metrics.get('residual_displacement', 0.0)):.6g}"
         )
-        self.cyclic_plot.set_series(x, y)
+        experiment_x, experiment_y = self._cyclic_experiment_series()
+        comparison: dict[str, Any] = {}
+        view = str(self.cyclic_compare_view.currentData() or "hysteresis")
+        if view == "backbone":
+            plot_x, plot_y = cyclic_backbone_curve(x, y)
+        else:
+            plot_x, plot_y = x, y
+        self.cyclic_plot.set_series(plot_x, plot_y)
+
+        if experiment_x and experiment_y:
+            if view == "backbone":
+                overlay_x, overlay_y = cyclic_backbone_curve(
+                    experiment_x,
+                    experiment_y,
+                )
+            else:
+                overlay_x, overlay_y = experiment_x, experiment_y
+            self.cyclic_plot.set_overlay(
+                overlay_x,
+                overlay_y,
+                label="Experiment",
+            )
+            comparison = self._populate_cyclic_comparison(
+                x,
+                y,
+                experiment_x,
+                experiment_y,
+            )
+            filename = (
+                self._cyclic_experiment_path.replace("\\", "/").split("/")[-1]
+                if self._cyclic_experiment_path
+                else "experimental data"
+            )
+            matched = int(comparison.get("matched_reversal_count", 0))
+            sim_reversals = int(comparison.get("simulation_reversal_count", 0))
+            exp_reversals = int(comparison.get("experiment_reversal_count", 0))
+            nrmse = comparison.get("reversal_force_nrmse_percent")
+            nrmse_text = (
+                f"{float(nrmse):.3g}%"
+                if nrmse is not None
+                else "-"
+            )
+            self.cyclic_experiment_info.setText(
+                f"{filename} · {len(experiment_x)} valid point(s) · "
+                f"matched reversals {matched}/{sim_reversals} OpenSees "
+                f"and {exp_reversals} experimental · "
+                f"reversal-force NRMSE={nrmse_text}. "
+                "Δ values are descriptive differences relative to experiment."
+            )
+        else:
+            self.cyclic_plot.clear_overlay()
+            self.cyclic_compare_table.setRowCount(0)
+            self.cyclic_compare_table.hide()
+            if self._cyclic_experiment_dataset:
+                self.cyclic_experiment_info.setText(
+                    "Choose two numeric experimental columns with usable "
+                    "X/Y data. Scale factors may be negative to reverse sign."
+                )
+            else:
+                self.cyclic_experiment_info.setText(
+                    "Optional: import experimental displacement-force CSV "
+                    "for overlay and descriptive validation metrics."
+                )
 
         specimen_rows = column_cyclic_reversal_metrics(
             self._result
@@ -4051,6 +4116,27 @@ class ResultsPanel(QWidget):
                 str(int(cycle)) if cycle is not None else "-",
                 metric_text(reversal.get("closed_cycle_energy")),
             ]
+            reversal_number = int(reversal.get("reversal", row + 1))
+            match = next(
+                (
+                    item
+                    for item in comparison.get("reversal_matches", [])
+                    if int(item.get("simulation_reversal", -1))
+                    == reversal_number
+                ),
+                None,
+            )
+            if isinstance(match, dict):
+                values.extend([
+                    metric_text(match.get("experiment_force")),
+                    metric_text(match.get("force_error_percent"), 4),
+                    metric_text(
+                        match.get("experiment_secant_stiffness")
+                    ),
+                    metric_text(match.get("stiffness_error_percent"), 4),
+                ])
+            else:
+                values.extend(["-", "-", "-", "-"])
             for column, value in enumerate(values):
                 self.cyclic_reversal_table.setItem(
                     row,
