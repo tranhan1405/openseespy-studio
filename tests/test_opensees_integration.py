@@ -1060,3 +1060,120 @@ def test_modal_properties_include_distributed_element_mass(tmp_path: Path):
     participation = results["modes"]["1"]["participation"]["1"]
     assert float(participation["effective_mass"]) > 0.0
     assert 0.0 < float(participation["mass_ratio"]) <= 1.0
+
+
+def test_generated_native_2d_fiber_force_beam_column_runs(
+    tmp_path: Path,
+):
+    model = StructuralModel("native-2d-fiber", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 3.0, 0.0)
+    model.set_fixity(1, (1, 1, 1))
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+        integration_type="Lobatto",
+        integration_points=3,
+    )
+    materials = {
+        1: MaterialData(
+            1,
+            "Elastic fiber",
+            "Elastic",
+            parameters={"E": 200.0e9},
+        )
+    }
+    sections = {
+        1: SectionData(
+            1,
+            "2D Fiber",
+            "Fiber",
+            parameters={"GJ": 1.0},
+            fibers=[
+                FiberData(-0.10, 0.0, 0.005, 1),
+                FiberData(-0.05, 0.0, 0.005, 1),
+                FiberData(0.05, 0.0, 0.005, 1),
+                FiberData(0.10, 0.0, 0.005, 1),
+            ],
+        )
+    }
+    transformations = {
+        1: TransformationData(
+            1, "2D Linear", "Linear", (0.0, 0.0, 1.0)
+        )
+    }
+    time_series = {
+        1: TimeSeriesData(1, "Linear", "Linear", factor=1.0)
+    }
+    patterns = {
+        1: LoadPatternData(1, "Tip", "Plain", time_series_tag=1)
+    }
+    nodal_loads = {
+        1: NodalLoadData(
+            1,
+            "Tip vertical",
+            pattern_tag=1,
+            node_tag=2,
+            values=(0.0, -1000.0, 0.0, 0.0, 0.0, 0.0),
+        )
+    }
+    analysis = AnalysisSettingsData(
+        1,
+        "2D Fiber Static",
+        "Static",
+        constraints_handler="Plain",
+        numberer="Plain",
+        system="BandGeneral",
+        test="NormDispIncr",
+        tolerance=1.0e-10,
+        max_iterations=20,
+        algorithm="Newton",
+        steps=1,
+        load_increment=1.0,
+        control_node=2,
+        control_dof=2,
+        recovery=False,
+        adaptive_step=False,
+        live_convergence=False,
+    )
+
+    script = to_openseespy(
+        model,
+        materials=materials,
+        sections=sections,
+        transformations=transformations,
+        time_series=time_series,
+        load_patterns=patterns,
+        nodal_loads=nodal_loads,
+        analyses={1: analysis},
+        active_analysis_tag=1,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert "ops.section('Fiber', 1)" in script
+    assert "'-GJ'" not in next(
+        line for line in script.splitlines()
+        if "ops.section('Fiber', 1" in line
+    )
+    assert "ops.geomTransf('Linear', 1)" in script
+    assert "ops.element('forceBeamColumn', 1, 1, 2, 1, 1" in script
+    assert "# ERROR:" not in script
+
+    script_path = tmp_path / "native-2d-fiber.py"
+    result_path = tmp_path / "native-2d-fiber-result.json"
+    script_path.write_text(script, encoding="utf-8")
+
+    exit_code = run_script(script_path, result_path)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0, payload.get("error", "")
+    assert payload["status"] == "completed"
+    tip = payload["results"]["final"]["node_displacements"]["2"]
+    assert len(tip) == 3
+    assert float(tip[1]) < 0.0
+    local_force = payload["results"]["final"]["element_local_forces"]["1"]
+    assert len(local_force) == 6
