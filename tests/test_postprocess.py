@@ -4,6 +4,7 @@ import pytest
 
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.postprocess import (
+    canonical_nodal_vector,
     classify_fiber_state,
     component_end_resultants,
     convergence_series,
@@ -50,6 +51,19 @@ from openseespy_studio.project import (
     TransformationData,
 )
 
+
+
+
+
+def test_canonical_nodal_vector_maps_2d_frame_rotation_to_rz():
+    raw = [1.0, 2.0, 0.03]
+    canonical = canonical_nodal_vector(raw, ndm=2, ndf=3)
+
+    assert canonical == [1.0, 2.0, 0.0, 0.0, 0.0, 0.03]
+    assert nodal_result_scalar(raw, "UY", ndm=2, ndf=3) == 2.0
+    assert nodal_result_scalar(raw, "RZ", ndm=2, ndf=3) == 0.03
+    assert nodal_result_scalar(raw, "UZ", ndm=2, ndf=3) is None
+    assert nodal_result_scalar(raw, "FZ", ndm=2, ndf=3) is None
 
 
 def test_nodal_result_scalar_keeps_force_and_moment_groups_separate():
@@ -691,6 +705,40 @@ def test_local_end_actions_follow_3d_local_dof_order():
     assert actions["T"] == (-40.0, 41.0)
     assert actions["My"] == (-50.0, 51.0)
     assert actions["Mz"] == (-60.0, 61.0)
+
+
+def test_local_end_actions_support_2d_frame_response():
+    local = [-10.0, -20.0, -30.0, 10.0, 21.0, 31.0]
+
+    actions = local_end_actions(local)
+    resultants = member_end_resultants(local)
+
+    assert actions == {
+        "N": (-10.0, 10.0),
+        "Vy": (-20.0, 21.0),
+        "Mz": (-30.0, 31.0),
+    }
+    assert resultants == {
+        "N": (10.0, 10.0),
+        "Vy": (-20.0, -21.0),
+        "Mz": (30.0, 31.0),
+    }
+    assert component_end_resultants(local, "Vz") is None
+
+
+def test_2d_equilibrium_diagram_supports_vy_and_mz():
+    # L=4, uniform wy=-10, end-action response N,V,M at each node.
+    local = [0.0, 20.0, 0.0, 0.0, 20.0, 0.0]
+    loads = [{"type": "Uniform", "wx": 0.0, "wy": -10.0, "wz": 0.0}]
+
+    shear = equilibrium_component_samples(local, 4.0, "Vy", loads)
+    moment = equilibrium_component_samples(local, 4.0, "Mz", loads)
+    unsupported = equilibrium_component_samples(local, 4.0, "My", loads)
+
+    assert shear[0] == (0.0, 20.0)
+    assert shear[-1] == (4.0, -20.0)
+    assert max(value for _, value in moment) == pytest.approx(20.0)
+    assert unsupported == []
 
 
 def test_member_end_resultants_follow_opensees_section_signs():

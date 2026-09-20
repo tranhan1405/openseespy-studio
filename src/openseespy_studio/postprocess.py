@@ -64,9 +64,48 @@ NODAL_MAGNITUDE_COMPONENTS: dict[str, tuple[int, ...]] = {
 }
 
 
+def canonical_nodal_vector(
+    values: Sequence[float],
+    *,
+    ndm: int | None = None,
+    ndf: int | None = None,
+) -> list[float]:
+    """Map OpenSees nodal DOF vectors to Studio's canonical 6-DOF order.
+
+    Canonical order is X, Y, Z, RX, RY, RZ. In a standard 2D frame
+    (ndm=2, ndf=3), OpenSees returns UX, UY, RZ, so the third raw value
+    belongs at canonical index 5 rather than index 2.
+    """
+    raw = [float(value) for value in values]
+    if ndm is None or ndf is None:
+        padded = raw[:6]
+        while len(padded) < 6:
+            padded.append(0.0)
+        return padded
+
+    ndm = int(ndm)
+    ndf = int(ndf)
+    result = [0.0] * 6
+    if ndm == 2:
+        if len(raw) >= 1:
+            result[0] = raw[0]
+        if len(raw) >= 2:
+            result[1] = raw[1]
+        if ndf >= 3 and len(raw) >= 3:
+            result[5] = raw[2]
+        return result
+
+    for index, value in enumerate(raw[: min(ndf, 6)]):
+        result[index] = value
+    return result
+
+
 def nodal_result_scalar(
     values: Sequence[float],
     component: str,
+    *,
+    ndm: int | None = None,
+    ndf: int | None = None,
 ) -> float | None:
     """Extract one scalar from a six-DOF nodal result vector.
 
@@ -76,16 +115,33 @@ def nodal_result_scalar(
     """
     component = str(component).strip().upper()
     index = NODAL_COMPONENT_INDEX.get(component)
-    if index is not None:
-        if len(values) <= index:
-            return None
-        return float(values[index])
-
     magnitude_indices = NODAL_MAGNITUDE_COMPONENTS.get(component)
-    if magnitude_indices is not None:
-        if len(values) <= max(magnitude_indices):
-            return None
-        return math.sqrt(sum(float(values[index]) ** 2 for index in magnitude_indices))
+
+    if ndm is None or ndf is None:
+        if index is not None:
+            if len(values) <= index:
+                return None
+            return float(values[index])
+        if magnitude_indices is not None:
+            if len(values) <= max(magnitude_indices):
+                return None
+            return math.sqrt(
+                sum(float(values[item]) ** 2 for item in magnitude_indices)
+            )
+    else:
+        canonical = canonical_nodal_vector(values, ndm=ndm, ndf=ndf)
+        if index is not None:
+            if int(ndm) == 2 and component in {
+                "UZ", "RX", "RY", "FZ", "MX", "MY"
+            }:
+                return None
+            if int(ndm) == 3 and int(ndf) <= 3 and index >= 3:
+                return None
+            return float(canonical[index])
+        if magnitude_indices is not None:
+            return math.sqrt(
+                sum(float(canonical[item]) ** 2 for item in magnitude_indices)
+            )
 
     raise ValueError(f"Unsupported nodal result component: {component}")
 
@@ -2945,22 +3001,28 @@ def fiber_state_sections(
 def local_end_actions(
     values: Sequence[float],
 ) -> dict[str, tuple[float, float]]:
-    """Return OpenSees local nodal end actions for a 3D frame element.
+    """Return OpenSees local nodal end actions for 2D or 3D frames.
 
-    OpenSees orders the 12 local-force values by the six local DOFs at
-    node I followed by the six local DOFs at node J:
-    Fx, Fy, Fz, Mx, My, Mz at each end.
+    2D localForce order is N, Vy, Mz at node I followed by the same three
+    actions at node J. 3D uses Fx, Fy, Fz, Mx, My, Mz at each end.
     """
-    if len(values) < 12:
-        return {}
-    numeric = [float(value) for value in values[:12]]
-    return {
-        component: (
-            numeric[index],
-            numeric[index + 6],
-        )
-        for component, index in LOCAL_FORCE_INDEX.items()
-    }
+    if len(values) >= 12:
+        numeric = [float(value) for value in values[:12]]
+        return {
+            component: (
+                numeric[index],
+                numeric[index + 6],
+            )
+            for component, index in LOCAL_FORCE_INDEX.items()
+        }
+    if len(values) >= 6:
+        numeric = [float(value) for value in values[:6]]
+        return {
+            "N": (numeric[0], numeric[3]),
+            "Vy": (numeric[1], numeric[4]),
+            "Mz": (numeric[2], numeric[5]),
+        }
+    return {}
 
 
 def member_end_resultants(
@@ -3117,6 +3179,29 @@ def _point_loads(
     return sorted(points, key=lambda item: item["x"])
 
 
+def _local_i_resultants(
+    local_force: Sequence[float],
+) -> dict[str, float]:
+    if len(local_force) >= 12:
+        values = [float(value) for value in local_force[:12]]
+        return {
+            "N": -values[0],
+            "Vy": values[1],
+            "Vz": -values[2],
+            "T": -values[3],
+            "My": -values[4],
+            "Mz": -values[5],
+        }
+    if len(local_force) >= 6:
+        values = [float(value) for value in local_force[:6]]
+        return {
+            "N": -values[0],
+            "Vy": values[1],
+            "Mz": -values[2],
+        }
+    return {}
+
+
 def _resultant_at(
     local_force: Sequence[float],
     length: float,
@@ -3126,18 +3211,23 @@ def _resultant_at(
     *,
     side: str = "right",
 ) -> float:
-    if len(local_force) < 12:
-        raise ValueError("A 12-value localForce response is required.")
+    initial = _local_i_resultants(local_force)
+    if not initial:
+        raise ValueError("A 6-value 2D or 12-value 3D localForce is required.")
+    if component not in initial:
+        raise ValueError(
+            f"Local force component {component} is unavailable for this "
+            "element response."
+        )
     if length <= 0.0:
         raise ValueError("Element length must be positive.")
 
-    values = [float(value) for value in local_force[:12]]
-    n0 = -values[0]
-    vy0 = values[1]
-    vz0 = -values[2]
-    t0 = -values[3]
-    my0 = -values[4]
-    mz0 = -values[5]
+    n0 = initial.get("N", 0.0)
+    vy0 = initial.get("Vy", 0.0)
+    vz0 = initial.get("Vz", 0.0)
+    t0 = initial.get("T", 0.0)
+    my0 = initial.get("My", 0.0)
+    mz0 = initial.get("Mz", 0.0)
 
     wx, wy, wz = _aggregate_uniform(active_loads)
     points = _point_loads(active_loads, length)
@@ -3180,10 +3270,11 @@ def _moment_extrema_positions(
     component: str,
     active_loads: Sequence[dict[str, float]],
 ) -> list[float]:
-    if component not in {"My", "Mz"} or len(local_force) < 12:
+    if component not in {"My", "Mz"}:
         return []
-
-    values = [float(value) for value in local_force[:12]]
+    initial = _local_i_resultants(local_force)
+    if component not in initial:
+        return []
     wx, wy, wz = _aggregate_uniform(active_loads)
     _ = wx
     points = _point_loads(active_loads, length)
@@ -3202,14 +3293,14 @@ def _moment_extrema_positions(
 
         if component == "Mz":
             slope = wy
-            constant = values[1]
+            constant = initial["Vy"]
             for point in points:
                 if point["x"] < midpoint:
                     constant += point["py"]
         else:
-            # dMy/dx = Vz = -localForce_I(Vz) - wz*x - sum(Pz)
+            # dMy/dx = Vz.
             slope = -wz
-            constant = -values[2]
+            constant = initial["Vz"]
             for point in points:
                 if point["x"] < midpoint:
                     constant -= point["pz"]
@@ -3241,7 +3332,8 @@ def equilibrium_component_samples(
         raise ValueError(
             f"Unsupported local force component: {component}"
         )
-    if len(local_force) < 12 or length <= 0.0:
+    initial = _local_i_resultants(local_force)
+    if not initial or component not in initial or length <= 0.0:
         return []
     if active_loads is None:
         ends = component_end_resultants(local_force, component)

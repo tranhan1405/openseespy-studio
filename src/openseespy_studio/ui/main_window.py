@@ -5486,6 +5486,8 @@ class MainWindow(QMainWindow):
         dialog = MassDialog(
             initial=initial,
             units=self.project.units,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
             parent=self,
         )
         if not dialog.exec():
@@ -6286,6 +6288,7 @@ class MainWindow(QMainWindow):
             next_tag=self.project.next_element_load_tag(),
             element_tag=selected[0],
             units=self.project.units,
+            ndm=self.model.ndm,
             parent=self,
         )
         if not dialog.exec():
@@ -8430,6 +8433,8 @@ class MainWindow(QMainWindow):
                 for tag, node in self.model.nodes.items()
             },
             units=self.project.units,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
             parent=self,
         )
         if not dialog.exec():
@@ -8507,6 +8512,8 @@ class MainWindow(QMainWindow):
                 for node_tag, node in self.model.nodes.items()
             },
             units=self.project.units,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
             parent=self,
         )
         if not dialog.exec():
@@ -8617,7 +8624,16 @@ class MainWindow(QMainWindow):
 
         from ..material_chain import describe_material_chain
 
-        dof_labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+        if int(self.model.ndm) == 2:
+            dof_labels = (
+                ("UX", "UY", "RZ")
+                if int(self.model.ndf) >= 3
+                else ("UX", "UY")[: self.model.ndf]
+            )
+        else:
+            dof_labels = (
+                "UX", "UY", "UZ", "RX", "RY", "RZ"
+            )[: self.model.ndf]
         material_text = []
         for dof in sorted(connection.materials_by_dof):
             material_tag = connection.materials_by_dof[dof]
@@ -8684,6 +8700,8 @@ class MainWindow(QMainWindow):
             next_tag=self.project.next_constraint_tag(),
             initial_retained=retained,
             initial_constrained=constrained,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
             parent=self,
         )
         if not dialog.exec():
@@ -8714,6 +8732,8 @@ class MainWindow(QMainWindow):
 
         dialog = ConstraintDialog(
             constraint=constraint,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
             parent=self,
         )
         if not dialog.exec():
@@ -8776,7 +8796,17 @@ class MainWindow(QMainWindow):
             ),
         ]
         if constraint.constraint_type == "equalDOF":
-            labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+            labels = (
+                ("UX", "UY", "RZ")
+                if int(self.model.ndm) == 2 and int(self.model.ndf) >= 3
+                else (
+                    ("UX", "UY")[: self.model.ndf]
+                    if int(self.model.ndm) == 2
+                    else ("UX", "UY", "UZ", "RX", "RY", "RZ")[
+                        : self.model.ndf
+                    ]
+                )
+            )
             rows.append((
                 "DOFs",
                 ", ".join(labels[dof - 1] for dof in constraint.dofs),

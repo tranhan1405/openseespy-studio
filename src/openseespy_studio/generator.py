@@ -433,6 +433,7 @@ def section_to_openseespy(
     section: SectionData,
     materials: dict[int, MaterialData] | None = None,
     units: dict[str, str] | None = None,
+    ndm: int = 3,
 ) -> list[str]:
     p = (
         elastic_section_parameters_in_model_units(
@@ -444,6 +445,12 @@ def section_to_openseespy(
         else section.parameters
     )
     if section.section_type == "Elastic":
+        if int(ndm) == 2:
+            return [
+                "ops.section('Elastic', "
+                f"{section.tag}, {p['E']:g}, {p['A']:g}, "
+                f"{p['Iz']:g})"
+            ]
         return [
             "ops.section('Elastic', "
             f"{section.tag}, {p['E']:g}, {p['A']:g}, "
@@ -588,9 +595,28 @@ def element_load_to_openseespy(
     transformations: dict[int, TransformationData] | None = None,
     units: dict[str, str] | None = None,
 ) -> str:
+    element = model.elements.get(int(load.element_tag))
+    if element is not None and element.element_type == "truss":
+        raise ValueError(
+            f"Element load {load.tag} cannot be applied to Truss element "
+            f"{load.element_tag}; OpenSees beam eleLoad commands require "
+            "a beam-column element."
+        )
+
     if load.load_type == "Uniform":
         wx, wy, wz = load.wx, load.wy, load.wz
     elif load.load_type == "Point":
+        if int(model.ndm) == 2:
+            if abs(float(load.pz)) > 1.0e-15:
+                raise ValueError(
+                    f"2D point load {load.tag} has nonzero local Pz. "
+                    "NDM=2 beamPoint supports Py, x/L and optional Px only."
+                )
+            return (
+                "ops.eleLoad('-ele', "
+                f"{load.element_tag}, '-type', '-beamPoint', "
+                f"{load.py:g}, {load.x_over_l:g}, {load.px:g})"
+            )
         return (
             "ops.eleLoad('-ele', "
             f"{load.element_tag}, '-type', '-beamPoint', "
@@ -608,6 +634,18 @@ def element_load_to_openseespy(
     else:
         raise ValueError(
             f"Unsupported element load type: {load.load_type}"
+        )
+
+    if int(model.ndm) == 2:
+        if abs(float(wz)) > 1.0e-15:
+            raise ValueError(
+                f"2D element load {load.tag} has nonzero local Wz. "
+                "NDM=2 beamUniform supports Wy and optional Wx only."
+            )
+        return (
+            "ops.eleLoad('-ele', "
+            f"{load.element_tag}, '-type', '-beamUniform', "
+            f"{wy:g}, {wx:g})"
         )
 
     return (
@@ -1026,6 +1064,8 @@ def analysis_to_openseespy(
     monitor_node: int | None = None,
     fiber_response_specs: dict[int, dict[str, object]] | None = None,
     specimen_response_spec: dict[str, object] | None = None,
+    model_ndm: int = 3,
+    model_ndf: int = 6,
 ) -> list[str]:
     node_tags = list(node_tags or [])
     element_tags = list(element_tags or [])
@@ -1077,6 +1117,11 @@ def analysis_to_openseespy(
         "",
         "_studio_results = {",
         "    'schema_version': 11,",
+        (
+            "    'model': {'ndm': "
+            f"{int(model_ndm)}, 'ndf': {int(model_ndf)}"
+            "},"
+        ),
         "    'analysis': {",
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
@@ -1194,6 +1239,12 @@ def analysis_to_openseespy(
             ),
             "_studio_omega_i = math.sqrt(max(_studio_lambda_i, 0.0))",
             "_studio_omega_j = math.sqrt(max(_studio_lambda_j, 0.0))",
+            "if _studio_omega_i <= 0.0 or _studio_omega_j <= 0.0:",
+            "    raise RuntimeError(",
+            "        'Rayleigh damping modes must have positive eigenvalues. '",
+            "        f'Got lambda_i={_studio_lambda_i:g}, '",
+            "        f'lambda_j={_studio_lambda_j:g}.'",
+            "    )",
             (
                 f"_studio_zeta = {settings.rayleigh_damping_ratio:g}"
             ),
@@ -1222,20 +1273,43 @@ def analysis_to_openseespy(
         lines.append("if not isinstance(_studio_eigenvalues, (list, tuple)):")
         lines.append("    _studio_eigenvalues = [_studio_eigenvalues]")
         lines.extend([
+            f"_studio_translational_dofs = {tuple(range(1, int(model_ndm) + 1))!r}",
+            "_studio_axis_key = {1: 'MX', 2: 'MY', 3: 'MZ'}",
+            "try:",
+            "    _studio_modal_properties = ops.modalProperties('-return') or {}",
+            "except Exception:",
+            "    _studio_modal_properties = {}",
+            "_studio_use_domain_modal_properties = isinstance(",
+            "    _studio_modal_properties, dict",
+            ") and bool(_studio_modal_properties)",
             "_studio_total_lumped_mass = {}",
-            "for _studio_dof in (1, 2, 3):",
-            "    _studio_mass_total = 0.0",
-            "    for _studio_node in _studio_node_tags:",
-            "        try:",
-            "            _studio_mass_total += max(",
-            "                0.0, float(ops.nodeMass(_studio_node, _studio_dof))",
-            "            )",
-            "        except Exception:",
-            "            pass",
+            "_studio_domain_total_mass = (",
+            "    _studio_modal_properties.get('totalMass', [])",
+            "    if _studio_use_domain_modal_properties else []",
+            ")",
+            "for _studio_dof in _studio_translational_dofs:",
+            "    if len(_studio_domain_total_mass) >= _studio_dof:",
+            "        _studio_mass_total = max(",
+            "            0.0, float(_studio_domain_total_mass[_studio_dof - 1])",
+            "        )",
+            "    else:",
+            "        _studio_mass_total = 0.0",
+            "        for _studio_node in _studio_node_tags:",
+            "            try:",
+            "                _studio_mass_total += max(",
+            "                    0.0, float(ops.nodeMass(_studio_node, _studio_dof))",
+            "                )",
+            "            except Exception:",
+            "                pass",
             "    _studio_total_lumped_mass[str(_studio_dof)] = _studio_mass_total",
             "_studio_results['modal_summary'] = {",
             f"    'eigen_solver': {settings.eigen_solver!r},",
             "    'total_lumped_mass': dict(_studio_total_lumped_mass),",
+            "    'mass_basis': (",
+            "        'OpenSees modalProperties (nodal + element mass)'",
+            "        if _studio_use_domain_modal_properties",
+            "        else 'Nodal mass fallback'",
+            "    ),",
             "}",
         ])
         lines.append(
@@ -1262,37 +1336,76 @@ def analysis_to_openseespy(
             "            ops.nodeEigenvector(_studio_node, _studio_mode)",
             "        ]",
             "    _studio_participation = {}",
-            "    for _studio_dof in (1, 2, 3):",
-            "        _studio_num = 0.0",
-            "        _studio_den = 0.0",
-            "        for _studio_node in _studio_node_tags:",
-            "            try:",
-            "                _studio_mass = max(",
-            "                    0.0, float(ops.nodeMass(_studio_node, _studio_dof))",
-            "                )",
-            "            except Exception:",
-            "                _studio_mass = 0.0",
-            "            _studio_vector = _studio_vectors.get(str(_studio_node), [])",
-            "            _studio_phi = (",
-            "                float(_studio_vector[_studio_dof - 1])",
-            "                if len(_studio_vector) >= _studio_dof",
-            "                else 0.0",
+            "    for _studio_dof in _studio_translational_dofs:",
+            "        _studio_axis = _studio_axis_key[_studio_dof]",
+            "        _studio_factor_values = (",
+            "            _studio_modal_properties.get(",
+            "                'partiFactor' + _studio_axis, []",
             "            )",
-            "            _studio_num += _studio_mass * _studio_phi",
-            "            _studio_den += _studio_mass * _studio_phi * _studio_phi",
-            "        _studio_gamma = (",
-            "            _studio_num / _studio_den",
-            "            if _studio_den > 0.0 else 0.0",
+            "            if _studio_use_domain_modal_properties else []",
             "        )",
-            "        _studio_effective_mass = (",
-            "            (_studio_num * _studio_num) / _studio_den",
-            "            if _studio_den > 0.0 else 0.0",
+            "        _studio_mass_values = (",
+            "            _studio_modal_properties.get(",
+            "                'partiMass' + _studio_axis, []",
+            "            )",
+            "            if _studio_use_domain_modal_properties else []",
             "        )",
-            "        _studio_total_mass = _studio_total_lumped_mass[str(_studio_dof)]",
-            "        _studio_mass_ratio = (",
-            "            _studio_effective_mass / _studio_total_mass",
-            "            if _studio_total_mass > 0.0 else 0.0",
+            "        _studio_ratio_values = (",
+            "            _studio_modal_properties.get(",
+            "                'partiMassRatios' + _studio_axis, []",
+            "            )",
+            "            if _studio_use_domain_modal_properties else []",
             "        )",
+            "        _studio_index = _studio_mode - 1",
+            "        if (",
+            "            len(_studio_factor_values) > _studio_index",
+            "            and len(_studio_mass_values) > _studio_index",
+            "            and len(_studio_ratio_values) > _studio_index",
+            "        ):",
+            "            _studio_gamma = float(_studio_factor_values[_studio_index])",
+            "            _studio_effective_mass = float(_studio_mass_values[_studio_index])",
+            "            _studio_mass_ratio = (",
+            "                float(_studio_ratio_values[_studio_index]) / 100.0",
+            "            )",
+            "        else:",
+            "            _studio_num = 0.0",
+            "            _studio_den = 0.0",
+            "            for _studio_node in _studio_node_tags:",
+            "                try:",
+            "                    _studio_mass = max(",
+            "                        0.0, float(ops.nodeMass(",
+            "                            _studio_node, _studio_dof",
+            "                        ))",
+            "                    )",
+            "                except Exception:",
+            "                    _studio_mass = 0.0",
+            "                _studio_vector = _studio_vectors.get(",
+            "                    str(_studio_node), []",
+            "                )",
+            "                _studio_phi = (",
+            "                    float(_studio_vector[_studio_dof - 1])",
+            "                    if len(_studio_vector) >= _studio_dof",
+            "                    else 0.0",
+            "                )",
+            "                _studio_num += _studio_mass * _studio_phi",
+            "                _studio_den += (",
+            "                    _studio_mass * _studio_phi * _studio_phi",
+            "                )",
+            "            _studio_gamma = (",
+            "                _studio_num / _studio_den",
+            "                if _studio_den > 0.0 else 0.0",
+            "            )",
+            "            _studio_effective_mass = (",
+            "                (_studio_num * _studio_num) / _studio_den",
+            "                if _studio_den > 0.0 else 0.0",
+            "            )",
+            "            _studio_total_mass = _studio_total_lumped_mass.get(",
+            "                str(_studio_dof), 0.0",
+            "            )",
+            "            _studio_mass_ratio = (",
+            "                _studio_effective_mass / _studio_total_mass",
+            "                if _studio_total_mass > 0.0 else 0.0",
+            "            )",
             "        _studio_participation[str(_studio_dof)] = {",
             "            'factor': float(_studio_gamma),",
             "            'effective_mass': float(_studio_effective_mass),",
@@ -2312,7 +2425,13 @@ def analysis_to_openseespy(
 
 def transformation_to_openseespy(
     transformation: TransformationData,
+    ndm: int = 3,
 ) -> str:
+    if int(ndm) == 2:
+        return (
+            f"ops.geomTransf('{transformation.transformation_type}', "
+            f"{transformation.tag})"
+        )
     x, y, z = transformation.vecxz
     return (
         f"ops.geomTransf('{transformation.transformation_type}', "
@@ -2417,14 +2536,18 @@ def to_openseespy(
         lines.extend(["", "# Sections"])
         for tag in sorted(sections):
             lines.extend(
-                section_to_openseespy(sections[tag], materials, units)
+                section_to_openseespy(
+                    sections[tag], materials, units, model.ndm
+                )
             )
 
     if transformations:
         lines.extend(["", "# Geometric transformations"])
         for tag in sorted(transformations):
             lines.append(
-                transformation_to_openseespy(transformations[tag])
+                transformation_to_openseespy(
+                    transformations[tag], model.ndm
+                )
             )
 
     lines.extend([
@@ -2517,12 +2640,19 @@ def to_openseespy(
                 materials,
                 units,
             )
-            args = (
-                "ops.element('elasticBeamColumn', "
-                f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
-                f"{p['G']:g}, {p['J']:g}, {p['Iy']:g}, {p['Iz']:g}, "
-                f"{transf_tag}"
-            )
+            if int(model.ndm) == 2:
+                args = (
+                    "ops.element('elasticBeamColumn', "
+                    f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
+                    f"{p['Iz']:g}, {transf_tag}"
+                )
+            else:
+                args = (
+                    "ops.element('elasticBeamColumn', "
+                    f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
+                    f"{p['G']:g}, {p['J']:g}, {p['Iy']:g}, {p['Iz']:g}, "
+                    f"{transf_tag}"
+                )
             if e.mass_per_length > 0.0:
                 args += f", '-mass', {e.mass_per_length:g}"
                 if e.consistent_mass:
@@ -2869,6 +2999,8 @@ def to_openseespy(
                 monitor_node=monitor_node,
                 fiber_response_specs=fiber_response_specs,
                 specimen_response_spec=specimen_response_spec,
+                model_ndm=model.ndm,
+                model_ndf=model.ndf,
             )
         )
 

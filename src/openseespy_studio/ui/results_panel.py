@@ -46,6 +46,7 @@ from ..motion import (
     motion_info,
 )
 from ..postprocess import (
+    canonical_nodal_vector,
     component_end_resultants,
     convergence_steps,
     convergence_trace,
@@ -3520,6 +3521,19 @@ class ResultsPanel(QWidget):
         )
         self.history_plot.set_series([], [])
 
+    def _modal_translation_axes(self) -> list[tuple[int, str]]:
+        model_info = self._result.get("model", {})
+        ndm = (
+            int(model_info.get("ndm", 3))
+            if isinstance(model_info, dict)
+            else 3
+        )
+        return (
+            [(1, "UX"), (2, "UY")]
+            if ndm == 2
+            else [(1, "UX"), (2, "UY"), (3, "UZ")]
+        )
+
     def _populate_modal_summary(self) -> None:
         modes = (
             self._result.get("modes", {})
@@ -3528,10 +3542,22 @@ class ResultsPanel(QWidget):
         )
         if not isinstance(modes, dict):
             modes = {}
+        axes = self._modal_translation_axes()
+        headers = [
+            "Mode",
+            "Eigenvalue",
+            "Frequency [Hz]",
+            "Period [s]",
+            *(f"{label} mass %" for _, label in axes),
+            *(f"Cum. {label} %" for _, label in axes),
+        ]
+        self.modal_summary_table.setColumnCount(len(headers))
+        self.modal_summary_table.setHorizontalHeaderLabels(headers)
+
         ordered = sorted(modes, key=lambda value: int(value))
         self.modal_summary_table.setRowCount(len(ordered))
+        cumulative = [0.0] * len(axes)
 
-        cumulative = [0.0, 0.0, 0.0]
         for row, key in enumerate(ordered):
             mode = modes.get(key, {})
             eigenvalue = float(mode.get("eigenvalue", 0.0) or 0.0)
@@ -3539,7 +3565,7 @@ class ResultsPanel(QWidget):
             period = mode.get("period_s")
             participation = mode.get("participation", {})
             ratios: list[float] = []
-            for dof in (1, 2, 3):
+            for index, (dof, _label) in enumerate(axes):
                 item = (
                     participation.get(str(dof), {})
                     if isinstance(participation, dict)
@@ -3549,7 +3575,7 @@ class ResultsPanel(QWidget):
                     item.get("mass_ratio", 0.0) or 0.0
                 )
                 ratios.append(ratio)
-                cumulative[dof - 1] += ratio
+                cumulative[index] += ratio
 
             values = [
                 str(key),
@@ -3593,7 +3619,7 @@ class ResultsPanel(QWidget):
         participation = mode.get("participation", {})
 
         mass_text: list[str] = []
-        for dof, label in ((1, "UX"), (2, "UY"), (3, "UZ")):
+        for dof, label in self._modal_translation_axes():
             item = (
                 participation.get(str(dof), {})
                 if isinstance(participation, dict)
@@ -4251,9 +4277,29 @@ class ResultsPanel(QWidget):
             data = final.get(key, {}) if isinstance(final, dict) else {}
             if not isinstance(data, dict):
                 data = {}
+            model_info = self._result.get("model", {})
+            ndm = (
+                model_info.get("ndm")
+                if isinstance(model_info, dict)
+                else None
+            )
+            ndf = (
+                model_info.get("ndf")
+                if isinstance(model_info, dict)
+                else None
+            )
             rows = []
             for tag in sorted(data, key=lambda value: int(value)):
-                values = list(data[tag])
+                raw_values = list(data[tag])
+                values = (
+                    canonical_nodal_vector(
+                        raw_values,
+                        ndm=int(ndm),
+                        ndf=int(ndf),
+                    )
+                    if ndm is not None and ndf is not None
+                    else raw_values
+                )
                 while len(values) < 6:
                     values.append(0.0)
                 rows.append(
@@ -5159,13 +5205,54 @@ class ResultsPanel(QWidget):
 
     def _update_history_controls(self) -> None:
         quantity = self.history_quantity.currentText()
-        labels = {
-            "Displacement": ["UX", "UY", "UZ", "RX", "RY", "RZ"],
-            "Velocity": ["VX", "VY", "VZ", "WX", "WY", "WZ"],
-            "Acceleration": ["AX", "AY", "AZ", "AlphaX", "AlphaY", "AlphaZ"],
-            "Reaction": ["FX", "FY", "FZ", "MX", "MY", "MZ"],
-            "Base shear": ["X", "Y", "Z"],
-        }.get(quantity, ["DOF 1"])
+        model_info = self._result.get("model", {})
+        ndm = (
+            int(model_info.get("ndm", 3))
+            if isinstance(model_info, dict)
+            else 3
+        )
+        ndf = (
+            int(model_info.get("ndf", 6))
+            if isinstance(model_info, dict)
+            else 6
+        )
+        if ndm == 2:
+            labels_by_quantity = {
+                "Displacement": (
+                    ["UX", "UY", "RZ"] if ndf >= 3 else ["UX", "UY"]
+                ),
+                "Velocity": (
+                    ["VX", "VY", "WZ"] if ndf >= 3 else ["VX", "VY"]
+                ),
+                "Acceleration": (
+                    ["AX", "AY", "AlphaZ"]
+                    if ndf >= 3
+                    else ["AX", "AY"]
+                ),
+                "Reaction": (
+                    ["FX", "FY", "MZ"] if ndf >= 3 else ["FX", "FY"]
+                ),
+                "Base shear": ["X", "Y"],
+            }
+        else:
+            labels_by_quantity = {
+                "Displacement": ["UX", "UY", "UZ", "RX", "RY", "RZ"],
+                "Velocity": ["VX", "VY", "VZ", "WX", "WY", "WZ"],
+                "Acceleration": [
+                    "AX", "AY", "AZ", "AlphaX", "AlphaY", "AlphaZ"
+                ],
+                "Reaction": ["FX", "FY", "FZ", "MX", "MY", "MZ"],
+                "Base shear": ["X", "Y", "Z"],
+            }
+            if ndf <= 3:
+                for key in (
+                    "Displacement",
+                    "Velocity",
+                    "Acceleration",
+                    "Reaction",
+                ):
+                    labels_by_quantity[key] = labels_by_quantity[key][:ndf]
+        labels = labels_by_quantity.get(quantity, ["DOF 1"])
 
         previous_index = max(self.history_dof.currentIndex(), 0)
         self.history_dof.blockSignals(True)

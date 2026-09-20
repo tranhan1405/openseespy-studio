@@ -160,3 +160,25 @@ def test_full_generator_emits_recorders_before_analysis():
     assert "# Recorder 1: Node displacement" in code
     assert "ops.recorder('Node'" in code
     assert "os.makedirs(" in code
+
+
+def test_2d_node_recorder_rejects_dof_above_model_ndf():
+    model = StructuralModel("Recorder2D", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+
+    try:
+        project.add_recorder(
+            RecorderData(
+                1,
+                "Bad 2D recorder",
+                "Node",
+                target_tags=[1],
+                response="disp",
+                dofs=[4],
+            )
+        )
+    except ValueError as exc:
+        assert "ndf=3" in str(exc)
+    else:
+        raise AssertionError("Expected invalid 2D recorder DOF to fail")

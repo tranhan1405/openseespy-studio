@@ -3540,7 +3540,12 @@ class ModelViewport(QWidget):
             if not isinstance(raw, (list, tuple)):
                 return None
             try:
-                return nodal_result_scalar(raw, component)
+                return nodal_result_scalar(
+                    raw,
+                    component,
+                    ndm=self._model.ndm if self._model is not None else None,
+                    ndf=self._model.ndf if self._model is not None else None,
+                )
             except ValueError:
                 return None
 

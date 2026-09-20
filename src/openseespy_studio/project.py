@@ -2052,6 +2052,38 @@ class ProjectDatabase:
                 + ", ".join(map(str, sorted(set(missing))))
             )
 
+        if constraint.constraint_type == "equalDOF":
+            invalid = [
+                dof
+                for dof in constraint.dofs
+                if dof < 1 or dof > int(self.model.ndf)
+            ]
+            if invalid:
+                raise ValueError(
+                    f"equalDOF DOF(s) {invalid} exceed model "
+                    f"ndf={self.model.ndf}."
+                )
+        elif constraint.constraint_type == "rigidDiaphragm":
+            if int(self.model.ndm) == 2:
+                if int(self.model.ndf) != 3:
+                    raise ValueError(
+                        "2D rigidDiaphragm requires ndf=3."
+                    )
+                if constraint.perp_dirn not in {1, 2}:
+                    raise ValueError(
+                        "2D rigidDiaphragm direction must be 1 (X) "
+                        "or 2 (Y)."
+                    )
+            elif int(self.model.ndm) == 3:
+                if int(self.model.ndf) != 6:
+                    raise ValueError(
+                        "3D rigidDiaphragm requires ndf=6."
+                    )
+                if constraint.perp_dirn not in {1, 2, 3}:
+                    raise ValueError(
+                        "3D rigidDiaphragm direction must be 1, 2, or 3."
+                    )
+
     def add_constraint(self, constraint: ConstraintData) -> None:
         if constraint.tag in self.constraints:
             raise ValueError(
@@ -2124,6 +2156,18 @@ class ProjectDatabase:
                 "Connection references missing node tag(s): "
                 + ", ".join(map(str, missing_nodes))
             )
+        if connection.connection_type != "zeroLengthSection":
+            invalid_dofs = sorted(
+                dof
+                for dof in connection.materials_by_dof
+                if dof < 1 or dof > int(self.model.ndf)
+            )
+            if invalid_dofs:
+                raise ValueError(
+                    f"Connection DOF(s) {invalid_dofs} exceed model "
+                    f"ndf={self.model.ndf}."
+                )
+
         missing_materials = sorted({
             material_tag
             for material_tag in connection.materials_by_dof.values()
@@ -2635,6 +2679,28 @@ class ProjectDatabase:
             raise ValueError(
                 "Beam element loads require a beam-column element."
             )
+        if int(self.model.ndm) == 2:
+            if (
+                load.load_type == "Uniform"
+                and abs(float(load.wz)) > 1.0e-15
+            ):
+                raise ValueError(
+                    "2D Uniform element loads cannot have local Wz."
+                )
+            if (
+                load.load_type == "Point"
+                and abs(float(load.pz)) > 1.0e-15
+            ):
+                raise ValueError(
+                    "2D Point element loads cannot have local Pz."
+                )
+            if (
+                load.load_type == "SelfWeight"
+                and abs(float(load.gravity[2])) > 1.0e-15
+            ):
+                raise ValueError(
+                    "2D Self Weight cannot use global GZ; use GX/GY."
+                )
 
     def add_element_load(self, load: ElementLoadData) -> None:
         if load.tag in self.element_loads:
@@ -2683,11 +2749,25 @@ class ProjectDatabase:
 
     def _validate_recorder(self, recorder: RecorderData) -> None:
         if recorder.recorder_type == "Node":
-            missing = [tag for tag in recorder.target_tags if tag not in self.model.nodes]
+            missing = [
+                tag
+                for tag in recorder.target_tags
+                if tag not in self.model.nodes
+            ]
             if missing:
                 raise ValueError(
                     "Recorder references missing node tag(s): "
                     + ", ".join(map(str, missing))
+                )
+            invalid_dofs = [
+                int(dof)
+                for dof in recorder.dofs
+                if int(dof) < 1 or int(dof) > int(self.model.ndf)
+            ]
+            if invalid_dofs:
+                raise ValueError(
+                    f"Node recorder DOF(s) {invalid_dofs} exceed model "
+                    f"ndf={self.model.ndf}."
                 )
             return
         valid_elements = set(self.model.elements) | set(self.connections)

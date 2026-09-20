@@ -2,6 +2,8 @@ from openseespy_studio.generator import (
     FrameGridSpec,
     generate_frame_grid,
     material_to_openseespy,
+    section_to_openseespy,
+    transformation_to_openseespy,
     to_openseespy,
 )
 from openseespy_studio.model import StructuralModel
@@ -181,3 +183,94 @@ def test_bond_sp01_slip_converts_from_si_storage_to_model_length():
     )
     assert ", 1," in command
     assert ", 10," in command
+
+
+def test_2d_elastic_section_uses_ndm2_signature():
+    section = SectionData(
+        1,
+        "2D elastic",
+        "Elastic",
+        parameters={
+            "E": 200.0e9,
+            "A": 0.02,
+            "Iz": 8.0e-5,
+            "Iy": 6.0e-5,
+            "G": 80.0e9,
+            "J": 1.0e-4,
+        },
+    )
+
+    lines = section_to_openseespy(
+        section,
+        units={"length": "m", "force": "N", "time": "s"},
+        ndm=2,
+    )
+
+    assert lines == [
+        "ops.section('Elastic', 1, 2e+11, 0.02, 8e-05)"
+    ]
+
+
+def test_2d_geom_transf_omits_vecxz():
+    transformation = TransformationData(
+        1,
+        "2D linear",
+        "Linear",
+        (0.0, 0.0, 1.0),
+    )
+
+    assert transformation_to_openseespy(
+        transformation,
+        ndm=2,
+    ) == "ops.geomTransf('Linear', 1)"
+
+
+def test_2d_elastic_beam_column_uses_ndm2_signature():
+    model = StructuralModel("2d-elastic", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 4.0, 0.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        section_tag=1,
+        transf_tag=1,
+    )
+    sections = {
+        1: SectionData(
+            1,
+            "2D elastic",
+            "Elastic",
+            parameters={
+                "E": 200.0e9,
+                "A": 0.02,
+                "Iz": 8.0e-5,
+                "Iy": 6.0e-5,
+                "G": 80.0e9,
+                "J": 1.0e-4,
+            },
+        )
+    }
+    transformations = {
+        1: TransformationData(
+            1,
+            "2D linear",
+            "Linear",
+            (0.0, 0.0, 1.0),
+        )
+    }
+
+    code = to_openseespy(
+        model,
+        sections=sections,
+        transformations=transformations,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert "ops.geomTransf('Linear', 1)" in code
+    assert (
+        "ops.element('elasticBeamColumn', 1, 1, 2, 0.02, 2e+11, "
+        "8e-05, 1)"
+        in code
+    )
+    assert "8e+10, 0.0001, 6e-05" not in code

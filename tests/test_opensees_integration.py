@@ -14,6 +14,7 @@ from openseespy_studio.project import (
     MATERIAL_DEFAULTS,
     AnalysisSettingsData,
     ConnectionData,
+    ElementLoadData,
     FiberData,
     LoadPatternData,
     MaterialData,
@@ -270,6 +271,39 @@ def test_generated_modal_runs_in_real_opensees(tmp_path: Path):
     assert len(results["eigenvalues"]) == 1
     assert float(results["eigenvalues"][0]) > 0.0
     assert "1" in results["modes"]
+
+
+
+
+def test_modal_properties_include_distributed_element_mass_in_real_opensees(
+    tmp_path: Path,
+):
+    model, sections, transformations = _elastic_cantilever()
+    model.elements[1].mass_per_length = 50.0
+    model.elements[1].consistent_mass = True
+
+    analysis = AnalysisSettingsData(
+        1,
+        "Modal distributed mass",
+        analysis_type="Modal",
+        num_modes=1,
+        eigen_solver="-fullGenLapack",
+        live_convergence=False,
+    )
+    results = _run_real_generated(
+        tmp_path,
+        "modal-element-mass",
+        model=model,
+        sections=sections,
+        transformations=transformations,
+        analysis=analysis,
+    )
+
+    summary = results["modal_summary"]
+    assert summary["mass_basis"].startswith("OpenSees modalProperties")
+    assert float(summary["total_lumped_mass"]["1"]) > 0.0
+    assert float(summary["total_lumped_mass"]["2"]) > 0.0
+    assert set(results["modes"]["1"]["participation"]) == {"1", "2", "3"}
 
 
 def test_generated_pushover_runs_in_real_opensees(tmp_path: Path):
@@ -913,3 +947,95 @@ def test_generated_2d_2dof_truss_runs_and_reports_axial_force(
     )
     axial = results["final"]["element_axial_forces"]["1"]
     assert abs(float(axial)) == pytest.approx(1000.0, rel=1.0e-8)
+
+
+def test_generated_2d_beam_uniform_load_runs_in_real_opensees(
+    tmp_path: Path,
+):
+    model = StructuralModel("2d-beam-load", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 4.0, 0.0, 0.0)
+    model.set_fixity(1, (1, 1, 1))
+    model.add_element(
+        1,
+        1,
+        2,
+        section_tag=1,
+        transf_tag=1,
+    )
+    sections = {
+        1: SectionData(
+            1,
+            "2D elastic",
+            "Elastic",
+            parameters={
+                "E": 200.0e9,
+                "A": 0.02,
+                "Iz": 8.0e-5,
+            },
+        )
+    }
+    transformations = {
+        1: TransformationData(1, "2D Linear", "Linear", (0.0, 0.0, 1.0))
+    }
+    series = {1: TimeSeriesData(1, "Linear", "Linear", factor=1.0)}
+    patterns = {1: LoadPatternData(1, "UDL", "Plain", time_series_tag=1)}
+    element_loads = {
+        1: ElementLoadData(
+            1,
+            "Downward UDL",
+            pattern_tag=1,
+            element_tag=1,
+            load_type="Uniform",
+            wy=-1000.0,
+            wx=0.0,
+            wz=0.0,
+        )
+    }
+    analysis = AnalysisSettingsData(
+        1,
+        "2D beam UDL",
+        analysis_type="Static",
+        constraints_handler="Plain",
+        numberer="Plain",
+        system="BandGeneral",
+        test="NormDispIncr",
+        tolerance=1.0e-10,
+        max_iterations=20,
+        algorithm="Newton",
+        steps=1,
+        load_increment=1.0,
+        recovery=False,
+        adaptive_step=False,
+        live_convergence=False,
+    )
+
+    script = to_openseespy(
+        model,
+        sections=sections,
+        transformations=transformations,
+        time_series=series,
+        load_patterns=patterns,
+        element_loads=element_loads,
+        analyses={1: analysis},
+        active_analysis_tag=1,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    assert (
+        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', -1000, 0)"
+        in script
+    )
+
+    script_path = tmp_path / "beam-2d-udl.py"
+    result_path = tmp_path / "beam-2d-udl-result.json"
+    script_path.write_text(script, encoding="utf-8")
+    assert run_script(script_path, result_path) == 0
+
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "completed"
+    assert payload["results"]["model"] == {"ndm": 2, "ndf": 3}
+    tip_uy = payload["results"]["final"]["node_displacements"]["2"][1]
+    expected = -1000.0 * 4.0**4 / (
+        8.0 * 200.0e9 * 8.0e-5
+    )
+    assert tip_uy == pytest.approx(expected, rel=1.0e-6)

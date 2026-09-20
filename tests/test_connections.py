@@ -3,6 +3,7 @@ from openseespy_studio.generator import (
     to_openseespy,
 )
 from openseespy_studio.model import StructuralModel
+from openseespy_studio.ui.connection_dialog import ConnectionDialog
 from openseespy_studio.project import (
     ConnectionData,
     MaterialData,
@@ -165,3 +166,49 @@ def test_connection_tag_cannot_conflict_with_structural_element():
         assert "conflicts with an element tag" in str(exc)
     else:
         raise AssertionError("Expected connection/element tag conflict")
+
+
+def test_2d_connection_dialog_maps_rz_to_dir3():
+    assert ConnectionDialog.dof_labels_for_model(2, 3) == (
+        ("UX", "Local translation X"),
+        ("UY", "Local translation Y"),
+        ("RZ", "Local rotation Z"),
+    )
+    presets = dict(ConnectionDialog.presets_for_model(2, 3))
+    assert presets["Rotational hinge RZ"] == (3,)
+    assert presets["Planar joint UX-UY-RZ"] == (1, 2, 3)
+    assert "Full 6-DOF spring" not in presets
+
+
+def test_2d_connection_project_rejects_dir6_and_accepts_rz_dir3():
+    model = StructuralModel("2d-connection", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+    project.add_material(elastic_material())
+
+    bad = ConnectionData(
+        10,
+        "Bad RZ mapping",
+        "zeroLength",
+        1,
+        2,
+        materials_by_dof={6: 1},
+    )
+    try:
+        project.add_connection(bad)
+    except ValueError as exc:
+        assert "ndf=3" in str(exc)
+    else:
+        raise AssertionError("Expected invalid 2D connection DOF to fail")
+
+    good = ConnectionData(
+        11,
+        "2D RZ spring",
+        "zeroLength",
+        1,
+        2,
+        materials_by_dof={3: 1},
+    )
+    project.add_connection(good)
+    assert project.connections[11].materials_by_dof == {3: 1}

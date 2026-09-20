@@ -1,6 +1,7 @@
 from openseespy_studio.generator import constraint_to_openseespy, to_openseespy
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import ConstraintData, ProjectDatabase
+from openseespy_studio.ui.constraint_dialog import ConstraintDialog
 
 
 def model_with_nodes() -> StructuralModel:
@@ -145,3 +146,54 @@ def test_prune_constraints_after_node_deletion():
 
     assert removed == [2]
     assert project.constraints[1].constrained_nodes == [2]
+
+
+def test_2d_constraint_dialog_uses_rz_as_dof3():
+    assert ConstraintDialog.dof_labels_for_model(2, 3) == (
+        "UX",
+        "UY",
+        "RZ",
+    )
+    assert ConstraintDialog.diaphragm_directions_for_model(2) == (
+        ("X perpendicular direction (1)", 1),
+        ("Y perpendicular direction (2)", 2),
+    )
+
+
+def test_2d_constraint_project_rejects_invalid_dof_and_z_diaphragm():
+    model = StructuralModel("2d-constraints", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+
+    try:
+        project.add_constraint(
+            ConstraintData(
+                1,
+                "Bad equalDOF",
+                "equalDOF",
+                1,
+                [2],
+                dofs=(4,),
+            )
+        )
+    except ValueError as exc:
+        assert "ndf=3" in str(exc)
+    else:
+        raise AssertionError("Expected invalid equalDOF DOF to fail")
+
+    try:
+        project.add_constraint(
+            ConstraintData(
+                2,
+                "Bad 2D diaphragm",
+                "rigidDiaphragm",
+                1,
+                [2],
+                perp_dirn=3,
+            )
+        )
+    except ValueError as exc:
+        assert "2D rigidDiaphragm direction" in str(exc)
+    else:
+        raise AssertionError("Expected invalid 2D diaphragm direction")

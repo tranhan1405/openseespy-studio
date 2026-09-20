@@ -1,3 +1,5 @@
+import pytest
+
 from openseespy_studio.generator import (
     element_load_to_openseespy,
     load_pattern_to_openseespy,
@@ -548,3 +550,173 @@ def test_generated_script_declares_consistent_project_units():
 
     assert "# Consistent model units: m, kN, s" in script
     assert "Material stress/modulus inputs are stored in Pa" in script
+
+
+def test_2d_uniform_element_load_uses_ndm2_opensees_syntax():
+    model = StructuralModel("2d-load", ndm=2, ndf=3)
+    load = ElementLoadData(
+        1,
+        "UDL 2D",
+        1,
+        5,
+        "Uniform",
+        wx=1.0,
+        wy=-2.0,
+        wz=0.0,
+    )
+
+    assert element_load_to_openseespy(load, model) == (
+        "ops.eleLoad('-ele', 5, '-type', '-beamUniform', -2, 1)"
+    )
+
+
+def test_2d_point_element_load_uses_ndm2_opensees_syntax():
+    model = StructuralModel("2d-point", ndm=2, ndf=3)
+    load = ElementLoadData(
+        1,
+        "Point 2D",
+        1,
+        5,
+        "Point",
+        px=4.0,
+        py=-5.0,
+        pz=0.0,
+        x_over_l=0.25,
+    )
+
+    assert element_load_to_openseespy(load, model) == (
+        "ops.eleLoad('-ele', 5, '-type', '-beamPoint', -5, 0.25, 4)"
+    )
+
+
+def test_2d_beam_load_rejects_nonzero_local_z_component():
+    model = StructuralModel("2d-invalid-load", ndm=2, ndf=3)
+
+    with pytest.raises(ValueError, match="nonzero local Wz"):
+        element_load_to_openseespy(
+            ElementLoadData(
+                1, "Bad UDL", 1, 5, "Uniform", wy=-2.0, wz=-3.0
+            ),
+            model,
+        )
+
+    with pytest.raises(ValueError, match="nonzero local Pz"):
+        element_load_to_openseespy(
+            ElementLoadData(
+                2,
+                "Bad point",
+                1,
+                5,
+                "Point",
+                py=-5.0,
+                pz=-6.0,
+                x_over_l=0.25,
+            ),
+            model,
+        )
+
+
+def test_beam_element_load_rejects_truss_target():
+    model = StructuralModel("truss-load", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    model.add_element(
+        5,
+        1,
+        2,
+        element_type="truss",
+        truss_area=1.0,
+        truss_material_tag=1,
+    )
+
+    with pytest.raises(ValueError, match="cannot be applied to Truss"):
+        element_load_to_openseespy(
+            ElementLoadData(
+                1, "Invalid truss UDL", 1, 5, "Uniform", wy=-1.0
+            ),
+            model,
+        )
+
+
+def test_project_rejects_out_of_plane_2d_element_load_components():
+    model = StructuralModel("2d-project-load", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    model.add_element(1, 1, 2, section_tag=1, transf_tag=1)
+    project = ProjectDatabase(model=model)
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(LoadPatternData(1, "Dead", "Plain", 1))
+
+    with pytest.raises(ValueError, match="local Wz"):
+        project.add_element_load(
+            ElementLoadData(
+                1, "Bad Wz", 1, 1, "Uniform", wy=-1.0, wz=-1.0
+            )
+        )
+
+    with pytest.raises(ValueError, match="global GZ"):
+        project.add_element_load(
+            ElementLoadData(
+                2,
+                "Bad gravity",
+                1,
+                1,
+                "SelfWeight",
+                gravity=(0.0, 0.0, -9.81),
+            )
+        )
+
+
+def test_2d_self_weight_projection_ignores_vecxz_like_opensees():
+    model = StructuralModel("2d-self-weight", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 2.0, 0.0, 0.0)
+    model.add_element(1, 1, 2, section_tag=1, transf_tag=1)
+    materials = {
+        1: MaterialData(
+            1,
+            "Dense",
+            "Elastic",
+            {"E": 2.0e11},
+            density=1000.0,
+        )
+    }
+    sections = {
+        1: SectionData(
+            1,
+            "A=0.2",
+            "Elastic",
+            {"A": 0.2},
+            material_tag=1,
+        )
+    }
+    transformations = {
+        1: TransformationData(
+            1,
+            "2D",
+            "Linear",
+            # Deliberately misleading for a 2D model; OpenSees ignores vecxz.
+            (0.0, 1.0, 0.0),
+        )
+    }
+    load = ElementLoadData(
+        1,
+        "2D Self Weight",
+        1,
+        1,
+        "SelfWeight",
+        gravity=(0.0, -10.0, 0.0),
+    )
+
+    text = element_load_to_openseespy(
+        load,
+        model,
+        sections,
+        materials,
+        transformations,
+        {"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert text == (
+        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', -2000, 0)"
+    )
