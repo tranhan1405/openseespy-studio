@@ -1672,6 +1672,7 @@ SOLUTION_RESULT_TYPES = {
     "ModeShape",
     "Motion",
     "Convergence",
+    "SpecimenResponse",
 }
 
 
