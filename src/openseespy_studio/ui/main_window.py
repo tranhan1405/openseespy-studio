@@ -7,8 +7,8 @@ import os
 import sys
 import tempfile
 
-from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QCursor, QFont, QKeySequence, QPainter, QPen, QShortcut, QTextCursor, QUndoStack
+from PySide6.QtCore import QProcess, QProcessEnvironment, QSettings, QTimer, QUrl, QSize, Qt, Signal
+from PySide6.QtGui import QAction, QColor, QCursor, QDesktopServices, QFont, QKeySequence, QPainter, QPen, QShortcut, QTextCursor, QUndoStack
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -1499,7 +1499,7 @@ class MainWindow(QMainWindow):
     def _build_actions_and_ribbon(self) -> None:
         menus = {}
         for name in (
-            "File", "Edit", "View", "Geometry", "Model", "Loads",
+            "File", "Edit", "View", "Geometry", "Model", "Loads & BCs",
             "Analysis", "Results", "Tools", "Window", "Help",
         ):
             menus[name] = self.menuBar().addMenu(name)
@@ -1510,13 +1510,36 @@ class MainWindow(QMainWindow):
         self._make_action("undo", "Undo", "undo", self.undo_stack.undo, "Undo")
         self._make_action("redo", "Redo", "redo", self.undo_stack.redo, "Redo")
         self._make_action("save_as", "Save As...", "save", self._save_project_as, "Save project as")
-        self._make_action("export_py", "Export Python...", "save", self._export_script, "Export OpenSeesPy script")
+        self._make_action("export_py", "Export OpenSeesPy...", "save", self._export_script, "Export readable OpenSeesPy script")
+        self._make_action(
+            "close_project",
+            "Close Project",
+            "delete",
+            self._new_model,
+            "Close the current project and return to an empty project",
+        )
+        self._make_action(
+            "exit",
+            "Exit",
+            "delete",
+            self.close,
+            "Exit OpenSeesPy Studio",
+        )
 
         self.actions["save"].setShortcut(QKeySequence.Save)
         self.actions["open"].setShortcut(QKeySequence.Open)
         self.actions["new"].setShortcut(QKeySequence.New)
         self.actions["undo"].setShortcut(QKeySequence.Undo)
         self.actions["redo"].setShortcut(QKeySequence.Redo)
+        self.actions["exit"].setShortcut(QKeySequence("Ctrl+Q"))
+
+        self._make_action(
+            "clear_selection",
+            "Clear Selection",
+            "select",
+            self.selection.clear,
+            "Clear the current node/element selection",
+        )
 
         self._make_action("node", "Node", "node", self._create_node, "Create node")
         self._make_action("line", "Line", "element", self._create_element, "Create element")
@@ -1537,6 +1560,10 @@ class MainWindow(QMainWindow):
             "Quick-create a planar X-Z frame with automatic out-of-plane restraints",
         )
         self._make_action("extrude", "Extrude", "copy", self._not_implemented, "Extrude geometry")
+        self.actions["extrude"].setEnabled(False)
+        self.actions["extrude"].setToolTip(
+            "Extrude is not implemented in the current research-alpha release"
+        )
 
         modify_callbacks = {
             "copy": self._copy_selection,
@@ -1661,6 +1688,13 @@ class MainWindow(QMainWindow):
             "Create a research zeroLength spring/interface or twoNodeLink",
         )
         self._make_action(
+            "recorder",
+            "Recorder...",
+            "recorder",
+            self._create_recorder,
+            "Create an OpenSees node, element, section, or fiber recorder",
+        )
+        self._make_action(
             "mass",
             "Nodal Mass...",
             "load",
@@ -1743,50 +1777,160 @@ class MainWindow(QMainWindow):
             self._show_plot_menu,
             "Plot results from the selected or latest completed Job",
         )
+        self._make_action(
+            "fit_view",
+            "Fit All",
+            "fit",
+            self._fit_view,
+            "Fit the visible model/result to the viewport",
+        )
+        self._make_action(
+            "export_results",
+            "Export Active Job Results...",
+            "save",
+            self._export_active_job_results,
+            "Export the active or latest completed Job results to JSON",
+        )
 
-        menus["File"].addActions([self.actions["new"], self.actions["open"], self.actions["save"]])
-        menus["File"].addAction(self.actions["save_as"])
-        menus["File"].addSeparator()
-        menus["File"].addAction(self.actions["export_py"])
-        menus["Edit"].addActions([self.actions["undo"], self.actions["redo"]])
-        menus["Model"].addAction(self.actions["new_material"])
-        menus["Model"].addAction(self.actions["new_section"])
-        menus["Model"].addAction(self.actions["new_transformation"])
-        menus["Model"].addSeparator()
-        menus["Model"].addAction(self.actions["assign_section"])
-        menus["Model"].addAction(self.actions["assign_transformation"])
-        menus["Model"].addAction(self.actions["element_formulation"])
-        menus["Geometry"].addActions([
+        file_menu = menus["File"]
+        file_menu.addActions([self.actions["new"], self.actions["open"]])
+        self.recent_projects_menu = file_menu.addMenu("Recent Projects")
+        self.recent_projects_menu.aboutToShow.connect(
+            self._refresh_recent_projects_menu
+        )
+        file_menu.addSeparator()
+        file_menu.addActions([self.actions["save"], self.actions["save_as"]])
+        file_menu.addSeparator()
+        file_menu.addAction(self.actions["export_py"])
+        file_menu.addSeparator()
+        file_menu.addActions([
+            self.actions["close_project"],
+            self.actions["exit"],
+        ])
+
+        edit_menu = menus["Edit"]
+        edit_menu.addActions([self.actions["undo"], self.actions["redo"]])
+        edit_menu.addSeparator()
+        edit_menu.addActions([
+            self.actions["copy"],
+            self.actions["move"],
+            self.actions["rotate"],
+            self.actions["mirror"],
+            self.actions["delete"],
+        ])
+        edit_menu.addSeparator()
+        edit_menu.addActions([
+            self.actions["byid"],
+            self.actions["bytype"],
+            self.actions["clear_selection"],
+        ])
+
+        geometry_menu = menus["Geometry"]
+        geometry_menu.addActions([
             self.actions["node"], self.actions["line"], self.actions["frame"],
-            self.actions["column_1d"], self.actions["grid"],
-            self.actions["frame_2d"], self.actions["extrude"],
         ])
-        menus["View"].addActions([
-            self.actions["xy"], self.actions["yz"], self.actions["xz"], self.actions["iso"],
+        geometry_menu.addSeparator()
+        geometry_menu.addActions([
+            self.actions["column_1d"],
+            self.actions["frame_2d"],
+            self.actions["grid"],
+            self.actions["extrude"],
         ])
-        menus["Loads"].addAction(self.actions["support"])
-        menus["Loads"].addAction(self.actions["clear_support"])
-        menus["Loads"].addSeparator()
-        menus["Loads"].addAction(self.actions["constraint"])
-        menus["Loads"].addAction(self.actions["connection"])
-        menus["Loads"].addSeparator()
-        menus["Loads"].addAction(self.actions["mass"])
-        menus["Loads"].addAction(self.actions["mass_source"])
-        menus["Loads"].addAction(self.actions["time_series"])
-        menus["Loads"].addAction(self.actions["load_pattern"])
-        menus["Loads"].addAction(self.actions["nodal_load"])
-        menus["Loads"].addAction(self.actions["prescribed_displacement"])
-        menus["Loads"].addAction(self.actions["beam_load"])
+        modify_menu = geometry_menu.addMenu("Modify")
+        modify_menu.addActions([
+            self.actions["copy"],
+            self.actions["move"],
+            self.actions["rotate"],
+            self.actions["mirror"],
+            self.actions["delete"],
+        ])
+
+        view_menu = menus["View"]
+        view_menu.addAction(self.actions["fit_view"])
+        view_menu.addAction(self.actions["byid"])
+        view_menu.addSeparator()
+        view_menu.addActions([
+            self.actions["xy"],
+            self.actions["xz"],
+            self.actions["yz"],
+            self.actions["iso"],
+        ])
+        view_menu.addSeparator()
+        representation_menu = view_menu.addMenu("Representation")
+        for label, mode in (
+            ("Tube", "tube"),
+            ("Actual Section", "actual_section"),
+            ("Centerline", "centerline"),
+        ):
+            action = representation_menu.addAction(label)
+            action.triggered.connect(
+                lambda checked=False, value=mode: (
+                    self.model_representation_combo.setCurrentIndex(
+                        self.model_representation_combo.findData(value)
+                    )
+                )
+            )
+        self.view_show_menu = view_menu.addMenu("Show")
+        view_menu.addSeparator()
+        for action in (
+            self.actions["hide_selection"] if "hide_selection" in self.actions else None,
+        ):
+            if action is not None:
+                view_menu.addAction(action)
+
+        model_menu = menus["Model"]
+        model_menu.addAction(self.actions["new_material"])
+        model_menu.addAction(self.actions["new_section"])
+        model_menu.addAction(self.actions["new_transformation"])
+        model_menu.addSeparator()
+        model_menu.addAction(self.actions["assign_section"])
+        model_menu.addAction(self.actions["assign_transformation"])
+        model_menu.addAction(self.actions["element_formulation"])
+        model_menu.addSeparator()
+        model_menu.addAction(self.actions["connection"])
+        model_menu.addAction(self.actions["recorder"])
+
+        loads_menu = menus["Loads & BCs"]
+        loads_menu.addAction(self.actions["support"])
+        loads_menu.addAction(self.actions["clear_support"])
+        loads_menu.addAction(self.actions["constraint"])
+        loads_menu.addSeparator()
+        loads_menu.addAction(self.actions["mass"])
+        loads_menu.addAction(self.actions["mass_source"])
+        loads_menu.addSeparator()
+        loads_menu.addAction(self.actions["time_series"])
+        loads_menu.addAction(self.actions["load_pattern"])
+        loads_menu.addAction(self.actions["nodal_load"])
+        loads_menu.addAction(self.actions["prescribed_displacement"])
+        loads_menu.addAction(self.actions["beam_load"])
+
         template_menu = menus["Analysis"].addMenu("Templates")
         template_menu.addAction(self.actions["modal_template"])
         template_menu.addAction(self.actions["pushover_template"])
         template_menu.addAction(self.actions["cyclic_template"])
         template_menu.addAction(self.actions["nlth_template"])
+        menus["Analysis"].addSeparator()
         menus["Analysis"].addAction(self.actions["analysis_setup"])
         menus["Analysis"].addAction(self.actions["check_model"])
+        menus["Analysis"].addSeparator()
         menus["Analysis"].addAction(self.actions["run"])
+        menus["Analysis"].addSeparator()
         menus["Analysis"].addAction(self.actions["calibration"])
+
         menus["Results"].addAction(self.actions["plot"])
+
+        units_menu = menus["Tools"].addMenu("Units")
+        for index, (label, _mapping) in enumerate(UNIT_PRESETS):
+            action = units_menu.addAction(label)
+            action.triggered.connect(
+                lambda checked=False, value=index: (
+                    self.unit_combo.setCurrentIndex(value)
+                )
+            )
+        menus["Tools"].addSeparator()
+        system_info_action = QAction("Runtime / System Information...", self)
+        system_info_action.triggered.connect(self._show_system_info)
+        menus["Tools"].addAction(system_info_action)
 
         menus["Window"].addAction(self.model_tree_dock.toggleViewAction())
         menus["Window"].addAction(self.properties_dock.toggleViewAction())
@@ -1804,8 +1948,54 @@ class MainWindow(QMainWindow):
         reset_layout.triggered.connect(self._reset_dock_layout)
         menus["Window"].addAction(reset_layout)
 
+        getting_started_action = QAction("Getting Started", self)
+        getting_started_action.triggered.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl(
+                    "https://github.com/tranhan1405/openseespy-studio"
+                    "#installation-from-source"
+                )
+            )
+        )
+        user_guide_action = QAction("User Guide", self)
+        user_guide_action.triggered.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl("https://github.com/tranhan1405/openseespy-studio")
+            )
+        )
+        opensees_docs_action = QAction("OpenSeesPy Documentation", self)
+        opensees_docs_action.triggered.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl("https://openseespydoc.readthedocs.io/")
+            )
+        )
+        shortcuts_action = QAction("Keyboard Shortcuts", self)
+        shortcuts_action.triggered.connect(self._show_keyboard_shortcuts)
+        report_issue_action = QAction("Report Issue", self)
+        report_issue_action.triggered.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl(
+                    "https://github.com/tranhan1405/openseespy-studio/issues/new"
+                )
+            )
+        )
+        help_system_action = QAction("System Information", self)
+        help_system_action.triggered.connect(self._show_system_info)
         about_action = QAction("About OpenSeesPy Studio", self)
         about_action.triggered.connect(self._show_about)
+
+        menus["Help"].addActions([
+            getting_started_action,
+            user_guide_action,
+            opensees_docs_action,
+            shortcuts_action,
+        ])
+        menus["Help"].addSeparator()
+        menus["Help"].addActions([
+            report_issue_action,
+            help_system_action,
+        ])
+        menus["Help"].addSeparator()
         menus["Help"].addAction(about_action)
 
         self._make_action(
@@ -1861,6 +2051,22 @@ class MainWindow(QMainWindow):
             self._show_solver_output,
             "Show solver output console",
         )
+
+        menus["Analysis"].addAction(self.actions["solver_output_view"])
+
+        menus["Results"].addAction(self.actions["results_manager"])
+        menus["Results"].addSeparator()
+        result_display_menu = menus["Results"].addMenu("Result Display")
+        result_display_menu.addActions([
+            self.actions["result_deformed"],
+            self.actions["result_both"],
+            self.actions["result_undeformed"],
+        ])
+        menus["Results"].addAction(self.actions["fit_result"])
+        menus["Results"].addAction(self.actions["clear_result"])
+        menus["Results"].addSeparator()
+        menus["Results"].addAction(self.actions["export_results"])
+
         for key, label, icon, option, tooltip in (
             (
                 "show_node_numbers",
@@ -1923,6 +2129,25 @@ class MainWindow(QMainWindow):
                 checkable=True,
             )
         self.actions["show_load_values"].setChecked(True)
+
+        self.view_show_menu.addActions([
+            self.actions["show_node_numbers"],
+            self.actions["show_element_numbers"],
+            self.actions["show_nodal_loads"],
+            self.actions["show_element_loads"],
+            self.actions["show_prescribed_displacements"],
+            self.actions["show_load_values"],
+            self.actions["show_section_axes"],
+        ])
+        self.view_show_menu.addSeparator()
+        hide_selection_action = self.view_show_menu.addAction("Hide Selection")
+        hide_selection_action.triggered.connect(self._hide_selection)
+        isolate_selection_action = self.view_show_menu.addAction("Isolate Selection")
+        isolate_selection_action.triggered.connect(self._isolate_selection)
+        show_all_action = self.view_show_menu.addAction("Show All")
+        show_all_action.triggered.connect(self._show_all)
+
+        self._refresh_recent_projects_menu()
 
         ribbon = QToolBar("Ribbon", self)
         ribbon.setObjectName("Ribbon")
@@ -2432,6 +2657,10 @@ class MainWindow(QMainWindow):
                 )
                 break
         self._set_result_display_mode(checked_mode)
+
+    def _fit_view(self) -> None:
+        self.viewport.fit_view()
+        self.status_message.setText("Fit visible model/result")
 
     def _fit_active_result(self) -> None:
         self.viewport.fit_view()
@@ -5301,6 +5530,109 @@ class MainWindow(QMainWindow):
         self.selection.clear()
         self._refresh_all()
 
+    def _recent_project_paths(self) -> list[str]:
+        settings = QSettings("OpenSeesPy Studio", "OpenSeesPy Studio")
+        raw = settings.value("recentProjects", [])
+        if isinstance(raw, str):
+            raw = [raw]
+        if not isinstance(raw, (list, tuple)):
+            return []
+        return [str(path) for path in raw if str(path).strip()]
+
+    def _remember_recent_project(self, path: str | Path) -> None:
+        value = str(Path(path).resolve())
+        paths = [
+            item
+            for item in self._recent_project_paths()
+            if item != value
+        ]
+        paths.insert(0, value)
+        QSettings(
+            "OpenSeesPy Studio",
+            "OpenSeesPy Studio",
+        ).setValue("recentProjects", paths[:10])
+        if hasattr(self, "recent_projects_menu"):
+            self._refresh_recent_projects_menu()
+
+    def _forget_recent_project(self, path: str | Path) -> None:
+        value = str(Path(path).resolve())
+        paths = [
+            item
+            for item in self._recent_project_paths()
+            if str(Path(item).resolve()) != value
+        ]
+        QSettings(
+            "OpenSeesPy Studio",
+            "OpenSeesPy Studio",
+        ).setValue("recentProjects", paths)
+
+    def _refresh_recent_projects_menu(self) -> None:
+        menu = getattr(self, "recent_projects_menu", None)
+        if menu is None:
+            return
+        menu.clear()
+        paths = [
+            path
+            for path in self._recent_project_paths()
+            if Path(path).is_file()
+        ]
+        stored = self._recent_project_paths()
+        if paths != stored:
+            QSettings(
+                "OpenSeesPy Studio",
+                "OpenSeesPy Studio",
+            ).setValue("recentProjects", paths[:10])
+        if not paths:
+            action = menu.addAction("No recent projects")
+            action.setEnabled(False)
+            return
+        for path in paths[:10]:
+            action = menu.addAction(Path(path).name)
+            action.setToolTip(path)
+            action.triggered.connect(
+                lambda checked=False, value=path: (
+                    self._open_recent_project(value)
+                )
+            )
+        menu.addSeparator()
+        clear_action = menu.addAction("Clear Recent Projects")
+        clear_action.triggered.connect(self._clear_recent_projects)
+
+    def _clear_recent_projects(self) -> None:
+        QSettings(
+            "OpenSeesPy Studio",
+            "OpenSeesPy Studio",
+        ).remove("recentProjects")
+        self._refresh_recent_projects_menu()
+
+    def _open_recent_project(self, path: str) -> None:
+        if not self._maybe_save_changes():
+            return
+        target = Path(path)
+        if not target.is_file():
+            self._forget_recent_project(target)
+            QMessageBox.warning(
+                self,
+                "Recent project",
+                f"Project file no longer exists:\n{target}",
+            )
+            return
+        try:
+            project = ProjectDatabase.load(target)
+        except Exception as exc:
+            QMessageBox.critical(self, "Open project", str(exc))
+            return
+        self.selection.clear()
+        self.project = project
+        self.model = project.model
+        self._project_path = target
+        self._reset_runtime_results()
+        self.undo_stack.clear()
+        self.undo_stack.setClean()
+        self._set_dirty(False)
+        self._remember_recent_project(target)
+        self._refresh_all(f"Opened {target.name}")
+
     def _save_project(self) -> bool:
         if self._project_path is None:
             return self._save_project_as()
@@ -5312,6 +5644,7 @@ class MainWindow(QMainWindow):
 
         self.undo_stack.setClean()
         self._set_dirty(False)
+        self._remember_recent_project(self._project_path)
         self.status_message.setText(f"Saved {self._project_path.name}")
         return True
 
@@ -5357,6 +5690,7 @@ class MainWindow(QMainWindow):
         self.undo_stack.clear()
         self.undo_stack.setClean()
         self._set_dirty(False)
+        self._remember_recent_project(self._project_path)
         self._refresh_all(f"Opened {self._project_path.name}")
 
     def _maybe_save_changes(self) -> bool:
@@ -7943,6 +8277,35 @@ class MainWindow(QMainWindow):
         self.status_message.setText(
             f"Job {job.job_id} · added result: {plot['name']}"
         )
+
+    def _export_active_job_results(self) -> None:
+        job_id: int | None = None
+        cache_key = self._last_result_cache_key
+        if (
+            isinstance(cache_key, tuple)
+            and len(cache_key) == 2
+            and cache_key[0] == "job"
+        ):
+            try:
+                job_id = int(cache_key[1])
+            except (TypeError, ValueError):
+                job_id = None
+        if job_id is None and self._jobs:
+            completed = [
+                job.job_id
+                for job in self._jobs.values()
+                if job.results
+            ]
+            if completed:
+                job_id = max(completed)
+        if job_id is None:
+            QMessageBox.information(
+                self,
+                "Export Job Results",
+                "No completed Job results are available to export.",
+            )
+            return
+        self._export_job_result_json(job_id)
 
     def _export_job_result_json(self, job_id: int) -> None:
         job = self._jobs.get(int(job_id))
@@ -10982,6 +11345,40 @@ class MainWindow(QMainWindow):
         self._external_log_paths.clear()
         super().closeEvent(event)
 
+    def _show_keyboard_shortcuts(self) -> None:
+        QMessageBox.information(
+            self,
+            "Keyboard Shortcuts",
+            "Project\n"
+            "  Ctrl+N   New project\n"
+            "  Ctrl+O   Open project\n"
+            "  Ctrl+S   Save project\n"
+            "  Ctrl+Q   Exit\n\n"
+            "Edit / Selection\n"
+            "  Ctrl+Z   Undo\n"
+            "  Ctrl+Y   Redo\n"
+            "  Delete   Delete selection\n"
+            "  Esc      Clear selection\n\n"
+            "Viewport\n"
+            "  F        Zoom to selection\n"
+            "  H        Hide selection\n"
+            "  Shift+H  Show all\n"
+            "  I        Isolate selection",
+        )
+
+    def _show_system_info(self) -> None:
+        ok, runtime_detail = probe_opensees_runtime(timeout=10.0)
+        version = QApplication.applicationVersion() or "Development"
+        QMessageBox.information(
+            self,
+            "OpenSeesPy Studio - System Information",
+            f"OpenSeesPy Studio: {version}\n"
+            f"Python: {sys.version.split()[0]}\n"
+            f"Platform: {sys.platform}\n"
+            f"Runtime probe: {'OK' if ok else 'FAILED'}\n\n"
+            f"{runtime_detail}",
+        )
+
     def _show_about(self) -> None:
         dialog = QMessageBox(self)
         dialog.setWindowTitle("About OpenSeesPy Studio")
@@ -11000,7 +11397,9 @@ class MainWindow(QMainWindow):
             "A research-focused visual environment for nonlinear structural "
             "modelling, analysis, and post-processing with OpenSeesPy.\n\n"
             "Developed by Tran-Van Han.\n"
-            "Built with OpenSeesPy, PySide6, and PyVista."
+            "Research software for structural and earthquake engineering.\n"
+            "Built with OpenSeesPy, PySide6, and PyVista.\n\n"
+            "github.com/tranhan1405/openseespy-studio"
         )
         dialog.setStandardButtons(QMessageBox.Ok)
         dialog.exec()
