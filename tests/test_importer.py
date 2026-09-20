@@ -357,3 +357,27 @@ ops.eleLoad('-ele', 1, '-type', '-beamPoint', -10.0, 0.25, 2.0)
     ) in exported
     assert "'-beamUniform', -5, 1.5)" in exported
     assert "'-beamPoint', -10, 0.25, 2)" in exported
+
+
+def test_importer_supports_native_2d_elastic_section():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+ops.uniaxialMaterial('Elastic', 1, 200000000000.0)
+ops.section('Elastic', 7, 200000000000.0, 0.02, 8.0e-5)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="section2d.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    section = result.project.sections[7]
+    assert section.section_type == "Elastic"
+    assert section.parameters["E"] == pytest.approx(200.0e9)
+    assert section.parameters["A"] == pytest.approx(0.02)
+    assert section.parameters["Iz"] == pytest.approx(8.0e-5)
+    assert section.parameters["Iy"] == 0.0
+    assert section.parameters["J"] == 0.0
