@@ -509,14 +509,22 @@ def constraint_to_openseespy(
 
 
 def connection_to_openseespy(connection: ConnectionData) -> str:
+    ox = ", ".join(f"{value:g}" for value in connection.orient_x)
+    oy = ", ".join(f"{value:g}" for value in connection.orient_y)
+
+    if connection.connection_type == "zeroLengthSection":
+        return (
+            "ops.element('zeroLengthSection', "
+            f"{connection.tag}, {connection.node_i}, {connection.node_j}, "
+            f"{connection.section_tag}, '-orient', {ox}, {oy}, "
+            f"'-doRayleigh', {1 if connection.do_rayleigh else 0})"
+        )
+
     directions = sorted(connection.materials_by_dof)
     materials = [connection.materials_by_dof[dof] for dof in directions]
 
     mat_text = ", ".join(str(tag) for tag in materials)
     dir_text = ", ".join(str(dof) for dof in directions)
-    ox = ", ".join(f"{value:g}" for value in connection.orient_x)
-    oy = ", ".join(f"{value:g}" for value in connection.orient_y)
-
     return (
         f"ops.element('{connection.connection_type}', {connection.tag}, "
         f"{connection.node_i}, {connection.node_j}, "
