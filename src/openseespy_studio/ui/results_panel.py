@@ -2376,6 +2376,15 @@ class ResultsPanel(QWidget):
         self._cyclic_experiment_path = ""
         self.cyclic_exp_x_column.clear()
         self.cyclic_exp_y_column.clear()
+        self.specimen_exp_x_column.clear()
+        self.specimen_exp_y_column.clear()
+        self.specimen_exp_x_column.addItem("(none)", -1)
+        self.specimen_exp_y_column.addItem("(none)", -1)
+        self.specimen_plot.clear_overlay()
+        self.specimen_experiment_info.setText(
+            "Experimental overlay is optional. For M–κ select curvature "
+            "as X and moment as Y."
+        )
         self.cyclic_info.setText(
             "Run a Cyclic analysis to plot applied base shear versus "
             "control displacement."
@@ -3657,6 +3666,7 @@ class ResultsPanel(QWidget):
                 "Mmax: -   κmax: -   drift: -   interface rotation: -"
             )
             self.specimen_plot.set_series([], [])
+            self.specimen_plot.clear_overlay()
             self.specimen_research_table.setRowCount(0)
             self.specimen_fiber_table.setRowCount(0)
             return
@@ -3716,6 +3726,7 @@ class ResultsPanel(QWidget):
                 "strain-penetration interface loop from the member M–κ loop."
             )
             self.specimen_plot.set_series(x, y)
+            self._update_specimen_experiment_overlay()
             return
 
         if selected.startswith("rotation:"):
@@ -3979,17 +3990,21 @@ class ResultsPanel(QWidget):
             with open(path, "r", encoding="utf-8-sig") as stream:
                 dataset = parse_experimental_csv_text(stream.read())
         except (OSError, UnicodeError) as exc:
-            self.cyclic_experiment_info.setText(
-                f"Could not read experimental file: {exc}"
-            )
+            message = f"Could not read experimental file: {exc}"
+            self.cyclic_experiment_info.setText(message)
+            if hasattr(self, "specimen_experiment_info"):
+                self.specimen_experiment_info.setText(message)
             return
 
         headers = dataset.get("headers", [])
         rows = dataset.get("rows", [])
         if not headers or not rows:
-            self.cyclic_experiment_info.setText(
+            message = (
                 "The selected file has no usable numeric experimental data."
             )
+            self.cyclic_experiment_info.setText(message)
+            if hasattr(self, "specimen_experiment_info"):
+                self.specimen_experiment_info.setText(message)
             return
 
         self._set_cyclic_experiment_dataset(dataset, path=path)
