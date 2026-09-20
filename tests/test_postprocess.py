@@ -28,10 +28,10 @@ from openseespy_studio.postprocess import (
     section_component_samples,
     time_history_node_tags,
     time_history_series,
-    test_column_fiber_history_catalog,
-    test_column_moment_curvature_curve,
-    test_column_response_summary,
-    test_column_rotation_decomposition,
+    column_fiber_history_catalog,
+    column_moment_curvature_curve,
+    column_response_summary,
+    column_rotation_decomposition,
 )
 from openseespy_studio.project import (
     ElementLoadData,
@@ -1101,7 +1101,7 @@ def _specimen_history_result():
 
 
 def test_test_column_moment_curvature_uses_local_to_global_sign():
-    curvature, moment, component = test_column_moment_curvature_curve(
+    curvature, moment, component = column_moment_curvature_curve(
         _specimen_history_result()
     )
 
@@ -1111,7 +1111,7 @@ def test_test_column_moment_curvature_uses_local_to_global_sign():
 
 
 def test_test_column_rotation_decomposition_separates_interface_terms():
-    rows = test_column_rotation_decomposition(_specimen_history_result())
+    rows = column_rotation_decomposition(_specimen_history_result())
 
     assert rows["time"] == [1.0, 2.0]
     assert rows["total"] == pytest.approx([0.005, 0.01])
@@ -1121,7 +1121,7 @@ def test_test_column_rotation_decomposition_separates_interface_terms():
 
 
 def test_test_column_fiber_history_catalog_distinguishes_strain_and_bond_slip():
-    catalog = test_column_fiber_history_catalog(_specimen_history_result())
+    catalog = column_fiber_history_catalog(_specimen_history_result())
     keys = {row["key"] for row in catalog}
 
     assert "base_fibers:steel_max:stress" in keys
@@ -1139,7 +1139,7 @@ def test_test_column_fiber_history_catalog_distinguishes_strain_and_bond_slip():
 
 
 def test_test_column_response_summary_reports_peak_diagnostics():
-    summary = test_column_response_summary(_specimen_history_result())
+    summary = column_response_summary(_specimen_history_result())
 
     assert summary["moment_component"] == "My"
     assert summary["max_abs_moment"] == pytest.approx(20.0)
