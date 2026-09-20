@@ -114,20 +114,34 @@ def nodal_result_scalar(
     rotation/moment groups separate so incompatible units are never mixed.
     """
     component = str(component).strip().upper()
-    canonical = canonical_nodal_vector(values, ndm=ndm, ndf=ndf)
     index = NODAL_COMPONENT_INDEX.get(component)
-    if index is not None:
-        if ndm == 2 and component in {"UZ", "RX", "RY", "FZ", "MX", "MY"}:
-            return None
-        if ndm == 3 and ndf is not None and int(ndf) <= 3 and index >= 3:
-            return None
-        return float(canonical[index])
-
     magnitude_indices = NODAL_MAGNITUDE_COMPONENTS.get(component)
-    if magnitude_indices is not None:
-        return math.sqrt(
-            sum(float(canonical[index]) ** 2 for index in magnitude_indices)
-        )
+
+    if ndm is None or ndf is None:
+        if index is not None:
+            if len(values) <= index:
+                return None
+            return float(values[index])
+        if magnitude_indices is not None:
+            if len(values) <= max(magnitude_indices):
+                return None
+            return math.sqrt(
+                sum(float(values[item]) ** 2 for item in magnitude_indices)
+            )
+    else:
+        canonical = canonical_nodal_vector(values, ndm=ndm, ndf=ndf)
+        if index is not None:
+            if int(ndm) == 2 and component in {
+                "UZ", "RX", "RY", "FZ", "MX", "MY"
+            }:
+                return None
+            if int(ndm) == 3 and int(ndf) <= 3 and index >= 3:
+                return None
+            return float(canonical[index])
+        if magnitude_indices is not None:
+            return math.sqrt(
+                sum(float(canonical[item]) ** 2 for item in magnitude_indices)
+            )
 
     raise ValueError(f"Unsupported nodal result component: {component}")
 
