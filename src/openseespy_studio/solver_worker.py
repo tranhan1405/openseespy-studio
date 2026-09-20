@@ -105,13 +105,13 @@ def run_script(
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="OpenSeesPy Studio analysis worker"
     )
     parser.add_argument("script", type=Path)
     parser.add_argument("--result-file", type=Path, default=None)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     return run_script(args.script, args.result_file)
 
 
