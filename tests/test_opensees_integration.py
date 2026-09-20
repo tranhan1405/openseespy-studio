@@ -17,6 +17,7 @@ from openseespy_studio.project import (
     TransformationData,
 )
 from openseespy_studio.solver_worker import run_script
+from openseespy_studio.ui.viewport import ModelViewport
 
 
 pytestmark = pytest.mark.integration
@@ -141,3 +142,21 @@ def test_generated_static_cantilever_runs_in_real_opensees(tmp_path: Path):
 
     reaction = results["final"]["node_reactions"]["1"][0]
     assert reaction == pytest.approx(-1000.0, rel=1.0e-8)
+
+
+def test_batched_centerline_mesh_contains_only_line_cells():
+    model = StructuralModel("centerline-smoke")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 4.0, 0.0, 0.0)
+    model.add_node(3, 4.0, 0.0, 3.0)
+    model.add_element(11, 1, 2)
+    model.add_element(12, 2, 3)
+
+    mesh = ModelViewport._batched_centerline_mesh(model, [11, 12])
+
+    assert mesh is not None
+    assert mesh.n_points == 4
+    assert mesh.n_lines == 2
+    assert mesh.n_verts == 0
+    assert mesh.n_cells == 2
+    assert list(mesh.cell_data["element_tag"]) == [11, 12]

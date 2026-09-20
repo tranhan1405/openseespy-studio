@@ -894,8 +894,11 @@ class ModelViewport(QWidget):
             cell_tags.append(int(tag))
         if not points:
             return None
-        mesh = pv.PolyData(np.asarray(points, dtype=float))
-        mesh.lines = np.asarray(lines, dtype=np.int64)
+        mesh = pv.PolyData(
+            np.asarray(points, dtype=float),
+            lines=np.asarray(lines, dtype=np.int64),
+            deep=True,
+        )
         mesh.cell_data["element_tag"] = np.asarray(cell_tags, dtype=np.int64)
         return mesh
 
