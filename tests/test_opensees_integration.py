@@ -11,9 +11,14 @@ import pytest
 from openseespy_studio.generator import to_openseespy
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
+    MATERIAL_DEFAULTS,
     AnalysisSettingsData,
+    ConnectionData,
+    FiberData,
     LoadPatternData,
+    MaterialData,
     NodalLoadData,
+    RecorderData,
     SectionData,
     TimeSeriesData,
     TransformationData,
@@ -444,6 +449,254 @@ def test_generated_nlth_runs_in_real_opensees(tmp_path: Path):
     node_history = results["history"]["nodes"]["2"]
     assert len(node_history["disp"]) == 3
     assert len(node_history["accel"]) == 3
+
+
+def test_generated_fiber_force_beam_column_and_recorder_run_in_real_opensees(
+    tmp_path: Path,
+):
+    model = StructuralModel("fiber-export-smoke")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0, 3.0)
+    model.set_fixity(1, (1, 1, 1, 1, 1, 1))
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+        integration_type="Lobatto",
+        integration_points=3,
+    )
+
+    materials = {
+        1: MaterialData(
+            1,
+            "Elastic fiber",
+            "Elastic",
+            parameters={"E": 200.0e9},
+        )
+    }
+    sections = {
+        1: SectionData(
+            1,
+            "Fiber section",
+            "Fiber",
+            parameters={"GJ": 1.0e6},
+            fibers=[
+                FiberData(-0.10, -0.10, 0.005, 1),
+                FiberData(-0.10, 0.10, 0.005, 1),
+                FiberData(0.10, -0.10, 0.005, 1),
+                FiberData(0.10, 0.10, 0.005, 1),
+            ],
+        )
+    }
+    transformations = {
+        1: TransformationData(
+            1,
+            "Column",
+            "Linear",
+            (1.0, 0.0, 0.0),
+        )
+    }
+    series = {
+        1: TimeSeriesData(1, "Axial", "Linear", factor=1.0)
+    }
+    patterns = {
+        1: LoadPatternData(1, "Axial", "Plain", time_series_tag=1)
+    }
+    loads = {
+        1: NodalLoadData(
+            1,
+            "Top axial",
+            pattern_tag=1,
+            node_tag=2,
+            values=(0.0, 0.0, -1000.0, 0.0, 0.0, 0.0),
+        )
+    }
+    recorder_path = tmp_path / "fiber-node-disp.out"
+    recorders = {
+        1: RecorderData(
+            1,
+            "Top UZ",
+            "Node",
+            target_tags=[2],
+            response="disp",
+            dofs=[3],
+            file_name=str(recorder_path),
+            include_time=True,
+        )
+    }
+    analysis = AnalysisSettingsData(
+        1,
+        "Fiber static",
+        analysis_type="Static",
+        constraints_handler="Plain",
+        numberer="Plain",
+        system="BandGeneral",
+        test="NormDispIncr",
+        tolerance=1.0e-10,
+        max_iterations=20,
+        algorithm="Newton",
+        steps=1,
+        load_increment=1.0,
+        control_node=2,
+        control_dof=3,
+        recovery=False,
+        adaptive_step=False,
+        live_convergence=False,
+    )
+
+    script = to_openseespy(
+        model,
+        materials=materials,
+        sections=sections,
+        transformations=transformations,
+        time_series=series,
+        load_patterns=patterns,
+        nodal_loads=loads,
+        analyses={1: analysis},
+        active_analysis_tag=1,
+        recorders=recorders,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    assert "# ERROR:" not in script
+    compile(script, "<fiber-export>", "exec")
+
+    script_path = tmp_path / "fiber-export.py"
+    result_path = tmp_path / "fiber-export-result.json"
+    script_path.write_text(script, encoding="utf-8")
+    assert run_script(script_path, result_path) == 0
+
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "completed"
+    assert payload["results"]["analysis"]["type"] == "Static"
+    assert payload["results"]["final"]["node_displacements"]["2"][2] < 0.0
+    assert recorder_path.exists()
+    assert recorder_path.read_text(encoding="utf-8").strip()
+
+
+def test_generated_zero_length_spring_runs_in_real_opensees(tmp_path: Path):
+    model = StructuralModel("zero-length-export-smoke")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0, 0.0)
+    model.set_fixity(1, (1, 1, 1, 1, 1, 1))
+    model.set_fixity(2, (0, 1, 1, 1, 1, 1))
+
+    materials = {
+        1: MaterialData(
+            1,
+            "Translation spring",
+            "Elastic",
+            parameters={"E": 1.0e6},
+        )
+    }
+    connections = {
+        10: ConnectionData(
+            10,
+            "Base spring",
+            "zeroLength",
+            1,
+            2,
+            materials_by_dof={1: 1},
+        )
+    }
+    series = {
+        1: TimeSeriesData(1, "Load", "Linear", factor=1.0)
+    }
+    patterns = {
+        1: LoadPatternData(1, "Load", "Plain", time_series_tag=1)
+    }
+    loads = {
+        1: NodalLoadData(
+            1,
+            "Spring load",
+            pattern_tag=1,
+            node_tag=2,
+            values=(1000.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        )
+    }
+    analysis = AnalysisSettingsData(
+        1,
+        "Spring static",
+        analysis_type="Static",
+        constraints_handler="Plain",
+        numberer="Plain",
+        system="BandGeneral",
+        test="NormDispIncr",
+        tolerance=1.0e-12,
+        max_iterations=20,
+        algorithm="Newton",
+        steps=1,
+        load_increment=1.0,
+        control_node=2,
+        control_dof=1,
+        recovery=False,
+        adaptive_step=False,
+        live_convergence=False,
+    )
+
+    script = to_openseespy(
+        model,
+        materials=materials,
+        connections=connections,
+        time_series=series,
+        load_patterns=patterns,
+        nodal_loads=loads,
+        analyses={1: analysis},
+        active_analysis_tag=1,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    assert "# ERROR:" not in script
+    compile(script, "<zero-length-export>", "exec")
+
+    script_path = tmp_path / "zero-length-export.py"
+    result_path = tmp_path / "zero-length-export-result.json"
+    script_path.write_text(script, encoding="utf-8")
+    assert run_script(script_path, result_path) == 0
+
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "completed"
+    displacement = payload["results"]["final"]["node_displacements"]["2"][0]
+    assert displacement == pytest.approx(0.001, rel=1.0e-8)
+
+
+def test_research_material_commands_load_in_real_opensees(tmp_path: Path):
+    model = StructuralModel("research-material-export-smoke")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.set_fixity(1, (1, 1, 1, 1, 1, 1))
+
+    materials = {
+        1: MaterialData(
+            1,
+            "Bond",
+            "Bond_SP01",
+            parameters=MATERIAL_DEFAULTS["Bond_SP01"],
+        ),
+        2: MaterialData(
+            2,
+            "FRP jacket",
+            "FRPConfinedConcrete02",
+            parameters=MATERIAL_DEFAULTS["FRPConfinedConcrete02"],
+        ),
+    }
+
+    script = to_openseespy(
+        model,
+        materials=materials,
+        units={"length": "mm", "force": "N", "time": "s"},
+    )
+    assert "# ERROR:" not in script
+    compile(script, "<research-material-export>", "exec")
+
+    script_path = tmp_path / "research-material-export.py"
+    result_path = tmp_path / "research-material-export-result.json"
+    script_path.write_text(script, encoding="utf-8")
+    exit_code = run_script(script_path, result_path)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0, payload.get("error", "")
+    assert payload["status"] == "completed"
 
 
 def test_batched_centerline_mesh_contains_only_line_cells():
