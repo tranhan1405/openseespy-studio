@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
 from ..calibration import (
     CalibrationCase,
     apply_calibration_case,
+    calibration_case_changes,
     calibration_case_script,
 )
 from ..analysis_templates import (
@@ -73,7 +74,10 @@ from ..validation import ValidationIssue, validate_project
 from ..units import UnitSystem
 from .analysis_dialog import AnalysisDialog
 from .analysis_template_dialog import AnalysisTemplateDialog
-from .calibration_dialog import CalibrationDialog
+from .calibration_dialog import (
+    ApplyCalibrationCaseDialog,
+    CalibrationDialog,
+)
 from .code_editor import CodeEditor
 from .connection_dialog import ConnectionDialog
 from .constraint_dialog import ConstraintDialog
@@ -1429,6 +1433,9 @@ class MainWindow(QMainWindow):
             self._clear_result_display
         )
         self.results_panel.job_selected.connect(self._select_job_result)
+        self.results_panel.calibration_case_apply_requested.connect(
+            self._apply_selected_calibration_case
+        )
         self._active_result_display_kind: str | None = None
         self._syncing_result_display_controls = False
         self.results_panel.deformation_display.currentIndexChanged.connect(
@@ -10481,6 +10488,132 @@ class MainWindow(QMainWindow):
         self._active_solution_result_tag = None
         self.viewport.clear_result_overlay()
         self.results_panel.clear_all()
+
+    def _apply_selected_calibration_case(
+        self,
+        row: object,
+    ) -> None:
+        if not isinstance(row, dict):
+            QMessageBox.warning(
+                self,
+                "Calibration",
+                "The selected calibration case is invalid.",
+            )
+            return
+
+        score = row.get("score")
+        try:
+            valid_score = score is not None and math.isfinite(
+                float(score)
+            )
+        except (TypeError, ValueError):
+            valid_score = False
+        if (
+            not valid_score
+            or str(row.get("status", "")).lower() != "scored"
+        ):
+            QMessageBox.warning(
+                self,
+                "Calibration",
+                "Only a successfully scored calibration case can be "
+                "applied to the model.",
+            )
+            return
+
+        values = row.get("values", {})
+        if not isinstance(values, dict) or not values:
+            QMessageBox.warning(
+                self,
+                "Calibration",
+                "The selected case contains no material parameters.",
+            )
+            return
+
+        try:
+            case = CalibrationCase(
+                case_id=int(row.get("case_id", 0) or 0),
+                values={
+                    str(key): float(value)
+                    for key, value in values.items()
+                },
+            )
+            changes = calibration_case_changes(
+                self.project,
+                case,
+            )
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Calibration Case No Longer Matches Model",
+                str(exc),
+            )
+            return
+
+        if not any(bool(change.get("changed")) for change in changes):
+            QMessageBox.information(
+                self,
+                "Calibration",
+                "The selected case is already applied; all listed project "
+                "parameters already match the calibrated values.",
+            )
+            return
+
+        rank_raw = row.get("rank")
+        try:
+            rank = (
+                int(rank_raw)
+                if rank_raw is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            rank = None
+
+        preview = ApplyCalibrationCaseDialog(
+            changes,
+            case_id=case.case_id,
+            rank=rank,
+            score=float(score),
+            parent=self,
+        )
+        if not preview.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            updated = apply_calibration_case(
+                self.project,
+                case,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Apply Calibration Case",
+                str(exc),
+            )
+            return
+
+        self.project = updated
+        self.model = updated.model
+        changed_count = sum(
+            bool(change.get("changed"))
+            for change in changes
+        )
+        self._refresh_all(
+            f"Applied calibration case {case.case_id} "
+            f"({changed_count} material parameter(s))"
+        )
+        self._record_project_change(
+            f"Apply calibration case {case.case_id}",
+            before,
+        )
+        self.results_panel.show_calibration()
+        self.results_dock.show()
+        self.results_dock.raise_()
+        self.results_panel.calibration_info.setText(
+            f"Applied calibration case {case.case_id} to the model. "
+            "Existing batch Jobs remain historical results; rerun "
+            "Calibration to evaluate a new search around the updated model."
+        )
 
     def _select_job_result(self, job_id: int) -> None:
         job = self._jobs.get(int(job_id))
