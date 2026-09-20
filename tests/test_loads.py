@@ -1,3 +1,5 @@
+import pytest
+
 from openseespy_studio.generator import (
     element_load_to_openseespy,
     load_pattern_to_openseespy,
@@ -633,4 +635,33 @@ def test_beam_element_load_rejects_truss_target():
                 1, "Invalid truss UDL", 1, 5, "Uniform", wy=-1.0
             ),
             model,
+        )
+
+
+def test_project_rejects_out_of_plane_2d_element_load_components():
+    model = StructuralModel("2d-project-load", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    model.add_element(1, 1, 2, section_tag=1, transf_tag=1)
+    project = ProjectDatabase(model=model)
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(LoadPatternData(1, "Dead", "Plain", 1))
+
+    with pytest.raises(ValueError, match="local Wz"):
+        project.add_element_load(
+            ElementLoadData(
+                1, "Bad Wz", 1, 1, "Uniform", wy=-1.0, wz=-1.0
+            )
+        )
+
+    with pytest.raises(ValueError, match="global GZ"):
+        project.add_element_load(
+            ElementLoadData(
+                2,
+                "Bad gravity",
+                1,
+                1,
+                "SelfWeight",
+                gravity=(0.0, 0.0, -9.81),
+            )
         )
