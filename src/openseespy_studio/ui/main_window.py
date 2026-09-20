@@ -4696,7 +4696,7 @@ class MainWindow(QMainWindow):
                 if element.i == tag or element.j == tag
             ]
             unit_system = UnitSystem.from_mapping(self.project.units)
-            dof_labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+            dof_labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")[:self.model.ndf]
             rows = [
                 ("Tag", tag),
                 (
