@@ -3319,7 +3319,63 @@ class MainWindow(QMainWindow):
         )
         self._sync_unit_selector()
 
+    @staticmethod
+    def _tree_item_state_key(
+        item: QTreeWidgetItem,
+    ) -> tuple[tuple[str, str], ...]:
+        """Return a stable tree identity that survives label/count changes."""
+        parts: list[tuple[str, str]] = []
+        current: QTreeWidgetItem | None = item
+        while current is not None:
+            payload = current.data(0, Qt.UserRole)
+            if isinstance(payload, tuple) and len(payload) == 2:
+                kind, value = payload
+                parts.append((str(kind), repr(value)))
+            else:
+                parts.append(("text", current.text(0)))
+            current = current.parent()
+        parts.reverse()
+        return tuple(parts)
+
+    def _capture_tree_expansion_state(
+        self,
+    ) -> dict[tuple[tuple[str, str], ...], bool]:
+        """Remember both expanded and collapsed branches before rebuilding."""
+        state: dict[tuple[tuple[str, str], ...], bool] = {}
+
+        def visit(item: QTreeWidgetItem) -> None:
+            if item.childCount() > 0:
+                state[self._tree_item_state_key(item)] = item.isExpanded()
+            for index in range(item.childCount()):
+                visit(item.child(index))
+
+        for index in range(self.tree.topLevelItemCount()):
+            visit(self.tree.topLevelItem(index))
+        return state
+
+    def _restore_tree_expansion_state(
+        self,
+        state: dict[tuple[tuple[str, str], ...], bool],
+    ) -> None:
+        """Restore expansion only for branches that existed before refresh."""
+        if not state:
+            return
+
+        def visit(item: QTreeWidgetItem) -> None:
+            key = self._tree_item_state_key(item)
+            if key in state:
+                item.setExpanded(state[key])
+            for index in range(item.childCount()):
+                visit(item.child(index))
+
+        for index in range(self.tree.topLevelItemCount()):
+            visit(self.tree.topLevelItem(index))
+
     def _refresh_tree(self) -> None:
+        expansion_state = self._capture_tree_expansion_state()
+        vertical_scroll = self.tree.verticalScrollBar().value()
+        horizontal_scroll = self.tree.horizontalScrollBar().value()
+
         self.tree.clear()
         self._tree_node_items.clear()
         self._tree_element_items.clear()
@@ -3791,6 +3847,12 @@ class MainWindow(QMainWindow):
         root.addChild(results)
 
         self.tree.addTopLevelItem(root)
+
+        # Rebuilding the tree is common after edits/imports. Preserve the
+        # user's navigation context instead of reopening default branches.
+        self._restore_tree_expansion_state(expansion_state)
+        self.tree.verticalScrollBar().setValue(vertical_scroll)
+        self.tree.horizontalScrollBar().setValue(horizontal_scroll)
 
     def _tree_selection_changed(self) -> None:
         nodes: set[int] = set()
