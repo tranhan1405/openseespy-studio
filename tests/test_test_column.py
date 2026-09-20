@@ -299,3 +299,74 @@ def test_base_interface_requires_existing_material():
                 base_interface_materials={5: 999},
             ),
         )
+
+
+def test_test_column_hinge_radau_stores_member_hinge_definition():
+    project = project_with_section()
+    project.add_section(
+        SectionData(
+            tag=2,
+            name="Elastic interior",
+            section_type="Elastic",
+        )
+    )
+
+    result = build_test_column(
+        project,
+        TestColumnSpec(
+            height=3.0,
+            num_elements=1,
+            section_tag=1,
+            integration_type="HingeRadau",
+            hinge_i_section_tag=1,
+            hinge_j_section_tag=1,
+            interior_section_tag=2,
+            hinge_i_length=0.30,
+            hinge_j_length=0.10,
+        ),
+    )
+
+    element = project.model.elements[result.element_tags[0]]
+    assert element.integration_type == "HingeRadau"
+    assert element.hinge_i_section_tag == 1
+    assert element.hinge_j_section_tag == 1
+    assert element.interior_section_tag == 2
+    assert element.hinge_i_length == pytest.approx(0.30)
+    assert element.hinge_j_length == pytest.approx(0.10)
+
+
+def test_test_column_hinge_integration_requires_one_physical_member_element():
+    project = project_with_section()
+
+    with pytest.raises(ValueError, match="requires Number of elements = 1"):
+        build_test_column(
+            project,
+            TestColumnSpec(
+                height=3.0,
+                num_elements=2,
+                section_tag=1,
+                integration_type="HingeRadauTwo",
+                hinge_i_length=0.30,
+            ),
+        )
+
+
+def test_test_column_radau_allows_subdivided_distributed_plasticity():
+    project = project_with_section()
+
+    result = build_test_column(
+        project,
+        TestColumnSpec(
+            height=3.0,
+            num_elements=3,
+            section_tag=1,
+            integration_type="Radau",
+            integration_points=4,
+        ),
+    )
+
+    assert len(result.element_tags) == 3
+    assert all(
+        project.model.elements[tag].integration_type == "Radau"
+        for tag in result.element_tags
+    )
