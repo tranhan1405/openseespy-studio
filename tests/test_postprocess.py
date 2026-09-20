@@ -28,6 +28,7 @@ from openseespy_studio.postprocess import (
     fiber_response_sections,
     fiber_state_element_tags,
     fiber_state_sections,
+    force_displacement_curve,
     local_end_actions,
     member_end_resultants,
     nodal_result_scalar,
@@ -1491,3 +1492,79 @@ def test_enrichment_builds_axial_force_diagram_for_truss():
     assert diagram["source"] == "truss axialForce"
     assert diagram["x"] == [0.0, 5.0]
     assert diagram["values"] == [125.0, 125.0]
+
+
+def test_force_displacement_curve_defaults_to_monitor_node_and_base_shear():
+    result = {
+        "analysis": {
+            "type": "Cyclic",
+            "control_node": 9,
+            "control_dof": 1,
+        },
+        "history": {
+            "time": [0.1, 0.2, 0.3],
+            "monitor_node": 9,
+            "control_dof": 1,
+            "nodes": {
+                "9": {
+                    "disp": [[0.01], [-0.02], [0.03]],
+                    "reaction": [[-2.0], [4.0], [-6.0]],
+                }
+            },
+            "base_reactions": [
+                [-100.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [150.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [-180.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+        },
+    }
+
+    x, y, node, dof, source, force_node, force_dof = (
+        force_displacement_curve(result)
+    )
+
+    assert x == [0.01, -0.02, 0.03]
+    assert y == [100.0, -150.0, 180.0]
+    assert node == 9
+    assert dof == 1
+    assert source == "Base shear"
+    assert force_node is None
+    assert force_dof == 1
+
+
+def test_force_displacement_curve_can_use_nodal_reaction():
+    result = {
+        "analysis": {"type": "Static"},
+        "history": {
+            "time": [1.0, 2.0],
+            "nodes": {
+                "2": {
+                    "disp": [[0.0, 0.01], [0.0, 0.02]],
+                    "reaction": [[0.0, -25.0], [0.0, -40.0]],
+                },
+                "5": {
+                    "disp": [[0.0, 0.0], [0.0, 0.0]],
+                    "reaction": [[0.0, 12.0], [0.0, 18.0]],
+                },
+            },
+        },
+    }
+
+    x, y, node, dof, source, force_node, force_dof = (
+        force_displacement_curve(
+            result,
+            displacement_node=2,
+            displacement_dof=2,
+            force_source="Node reaction",
+            force_node=5,
+            force_dof=2,
+        )
+    )
+
+    assert x == [0.01, 0.02]
+    assert y == [12.0, 18.0]
+    assert node == 2
+    assert dof == 2
+    assert source == "Node reaction"
+    assert force_node == 5
+    assert force_dof == 2

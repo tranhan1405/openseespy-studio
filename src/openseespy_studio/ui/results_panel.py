@@ -63,6 +63,7 @@ from ..postprocess import (
     fiber_response_sections,
     fiber_state_element_tags,
     fiber_state_sections,
+    force_displacement_curve,
     pushover_capacity_curve,
     time_history_node_tags,
     time_history_series,
@@ -968,6 +969,7 @@ class ResultsPanel(QWidget):
         self._build_element_tab()
         self._build_fiber_tab()
         self._build_hinge_tab()
+        self._build_force_displacement_tab()
         self._build_pushover_tab()
         self._build_cyclic_tab()
         self._build_specimen_tab()
@@ -1108,6 +1110,64 @@ class ResultsPanel(QWidget):
 
         if kind == "HingeState":
             self._select_tab("Hinge / Yield States")
+            return
+        if kind == "ForceDisplacement":
+            node_scope = options.get("_node_scope", [])
+            default_node = (
+                int(node_scope[0])
+                if isinstance(node_scope, (list, tuple)) and node_scope
+                else None
+            )
+            displacement_node = options.get(
+                "displacement_node",
+                default_node,
+            )
+            if displacement_node is not None:
+                try:
+                    index = self.force_disp_node.findData(
+                        int(displacement_node)
+                    )
+                except (TypeError, ValueError):
+                    index = -1
+                if index >= 0:
+                    self.force_disp_node.setCurrentIndex(index)
+
+            displacement_dof = options.get("displacement_dof")
+            if displacement_dof is not None:
+                try:
+                    index = int(displacement_dof) - 1
+                except (TypeError, ValueError):
+                    index = -1
+                if 0 <= index < self.force_disp_dof.count():
+                    self.force_disp_dof.setCurrentIndex(index)
+
+            source = str(options.get("force_source", "Base shear"))
+            index = self.force_disp_force_source.findText(source)
+            if index >= 0:
+                self.force_disp_force_source.setCurrentIndex(index)
+
+            force_node = options.get("force_node", default_node)
+            if force_node is not None:
+                try:
+                    index = self.force_disp_force_node.findData(
+                        int(force_node)
+                    )
+                except (TypeError, ValueError):
+                    index = -1
+                if index >= 0:
+                    self.force_disp_force_node.setCurrentIndex(index)
+
+            force_dof = options.get("force_dof")
+            if force_dof is not None:
+                try:
+                    index = int(force_dof) - 1
+                except (TypeError, ValueError):
+                    index = -1
+                if 0 <= index < self.force_disp_force_dof.count():
+                    self.force_disp_force_dof.setCurrentIndex(index)
+
+            self._update_force_displacement_controls()
+            self._select_tab("Force–Displacement")
             return
         if kind == "PushoverCurve":
             self._select_tab("Pushover Curve")
@@ -1741,6 +1801,82 @@ class ResultsPanel(QWidget):
         layout.addWidget(self.hinge_table)
 
         self.tabs.addTab(page, "Hinge / Yield States")
+
+    def _build_force_displacement_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(5)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Disp. node:"))
+        self.force_disp_node = QComboBox()
+        self.force_disp_node.currentIndexChanged.connect(
+            self._update_force_displacement_plot
+        )
+        controls.addWidget(self.force_disp_node)
+
+        controls.addWidget(QLabel("DOF:"))
+        self.force_disp_dof = QComboBox()
+        self.force_disp_dof.addItems(
+            ["UX", "UY", "UZ", "RX", "RY", "RZ"]
+        )
+        self.force_disp_dof.currentIndexChanged.connect(
+            self._update_force_displacement_plot
+        )
+        controls.addWidget(self.force_disp_dof)
+
+        controls.addWidget(QLabel("Force:"))
+        self.force_disp_force_source = QComboBox()
+        self.force_disp_force_source.addItems(
+            ["Base shear", "Node reaction"]
+        )
+        self.force_disp_force_source.currentTextChanged.connect(
+            self._update_force_displacement_controls
+        )
+        controls.addWidget(self.force_disp_force_source)
+
+        controls.addWidget(QLabel("Force node:"))
+        self.force_disp_force_node = QComboBox()
+        self.force_disp_force_node.currentIndexChanged.connect(
+            self._update_force_displacement_plot
+        )
+        controls.addWidget(self.force_disp_force_node)
+
+        controls.addWidget(QLabel("DOF:"))
+        self.force_disp_force_dof = QComboBox()
+        self.force_disp_force_dof.addItems(
+            ["FX", "FY", "FZ", "MX", "MY", "MZ"]
+        )
+        self.force_disp_force_dof.currentIndexChanged.connect(
+            self._update_force_displacement_plot
+        )
+        controls.addWidget(self.force_disp_force_dof)
+
+        export = QPushButton("Export CSV")
+        export.clicked.connect(self._export_force_displacement_csv)
+        controls.addWidget(export)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.force_disp_info = QLabel(
+            "Run a non-modal analysis to plot force versus displacement."
+        )
+        self.force_disp_info.setWordWrap(True)
+        layout.addWidget(self.force_disp_info)
+
+        self.force_disp_metrics = QLabel(
+            "Points: -   Peak |F|: -   Peak |u|: -"
+        )
+        self.force_disp_metrics.setWordWrap(True)
+        layout.addWidget(self.force_disp_metrics)
+
+        self.force_disp_plot = TimeHistoryPlot(
+            empty_message="No force-displacement data"
+        )
+        layout.addWidget(self.force_disp_plot, 1)
+        self.tabs.addTab(page, "Force–Displacement")
+        self._update_force_displacement_controls()
 
     def _build_pushover_tab(self) -> None:
         page = QWidget()
@@ -3313,6 +3449,15 @@ class ResultsPanel(QWidget):
             "Run a non-modal analysis to view deformation."
         )
         self.mode_info.setText("Run a Modal analysis to populate mode shapes.")
+        self.force_disp_node.clear()
+        self.force_disp_force_node.clear()
+        self.force_disp_info.setText(
+            "Run a non-modal analysis to plot force versus displacement."
+        )
+        self.force_disp_metrics.setText(
+            "Points: -   Peak |F|: -   Peak |u|: -"
+        )
+        self.force_disp_plot.set_series([], [])
         self.pushover_info.setText(
             "Run a Pushover analysis to plot applied base shear versus "
             "control-node displacement."
@@ -3802,6 +3947,8 @@ class ResultsPanel(QWidget):
         self._populate_fiber_elements()
         self._populate_hinge_table()
         self._populate_history_nodes()
+        self._populate_force_displacement_nodes()
+        self._update_force_displacement_plot()
         self._update_pushover_plot()
         self._update_cyclic_plot()
         self._populate_specimen_response()
@@ -4811,6 +4958,190 @@ class ResultsPanel(QWidget):
             f"{filename} · {len(x)} point(s) · "
             f"X={self.specimen_exp_x_column.currentText()} · "
             f"Y={self.specimen_exp_y_column.currentText()}."
+        )
+
+    def _populate_force_displacement_nodes(self) -> None:
+        tags = time_history_node_tags(self._result)
+        history = self._result.get("history", {})
+        analysis = self._result.get("analysis", {})
+        if not isinstance(history, dict):
+            history = {}
+        if not isinstance(analysis, dict):
+            analysis = {}
+
+        raw_monitor = history.get(
+            "monitor_node",
+            analysis.get("control_node"),
+        )
+        try:
+            monitor_node = (
+                int(raw_monitor)
+                if raw_monitor is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            monitor_node = None
+
+        for combo in (self.force_disp_node, self.force_disp_force_node):
+            previous = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            for tag in tags:
+                combo.addItem(str(tag), int(tag))
+            preferred = previous if previous is not None else monitor_node
+            if preferred is not None:
+                index = combo.findData(int(preferred))
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+            combo.blockSignals(False)
+
+        raw_dof = history.get(
+            "control_dof",
+            analysis.get("control_dof", 1),
+        )
+        try:
+            dof = int(raw_dof)
+        except (TypeError, ValueError):
+            dof = 1
+        if dof not in range(1, 7):
+            dof = 1
+        self.force_disp_dof.blockSignals(True)
+        self.force_disp_force_dof.blockSignals(True)
+        self.force_disp_dof.setCurrentIndex(dof - 1)
+        self.force_disp_force_dof.setCurrentIndex(dof - 1)
+        self.force_disp_dof.blockSignals(False)
+        self.force_disp_force_dof.blockSignals(False)
+
+    def _update_force_displacement_controls(self, *_args) -> None:
+        reaction = (
+            self.force_disp_force_source.currentText()
+            == "Node reaction"
+        )
+        self.force_disp_force_node.setEnabled(reaction)
+        self._update_force_displacement_plot()
+
+    def _force_displacement_selection(
+        self,
+    ) -> tuple[
+        list[float],
+        list[float],
+        int | None,
+        int,
+        str,
+        int | None,
+        int,
+    ]:
+        displacement_data = self.force_disp_node.currentData()
+        force_node_data = self.force_disp_force_node.currentData()
+        return force_displacement_curve(
+            self._result,
+            displacement_node=(
+                int(displacement_data)
+                if displacement_data is not None
+                else None
+            ),
+            displacement_dof=self.force_disp_dof.currentIndex() + 1,
+            force_source=self.force_disp_force_source.currentText(),
+            force_node=(
+                int(force_node_data)
+                if force_node_data is not None
+                else None
+            ),
+            force_dof=self.force_disp_force_dof.currentIndex() + 1,
+        )
+
+    def _update_force_displacement_plot(self, *_args) -> None:
+        (
+            x,
+            y,
+            displacement_node,
+            displacement_dof,
+            force_source,
+            force_node,
+            force_dof,
+        ) = self._force_displacement_selection()
+
+        if not x or not y:
+            self.force_disp_info.setText(
+                "No complete force-displacement history is available for "
+                "the selected node / force source."
+            )
+            self.force_disp_metrics.setText(
+                "Points: -   Peak |F|: -   Peak |u|: -"
+            )
+            self.force_disp_plot.set_series([], [])
+            return
+
+        disp_labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+        force_labels = ("FX", "FY", "FZ", "MX", "MY", "MZ")
+        disp_label = disp_labels[displacement_dof - 1]
+        force_label = force_labels[force_dof - 1]
+        force_text = (
+            f"applied base shear {force_label} (-Σ support reactions)"
+            if force_source == "Base shear"
+            else f"node {force_node} reaction {force_label}"
+        )
+        self.force_disp_info.setText(
+            f"X = node {displacement_node} {disp_label} displacement · "
+            f"Y = {force_text}"
+        )
+        self.force_disp_metrics.setText(
+            f"Points: {len(x)}   "
+            f"Peak |F|: {max(abs(value) for value in y):.6g}   "
+            f"Peak |u|: {max(abs(value) for value in x):.6g}   "
+            f"Final: ({x[-1]:.6g}, {y[-1]:.6g})"
+        )
+        self.force_disp_plot.set_series(x, y)
+
+    def _export_force_displacement_csv(self) -> None:
+        (
+            x,
+            y,
+            displacement_node,
+            displacement_dof,
+            force_source,
+            force_node,
+            force_dof,
+        ) = self._force_displacement_selection()
+        if not x or not y:
+            self.force_disp_info.setText(
+                "No force-displacement data is available to export."
+            )
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Force–Displacement",
+            "force_displacement.csv",
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+
+        disp_labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+        force_labels = ("FX", "FY", "FZ", "MX", "MY", "MZ")
+        force_header = (
+            f"Applied base shear {force_labels[force_dof - 1]}"
+            if force_source == "Base shear"
+            else (
+                f"Node {force_node} reaction "
+                f"{force_labels[force_dof - 1]}"
+            )
+        )
+        with open(path, "w", newline="", encoding="utf-8") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(
+                [
+                    f"Node {displacement_node} "
+                    f"{disp_labels[displacement_dof - 1]} displacement",
+                    force_header,
+                ]
+            )
+            writer.writerows(zip(x, y))
+        self.force_disp_info.setText(
+            f"Exported {len(x)} force-displacement point(s) to {path}"
         )
 
     def _populate_history_nodes(self) -> None:

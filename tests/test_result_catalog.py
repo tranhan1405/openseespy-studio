@@ -37,6 +37,7 @@ def test_pushover_catalog_includes_capacity_curve_and_common_results():
     assert "FiberStress" in types
     assert "SpecimenResponse" in types
     assert "TimeHistory" in types
+    assert "ForceDisplacement" in types
     assert "Convergence" in types
     assert "PushoverCurve" in types
     assert "CyclicHysteresis" not in types
@@ -49,6 +50,7 @@ def test_cyclic_catalog_includes_hysteresis_not_pushover_curve():
     assert "SpecimenResponse" in types
     assert "PushoverCurve" not in types
     assert "TimeHistory" in types
+    assert "ForceDisplacement" in types
 
 
 def test_static_and_transient_catalogs_exclude_specialized_curves():
@@ -57,6 +59,7 @@ def test_static_and_transient_catalogs_exclude_specialized_curves():
         assert "PushoverCurve" not in types
         assert "CyclicHysteresis" not in types
         assert "TimeHistory" in types
+        assert "ForceDisplacement" in types
         assert "SpecimenResponse" in types
         assert "Motion" in types
         assert "Convergence" in types
@@ -91,3 +94,16 @@ def test_result_catalog_uses_specific_convergence_name():
     assert convergence.label == "Force / Residual Convergence"
     assert convergence.name == "Force / Residual Convergence"
     assert convergence.settings["test"] == "NormUnbalance"
+
+
+def test_force_displacement_catalog_default_uses_base_shear():
+    choices = result_choices_for_analysis("Cyclic")
+    item = next(
+        choice
+        for choice in choices
+        if choice.result_type == "ForceDisplacement"
+    )
+
+    assert item.category == "Charts / History"
+    assert item.label == "Force–Displacement"
+    assert item.settings["force_source"] == "Base shear"

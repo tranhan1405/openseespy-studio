@@ -149,6 +149,18 @@ def result_choices_for_analysis(
         ]
     )
 
+    choices.append(
+        ResultChoice(
+            "Charts / History",
+            "Force–Displacement",
+            "ForceDisplacement",
+            "Force–Displacement",
+            {
+                "force_source": "Base shear",
+            },
+        )
+    )
+
     if kind == "Pushover":
         choices.append(
             ResultChoice(
