@@ -107,3 +107,31 @@ def test_invalid_beam_integration_settings_are_rejected():
         assert "at least 2 points" in str(exc)
     else:
         raise AssertionError("Expected integration-point validation failure")
+
+
+def test_hinge_integration_round_trip_dict():
+    model = StructuralModel("HingeRoundTrip")
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0, 3.0)
+    model.add_element(
+        10,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=1,
+        transf_tag=2,
+        integration_type="HingeRadauTwo",
+        hinge_i_section_tag=1,
+        hinge_j_section_tag=1,
+        interior_section_tag=3,
+        hinge_i_length=0.30,
+        hinge_j_length=0.10,
+    )
+
+    restored = StructuralModel.from_dict(model.to_dict())
+
+    assert restored.to_dict() == model.to_dict()
+    element = restored.elements[10]
+    assert element.integration_type == "HingeRadauTwo"
+    assert element.hinge_i_section_tag == 1
+    assert element.interior_section_tag == 3
