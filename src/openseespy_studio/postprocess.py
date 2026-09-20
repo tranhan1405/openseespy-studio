@@ -2985,6 +2985,30 @@ def member_end_resultants(
     return result
 
 
+def normalize_frame_local_force(
+    values: Sequence[float],
+    *,
+    ndm: int,
+) -> list[float]:
+    """Normalize OpenSees frame localForce to Studio's 12-value convention.
+
+    OpenSees 2D frame elements return
+    [Ni, Vi, Mi, Nj, Vj, Mj]. Studio's member-force plotting convention is
+    the 3D order [N, Vy, Vz, T, My, Mz] at I then J. Embedding 2D responses
+    in that convention lets the same equilibrium reconstruction serve both
+    dimensions without changing 3D behavior.
+    """
+    raw = [float(value) for value in values]
+    if int(ndm) == 2:
+        if len(raw) < 6:
+            return []
+        return [
+            raw[0], raw[1], 0.0, 0.0, 0.0, raw[2],
+            raw[3], raw[4], 0.0, 0.0, 0.0, raw[5],
+        ]
+    return raw[:12] if len(raw) >= 12 else []
+
+
 def component_end_resultants(
     values: Sequence[float],
     component: str,
@@ -3411,8 +3435,14 @@ def enrich_member_force_results(
             }
             continue
 
-        raw = local_forces.get(str(tag), local_forces.get(tag))
-        if not isinstance(raw, (list, tuple)) or len(raw) < 12:
+        raw_source = local_forces.get(str(tag), local_forces.get(tag))
+        if not isinstance(raw_source, (list, tuple)):
+            continue
+        raw = normalize_frame_local_force(
+            raw_source,
+            ndm=model.ndm,
+        )
+        if not raw:
             continue
 
         active_loads = _active_local_element_loads(
@@ -3431,7 +3461,12 @@ def enrich_member_force_results(
         )
         per_component: dict[str, Any] = {}
 
-        for component in LOCAL_FORCE_COMPONENTS:
+        components = (
+            ("N", "Vy", "Mz")
+            if int(model.ndm) == 2
+            else LOCAL_FORCE_COMPONENTS
+        )
+        for component in components:
             end_values = component_end_resultants(raw, component)
             if end_values is None:
                 continue
