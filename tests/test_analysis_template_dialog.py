@@ -374,7 +374,7 @@ def test_nlth_bundled_el_centro_can_create_request_without_browse(qapp):
         qapp.processEvents()
 
 
-def test_nlth_reference_only_presets_are_hidden_and_custom_clears_auto_record(qapp):
+def test_nlth_library_is_offline_only_and_custom_clears_auto_record(qapp):
     model = StructuralModel("nlth-library")
     model.add_node(1, 0.0, 0.0, 0.0)
     project = ProjectDatabase(model=model)
@@ -386,7 +386,10 @@ def test_nlth_reference_only_presets_are_hidden_and_custom_clears_auto_record(qa
         project=project,
     )
     try:
+        assert not hasattr(dialog, "gm_library_download")
         assert dialog.gm_library.findData("kobe-1995-kjma") == -1
+        assert dialog.gm_library.findData("northridge-1994-arleta-360") >= 0
+        assert dialog.gm_library.findData("chi-chi-1999-nsk-e") >= 0
 
         dialog.gm_library.setCurrentIndex(
             dialog.gm_library.findData("el-centro-1940")

@@ -28,6 +28,7 @@ openseespy_studio = [
   "resources/icons/*.svg",
   "resources/ground_motions/*.at2",
   "resources/ground_motions/*.json",
+  "resources/ground_motions/*.txt",
 ]
 
 [tool.pytest.ini_options]
