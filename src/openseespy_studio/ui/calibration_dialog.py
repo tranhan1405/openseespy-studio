@@ -315,14 +315,14 @@ class CalibrationDialog(QDialog):
         try:
             cases = build_grid_cases(
                 self._parameters(),
-                max_cases=500,
+                max_cases=64,
             )
         except ValueError as exc:
             self.case_info.setText(str(exc))
             return
         self.case_info.setText(
             f"Grid size: {len(cases)} case(s). "
-            "Current safety limit: 500 cases."
+            "Current safety limit: 64 cases."
         )
 
     def _import_experiment(self) -> None:
@@ -396,7 +396,7 @@ class CalibrationDialog(QDialog):
 
     def request(self) -> dict[str, Any]:
         parameters = self._parameters()
-        cases = build_grid_cases(parameters, max_cases=500)
+        cases = build_grid_cases(parameters, max_cases=64)
         if not self._dataset:
             raise ValueError(
                 "Import experimental cyclic displacement-force data first."
