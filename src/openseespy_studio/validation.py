@@ -643,18 +643,41 @@ def _dynamic_checks(
                 )
             )
             continue
-        if series.series_type == "Path":
-            if series.dt <= 0.0 or not series.values:
-                issues.append(
-                    ValidationIssue(
-                        "ERROR",
-                        "Ground motion",
-                        f"Path time series {series.tag} used by "
-                        f"UniformExcitation pattern {pattern.tag} has no "
-                        "usable ground-motion data.",
-                        suggestion="Provide positive dt and acceleration values.",
-                    )
+        if series.series_type != "Path":
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Ground motion",
+                    f"UniformExcitation pattern {pattern.tag} must use a "
+                    f"Path time series, not {series.series_type}.",
+                    suggestion=(
+                        "Use Loading > Ground Motions to define an "
+                        "acceleration record."
+                    ),
                 )
+            )
+            continue
+        if series.dt <= 0.0 or not series.values:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Ground motion",
+                    f"Path time series {series.tag} used by "
+                    f"UniformExcitation pattern {pattern.tag} has no "
+                    "usable ground-motion data.",
+                    suggestion="Provide positive dt and acceleration values.",
+                )
+            )
+        if pattern.direction > model.ndf:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Ground motion",
+                    f"UniformExcitation pattern {pattern.tag} uses DOF "
+                    f"{pattern.direction}, but the model has ndf={model.ndf}.",
+                    suggestion="Choose an excitation direction supported by the model.",
+                )
+            )
 
 
 def _recorder_checks(
