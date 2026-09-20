@@ -76,6 +76,7 @@ def build_grid_cases(
     parameters: Sequence[CalibrationParameter],
     *,
     max_cases: int = 500,
+    start_case_id: int = 1,
 ) -> list[CalibrationCase]:
     specs = list(parameters)
     if not specs:
@@ -103,7 +104,10 @@ def build_grid_cases(
         )
 
     cases: list[CalibrationCase] = []
-    for case_id, combination in enumerate(product(*value_sets), start=1):
+    for case_id, combination in enumerate(
+        product(*value_sets),
+        start=max(1, int(start_case_id)),
+    ):
         cases.append(
             CalibrationCase(
                 case_id=case_id,
@@ -114,6 +118,121 @@ def build_grid_cases(
             )
         )
     return cases
+
+
+def calibration_grid_size(
+    parameters: Sequence[CalibrationParameter],
+) -> int:
+    specs = list(parameters)
+    if not specs:
+        return 0
+    return math.prod(max(1, int(spec.points)) for spec in specs)
+
+
+def refine_calibration_parameters(
+    parameters: Sequence[CalibrationParameter],
+    best_values: dict[str, float],
+    *,
+    shrink_ratio: float = 0.5,
+) -> list[CalibrationParameter]:
+    ratio = float(shrink_ratio)
+    if not (0.0 < ratio < 1.0):
+        raise ValueError(
+            "Adaptive shrink ratio must be greater than 0 and less than 1."
+        )
+
+    refined: list[CalibrationParameter] = []
+    for spec in parameters:
+        key = parameter_key(spec.material_tag, spec.parameter)
+        if key not in best_values:
+            raise ValueError(
+                f"Best calibration case is missing parameter {key}."
+            )
+        lower = min(float(spec.minimum), float(spec.maximum))
+        upper = max(float(spec.minimum), float(spec.maximum))
+        center = float(best_values[key])
+        if not math.isfinite(center):
+            raise ValueError(
+                f"Best calibration value for {key} must be finite."
+            )
+        center = min(max(center, lower), upper)
+
+        if int(spec.points) <= 1 or math.isclose(
+            lower,
+            upper,
+            rel_tol=0.0,
+            abs_tol=1.0e-15,
+        ):
+            new_lower = center
+            new_upper = center
+        else:
+            span = (upper - lower) * ratio
+            half = 0.5 * span
+            new_lower = center - half
+            new_upper = center + half
+
+            if new_lower < lower:
+                shift = lower - new_lower
+                new_lower += shift
+                new_upper += shift
+            if new_upper > upper:
+                shift = new_upper - upper
+                new_lower -= shift
+                new_upper -= shift
+
+            new_lower = max(lower, new_lower)
+            new_upper = min(upper, new_upper)
+
+        refined.append(
+            CalibrationParameter(
+                material_tag=spec.material_tag,
+                parameter=spec.parameter,
+                minimum=new_lower,
+                maximum=new_upper,
+                points=spec.points,
+            )
+        )
+    return refined
+
+
+def calibration_parameter_payload(
+    parameters: Sequence[CalibrationParameter],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "material_tag": int(spec.material_tag),
+            "parameter": str(spec.parameter),
+            "minimum": float(spec.minimum),
+            "maximum": float(spec.maximum),
+            "points": int(spec.points),
+        }
+        for spec in parameters
+    ]
+
+
+def calibration_parameters_from_payload(
+    raw: Any,
+) -> list[CalibrationParameter]:
+    if not isinstance(raw, list):
+        raise ValueError("Calibration parameter specification must be a list.")
+    parameters: list[CalibrationParameter] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError(
+                "Each calibration parameter specification must be an object."
+            )
+        parameters.append(
+            CalibrationParameter(
+                material_tag=int(item["material_tag"]),
+                parameter=str(item["parameter"]),
+                minimum=float(item["minimum"]),
+                maximum=float(item["maximum"]),
+                points=int(item.get("points", 3)),
+            )
+        )
+    if not parameters:
+        raise ValueError("Select at least one calibration parameter.")
+    return parameters
 
 
 def calibration_case_changes(
