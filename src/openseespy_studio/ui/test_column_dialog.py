@@ -175,7 +175,7 @@ class TestColumnWizard(QDialog):
         self.base_interface = QComboBox()
         self.base_interface.addItems([
             "Fixed base",
-            "Bond-slip",
+            "Translational slip spring",
             "Rotational spring",
             "Custom zeroLength",
         ])
@@ -187,7 +187,9 @@ class TestColumnWizard(QDialog):
             "can be used for Cyclic, Pushover, and NLTH. Fixed base is the "
             "default. Nonlinear interface DOFs are released at the column "
             "base and connected to a coincident fixed ground node through "
-            "zeroLength."
+            "zeroLength. For reinforcement strain penetration, Bond_SP01 "
+            "belongs in a Fiber zeroLengthSection rather than directly in "
+            "a force-deformation zeroLength DOF."
         )
         interface_note.setWordWrap(True)
         interface_note.setObjectName("Muted")
@@ -492,10 +494,10 @@ class TestColumnWizard(QDialog):
         self.interface_rayleigh.setEnabled(active)
         self.interface_warning.setVisible(active)
 
-        if interface == "Bond-slip":
+        if interface == "Translational slip spring":
             self._set_interface_single_dof(
                 int(self.lateral.currentData()),
-                ("Bond_SP01",),
+                ("Pinching4", "Hysteretic", "ElasticPPGap", "Steel02", "Elastic"),
             )
         elif interface == "Rotational spring":
             try:
@@ -529,7 +531,7 @@ class TestColumnWizard(QDialog):
 
     def _lateral_changed(self, *_args) -> None:
         if self.base_interface.currentText() in {
-            "Bond-slip",
+            "Translational slip spring",
             "Rotational spring",
         }:
             self._sync_base_interface()
