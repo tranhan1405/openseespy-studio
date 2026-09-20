@@ -53,7 +53,7 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
-exe = EXE(
+gui_exe = EXE(
     pyz,
     a.scripts,
     [],
@@ -67,8 +67,22 @@ exe = EXE(
     disable_windowed_traceback=False,
 )
 
+worker_exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="OpenSeesPyStudioWorker",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=True,
+)
+
 coll = COLLECT(
-    exe,
+    gui_exe,
+    worker_exe,
     a.binaries,
     a.datas,
     strip=False,
