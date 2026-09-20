@@ -64,9 +64,48 @@ NODAL_MAGNITUDE_COMPONENTS: dict[str, tuple[int, ...]] = {
 }
 
 
+def canonical_nodal_vector(
+    values: Sequence[float],
+    *,
+    ndm: int | None = None,
+    ndf: int | None = None,
+) -> list[float]:
+    """Map OpenSees nodal DOF vectors to Studio's canonical 6-DOF order.
+
+    Canonical order is X, Y, Z, RX, RY, RZ. In a standard 2D frame
+    (ndm=2, ndf=3), OpenSees returns UX, UY, RZ, so the third raw value
+    belongs at canonical index 5 rather than index 2.
+    """
+    raw = [float(value) for value in values]
+    if ndm is None or ndf is None:
+        padded = raw[:6]
+        while len(padded) < 6:
+            padded.append(0.0)
+        return padded
+
+    ndm = int(ndm)
+    ndf = int(ndf)
+    result = [0.0] * 6
+    if ndm == 2:
+        if len(raw) >= 1:
+            result[0] = raw[0]
+        if len(raw) >= 2:
+            result[1] = raw[1]
+        if ndf >= 3 and len(raw) >= 3:
+            result[5] = raw[2]
+        return result
+
+    for index, value in enumerate(raw[: min(ndf, 6)]):
+        result[index] = value
+    return result
+
+
 def nodal_result_scalar(
     values: Sequence[float],
     component: str,
+    *,
+    ndm: int | None = None,
+    ndf: int | None = None,
 ) -> float | None:
     """Extract one scalar from a six-DOF nodal result vector.
 
@@ -75,17 +114,20 @@ def nodal_result_scalar(
     rotation/moment groups separate so incompatible units are never mixed.
     """
     component = str(component).strip().upper()
+    canonical = canonical_nodal_vector(values, ndm=ndm, ndf=ndf)
     index = NODAL_COMPONENT_INDEX.get(component)
     if index is not None:
-        if len(values) <= index:
+        if ndm == 2 and component in {"UZ", "RX", "RY", "FZ", "MX", "MY"}:
             return None
-        return float(values[index])
+        if ndm == 3 and ndf is not None and int(ndf) <= 3 and index >= 3:
+            return None
+        return float(canonical[index])
 
     magnitude_indices = NODAL_MAGNITUDE_COMPONENTS.get(component)
     if magnitude_indices is not None:
-        if len(values) <= max(magnitude_indices):
-            return None
-        return math.sqrt(sum(float(values[index]) ** 2 for index in magnitude_indices))
+        return math.sqrt(
+            sum(float(canonical[index]) ** 2 for index in magnitude_indices)
+        )
 
     raise ValueError(f"Unsupported nodal result component: {component}")
 
