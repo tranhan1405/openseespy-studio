@@ -38,6 +38,12 @@ from .material_test_dialog import MaterialTestDialog
 
 PA_PER_MPA = 1.0e6
 
+PREVIEW_MATERIAL_TYPES = {
+    "Hysteretic",
+    "Pinching4",
+    "FRPConfinedConcrete02",
+}
+
 PARAMETER_LABELS = {
     "mode": "FRP definition",
     "dmgType": "Damage type",
@@ -62,7 +68,7 @@ class MaterialEnvelopePreview(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumSize(340, 320)
+        self.setMinimumSize(260, 180)
         self._material_type = ""
         self._parameters: dict[str, float] = {}
 
@@ -269,23 +275,31 @@ class MaterialDialog(QDialog):
         scroll.setWidget(self.parameter_widget)
         splitter.addWidget(scroll)
 
-        preview_host = QWidget()
-        preview_layout = QVBoxLayout(preview_host)
+        self.preview_host = QWidget()
+        preview_layout = QVBoxLayout(self.preview_host)
         preview_layout.setContentsMargins(6, 0, 0, 0)
-        preview_title = QLabel("Research response preview")
-        preview_title.setStyleSheet("font-weight: 700; color: #17356d;")
-        preview_layout.addWidget(preview_title)
+        self.preview_title = QLabel("Research response preview")
+        self.preview_title.setStyleSheet(
+            "font-weight: 700; color: #17356d;"
+        )
+        preview_layout.addWidget(self.preview_title)
         self.preview = MaterialEnvelopePreview()
         preview_layout.addWidget(self.preview, 1)
+        splitter.addWidget(self.preview_host)
+        splitter.setStretchFactor(0, 4)
+        splitter.setStretchFactor(1, 1)
+        splitter.setCollapsible(1, True)
+        splitter.setSizes([650, 270])
+
+        # Keep material guidance available without forcing a permanent preview
+        # pane.  Materials without a meaningful live envelope use the full
+        # editor width and show only this compact note.
         self.material_note = QLabel()
         self.material_note.setWordWrap(True)
         self.material_note.setStyleSheet(
             "padding: 7px; background: #f2f5f8; color: #526578;"
         )
-        preview_layout.addWidget(self.material_note)
-        splitter.addWidget(preview_host)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
+        root.addWidget(self.material_note)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.test_material_button = buttons.addButton(
@@ -702,7 +716,11 @@ class MaterialDialog(QDialog):
     def _update_preview(self) -> None:
         material_type = str(self.material_type.currentData())
         values = self._display_parameter_values()
-        self.preview.set_material(material_type, values)
+
+        preview_available = material_type in PREVIEW_MATERIAL_TYPES
+        self.preview_host.setVisible(preview_available)
+        if preview_available:
+            self.preview.set_material(material_type, values)
 
         if material_type == "FRPConfinedConcrete02":
             unit_ok = (
