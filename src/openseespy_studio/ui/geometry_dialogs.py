@@ -65,30 +65,42 @@ class NodeDialog(_BaseDialog):
 
 
 class ElementDialog(_BaseDialog):
+    """Create a fully assigned structural frame member."""
+
     def __init__(
         self,
         tag: int,
         node_i: int = 1,
         node_j: int = 2,
+        *,
+        sections=None,
+        transformations=None,
         parent=None,
     ):
-        super().__init__("Create Element", parent)
+        super().__init__("Create Frame Member", parent)
+        self._sections = dict(sections or {})
+        self._transformations = dict(transformations or {})
+
         self.tag = _tag_spin(tag)
         self.node_i = _tag_spin(node_i)
         self.node_j = _tag_spin(node_j)
+
         self.element_type = QComboBox()
         self.element_type.addItems([
             "elasticBeamColumn",
             "forceBeamColumn",
             "dispBeamColumn",
-            "truss",
         ])
+
+        self.section = QComboBox()
+        self.transformation = QComboBox()
+
         self.group = QComboBox()
         self.group.setEditable(True)
         self.group.addItems(["frame", "column", "beam-x", "beam-y"])
 
         self.integration_type = QComboBox()
-        self.integration_type.addItems(["Lobatto", "Legendre"])
+        self.integration_type.addItems(["Lobatto", "Legendre", "Radau"])
         self.integration_points = QSpinBox()
         self.integration_points.setRange(2, 50)
         self.integration_points.setValue(5)
@@ -96,27 +108,78 @@ class ElementDialog(_BaseDialog):
         self.form.addRow("Tag:", self.tag)
         self.form.addRow("Node I:", self.node_i)
         self.form.addRow("Node J:", self.node_j)
-        self.form.addRow("Type:", self.element_type)
+        self.form.addRow("Formulation:", self.element_type)
+        self.form.addRow("Section:", self.section)
+        self.form.addRow("Transformation:", self.transformation)
         self.form.addRow("Group:", self.group)
         self.form.addRow("Beam integration:", self.integration_type)
         self.form.addRow("Integration points:", self.integration_points)
 
+        self._populate_transformations()
         self.element_type.currentTextChanged.connect(
             self._sync_formulation_controls
         )
         self._sync_formulation_controls(self.element_type.currentText())
 
+        note = QLabel(
+            "Frame creates a solver-ready structural member. "
+            "Section and geometric transformation are assigned at creation."
+        )
+        note.setWordWrap(True)
+        self.root.insertWidget(1, note)
+
+    def _populate_transformations(self) -> None:
+        self.transformation.clear()
+        for tag in sorted(self._transformations):
+            item = self._transformations[tag]
+            self.transformation.addItem(
+                f"{tag} - {item.name} ({item.transf_type})",
+                int(tag),
+            )
+
+    def _populate_sections(self, element_type: str) -> None:
+        current = self.section.currentData()
+        self.section.clear()
+        for tag in sorted(self._sections):
+            item = self._sections[tag]
+            if (
+                element_type == "elasticBeamColumn"
+                and item.section_type != "Elastic"
+            ):
+                continue
+            self.section.addItem(
+                f"{tag} - {item.name} ({item.section_type})",
+                int(tag),
+            )
+        if current is not None:
+            index = self.section.findData(current)
+            if index >= 0:
+                self.section.setCurrentIndex(index)
+
     def _sync_formulation_controls(self, element_type: str) -> None:
         nonlinear = element_type in {"forceBeamColumn", "dispBeamColumn"}
         self.integration_type.setEnabled(nonlinear)
         self.integration_points.setEnabled(nonlinear)
+        self._populate_sections(element_type)
 
     def values(self):
+        section_tag = self.section.currentData()
+        transf_tag = self.transformation.currentData()
+        if section_tag is None:
+            raise ValueError(
+                "Select a compatible section before creating the frame member."
+            )
+        if transf_tag is None:
+            raise ValueError(
+                "Select a geometric transformation before creating the frame member."
+            )
         return (
             self.tag.value(),
             self.node_i.value(),
             self.node_j.value(),
             self.element_type.currentText(),
+            int(section_tag),
+            int(transf_tag),
             self.group.currentText().strip() or "frame",
             self.integration_type.currentText(),
             self.integration_points.value(),
