@@ -4,6 +4,7 @@ import pytest
 
 from openseespy_studio.project import (
     LoadPatternData,
+    MaterialData,
     NodalLoadData,
     ProjectDatabase,
     SectionData,
@@ -186,5 +187,115 @@ def test_planar_direction_must_differ_from_column_axis():
                 lateral_direction=3,
                 planar=True,
                 section_tag=1,
+            ),
+        )
+
+
+
+def test_test_column_rotational_base_interface_creates_zero_length():
+    project = project_with_section()
+    project.add_material(
+        MaterialData(
+            10,
+            "Base rotation",
+            "Elastic",
+            parameters={"E": 5.0e6},
+        )
+    )
+
+    result = build_test_column(
+        project,
+        TestColumnSpec(
+            height=3.0,
+            axis=3,
+            lateral_direction=1,
+            planar=True,
+            section_tag=1,
+            base_interface_type="Rotational spring",
+            base_interface_materials={5: 10},
+            base_interface_rayleigh=False,
+        ),
+    )
+
+    assert result.base_connection_tag is not None
+    assert result.base_ground_node is not None
+    assert result.base_ground_node in project.model.nodes
+    assert project.model.nodes[result.base_ground_node].xyz == pytest.approx(
+        project.model.nodes[result.base_node].xyz
+    )
+    assert project.model.nodes[result.base_ground_node].fixity == (1, 1, 1, 1, 1, 1)
+
+    # Z-axis column + X lateral direction bends about global Y => RY / DOF 5.
+    assert project.model.nodes[result.base_node].fixity == (1, 1, 1, 1, 0, 1)
+    connection = project.connections[result.base_connection_tag]
+    assert connection.connection_type == "zeroLength"
+    assert connection.materials_by_dof == {5: 10}
+    assert connection.do_rayleigh is False
+    assert connection.generated_ground_node == result.base_ground_node
+
+
+def test_test_column_bond_slip_interface_can_release_lateral_translation():
+    project = project_with_section()
+    project.add_material(
+        MaterialData(
+            11,
+            "Bond slip surrogate",
+            "Elastic",
+            parameters={"E": 1000.0},
+        )
+    )
+
+    result = build_test_column(
+        project,
+        TestColumnSpec(
+            section_tag=1,
+            axis=3,
+            lateral_direction=1,
+            planar=True,
+            base_interface_type="Bond-slip",
+            base_interface_materials={1: 11},
+        ),
+    )
+
+    assert project.model.nodes[result.base_node].fixity == (0, 1, 1, 1, 1, 1)
+    connection = project.connections[result.base_connection_tag]
+    assert connection.materials_by_dof == {1: 11}
+
+
+def test_planar_test_rejects_out_of_plane_base_interface_dof():
+    project = project_with_section()
+    project.add_material(
+        MaterialData(
+            12,
+            "Spring",
+            "Elastic",
+            parameters={"E": 1000.0},
+        )
+    )
+
+    with pytest.raises(ValueError, match="Planar test restrains"):
+        build_test_column(
+            project,
+            TestColumnSpec(
+                section_tag=1,
+                axis=3,
+                lateral_direction=1,
+                planar=True,
+                base_interface_type="Custom zeroLength",
+                # For X-Z plane, UY is an out-of-plane restrained DOF.
+                base_interface_materials={2: 12},
+            ),
+        )
+
+
+def test_base_interface_requires_existing_material():
+    project = project_with_section()
+    with pytest.raises(ValueError, match="missing material"):
+        build_test_column(
+            project,
+            TestColumnSpec(
+                section_tag=1,
+                base_interface_type="Rotational spring",
+                base_interface_materials={5: 999},
             ),
         )

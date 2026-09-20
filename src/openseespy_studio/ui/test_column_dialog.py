@@ -19,9 +19,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..project import ProjectDatabase, SectionData
-from ..test_column import TestColumnSpec
+from ..project import MaterialData, ProjectDatabase, SectionData
+from ..test_column import TestColumnSpec, bending_rotation_dof
 from ..units import UnitSystem
+from .material_dialog import MaterialDialog
 from .section_dialog import SectionDialog
 
 
@@ -58,6 +59,7 @@ class TestColumnWizard(QDialog):
         self.project = project
         self.units = UnitSystem.from_mapping(project.units)
         self._pending_sections: dict[int, SectionData] = {}
+        self._pending_materials: dict[int, MaterialData] = {}
         self.setWindowTitle("Quick 1D Column / Test Specimen")
         self.setModal(True)
         self.setSizeGripEnabled(True)
@@ -160,14 +162,91 @@ class TestColumnWizard(QDialog):
         geometry.addRow("Geometric transformation:", self.transformation)
         body_layout.addWidget(geometry_group)
 
-        boundary_group = QGroupBox("Boundary")
-        boundary = QFormLayout(boundary_group)
+        boundary_group = QGroupBox("Boundary & Base Interface Model")
+        boundary_layout = QVBoxLayout(boundary_group)
+        boundary = QFormLayout()
         self.base_support = QComboBox()
         self.base_support.addItems(["Fixed", "Pinned", "Free"])
         self.top_support = QComboBox()
         self.top_support.addItems(["Free", "Pinned", "Fixed"])
-        boundary.addRow("Base:", self.base_support)
+        boundary.addRow("Nominal base support:", self.base_support)
         boundary.addRow("Top:", self.top_support)
+
+        self.base_interface = QComboBox()
+        self.base_interface.addItems([
+            "Fixed base",
+            "Bond-slip",
+            "Rotational spring",
+            "Custom zeroLength",
+        ])
+        boundary.addRow("Base Interface Model:", self.base_interface)
+        boundary_layout.addLayout(boundary)
+
+        interface_note = QLabel(
+            "The base interface belongs to the specimen, so the same column "
+            "can be used for Cyclic, Pushover, and NLTH. Fixed base is the "
+            "default. Nonlinear interface DOFs are released at the column "
+            "base and connected to a coincident fixed ground node through "
+            "zeroLength."
+        )
+        interface_note.setWordWrap(True)
+        interface_note.setObjectName("Muted")
+        boundary_layout.addWidget(interface_note)
+
+        self.interface_rows: dict[
+            int, tuple[QCheckBox, QComboBox]
+        ] = {}
+        interface_dofs = QGroupBox("zeroLength spring DOFs")
+        interface_dofs_layout = QVBoxLayout(interface_dofs)
+        for dof, label in (
+            (1, "UX"), (2, "UY"), (3, "UZ"),
+            (4, "RX"), (5, "RY"), (6, "RZ"),
+        ):
+            row = QHBoxLayout()
+            check = QCheckBox(f"{label} · dir {dof}")
+            combo = QComboBox()
+            row.addWidget(check)
+            row.addWidget(combo, 1)
+            interface_dofs_layout.addLayout(row)
+            self.interface_rows[dof] = (check, combo)
+            check.toggled.connect(
+                lambda checked, row_dof=dof: self._sync_interface_row(
+                    row_dof,
+                    checked,
+                )
+            )
+            combo.currentIndexChanged.connect(self._update_preview)
+
+        material_buttons = QHBoxLayout()
+        self.new_interface_material = QPushButton("New Material...")
+        self.new_interface_material.clicked.connect(
+            self._create_interface_material
+        )
+        material_buttons.addWidget(self.new_interface_material)
+        material_buttons.addStretch(1)
+        interface_dofs_layout.addLayout(material_buttons)
+        boundary_layout.addWidget(interface_dofs)
+
+        self.interface_rayleigh = QCheckBox(
+            "Include base zeroLength in Rayleigh damping"
+        )
+        self.interface_rayleigh.setChecked(False)
+        self.interface_rayleigh.setToolTip(
+            "Off by default for nonlinear concentrated springs to avoid "
+            "unintended damping forces. Enable only when your formulation "
+            "requires it."
+        )
+        boundary_layout.addWidget(self.interface_rayleigh)
+
+        self.interface_warning = QLabel(
+            "Rayleigh contribution is OFF by default for nonlinear base "
+            "springs, especially for NLTH."
+        )
+        self.interface_warning.setWordWrap(True)
+        self.interface_warning.setStyleSheet(
+            "padding: 6px; background: #fff7e0; color: #7a5600;"
+        )
+        boundary_layout.addWidget(self.interface_warning)
         body_layout.addWidget(boundary_group)
 
         loading_group = QGroupBox("Optional test setup")
@@ -268,7 +347,11 @@ class TestColumnWizard(QDialog):
 
         self.preset.currentTextChanged.connect(self._apply_preset)
         self.axis.currentIndexChanged.connect(self._axis_changed)
-        self.lateral.currentIndexChanged.connect(self._update_preview)
+        self.lateral.currentIndexChanged.connect(self._lateral_changed)
+        self.base_interface.currentTextChanged.connect(
+            self._sync_base_interface
+        )
+        self.interface_rayleigh.toggled.connect(self._update_preview)
         self.planar.toggled.connect(self._update_preview)
         self.column_height.valueChanged.connect(self._update_preview)
         self.elements.valueChanged.connect(self._update_preview)
@@ -280,10 +363,178 @@ class TestColumnWizard(QDialog):
             self.use_mass,
         ):
             toggle.toggled.connect(self._sync_optional_controls)
+        self._refresh_interface_material_combos()
         self._apply_preset(self.preset.currentText())
         self._sync_formulation()
         self._sync_optional_controls()
+        self._sync_base_interface()
         self._update_preview()
+
+    def _combined_materials(self) -> dict[int, MaterialData]:
+        materials = dict(self.project.materials)
+        materials.update(self._pending_materials)
+        return materials
+
+    def _next_material_tag(self) -> int:
+        used = set(self.project.materials) | set(self._pending_materials)
+        return max(used, default=0) + 1
+
+    def _refresh_interface_material_combos(
+        self,
+        selected_tag: int | None = None,
+    ) -> None:
+        materials = self._combined_materials()
+        for _dof, (_check, combo) in self.interface_rows.items():
+            previous = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            for tag in sorted(materials):
+                material = materials[tag]
+                suffix = (
+                    " · new"
+                    if tag in self._pending_materials
+                    else ""
+                )
+                combo.addItem(
+                    f"{tag} - {material.name} "
+                    f"({material.material_type}){suffix}",
+                    tag,
+                )
+            wanted = selected_tag if selected_tag is not None else previous
+            if wanted is not None:
+                combo_index = combo.findData(int(wanted))
+                if combo_index >= 0:
+                    combo.setCurrentIndex(combo_index)
+            combo.blockSignals(False)
+
+    def _preferred_material_tag(
+        self,
+        material_types: tuple[str, ...],
+    ) -> int | None:
+        materials = self._combined_materials()
+        for tag in sorted(materials):
+            if materials[tag].material_type in material_types:
+                return tag
+        return next(iter(sorted(materials)), None)
+
+    def _create_interface_material(self) -> None:
+        materials = self._combined_materials()
+        dialog = MaterialDialog(
+            next_tag=self._next_material_tag(),
+            units=self.project.units,
+            materials=materials,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            material = dialog.material_data()
+            if material.tag in self.project.materials:
+                raise ValueError(
+                    f"Material tag {material.tag} already exists in the project."
+                )
+            if material.tag in self._pending_materials:
+                raise ValueError(
+                    f"Material tag {material.tag} is already staged in this wizard."
+                )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Material Editor", str(exc))
+            return
+
+        self._pending_materials[material.tag] = material
+        self._refresh_interface_material_combos(material.tag)
+        self._update_preview()
+
+    def new_materials(self) -> list[MaterialData]:
+        return [
+            MaterialData.from_dict(self._pending_materials[tag].to_dict())
+            for tag in self._pending_materials
+        ]
+
+    def _set_interface_single_dof(
+        self,
+        dof: int,
+        preferred_types: tuple[str, ...],
+    ) -> None:
+        material_tag = self._preferred_material_tag(preferred_types)
+        for row_dof, (check, combo) in self.interface_rows.items():
+            check.blockSignals(True)
+            check.setChecked(row_dof == dof)
+            check.blockSignals(False)
+            if row_dof == dof and material_tag is not None:
+                index = combo.findData(material_tag)
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+
+    def _sync_interface_row(
+        self,
+        dof: int,
+        checked: bool,
+    ) -> None:
+        _check, combo = self.interface_rows[int(dof)]
+        combo.setEnabled(
+            self.base_interface.currentText() != "Fixed base"
+            and bool(checked)
+        )
+        self._update_preview()
+
+    def _sync_base_interface(self, *_args) -> None:
+        interface = self.base_interface.currentText()
+        active = interface != "Fixed base"
+        self.base_support.setEnabled(not active)
+        if active:
+            self.base_support.setCurrentText("Fixed")
+
+        for check, combo in self.interface_rows.values():
+            check.setEnabled(active)
+            combo.setEnabled(active and check.isChecked())
+        self.new_interface_material.setEnabled(active)
+        self.interface_rayleigh.setEnabled(active)
+        self.interface_warning.setVisible(active)
+
+        if interface == "Bond-slip":
+            self._set_interface_single_dof(
+                int(self.lateral.currentData()),
+                ("Bond_SP01",),
+            )
+        elif interface == "Rotational spring":
+            try:
+                dof = bending_rotation_dof(
+                    int(self.axis.currentData()),
+                    int(self.lateral.currentData()),
+                )
+            except ValueError:
+                dof = 6
+            self._set_interface_single_dof(
+                dof,
+                ("Pinching4", "Hysteretic", "Steel02"),
+            )
+        elif interface == "Custom zeroLength":
+            if not any(
+                check.isChecked()
+                for check, _combo in self.interface_rows.values()
+            ):
+                dof = int(self.lateral.currentData())
+                check, _combo = self.interface_rows[dof]
+                check.setChecked(True)
+        else:
+            for check, _combo in self.interface_rows.values():
+                check.blockSignals(True)
+                check.setChecked(False)
+                check.blockSignals(False)
+
+        for check, combo in self.interface_rows.values():
+            combo.setEnabled(active and check.isChecked())
+        self._update_preview()
+
+    def _lateral_changed(self, *_args) -> None:
+        if self.base_interface.currentText() in {
+            "Bond-slip",
+            "Rotational spring",
+        }:
+            self._sync_base_interface()
+        else:
+            self._update_preview()
 
     def _refresh_section_combo(
         self,
@@ -324,7 +575,7 @@ class TestColumnWizard(QDialog):
 
     def _create_section(self) -> None:
         dialog = SectionDialog(
-            self.project.materials,
+            self._combined_materials(),
             next_tag=self._next_section_tag(),
             units=self.project.units,
             parent=self,
@@ -345,6 +596,29 @@ class TestColumnWizard(QDialog):
             QMessageBox.warning(self, "Section Editor", str(exc))
             return
 
+        pending_materials = (
+            dialog.pending_materials()
+            if hasattr(dialog, "pending_materials")
+            else []
+        )
+        try:
+            for material in pending_materials:
+                if material.tag in self.project.materials:
+                    raise ValueError(
+                        f"Material tag {material.tag} already exists in the project."
+                    )
+                if material.tag in self._pending_materials:
+                    raise ValueError(
+                        f"Material tag {material.tag} is already staged "
+                        "in this wizard."
+                    )
+            for material in pending_materials:
+                self._pending_materials[material.tag] = material
+        except ValueError as exc:
+            QMessageBox.warning(self, "Section Editor", str(exc))
+            return
+        self._refresh_interface_material_combos()
+
         self._pending_sections[section.tag] = section
         self._refresh_section_combo(section.tag)
         self._update_preview()
@@ -362,6 +636,8 @@ class TestColumnWizard(QDialog):
         self.use_mass.setChecked(False)
         self.base_support.setCurrentText("Fixed")
         self.top_support.setCurrentText("Free")
+        self.base_interface.setCurrentText("Fixed base")
+        self.interface_rayleigh.setChecked(False)
         self.planar.setChecked(True)
 
         if preset == "Cantilever Cyclic Test":
@@ -395,7 +671,10 @@ class TestColumnWizard(QDialog):
                     if index >= 0:
                         self.lateral.setCurrentIndex(index)
                         break
-        self._update_preview()
+        if self.base_interface.currentText() == "Rotational spring":
+            self._sync_base_interface()
+        else:
+            self._update_preview()
 
     def _sync_formulation(self, *_args) -> None:
         nonlinear = self.element_type.currentText() in {
@@ -442,12 +721,31 @@ class TestColumnWizard(QDialog):
                 )
             )
         )
+        interface = self.base_interface.currentText()
+        if interface == "Fixed base":
+            interface_note = "fixed base"
+        else:
+            active = [
+                f"{('UX','UY','UZ','RX','RY','RZ')[dof - 1]}→"
+                f"{combo.currentData()}"
+                for dof, (check, combo) in self.interface_rows.items()
+                if check.isChecked() and combo.currentData() is not None
+            ]
+            interface_note = (
+                interface
+                + (" [" + ", ".join(active) + "]" if active else " [not configured]")
+                + (
+                    " · Rayleigh ON"
+                    if self.interface_rayleigh.isChecked()
+                    else " · Rayleigh OFF"
+                )
+            )
         self.preview.setText(
             f"Preview: 1D {axis}-axis column · {self.column_height.value():g} "
             f"{self.units.length} · {self.elements.value()} element(s) · "
             f"lateral {lateral} · "
             f"{'planar' if self.planar.isChecked() else '3D'} · "
-            f"{section_note} · "
+            f"{section_note} · base: {interface_note} · "
             + (", ".join(options) if options else "geometry only")
         )
 
@@ -488,6 +786,22 @@ class TestColumnWizard(QDialog):
                 "Select at least one direction for the top mass."
             )
 
+        interface_type = self.base_interface.currentText()
+        interface_materials: dict[int, int] = {}
+        if interface_type != "Fixed base":
+            for dof, (check, combo) in self.interface_rows.items():
+                if not check.isChecked():
+                    continue
+                if combo.currentData() is None:
+                    raise ValueError(
+                        "Select a material for every active base-interface DOF."
+                    )
+                interface_materials[dof] = int(combo.currentData())
+            if not interface_materials:
+                raise ValueError(
+                    "Activate at least one DOF for the Base Interface Model."
+                )
+
         return TestColumnSpec(
             height=self.column_height.value(),
             num_elements=self.elements.value(),
@@ -505,8 +819,19 @@ class TestColumnWizard(QDialog):
             element_type=self.element_type.currentText(),
             integration_type=self.integration.currentText(),
             integration_points=self.integration_points.value(),
-            base_support=self.base_support.currentText(),
+            base_support=(
+                "Fixed"
+                if interface_type != "Fixed base"
+                else self.base_support.currentText()
+            ),
             top_support=self.top_support.currentText(),
+            base_interface_type=interface_type,
+            base_interface_materials=interface_materials,
+            base_interface_rayleigh=(
+                self.interface_rayleigh.isChecked()
+                if interface_type != "Fixed base"
+                else False
+            ),
             top_mass=(
                 self.top_mass.value()
                 if self.use_mass.isChecked()
