@@ -588,9 +588,28 @@ def element_load_to_openseespy(
     transformations: dict[int, TransformationData] | None = None,
     units: dict[str, str] | None = None,
 ) -> str:
+    element = model.elements.get(int(load.element_tag))
+    if element is not None and element.element_type == "truss":
+        raise ValueError(
+            f"Element load {load.tag} cannot be applied to Truss element "
+            f"{load.element_tag}; OpenSees beam eleLoad commands require "
+            "a beam-column element."
+        )
+
     if load.load_type == "Uniform":
         wx, wy, wz = load.wx, load.wy, load.wz
     elif load.load_type == "Point":
+        if int(model.ndm) == 2:
+            if abs(float(load.pz)) > 1.0e-15:
+                raise ValueError(
+                    f"2D point load {load.tag} has nonzero local Pz. "
+                    "NDM=2 beamPoint supports Py, x/L and optional Px only."
+                )
+            return (
+                "ops.eleLoad('-ele', "
+                f"{load.element_tag}, '-type', '-beamPoint', "
+                f"{load.py:g}, {load.x_over_l:g}, {load.px:g})"
+            )
         return (
             "ops.eleLoad('-ele', "
             f"{load.element_tag}, '-type', '-beamPoint', "
@@ -608,6 +627,18 @@ def element_load_to_openseespy(
     else:
         raise ValueError(
             f"Unsupported element load type: {load.load_type}"
+        )
+
+    if int(model.ndm) == 2:
+        if abs(float(wz)) > 1.0e-15:
+            raise ValueError(
+                f"2D element load {load.tag} has nonzero local Wz. "
+                "NDM=2 beamUniform supports Wy and optional Wx only."
+            )
+        return (
+            "ops.eleLoad('-ele', "
+            f"{load.element_tag}, '-type', '-beamUniform', "
+            f"{wy:g}, {wx:g})"
         )
 
     return (
