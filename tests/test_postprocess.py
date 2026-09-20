@@ -31,6 +31,7 @@ from openseespy_studio.postprocess import (
     force_displacement_curve,
     local_end_actions,
     member_end_resultants,
+    normalize_frame_local_force,
     nodal_result_scalar,
     pushover_capacity_curve,
     section_component_samples,
@@ -1568,3 +1569,71 @@ def test_force_displacement_curve_can_use_nodal_reaction():
     assert source == "Node reaction"
     assert force_node == 5
     assert force_dof == 2
+
+
+def test_native_2d_local_force_normalizes_to_member_diagram_convention():
+    normalized = normalize_frame_local_force(
+        [10.0, 20.0, 30.0, -10.0, -20.0, 40.0],
+        ndm=2,
+    )
+
+    assert len(normalized) == 12
+    assert normalized == [
+        10.0, 20.0, 0.0, 0.0, 0.0, 30.0,
+        -10.0, -20.0, 0.0, 0.0, 0.0, 40.0,
+    ]
+    assert component_end_resultants(normalized, "N") is not None
+    assert component_end_resultants(normalized, "Vy") is not None
+    assert component_end_resultants(normalized, "Mz") is not None
+
+
+def test_member_force_enrichment_supports_native_2d_six_value_local_force():
+    model = StructuralModel("2d-results", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 4.0, 0.0)
+    model.add_element(1, 1, 2, section_tag=1, transf_tag=1)
+    sections = {
+        1: SectionData(
+            1,
+            "2D",
+            "Elastic",
+            parameters={
+                "E": 200.0e9,
+                "A": 0.02,
+                "Iz": 8.0e-5,
+                "Iy": 0.0,
+                "G": 80.0e9,
+                "J": 0.0,
+            },
+        )
+    }
+    transformations = {
+        1: TransformationData(1, "2D", "Linear", (0.0, 0.0, 1.0))
+    }
+    result = {
+        "analysis": {"type": "Static"},
+        "final": {
+            "element_local_forces": {
+                "1": [10.0, 20.0, 30.0, -10.0, -20.0, 40.0]
+            },
+            "element_axial_forces": {},
+            "element_section_forces": {},
+            "load_factors": {},
+        },
+    }
+
+    enriched = enrich_member_force_results(
+        result,
+        model,
+        {},
+        sections,
+        {},
+        transformations,
+        {"length": "m", "force": "N", "time": "s"},
+    )
+
+    diagrams = enriched["final"]["member_force_diagrams"]["1"]
+    assert set(diagrams) == {"N", "Vy", "Mz"}
+    assert len(diagrams["N"]["x"]) == 2
+    assert len(diagrams["Vy"]["values"]) == 2
+    assert len(diagrams["Mz"]["values"]) == 2
