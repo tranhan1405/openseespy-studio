@@ -5689,6 +5689,7 @@ class MainWindow(QMainWindow):
         dialog = LoadPatternDialog(
             self.project.time_series,
             next_tag=self.project.next_load_pattern_tag(),
+            allow_uniform_excitation=False,
             parent=self,
         )
         if not dialog.exec():
@@ -5709,7 +5710,10 @@ class MainWindow(QMainWindow):
         if pattern is None:
             return
         dialog = LoadPatternDialog(
-            self.project.time_series, pattern=pattern, parent=self
+            self.project.time_series,
+            pattern=pattern,
+            allow_uniform_excitation=False,
+            parent=self,
         )
         if not dialog.exec():
             return
