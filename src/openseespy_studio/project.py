@@ -2705,11 +2705,25 @@ class ProjectDatabase:
 
     def _validate_recorder(self, recorder: RecorderData) -> None:
         if recorder.recorder_type == "Node":
-            missing = [tag for tag in recorder.target_tags if tag not in self.model.nodes]
+            missing = [
+                tag
+                for tag in recorder.target_tags
+                if tag not in self.model.nodes
+            ]
             if missing:
                 raise ValueError(
                     "Recorder references missing node tag(s): "
                     + ", ".join(map(str, missing))
+                )
+            invalid_dofs = [
+                int(dof)
+                for dof in recorder.dofs
+                if int(dof) < 1 or int(dof) > int(self.model.ndf)
+            ]
+            if invalid_dofs:
+                raise ValueError(
+                    f"Node recorder DOF(s) {invalid_dofs} exceed model "
+                    f"ndf={self.model.ndf}."
                 )
             return
         valid_elements = set(self.model.elements) | set(self.connections)
