@@ -6,6 +6,7 @@ from .model import StructuralModel
 from .strain_penetration import build_bond_sp01_strain_penetration_section
 from .project import (
     ConnectionData,
+    ConstraintData,
     LoadPatternData,
     NodalLoadData,
     PrescribedDisplacementData,
@@ -68,6 +69,7 @@ class TestColumnBuildResult:
     base_ground_node: int | None = None
     base_connection_tag: int | None = None
     base_section_tag: int | None = None
+    base_constraint_tag: int | None = None
 
 
 BASE_INTERFACE_TYPES = {
@@ -92,6 +94,45 @@ def bending_rotation_dof(axis: int, lateral_direction: int) -> int:
         )
     normal = ({1, 2, 3} - {axis, lateral_direction}).pop()
     return normal + 3
+
+
+def _axis_unit(axis: int) -> tuple[float, float, float]:
+    values = [0.0, 0.0, 0.0]
+    values[int(axis) - 1] = 1.0
+    return tuple(values)
+
+
+def _cross3(
+    a: tuple[float, float, float],
+    b: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    return (
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
+
+
+def _unit3(
+    vector: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    norm = sum(value * value for value in vector) ** 0.5
+    if norm <= 1.0e-14:
+        raise ValueError("Cannot define zeroLengthSection local axes.")
+    return tuple(value / norm for value in vector)
+
+
+def zero_length_section_orientation(
+    axis: int,
+) -> tuple[
+    tuple[float, float, float],
+    tuple[float, float, float],
+]:
+    """Match zeroLengthSection y-z axes to the beam-column section axes."""
+    local_x = _axis_unit(axis)
+    vecxz = _safe_vecxz(axis)
+    local_y = _unit3(_cross3(vecxz, local_x))
+    return local_x, local_y
 
 
 def _support_fixity(name: str) -> tuple[int, ...]:
@@ -425,22 +466,19 @@ def build_test_column(
     for tag in node_tags:
         model.set_fixity(tag, plane)
 
-    base_fixity = list(
-        _merge_fixity(plane, _support_fixity(spec.base_support))
-    )
     if interface_type == "Bond_SP01 strain penetration":
-        # zeroLengthSection supplies axial force and flexural moment. Shear
-        # translations remain fixed so the interface cannot slide laterally.
-        base_fixity[axis - 1] = 0
-        if spec.planar:
-            base_fixity[bending_rotation_dof(axis, lateral) - 1] = 0
-        else:
-            for rotation_dof in (4, 5, 6):
-                if rotation_dof != axis + 3:
-                    base_fixity[rotation_dof - 1] = 0
-    elif interface_type != "Fixed base":
-        for dof in interface_materials:
-            base_fixity[dof - 1] = 0
+        # The interface Section carries P, My/Mz and torsion as available.
+        # Keep only the specimen's out-of-plane planar restraints here.
+        # Shear translations are coupled to the fixed footing with equalDOF
+        # below, matching the documented Bond_SP01 zeroLengthSection setup.
+        base_fixity = list(plane)
+    else:
+        base_fixity = list(
+            _merge_fixity(plane, _support_fixity(spec.base_support))
+        )
+        if interface_type != "Fixed base":
+            for dof in interface_materials:
+                base_fixity[dof - 1] = 0
 
     model.set_fixity(node_tags[0], tuple(base_fixity))
     model.set_fixity(
@@ -484,10 +522,30 @@ def build_test_column(
             )
             project.add_section(penetration.section)
 
-            axis_vector = [0.0, 0.0, 0.0]
-            axis_vector[axis - 1] = 1.0
-            lateral_vector = [0.0, 0.0, 0.0]
-            lateral_vector[lateral - 1] = 1.0
+            orient_x, orient_y = zero_length_section_orientation(axis)
+
+            shear_dofs = tuple(
+                dof
+                for dof in (1, 2, 3)
+                if dof != axis and not plane[dof - 1]
+            )
+            generated_constraint_tag = None
+            if shear_dofs:
+                generated_constraint_tag = project.next_constraint_tag()
+                project.add_constraint(
+                    ConstraintData(
+                        tag=generated_constraint_tag,
+                        name=(
+                            f"{spec.name_prefix} · strain-penetration "
+                            "shear transfer"
+                        ),
+                        constraint_type="equalDOF",
+                        retained_node=ground_node,
+                        constrained_nodes=[result.base_node],
+                        dofs=shear_dofs,
+                    )
+                )
+                result.base_constraint_tag = generated_constraint_tag
 
             project.add_connection(
                 ConnectionData(
@@ -498,8 +556,9 @@ def build_test_column(
                     node_j=result.base_node,
                     section_tag=penetration.section.tag,
                     generated_section_tag=penetration.section.tag,
-                    orient_x=tuple(axis_vector),
-                    orient_y=tuple(lateral_vector),
+                    generated_constraint_tag=generated_constraint_tag,
+                    orient_x=orient_x,
+                    orient_y=orient_y,
                     do_rayleigh=bool(spec.base_interface_rayleigh),
                     generated_ground_node=ground_node,
                 )
