@@ -1227,6 +1227,18 @@ class PropertiesPanel(QWidget):
             )
 
 
+def _dock_toggle_action(
+    dock: QDockWidget,
+    *,
+    fallback_text: str | None = None,
+) -> QAction:
+    """Return a non-empty dock visibility action for the Window menu."""
+    action = dock.toggleViewAction()
+    if fallback_text and not action.text().strip():
+        action.setText(fallback_text)
+    return action
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1778,7 +1790,12 @@ class MainWindow(QMainWindow):
 
         menus["Window"].addAction(self.model_tree_dock.toggleViewAction())
         menus["Window"].addAction(self.properties_dock.toggleViewAction())
-        menus["Window"].addAction(self.script_dock.toggleViewAction())
+        menus["Window"].addAction(
+            _dock_toggle_action(
+                self.script_dock,
+                fallback_text="Python / Command",
+            )
+        )
         menus["Window"].addAction(self.console_dock.toggleViewAction())
         menus["Window"].addAction(self.results_dock.toggleViewAction())
         menus["Window"].addAction(self.create_dock.toggleViewAction())
