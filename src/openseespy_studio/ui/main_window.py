@@ -8613,6 +8613,7 @@ class MainWindow(QMainWindow):
             next_tag=self.project.next_analysis_tag(),
             default_node=default_node,
             analysis_type=analysis_type,
+            ndf=self.model.ndf,
             parent=self,
         )
         if not dialog.exec():
@@ -8632,7 +8633,11 @@ class MainWindow(QMainWindow):
         settings = self.project.analyses.get(tag)
         if settings is None:
             return
-        dialog = AnalysisDialog(analysis=settings, parent=self)
+        dialog = AnalysisDialog(
+            analysis=settings,
+            ndf=self.model.ndf,
+            parent=self,
+        )
         if not dialog.exec():
             return
         before = self.project.to_dict()
