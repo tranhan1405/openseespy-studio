@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import math
 from typing import Any
 
 from PySide6.QtCore import Qt
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
 )
 
@@ -436,3 +438,106 @@ class CalibrationDialog(QDialog):
             QMessageBox.warning(self, "Calibration", str(exc))
             return
         self.accept()
+
+
+
+class ApplyCalibrationCaseDialog(QDialog):
+    def __init__(
+        self,
+        changes: list[dict[str, Any]],
+        *,
+        case_id: int,
+        rank: int | None,
+        score: float | None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Apply Calibration Case")
+        self.resize(760, 420)
+
+        root = QVBoxLayout(self)
+        rank_text = str(rank) if rank is not None else "-"
+        score_text = (
+            f"{float(score):.6g}%"
+            if score is not None and math.isfinite(float(score))
+            else "-"
+        )
+        heading = QLabel(
+            f"<b>Case {int(case_id)}</b> · rank {rank_text} · "
+            f"calibration score {score_text}"
+        )
+        root.addWidget(heading)
+
+        description = QLabel(
+            "Review the current project values against the calibrated case. "
+            "Applying changes only the listed material parameters; geometry, "
+            "sections, loading and analysis settings are preserved."
+        )
+        description.setWordWrap(True)
+        root.addWidget(description)
+
+        table = QTableWidget(len(changes), 6)
+        table.setHorizontalHeaderLabels(
+            [
+                "Material",
+                "Type",
+                "Parameter",
+                "Current",
+                "Calibrated",
+                "Δ [%]",
+            ]
+        )
+        table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        table.horizontalHeader().setStretchLastSection(True)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionMode(QTableWidget.NoSelection)
+
+        changed_count = 0
+        for row, change in enumerate(changes):
+            old_value = float(change["old_value"])
+            new_value = float(change["new_value"])
+            if bool(change.get("changed", True)):
+                changed_count += 1
+            if abs(old_value) > 1.0e-15:
+                delta = (new_value - old_value) / abs(old_value) * 100.0
+                delta_text = f"{delta:.6g}"
+            elif abs(new_value) <= 1.0e-15:
+                delta_text = "0"
+            else:
+                delta_text = "n/a"
+
+            values = [
+                f"[{int(change['material_tag'])}] {change['material_name']}",
+                str(change["material_type"]),
+                str(change["parameter"]),
+                f"{old_value:.10g}",
+                f"{new_value:.10g}",
+                delta_text,
+            ]
+            for column, value in enumerate(values):
+                table.setItem(
+                    row,
+                    column,
+                    QTableWidgetItem(value),
+                )
+        root.addWidget(table, 1)
+
+        warning = QLabel(
+            f"{changed_count} parameter value(s) will change. "
+            "The operation is added to the project Undo stack, so Ctrl+Z "
+            "restores the previous values. Existing calibration Jobs remain "
+            "historical results from the completed batch."
+        )
+        warning.setWordWrap(True)
+        warning.setStyleSheet("color: #617080;")
+        root.addWidget(warning)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.button(QDialogButtonBox.Ok).setText("Apply to Model")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
