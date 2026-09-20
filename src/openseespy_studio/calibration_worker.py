@@ -11,10 +11,12 @@ from .calibration import (
     CalibrationCase,
     CalibrationWeights,
     build_grid_cases,
+    calibration_active_objectives,
     calibration_case_script,
     calibration_grid_size,
     calibration_parameters_from_payload,
     calibration_parameter_payload,
+    pareto_rank_calibration_cases,
     rank_calibration_cases,
     refine_calibration_parameters,
     score_cyclic_calibration,
@@ -413,12 +415,24 @@ def run_plan(plan_path: Path, result_path: Path) -> int:
                 f"Unsupported calibration strategy: {strategy}"
             )
 
+        active_objectives = calibration_active_objectives(weights)
         ranked = rank_calibration_cases(completed)
+        ranked = pareto_rank_calibration_cases(
+            ranked,
+            active_objectives,
+        )
+        pareto_front_count = sum(
+            1
+            for row in ranked
+            if bool(row.get("pareto_front"))
+        )
         payload = {
             "status": "completed",
             "error": "",
             "cases": ranked,
             "case_count": len(completed),
+            "pareto_objectives": active_objectives,
+            "pareto_front_count": pareto_front_count,
             **metadata,
         }
         _write_payload(result_path, payload)
@@ -432,6 +446,7 @@ def run_plan(plan_path: Path, result_path: Path) -> int:
                     1,
                 ),
                 "stop_reason": metadata.get("stop_reason", ""),
+                "pareto_front_count": pareto_front_count,
             }
         )
         return 0
