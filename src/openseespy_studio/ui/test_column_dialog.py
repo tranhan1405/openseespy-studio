@@ -129,10 +129,50 @@ class TestColumnWizard(QDialog):
         )
 
         self.integration = QComboBox()
-        self.integration.addItems(["Lobatto", "Legendre"])
+        for label, value in (
+            ("Lobatto · distributed plasticity", "Lobatto"),
+            ("Legendre · distributed plasticity", "Legendre"),
+            ("Radau · distributed plasticity", "Radau"),
+            ("HingeRadau · plastic hinge", "HingeRadau"),
+            ("HingeRadauTwo · plastic hinge", "HingeRadauTwo"),
+            ("HingeMidpoint · plastic hinge", "HingeMidpoint"),
+            ("HingeEndpoint · plastic hinge", "HingeEndpoint"),
+        ):
+            self.integration.addItem(label, value)
         self.integration_points = QSpinBox()
         self.integration_points.setRange(2, 50)
         self.integration_points.setValue(5)
+
+        self.hinge_group = QGroupBox("Plastic hinge integration")
+        hinge_form = QFormLayout(self.hinge_group)
+        self.hinge_i_section = QComboBox()
+        self.hinge_j_section = QComboBox()
+        self.interior_section = QComboBox()
+        self.hinge_i_length = _double(0.30, 0.0, 1.0e9)
+        self.hinge_j_length = _double(0.0, 0.0, 1.0e9)
+        hinge_form.addRow("Base / I-end section:", self.hinge_i_section)
+        hinge_form.addRow(
+            f"Base hinge length [{self.units.length}]:",
+            self.hinge_i_length,
+        )
+        hinge_form.addRow("Top / J-end section:", self.hinge_j_section)
+        hinge_form.addRow(
+            f"Top hinge length [{self.units.length}]:",
+            self.hinge_j_length,
+        )
+        hinge_form.addRow("Interior section:", self.interior_section)
+        hinge_note = QLabel(
+            "For a cantilever specimen, node I is the column base and node J "
+            "is the top. HingeRadau/HingeRadauTwo use explicit plastic-hinge "
+            "lengths. Use one force/dispBeamColumn element for the physical "
+            "member; use Lobatto/Radau when subdividing the member for "
+            "distributed plasticity."
+        )
+        hinge_note.setWordWrap(True)
+        hinge_note.setObjectName("Muted")
+        hinge_form.addRow(hinge_note)
+        self.hinge_group.setVisible(False)
+        self._refresh_hinge_section_combos()
 
         self.transformation = QComboBox()
         self.transformation.addItem("Auto · PDelta", ("auto", "PDelta"))
@@ -160,6 +200,7 @@ class TestColumnWizard(QDialog):
         geometry.addRow("Element formulation:", self.element_type)
         geometry.addRow("Beam integration:", self.integration)
         geometry.addRow("Integration points:", self.integration_points)
+        geometry.addRow(self.hinge_group)
         geometry.addRow("Geometric transformation:", self.transformation)
         body_layout.addWidget(geometry_group)
 
@@ -399,7 +440,17 @@ class TestColumnWizard(QDialog):
         self.planar.toggled.connect(self._update_preview)
         self.column_height.valueChanged.connect(self._update_preview)
         self.elements.valueChanged.connect(self._update_preview)
+        self.section.currentIndexChanged.connect(self._update_preview)
         self.element_type.currentTextChanged.connect(self._sync_formulation)
+        self.integration.currentIndexChanged.connect(self._sync_formulation)
+        for combo in (
+            self.hinge_i_section,
+            self.hinge_j_section,
+            self.interior_section,
+        ):
+            combo.currentIndexChanged.connect(self._update_preview)
+        self.hinge_i_length.valueChanged.connect(self._update_preview)
+        self.hinge_j_length.valueChanged.connect(self._update_preview)
         for toggle in (
             self.use_axial,
             self.use_lateral,
@@ -702,6 +753,33 @@ class TestColumnWizard(QDialog):
         else:
             self._update_preview()
 
+    def _refresh_hinge_section_combos(self) -> None:
+        if not hasattr(self, "hinge_i_section"):
+            return
+        combined = dict(self.project.sections)
+        combined.update(self._pending_sections)
+        for combo in (
+            self.hinge_i_section,
+            self.hinge_j_section,
+            self.interior_section,
+        ):
+            previous = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("Same as column section", None)
+            for tag in sorted(combined):
+                item = combined[tag]
+                suffix = " · new" if tag in self._pending_sections else ""
+                combo.addItem(
+                    f"{tag} - {item.name} ({item.section_type}){suffix}",
+                    tag,
+                )
+            if previous is not None:
+                index = combo.findData(int(previous))
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+            combo.blockSignals(False)
+
     def _refresh_section_combo(
         self,
         selected_tag: int | None = None,
@@ -734,6 +812,7 @@ class TestColumnWizard(QDialog):
             index = self.section.findData(int(current))
             if index >= 0:
                 self.section.setCurrentIndex(index)
+        self._refresh_hinge_section_combos()
 
     def _next_section_tag(self) -> int:
         used = set(self.project.sections) | set(self._pending_sections)
@@ -847,8 +926,23 @@ class TestColumnWizard(QDialog):
             "forceBeamColumn",
             "dispBeamColumn",
         }
+        integration_type = (
+            str(self.integration.currentData())
+            if self.integration.currentData() is not None
+            else "Lobatto"
+        )
+        hinge_mode = nonlinear and integration_type in {
+            "HingeRadau",
+            "HingeRadauTwo",
+            "HingeMidpoint",
+            "HingeEndpoint",
+        }
         self.integration.setEnabled(nonlinear)
-        self.integration_points.setEnabled(nonlinear)
+        self.integration_points.setEnabled(nonlinear and not hinge_mode)
+        self.hinge_group.setVisible(hinge_mode)
+        if hinge_mode and self.elements.value() != 1:
+            self.elements.setValue(1)
+        self.elements.setEnabled(not hinge_mode)
         self._update_preview()
 
     def _sync_optional_controls(self, *_args) -> None:
@@ -917,12 +1011,32 @@ class TestColumnWizard(QDialog):
                     else " · Rayleigh OFF"
                 )
             )
+        integration_type = (
+            str(self.integration.currentData())
+            if self.integration.currentData() is not None
+            else "Lobatto"
+        )
+        integration_note = integration_type
+        if integration_type in {
+            "HingeRadau",
+            "HingeRadauTwo",
+            "HingeMidpoint",
+            "HingeEndpoint",
+        }:
+            integration_note += (
+                f" · LpI={self.hinge_i_length.value():g} "
+                f"{self.units.length} · LpJ={self.hinge_j_length.value():g} "
+                f"{self.units.length}"
+            )
+        else:
+            integration_note += f" · {self.integration_points.value()} pts"
+
         self.preview.setText(
             f"Preview: 1D {axis}-axis column · {self.column_height.value():g} "
             f"{self.units.length} · {self.elements.value()} element(s) · "
             f"lateral {lateral} · "
             f"{'planar' if self.planar.isChecked() else '3D'} · "
-            f"{section_note} · base: {interface_note} · "
+            f"{section_note} · {integration_note} · base: {interface_note} · "
             + (", ".join(options) if options else "geometry only")
         )
 
@@ -1000,6 +1114,26 @@ class TestColumnWizard(QDialog):
                     "Activate at least one DOF for the Base Interface Model."
                 )
 
+        integration_type = (
+            str(self.integration.currentData())
+            if self.element_type.currentText() in {
+                "forceBeamColumn",
+                "dispBeamColumn",
+            }
+            else "Lobatto"
+        )
+        hinge_mode = integration_type in {
+            "HingeRadau",
+            "HingeRadauTwo",
+            "HingeMidpoint",
+            "HingeEndpoint",
+        }
+        column_section_tag = (
+            int(self.section.currentData())
+            if self.section.currentData() is not None
+            else None
+        )
+
         return TestColumnSpec(
             height=self.column_height.value(),
             num_elements=self.elements.value(),
@@ -1007,16 +1141,33 @@ class TestColumnWizard(QDialog):
             lateral_direction=lateral,
             planar=self.planar.isChecked(),
             replace_geometry=self.replace_geometry.isChecked(),
-            section_tag=(
-                int(self.section.currentData())
-                if self.section.currentData() is not None
-                else None
-            ),
+            section_tag=column_section_tag,
             transformation_tag=transform_tag,
             transformation_type=transform_type,
             element_type=self.element_type.currentText(),
-            integration_type=self.integration.currentText(),
+            integration_type=integration_type,
             integration_points=self.integration_points.value(),
+            hinge_i_section_tag=(
+                int(self.hinge_i_section.currentData())
+                if hinge_mode and self.hinge_i_section.currentData() is not None
+                else None
+            ),
+            hinge_j_section_tag=(
+                int(self.hinge_j_section.currentData())
+                if hinge_mode and self.hinge_j_section.currentData() is not None
+                else None
+            ),
+            interior_section_tag=(
+                int(self.interior_section.currentData())
+                if hinge_mode and self.interior_section.currentData() is not None
+                else None
+            ),
+            hinge_i_length=(
+                self.hinge_i_length.value() if hinge_mode else 0.0
+            ),
+            hinge_j_length=(
+                self.hinge_j_length.value() if hinge_mode else 0.0
+            ),
             base_support=(
                 "Fixed"
                 if interface_type != "Fixed base"

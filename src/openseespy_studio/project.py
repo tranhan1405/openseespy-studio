@@ -11,7 +11,7 @@ from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 27
+PROJECT_FORMAT_VERSION = 28
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
