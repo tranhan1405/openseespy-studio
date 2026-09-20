@@ -63,12 +63,28 @@ class TimeSeriesDialog(QDialog):
 
 
 class LoadPatternDialog(QDialog):
-    def __init__(self, time_series, pattern=None, *, next_tag=1, parent=None):
+    def __init__(
+        self,
+        time_series,
+        pattern=None,
+        *,
+        next_tag=1,
+        allow_uniform_excitation=True,
+        parent=None,
+    ):
         super().__init__(parent); self.setWindowTitle("Load Pattern Editor"); self.setModal(True)
         root=QVBoxLayout(self); form=QFormLayout()
         self.tag=QSpinBox(); self.tag.setRange(1,2147483647); self.tag.setValue(pattern.tag if pattern else next_tag)
         self.name=QLineEdit(pattern.name if pattern else f"Load Pattern {next_tag}")
-        self.kind=QComboBox(); self.kind.addItems(["Plain","UniformExcitation"]); self.kind.setCurrentText(pattern.pattern_type if pattern else "Plain")
+        self.kind=QComboBox()
+        kinds=["Plain"]
+        if allow_uniform_excitation or (
+            pattern is not None
+            and pattern.pattern_type == "UniformExcitation"
+        ):
+            kinds.append("UniformExcitation")
+        self.kind.addItems(kinds)
+        self.kind.setCurrentText(pattern.pattern_type if pattern else "Plain")
         self.ts=QComboBox()
         for tag in sorted(time_series):
             s=time_series[tag]; self.ts.addItem(f"{tag} - {s.name} ({s.series_type})",tag)
