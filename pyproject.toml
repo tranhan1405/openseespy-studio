@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openseespy-studio"
-version = "0.1.0"
+version = "0.2.0a1"
 description = "GUI pre/post processor for OpenSeesPy"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -32,3 +32,6 @@ openseespy_studio = [
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+markers = [
+  "integration: tests that execute the real OpenSeesPy solver runtime",
+]

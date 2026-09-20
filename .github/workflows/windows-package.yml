@@ -1,0 +1,98 @@
+name: windows-package
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "packaging/**"
+      - "src/openseespy_studio/**"
+      - "pyproject.toml"
+      - "run.py"
+      - ".github/workflows/windows-package.yml"
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-windows-installer:
+    runs-on: windows-latest
+    env:
+      STUDIO_VERSION: 0.2.0-alpha.1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Studio and packager
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pyinstaller
+
+      - name: Source runtime self-check
+        shell: pwsh
+        run: python -m openseespy_studio --self-check
+
+      - name: Build standalone application
+        shell: pwsh
+        run: pyinstaller packaging\openseespy_studio.spec --noconfirm --clean
+
+      - name: Packaged executable self-check
+        shell: pwsh
+        run: |
+          $process = Start-Process `
+            -FilePath ".\dist\OpenSeesPyStudio\OpenSeesPyStudio.exe" `
+            -ArgumentList "--self-check" `
+            -Wait `
+            -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged OpenSeesPy Studio self-check failed with exit code $($process.ExitCode)."
+          }
+          Write-Host "Packaged runtime self-check exited successfully."
+
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          $zip = ".\dist\OpenSeesPy-Studio-$env:STUDIO_VERSION-Windows-x64-portable.zip"
+          Compress-Archive -Path ".\dist\OpenSeesPyStudio\*" -DestinationPath $zip -Force
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build one-file Windows installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            throw "Inno Setup compiler was not found at $iscc"
+          }
+          & $iscc "/DRepoRoot=$env:GITHUB_WORKSPACE" "/DAppVersion=$env:STUDIO_VERSION" "packaging\windows_installer.iss"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup build failed."
+          }
+
+      - name: Verify installer artifact
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem ".\dist\installer\*.exe" | Select-Object -First 1
+          if (-not $installer) {
+            throw "Windows installer was not created."
+          }
+          Write-Host "Installer: $($installer.FullName)"
+          Write-Host "Size: $($installer.Length) bytes"
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenSeesPy-Studio-${{ env.STUDIO_VERSION }}-Windows-x64
+          path: |
+            dist/OpenSeesPy-Studio-*-Windows-x64-portable.zip
+            dist/installer/*.exe
+          if-no-files-found: error

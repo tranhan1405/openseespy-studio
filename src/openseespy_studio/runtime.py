@@ -6,6 +6,16 @@ import subprocess
 import sys
 
 
+_WORKER_SWITCHES = {
+    "openseespy_studio.solver_worker": "--solver-worker",
+    "openseespy_studio.calibration_worker": "--calibration-worker",
+}
+
+
+def is_frozen_runtime() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
 def studio_source_root() -> Path:
     """Return the source root that contains the openseespy_studio package."""
     return Path(__file__).resolve().parent.parent
@@ -27,6 +37,37 @@ def build_worker_pythonpath(existing: str = "") -> str:
     if source_key not in normalized:
         parts.insert(0, source_root)
     return os.pathsep.join(parts)
+
+
+def packaged_worker_executable() -> Path:
+    """Return the sibling console worker executable in a frozen build."""
+    executable = Path(sys.executable).resolve()
+    suffix = executable.suffix or (".exe" if sys.platform == "win32" else "")
+    worker = executable.with_name(
+        "OpenSeesPyStudioWorker" + suffix
+    )
+    if not worker.exists():
+        raise RuntimeError(
+            "Packaged solver worker is missing: "
+            f"{worker.name}. Reinstall OpenSeesPy Studio."
+        )
+    return worker
+
+
+def worker_process_command(
+    module_name: str,
+) -> tuple[str, list[str]]:
+    """Return program/prefix arguments for source or frozen workers."""
+    module = str(module_name)
+    if is_frozen_runtime():
+        try:
+            switch = _WORKER_SWITCHES[module]
+        except KeyError as exc:
+            raise ValueError(
+                f"Unsupported packaged worker module: {module}"
+            ) from exc
+        return str(packaged_worker_executable()), [switch]
+    return sys.executable, ["-m", module]
 
 
 def opensees_python_requirement(
@@ -58,16 +99,25 @@ def probe_opensees_runtime(
     env["PYTHONPATH"] = build_worker_pythonpath(
         env.get("PYTHONPATH", "")
     )
-    command = (
-        "import importlib.metadata as m, sys\n"
-        "import openseespy.opensees as ops\n"
-        "print('openseespy=' + m.version('openseespy'))\n"
-        "if sys.platform == 'win32':\n"
-        "    print('openseespywin=' + m.version('openseespywin'))\n"
-    )
+
+    if is_frozen_runtime() and os.path.abspath(executable) == os.path.abspath(
+        sys.executable
+    ):
+        executable = str(packaged_worker_executable())
+        args = ["--runtime-probe"]
+    else:
+        command = (
+            "import importlib.metadata as m, sys\n"
+            "import openseespy.opensees as ops\n"
+            "print('openseespy=' + m.version('openseespy'))\n"
+            "if sys.platform == 'win32':\n"
+            "    print('openseespywin=' + m.version('openseespywin'))\n"
+        )
+        args = ["-c", command]
+
     try:
         result = subprocess.run(
-            [executable, "-c", command],
+            [executable, *args],
             env=env,
             text=True,
             capture_output=True,

@@ -6,6 +6,7 @@ from openseespy_studio.runtime import (
     build_worker_pythonpath,
     opensees_python_requirement,
     studio_source_root,
+    worker_process_command,
 )
 
 
@@ -59,3 +60,36 @@ def test_windows_runtime_rejects_python_311():
 
 def test_windows_runtime_accepts_python_312():
     assert opensees_python_requirement("win32", (3, 12)) is None
+
+
+
+def test_worker_process_command_uses_python_module_in_source_runtime(
+    monkeypatch,
+):
+    monkeypatch.delattr(sys, "frozen", raising=False)
+
+    program, prefix = worker_process_command(
+        "openseespy_studio.solver_worker"
+    )
+
+    assert program == sys.executable
+    assert prefix == ["-m", "openseespy_studio.solver_worker"]
+
+
+def test_worker_process_command_uses_sibling_console_exe_when_frozen(
+    monkeypatch,
+    tmp_path,
+):
+    gui = tmp_path / "OpenSeesPyStudio.exe"
+    worker = tmp_path / "OpenSeesPyStudioWorker.exe"
+    gui.write_bytes(b"gui")
+    worker.write_bytes(b"worker")
+    monkeypatch.setattr(sys, "executable", str(gui))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    program, prefix = worker_process_command(
+        "openseespy_studio.calibration_worker"
+    )
+
+    assert program == str(worker.resolve())
+    assert prefix == ["--calibration-worker"]

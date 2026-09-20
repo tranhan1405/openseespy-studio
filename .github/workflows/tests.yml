@@ -19,6 +19,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
       - name: Install Qt runtime dependency
         run: |
@@ -32,4 +33,38 @@ jobs:
         run: python -m compileall -q src tests
 
       - name: Run unit tests
-        run: python -m pytest -q
+        run: python -m pytest -q -m "not integration"
+
+  opensees-integration:
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install runtime dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1
+
+      - name: Install Studio with runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+
+      - name: Verify OpenSeesPy import
+        run: |
+          python -c "import openseespy.opensees as ops; print('OpenSeesPy', ops.version())"
+
+      - name: Run real OpenSees integration test
+        run: python -m pytest -q -m integration tests/test_opensees_integration.py
+
+      - name: Run Studio runtime self-check
+        run: python -m openseespy_studio --self-check
