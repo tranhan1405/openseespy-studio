@@ -188,14 +188,22 @@ def test_test_column_builds_bond_sp01_zero_length_section():
     assert connection.section_tag == result.base_section_tag
     assert connection.generated_section_tag == result.base_section_tag
     assert connection.orient_x == pytest.approx((0.0, 0.0, 1.0))
-    assert connection.orient_y == pytest.approx((1.0, 0.0, 0.0))
+    assert connection.orient_y == pytest.approx((0.0, -1.0, 0.0))
     assert connection.do_rayleigh is False
+    assert result.base_constraint_tag is not None
+    assert connection.generated_constraint_tag == result.base_constraint_tag
 
-    # Z-axis column + X lateral: shear UX stays fixed; axial UZ and RY
-    # are released for P-M strain-penetration response.
+    # Z-axis column + X lateral: planar scaffolding fixes UY/RX/RZ.
+    # UX shear is transferred to the fixed footing by equalDOF, while
+    # UZ and RY remain interface freedoms carried by zeroLengthSection.
     assert project.model.nodes[result.base_node].fixity == (
-        1, 1, 0, 1, 0, 1
+        0, 1, 0, 1, 0, 1
     )
+    constraint = project.constraints[result.base_constraint_tag]
+    assert constraint.constraint_type == "equalDOF"
+    assert constraint.retained_node == result.base_ground_node
+    assert constraint.constrained_nodes == [result.base_node]
+    assert constraint.dofs == (1,)
 
     interface_section = project.sections[result.base_section_tag]
     assert interface_section.fiber_components[0].material_tag == 1
@@ -257,8 +265,67 @@ def test_removing_generated_connection_cleans_ground_and_interface_section():
     )
     ground = result.base_ground_node
     section_tag = result.base_section_tag
+    constraint_tag = result.base_constraint_tag
+    assert constraint_tag in project.constraints
+
     project.remove_connection(result.base_connection_tag)
 
     assert ground not in project.model.nodes
     assert section_tag not in project.sections
+    assert constraint_tag not in project.constraints
     assert 1 in project.sections
+
+
+
+@pytest.mark.parametrize(
+    ("axis", "expected_x", "expected_y"),
+    [
+        (1, (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+        (2, (0.0, 1.0, 0.0), (-1.0, 0.0, 0.0)),
+        (3, (0.0, 0.0, 1.0), (0.0, -1.0, 0.0)),
+    ],
+)
+def test_strain_penetration_orientation_matches_beam_local_axes(
+    axis,
+    expected_x,
+    expected_y,
+):
+    from openseespy_studio.test_column import zero_length_section_orientation
+
+    x, y = zero_length_section_orientation(axis)
+    assert x == pytest.approx(expected_x)
+    assert y == pytest.approx(expected_y)
+
+
+def test_3d_strain_penetration_constrains_both_transverse_shear_dofs():
+    project = ProjectDatabase(
+        units={"length": "mm", "force": "N", "time": "s"}
+    )
+    for material in _materials().values():
+        project.add_material(material)
+    project.add_section(_fiber_section())
+
+    result = build_test_column(
+        project,
+        TestColumnSpec(
+            height=3000.0,
+            axis=3,
+            lateral_direction=1,
+            planar=False,
+            section_tag=1,
+            base_interface_type="Bond_SP01 strain penetration",
+            strain_penetration_bond_material_tag=3,
+        ),
+    )
+
+    assert project.model.nodes[result.base_node].fixity == (
+        0, 0, 0, 0, 0, 0
+    )
+    assert result.base_constraint_tag is not None
+    constraint = project.constraints[result.base_constraint_tag]
+    assert constraint.dofs == (1, 2)
+
+    connection = project.connections[result.base_connection_tag]
+    assert connection.connection_type == "zeroLengthSection"
+    assert connection.orient_x == pytest.approx((0.0, 0.0, 1.0))
+    assert connection.orient_y == pytest.approx((0.0, -1.0, 0.0))
