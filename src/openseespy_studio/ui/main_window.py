@@ -10956,22 +10956,6 @@ class MainWindow(QMainWindow):
                     self._create_analysis_template(name)
                 )
             menu.addSeparator()
-            insert_menu = menu.addMenu("Add Result Request")
-            for analysis_type in (
-                "Static",
-                "Pushover",
-                "Cyclic",
-                "Transient",
-                "Modal",
-            ):
-                action = insert_menu.addAction(
-                    f"{analysis_type} Analysis"
-                )
-                action.triggered.connect(
-                    lambda checked=False, kind=analysis_type:
-                    self._create_analysis_of_type(kind)
-                )
-            menu.addSeparator()
             action = menu.addAction("New Analysis...")
             action.triggered.connect(self._create_analysis)
             menu.exec(self.tree.viewport().mapToGlobal(position))
