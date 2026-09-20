@@ -1000,6 +1000,7 @@ def test_generated_2d_beam_uniform_load_runs_in_real_opensees(
 
     payload = json.loads(result_path.read_text(encoding="utf-8"))
     assert payload["status"] == "completed"
+    assert payload["results"]["model"] == {"ndm": 2, "ndf": 3}
     tip_uy = payload["results"]["final"]["node_displacements"]["2"][1]
     expected = -1000.0 * 4.0**4 / (
         8.0 * 200.0e9 * 8.0e-5
