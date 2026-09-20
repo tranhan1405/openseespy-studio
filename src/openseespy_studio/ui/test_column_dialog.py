@@ -177,6 +177,7 @@ class TestColumnWizard(QDialog):
             "Fixed base",
             "Translational slip spring",
             "Rotational spring",
+            "Bond_SP01 strain penetration",
             "Custom zeroLength",
         ])
         boundary.addRow("Base Interface Model:", self.base_interface)
@@ -198,8 +199,8 @@ class TestColumnWizard(QDialog):
         self.interface_rows: dict[
             int, tuple[QCheckBox, QComboBox]
         ] = {}
-        interface_dofs = QGroupBox("zeroLength spring DOFs")
-        interface_dofs_layout = QVBoxLayout(interface_dofs)
+        self.interface_dofs_group = QGroupBox("zeroLength spring DOFs")
+        interface_dofs_layout = QVBoxLayout(self.interface_dofs_group)
         for dof, label in (
             (1, "UX"), (2, "UY"), (3, "UZ"),
             (4, "RX"), (5, "RY"), (6, "RZ"),
@@ -227,7 +228,31 @@ class TestColumnWizard(QDialog):
         material_buttons.addWidget(self.new_interface_material)
         material_buttons.addStretch(1)
         interface_dofs_layout.addLayout(material_buttons)
-        boundary_layout.addWidget(interface_dofs)
+        boundary_layout.addWidget(self.interface_dofs_group)
+
+        self.strain_penetration_group = QGroupBox(
+            "Bond_SP01 strain penetration · zeroLengthSection"
+        )
+        strain_form = QFormLayout(self.strain_penetration_group)
+        self.strain_bond_material = QComboBox()
+        self.strain_bond_material.currentIndexChanged.connect(
+            self._update_preview
+        )
+        strain_form.addRow("Bond_SP01 material:", self.strain_bond_material)
+
+        self.strain_note = QLabel(
+            "Studio clones the selected column Fiber section, keeps its "
+            "concrete fibers, and replaces steel/rebar fibers with Bond_SP01. "
+            "The resulting Fiber section is assigned to a zeroLengthSection. "
+            "Lateral shear translation remains restrained; axial deformation "
+            "and flexural rotation are carried by the interface section."
+        )
+        self.strain_note.setWordWrap(True)
+        self.strain_note.setStyleSheet(
+            "padding: 6px; background: #eef4fb; color: #40566c;"
+        )
+        strain_form.addRow(self.strain_note)
+        boundary_layout.addWidget(self.strain_penetration_group)
 
         self.interface_rayleigh = QCheckBox(
             "Include base zeroLength in Rayleigh damping"
@@ -409,6 +434,31 @@ class TestColumnWizard(QDialog):
                     combo.setCurrentIndex(combo_index)
             combo.blockSignals(False)
 
+        previous_bond = (
+            self.strain_bond_material.currentData()
+            if hasattr(self, "strain_bond_material")
+            else None
+        )
+        if hasattr(self, "strain_bond_material"):
+            self.strain_bond_material.blockSignals(True)
+            self.strain_bond_material.clear()
+            for tag in sorted(materials):
+                material = materials[tag]
+                if material.material_type != "Bond_SP01":
+                    continue
+                suffix = " · new" if tag in self._pending_materials else ""
+                self.strain_bond_material.addItem(
+                    f"{tag} - {material.name}{suffix}",
+                    tag,
+                )
+            if previous_bond is not None:
+                bond_index = self.strain_bond_material.findData(
+                    int(previous_bond)
+                )
+                if bond_index >= 0:
+                    self.strain_bond_material.setCurrentIndex(bond_index)
+            self.strain_bond_material.blockSignals(False)
+
     def _preferred_material_tag(
         self,
         material_types: tuple[str, ...],
@@ -445,6 +495,10 @@ class TestColumnWizard(QDialog):
 
         self._pending_materials[material.tag] = material
         self._refresh_interface_material_combos(material.tag)
+        if material.material_type == "Bond_SP01":
+            bond_index = self.strain_bond_material.findData(material.tag)
+            if bond_index >= 0:
+                self.strain_bond_material.setCurrentIndex(bond_index)
         self._update_preview()
 
     def new_materials(self) -> list[MaterialData]:
@@ -487,9 +541,15 @@ class TestColumnWizard(QDialog):
         if active:
             self.base_support.setCurrentText("Fixed")
 
+        strain_mode = interface == "Bond_SP01 strain penetration"
+        self.interface_dofs_group.setVisible(active and not strain_mode)
+        self.strain_penetration_group.setVisible(strain_mode)
+
         for check, combo in self.interface_rows.values():
-            check.setEnabled(active)
-            combo.setEnabled(active and check.isChecked())
+            check.setEnabled(active and not strain_mode)
+            combo.setEnabled(
+                active and not strain_mode and check.isChecked()
+            )
         self.new_interface_material.setEnabled(active)
         self.interface_rayleigh.setEnabled(active)
         self.interface_warning.setVisible(active)
@@ -511,6 +571,11 @@ class TestColumnWizard(QDialog):
                 dof,
                 ("Pinching4", "Hysteretic", "Steel02"),
             )
+        elif interface == "Bond_SP01 strain penetration":
+            for check, _combo in self.interface_rows.values():
+                check.blockSignals(True)
+                check.setChecked(False)
+                check.blockSignals(False)
         elif interface == "Custom zeroLength":
             if not any(
                 check.isChecked()
@@ -526,7 +591,9 @@ class TestColumnWizard(QDialog):
                 check.blockSignals(False)
 
         for check, combo in self.interface_rows.values():
-            combo.setEnabled(active and check.isChecked())
+            combo.setEnabled(
+                active and not strain_mode and check.isChecked()
+            )
         self._update_preview()
 
     def _lateral_changed(self, *_args) -> None:
@@ -726,6 +793,17 @@ class TestColumnWizard(QDialog):
         interface = self.base_interface.currentText()
         if interface == "Fixed base":
             interface_note = "fixed base"
+        elif interface == "Bond_SP01 strain penetration":
+            bond_tag = self.strain_bond_material.currentData()
+            interface_note = (
+                "Bond_SP01 strain penetration · "
+                f"zeroLengthSection · Bond material {bond_tag if bond_tag is not None else 'not selected'}"
+                + (
+                    " · Rayleigh ON"
+                    if self.interface_rayleigh.isChecked()
+                    else " · Rayleigh OFF"
+                )
+            )
         else:
             active = [
                 f"{('UX','UY','UZ','RX','RY','RZ')[dof - 1]}→"
@@ -790,7 +868,28 @@ class TestColumnWizard(QDialog):
 
         interface_type = self.base_interface.currentText()
         interface_materials: dict[int, int] = {}
-        if interface_type != "Fixed base":
+        strain_bond_tag: int | None = None
+        if interface_type == "Bond_SP01 strain penetration":
+            if self.section.currentData() is None:
+                raise ValueError(
+                    "Assign a Fiber column section before enabling "
+                    "Bond_SP01 strain penetration."
+                )
+            combined_sections = dict(self.project.sections)
+            combined_sections.update(self._pending_sections)
+            source_section = combined_sections.get(
+                int(self.section.currentData())
+            )
+            if source_section is None or source_section.section_type != "Fiber":
+                raise ValueError(
+                    "Bond_SP01 strain penetration requires a Fiber column section."
+                )
+            if self.strain_bond_material.currentData() is None:
+                raise ValueError(
+                    "Create/select a Bond_SP01 material for strain penetration."
+                )
+            strain_bond_tag = int(self.strain_bond_material.currentData())
+        elif interface_type != "Fixed base":
             for dof, (check, combo) in self.interface_rows.items():
                 if not check.isChecked():
                     continue
@@ -834,6 +933,7 @@ class TestColumnWizard(QDialog):
                 if interface_type != "Fixed base"
                 else False
             ),
+            strain_penetration_bond_material_tag=strain_bond_tag,
             top_mass=(
                 self.top_mass.value()
                 if self.use_mass.isChecked()
