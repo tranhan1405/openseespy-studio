@@ -4,12 +4,14 @@ import pytest
 
 from openseespy_studio.generator import (
     connection_to_openseespy,
+    column_response_spec,
     to_openseespy,
 )
 from openseespy_studio.project import (
     ConnectionData,
     FiberComponentData,
     MATERIAL_DEFAULTS,
+    AnalysisSettingsData,
     MaterialData,
     ProjectDatabase,
     SectionData,
@@ -358,3 +360,118 @@ def test_generated_constraint_metadata_round_trip():
     assert connection.generated_constraint_tag == result.base_constraint_tag
     assert connection.generated_section_tag == result.base_section_tag
     assert result.base_constraint_tag in restored.constraints
+
+
+
+def test_test_column_response_spec_identifies_base_hinge_and_bond_fibers():
+    project = ProjectDatabase(
+        units={"length": "mm", "force": "N", "time": "s"}
+    )
+    for material in _materials().values():
+        project.add_material(material)
+    project.add_section(_fiber_section())
+
+    built = build_test_column(
+        project,
+        TestColumnSpec(
+            height=3000.0,
+            axis=3,
+            lateral_direction=1,
+            section_tag=1,
+            base_interface_type="Bond_SP01 strain penetration",
+            strain_penetration_bond_material_tag=3,
+        ),
+    )
+    analysis = AnalysisSettingsData(
+        1,
+        "Cyclic",
+        "Cyclic",
+        control_node=built.top_node,
+        control_dof=1,
+        cyclic_targets=[10.0, -10.0, 0.0],
+        cyclic_increment=2.0,
+    )
+
+    spec = column_response_spec(
+        project.model,
+        sections=project.sections,
+        materials=project.materials,
+        transformations=project.transformations,
+        connections=project.connections,
+        active_analysis=analysis,
+    )
+
+    assert spec is not None
+    assert spec["element_tag"] == built.element_tags[0]
+    assert spec["base_node"] == built.base_node
+    assert spec["top_node"] == built.top_node
+    assert spec["moment_component"] == "My"
+    assert spec["moment_index"] == 2
+    assert spec["moment_sign"] == pytest.approx(-1.0)
+    assert spec["interface_tag"] == built.base_connection_tag
+    assert len(spec["base_fibers"]) >= 2
+    assert {row["material_type"] for row in spec["base_fibers"]} >= {
+        "ReinforcingSteel",
+        "Concrete02",
+    }
+    assert len(spec["interface_fibers"]) == 2
+    assert all(
+        row["material_type"] == "Bond_SP01"
+        for row in spec["interface_fibers"]
+    )
+
+
+def test_full_generator_captures_specimen_histories_for_active_analysis():
+    project = ProjectDatabase(
+        units={"length": "mm", "force": "N", "time": "s"}
+    )
+    for material in _materials().values():
+        project.add_material(material)
+    project.add_section(_fiber_section())
+
+    built = build_test_column(
+        project,
+        TestColumnSpec(
+            height=3000.0,
+            section_tag=1,
+            lateral_reference_load=1.0,
+            base_interface_type="Bond_SP01 strain penetration",
+            strain_penetration_bond_material_tag=3,
+        ),
+    )
+    project.add_analysis(
+        AnalysisSettingsData(
+            1,
+            "Push",
+            "Pushover",
+            steps=2,
+            control_node=built.top_node,
+            control_dof=1,
+            displacement_increment=1.0,
+        )
+    )
+    project.active_analysis_tag = 1
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        time_series=project.time_series,
+        load_patterns=project.load_patterns,
+        nodal_loads=project.nodal_loads,
+        analyses=project.analyses,
+        active_analysis_tag=project.active_analysis_tag,
+        units=project.units,
+    )
+
+    assert "'schema_version': 11" in script
+    assert "_studio_specimen_response_spec" in script
+    assert "'section_deformation': []" in script
+    assert "'interface_deformation': []" in script
+    assert "'interface_fibers': []" in script
+    assert "'section', _studio_specimen_section, 'deformation'" in script
+    assert "'section', 'fiber'" in script
+    assert "'slip':" in script

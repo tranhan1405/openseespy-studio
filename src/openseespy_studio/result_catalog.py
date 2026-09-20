@@ -113,6 +113,16 @@ def result_choices_for_analysis(
             )
         )
 
+    choices.append(
+        ResultChoice(
+            "Nonlinear Results",
+            "1D Column / Specimen Response",
+            "SpecimenResponse",
+            "1D Column / Specimen Response",
+            {},
+        )
+    )
+
     choices.extend(
         [
             ResultChoice(

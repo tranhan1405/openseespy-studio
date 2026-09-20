@@ -28,6 +28,10 @@ from openseespy_studio.postprocess import (
     section_component_samples,
     time_history_node_tags,
     time_history_series,
+    column_fiber_history_catalog,
+    column_moment_curvature_curve,
+    column_response_summary,
+    column_rotation_decomposition,
 )
 from openseespy_studio.project import (
     ElementLoadData,
@@ -984,3 +988,162 @@ def test_convergence_trace_falls_back_to_final_norm_without_history():
     assert trace["converged"] == [4.0]
     assert trace["coordinate_iteration"] == [0.0, 4.0]
     assert trace["coordinate"] == [0.0, 1.0]
+
+
+
+def _specimen_history_result():
+    return {
+        "specimen": {
+            "kind": "test-column",
+            "element_tag": 10,
+            "base_node": 1,
+            "top_node": 2,
+            "ground_node": 3,
+            "height": 3000.0,
+            "lateral_direction": 1,
+            "bending_rotation_dof": 5,
+            "moment_component": "My",
+            "moment_index": 2,
+            "moment_sign": -1.0,
+            "interface_type": "zeroLengthSection",
+            "interface_name": "Bond_SP01 strain penetration",
+        },
+        "history": {
+            "time": [1.0, 2.0],
+            "nodes": {
+                "1": {
+                    "disp": [
+                        [1.5, 0.0, 0.0, 0.0, 0.0001, 0.0],
+                        [3.0, 0.0, 0.0, 0.0, 0.0002, 0.0],
+                    ]
+                },
+                "2": {
+                    "disp": [
+                        [15.0, 0.0, 0.0, 0.0, 0.004, 0.0],
+                        [30.0, 0.0, 0.0, 0.0, 0.008, 0.0],
+                    ]
+                },
+                "3": {
+                    "disp": [
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    ]
+                },
+            },
+            "specimen": {
+                "section_force": [
+                    [100.0, 0.0, -10.0, 0.0],
+                    [100.0, 0.0, -20.0, 0.0],
+                ],
+                "section_deformation": [
+                    [0.0, 0.0, -0.001, 0.0],
+                    [0.0, 0.0, -0.002, 0.0],
+                ],
+                "interface_force": [
+                    [100.0, 0.0, -9.0, 0.0],
+                    [100.0, 0.0, -18.0, 0.0],
+                ],
+                "interface_deformation": [
+                    [0.0, 0.0, -0.0001, 0.0],
+                    [0.0, 0.0, -0.0002, 0.0],
+                ],
+                "base_fibers": [
+                    [
+                        {
+                            "label": "steel_max",
+                            "material_tag": 2,
+                            "material_type": "ReinforcingSteel",
+                            "y": 0.0,
+                            "z": 150.0,
+                            "stress": 200.0,
+                            "strain": 0.001,
+                        }
+                    ],
+                    [
+                        {
+                            "label": "steel_max",
+                            "material_tag": 2,
+                            "material_type": "ReinforcingSteel",
+                            "y": 0.0,
+                            "z": 150.0,
+                            "stress": 400.0,
+                            "strain": 0.002,
+                        }
+                    ],
+                ],
+                "interface_fibers": [
+                    [
+                        {
+                            "label": "bond_max",
+                            "material_tag": 3,
+                            "material_type": "Bond_SP01",
+                            "y": 0.0,
+                            "z": 150.0,
+                            "stress": 180.0,
+                            "slip": 0.5,
+                        }
+                    ],
+                    [
+                        {
+                            "label": "bond_max",
+                            "material_tag": 3,
+                            "material_type": "Bond_SP01",
+                            "y": 0.0,
+                            "z": 150.0,
+                            "stress": 350.0,
+                            "slip": 1.0,
+                        }
+                    ],
+                ],
+            },
+        },
+    }
+
+
+def test_test_column_moment_curvature_uses_local_to_global_sign():
+    curvature, moment, component = column_moment_curvature_curve(
+        _specimen_history_result()
+    )
+
+    assert component == "My"
+    assert curvature == pytest.approx([0.0, 0.001, 0.002])
+    assert moment == pytest.approx([0.0, 10.0, 20.0])
+
+
+def test_test_column_rotation_decomposition_separates_interface_terms():
+    rows = column_rotation_decomposition(_specimen_history_result())
+
+    assert rows["time"] == [1.0, 2.0]
+    assert rows["total"] == pytest.approx([0.005, 0.01])
+    assert rows["interface_rotation"] == pytest.approx([0.0001, 0.0002])
+    assert rows["interface_slip"] == pytest.approx([0.0005, 0.001])
+    assert rows["column"] == pytest.approx([0.0044, 0.0088])
+
+
+def test_test_column_fiber_history_catalog_distinguishes_strain_and_bond_slip():
+    catalog = column_fiber_history_catalog(_specimen_history_result())
+    keys = {row["key"] for row in catalog}
+
+    assert "base_fibers:steel_max:stress" in keys
+    assert "base_fibers:steel_max:strain" in keys
+    assert "interface_fibers:bond_max:stress" in keys
+    assert "interface_fibers:bond_max:slip" in keys
+
+    slip = next(
+        row
+        for row in catalog
+        if row["key"] == "interface_fibers:bond_max:slip"
+    )
+    assert slip["y"] == pytest.approx([0.5, 1.0])
+    assert slip["latest"] == pytest.approx(1.0)
+
+
+def test_test_column_response_summary_reports_peak_diagnostics():
+    summary = column_response_summary(_specimen_history_result())
+
+    assert summary["moment_component"] == "My"
+    assert summary["max_abs_moment"] == pytest.approx(20.0)
+    assert summary["max_abs_curvature"] == pytest.approx(0.002)
+    assert summary["max_abs_total_drift"] == pytest.approx(0.01)
+    assert summary["max_abs_interface_rotation"] == pytest.approx(0.0002)
+    assert summary["max_abs_interface_slip_drift"] == pytest.approx(0.001)

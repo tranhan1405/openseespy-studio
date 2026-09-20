@@ -726,6 +726,289 @@ def cyclic_displacement_steps(
     return steps
 
 
+
+def _vector_unit(
+    values: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    norm = math.sqrt(sum(float(value) ** 2 for value in values))
+    if norm <= 1.0e-14:
+        raise ValueError("Cannot normalize a zero vector.")
+    return tuple(float(value) / norm for value in values)
+
+
+def _vector_cross(
+    a: tuple[float, float, float],
+    b: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    return (
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
+
+
+def _vector_dot(
+    a: tuple[float, float, float],
+    b: tuple[float, float, float],
+) -> float:
+    return sum(float(x) * float(y) for x, y in zip(a, b))
+
+
+def _critical_section_fibers(
+    section: SectionData | None,
+    materials: dict[int, MaterialData] | None,
+    *,
+    coordinate: str,
+    material_types: set[str],
+    label_prefix: str,
+) -> list[dict[str, object]]:
+    if section is None or section.section_type != "Fiber":
+        return []
+    if coordinate not in {"y", "z"}:
+        raise ValueError("Critical fiber coordinate must be y or z.")
+
+    candidates = []
+    for fiber in section.compiled_fibers():
+        material = (materials or {}).get(int(fiber.material_tag))
+        if material is None or material.material_type not in material_types:
+            continue
+        candidates.append(fiber)
+    if not candidates:
+        return []
+
+    key = (
+        (lambda fiber: float(fiber.y))
+        if coordinate == "y"
+        else (lambda fiber: float(fiber.z))
+    )
+    selected = [
+        ("min", min(candidates, key=key)),
+        ("max", max(candidates, key=key)),
+    ]
+    rows: list[dict[str, object]] = []
+    seen: set[tuple[float, float, int]] = set()
+    for suffix, fiber in selected:
+        identity = (
+            round(float(fiber.y), 14),
+            round(float(fiber.z), 14),
+            int(fiber.material_tag),
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        material = (materials or {}).get(int(fiber.material_tag))
+        rows.append({
+            "label": f"{label_prefix}_{suffix}",
+            "y": float(fiber.y),
+            "z": float(fiber.z),
+            "area": float(fiber.area),
+            "material_tag": int(fiber.material_tag),
+            "material_type": (
+                material.material_type if material is not None else "Unknown"
+            ),
+        })
+    return rows
+
+
+def column_response_spec(
+    model: StructuralModel,
+    *,
+    sections: dict[int, SectionData] | None = None,
+    materials: dict[int, MaterialData] | None = None,
+    transformations: dict[int, TransformationData] | None = None,
+    connections: dict[int, ConnectionData] | None = None,
+    active_analysis: AnalysisSettingsData | None = None,
+) -> dict[str, object] | None:
+    """Infer instrumentation for a Quick 1D Column specimen.
+
+    The builder tags its member elements with group="test-column". This
+    helper keeps the instrumentation automatic and does not require a second
+    user-facing recorder setup.
+    """
+    members = sorted(
+        (
+            element
+            for element in model.elements.values()
+            if element.group == "test-column"
+        ),
+        key=lambda element: int(element.tag),
+    )
+    if not members:
+        return None
+
+    base_element = members[0]
+    top_element = members[-1]
+    base_node = int(base_element.i)
+    top_node = int(top_element.j)
+    base_xyz = model.nodes[base_node].xyz
+    top_xyz = model.nodes[top_node].xyz
+    member_vector = tuple(
+        float(top_xyz[index]) - float(base_xyz[index])
+        for index in range(3)
+    )
+    local_x = _vector_unit(member_vector)
+    height = math.sqrt(sum(value * value for value in member_vector))
+    axis = max(range(3), key=lambda index: abs(local_x[index])) + 1
+
+    lateral = (
+        int(active_analysis.control_dof)
+        if active_analysis is not None
+        and int(active_analysis.control_dof) in (1, 2, 3)
+        else 1
+    )
+    if lateral == axis:
+        lateral = next(direction for direction in (1, 2, 3) if direction != axis)
+    global_lateral = tuple(
+        1.0 if index == lateral - 1 else 0.0
+        for index in range(3)
+    )
+
+    transformation = (
+        (transformations or {}).get(int(base_element.transf_tag))
+        if base_element.transf_tag is not None
+        else None
+    )
+    vecxz = (
+        tuple(float(value) for value in transformation.vecxz)
+        if transformation is not None
+        else ((1.0, 0.0, 0.0) if axis == 3 else (0.0, 0.0, 1.0))
+    )
+    local_y = _vector_unit(_vector_cross(vecxz, local_x))
+    local_z = _vector_unit(_vector_cross(local_x, local_y))
+    projection_y = _vector_dot(global_lateral, local_y)
+    projection_z = _vector_dot(global_lateral, local_z)
+
+    if abs(projection_y) >= abs(projection_z):
+        moment_component = "Mz"
+        moment_index = 1
+        bending_coordinate = "y"
+        component_axis = local_z
+    else:
+        moment_component = "My"
+        moment_index = 2
+        bending_coordinate = "z"
+        component_axis = local_y
+
+    global_bending_axis = _vector_unit(
+        _vector_cross(local_x, global_lateral)
+    )
+    sign_value = _vector_dot(component_axis, global_bending_axis)
+    moment_sign = 1.0 if sign_value >= 0.0 else -1.0
+
+    hinge_integrations = {
+        "HingeRadau",
+        "HingeRadauTwo",
+        "HingeMidpoint",
+        "HingeEndpoint",
+        "ConcentratedPlasticity",
+    }
+    base_section_tag = (
+        base_element.hinge_i_section_tag
+        if base_element.integration_type in hinge_integrations
+        and base_element.hinge_i_section_tag is not None
+        else base_element.section_tag
+    )
+    base_section = (
+        (sections or {}).get(int(base_section_tag))
+        if base_section_tag is not None
+        else None
+    )
+
+    base_fibers = []
+    base_fibers.extend(
+        _critical_section_fibers(
+            base_section,
+            materials,
+            coordinate=bending_coordinate,
+            material_types={"Steel01", "Steel02", "ReinforcingSteel"},
+            label_prefix="steel",
+        )
+    )
+    base_fibers.extend(
+        _critical_section_fibers(
+            base_section,
+            materials,
+            coordinate=bending_coordinate,
+            material_types={
+                "Concrete01",
+                "Concrete02",
+                "Concrete04",
+                "FRPConfinedConcrete02",
+            },
+            label_prefix="concrete",
+        )
+    )
+
+    interface = next(
+        (
+            connection
+            for connection in (connections or {}).values()
+            if connection.node_j == base_node
+            and connection.generated_ground_node is not None
+        ),
+        None,
+    )
+    interface_fibers: list[dict[str, object]] = []
+    interface_section_tag: int | None = None
+    if interface is not None and interface.connection_type == "zeroLengthSection":
+        interface_section_tag = interface.section_tag
+        interface_section = (
+            (sections or {}).get(int(interface_section_tag))
+            if interface_section_tag is not None
+            else None
+        )
+        interface_fibers = _critical_section_fibers(
+            interface_section,
+            materials,
+            coordinate=bending_coordinate,
+            material_types={"Bond_SP01"},
+            label_prefix="bond",
+        )
+
+    return {
+        "kind": "test-column",
+        "element_tag": int(base_element.tag),
+        "base_node": base_node,
+        "top_node": top_node,
+        "height": float(height),
+        "axis": int(axis),
+        "lateral_direction": int(lateral),
+        "bending_rotation_dof": int(
+            ({1, 2, 3} - {axis, lateral}).pop() + 3
+        ),
+        "section_number": 1,
+        "base_section_tag": (
+            int(base_section_tag) if base_section_tag is not None else None
+        ),
+        "moment_component": moment_component,
+        "moment_index": int(moment_index),
+        "moment_sign": float(moment_sign),
+        "bending_coordinate": bending_coordinate,
+        "base_fibers": base_fibers,
+        "interface_tag": (
+            int(interface.tag) if interface is not None else None
+        ),
+        "interface_type": (
+            str(interface.connection_type) if interface is not None else "Fixed base"
+        ),
+        "interface_name": (
+            str(interface.name) if interface is not None else "Fixed base"
+        ),
+        "interface_section_tag": (
+            int(interface_section_tag)
+            if interface_section_tag is not None
+            else None
+        ),
+        "ground_node": (
+            int(interface.generated_ground_node)
+            if interface is not None
+            and interface.generated_ground_node is not None
+            else None
+        ),
+        "interface_fibers": interface_fibers,
+    }
+
+
 def analysis_to_openseespy(
     settings: AnalysisSettingsData,
     *,
@@ -736,6 +1019,7 @@ def analysis_to_openseespy(
     plain_pattern_tags: list[int] | None = None,
     monitor_node: int | None = None,
     fiber_response_specs: dict[int, dict[str, object]] | None = None,
+    specimen_response_spec: dict[str, object] | None = None,
 ) -> list[str]:
     node_tags = list(node_tags or [])
     element_tags = list(element_tags or [])
@@ -743,6 +1027,7 @@ def analysis_to_openseespy(
     support_node_tags = list(support_node_tags or [])
     plain_pattern_tags = list(plain_pattern_tags or [])
     fiber_response_specs = dict(fiber_response_specs or {})
+    specimen_response_spec = dict(specimen_response_spec or {})
     cyclic_steps = (
         cyclic_displacement_steps(
             settings.cyclic_targets,
@@ -778,7 +1063,7 @@ def analysis_to_openseespy(
         "    return _iterations, _norm, _norms",
         "",
         "_studio_results = {",
-        "    'schema_version': 10,",
+        "    'schema_version': 11,",
         "    'analysis': {",
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
@@ -797,6 +1082,7 @@ def analysis_to_openseespy(
         f"        'rayleigh_mode_j': {settings.rayleigh_mode_j},",
         f"        'eigen_solver': {settings.eigen_solver!r},",
         "    },",
+        "    'specimen': " + repr(specimen_response_spec) + ",",
         "    'final': {},",
         "    'convergence': {",
         f"        'test': {settings.test!r},",
@@ -814,7 +1100,12 @@ def analysis_to_openseespy(
         "    'history': {'time': [], 'monitor_node': "
         f"{monitor_node}, 'control_dof': {settings.control_dof}, "
         "'displacement': [], 'base_shear': [], "
-        "'base_reactions': [], 'nodes': {}}," ,
+        "'base_reactions': [], 'nodes': {}, "
+        "'specimen': {"
+        "'section_force': [], 'section_deformation': [], "
+        "'base_fibers': [], 'interface_force': [], "
+        "'interface_deformation': [], 'interface_fibers': []"
+        "}}," ,
         "    'modes': {},",
         "}",
         f"_studio_node_tags = {node_tags!r}",
@@ -829,6 +1120,7 @@ def analysis_to_openseespy(
         f"_studio_support_node_tags = {support_node_tags!r}",
         f"_studio_plain_pattern_tags = {plain_pattern_tags!r}",
         f"_studio_fiber_response_specs = {fiber_response_specs!r}",
+        f"_studio_specimen_response_spec = {specimen_response_spec!r}",
         f"_studio_monitor_node = {monitor_node}",
         f"ops.constraints('{settings.constraints_handler}')",
         f"ops.numberer('{settings.numberer}')",
@@ -1612,6 +1904,155 @@ def analysis_to_openseespy(
     lines.append(
         "    _studio_results['history']['displacement'].append(_studio_disp)"
     )
+    lines.append("    if _studio_specimen_response_spec:")
+    lines.append(
+        "        _studio_specimen_history = "
+        "_studio_results['history']['specimen']"
+    )
+    lines.append(
+        "        _studio_specimen_element = "
+        "int(_studio_specimen_response_spec.get('element_tag', 0))"
+    )
+    lines.append(
+        "        _studio_specimen_section = "
+        "int(_studio_specimen_response_spec.get('section_number', 1))"
+    )
+    lines.append("        try:")
+    lines.append(
+        "            _studio_sec_force = ops.eleResponse("
+        "_studio_specimen_element, 'section', "
+        "_studio_specimen_section, 'force') or []"
+    )
+    lines.append(
+        "            _studio_sec_force = "
+        "[float(v) for v in _studio_sec_force]"
+    )
+    lines.append("        except Exception:")
+    lines.append("            _studio_sec_force = []")
+    lines.append("        try:")
+    lines.append(
+        "            _studio_sec_def = ops.eleResponse("
+        "_studio_specimen_element, 'section', "
+        "_studio_specimen_section, 'deformation') or []"
+    )
+    lines.append(
+        "            _studio_sec_def = [float(v) for v in _studio_sec_def]"
+    )
+    lines.append("        except Exception:")
+    lines.append("            _studio_sec_def = []")
+    lines.append(
+        "        _studio_specimen_history['section_force'].append("
+        "_studio_sec_force)"
+    )
+    lines.append(
+        "        _studio_specimen_history['section_deformation'].append("
+        "_studio_sec_def)"
+    )
+    lines.append("        _studio_base_fiber_rows = []")
+    lines.append(
+        "        for _studio_fiber in "
+        "_studio_specimen_response_spec.get('base_fibers', []):"
+    )
+    lines.append("            _studio_y = float(_studio_fiber.get('y', 0.0))")
+    lines.append("            _studio_z = float(_studio_fiber.get('z', 0.0))")
+    lines.append(
+        "            _studio_mat = int(_studio_fiber.get('material_tag', 0))"
+    )
+    lines.append("            try:")
+    lines.append(
+        "                _studio_ss = ops.eleResponse("
+        "_studio_specimen_element, 'section', "
+        "_studio_specimen_section, 'fiber', "
+        "_studio_y, _studio_z, _studio_mat, 'stressStrain') or []"
+    )
+    lines.append("                _studio_ss = [float(v) for v in _studio_ss]")
+    lines.append("            except Exception:")
+    lines.append("                _studio_ss = []")
+    lines.append("            _studio_base_fiber_rows.append({")
+    lines.append(
+        "                **dict(_studio_fiber), "
+        "'stress': float(_studio_ss[0]) if len(_studio_ss) >= 1 else None, "
+        "'strain': float(_studio_ss[1]) if len(_studio_ss) >= 2 else None"
+    )
+    lines.append("            })")
+    lines.append(
+        "        _studio_specimen_history['base_fibers'].append("
+        "_studio_base_fiber_rows)"
+    )
+    lines.append(
+        "        _studio_interface_tag = "
+        "_studio_specimen_response_spec.get('interface_tag')"
+    )
+    lines.append("        _studio_interface_force = []")
+    lines.append("        _studio_interface_def = []")
+    lines.append("        _studio_interface_fiber_rows = []")
+    lines.append("        if _studio_interface_tag is not None:")
+    lines.append("            _studio_interface_tag = int(_studio_interface_tag)")
+    lines.append("            try:")
+    lines.append(
+        "                _studio_if_force = ops.eleResponse("
+        "_studio_interface_tag, 'force') or []"
+    )
+    lines.append(
+        "                _studio_interface_force = "
+        "[float(v) for v in _studio_if_force]"
+    )
+    lines.append("            except Exception:")
+    lines.append("                _studio_interface_force = []")
+    lines.append("            try:")
+    lines.append(
+        "                _studio_if_def = ops.eleResponse("
+        "_studio_interface_tag, 'deformation') or []"
+    )
+    lines.append(
+        "                _studio_interface_def = "
+        "[float(v) for v in _studio_if_def]"
+    )
+    lines.append("            except Exception:")
+    lines.append("                _studio_interface_def = []")
+    lines.append(
+        "            for _studio_fiber in "
+        "_studio_specimen_response_spec.get('interface_fibers', []):"
+    )
+    lines.append(
+        "                _studio_y = float(_studio_fiber.get('y', 0.0))"
+    )
+    lines.append(
+        "                _studio_z = float(_studio_fiber.get('z', 0.0))"
+    )
+    lines.append(
+        "                _studio_mat = int(_studio_fiber.get('material_tag', 0))"
+    )
+    lines.append("                try:")
+    lines.append(
+        "                    _studio_ss = ops.eleResponse("
+        "_studio_interface_tag, 'section', 'fiber', "
+        "_studio_y, _studio_z, _studio_mat, 'stressStrain') or []"
+    )
+    lines.append(
+        "                    _studio_ss = [float(v) for v in _studio_ss]"
+    )
+    lines.append("                except Exception:")
+    lines.append("                    _studio_ss = []")
+    lines.append("                _studio_interface_fiber_rows.append({")
+    lines.append(
+        "                    **dict(_studio_fiber), "
+        "'stress': float(_studio_ss[0]) if len(_studio_ss) >= 1 else None, "
+        "'slip': float(_studio_ss[1]) if len(_studio_ss) >= 2 else None"
+    )
+    lines.append("                })")
+    lines.append(
+        "        _studio_specimen_history['interface_force'].append("
+        "_studio_interface_force)"
+    )
+    lines.append(
+        "        _studio_specimen_history['interface_deformation'].append("
+        "_studio_interface_def)"
+    )
+    lines.append(
+        "        _studio_specimen_history['interface_fibers'].append("
+        "_studio_interface_fiber_rows)"
+    )
     lines.append(
         f"    _studio_monitor = "
         f"float(_studio_disp[{settings.control_dof - 1}]) "
@@ -2236,6 +2677,15 @@ def to_openseespy(
                 ],
             }
 
+        specimen_response_spec = column_response_spec(
+            model,
+            sections=sections,
+            materials=materials,
+            transformations=transformations,
+            connections=connections,
+            active_analysis=active,
+        )
+
         lines.extend(
             analysis_to_openseespy(
                 active,
@@ -2250,6 +2700,7 @@ def to_openseespy(
                 ),
                 monitor_node=monitor_node,
                 fiber_response_specs=fiber_response_specs,
+                specimen_response_spec=specimen_response_spec,
             )
         )
 

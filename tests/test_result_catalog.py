@@ -35,6 +35,7 @@ def test_pushover_catalog_includes_capacity_curve_and_common_results():
     assert "Motion" in types
     assert "MemberForce" in types
     assert "FiberStress" in types
+    assert "SpecimenResponse" in types
     assert "TimeHistory" in types
     assert "Convergence" in types
     assert "PushoverCurve" in types
@@ -45,6 +46,7 @@ def test_cyclic_catalog_includes_hysteresis_not_pushover_curve():
     types = _types("Cyclic")
 
     assert "CyclicHysteresis" in types
+    assert "SpecimenResponse" in types
     assert "PushoverCurve" not in types
     assert "TimeHistory" in types
 
@@ -55,6 +57,7 @@ def test_static_and_transient_catalogs_exclude_specialized_curves():
         assert "PushoverCurve" not in types
         assert "CyclicHysteresis" not in types
         assert "TimeHistory" in types
+        assert "SpecimenResponse" in types
         assert "Motion" in types
         assert "Convergence" in types
 
