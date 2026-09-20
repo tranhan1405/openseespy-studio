@@ -1975,10 +1975,10 @@ class MainWindow(QMainWindow):
         add_group(
             home,
             "Geometry",
-            large=("grid",),
+            large=("frame_2d",),
             small=(
                 "column_1d",
-                "frame_2d",
+                "grid",
                 "node",
                 "line",
                 "frame",
