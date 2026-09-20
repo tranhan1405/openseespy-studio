@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 from .model import StructuralModel
 from .project import (
+    ConnectionData,
     LoadPatternData,
     NodalLoadData,
     PrescribedDisplacementData,
@@ -35,6 +36,12 @@ class TestColumnSpec:
     base_support: str = "Fixed"
     top_support: str = "Free"
 
+    # Base interface is part of the specimen, not a specific analysis type.
+    # The same specimen can therefore be used for Cyclic, Pushover, or NLTH.
+    base_interface_type: str = "Fixed base"
+    base_interface_materials: dict[int, int] = field(default_factory=dict)
+    base_interface_rayleigh: bool = False
+
     top_mass: float = 0.0
     top_mass_directions: tuple[int, ...] = (1, 2, 3)
 
@@ -56,6 +63,30 @@ class TestColumnBuildResult:
     axial_pattern_tag: int | None = None
     lateral_pattern_tag: int | None = None
     prescribed_pattern_tag: int | None = None
+    base_ground_node: int | None = None
+    base_connection_tag: int | None = None
+
+
+BASE_INTERFACE_TYPES = {
+    "Fixed base",
+    "Bond-slip",
+    "Rotational spring",
+    "Custom zeroLength",
+}
+
+
+def bending_rotation_dof(axis: int, lateral_direction: int) -> int:
+    """Rotation DOF normal to the column-lateral bending plane."""
+    axis = int(axis)
+    lateral_direction = int(lateral_direction)
+    if axis not in (1, 2, 3) or lateral_direction not in (1, 2, 3):
+        raise ValueError("Column and lateral axes must be X, Y, or Z.")
+    if axis == lateral_direction:
+        raise ValueError(
+            "Bending rotation needs different column and lateral axes."
+        )
+    normal = ({1, 2, 3} - {axis, lateral_direction}).pop()
+    return normal + 3
 
 
 def _support_fixity(name: str) -> tuple[int, ...]:
@@ -252,6 +283,51 @@ def build_test_column(
     if any(int(dof) not in (1, 2, 3) for dof in spec.top_mass_directions):
         raise ValueError("Top-mass directions must be UX, UY, or UZ.")
 
+    interface_type = str(spec.base_interface_type)
+    interface_materials = {
+        int(dof): int(material_tag)
+        for dof, material_tag in spec.base_interface_materials.items()
+    }
+    if interface_type not in BASE_INTERFACE_TYPES:
+        raise ValueError(
+            f"Unsupported base interface type: {interface_type}"
+        )
+    if interface_type != "Fixed base":
+        if spec.base_support != "Fixed":
+            raise ValueError(
+                "Base Interface Model requires a Fixed nominal base; "
+                "the selected spring DOFs are released automatically."
+            )
+        if not interface_materials:
+            raise ValueError(
+                f"{interface_type} requires at least one active spring DOF."
+            )
+        if any(dof < 1 or dof > 6 for dof in interface_materials):
+            raise ValueError("Base-interface DOFs must be in the range 1..6.")
+        missing_materials = sorted({
+            material_tag
+            for material_tag in interface_materials.values()
+            if material_tag not in project.materials
+        })
+        if missing_materials:
+            raise ValueError(
+                "Base interface references missing material tag(s): "
+                + ", ".join(map(str, missing_materials))
+            )
+        if spec.planar:
+            plane_fixity = _planar_fixity(axis, lateral)
+            blocked = [
+                dof
+                for dof in interface_materials
+                if plane_fixity[dof - 1]
+            ]
+            if blocked:
+                raise ValueError(
+                    "Planar test restrains base-interface DOF(s): "
+                    + ", ".join(map(str, blocked))
+                    + ". Choose an in-plane DOF or disable Planar test."
+                )
+
     if spec.replace_geometry:
         _clear_model_linked_data(project)
         project.model.clear()
@@ -312,10 +388,15 @@ def build_test_column(
     )
     for tag in node_tags:
         model.set_fixity(tag, plane)
-    model.set_fixity(
-        node_tags[0],
-        _merge_fixity(plane, _support_fixity(spec.base_support)),
+
+    base_fixity = list(
+        _merge_fixity(plane, _support_fixity(spec.base_support))
     )
+    if interface_type != "Fixed base":
+        for dof in interface_materials:
+            base_fixity[dof - 1] = 0
+
+    model.set_fixity(node_tags[0], tuple(base_fixity))
     model.set_fixity(
         node_tags[-1],
         _merge_fixity(plane, _support_fixity(spec.top_support)),
@@ -335,6 +416,25 @@ def build_test_column(
         transformation_tag=transformation_tag,
         created_transformation=created_transformation,
     )
+
+    if interface_type != "Fixed base":
+        ground_node = project.create_ground_node(result.base_node)
+        connection_tag = project.next_connection_tag()
+        project.add_connection(
+            ConnectionData(
+                tag=connection_tag,
+                name=f"{spec.name_prefix} · {interface_type}",
+                connection_type="zeroLength",
+                node_i=ground_node,
+                node_j=result.base_node,
+                materials_by_dof=interface_materials,
+                do_rayleigh=bool(spec.base_interface_rayleigh),
+                generated_ground_node=ground_node,
+            )
+        )
+        result.base_ground_node = ground_node
+        result.base_connection_tag = connection_tag
+        result.node_tags.append(ground_node)
 
     if abs(float(spec.axial_load)) > 0.0:
         pattern_tag = _add_plain_pattern(
