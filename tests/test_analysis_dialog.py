@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtWidgets import QApplication
+
+from openseespy_studio.ui.analysis_dialog import AnalysisDialog
+
+
+_APP = QApplication.instance() or QApplication([])
+
+
+def _shown(widget) -> bool:
+    return not widget.isHidden()
+
+
+def _close(dialog: AnalysisDialog) -> None:
+    dialog.close()
+    dialog.deleteLater()
+    _APP.processEvents()
+
+
+def test_static_analysis_hides_irrelevant_fields():
+    dialog = AnalysisDialog(analysis_type="Static")
+    try:
+        assert _shown(dialog.load_inc)
+        assert _shown(dialog.steps)
+        assert _shown(dialog.test)
+        assert _shown(dialog.algorithm)
+
+        assert not _shown(dialog.control_node)
+        assert not _shown(dialog.cyclic_targets)
+        assert not _shown(dialog.dt)
+        assert not _shown(dialog.modes)
+        assert not _shown(dialog.preload_gravity)
+        assert not _shown(dialog.cutback)
+    finally:
+        _close(dialog)
+
+
+def test_modal_analysis_shows_only_modal_specific_solver_fields():
+    dialog = AnalysisDialog(analysis_type="Modal")
+    try:
+        assert _shown(dialog.constraints)
+        assert _shown(dialog.numberer)
+        assert _shown(dialog.system)
+        assert _shown(dialog.modes)
+        assert _shown(dialog.eigen_solver)
+
+        assert not _shown(dialog.test)
+        assert not _shown(dialog.steps)
+        assert not _shown(dialog.load_inc)
+        assert not _shown(dialog.recovery)
+        assert not _shown(dialog.adaptive)
+        assert not _shown(dialog.live_convergence)
+    finally:
+        _close(dialog)
+
+
+def test_transient_and_adaptive_rows_expand_only_when_needed():
+    dialog = AnalysisDialog(analysis_type="Transient")
+    try:
+        assert _shown(dialog.steps)
+        assert _shown(dialog.dt)
+        assert _shown(dialog.gamma)
+        assert _shown(dialog.beta)
+        assert _shown(dialog.damping_ratio)
+        assert not _shown(dialog.damping_mode_i)
+        assert not _shown(dialog.damping_mode_j)
+
+        dialog.damping_ratio.setValue(0.05)
+        _APP.processEvents()
+        assert _shown(dialog.damping_mode_i)
+        assert _shown(dialog.damping_mode_j)
+
+        assert _shown(dialog.adaptive)
+        assert not _shown(dialog.cutback)
+        dialog.adaptive.setChecked(True)
+        _APP.processEvents()
+        assert _shown(dialog.cutback)
+        assert _shown(dialog.min_factor)
+        assert _shown(dialog.growth)
+        assert _shown(dialog.easy_iter)
+        assert _shown(dialog.grow_after)
+
+        assert _shown(dialog.preload_gravity)
+        assert not _shown(dialog.gravity_steps)
+        dialog.preload_gravity.setChecked(True)
+        _APP.processEvents()
+        assert _shown(dialog.gravity_steps)
+    finally:
+        _close(dialog)
+
+
+def test_cyclic_protocol_hides_nominal_steps_and_uses_model_ndf():
+    dialog = AnalysisDialog(analysis_type="Cyclic", ndf=2)
+    try:
+        assert _shown(dialog.control_node)
+        assert _shown(dialog.control_dof)
+        assert _shown(dialog.cyclic_targets)
+        assert _shown(dialog.cyclic_inc)
+        assert not _shown(dialog.steps)
+        assert not _shown(dialog.disp_inc)
+
+        assert dialog.control_dof.count() == 2
+        assert dialog.control_dof.itemData(0) == 1
+        assert dialog.control_dof.itemData(1) == 2
+    finally:
+        _close(dialog)
