@@ -2,6 +2,7 @@ from openseespy_studio.generator import FrameGridSpec, generate_frame_grid
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
     AnalysisSettingsData,
+    ConstraintData,
     ElementLoadData,
     LoadPatternData,
     ProjectDatabase,
@@ -377,5 +378,146 @@ def test_invalid_recorder_target_blocks_run():
         issue.severity == "ERROR"
         and issue.category == "Recorder"
         and "missing node" in issue.message
+        for issue in issues
+    )
+
+
+def test_2d_frame_ignores_stored_vecxz_and_accepts_parallel_vector():
+    model = StructuralModel("frame-2d-validation", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 3.0)
+    model.set_fixity(1, (1, 1, 1))
+    model.add_element(1, 1, 2, section_tag=1, transf_tag=1)
+    project = ProjectDatabase(model=model)
+    project.sections[1] = _elastic_section()
+    project.transformations[1] = TransformationData(
+        1,
+        "2D Linear",
+        "Linear",
+        # This would be invalid for this member in 3D, but 2D geomTransf
+        # does not consume vecxz.
+        (0.0, 1.0, 0.0),
+    )
+
+    issues = validate_project(
+        project,
+        AnalysisSettingsData(1, "Static", "Static"),
+    )
+
+    assert not any(
+        issue.category == "Transformation orientation"
+        for issue in issues
+    )
+
+
+def test_2d_frame_requires_three_dof_per_node():
+    model = StructuralModel("bad-frame-dof", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 3.0)
+    model.set_fixity(1, (1, 1))
+    model.add_element(1, 1, 2, section_tag=1, transf_tag=1)
+    project = ProjectDatabase(model=model)
+    project.sections[1] = _elastic_section()
+    project.transformations[1] = TransformationData(
+        1, "Linear", "Linear"
+    )
+
+    issues = validate_project(project)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Model DOF"
+        and "ndf=3" in issue.message
+        for issue in issues
+    )
+
+
+def test_plain_handler_is_blocked_for_rigid_diaphragm():
+    project = _frame_project()
+    project.add_constraint(
+        ConstraintData(
+            1,
+            "Floor diaphragm",
+            "rigidDiaphragm",
+            retained_node=1,
+            constrained_nodes=[2],
+            perp_dirn=3,
+        )
+    )
+    analysis = AnalysisSettingsData(
+        1,
+        "Static",
+        "Static",
+        constraints_handler="Plain",
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Constraint handler"
+        and "rigidLink/rigidDiaphragm" in issue.message
+        for issue in issues
+    )
+
+
+def test_transformation_handler_accepts_rigid_diaphragm():
+    project = _frame_project()
+    project.add_constraint(
+        ConstraintData(
+            1,
+            "Floor diaphragm",
+            "rigidDiaphragm",
+            retained_node=1,
+            constrained_nodes=[2],
+            perp_dirn=3,
+        )
+    )
+    analysis = AnalysisSettingsData(
+        1,
+        "Static",
+        "Static",
+        constraints_handler="Transformation",
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert not any(
+        issue.category == "Constraint handler"
+        for issue in issues
+    )
+
+
+def test_2d_corotational_element_load_is_not_blocked_by_3d_rule():
+    model = StructuralModel("corot-load-2d", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 3.0, 0.0)
+    model.set_fixity(1, (1, 1, 1))
+    model.add_element(1, 1, 2, section_tag=1, transf_tag=1)
+    project = ProjectDatabase(model=model)
+    project.sections[1] = _elastic_section()
+    project.transformations[1] = TransformationData(
+        1,
+        "2D Corot",
+        "Corotational",
+    )
+    project.time_series[1] = TimeSeriesData(1, "Linear", "Linear")
+    project.load_patterns[1] = LoadPatternData(
+        1, "Load", "Plain", 1
+    )
+    project.element_loads[1] = ElementLoadData(
+        1,
+        "UDL",
+        1,
+        1,
+        "Uniform",
+        wy=-1.0,
+    )
+
+    issues = validate_project(project)
+
+    assert not any(
+        issue.category == "Element load"
+        and "Corotational" in issue.message
         for issue in issues
     )
