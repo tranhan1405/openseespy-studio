@@ -64,6 +64,7 @@ from ..postprocess import (
     fiber_state_element_tags,
     fiber_state_sections,
     force_displacement_curve,
+    nodal_dof_component_labels,
     pushover_capacity_curve,
     time_history_node_tags,
     time_history_series,
@@ -1003,6 +1004,68 @@ class ResultsPanel(QWidget):
     def sizeHint(self) -> QSize:
         return QSize(360, 300)
 
+    def _model_dimensions(self) -> tuple[int, int]:
+        analysis = self._result.get("analysis", {})
+        if not isinstance(analysis, dict):
+            analysis = {}
+        try:
+            ndm = int(analysis.get("ndm", 3))
+        except (TypeError, ValueError):
+            ndm = 3
+        try:
+            ndf = int(analysis.get("ndf", 6))
+        except (TypeError, ValueError):
+            ndf = 6
+        return ndm, ndf
+
+    def _nodal_labels(self, quantity: str) -> list[str]:
+        ndm, ndf = self._model_dimensions()
+        return nodal_dof_component_labels(
+            ndm=ndm,
+            ndf=ndf,
+            quantity=quantity,
+        )
+
+    def _sync_dimension_dependent_controls(self) -> None:
+        ndm, _ndf = self._model_dimensions()
+
+        current_member = self.element_quantity.currentText()
+        member_components = (
+            ["N", "Vy", "Mz"]
+            if ndm == 2
+            else ["N", "Vy", "Vz", "T", "My", "Mz"]
+        )
+        self.element_quantity.blockSignals(True)
+        self.element_quantity.clear()
+        self.element_quantity.addItems(member_components)
+        index = self.element_quantity.findText(current_member)
+        self.element_quantity.setCurrentIndex(index if index >= 0 else 0)
+        self.element_quantity.blockSignals(False)
+
+        current_disp = max(self.force_disp_dof.currentIndex(), 0)
+        current_force = max(self.force_disp_force_dof.currentIndex(), 0)
+        disp_labels = self._nodal_labels("Displacement")
+        force_labels = self._nodal_labels("Reaction")
+        self.force_disp_dof.blockSignals(True)
+        self.force_disp_force_dof.blockSignals(True)
+        self.force_disp_dof.clear()
+        self.force_disp_force_dof.clear()
+        self.force_disp_dof.addItems(disp_labels)
+        self.force_disp_force_dof.addItems(force_labels)
+        if disp_labels:
+            self.force_disp_dof.setCurrentIndex(
+                min(current_disp, len(disp_labels) - 1)
+            )
+        if force_labels:
+            self.force_disp_force_dof.setCurrentIndex(
+                min(current_force, len(force_labels) - 1)
+            )
+        self.force_disp_dof.blockSignals(False)
+        self.force_disp_force_dof.blockSignals(False)
+
+        self._node_quantity_changed(self.node_quantity.currentText())
+        self._update_history_controls()
+
     def _select_tab(self, title: str) -> None:
         for index in range(self.tabs.count()):
             if self.tabs.tabText(index) == str(title):
@@ -1637,15 +1700,28 @@ class ResultsPanel(QWidget):
         self._node_quantity_changed(self.node_quantity.currentText())
 
     def _node_quantity_changed(self, quantity: str) -> None:
+        labels = self._nodal_labels(str(quantity))
+        ndm, _ndf = self._model_dimensions()
+        translational_count = min(ndm, len(labels))
+        translational = labels[:translational_count]
+        rotational = labels[translational_count:]
+
+        self.node_contour_component.blockSignals(True)
         self.node_contour_component.clear()
         if str(quantity) == "Reaction":
-            self.node_contour_component.addItems(
-                ["|F|", "FX", "FY", "FZ", "|M|", "MX", "MY", "MZ"]
-            )
+            self.node_contour_component.addItem("|F|")
+            self.node_contour_component.addItems(translational)
+            if rotational:
+                self.node_contour_component.addItem("|M|")
+                self.node_contour_component.addItems(rotational)
         else:
-            self.node_contour_component.addItems(
-                ["|U|", "UX", "UY", "UZ", "|R|", "RX", "RY", "RZ"]
-            )
+            self.node_contour_component.addItem("|U|")
+            self.node_contour_component.addItems(translational)
+            if rotational:
+                self.node_contour_component.addItem("|R|")
+                self.node_contour_component.addItems(rotational)
+        self.node_contour_component.blockSignals(False)
+        self._node_table_display_key = None
         self._populate_node_table()
 
     def _build_element_tab(self) -> None:
@@ -3942,6 +4018,7 @@ class ResultsPanel(QWidget):
         self._update_mode_summary()
 
         self._populate_convergence_dashboard()
+        self._sync_dimension_dependent_controls()
         self._populate_node_table()
         self._populate_element_table()
         self._populate_fiber_elements()
@@ -4239,11 +4316,11 @@ class ResultsPanel(QWidget):
         if self._node_table_display_key == display_key:
             return
 
-        headers = (
-            ["Node", "UX", "UY", "UZ", "RX", "RY", "RZ"]
-            if displacement
-            else ["Node", "FX", "FY", "FZ", "MX", "MY", "MZ"]
+        component_labels = self._nodal_labels(
+            "Displacement" if displacement else "Reaction"
         )
+        headers = ["Node", *component_labels]
+        component_count = len(component_labels)
         rows = self._node_table_cache.get(display_key)
         if rows is None:
             final = self._result.get("final", {})
@@ -4254,18 +4331,22 @@ class ResultsPanel(QWidget):
             rows = []
             for tag in sorted(data, key=lambda value: int(value)):
                 values = list(data[tag])
-                while len(values) < 6:
+                while len(values) < component_count:
                     values.append(0.0)
                 rows.append(
                     (
                         str(tag),
-                        *(f"{float(value):.6g}" for value in values[:6]),
+                        *(
+                            f"{float(value):.6g}"
+                            for value in values[:component_count]
+                        ),
                     )
                 )
             self._node_table_cache[display_key] = rows
 
         self.node_table.setUpdatesEnabled(False)
         try:
+            self.node_table.setColumnCount(len(headers))
             self.node_table.setHorizontalHeaderLabels(headers)
             self.node_table.setRowCount(len(rows))
             for row_index, values in enumerate(rows):
@@ -5072,10 +5153,8 @@ class ResultsPanel(QWidget):
             self.force_disp_plot.set_series([], [])
             return
 
-        disp_labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")
-        force_labels = ("FX", "FY", "FZ", "MX", "MY", "MZ")
-        disp_label = disp_labels[displacement_dof - 1]
-        force_label = force_labels[force_dof - 1]
+        disp_label = self.force_disp_dof.currentText()
+        force_label = self.force_disp_force_dof.currentText()
         force_text = (
             f"applied base shear {force_label} (-Σ support reactions)"
             if force_source == "Base shear"
@@ -5120,14 +5199,13 @@ class ResultsPanel(QWidget):
         if not path.lower().endswith(".csv"):
             path += ".csv"
 
-        disp_labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")
-        force_labels = ("FX", "FY", "FZ", "MX", "MY", "MZ")
+        disp_label = self.force_disp_dof.currentText()
+        force_label = self.force_disp_force_dof.currentText()
         force_header = (
-            f"Applied base shear {force_labels[force_dof - 1]}"
+            f"Applied base shear {force_label}"
             if force_source == "Base shear"
             else (
-                f"Node {force_node} reaction "
-                f"{force_labels[force_dof - 1]}"
+                f"Node {force_node} reaction {force_label}"
             )
         )
         with open(path, "w", newline="", encoding="utf-8") as stream:
@@ -5135,7 +5213,7 @@ class ResultsPanel(QWidget):
             writer.writerow(
                 [
                     f"Node {displacement_node} "
-                    f"{disp_labels[displacement_dof - 1]} displacement",
+                    f"{disp_label} displacement",
                     force_header,
                 ]
             )
@@ -5159,13 +5237,33 @@ class ResultsPanel(QWidget):
 
     def _update_history_controls(self) -> None:
         quantity = self.history_quantity.currentText()
-        labels = {
-            "Displacement": ["UX", "UY", "UZ", "RX", "RY", "RZ"],
-            "Velocity": ["VX", "VY", "VZ", "WX", "WY", "WZ"],
-            "Acceleration": ["AX", "AY", "AZ", "AlphaX", "AlphaY", "AlphaZ"],
-            "Reaction": ["FX", "FY", "FZ", "MX", "MY", "MZ"],
-            "Base shear": ["X", "Y", "Z"],
-        }.get(quantity, ["DOF 1"])
+        ndm, _ndf = self._model_dimensions()
+        if quantity in {"Displacement", "Reaction"}:
+            labels = self._nodal_labels(quantity)
+        elif quantity in {"Velocity", "Acceleration"}:
+            base = self._nodal_labels("Displacement")
+            if quantity == "Velocity":
+                labels = [
+                    (
+                        "V" + label[1:]
+                        if label.startswith("U")
+                        else "W" + label[1:]
+                    )
+                    for label in base
+                ]
+            else:
+                labels = [
+                    (
+                        "A" + label[1:]
+                        if label.startswith("U")
+                        else "Alpha" + label[1:]
+                    )
+                    for label in base
+                ]
+        elif quantity == "Base shear":
+            labels = ["X", "Y", "Z"][: max(1, min(ndm, 3))]
+        else:
+            labels = ["DOF 1"]
 
         previous_index = max(self.history_dof.currentIndex(), 0)
         self.history_dof.blockSignals(True)
