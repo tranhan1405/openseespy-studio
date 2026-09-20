@@ -4299,30 +4299,62 @@ class MainWindow(QMainWindow):
                 for element in self.model.elements.values()
                 if element.i == tag or element.j == tag
             ]
+            unit_system = UnitSystem.from_mapping(self.project.units)
+            dof_labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+            rows = [
+                ("Tag", tag),
+                (
+                    f"Coordinates [{unit_system.length}]",
+                    ", ".join(f"{value:g}" for value in node.xyz),
+                ),
+                ("X", f"{node.xyz[0]:g}", {
+                    "id": "x", "editable": True, "kind": "float",
+                }),
+                ("Y", f"{node.xyz[1]:g}", {
+                    "id": "y", "editable": True, "kind": "float",
+                }),
+                ("Z", f"{node.xyz[2]:g}", {
+                    "id": "z", "editable": True, "kind": "float",
+                }),
+                ("Support", classify_fixity(node.fixity)),
+                ("Fixity", node.fixity),
+            ]
+            for index, label in enumerate(dof_labels):
+                rows.append((
+                    label,
+                    "Fixed" if node.fixity[index] else "Free",
+                    {
+                        "id": f"fixity_{index}",
+                        "editable": True,
+                        "kind": "choice",
+                        "current": int(node.fixity[index]),
+                        "choices": [("Free", 0), ("Fixed", 1)],
+                    },
+                ))
+            rows.extend([
+                (
+                    "Mass",
+                    ", ".join(f"{value:g}" for value in node.mass),
+                    {
+                        "id": "mass",
+                        "editable": True,
+                        "kind": "text",
+                    },
+                ),
+                ("Connected", ", ".join(map(str, connected)) or "-"),
+            ])
             self.properties_panel.set_properties(
                 "Node",
-                [
-                    ("Tag", tag),
-                    ("Coordinates (m)", f"{node.xyz}"),
-                    ("X", f"{node.xyz[0]:g}"),
-                    ("Y", f"{node.xyz[1]:g}"),
-                    ("Z", f"{node.xyz[2]:g}"),
-                    ("Support", classify_fixity(node.fixity)),
-                    ("Fixity", node.fixity),
-                    ("UX", "Fixed" if node.fixity[0] else "Free"),
-                    ("UY", "Fixed" if node.fixity[1] else "Free"),
-                    ("UZ", "Fixed" if node.fixity[2] else "Free"),
-                    ("RX", "Fixed" if node.fixity[3] else "Free"),
-                    ("RY", "Fixed" if node.fixity[4] else "Free"),
-                    ("RZ", "Fixed" if node.fixity[5] else "Free"),
-                    ("Mass", ", ".join(f"{value:g}" for value in node.mass)),
-                    ("Connected", ", ".join(map(str, connected)) or "-"),
-                ],
+                rows,
+                context={"kind": "node", "tag": int(tag)},
             )
-        elif kind == "element":
+            return
+
+        if kind == "element":
             element = self.model.elements.get(tag)
             if element is None:
                 return
+
             section_text = "-"
             if element.section_tag is not None:
                 section = self.project.sections.get(element.section_tag)
@@ -4343,42 +4375,174 @@ class MainWindow(QMainWindow):
                     else f"{element.transf_tag} (missing)"
                 )
 
-            self.properties_panel.set_properties(
-                "Element",
-                [
-                    ("Tag", tag),
-                    ("Type", element.element_type),
-                    ("Nodes", f"{element.i}, {element.j}"),
-                    ("Group", element.group),
-                    ("Section", section_text),
-                    ("Transformation", transformation_text),
+            section_choices = [("Unassigned", None)]
+            for section_tag in sorted(self.project.sections):
+                section = self.project.sections[section_tag]
+                if (
+                    element.element_type == "elasticBeamColumn"
+                    and section.section_type != "Elastic"
+                ):
+                    continue
+                section_choices.append((
+                    f"{section_tag} - {section.name} ({section.section_type})",
+                    int(section_tag),
+                ))
+
+            transformation_choices = [("Unassigned", None)]
+            transformation_choices.extend(
+                (
+                    f"{transf_tag} - {transformation.name} "
+                    f"({transformation.transformation_type})",
+                    int(transf_tag),
+                )
+                for transf_tag, transformation in sorted(
+                    self.project.transformations.items()
+                )
+            )
+
+            nonlinear = element.element_type in {
+                "forceBeamColumn", "dispBeamColumn"
+            }
+            force_based = element.element_type == "forceBeamColumn"
+            rows = [
+                ("Tag", tag),
+                (
+                    "Type",
+                    element.element_type,
+                    {
+                        "id": "element_type",
+                        "editable": True,
+                        "kind": "choice",
+                        "current": element.element_type,
+                        "choices": [
+                            ("elasticBeamColumn", "elasticBeamColumn"),
+                            ("forceBeamColumn", "forceBeamColumn"),
+                            ("dispBeamColumn", "dispBeamColumn"),
+                        ],
+                    },
+                ),
+                ("Nodes", f"{element.i}, {element.j}"),
+                (
+                    "Group",
+                    element.group,
+                    {
+                        "id": "group",
+                        "editable": True,
+                        "kind": "text",
+                    },
+                ),
+                (
+                    "Section",
+                    section_text,
+                    {
+                        "id": "section_tag",
+                        "editable": True,
+                        "kind": "choice",
+                        "current": element.section_tag,
+                        "choices": section_choices,
+                    },
+                ),
+                (
+                    "Transformation",
+                    transformation_text,
+                    {
+                        "id": "transf_tag",
+                        "editable": True,
+                        "kind": "choice",
+                        "current": element.transf_tag,
+                        "choices": transformation_choices,
+                    },
+                ),
+            ]
+            if nonlinear:
+                rows.extend([
                     (
                         "Integration",
-                        (
-                            f"{element.integration_type} × "
-                            f"{element.integration_points}"
-                            if element.element_type
-                            in {"forceBeamColumn", "dispBeamColumn"}
-                            else "-"
-                        ),
+                        element.integration_type,
+                        {
+                            "id": "integration_type",
+                            "editable": True,
+                            "kind": "choice",
+                            "current": element.integration_type,
+                            "choices": [
+                                ("Lobatto", "Lobatto"),
+                                ("Legendre", "Legendre"),
+                                ("Radau", "Radau"),
+                            ],
+                        },
                     ),
                     (
-                        "Force iter/tol",
-                        (
-                            f"{element.force_max_iter} / "
-                            f"{element.force_tolerance:g}"
-                            if element.element_type == "forceBeamColumn"
-                            else "-"
-                        ),
+                        "Integration points",
+                        element.integration_points,
+                        {
+                            "id": "integration_points",
+                            "editable": True,
+                            "kind": "int",
+                        },
                     ),
-                    ("Mass / length", f"{element.mass_per_length:g}"),
+                ])
+            else:
+                rows.extend([
+                    ("Integration", "-"),
+                    ("Integration points", "-"),
+                ])
+
+            if force_based:
+                rows.extend([
                     (
-                        "Mass matrix",
-                        "Consistent"
-                        if element.consistent_mass
-                        else "Lumped",
+                        "Force max iterations",
+                        element.force_max_iter,
+                        {
+                            "id": "force_max_iter",
+                            "editable": True,
+                            "kind": "int",
+                        },
                     ),
-                ],
+                    (
+                        "Force tolerance",
+                        f"{element.force_tolerance:g}",
+                        {
+                            "id": "force_tolerance",
+                            "editable": True,
+                            "kind": "float",
+                        },
+                    ),
+                ])
+            else:
+                rows.extend([
+                    ("Force max iterations", "-"),
+                    ("Force tolerance", "-"),
+                ])
+
+            rows.extend([
+                (
+                    "Mass / length",
+                    f"{element.mass_per_length:g}",
+                    {
+                        "id": "mass_per_length",
+                        "editable": True,
+                        "kind": "float",
+                    },
+                ),
+                (
+                    "Mass matrix",
+                    "Consistent" if element.consistent_mass else "Lumped",
+                    {
+                        "id": "consistent_mass",
+                        "editable": True,
+                        "kind": "choice",
+                        "current": bool(element.consistent_mass),
+                        "choices": [
+                            ("Lumped", False),
+                            ("Consistent", True),
+                        ],
+                    },
+                ),
+            ])
+            self.properties_panel.set_properties(
+                "Frame / Element",
+                rows,
+                context={"kind": "element", "tag": int(tag)},
             )
 
     def _show_viewport_context_menu(self, payload: object) -> None:
