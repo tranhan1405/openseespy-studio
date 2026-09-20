@@ -42,6 +42,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..calibration import (
+    CalibrationCase,
+    apply_calibration_case,
+    calibration_case_script,
+)
 from ..analysis_templates import (
     GroundMotionComponentSpec,
     build_cyclic_template,
@@ -68,6 +73,7 @@ from ..validation import ValidationIssue, validate_project
 from ..units import UnitSystem
 from .analysis_dialog import AnalysisDialog
 from .analysis_template_dialog import AnalysisTemplateDialog
+from .calibration_dialog import CalibrationDialog
 from .code_editor import CodeEditor
 from .connection_dialog import ConnectionDialog
 from .constraint_dialog import ConstraintDialog
@@ -1231,6 +1237,11 @@ class MainWindow(QMainWindow):
         self._tree_element_items: dict[int, QTreeWidgetItem] = {}
         self._shortcuts: list[QShortcut] = []
         self._analysis_process: QProcess | None = None
+        self._calibration_process: QProcess | None = None
+        self._calibration_plan_path: str | None = None
+        self._calibration_result_path: str | None = None
+        self._calibration_output_buffer = ""
+        self._calibration_active_analysis_tag: int | None = None
         self._analysis_script_path: str | None = None
         self._analysis_result_path: str | None = None
         self._analysis_log_path: str | None = None
@@ -1691,6 +1702,13 @@ class MainWindow(QMainWindow):
         self._make_action("check_model", "Check Model", "analysis", self._check_model, "Validate the model before analysis")
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action(
+            "calibration",
+            "Calibration...",
+            "analysis",
+            self._open_calibration,
+            "Run a grid parameter study against experimental cyclic data",
+        )
+        self._make_action(
             "plot",
             "Plot",
             "plot",
@@ -1739,6 +1757,7 @@ class MainWindow(QMainWindow):
         menus["Analysis"].addAction(self.actions["analysis_setup"])
         menus["Analysis"].addAction(self.actions["check_model"])
         menus["Analysis"].addAction(self.actions["run"])
+        menus["Analysis"].addAction(self.actions["calibration"])
         menus["Results"].addAction(self.actions["plot"])
 
         menus["Window"].addAction(self.model_tree_dock.toggleViewAction())
@@ -2015,6 +2034,11 @@ class MainWindow(QMainWindow):
             "Solver",
             large=("run",),
             small=("analysis_setup", "check_model", "solver_output_view"),
+        )
+        add_group(
+            analysis_page,
+            "Research",
+            large=("calibration",),
         )
         add_group(
             analysis_page,
