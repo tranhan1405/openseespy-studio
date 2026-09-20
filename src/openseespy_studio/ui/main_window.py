@@ -3662,26 +3662,60 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("mass_source", tag))
             mass_sources_root.addChild(item)
 
-        series_root = QTreeWidgetItem([f"Time Series ({len(self.project.time_series)})"])
+        loading_root = QTreeWidgetItem(["Loading"])
+        loading_root.setIcon(0, studio_icon("load"))
+        loading_root.setData(0, Qt.UserRole, ("loading_root", None))
+        loading_root.setExpanded(True)
+        root.addChild(loading_root)
+
+        ground_motion_patterns = {
+            tag: pattern
+            for tag, pattern in self.project.load_patterns.items()
+            if pattern.pattern_type == "UniformExcitation"
+        }
+        ground_motion_series_tags = {
+            pattern.time_series_tag
+            for pattern in ground_motion_patterns.values()
+        }
+        standalone_series = {
+            tag: series
+            for tag, series in self.project.time_series.items()
+            if tag not in ground_motion_series_tags
+        }
+        plain_patterns = {
+            tag: pattern
+            for tag, pattern in self.project.load_patterns.items()
+            if pattern.pattern_type == "Plain"
+        }
+
+        series_root = QTreeWidgetItem([
+            f"Time Series ({len(standalone_series)})"
+        ])
         series_root.setIcon(0, studio_icon("timeseries"))
         series_root.setData(0, Qt.UserRole, ("time_series_root", None))
         series_root.setExpanded(True)
-        root.addChild(series_root)
-        for tag in sorted(self.project.time_series):
-            series = self.project.time_series[tag]
-            item = QTreeWidgetItem([f"{series.series_type} [{tag}]  {series.name}"])
+        loading_root.addChild(series_root)
+        for tag in sorted(standalone_series):
+            series = standalone_series[tag]
+            item = QTreeWidgetItem([
+                f"{series.series_type} [{tag}]  {series.name}"
+            ])
             item.setIcon(0, studio_icon("timeseries"))
             item.setData(0, Qt.UserRole, ("time_series", tag))
             series_root.addChild(item)
 
-        patterns_root = QTreeWidgetItem([f"Load Patterns ({len(self.project.load_patterns)})"])
+        patterns_root = QTreeWidgetItem([
+            f"Load Patterns ({len(plain_patterns)})"
+        ])
         patterns_root.setIcon(0, studio_icon("load"))
         patterns_root.setData(0, Qt.UserRole, ("load_patterns_root", None))
         patterns_root.setExpanded(True)
-        root.addChild(patterns_root)
-        for tag in sorted(self.project.load_patterns):
-            pattern = self.project.load_patterns[tag]
-            item = QTreeWidgetItem([f"{pattern.pattern_type} [{tag}]  {pattern.name}"])
+        loading_root.addChild(patterns_root)
+        for tag in sorted(plain_patterns):
+            pattern = plain_patterns[tag]
+            item = QTreeWidgetItem([
+                f"Plain [{tag}]  {pattern.name}"
+            ])
             item.setIcon(0, studio_icon("load"))
             item.setData(0, Qt.UserRole, ("load_pattern", tag))
             item.setExpanded(True)
@@ -3690,9 +3724,15 @@ class MainWindow(QMainWindow):
                 load = self.project.nodal_loads[load_tag]
                 if load.pattern_tag != tag:
                     continue
-                load_item = QTreeWidgetItem([f"{load.name} [{load.tag}] → Node {load.node_tag}"])
+                load_item = QTreeWidgetItem([
+                    f"{load.name} [{load.tag}] → Node {load.node_tag}"
+                ])
                 load_item.setIcon(0, studio_icon("load"))
-                load_item.setData(0, Qt.UserRole, ("nodal_load", load.tag))
+                load_item.setData(
+                    0,
+                    Qt.UserRole,
+                    ("nodal_load", load.tag),
+                )
                 item.addChild(load_item)
             for displacement_tag in sorted(
                 self.project.prescribed_displacements
@@ -3731,6 +3771,39 @@ class MainWindow(QMainWindow):
                     ("element_load", load.tag),
                 )
                 item.addChild(load_item)
+
+        ground_motions_root = QTreeWidgetItem([
+            f"Ground Motions ({len(ground_motion_patterns)})"
+        ])
+        ground_motions_root.setIcon(0, studio_icon("timeseries"))
+        ground_motions_root.setData(
+            0,
+            Qt.UserRole,
+            ("ground_motions_root", None),
+        )
+        ground_motions_root.setExpanded(True)
+        loading_root.addChild(ground_motions_root)
+        axis_name = {1: "X", 2: "Y", 3: "Z"}
+        for tag in sorted(ground_motion_patterns):
+            pattern = ground_motion_patterns[tag]
+            series = self.project.time_series.get(
+                pattern.time_series_tag
+            )
+            axis = axis_name.get(
+                pattern.direction,
+                f"DOF {pattern.direction}",
+            )
+            points = (
+                len(series.values)
+                if series is not None and series.series_type == "Path"
+                else 0
+            )
+            item = QTreeWidgetItem([
+                f"{pattern.name} [{tag}] · {axis} · {points} pts"
+            ])
+            item.setIcon(0, studio_icon("timeseries"))
+            item.setData(0, Qt.UserRole, ("ground_motion", tag))
+            ground_motions_root.addChild(item)
 
         analysis = QTreeWidgetItem([f"Analysis ({len(self.project.analyses)})"])
         analysis.setIcon(0, studio_icon("analysis"))
