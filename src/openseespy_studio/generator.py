@@ -1015,6 +1015,7 @@ def analysis_to_openseespy(
     node_tags: list[int] | None = None,
     element_tags: list[int] | None = None,
     frame_element_tags: list[int] | None = None,
+    truss_element_tags: list[int] | None = None,
     support_node_tags: list[int] | None = None,
     plain_pattern_tags: list[int] | None = None,
     monitor_node: int | None = None,
@@ -1024,6 +1025,7 @@ def analysis_to_openseespy(
     node_tags = list(node_tags or [])
     element_tags = list(element_tags or [])
     frame_element_tags = list(frame_element_tags or [])
+    truss_element_tags = list(truss_element_tags or [])
     support_node_tags = list(support_node_tags or [])
     plain_pattern_tags = list(plain_pattern_tags or [])
     fiber_response_specs = dict(fiber_response_specs or {})
@@ -1138,6 +1140,7 @@ def analysis_to_openseespy(
         "}",
         f"_studio_element_tags = {element_tags!r}",
         f"_studio_frame_element_tags = {frame_element_tags!r}",
+        f"_studio_truss_element_tags = {truss_element_tags!r}",
         f"_studio_support_node_tags = {support_node_tags!r}",
         f"_studio_plain_pattern_tags = {plain_pattern_tags!r}",
         f"_studio_fiber_response_specs = {fiber_response_specs!r}",
@@ -2108,6 +2111,19 @@ def analysis_to_openseespy(
         "[float(v) for v in ops.eleForce(_studio_element)]",
         "    except Exception:",
         "        _studio_element_forces[str(_studio_element)] = []",
+        "_studio_element_axial_forces = {}",
+        "for _studio_element in _studio_truss_element_tags:",
+        "    try:",
+        "        _studio_axial = ops.eleResponse(",
+        "            _studio_element, 'axialForce'",
+        "        )",
+        "        if isinstance(_studio_axial, (list, tuple)):",
+        "            _studio_axial = _studio_axial[0] if _studio_axial else None",
+        "        _studio_element_axial_forces[str(_studio_element)] = (",
+        "            None if _studio_axial is None else float(_studio_axial)",
+        "        )",
+        "    except Exception:",
+        "        _studio_element_axial_forces[str(_studio_element)] = None",
         "_studio_element_local_forces = {}",
         "_studio_element_section_forces = {}",
         "for _studio_element in _studio_frame_element_tags:",
@@ -2211,6 +2227,7 @@ def analysis_to_openseespy(
         "    'node_displacements': _studio_final_disp,",
         "    'node_reactions': _studio_final_reaction,",
         "    'element_forces': _studio_element_forces,",
+        "    'element_axial_forces': _studio_element_axial_forces,",
         "    'element_local_forces': _studio_element_local_forces,",
         "    'element_section_forces': _studio_element_section_forces,",
         "    'element_fiber_responses': _studio_element_fiber_responses,",
@@ -2751,7 +2768,20 @@ def to_openseespy(
                 active,
                 node_tags=sorted(model.nodes),
                 element_tags=result_element_tags,
-                frame_element_tags=sorted(model.elements),
+                frame_element_tags=sorted(
+                    tag
+                    for tag, element in model.elements.items()
+                    if element.element_type in {
+                        "elasticBeamColumn",
+                        "forceBeamColumn",
+                        "dispBeamColumn",
+                    }
+                ),
+                truss_element_tags=sorted(
+                    tag
+                    for tag, element in model.elements.items()
+                    if element.element_type == "truss"
+                ),
                 support_node_tags=support_node_tags,
                 plain_pattern_tags=sorted(
                     tag
