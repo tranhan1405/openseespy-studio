@@ -819,11 +819,14 @@ class PropertiesPanel(QWidget):
     solution_result_apply = Signal(int, object)
     solution_result_evaluate = Signal(int, object)
     solution_scope_from_selection = Signal(int)
+    property_edited = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._solution_result_tag: int | None = None
         self._solution_result_auto_scale = True
+        self._property_context: dict[str, object] = {}
+        self._building_property_grid = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 6)
@@ -837,8 +840,14 @@ class PropertiesPanel(QWidget):
         self.table.horizontalHeader().hide()
         self.table.verticalHeader().hide()
         self.table.setShowGrid(True)
-        self.table.setSelectionMode(QAbstractItemView.NoSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self.table.setEditTriggers(
+            QAbstractItemView.DoubleClicked
+            | QAbstractItemView.EditKeyPressed
+            | QAbstractItemView.SelectedClicked
+        )
+        self.table.itemChanged.connect(self._property_item_changed)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setColumnWidth(0, 112)
         layout.addWidget(self.table, 1)
@@ -987,16 +996,108 @@ class PropertiesPanel(QWidget):
         if label is not None:
             label.setVisible(bool(visible))
 
-    def set_properties(self, title: str, rows: list[tuple[str, object]]) -> None:
+    @staticmethod
+    def _property_spec(row) -> tuple[str, object, dict[str, object]]:
+        if len(row) >= 3 and isinstance(row[2], dict):
+            return str(row[0]), row[1], dict(row[2])
+        return str(row[0]), row[1], {}
+
+    def _emit_combo_property(
+        self,
+        property_id: str,
+        combo: QComboBox,
+    ) -> None:
+        if self._building_property_grid:
+            return
+        self.property_edited.emit({
+            "context": dict(self._property_context),
+            "id": str(property_id),
+            "value": combo.currentData(),
+        })
+
+    def _property_item_changed(self, item: QTableWidgetItem) -> None:
+        if self._building_property_grid or item.column() != 1:
+            return
+        spec = item.data(Qt.UserRole)
+        if not isinstance(spec, dict) or not spec.get("editable"):
+            return
+        self.property_edited.emit({
+            "context": dict(self._property_context),
+            "id": str(spec.get("id", "")),
+            "value": item.text(),
+        })
+
+    def set_properties(
+        self,
+        title: str,
+        rows,
+        *,
+        context: dict[str, object] | None = None,
+    ) -> None:
         self._solution_result_tag = None
+        self._property_context = dict(context or {})
         self.result_editor.hide()
         self.table.show()
-        self.apply_button.show()
+        self.apply_button.hide()
         self.entity_label.setText(title)
-        self.table.setRowCount(len(rows))
-        for index, (key, value) in enumerate(rows):
-            self.table.setItem(index, 0, QTableWidgetItem(str(key)))
-            self.table.setItem(index, 1, QTableWidgetItem(str(value)))
+        self._building_property_grid = True
+        self.table.blockSignals(True)
+        try:
+            self.table.clearContents()
+            self.table.setRowCount(len(rows))
+            for index, raw_row in enumerate(rows):
+                key, value, spec = self._property_spec(raw_row)
+                editable = bool(spec.get("editable", False))
+                property_id = str(spec.get("id", key))
+
+                key_item = QTableWidgetItem(key)
+                key_item.setFlags(
+                    key_item.flags() & ~Qt.ItemIsEditable
+                )
+                key_item.setBackground(QColor("#eef1f4"))
+                self.table.setItem(index, 0, key_item)
+
+                kind = str(spec.get("kind", "text"))
+                choices = spec.get("choices")
+                if editable and kind == "choice" and isinstance(choices, (list, tuple)):
+                    combo = QComboBox()
+                    for choice in choices:
+                        if isinstance(choice, (list, tuple)) and len(choice) >= 2:
+                            combo.addItem(str(choice[0]), choice[1])
+                        else:
+                            combo.addItem(str(choice), choice)
+                    current = spec.get("current", value)
+                    current_index = combo.findData(current)
+                    if current_index < 0:
+                        current_index = combo.findText(str(value))
+                    if current_index >= 0:
+                        combo.setCurrentIndex(current_index)
+                    combo.currentIndexChanged.connect(
+                        lambda _index, pid=property_id, widget=combo: (
+                            self._emit_combo_property(pid, widget)
+                        )
+                    )
+                    self.table.setCellWidget(index, 1, combo)
+                    continue
+
+                value_item = QTableWidgetItem(str(value))
+                item_spec = dict(spec)
+                item_spec["id"] = property_id
+                item_spec["editable"] = editable
+                value_item.setData(Qt.UserRole, item_spec)
+                if not editable:
+                    value_item.setFlags(
+                        value_item.flags() & ~Qt.ItemIsEditable
+                    )
+                    value_item.setBackground(QColor("#e3e6e9"))
+                    value_item.setForeground(QColor("#69737d"))
+                else:
+                    value_item.setBackground(QColor("#ffffff"))
+                    value_item.setForeground(QColor("#1f2f40"))
+                self.table.setItem(index, 1, value_item)
+        finally:
+            self.table.blockSignals(False)
+            self._building_property_grid = False
 
     def set_solution_result(
         self,
