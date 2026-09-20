@@ -433,6 +433,7 @@ def section_to_openseespy(
     section: SectionData,
     materials: dict[int, MaterialData] | None = None,
     units: dict[str, str] | None = None,
+    ndm: int = 3,
 ) -> list[str]:
     p = (
         elastic_section_parameters_in_model_units(
@@ -444,11 +445,19 @@ def section_to_openseespy(
         else section.parameters
     )
     if section.section_type == "Elastic":
-        return [
-            "ops.section('Elastic', "
-            f"{section.tag}, {p['E']:g}, {p['A']:g}, "
-            f"{p['Iz']:g}, {p['Iy']:g}, {p['G']:g}, {p['J']:g})"
-        ]
+        if int(ndm) == 2:
+            return [
+                "ops.section('Elastic', "
+                f"{section.tag}, {p['E']:g}, {p['A']:g}, "
+                f"{p['Iz']:g})"
+            ]
+        if int(ndm) == 3:
+            return [
+                "ops.section('Elastic', "
+                f"{section.tag}, {p['E']:g}, {p['A']:g}, "
+                f"{p['Iz']:g}, {p['Iy']:g}, {p['G']:g}, {p['J']:g})"
+            ]
+        raise ValueError(f"Unsupported model dimension for Elastic section: {ndm}")
 
     if section.section_type == "Fiber":
         lines = [
@@ -591,6 +600,12 @@ def element_load_to_openseespy(
     if load.load_type == "Uniform":
         wx, wy, wz = load.wx, load.wy, load.wz
     elif load.load_type == "Point":
+        if int(model.ndm) == 2:
+            return (
+                "ops.eleLoad('-ele', "
+                f"{load.element_tag}, '-type', '-beamPoint', "
+                f"{load.py:g}, {load.x_over_l:g}, {load.px:g})"
+            )
         return (
             "ops.eleLoad('-ele', "
             f"{load.element_tag}, '-type', '-beamPoint', "
@@ -610,6 +625,12 @@ def element_load_to_openseespy(
             f"Unsupported element load type: {load.load_type}"
         )
 
+    if int(model.ndm) == 2:
+        return (
+            "ops.eleLoad('-ele', "
+            f"{load.element_tag}, '-type', '-beamUniform', "
+            f"{wy:g}, {wx:g})"
+        )
     return (
         "ops.eleLoad('-ele', "
         f"{load.element_tag}, '-type', '-beamUniform', "
@@ -2312,11 +2333,21 @@ def analysis_to_openseespy(
 
 def transformation_to_openseespy(
     transformation: TransformationData,
+    ndm: int = 3,
 ) -> str:
-    x, y, z = transformation.vecxz
-    return (
-        f"ops.geomTransf('{transformation.transformation_type}', "
-        f"{transformation.tag}, {x:g}, {y:g}, {z:g})"
+    if int(ndm) == 2:
+        return (
+            f"ops.geomTransf('{transformation.transformation_type}', "
+            f"{transformation.tag})"
+        )
+    if int(ndm) == 3:
+        x, y, z = transformation.vecxz
+        return (
+            f"ops.geomTransf('{transformation.transformation_type}', "
+            f"{transformation.tag}, {x:g}, {y:g}, {z:g})"
+        )
+    raise ValueError(
+        f"Unsupported model dimension for geometric transformation: {ndm}"
     )
 
 
@@ -2417,14 +2448,22 @@ def to_openseespy(
         lines.extend(["", "# Sections"])
         for tag in sorted(sections):
             lines.extend(
-                section_to_openseespy(sections[tag], materials, units)
+                section_to_openseespy(
+                    sections[tag],
+                    materials,
+                    units,
+                    ndm=model.ndm,
+                )
             )
 
     if transformations:
         lines.extend(["", "# Geometric transformations"])
         for tag in sorted(transformations):
             lines.append(
-                transformation_to_openseespy(transformations[tag])
+                transformation_to_openseespy(
+                    transformations[tag],
+                    ndm=model.ndm,
+                )
             )
 
     lines.extend([
@@ -2517,12 +2556,19 @@ def to_openseespy(
                 materials,
                 units,
             )
-            args = (
-                "ops.element('elasticBeamColumn', "
-                f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
-                f"{p['G']:g}, {p['J']:g}, {p['Iy']:g}, {p['Iz']:g}, "
-                f"{transf_tag}"
-            )
+            if int(model.ndm) == 2:
+                args = (
+                    "ops.element('elasticBeamColumn', "
+                    f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
+                    f"{p['Iz']:g}, {transf_tag}"
+                )
+            else:
+                args = (
+                    "ops.element('elasticBeamColumn', "
+                    f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
+                    f"{p['G']:g}, {p['J']:g}, {p['Iy']:g}, {p['Iz']:g}, "
+                    f"{transf_tag}"
+                )
             if e.mass_per_length > 0.0:
                 args += f", '-mass', {e.mass_per_length:g}"
                 if e.consistent_mass:

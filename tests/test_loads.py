@@ -548,3 +548,38 @@ def test_generated_script_declares_consistent_project_units():
 
     assert "# Consistent model units: m, kN, s" in script
     assert "Material stress/modulus inputs are stored in Pa" in script
+
+
+def test_2d_beam_load_commands_use_2d_opensees_signature():
+    model = StructuralModel("2d-loads", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 3.0, 0.0)
+
+    uniform = ElementLoadData(
+        1,
+        "2D uniform",
+        pattern_tag=1,
+        element_tag=1,
+        load_type="Uniform",
+        wx=2.0,
+        wy=-5.0,
+        wz=99.0,
+    )
+    point = ElementLoadData(
+        2,
+        "2D point",
+        pattern_tag=1,
+        element_tag=1,
+        load_type="Point",
+        px=3.0,
+        py=-7.0,
+        pz=88.0,
+        x_over_l=0.25,
+    )
+
+    assert element_load_to_openseespy(uniform, model) == (
+        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', -5, 2)"
+    )
+    assert element_load_to_openseespy(point, model) == (
+        "ops.eleLoad('-ele', 1, '-type', '-beamPoint', -7, 0.25, 3)"
+    )

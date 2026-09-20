@@ -288,3 +288,90 @@ ops.element('Truss', 9, 1, 2, 0.005, 3)
     assert element.truss_area == 0.005
     assert element.truss_material_tag == 3
     assert 3 in result.project.materials
+
+
+def test_2d_frame_export_import_round_trip_preserves_frame_and_loads():
+    model = StructuralModel("roundtrip-2d", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 3.0)
+    model.set_fixity(1, (1, 1, 1))
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="elasticBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
+    sections = {
+        1: SectionData(
+            1,
+            "2D section",
+            "Elastic",
+            parameters={
+                "E": 200.0e9,
+                "A": 0.02,
+                "Iz": 8.0e-5,
+                "Iy": 6.0e-5,
+                "G": 80.0e9,
+                "J": 1.0e-4,
+            },
+        )
+    }
+    transformations = {
+        1: TransformationData(
+            1,
+            "2D Linear",
+            "Linear",
+            (0.0, 1.0, 0.0),
+        )
+    }
+    series = {
+        1: TimeSeriesData(1, "Ramp", "Linear", factor=1.0)
+    }
+    patterns = {
+        1: LoadPatternData(1, "Load", "Plain", time_series_tag=1)
+    }
+    from openseespy_studio.project import ElementLoadData
+    element_loads = {
+        1: ElementLoadData(
+            1,
+            "Distributed",
+            pattern_tag=1,
+            element_tag=1,
+            load_type="Uniform",
+            wx=2.0,
+            wy=-5.0,
+        )
+    }
+
+    script = to_openseespy(
+        model,
+        sections=sections,
+        transformations=transformations,
+        time_series=series,
+        load_patterns=patterns,
+        element_loads=element_loads,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    imported = import_openseespy_source(
+        script,
+        source_name="roundtrip_2d.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert imported.error_count == 0
+    assert imported.unsupported_count == 0
+    assert imported.project.model.ndm == 2
+    assert imported.project.model.ndf == 3
+    assert set(imported.project.model.elements) == {1}
+    element = imported.project.model.elements[1]
+    assert element.element_type == "elasticBeamColumn"
+    assert element.transf_tag == 1
+    section = imported.project.sections[element.section_tag]
+    assert section.parameters["A"] == 0.02
+    assert section.parameters["E"] == 200.0e9
+    assert section.parameters["Iz"] == 8.0e-5
+    assert imported.project.element_loads[1].wy == -5.0
+    assert imported.project.element_loads[1].wx == 2.0
+    assert imported.project.element_loads[1].wz == 0.0

@@ -188,6 +188,24 @@ def _element_geometry_checks(
         if element.element_type not in FRAME_ELEMENT_TYPES:
             continue
 
+        expected_frame_ndf = 3 if int(model.ndm) == 2 else 6
+        if int(model.ndm) in {2, 3} and int(model.ndf) != expected_frame_ndf:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Model DOF",
+                    f"Frame element {tag} uses an ndm={model.ndm} model "
+                    f"with ndf={model.ndf}; OpenSees beam-column elements "
+                    f"require ndf={expected_frame_ndf} in this dimension.",
+                    "element",
+                    tag,
+                    (
+                        "Use ndm=2, ndf=3 for planar frames or "
+                        "ndm=3, ndf=6 for spatial frames."
+                    ),
+                )
+            )
+
         if element.section_tag is None:
             issues.append(
                 ValidationIssue(
@@ -223,7 +241,7 @@ def _element_geometry_checks(
                         "Element formulation",
                         f"elasticBeamColumn element {tag} cannot use "
                         f"{section.section_type} section {section.tag} in the "
-                        "current 3D generator.",
+                        "current Studio generator.",
                         "element",
                         tag,
                         "Use an Elastic section, or switch the element to "
@@ -277,34 +295,36 @@ def _element_geometry_checks(
         if length <= 1.0e-12:
             continue
 
-        vecxz = transformation.vecxz
-        sine = _norm(_cross(axis, vecxz)) / (length * _norm(vecxz))
-        if sine <= 1.0e-8:
-            suggested = _suggest_vecxz(axis)
-            issues.append(
-                ValidationIssue(
-                    "ERROR",
-                    "Transformation orientation",
-                    f"Element {tag}: transformation {transformation.tag} "
-                    f"vecxz={_format_vector(vecxz)} is parallel to the "
-                    "element axis.",
-                    "element",
-                    tag,
-                    f"Suggested vecxz: {_format_vector(suggested)}.",
+        if int(model.ndm) == 3:
+            vecxz = transformation.vecxz
+            sine = _norm(_cross(axis, vecxz)) / (length * _norm(vecxz))
+            if sine <= 1.0e-8:
+                suggested = _suggest_vecxz(axis)
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Transformation orientation",
+                        f"Element {tag}: transformation {transformation.tag} "
+                        f"vecxz={_format_vector(vecxz)} is parallel to the "
+                        "element axis.",
+                        "element",
+                        tag,
+                        f"Suggested vecxz: {_format_vector(suggested)}.",
+                    )
                 )
-            )
-        elif sine <= 1.0e-3:
-            issues.append(
-                ValidationIssue(
-                    "WARNING",
-                    "Transformation orientation",
-                    f"Element {tag}: transformation {transformation.tag} is "
-                    "nearly parallel to the element axis.",
-                    "element",
-                    tag,
-                    f"Consider vecxz={_format_vector(_suggest_vecxz(axis))}.",
+            elif sine <= 1.0e-3:
+                issues.append(
+                    ValidationIssue(
+                        "WARNING",
+                        "Transformation orientation",
+                        f"Element {tag}: transformation {transformation.tag} is "
+                        "nearly parallel to the element axis.",
+                        "element",
+                        tag,
+                        f"Consider vecxz={_format_vector(_suggest_vecxz(axis))}.",
+                    )
                 )
-            )
+
 
 
 def _support_and_connectivity_checks(
@@ -543,7 +563,8 @@ def _element_load_checks(
             else None
         )
         if (
-            transformation is not None
+            int(project.model.ndm) == 3
+            and transformation is not None
             and transformation.transformation_type == "Corotational"
         ):
             issues.append(
@@ -582,6 +603,41 @@ def _element_load_checks(
                         "density, or provide a density override.",
                     )
                 )
+
+
+def _constraint_handler_checks(
+    project: ProjectDatabase,
+    analysis: AnalysisSettingsData,
+    issues: list[ValidationIssue],
+) -> None:
+    if analysis.analysis_type == "Modal":
+        return
+    if analysis.constraints_handler != "Plain":
+        return
+
+    incompatible = sorted(
+        constraint.tag
+        for constraint in project.constraints.values()
+        if constraint.constraint_type in {"rigidLink", "rigidDiaphragm"}
+    )
+    if not incompatible:
+        return
+
+    preview = ", ".join(str(tag) for tag in incompatible[:8])
+    suffix = "..." if len(incompatible) > 8 else ""
+    issues.append(
+        ValidationIssue(
+            "ERROR",
+            "Constraint handler",
+            "Plain ConstraintHandler cannot faithfully enforce "
+            "rigidLink/rigidDiaphragm multi-point constraints "
+            f"(constraint tag(s): {preview}{suffix}).",
+            suggestion=(
+                "Set Analysis Settings > Constraints to Transformation "
+                "for analyses using rigidLink or rigidDiaphragm."
+            ),
+        )
+    )
 
 
 def _driving_load_checks(
@@ -799,6 +855,28 @@ def validate_project(
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
 
+    if int(project.model.ndm) not in {2, 3}:
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Model dimension",
+                f"Studio frame/truss workflows currently support ndm=2 or "
+                f"ndm=3; this project uses ndm={project.model.ndm}.",
+                suggestion="Use a 2D or 3D BasicBuilder model.",
+            )
+        )
+
+    if int(project.model.ndf) < int(project.model.ndm):
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Model DOF",
+                f"Model ndf={project.model.ndf} is smaller than "
+                f"ndm={project.model.ndm}.",
+                suggestion="Choose a compatible BasicBuilder ndm/ndf pair.",
+            )
+        )
+
     try:
         UnitSystem.from_mapping(project.units)
     except ValueError as exc:
@@ -832,6 +910,7 @@ def validate_project(
     _recorder_checks(project, issues)
 
     if analysis is not None:
+        _constraint_handler_checks(project, analysis, issues)
         _driving_load_checks(project, analysis, issues)
         _dynamic_checks(project, analysis, issues)
 
