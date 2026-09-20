@@ -308,6 +308,8 @@ def pga_in_g(values: list[float], input_unit: str) -> float:
         return peak / 9.80665
     if unit == "cm/s²":
         return peak / 980.665
+    if unit == "mm/s²":
+        return peak / 9806.65
     raise ValueError(f"Unsupported acceleration unit: {input_unit}")
 
 

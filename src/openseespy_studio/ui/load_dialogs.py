@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-    QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QSpinBox, QVBoxLayout
+    QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog,
+    QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+    QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget
 )
 
+from ..ground_motion_library import (
+    GROUND_MOTION_LIBRARY,
+    load_bundled_ground_motion_record,
+    parse_ground_motion_record_text,
+    pga_in_g,
+    record_preset,
+)
 from ..project import ElementLoadData, LoadPatternData, NodalLoadData, PrescribedDisplacementData, TimeSeriesData
 from ..units import UnitSystem
 
@@ -113,8 +125,86 @@ class LoadPatternDialog(QDialog):
         self.accept()
 
 
+class GroundMotionPreviewWidget(QWidget):
+    """Compact acceleration-time preview for the Ground Motion editor."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._values: list[float] = []
+        self._dt = 0.01
+        self._unit = "g"
+        self.setMinimumHeight(150)
+
+    def set_data(
+        self,
+        values: list[float],
+        *,
+        dt: float,
+        unit: str,
+    ) -> None:
+        self._values = [float(value) for value in values]
+        self._dt = max(float(dt), 1.0e-15)
+        self._unit = str(unit)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#ffffff"))
+
+        if not self._values:
+            painter.setPen(QColor("#718195"))
+            painter.drawText(
+                self.rect(),
+                Qt.AlignCenter,
+                "No ground-motion data",
+            )
+            return
+
+        left = 58.0
+        right = max(left + 10.0, float(self.width()) - 14.0)
+        top = 18.0
+        bottom = max(top + 10.0, float(self.height()) - 30.0)
+        zero_y = 0.5 * (top + bottom)
+        peak = max(max(abs(value) for value in self._values), 1.0e-15)
+
+        painter.setPen(QPen(QColor("#c7d0da"), 1))
+        painter.drawLine(QPointF(left, zero_y), QPointF(right, zero_y))
+        painter.drawLine(QPointF(left, top), QPointF(left, bottom))
+
+        # Downsample only for painting. Stored data remain untouched.
+        width_points = max(2, int(right - left))
+        stride = max(1, len(self._values) // width_points)
+        sampled = list(range(0, len(self._values), stride))
+        if sampled[-1] != len(self._values) - 1:
+            sampled.append(len(self._values) - 1)
+
+        points: list[QPointF] = []
+        denominator = max(1, len(self._values) - 1)
+        for index in sampled:
+            x = left + (right - left) * index / denominator
+            y = zero_y - 0.5 * (bottom - top) * self._values[index] / peak
+            points.append(QPointF(x, y))
+
+        painter.setPen(QPen(QColor("#2f80ed"), 1.5))
+        for first, second in zip(points, points[1:]):
+            painter.drawLine(first, second)
+
+        duration = max(0, len(self._values) - 1) * self._dt
+        painter.setPen(QColor("#617080"))
+        painter.drawText(4, int(top + 10), f"+{peak:.3g}")
+        painter.drawText(4, int(bottom), f"-{peak:.3g}")
+        painter.drawText(
+            int(max(left, right - 120)),
+            int(self.height() - 7),
+            f"{duration:.3g} s · {self._unit}",
+        )
+
+
 class GroundMotionDialog(QDialog):
-    """Edit a Path time series and UniformExcitation pattern as one object."""
+    """Edit one Path time series + UniformExcitation as one object."""
+
+    INPUT_UNITS = ("g", "m/s²", "cm/s²", "mm/s²")
 
     def __init__(
         self,
@@ -124,13 +214,18 @@ class GroundMotionDialog(QDialog):
         next_series_tag=1,
         next_pattern_tag=1,
         units=None,
+        initial_source="manual",
         parent=None,
     ):
         super().__init__(parent)
         self.setWindowTitle("Ground Motion Editor")
         self.setModal(True)
-        self.resize(520, 500)
+        self.setSizeGripEnabled(True)
+        self.resize(660, 720)
         self.unit_system = UnitSystem.from_mapping(units)
+        self._source_path = ""
+        self._source_format = ""
+        self._builtin_key = ""
 
         if (series is None) != (pattern is None):
             raise ValueError(
@@ -144,6 +239,7 @@ class GroundMotionDialog(QDialog):
 
         root = QVBoxLayout(self)
         form = QFormLayout()
+        self.form = form
 
         self.pattern_tag = QSpinBox()
         self.pattern_tag.setRange(1, 2147483647)
@@ -155,8 +251,6 @@ class GroundMotionDialog(QDialog):
         self.series_tag.setValue(
             series.tag if series else int(next_series_tag)
         )
-        # Changing IDs of a paired object during edit complicates external
-        # references. Creation may choose IDs; editing keeps them stable.
         self.pattern_tag.setEnabled(pattern is None)
         self.series_tag.setEnabled(series is None)
 
@@ -178,6 +272,49 @@ class GroundMotionDialog(QDialog):
             if index >= 0:
                 self.direction.setCurrentIndex(index)
 
+        self.source_mode = QComboBox()
+        self.source_mode.addItem("Built-in Record", "builtin")
+        self.source_mode.addItem("Import File", "file")
+        self.source_mode.addItem("Manual / Paste", "manual")
+
+        self.library = QComboBox()
+        for preset in GROUND_MOTION_LIBRARY:
+            if preset.key == "custom":
+                continue
+            status = "Built-in" if preset.bundled_resource else "Import required"
+            self.library.addItem(
+                f"{preset.label}  [{status}]",
+                preset.key,
+            )
+
+        self.library_info = QLabel()
+        self.library_info.setWordWrap(True)
+        self.library_info.setObjectName("Muted")
+
+        file_host = QWidget()
+        file_layout = QHBoxLayout(file_host)
+        file_layout.setContentsMargins(0, 0, 0, 0)
+        self.file_path = QLineEdit()
+        self.file_path.setReadOnly(True)
+        self.file_button = QPushButton("Browse...")
+        self.file_button.clicked.connect(self._browse_file)
+        file_layout.addWidget(self.file_path, 1)
+        file_layout.addWidget(self.file_button)
+
+        self.column = QSpinBox()
+        self.column.setRange(1, 100)
+        self.column.setValue(1)
+        self.column.setToolTip(
+            "Numeric column used for generic TXT/CSV files. "
+            "PEER AT2 and SimCenter JSON are auto-detected."
+        )
+
+        self.input_unit = QComboBox()
+        self.input_unit.addItems(list(self.INPUT_UNITS))
+        model_accel_unit = self.unit_system.acceleration_label
+        if model_accel_unit in self.INPUT_UNITS:
+            self.input_unit.setCurrentText(model_accel_unit)
+
         self.dt = _spin(
             series.dt if series is not None else 0.01,
             1.0e-12,
@@ -189,13 +326,16 @@ class GroundMotionDialog(QDialog):
         self.scale = _spin(combined_scale)
         self.vel0 = _spin(pattern.vel0 if pattern is not None else 0.0)
 
-        acceleration_unit = (
-            f"{self.unit_system.length}/{self.unit_system.time}²"
-        )
         form.addRow("Ground motion tag:", self.pattern_tag)
         form.addRow("Path series tag:", self.series_tag)
         form.addRow("Name:", self.name)
         form.addRow("Direction:", self.direction)
+        form.addRow("Source:", self.source_mode)
+        form.addRow("Record library:", self.library)
+        form.addRow("Record info:", self.library_info)
+        form.addRow("File:", file_host)
+        form.addRow("TXT/CSV column:", self.column)
+        form.addRow("Input acceleration unit:", self.input_unit)
         form.addRow(f"dt [{self.unit_system.time}]:", self.dt)
         form.addRow("Scale factor:", self.scale)
         form.addRow(
@@ -205,21 +345,34 @@ class GroundMotionDialog(QDialog):
         root.addLayout(form)
 
         note = QLabel(
-            "Ground Motion is stored as one Path TimeSeries plus one "
-            "UniformExcitation pattern. Pushover and Cyclic loading protocols "
-            "remain Analysis settings, not load objects."
+            "Built-in and imported acceleration data are converted to the "
+            f"active model unit ({self.unit_system.acceleration_label}) when "
+            "the ground motion is saved. Pushover/Cyclic protocols remain "
+            "Analysis settings."
         )
         note.setWordWrap(True)
         root.addWidget(note)
 
-        root.addWidget(
-            QLabel(
-                f"Acceleration values [{acceleration_unit}] "
-                "(space/comma/newline separated):"
-            )
-        )
+        self.data_info = QLabel("No acceleration data.")
+        self.data_info.setWordWrap(True)
+        self.data_info.setObjectName("Muted")
+        root.addWidget(self.data_info)
+
+        self.preview = GroundMotionPreviewWidget()
+        root.addWidget(self.preview)
+
+        self.values_label = QLabel("Acceleration values:")
+        root.addWidget(self.values_label)
         self.values = QPlainTextEdit()
+        self.values.setPlaceholderText(
+            "Paste acceleration values separated by spaces, commas or lines."
+        )
         if series is not None and series.values:
+            self.source_mode.setCurrentIndex(
+                self.source_mode.findData("manual")
+            )
+            if model_accel_unit in self.INPUT_UNITS:
+                self.input_unit.setCurrentText(model_accel_unit)
             self.values.setPlainText(
                 " ".join(f"{value:g}" for value in series.values)
             )
@@ -232,12 +385,214 @@ class GroundMotionDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
 
+        self.source_mode.currentIndexChanged.connect(self._sync_source_mode)
+        self.library.currentIndexChanged.connect(self._library_changed)
+        self.values.textChanged.connect(self._refresh_preview)
+        self.dt.valueChanged.connect(self._refresh_preview)
+        self.input_unit.currentTextChanged.connect(self._refresh_preview)
+        self.scale.valueChanged.connect(self._refresh_preview)
+        if series is None:
+            source_index = self.source_mode.findData(str(initial_source))
+            if source_index >= 0:
+                self.source_mode.setCurrentIndex(source_index)
+        self._sync_source_mode()
+        if series is None and self.source_mode.currentData() == "builtin":
+            self._library_changed()
+        else:
+            self._refresh_preview()
+
+    def _set_form_row_visible(self, widget: QWidget, visible: bool) -> None:
+        widget.setVisible(bool(visible))
+        label = self.form.labelForField(widget)
+        if label is not None:
+            label.setVisible(bool(visible))
+
+    def _sync_source_mode(self, *_args) -> None:
+        mode = str(self.source_mode.currentData() or "manual")
+        self._set_form_row_visible(self.library, mode == "builtin")
+        self._set_form_row_visible(self.library_info, mode == "builtin")
+        self._set_form_row_visible(self.file_path.parentWidget(), mode == "file")
+        self._set_form_row_visible(self.column, mode == "file")
+        self.values.setReadOnly(mode != "manual")
+        self.values_label.setText(
+            "Acceleration values (editable):"
+            if mode == "manual"
+            else "Acceleration values (loaded preview):"
+        )
+        if mode == "builtin":
+            self._library_changed()
+        self._refresh_preview()
+
+    def _library_changed(self, *_args) -> None:
+        key = str(self.library.currentData() or "")
+        if not key:
+            return
+        preset = record_preset(key)
+        year = f" ({preset.year})" if preset.year is not None else ""
+        if not preset.bundled_resource:
+            self.library_info.setText(
+                f"{preset.event}{year} · {preset.station} · "
+                f"Source: {preset.source}. Reference preset only — use "
+                f"Import File to supply the record. {preset.notes}"
+            )
+            self._builtin_key = ""
+            self._source_format = ""
+            self.values.clear()
+            self._refresh_preview()
+            return
+
+        try:
+            parsed = load_bundled_ground_motion_record(key)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Ground Motion Library", str(exc))
+            return
+
+        self._builtin_key = key
+        self._source_path = ""
+        self._source_format = parsed.format
+        if parsed.dt is not None:
+            self.dt.setValue(parsed.dt)
+        if parsed.input_unit in self.INPUT_UNITS:
+            self.input_unit.setCurrentText(parsed.input_unit)
+        self.values.setPlainText(
+            " ".join(f"{value:g}" for value in parsed.values)
+        )
+        if not self.name.text().strip() or self.name.text().startswith(
+            "Ground Motion "
+        ):
+            self.name.setText(preset.label)
+        self.library_info.setText(
+            f"{preset.event}{year} · {preset.station} · Source: "
+            f"{preset.source}. Built-in offline record. {preset.notes}"
+        )
+        self._refresh_preview()
+
+    def _browse_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Ground Motion",
+            "",
+            (
+                "Ground motion (*.at2 *.AT2 *.txt *.dat *.csv *.json);;"
+                "All files (*)"
+            ),
+        )
+        if not path:
+            return
+        try:
+            text = Path(path).read_text(encoding="utf-8", errors="replace")
+            parsed = parse_ground_motion_record_text(
+                text,
+                column=self.column.value(),
+                filename=path,
+            )
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Import Ground Motion",
+                str(exc),
+            )
+            return
+
+        self._source_path = str(path)
+        self._source_format = parsed.format
+        self._builtin_key = ""
+        self.file_path.setText(str(path))
+        if parsed.dt is not None:
+            self.dt.setValue(parsed.dt)
+        if parsed.input_unit in self.INPUT_UNITS:
+            self.input_unit.setCurrentText(parsed.input_unit)
+        self.values.setPlainText(
+            " ".join(f"{value:g}" for value in parsed.values)
+        )
+        if not self.name.text().strip() or self.name.text().startswith(
+            "Ground Motion "
+        ):
+            self.name.setText(Path(path).stem)
+        self._refresh_preview()
+
     def _parsed_values(self) -> list[float]:
-        text = self.values.toPlainText().replace(",", " ")
+        text = (
+            self.values.toPlainText()
+            .replace(",", " ")
+            .replace(";", " ")
+        )
         return [float(value) for value in text.split()] if text.strip() else []
 
-    def data(self) -> tuple[TimeSeriesData, LoadPatternData]:
+    def _raw_pga_g(self, values: list[float]) -> float:
+        if not values:
+            return 0.0
+        return pga_in_g(values, self.input_unit.currentText())
+
+    def _values_in_model_units(self) -> list[float]:
         values = self._parsed_values()
+        unit = self.input_unit.currentText()
+        if unit == "g":
+            to_m_per_s2 = 9.80665
+        elif unit == "m/s²":
+            to_m_per_s2 = 1.0
+        elif unit == "cm/s²":
+            to_m_per_s2 = 0.01
+        elif unit == "mm/s²":
+            to_m_per_s2 = 0.001
+        else:
+            raise ValueError(f"Unsupported acceleration unit: {unit}")
+        return [
+            self.unit_system.acceleration_from_m_per_s2(
+                value * to_m_per_s2
+            )
+            for value in values
+        ]
+
+    def _refresh_preview(self, *_args) -> None:
+        try:
+            values = self._parsed_values()
+        except ValueError:
+            self.data_info.setText("Acceleration data contain an invalid value.")
+            self.preview.set_data(
+                [],
+                dt=self.dt.value(),
+                unit=self.input_unit.currentText(),
+            )
+            return
+        self.preview.set_data(
+            values,
+            dt=self.dt.value(),
+            unit=self.input_unit.currentText(),
+        )
+        if not values:
+            self.data_info.setText("No acceleration data.")
+            return
+        try:
+            raw_pga = self._raw_pga_g(values)
+        except ValueError:
+            raw_pga = 0.0
+        duration = max(0, len(values) - 1) * self.dt.value()
+        scaled_pga = raw_pga * abs(self.scale.value())
+        source = (
+            f"Built-in · {record_preset(self._builtin_key).label}"
+            if self._builtin_key
+            else (
+                f"Imported · {Path(self._source_path).name}"
+                if self._source_path
+                else "Manual"
+            )
+        )
+        format_text = f" · {self._source_format}" if self._source_format else ""
+        self.data_info.setText(
+            f"{source}{format_text} · {len(values)} point(s) · "
+            f"duration {duration:g} s · raw PGA {raw_pga:.4g} g · "
+            f"scaled PGA {scaled_pga:.4g} g"
+        )
+
+    def data(self) -> tuple[TimeSeriesData, LoadPatternData]:
+        raw_values = self._parsed_values()
+        if not raw_values:
+            raise ValueError(
+                "Ground motion needs acceleration data. Choose a built-in "
+                "record, import a file, or paste values manually."
+            )
+        values = self._values_in_model_units()
         name = (
             self.name.text().strip()
             or f"Ground Motion {self.pattern_tag.value()}"

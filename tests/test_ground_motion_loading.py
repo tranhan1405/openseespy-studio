@@ -156,3 +156,54 @@ def test_validation_rejects_ground_motion_direction_beyond_model_ndf():
         and "model has ndf=2" in issue.message
         for issue in issues
     )
+
+
+def test_ground_motion_dialog_loads_bundled_el_centro_and_converts_to_model_units():
+    app = QApplication.instance() or QApplication([])
+    dialog = GroundMotionDialog(
+        next_series_tag=10,
+        next_pattern_tag=11,
+        units={"length": "m", "force": "N", "time": "s"},
+        initial_source="builtin",
+    )
+    try:
+        index = dialog.library.findData("el-centro-1940")
+        assert index >= 0
+        dialog.library.setCurrentIndex(index)
+        dialog._library_changed()
+
+        raw_values = dialog._parsed_values()
+        assert len(raw_values) == 1559
+        assert dialog.dt.value() == 0.02
+        assert dialog.input_unit.currentText() == "g"
+
+        series, pattern = dialog.data()
+        assert len(series.values) == 1559
+        assert series.dt == 0.02
+        assert pattern.pattern_type == "UniformExcitation"
+        peak_raw = max(abs(value) for value in raw_values)
+        peak_model = max(abs(value) for value in series.values)
+        assert abs(peak_model - peak_raw * 9.80665) < 1.0e-8
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        app.processEvents()
+
+
+def test_ground_motion_dialog_converts_g_to_mm_per_s2_model_units():
+    app = QApplication.instance() or QApplication([])
+    dialog = GroundMotionDialog(
+        units={"length": "mm", "force": "N", "time": "s"},
+    )
+    try:
+        dialog.source_mode.setCurrentIndex(
+            dialog.source_mode.findData("manual")
+        )
+        dialog.input_unit.setCurrentText("g")
+        dialog.values.setPlainText("0.0 1.0 -0.5")
+        series, _ = dialog.data()
+        assert series.values == [0.0, 9806.65, -4903.325]
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        app.processEvents()

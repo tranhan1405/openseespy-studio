@@ -200,3 +200,37 @@ def test_cyclic_can_use_existing_plain_driving_pattern():
         assert dialog.data().deferred_pattern_tags == [7]
     finally:
         _close(dialog)
+
+
+def test_cyclic_protocol_import_accepts_absolute_targets():
+    dialog = AnalysisDialog(analysis_type="Cyclic")
+    try:
+        targets = dialog._apply_cyclic_protocol_text(
+            "Target\n0.005\n-0.005\n0.01\n0\n",
+            mode="targets",
+        )
+        assert targets == [0.005, -0.005, 0.01, 0.0]
+        assert dialog.data().cyclic_targets == targets
+    finally:
+        _close(dialog)
+
+
+def test_cyclic_protocol_import_expands_amplitude_cycle_rows():
+    dialog = AnalysisDialog(analysis_type="Cyclic")
+    try:
+        targets = dialog._apply_cyclic_protocol_text(
+            "Amplitude,Cycles\n0.005,1\n0.01,2\n",
+            mode="amplitude_cycles",
+        )
+        assert targets == [
+            0.005,
+            -0.005,
+            0.01,
+            -0.01,
+            0.01,
+            -0.01,
+            0.0,
+        ]
+        assert dialog.data().cyclic_targets == targets
+    finally:
+        _close(dialog)
