@@ -3525,6 +3525,12 @@ class ModelViewport(QWidget):
             self.clear_result_overlay()
             return
 
+        analysis = result.get("analysis", {}) if isinstance(result, dict) else {}
+        if not isinstance(analysis, dict):
+            analysis = {}
+        ndm = int(analysis.get("ndm", self._model.ndm))
+        ndf = int(analysis.get("ndf", self._model.ndf))
+
         key = (
             "node_displacements"
             if quantity == "Displacement"
@@ -3540,7 +3546,12 @@ class ModelViewport(QWidget):
             if not isinstance(raw, (list, tuple)):
                 return None
             try:
-                return nodal_result_scalar(raw, component)
+                return nodal_result_scalar(
+                    raw,
+                    component,
+                    ndm=ndm,
+                    ndf=ndf,
+                )
             except ValueError:
                 return None
 
