@@ -51,10 +51,10 @@ from ..postprocess import (
     pushover_capacity_curve,
     time_history_node_tags,
     time_history_series,
-    test_column_fiber_history_catalog,
-    test_column_moment_curvature_curve,
-    test_column_response_summary,
-    test_column_rotation_decomposition,
+    column_fiber_history_catalog,
+    column_moment_curvature_curve,
+    column_response_summary,
+    column_rotation_decomposition,
 )
 
 
@@ -3251,7 +3251,7 @@ class ResultsPanel(QWidget):
         ):
             self.specimen_quantity.addItem(label, key)
 
-        fibers = test_column_fiber_history_catalog(self._result)
+        fibers = column_fiber_history_catalog(self._result)
         for item in fibers:
             self.specimen_quantity.addItem(
                 f"{item.get('source', '-')} · "
@@ -3303,7 +3303,7 @@ class ResultsPanel(QWidget):
             self.specimen_fiber_table.setRowCount(0)
             return
 
-        summary = test_column_response_summary(self._result)
+        summary = column_response_summary(self._result)
         interface_name = str(specimen.get("interface_name", "Fixed base"))
         element_tag = specimen.get("element_tag", "-")
         selected = str(
@@ -3334,7 +3334,7 @@ class ResultsPanel(QWidget):
         )
 
         if selected == "moment_curvature":
-            x, y, component = test_column_moment_curvature_curve(
+            x, y, component = column_moment_curvature_curve(
                 self._result
             )
             self.specimen_info.setText(
@@ -3348,7 +3348,7 @@ class ResultsPanel(QWidget):
 
         if selected.startswith("rotation:"):
             key = selected.split(":", 1)[1]
-            decomposition = test_column_rotation_decomposition(
+            decomposition = column_rotation_decomposition(
                 self._result
             )
             x = decomposition.get("time", [])
@@ -3371,7 +3371,7 @@ class ResultsPanel(QWidget):
         item = next(
             (
                 row
-                for row in test_column_fiber_history_catalog(self._result)
+                for row in column_fiber_history_catalog(self._result)
                 if str(row.get("key", "")) == selected
             ),
             None,
