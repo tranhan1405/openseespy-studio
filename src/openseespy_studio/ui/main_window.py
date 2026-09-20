@@ -1913,6 +1913,13 @@ class MainWindow(QMainWindow):
             self._create_ground_motion,
             "Create a Path record with UniformExcitation for NLTH",
         )
+        self._make_action(
+            "import_ground_motion",
+            "Import Ground Motion...",
+            "timeseries",
+            self._import_ground_motion,
+            "Import AT2, JSON, TXT, CSV or DAT ground-motion data",
+        )
         self._make_action("nodal_load", "Nodal Load...", "load", self._create_nodal_load, "Create nodal load")
         self._make_action(
             "prescribed_displacement",
@@ -2114,6 +2121,7 @@ class MainWindow(QMainWindow):
         loads_menu.addAction(self.actions["time_series"])
         loads_menu.addAction(self.actions["load_pattern"])
         loads_menu.addAction(self.actions["ground_motion"])
+        loads_menu.addAction(self.actions["import_ground_motion"])
         loads_menu.addAction(self.actions["nodal_load"])
         loads_menu.addAction(self.actions["prescribed_displacement"])
         loads_menu.addAction(self.actions["beam_load"])
@@ -5795,12 +5803,24 @@ class MainWindow(QMainWindow):
         return series, pattern
 
     def _create_ground_motion(self) -> None:
+        self._create_ground_motion_from_source("builtin")
+
+    def _import_ground_motion(self) -> None:
+        self._create_ground_motion_from_source("file")
+
+    def _create_ground_motion_from_source(
+        self,
+        source_mode: str,
+    ) -> None:
         dialog = GroundMotionDialog(
             next_series_tag=self.project.next_time_series_tag(),
             next_pattern_tag=self.project.next_load_pattern_tag(),
             units=self.project.units,
+            initial_source=str(source_mode),
             parent=self,
         )
+        if str(source_mode) == "file":
+            dialog._browse_file()
         if not dialog.exec():
             return
         before = self.project.to_dict()
@@ -11337,6 +11357,8 @@ class MainWindow(QMainWindow):
             new_pattern.triggered.connect(self._create_load_pattern)
             new_motion = menu.addAction("New Ground Motion...")
             new_motion.triggered.connect(self._create_ground_motion)
+            import_motion = menu.addAction("Import Ground Motion...")
+            import_motion.triggered.connect(self._import_ground_motion)
             new_series = menu.addAction("New Time Series...")
             new_series.triggered.connect(self._create_time_series)
             menu.exec(self.tree.viewport().mapToGlobal(position))
@@ -11345,6 +11367,8 @@ class MainWindow(QMainWindow):
         if kind == "ground_motions_root":
             action = menu.addAction("New Ground Motion...")
             action.triggered.connect(self._create_ground_motion)
+            import_action = menu.addAction("Import Ground Motion...")
+            import_action.triggered.connect(self._import_ground_motion)
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
