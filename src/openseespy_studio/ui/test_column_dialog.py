@@ -209,7 +209,12 @@ class TestColumnWizard(QDialog):
             row.addWidget(combo, 1)
             interface_dofs_layout.addLayout(row)
             self.interface_rows[dof] = (check, combo)
-            check.toggled.connect(self._update_preview)
+            check.toggled.connect(
+                lambda checked, row_dof=dof: self._sync_interface_row(
+                    row_dof,
+                    checked,
+                )
+            )
             combo.currentIndexChanged.connect(self._update_preview)
 
         material_buttons = QHBoxLayout()
@@ -461,6 +466,18 @@ class TestColumnWizard(QDialog):
                 if index >= 0:
                     combo.setCurrentIndex(index)
 
+    def _sync_interface_row(
+        self,
+        dof: int,
+        checked: bool,
+    ) -> None:
+        _check, combo = self.interface_rows[int(dof)]
+        combo.setEnabled(
+            self.base_interface.currentText() != "Fixed base"
+            and bool(checked)
+        )
+        self._update_preview()
+
     def _sync_base_interface(self, *_args) -> None:
         interface = self.base_interface.currentText()
         active = interface != "Fixed base"
@@ -584,12 +601,22 @@ class TestColumnWizard(QDialog):
             if hasattr(dialog, "pending_materials")
             else []
         )
-        for material in pending_materials:
-            if material.tag in self.project.materials:
-                raise ValueError(
-                    f"Material tag {material.tag} already exists in the project."
-                )
-            self._pending_materials[material.tag] = material
+        try:
+            for material in pending_materials:
+                if material.tag in self.project.materials:
+                    raise ValueError(
+                        f"Material tag {material.tag} already exists in the project."
+                    )
+                if material.tag in self._pending_materials:
+                    raise ValueError(
+                        f"Material tag {material.tag} is already staged "
+                        "in this wizard."
+                    )
+            for material in pending_materials:
+                self._pending_materials[material.tag] = material
+        except ValueError as exc:
+            QMessageBox.warning(self, "Section Editor", str(exc))
+            return
         self._refresh_interface_material_combos()
 
         self._pending_sections[section.tag] = section
