@@ -217,6 +217,38 @@ def test_specimen_response_tab_loads_moment_curvature_and_fiber_choices(qapp):
         qapp.processEvents()
         assert panel.specimen_plot._x == pytest.approx([0.0, 0.0002])
         assert panel.specimen_plot._y == pytest.approx([0.0, 18.0])
+
+        panel._set_cyclic_experiment_dataset(
+            {
+                "headers": [
+                    "Displacement",
+                    "Force",
+                    "Curvature",
+                    "Moment",
+                ],
+                "rows": [
+                    [0.0, 0.0, 0.0, 0.0],
+                    [0.01, 18.0, 0.002, 19.0],
+                ],
+                "delimiter": ",",
+                "skipped_rows": 0,
+            },
+            path="/tmp/specimen_response.csv",
+        )
+        panel.specimen_quantity.setCurrentIndex(
+            panel.specimen_quantity.findData("moment_curvature")
+        )
+        qapp.processEvents()
+
+        assert panel.specimen_exp_x_column.currentText() == "Curvature"
+        assert panel.specimen_exp_y_column.currentText() == "Moment"
+        assert panel.specimen_plot._overlay_x == pytest.approx(
+            [0.0, 0.002]
+        )
+        assert panel.specimen_plot._overlay_y == pytest.approx(
+            [0.0, 19.0]
+        )
+        assert "specimen_response.csv" in panel.specimen_experiment_info.text()
     finally:
         panel.close()
         panel.deleteLater()
