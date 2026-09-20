@@ -665,3 +665,58 @@ def test_project_rejects_out_of_plane_2d_element_load_components():
                 gravity=(0.0, 0.0, -9.81),
             )
         )
+
+
+def test_2d_self_weight_projection_ignores_vecxz_like_opensees():
+    model = StructuralModel("2d-self-weight", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 2.0, 0.0, 0.0)
+    model.add_element(1, 1, 2, section_tag=1, transf_tag=1)
+    materials = {
+        1: MaterialData(
+            1,
+            "Dense",
+            "Elastic",
+            {"E": 2.0e11},
+            density=1000.0,
+        )
+    }
+    sections = {
+        1: SectionData(
+            1,
+            "A=0.2",
+            "Elastic",
+            {"A": 0.2},
+            material_tag=1,
+        )
+    }
+    transformations = {
+        1: TransformationData(
+            1,
+            "2D",
+            "Linear",
+            # Deliberately misleading for a 2D model; OpenSees ignores vecxz.
+            (0.0, 1.0, 0.0),
+        )
+    }
+    load = ElementLoadData(
+        1,
+        "2D Self Weight",
+        1,
+        1,
+        "SelfWeight",
+        gravity=(0.0, -10.0, 0.0),
+    )
+
+    text = element_load_to_openseespy(
+        load,
+        model,
+        sections,
+        materials,
+        transformations,
+        {"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert text == (
+        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', -2000, 0)"
+    )
