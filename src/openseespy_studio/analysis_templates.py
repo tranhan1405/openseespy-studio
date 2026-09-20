@@ -448,6 +448,24 @@ def _reference_lateral_loading(
     return [series], [pattern], loads
 
 
+def build_reference_lateral_loading(
+    project: ProjectDatabase,
+    *,
+    dof: int,
+    distribution: str,
+    prefix: str,
+    height_axis: int,
+) -> tuple[list[TimeSeriesData], list[LoadPatternData], list[NodalLoadData]]:
+    """Public safe helper used by New Analysis auto-driving-load setup."""
+    return _reference_lateral_loading(
+        project,
+        dof=dof,
+        distribution=distribution,
+        prefix=prefix,
+        height_axis=height_axis,
+    )
+
+
 def _result_objects(
     project: ProjectDatabase,
     analysis_tag: int,
