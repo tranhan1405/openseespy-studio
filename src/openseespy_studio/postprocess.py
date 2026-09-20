@@ -1183,6 +1183,307 @@ def time_history_series(
     return selected_time, values
 
 
+
+def test_column_specimen_metadata(
+    result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return normalized Quick 1D Column instrumentation metadata."""
+    if not isinstance(result, dict):
+        return {}
+    specimen = result.get("specimen", {})
+    if not isinstance(specimen, dict):
+        return {}
+    if specimen.get("kind") != "test-column":
+        return {}
+    return dict(specimen)
+
+
+def test_column_moment_curvature(
+    result: dict[str, Any] | None,
+) -> tuple[list[float], list[float], str]:
+    """Return base-section curvature and moment histories."""
+    specimen = test_column_specimen_metadata(result)
+    if not specimen or not isinstance(result, dict):
+        return [], [], ""
+
+    history = result.get("history", {})
+    if not isinstance(history, dict):
+        return [], [], ""
+    response = history.get("specimen", {})
+    if not isinstance(response, dict):
+        return [], [], ""
+
+    try:
+        index = int(specimen.get("moment_index", 1))
+        sign = float(specimen.get("moment_sign", 1.0))
+    except (TypeError, ValueError):
+        return [], [], ""
+    component = str(specimen.get("moment_component", "M"))
+
+    forces = response.get("section_force", [])
+    deformations = response.get("section_deformation", [])
+    if not isinstance(forces, (list, tuple)):
+        return [], [], component
+    if not isinstance(deformations, (list, tuple)):
+        return [], [], component
+
+    curvature: list[float] = [0.0]
+    moment: list[float] = [0.0]
+    for force_row, deformation_row in zip(forces, deformations):
+        if (
+            not isinstance(force_row, (list, tuple))
+            or not isinstance(deformation_row, (list, tuple))
+            or len(force_row) <= index
+            or len(deformation_row) <= index
+        ):
+            continue
+        try:
+            m_value = sign * float(force_row[index])
+            kappa = sign * float(deformation_row[index])
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(m_value) and math.isfinite(kappa):
+            moment.append(m_value)
+            curvature.append(kappa)
+
+    if len(moment) <= 1:
+        return [], [], component
+    return curvature, moment, component
+
+
+def _history_node_rows(
+    result: dict[str, Any],
+    node_tag: int,
+    key: str = "disp",
+) -> list[Any]:
+    history = result.get("history", {})
+    if not isinstance(history, dict):
+        return []
+    nodes = history.get("nodes", {})
+    if not isinstance(nodes, dict):
+        return []
+    payload = nodes.get(str(int(node_tag)), nodes.get(int(node_tag), {}))
+    if not isinstance(payload, dict):
+        return []
+    rows = payload.get(key, [])
+    return list(rows) if isinstance(rows, (list, tuple)) else []
+
+
+def test_column_rotation_decomposition(
+    result: dict[str, Any] | None,
+) -> dict[str, list[float]]:
+    """Decompose global drift rotation into column and base-interface parts.
+
+    For a fixed base the interface term is zero. For a zeroLength base
+    interface, relative rotation between the specimen base and generated
+    ground node is used. This makes Bond_SP01 strain penetration visible as
+    its own rotation contribution instead of being hidden inside global drift.
+    """
+    specimen = test_column_specimen_metadata(result)
+    if not specimen or not isinstance(result, dict):
+        return {
+            "time": [],
+            "total": [],
+            "column": [],
+            "interface": [],
+            "base_slip": [],
+        }
+
+    try:
+        top_node = int(specimen["top_node"])
+        base_node = int(specimen["base_node"])
+        ground_raw = specimen.get("ground_node")
+        ground_node = int(ground_raw) if ground_raw is not None else None
+        lateral_index = int(specimen["lateral_direction"]) - 1
+        rotation_index = int(specimen["bending_rotation_dof"]) - 1
+        height = abs(float(specimen["height"]))
+    except (KeyError, TypeError, ValueError):
+        return {
+            "time": [],
+            "total": [],
+            "column": [],
+            "interface": [],
+            "base_slip": [],
+        }
+    if height <= 1.0e-30:
+        return {
+            "time": [],
+            "total": [],
+            "column": [],
+            "interface": [],
+            "base_slip": [],
+        }
+
+    history = result.get("history", {})
+    times = history.get("time", []) if isinstance(history, dict) else []
+    if not isinstance(times, (list, tuple)):
+        times = []
+
+    top_rows = _history_node_rows(result, top_node)
+    base_rows = _history_node_rows(result, base_node)
+    ground_rows = (
+        _history_node_rows(result, ground_node)
+        if ground_node is not None
+        else []
+    )
+
+    output = {
+        "time": [0.0],
+        "total": [0.0],
+        "column": [0.0],
+        "interface": [0.0],
+        "base_slip": [0.0],
+    }
+    for step, (time_value, top_row, base_row) in enumerate(
+        zip(times, top_rows, base_rows)
+    ):
+        if (
+            not isinstance(top_row, (list, tuple))
+            or not isinstance(base_row, (list, tuple))
+            or len(top_row) <= max(lateral_index, rotation_index)
+            or len(base_row) <= max(lateral_index, rotation_index)
+        ):
+            continue
+
+        ground_row = (
+            ground_rows[step]
+            if step < len(ground_rows)
+            and isinstance(ground_rows[step], (list, tuple))
+            else [0.0] * 6
+        )
+        try:
+            ground_lateral = (
+                float(ground_row[lateral_index])
+                if len(ground_row) > lateral_index
+                else 0.0
+            )
+            ground_rotation = (
+                float(ground_row[rotation_index])
+                if len(ground_row) > rotation_index
+                else 0.0
+            )
+            top_lateral = float(top_row[lateral_index])
+            base_lateral = float(base_row[lateral_index])
+            base_rotation = float(base_row[rotation_index])
+            total_rotation = (top_lateral - ground_lateral) / height
+            base_slip = base_lateral - ground_lateral
+            interface_rotation = base_rotation - ground_rotation
+            column_rotation = (
+                total_rotation
+                - interface_rotation
+                - base_slip / height
+            )
+            t_value = float(time_value)
+        except (TypeError, ValueError):
+            continue
+        if not all(
+            math.isfinite(value)
+            for value in (
+                t_value,
+                total_rotation,
+                column_rotation,
+                interface_rotation,
+                base_slip,
+            )
+        ):
+            continue
+
+        output["time"].append(t_value)
+        output["total"].append(total_rotation)
+        output["column"].append(column_rotation)
+        output["interface"].append(interface_rotation)
+        output["base_slip"].append(base_slip)
+    if len(output["time"]) <= 1:
+        return {
+            "time": [],
+            "total": [],
+            "column": [],
+            "interface": [],
+            "base_slip": [],
+        }
+    return output
+
+
+def test_column_critical_response_summary(
+    result: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Summarize critical base-section and interface fiber histories."""
+    specimen = test_column_specimen_metadata(result)
+    if not specimen or not isinstance(result, dict):
+        return []
+    history = result.get("history", {})
+    response = history.get("specimen", {}) if isinstance(history, dict) else {}
+    if not isinstance(response, dict):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    sources = (
+        ("Base section", response.get("base_fibers", []), "strain"),
+        ("Base interface", response.get("interface_fibers", []), "slip"),
+    )
+    for source_name, step_rows, deformation_key in sources:
+        if not isinstance(step_rows, (list, tuple)):
+            continue
+        histories: dict[str, dict[str, Any]] = {}
+        for step_row in step_rows:
+            if not isinstance(step_row, (list, tuple)):
+                continue
+            for fiber in step_row:
+                if not isinstance(fiber, dict):
+                    continue
+                label = str(fiber.get("label", "fiber"))
+                entry = histories.setdefault(
+                    label,
+                    {
+                        "source": source_name,
+                        "label": label,
+                        "material_tag": fiber.get("material_tag"),
+                        "material_type": fiber.get("material_type", "Unknown"),
+                        "stress": [],
+                        "deformation": [],
+                        "deformation_name": deformation_key,
+                    },
+                )
+                stress = fiber.get("stress")
+                deformation = fiber.get(deformation_key)
+                try:
+                    stress_value = float(stress) if stress is not None else math.nan
+                except (TypeError, ValueError):
+                    stress_value = math.nan
+                try:
+                    deformation_value = (
+                        float(deformation)
+                        if deformation is not None
+                        else math.nan
+                    )
+                except (TypeError, ValueError):
+                    deformation_value = math.nan
+                if math.isfinite(stress_value):
+                    entry["stress"].append(stress_value)
+                if math.isfinite(deformation_value):
+                    entry["deformation"].append(deformation_value)
+
+        for entry in histories.values():
+            stress_values = entry.pop("stress")
+            deformation_values = entry.pop("deformation")
+            entry["peak_abs_stress"] = (
+                max((abs(value) for value in stress_values), default=None)
+            )
+            entry["peak_abs_deformation"] = (
+                max((abs(value) for value in deformation_values), default=None)
+            )
+            entry["final_stress"] = (
+                stress_values[-1] if stress_values else None
+            )
+            entry["final_deformation"] = (
+                deformation_values[-1] if deformation_values else None
+            )
+            rows.append(entry)
+
+    return rows
+
+
+
 def fiber_response_element_tags(
     result: dict[str, Any] | None,
 ) -> list[int]:
