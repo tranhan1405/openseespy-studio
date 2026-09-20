@@ -5,7 +5,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QTableWidget
 
 from openseespy_studio.project import MaterialData, ProjectDatabase
 from openseespy_studio.ui.calibration_dialog import (
@@ -200,14 +200,7 @@ def test_apply_calibration_case_dialog_displays_old_and_new_values(qapp):
         score=3.25,
     )
     try:
-        table = next(
-            widget
-            for widget in dialog.findChildren(type(dialog.parameter_table))
-        ) if hasattr(dialog, "parameter_table") else None
-        tables = dialog.findChildren(__import__(
-            "PySide6.QtWidgets",
-            fromlist=["QTableWidget"],
-        ).QTableWidget)
+        tables = dialog.findChildren(QTableWidget)
         assert len(tables) == 1
         table = tables[0]
         assert table.rowCount() == 1
