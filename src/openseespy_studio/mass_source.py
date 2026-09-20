@@ -168,12 +168,28 @@ def evaluate_mass_source(
                 # matrix. Adding it again as nodal mass would double-count.
                 summary.skipped_element_mass_tags.append(element.tag)
                 continue
-            if element.section_tag is None:
-                continue
-            section = project.sections.get(element.section_tag)
-            if section is None:
-                continue
-            mass_per_length = _section_mass_per_length(project, section)
+            mass_per_length = 0.0
+            if element.element_type == "truss":
+                material = (
+                    project.materials.get(element.truss_material_tag)
+                    if element.truss_material_tag is not None
+                    else None
+                )
+                if (
+                    material is not None
+                    and material.density > 0.0
+                    and element.truss_area > 0.0
+                ):
+                    density = UnitSystem.from_mapping(
+                        project.units
+                    ).density_from_kg_per_m3(material.density)
+                    mass_per_length = density * float(element.truss_area)
+            elif element.section_tag is not None:
+                section = project.sections.get(element.section_tag)
+                if section is not None:
+                    mass_per_length = _section_mass_per_length(
+                        project, section
+                    )
             if mass_per_length <= 0.0:
                 continue
             total = mass_per_length * _length(project, element.tag)
