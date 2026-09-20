@@ -393,7 +393,7 @@ def cyclic_hysteresis_metrics(
 
 
 
-def test_column_moment_curvature_curve(
+def column_moment_curvature_curve(
     result: dict[str, Any] | None,
 ) -> tuple[list[float], list[float], str]:
     """Return base-section curvature and moment for a Quick 1D Column."""
@@ -446,7 +446,7 @@ def test_column_moment_curvature_curve(
     return curvature, moment, str(specimen.get("moment_component", ""))
 
 
-def test_column_rotation_decomposition(
+def column_rotation_decomposition(
     result: dict[str, Any] | None,
 ) -> dict[str, list[float]]:
     """Split total drift angle into member, interface-rotation and slip parts.
@@ -602,7 +602,7 @@ def test_column_rotation_decomposition(
     return result_rows
 
 
-def test_column_fiber_history_catalog(
+def column_fiber_history_catalog(
     result: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     """Return selectable critical-fiber histories captured for the specimen."""
@@ -683,13 +683,13 @@ def test_column_fiber_history_catalog(
     return catalog
 
 
-def test_column_response_summary(
+def column_response_summary(
     result: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Summarize the specialized 1D-column instrumentation."""
-    curvature, moment, component = test_column_moment_curvature_curve(result)
-    rotations = test_column_rotation_decomposition(result)
-    fibers = test_column_fiber_history_catalog(result)
+    curvature, moment, component = column_moment_curvature_curve(result)
+    rotations = column_rotation_decomposition(result)
+    fibers = column_fiber_history_catalog(result)
 
     def maximum_absolute(values: Sequence[float]) -> float | None:
         finite = [
