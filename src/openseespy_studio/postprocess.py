@@ -520,18 +520,6 @@ def column_cyclic_reversal_metrics(
         "interface_deformation",
         [],
     )
-    for name in (
-        "section_force_rows",
-        "section_deformation_rows",
-        "base_fiber_rows",
-        "interface_fiber_rows",
-        "interface_force_rows",
-        "interface_deformation_rows",
-    ):
-        value = locals()[name]
-        if not isinstance(value, (list, tuple)):
-            locals()[name] = []
-
     rotations = column_rotation_decomposition(result)
     total_rotation = list(rotations.get("total", []))
     member_rotation = list(rotations.get("column", []))
