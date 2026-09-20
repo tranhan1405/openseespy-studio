@@ -39,6 +39,21 @@ def build_worker_pythonpath(existing: str = "") -> str:
     return os.pathsep.join(parts)
 
 
+def packaged_worker_executable() -> Path:
+    """Return the sibling console worker executable in a frozen build."""
+    executable = Path(sys.executable).resolve()
+    suffix = executable.suffix or (".exe" if sys.platform == "win32" else "")
+    worker = executable.with_name(
+        "OpenSeesPyStudioWorker" + suffix
+    )
+    if not worker.exists():
+        raise RuntimeError(
+            "Packaged solver worker is missing: "
+            f"{worker.name}. Reinstall OpenSeesPy Studio."
+        )
+    return worker
+
+
 def worker_process_command(
     module_name: str,
 ) -> tuple[str, list[str]]:
@@ -51,7 +66,7 @@ def worker_process_command(
             raise ValueError(
                 f"Unsupported packaged worker module: {module}"
             ) from exc
-        return sys.executable, [switch]
+        return str(packaged_worker_executable()), [switch]
     return sys.executable, ["-m", module]
 
 
@@ -88,6 +103,7 @@ def probe_opensees_runtime(
     if is_frozen_runtime() and os.path.abspath(executable) == os.path.abspath(
         sys.executable
     ):
+        executable = str(packaged_worker_executable())
         args = ["--runtime-probe"]
     else:
         command = (
