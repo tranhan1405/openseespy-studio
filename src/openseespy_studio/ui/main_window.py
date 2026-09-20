@@ -1558,8 +1558,20 @@ class MainWindow(QMainWindow):
         )
 
         self._make_action("node", "Node", "node", self._create_node, "Create node")
-        self._make_action("line", "Line", "element", self._create_element, "Create element")
-        self._make_action("frame", "Frame", "element", self._create_element, "Create frame element")
+        self._make_action(
+            "line",
+            "Line",
+            "element",
+            self._create_line,
+            "Quick-connect exactly two selected nodes",
+        )
+        self._make_action(
+            "frame",
+            "Frame",
+            "element",
+            self._create_frame,
+            "Create a fully assigned structural frame member",
+        )
         self._make_action("grid", "Grid", "grid", self._show_frame_grid, "Create frame grid")
         self._make_action(
             "column_1d",
@@ -5412,31 +5424,158 @@ class MainWindow(QMainWindow):
         self.selection.select("node", tag, "replace")
         self._record_project_change(f"Create node {tag}", before)
 
-    def _create_element(self) -> None:
+    def _create_line(self) -> None:
+        """Quick-connect exactly two selected nodes.
+
+        Line is intentionally lightweight: it uses an elastic beam-column
+        formulation and adopts the first compatible Elastic section and
+        geometric transformation when available. Missing assignments remain
+        explicit so Model Check / Export can tell the user what still needs
+        to be assigned.
+        """
         selected_nodes = sorted(self.selection.nodes)
-        node_i = selected_nodes[0] if len(selected_nodes) >= 1 else min(self.model.nodes, default=1)
-        node_j = selected_nodes[1] if len(selected_nodes) >= 2 else (
-            sorted(self.model.nodes)[1]
-            if len(self.model.nodes) >= 2
-            else node_i + 1
+        if len(selected_nodes) != 2:
+            QMessageBox.information(
+                self,
+                "Create Line",
+                "Select exactly two nodes, then choose Line.",
+            )
+            return
+
+        tag = self.model.next_element_tag()
+        node_i, node_j = selected_nodes
+
+        section_tag = next(
+            (
+                section_tag
+                for section_tag in sorted(self.project.sections)
+                if self.project.sections[section_tag].section_type == "Elastic"
+            ),
+            None,
         )
+        transf_tag = next(
+            iter(sorted(self.project.transformations)),
+            None,
+        )
+
+        before = self.project.to_dict()
+        try:
+            if tag in self.project.connections:
+                raise ValueError(
+                    f"Element tag {tag} is already used by a connection."
+                )
+            self.model.add_element(
+                tag,
+                node_i,
+                node_j,
+                element_type="elasticBeamColumn",
+                section_tag=section_tag,
+                transf_tag=transf_tag,
+                group="line",
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Create Line", str(exc))
+            return
+
+        assignments: list[str] = []
+        if section_tag is not None:
+            assignments.append(f"section {section_tag}")
+        if transf_tag is not None:
+            assignments.append(f"transformation {transf_tag}")
+
+        if section_tag is None or transf_tag is None:
+            missing = []
+            if section_tag is None:
+                missing.append("Elastic section")
+            if transf_tag is None:
+                missing.append("transformation")
+            message = (
+                f"Created line {tag}: node {node_i} → {node_j} · "
+                f"assign {' + '.join(missing)} before analysis"
+            )
+        else:
+            message = (
+                f"Created line {tag}: node {node_i} → {node_j} · "
+                + " · ".join(assignments)
+            )
+
+        self._refresh_all(message)
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(f"Create line {tag}", before)
+
+    def _create_frame(self) -> None:
+        """Create a solver-ready frame member with explicit assignments."""
+        if len(self.model.nodes) < 2:
+            QMessageBox.information(
+                self,
+                "Create Frame Member",
+                "Create at least two nodes first.",
+            )
+            return
+        if not self.project.sections:
+            QMessageBox.information(
+                self,
+                "Create Frame Member",
+                "Create a Section first. Frame members require an explicit "
+                "section assignment.",
+            )
+            return
+        if not self.project.transformations:
+            QMessageBox.information(
+                self,
+                "Create Frame Member",
+                "Create a Geometric Transformation first. Frame members "
+                "require an explicit transformation assignment.",
+            )
+            return
+
+        selected_nodes = sorted(self.selection.nodes)
+        node_i = (
+            selected_nodes[0]
+            if len(selected_nodes) >= 1
+            else min(self.model.nodes)
+        )
+        node_j = (
+            selected_nodes[1]
+            if len(selected_nodes) >= 2
+            else next(
+                tag
+                for tag in sorted(self.model.nodes)
+                if tag != node_i
+            )
+        )
+
         dialog = ElementDialog(
             self.model.next_element_tag(),
             node_i=node_i,
             node_j=node_j,
+            sections=self.project.sections,
+            transformations=self.project.transformations,
             parent=self,
         )
         if not dialog.exec():
             return
-        (
-            tag,
-            i,
-            j,
-            element_type,
-            group,
-            integration_type,
-            integration_points,
-        ) = dialog.values()
+
+        try:
+            (
+                tag,
+                i,
+                j,
+                element_type,
+                section_tag,
+                transf_tag,
+                group,
+                integration_type,
+                integration_points,
+            ) = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Create Frame Member",
+                str(exc),
+            )
+            return
+
         before = self.project.to_dict()
         try:
             if tag in self.project.connections:
@@ -5448,16 +5587,31 @@ class MainWindow(QMainWindow):
                 i,
                 j,
                 element_type=element_type,
+                section_tag=section_tag,
+                transf_tag=transf_tag,
                 group=group,
                 integration_type=integration_type,
                 integration_points=integration_points,
             )
         except ValueError as exc:
-            QMessageBox.warning(self, "Create Element", str(exc))
+            QMessageBox.warning(
+                self,
+                "Create Frame Member",
+                str(exc),
+            )
             return
-        self._refresh_all(f"Created element {tag}")
+
+        self._refresh_all(
+            f"Created frame {tag}: node {i} → {j} · "
+            f"{element_type} · section {section_tag} · "
+            f"transformation {transf_tag}"
+        )
         self.selection.select("element", tag, "replace")
-        self._record_project_change(f"Create element {tag}", before)
+        self._record_project_change(f"Create frame {tag}", before)
+
+    def _create_element(self) -> None:
+        """Backward-compatible generic element command: use Frame."""
+        self._create_frame()
 
     def _require_selection(self, title: str) -> tuple[set[int], set[int]] | None:
         nodes, elements = self._selection_sets()
