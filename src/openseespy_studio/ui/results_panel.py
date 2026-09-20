@@ -52,9 +52,11 @@ from ..postprocess import (
     time_history_node_tags,
     time_history_series,
     column_fiber_history_catalog,
+    column_interface_moment_rotation_curve,
     column_moment_curvature_curve,
     column_response_summary,
     column_rotation_decomposition,
+    column_specimen_research_metrics,
 )
 
 
@@ -1943,6 +1945,24 @@ class ResultsPanel(QWidget):
         )
         layout.addWidget(self.specimen_plot, 1)
 
+        self.specimen_research_table = QTableWidget(0, 3)
+        self.specimen_research_table.setHorizontalHeaderLabels([
+            "Research metric",
+            "Value",
+            "Interpretation",
+        ])
+        self.specimen_research_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.specimen_research_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.specimen_research_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.specimen_research_table.setMaximumHeight(185)
+        layout.addWidget(self.specimen_research_table)
+
         self.specimen_fiber_table = QTableWidget(0, 7)
         self.specimen_fiber_table.setHorizontalHeaderLabels([
             "Source",
@@ -3243,6 +3263,14 @@ class ResultsPanel(QWidget):
             "Moment–curvature · base section",
             "moment_curvature",
         )
+        interface_rotation, interface_moment, _interface_component = (
+            column_interface_moment_rotation_curve(self._result)
+        )
+        if interface_rotation and interface_moment:
+            self.specimen_quantity.addItem(
+                "Moment–rotation · base interface",
+                "interface_moment_rotation",
+            )
         for label, key in (
             ("Drift angle · total", "rotation:total"),
             ("Drift angle · member contribution", "rotation:column"),
@@ -3265,6 +3293,89 @@ class ResultsPanel(QWidget):
             if index >= 0:
                 self.specimen_quantity.setCurrentIndex(index)
         self.specimen_quantity.blockSignals(False)
+
+        metrics = column_specimen_research_metrics(self._result)
+        metric_rows = [
+            (
+                "Peak +M",
+                metrics.get("peak_positive_moment"),
+                f"Maximum positive {metrics.get('moment_component', 'M')}",
+            ),
+            (
+                "Peak -M",
+                metrics.get("peak_negative_moment"),
+                f"Minimum negative {metrics.get('moment_component', 'M')}",
+            ),
+            (
+                "Peak |κ|",
+                metrics.get("peak_abs_curvature"),
+                "Maximum absolute base-section curvature",
+            ),
+            (
+                "Peak |drift angle|",
+                metrics.get("peak_abs_total_drift"),
+                "Global top drift angle relative to ground/base",
+            ),
+            (
+                "Peak |member contribution|",
+                metrics.get("peak_abs_column_drift"),
+                "Drift-equivalent member contribution",
+            ),
+            (
+                "Peak |interface rotation|",
+                metrics.get("peak_abs_interface_rotation"),
+                "Base-interface rotational contribution",
+            ),
+            (
+                "Interface share @ peak drift [%]",
+                metrics.get("interface_share_at_peak_drift_percent"),
+                "Kinematic magnitude share; may exceed 100% if contributions oppose",
+            ),
+            (
+                "Peak |steel strain|",
+                metrics.get("peak_abs_steel_strain"),
+                "Critical base-section reinforcing-steel strain",
+            ),
+            (
+                "Peak |concrete strain|",
+                metrics.get("peak_abs_concrete_strain"),
+                "Critical base-section concrete strain",
+            ),
+            (
+                "Peak |Bond_SP01 slip|",
+                metrics.get("peak_abs_bond_slip"),
+                "Critical strain-penetration material slip",
+            ),
+            (
+                "Interface path energy",
+                metrics.get("interface_path_energy"),
+                "Absolute M–θ path work; descriptive, not a code check",
+            ),
+        ]
+        visible_metric_rows = [
+            row for row in metric_rows if row[1] is not None
+        ]
+        self.specimen_research_table.setRowCount(
+            len(visible_metric_rows)
+        )
+        for row_index, (label, value, interpretation) in enumerate(
+            visible_metric_rows
+        ):
+            self.specimen_research_table.setItem(
+                row_index,
+                0,
+                QTableWidgetItem(str(label)),
+            )
+            self.specimen_research_table.setItem(
+                row_index,
+                1,
+                QTableWidgetItem(f"{float(value):.6g}"),
+            )
+            self.specimen_research_table.setItem(
+                row_index,
+                2,
+                QTableWidgetItem(str(interpretation)),
+            )
 
         self.specimen_fiber_table.setRowCount(len(fibers))
         for row, item in enumerate(fibers):
@@ -3300,6 +3411,7 @@ class ResultsPanel(QWidget):
                 "Mmax: -   κmax: -   drift: -   interface rotation: -"
             )
             self.specimen_plot.set_series([], [])
+            self.specimen_research_table.setRowCount(0)
             self.specimen_fiber_table.setRowCount(0)
             return
 
@@ -3342,6 +3454,19 @@ class ResultsPanel(QWidget):
                 f"base interface: {interface_name}. "
                 "The section history and interface history are captured "
                 "independently to avoid hiding strain-penetration deformation."
+            )
+            self.specimen_plot.set_series(x, y)
+            return
+
+        if selected == "interface_moment_rotation":
+            x, y, component = column_interface_moment_rotation_curve(
+                self._result
+            )
+            self.specimen_info.setText(
+                f"Base interface · {component or 'M'}–rotation · "
+                f"{interface_name}. "
+                "For Bond_SP01 zeroLengthSection this isolates the "
+                "strain-penetration interface loop from the member M–κ loop."
             )
             self.specimen_plot.set_series(x, y)
             return
