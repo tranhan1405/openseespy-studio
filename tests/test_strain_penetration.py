@@ -4,7 +4,7 @@ import pytest
 
 from openseespy_studio.generator import (
     connection_to_openseespy,
-    test_column_response_spec,
+    column_response_spec,
     to_openseespy,
 )
 from openseespy_studio.project import (
@@ -392,7 +392,7 @@ def test_test_column_response_spec_identifies_base_hinge_and_bond_fibers():
         cyclic_increment=2.0,
     )
 
-    spec = test_column_response_spec(
+    spec = column_response_spec(
         project.model,
         sections=project.sections,
         materials=project.materials,
