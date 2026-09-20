@@ -223,7 +223,7 @@ def _element_geometry_checks(
                         "Element formulation",
                         f"elasticBeamColumn element {tag} cannot use "
                         f"{section.section_type} section {section.tag} in the "
-                        "current 3D generator.",
+                        "current Studio generator.",
                         "element",
                         tag,
                         "Use an Elastic section, or switch the element to "
@@ -277,34 +277,36 @@ def _element_geometry_checks(
         if length <= 1.0e-12:
             continue
 
-        vecxz = transformation.vecxz
-        sine = _norm(_cross(axis, vecxz)) / (length * _norm(vecxz))
-        if sine <= 1.0e-8:
-            suggested = _suggest_vecxz(axis)
-            issues.append(
-                ValidationIssue(
-                    "ERROR",
-                    "Transformation orientation",
-                    f"Element {tag}: transformation {transformation.tag} "
-                    f"vecxz={_format_vector(vecxz)} is parallel to the "
-                    "element axis.",
-                    "element",
-                    tag,
-                    f"Suggested vecxz: {_format_vector(suggested)}.",
+        if int(model.ndm) == 3:
+            vecxz = transformation.vecxz
+            sine = _norm(_cross(axis, vecxz)) / (length * _norm(vecxz))
+            if sine <= 1.0e-8:
+                suggested = _suggest_vecxz(axis)
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Transformation orientation",
+                        f"Element {tag}: transformation {transformation.tag} "
+                        f"vecxz={_format_vector(vecxz)} is parallel to the "
+                        "element axis.",
+                        "element",
+                        tag,
+                        f"Suggested vecxz: {_format_vector(suggested)}.",
+                    )
                 )
-            )
-        elif sine <= 1.0e-3:
-            issues.append(
-                ValidationIssue(
-                    "WARNING",
-                    "Transformation orientation",
-                    f"Element {tag}: transformation {transformation.tag} is "
-                    "nearly parallel to the element axis.",
-                    "element",
-                    tag,
-                    f"Consider vecxz={_format_vector(_suggest_vecxz(axis))}.",
+            elif sine <= 1.0e-3:
+                issues.append(
+                    ValidationIssue(
+                        "WARNING",
+                        "Transformation orientation",
+                        f"Element {tag}: transformation {transformation.tag} is "
+                        "nearly parallel to the element axis.",
+                        "element",
+                        tag,
+                        f"Consider vecxz={_format_vector(_suggest_vecxz(axis))}.",
+                    )
                 )
-            )
+
 
 
 def _support_and_connectivity_checks(
@@ -543,7 +545,8 @@ def _element_load_checks(
             else None
         )
         if (
-            transformation is not None
+            int(project.model.ndm) == 3
+            and transformation is not None
             and transformation.transformation_type == "Corotational"
         ):
             issues.append(
