@@ -46,7 +46,10 @@ def test_calibration_dialog_builds_material_parameter_grid(qapp):
         assert enabled.isChecked()
         assert material.currentData() == 1
         assert parameter.findData("fpc") >= 0
-        assert "Grid size: 3 case(s)" in dialog.case_info.text()
+        assert dialog.strategy.currentData() == "adaptive"
+        assert "Adaptive: 3 case(s)/round × 3 rounds" in (
+            dialog.case_info.text()
+        )
     finally:
         dialog.close()
         dialog.deleteLater()
@@ -74,9 +77,13 @@ def test_calibration_dialog_request_extracts_experimental_reference(qapp):
         dialog.exp_y.addItem("Force", 1)
         dialog.exp_x.setCurrentIndex(0)
         dialog.exp_y.setCurrentIndex(1)
+        dialog.strategy.setCurrentIndex(
+            dialog.strategy.findData("grid")
+        )
 
         request = dialog.request()
 
+        assert request["strategy"] == "grid"
         assert len(request["cases"]) == 3
         assert request["experiment_x"] == pytest.approx(
             [0.0, 2.0, 0.0, -2.0]
@@ -85,6 +92,39 @@ def test_calibration_dialog_request_extracts_experimental_reference(qapp):
             [0.0, 20.0, 0.0, -18.0]
         )
         assert request["weights"].peak_force == pytest.approx(1.0)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_calibration_dialog_adaptive_request_reports_round_controls(qapp):
+    dialog = CalibrationDialog(_project_with_material())
+    try:
+        dialog._dataset = {
+            "headers": ["Displacement", "Force"],
+            "rows": [
+                [0.0, 0.0],
+                [2.0, 20.0],
+                [0.0, 0.0],
+                [-2.0, -18.0],
+            ],
+            "delimiter": ",",
+            "skipped_rows": 0,
+        }
+        dialog._dataset_path = "/tmp/experiment.csv"
+        dialog.exp_x.addItem("Displacement", 0)
+        dialog.exp_y.addItem("Force", 1)
+        dialog.adaptive_rounds.setValue(3)
+        dialog.adaptive_shrink.setValue(0.5)
+
+        request = dialog.request()
+
+        assert request["strategy"] == "adaptive"
+        assert request["cases"] == []
+        assert len(request["parameters"]) == 1
+        assert request["adaptive_rounds"] == 3
+        assert request["adaptive_shrink_ratio"] == pytest.approx(0.5)
     finally:
         dialog.close()
         dialog.deleteLater()
@@ -100,6 +140,8 @@ def test_results_panel_calibration_table_links_ranked_case_to_job(qapp):
             "rank": 1,
             "job_id": 12,
             "case_id": 2,
+            "round": 2,
+            "round_case": 3,
             "score": 4.5,
             "components": {
                 "peak_force": 3.0,
@@ -123,9 +165,10 @@ def test_results_panel_calibration_table_links_ranked_case_to_job(qapp):
         assert panel.calibration_table.rowCount() == 1
         assert panel.calibration_table.item(0, 0).text() == "1"
         assert panel.calibration_table.item(0, 1).text() == "12"
-        assert panel.calibration_table.item(0, 2).text() == "4.5"
-        assert "M1.fpc=" in panel.calibration_table.item(0, 7).text()
-        assert "M2.Fy=" in panel.calibration_table.item(0, 7).text()
+        assert panel.calibration_table.item(0, 2).text() == "2"
+        assert panel.calibration_table.item(0, 3).text() == "4.5"
+        assert "M1.fpc=" in panel.calibration_table.item(0, 8).text()
+        assert "M2.Fy=" in panel.calibration_table.item(0, 8).text()
 
         panel._calibration_row_activated(0, 0)
         assert captured == [12]

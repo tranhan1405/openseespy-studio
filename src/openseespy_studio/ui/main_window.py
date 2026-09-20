@@ -48,6 +48,8 @@ from ..calibration import (
     apply_calibration_case,
     calibration_case_changes,
     calibration_case_script,
+    calibration_grid_size,
+    calibration_parameter_payload,
 )
 from ..analysis_templates import (
     GroundMotionComponentSpec,
@@ -9203,15 +9205,34 @@ class MainWindow(QMainWindow):
             )
             return
 
+        strategy = str(request.get("strategy", "grid") or "grid")
         cases = request.get("cases", [])
+        parameters = request.get("parameters", [])
         weights = request.get("weights")
         experiment_x = request.get("experiment_x", [])
         experiment_y = request.get("experiment_y", [])
-        if not isinstance(cases, list) or not cases:
+
+        if strategy == "grid":
+            if not isinstance(cases, list) or not cases:
+                QMessageBox.warning(
+                    self,
+                    "Calibration",
+                    "No parameter-study cases were created.",
+                )
+                return
+        elif strategy == "adaptive":
+            if not isinstance(parameters, list) or not parameters:
+                QMessageBox.warning(
+                    self,
+                    "Calibration",
+                    "Adaptive calibration needs at least one parameter.",
+                )
+                return
+        else:
             QMessageBox.warning(
                 self,
                 "Calibration",
-                "No parameter-study cases were created.",
+                f"Unsupported calibration strategy: {strategy}",
             )
             return
 
@@ -9220,30 +9241,31 @@ class MainWindow(QMainWindow):
             self._calibration_project_snapshot
         )
         plan_cases: list[dict[str, object]] = []
-        try:
-            for case in cases:
-                if not isinstance(case, CalibrationCase):
-                    continue
-                plan_cases.append({
-                    "case_id": case.case_id,
-                    "values": dict(case.values),
-                    "script": calibration_case_script(
-                        snapshot_project,
-                        case,
-                    ),
-                })
-        except ValueError as exc:
-            self._calibration_project_snapshot = None
-            QMessageBox.warning(
-                self,
-                "Calibration",
-                f"Could not build calibration cases:\n{exc}",
-            )
-            return
+        if strategy == "grid":
+            try:
+                for case in cases:
+                    if not isinstance(case, CalibrationCase):
+                        continue
+                    plan_cases.append({
+                        "case_id": case.case_id,
+                        "values": dict(case.values),
+                        "script": calibration_case_script(
+                            snapshot_project,
+                            case,
+                        ),
+                    })
+            except ValueError as exc:
+                self._calibration_project_snapshot = None
+                QMessageBox.warning(
+                    self,
+                    "Calibration",
+                    f"Could not build calibration cases:\n{exc}",
+                )
+                return
 
-        if not plan_cases:
-            self._calibration_project_snapshot = None
-            return
+            if not plan_cases:
+                self._calibration_project_snapshot = None
+                return
 
         plan_fd, plan_path = tempfile.mkstemp(
             prefix="openseespy_studio_calibration_",
@@ -9265,6 +9287,7 @@ class MainWindow(QMainWindow):
             "max_displacement": float(weights.max_displacement),
         }
         plan = {
+            "strategy": strategy,
             "analysis_tag": int(settings.tag),
             "analysis_name": str(settings.name),
             "experiment": {
@@ -9273,8 +9296,25 @@ class MainWindow(QMainWindow):
                 "source": str(request.get("experiment_path", "")),
             },
             "weights": weight_payload,
-            "cases": plan_cases,
         }
+        if strategy == "adaptive":
+            rounds = int(request.get("adaptive_rounds", 3) or 3)
+            shrink_ratio = float(
+                request.get("adaptive_shrink_ratio", 0.5) or 0.5
+            )
+            plan.update({
+                "project": self._calibration_project_snapshot,
+                "parameters": calibration_parameter_payload(parameters),
+                "rounds": rounds,
+                "shrink_ratio": shrink_ratio,
+                "max_total_cases": 96,
+            })
+            planned_case_count = (
+                calibration_grid_size(parameters) * rounds
+            )
+        else:
+            plan["cases"] = plan_cases
+            planned_case_count = len(plan_cases)
         Path(plan_path).write_text(
             json.dumps(plan, ensure_ascii=False),
             encoding="utf-8",
@@ -9314,9 +9354,17 @@ class MainWindow(QMainWindow):
         self._calibration_process = process
 
         self.console_dock.show()
-        self.console.appendPlainText(
-            f">> Calibration: starting {len(plan_cases)} cyclic case(s)"
-        )
+        if strategy == "adaptive":
+            self.console.appendPlainText(
+                f">> Adaptive calibration: up to {planned_case_count} "
+                f"cyclic case(s) across {rounds} round(s), "
+                f"shrink={shrink_ratio:.3g}"
+            )
+        else:
+            self.console.appendPlainText(
+                f">> Grid calibration: starting {planned_case_count} "
+                "cyclic case(s)"
+            )
         self.console.appendPlainText(
             ">> Experimental reference: "
             + (
@@ -9325,7 +9373,7 @@ class MainWindow(QMainWindow):
             )
         )
         self.status_message.setText(
-            f"Calibration · 0/{len(plan_cases)} cases"
+            f"Calibration · 0/{planned_case_count} planned cases"
         )
         self.actions["calibration"].setText("Stop Calibration")
         self.actions["run"].setEnabled(False)
@@ -9354,11 +9402,14 @@ class MainWindow(QMainWindow):
         total = int(payload.get("total", 0) or 0)
         if event == "case_start":
             case_id = int(payload.get("case_id", current) or current)
+            round_index = int(payload.get("round", 1) or 1)
             self.status_message.setText(
-                f"Calibration · case {current}/{total} · #{case_id}"
+                f"Calibration · R{round_index} · "
+                f"case {current}/{total} · #{case_id}"
             )
         elif event == "case_finish":
             case_id = int(payload.get("case_id", current) or current)
+            round_index = int(payload.get("round", 1) or 1)
             score = payload.get("score")
             score_text = (
                 f"{float(score):.4g}%"
@@ -9366,16 +9417,60 @@ class MainWindow(QMainWindow):
                 else "unavailable"
             )
             self.console.appendPlainText(
-                f">> Calibration case {case_id}: "
+                f">> Calibration R{round_index} case {case_id}: "
                 f"{payload.get('status', '-')} · score={score_text}"
             )
             self.status_message.setText(
-                f"Calibration · {current}/{total} cases"
+                f"Calibration · R{round_index} · "
+                f"{current}/{total} planned cases"
+            )
+        elif event == "round_start":
+            round_index = int(payload.get("round", 1) or 1)
+            rounds = int(payload.get("rounds", 1) or 1)
+            self.console.appendPlainText(
+                f">> Adaptive round {round_index}/{rounds} started"
+            )
+            self.status_message.setText(
+                f"Adaptive calibration · round {round_index}/{rounds}"
+            )
+        elif event == "round_finish":
+            round_index = int(payload.get("round", 1) or 1)
+            rounds = int(payload.get("rounds", 1) or 1)
+            best_case = payload.get("best_case_id")
+            best_score = payload.get("best_score")
+            best_text = (
+                f"case {best_case} · {float(best_score):.4g}%"
+                if best_case is not None and best_score is not None
+                else "no scored case"
+            )
+            self.console.appendPlainText(
+                f">> Adaptive round {round_index}/{rounds} finished · "
+                f"best {best_text}"
             )
         elif event == "start":
-            self.status_message.setText(
-                f"Calibration · 0/{total} cases"
-            )
+            strategy = str(payload.get("strategy", "grid"))
+            rounds = int(payload.get("rounds", 1) or 1)
+            if strategy == "adaptive":
+                self.status_message.setText(
+                    f"Adaptive calibration · 0/{total} planned cases · "
+                    f"{rounds} rounds"
+                )
+            else:
+                self.status_message.setText(
+                    f"Calibration · 0/{total} cases"
+                )
+        elif event == "finish":
+            reason = str(payload.get("stop_reason", "") or "")
+            if reason:
+                self.console.appendPlainText(
+                    f">> Adaptive calibration stop reason: {reason}"
+                )
+        elif event == "failed":
+            error = str(payload.get("error", "") or "")
+            if error:
+                self.console.appendPlainText(
+                    f">> Calibration worker: {error}"
+                )
 
     def _read_calibration_stdout(self) -> None:
         process = self._calibration_process
@@ -9444,9 +9539,23 @@ class MainWindow(QMainWindow):
             )
             self.status_message.setText("Calibration failed")
         else:
-            self.console.appendPlainText(
-                f">> Calibration completed: {len(rows)} case(s)"
+            strategy = str(payload.get("strategy", "grid") or "grid")
+            rounds_completed = int(
+                payload.get("rounds_completed", 1) or 1
             )
+            stop_reason = str(payload.get("stop_reason", "") or "")
+            label = (
+                f"adaptive · {rounds_completed} round(s)"
+                if strategy == "adaptive"
+                else "grid"
+            )
+            self.console.appendPlainText(
+                f">> Calibration completed: {len(rows)} case(s) · {label}"
+            )
+            if stop_reason:
+                self.console.appendPlainText(
+                    f">> Calibration note: {stop_reason}"
+                )
 
         display_rows: list[dict[str, object]] = []
         snapshot = self._calibration_project_snapshot
@@ -9509,9 +9618,13 @@ class MainWindow(QMainWindow):
                 job_id=self._job_counter,
                 analysis_tag=analysis_tag,
                 analysis_name=(
-                    f"{analysis.name} · Calibration {case_id}"
+                    f"{analysis.name} · Calibration R"
+                    f"{int(row.get('round', 1) or 1)} C{case_id}"
                     if analysis is not None
-                    else f"Calibration {case_id}"
+                    else (
+                        f"Calibration R{int(row.get('round', 1) or 1)} "
+                        f"C{case_id}"
+                    )
                 ),
                 analysis_type=(
                     analysis.analysis_type

@@ -29,6 +29,7 @@ from ..calibration import (
     CalibrationParameter,
     CalibrationWeights,
     build_grid_cases,
+    calibration_grid_size,
 )
 from ..postprocess import experimental_csv_series, parse_experimental_csv_text
 from ..project import MATERIAL_PARAMETER_ORDER, ProjectDatabase
@@ -50,12 +51,52 @@ class CalibrationDialog(QDialog):
         root = QVBoxLayout(self)
 
         intro = QLabel(
-            "Grid-sweep material calibration for the active Cyclic analysis. "
-            "Each case changes only the selected material parameters; model "
-            "geometry, loading protocol and analysis settings are unchanged."
+            "Material calibration for the active Cyclic analysis. Grid sweep "
+            "evaluates one fixed parameter grid; Adaptive refinement repeats "
+            "the grid in progressively smaller windows around the best scored "
+            "case. Geometry, loading protocol and analysis settings are unchanged."
         )
         intro.setWordWrap(True)
         root.addWidget(intro)
+
+        strategy_row = QHBoxLayout()
+        strategy_row.addWidget(QLabel("Search strategy:"))
+        self.strategy = QComboBox()
+        self.strategy.addItem("Grid sweep", "grid")
+        self.strategy.addItem(
+            "Adaptive refinement · coarse → refine → refine",
+            "adaptive",
+        )
+        self.strategy.currentIndexChanged.connect(
+            self._strategy_changed
+        )
+        strategy_row.addWidget(self.strategy, 1)
+
+        strategy_row.addWidget(QLabel("Rounds:"))
+        self.adaptive_rounds = QSpinBox()
+        self.adaptive_rounds.setRange(2, 5)
+        self.adaptive_rounds.setValue(3)
+        self.adaptive_rounds.valueChanged.connect(
+            self._update_case_count
+        )
+        strategy_row.addWidget(self.adaptive_rounds)
+
+        strategy_row.addWidget(QLabel("Shrink:"))
+        self.adaptive_shrink = QDoubleSpinBox()
+        self.adaptive_shrink.setRange(0.10, 0.90)
+        self.adaptive_shrink.setSingleStep(0.05)
+        self.adaptive_shrink.setDecimals(2)
+        self.adaptive_shrink.setValue(0.50)
+        self.adaptive_shrink.setToolTip(
+            "Range width retained after each round. 0.50 halves each "
+            "parameter window around the best scored case."
+        )
+        self.adaptive_shrink.valueChanged.connect(
+            self._update_case_count
+        )
+        strategy_row.addWidget(self.adaptive_shrink)
+        root.addLayout(strategy_row)
+        self.strategy.setCurrentIndex(1)
 
         self.parameter_table = QTableWidget(3, 6)
         self.parameter_table.setHorizontalHeaderLabels(
@@ -194,7 +235,7 @@ class CalibrationDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         root.addWidget(self.buttons)
 
-        self._update_case_count()
+        self._strategy_changed()
 
     @staticmethod
     def _weight_spin(value: float) -> QDoubleSpinBox:
@@ -315,19 +356,50 @@ class CalibrationDialog(QDialog):
             )
         return parameters
 
+    def _strategy_changed(self, *_args) -> None:
+        adaptive = self.strategy.currentData() == "adaptive"
+        self.adaptive_rounds.setEnabled(adaptive)
+        self.adaptive_shrink.setEnabled(adaptive)
+        self._update_case_count()
+
     def _update_case_count(self, *_args) -> None:
+        parameters = self._parameters()
         try:
-            cases = build_grid_cases(
-                self._parameters(),
-                max_cases=64,
-            )
+            # Build once for duplicate-target/bounds validation.
+            build_grid_cases(parameters, max_cases=96)
         except ValueError as exc:
             self.case_info.setText(str(exc))
             return
-        self.case_info.setText(
-            f"Grid size: {len(cases)} case(s). "
-            "Current safety limit: 64 cases."
-        )
+
+        per_round = calibration_grid_size(parameters)
+        strategy = str(self.strategy.currentData() or "grid")
+        if strategy == "adaptive":
+            rounds = int(self.adaptive_rounds.value())
+            upper = per_round * rounds
+            if upper > 96:
+                self.case_info.setText(
+                    f"Adaptive plan can create up to {upper} cases, "
+                    "exceeding the safety limit of 96. Reduce Points, "
+                    "parameters, or rounds."
+                )
+                return
+            self.case_info.setText(
+                f"Adaptive: {per_round} case(s)/round × {rounds} rounds "
+                f"≤ {upper} case(s). Duplicate center cases are skipped. "
+                f"Each next window retains {self.adaptive_shrink.value():.0%} "
+                "of the previous range."
+            )
+        else:
+            if per_round > 64:
+                self.case_info.setText(
+                    f"Grid creates {per_round} cases, exceeding the "
+                    "safety limit of 64."
+                )
+                return
+            self.case_info.setText(
+                f"Grid size: {per_round} case(s). "
+                "Current safety limit: 64 cases."
+            )
 
     def _import_experiment(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -400,7 +472,22 @@ class CalibrationDialog(QDialog):
 
     def request(self) -> dict[str, Any]:
         parameters = self._parameters()
-        cases = build_grid_cases(parameters, max_cases=64)
+        strategy = str(self.strategy.currentData() or "grid")
+        if strategy == "adaptive":
+            per_round = calibration_grid_size(parameters)
+            rounds = int(self.adaptive_rounds.value())
+            upper = per_round * rounds
+            if upper > 96:
+                raise ValueError(
+                    f"Adaptive plan can create up to {upper} cases, "
+                    "exceeding the safety limit of 96."
+                )
+            # Validate duplicate targets and numerical ranges.
+            build_grid_cases(parameters, max_cases=96)
+            cases: list[Any] = []
+        else:
+            cases = build_grid_cases(parameters, max_cases=64)
+            rounds = 1
         if not self._dataset:
             raise ValueError(
                 "Import experimental cyclic displacement-force data first."
@@ -424,8 +511,13 @@ class CalibrationDialog(QDialog):
         weights = self.weights()
         weights.normalized()
         return {
+            "strategy": strategy,
             "parameters": parameters,
             "cases": cases,
+            "adaptive_rounds": rounds,
+            "adaptive_shrink_ratio": float(
+                self.adaptive_shrink.value()
+            ),
             "experiment_x": x,
             "experiment_y": y,
             "experiment_path": self._dataset_path,

@@ -2259,11 +2259,12 @@ class ResultsPanel(QWidget):
         controls.addStretch(1)
         layout.addLayout(controls)
 
-        self.calibration_table = QTableWidget(0, 9)
+        self.calibration_table = QTableWidget(0, 10)
         self.calibration_table.setHorizontalHeaderLabels(
             [
                 "Rank",
                 "Job",
+                "Round",
                 "Score [%]",
                 "Peak |V| err [%]",
                 "Reversal NRMSE [%]",
@@ -2370,6 +2371,7 @@ class ResultsPanel(QWidget):
                     if row.get("job_id") is not None
                     else "-"
                 ),
+                str(int(row.get("round", 1) or 1)),
                 self._calibration_metric_text(score),
                 self._calibration_metric_text(
                     components.get("peak_force")
@@ -2397,9 +2399,21 @@ class ResultsPanel(QWidget):
                     item,
                 )
 
+        max_round = max(
+            (
+                int(row.get("round", 1) or 1)
+                for row in self._calibration_rows
+            ),
+            default=1,
+        )
+        round_text = (
+            f" · {max_round} refinement round(s)"
+            if max_round > 1
+            else ""
+        )
         self.calibration_info.setText(
             f"{len(self._calibration_rows)} case(s) · "
-            f"{successful} scored case(s). "
+            f"{successful} scored case(s){round_text}. "
             "Double-click a row to activate its result; select a scored "
             "row to preview/apply its parameters to the model."
         )
@@ -2503,6 +2517,8 @@ class ResultsPanel(QWidget):
             "rank",
             "job_id",
             "case_id",
+            "round",
+            "round_case",
             "score_percent",
             "peak_force_error_percent",
             "reversal_force_nrmse_percent",
@@ -2526,6 +2542,8 @@ class ResultsPanel(QWidget):
                     "rank": row.get("rank"),
                     "job_id": row.get("job_id"),
                     "case_id": row.get("case_id"),
+                    "round": row.get("round", 1),
+                    "round_case": row.get("round_case"),
                     "score_percent": row.get("score"),
                     "peak_force_error_percent": components.get(
                         "peak_force"
