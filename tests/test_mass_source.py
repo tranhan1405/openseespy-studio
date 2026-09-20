@@ -218,3 +218,51 @@ def test_mass_source_rejects_dynamic_path_pattern():
 
     with pytest.raises(ValueError, match="Linear/Constant"):
         evaluate_mass_source(project, source)
+
+
+def test_mass_source_includes_truss_material_self_mass_without_rho():
+    model = StructuralModel("truss-mass", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 5.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="truss",
+        group="truss",
+        truss_area=0.01,
+        truss_material_tag=1,
+    )
+    project = ProjectDatabase(
+        model=model,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    project.add_material(
+        MaterialData(
+            1,
+            "Steel",
+            "Elastic",
+            {"E": 200.0e9},
+            density=7850.0,
+        )
+    )
+    source = MassSourceData(
+        1,
+        "Truss self mass",
+        include_self_mass=True,
+        load_factors={},
+        gravity_axis=2,
+        directions=(1, 2),
+    )
+
+    summary = evaluate_mass_source(project, source)
+
+    assert summary.self_mass == pytest.approx(
+        7850.0 * 0.01 * 5.0
+    )
+    assert summary.nodal_masses[1] == pytest.approx(
+        0.5 * 7850.0 * 0.01 * 5.0
+    )
+    assert summary.nodal_masses[2] == pytest.approx(
+        0.5 * 7850.0 * 0.01 * 5.0
+    )
