@@ -427,6 +427,122 @@ def _support_and_connectivity_checks(
         )
 
 
+def _constraint_and_connection_checks(
+    project: ProjectDatabase,
+    issues: list[ValidationIssue],
+) -> None:
+    model = project.model
+
+    for tag in sorted(project.constraints):
+        constraint = project.constraints[tag]
+        referenced = [
+            constraint.retained_node,
+            *constraint.constrained_nodes,
+        ]
+        missing = [node for node in referenced if node not in model.nodes]
+        if missing:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Constraint",
+                    f"Constraint {tag} references missing node(s): "
+                    + ", ".join(map(str, sorted(set(missing)))),
+                    "constraint",
+                    tag,
+                    "Update the constraint to use existing model nodes.",
+                )
+            )
+        if (
+            constraint.constraint_type == "equalDOF"
+            and any(dof > model.ndf for dof in constraint.dofs)
+        ):
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Constraint DOF",
+                    f"equalDOF constraint {tag} uses DOF(s) "
+                    f"{list(constraint.dofs)} but the model has ndf={model.ndf}.",
+                    "constraint",
+                    tag,
+                    f"Use only DOFs 1..{model.ndf}.",
+                )
+            )
+
+    for tag in sorted(project.connections):
+        connection = project.connections[tag]
+        missing_nodes = [
+            node
+            for node in (connection.node_i, connection.node_j)
+            if node not in model.nodes
+        ]
+        if missing_nodes:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Connection",
+                    f"Connection {tag} references missing node(s): "
+                    + ", ".join(map(str, sorted(set(missing_nodes)))),
+                    "connection",
+                    tag,
+                    "Update the connection to use existing model nodes.",
+                )
+            )
+
+        if connection.connection_type == "zeroLengthSection":
+            if (
+                connection.section_tag is None
+                or connection.section_tag not in project.sections
+            ):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Connection section",
+                        f"zeroLengthSection connection {tag} references "
+                        f"missing section {connection.section_tag}.",
+                        "connection",
+                        tag,
+                        "Assign an existing Section object.",
+                    )
+                )
+        else:
+            invalid_dofs = sorted(
+                dof
+                for dof in connection.materials_by_dof
+                if dof > model.ndf
+            )
+            if invalid_dofs:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Connection DOF",
+                        f"Connection {tag} uses DOF(s) {invalid_dofs} but "
+                        f"the model has ndf={model.ndf}.",
+                        "connection",
+                        tag,
+                        f"Use only DOFs 1..{model.ndf}.",
+                    )
+                )
+            missing_materials = sorted(
+                {
+                    material_tag
+                    for material_tag in connection.materials_by_dof.values()
+                    if material_tag not in project.materials
+                }
+            )
+            if missing_materials:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Connection material",
+                        f"Connection {tag} references missing material(s): "
+                        + ", ".join(map(str, missing_materials)),
+                        "connection",
+                        tag,
+                        "Assign existing UniaxialMaterial objects.",
+                    )
+                )
+
+
 def _prescribed_displacement_checks(
     project: ProjectDatabase,
     issues: list[ValidationIssue],
@@ -919,6 +1035,7 @@ def validate_project(
 
     _element_geometry_checks(project, issues)
     _support_and_connectivity_checks(project, issues)
+    _constraint_and_connection_checks(project, issues)
     _prescribed_displacement_checks(project, issues)
     _element_load_checks(project, issues)
     _recorder_checks(project, issues)
