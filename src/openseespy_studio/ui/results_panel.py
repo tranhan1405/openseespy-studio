@@ -734,6 +734,8 @@ class ResultsPanel(QWidget):
         self._motion_timer.timeout.connect(self._advance_motion)
         self._motion_info = None
         self._motion_frame_index = 0
+        self._cyclic_experiment_dataset: dict[str, Any] = {}
+        self._cyclic_experiment_path = ""
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 5, 6, 5)
@@ -1579,6 +1581,90 @@ class ResultsPanel(QWidget):
         self.cyclic_metrics.setWordWrap(True)
         layout.addWidget(self.cyclic_metrics)
 
+        experiment_row = QHBoxLayout()
+        import_experiment = QPushButton("Import Experiment CSV")
+        import_experiment.clicked.connect(
+            self._import_cyclic_experiment_csv
+        )
+        experiment_row.addWidget(import_experiment)
+
+        clear_experiment = QPushButton("Clear Experiment")
+        clear_experiment.clicked.connect(
+            self._clear_cyclic_experiment
+        )
+        experiment_row.addWidget(clear_experiment)
+
+        experiment_row.addWidget(QLabel("View:"))
+        self.cyclic_compare_view = QComboBox()
+        self.cyclic_compare_view.addItem("Hysteresis", "hysteresis")
+        self.cyclic_compare_view.addItem("Backbone / envelope", "backbone")
+        self.cyclic_compare_view.currentIndexChanged.connect(
+            self._update_cyclic_plot
+        )
+        experiment_row.addWidget(self.cyclic_compare_view)
+        experiment_row.addStretch(1)
+        layout.addLayout(experiment_row)
+
+        column_row = QHBoxLayout()
+        column_row.addWidget(QLabel("Exp X:"))
+        self.cyclic_exp_x_column = QComboBox()
+        self.cyclic_exp_x_column.currentIndexChanged.connect(
+            self._update_cyclic_plot
+        )
+        column_row.addWidget(self.cyclic_exp_x_column, 1)
+
+        column_row.addWidget(QLabel("×"))
+        self.cyclic_exp_x_scale = QDoubleSpinBox()
+        self.cyclic_exp_x_scale.setRange(-1.0e9, 1.0e9)
+        self.cyclic_exp_x_scale.setDecimals(8)
+        self.cyclic_exp_x_scale.setValue(1.0)
+        self.cyclic_exp_x_scale.valueChanged.connect(
+            self._update_cyclic_plot
+        )
+        column_row.addWidget(self.cyclic_exp_x_scale)
+
+        column_row.addWidget(QLabel("Exp Y:"))
+        self.cyclic_exp_y_column = QComboBox()
+        self.cyclic_exp_y_column.currentIndexChanged.connect(
+            self._update_cyclic_plot
+        )
+        column_row.addWidget(self.cyclic_exp_y_column, 1)
+
+        column_row.addWidget(QLabel("×"))
+        self.cyclic_exp_y_scale = QDoubleSpinBox()
+        self.cyclic_exp_y_scale.setRange(-1.0e9, 1.0e9)
+        self.cyclic_exp_y_scale.setDecimals(8)
+        self.cyclic_exp_y_scale.setValue(1.0)
+        self.cyclic_exp_y_scale.valueChanged.connect(
+            self._update_cyclic_plot
+        )
+        column_row.addWidget(self.cyclic_exp_y_scale)
+        layout.addLayout(column_row)
+
+        self.cyclic_experiment_info = QLabel(
+            "Optional: import experimental displacement-force CSV for "
+            "overlay and descriptive validation metrics."
+        )
+        self.cyclic_experiment_info.setWordWrap(True)
+        layout.addWidget(self.cyclic_experiment_info)
+
+        self.cyclic_compare_table = QTableWidget(0, 4)
+        self.cyclic_compare_table.setHorizontalHeaderLabels(
+            ["Comparison metric", "OpenSees", "Experiment", "Δ vs exp [%]"]
+        )
+        self.cyclic_compare_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.cyclic_compare_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.cyclic_compare_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.cyclic_compare_table.setMaximumHeight(145)
+        self.cyclic_compare_table.hide()
+        layout.addWidget(self.cyclic_compare_table)
+
         self.cyclic_plot = TimeHistoryPlot(
             empty_message="No cyclic hysteresis data"
         )
@@ -1598,7 +1684,7 @@ class ResultsPanel(QWidget):
         research_row.addWidget(export_research)
         layout.addLayout(research_row)
 
-        self.cyclic_reversal_table = QTableWidget(0, 16)
+        self.cyclic_reversal_table = QTableWidget(0, 20)
         self.cyclic_reversal_table.setHorizontalHeaderLabels(
             [
                 "Rev",
@@ -1617,6 +1703,10 @@ class ResultsPanel(QWidget):
                 "E branch",
                 "Cycle",
                 "E cycle",
+                "Vexp",
+                "V err [%]",
+                "Kexp",
+                "K err [%]",
             ]
         )
         self.cyclic_reversal_table.horizontalHeader().setSectionResizeMode(
@@ -2232,7 +2322,14 @@ class ResultsPanel(QWidget):
         )
         self.pushover_plot.set_series([], [])
         self.cyclic_plot.set_series([], [])
+        self.cyclic_plot.clear_overlay()
         self.cyclic_reversal_table.setRowCount(0)
+        self.cyclic_compare_table.setRowCount(0)
+        self.cyclic_compare_table.hide()
+        self._cyclic_experiment_dataset = {}
+        self._cyclic_experiment_path = ""
+        self.cyclic_exp_x_column.clear()
+        self.cyclic_exp_y_column.clear()
         self.cyclic_info.setText(
             "Run a Cyclic analysis to plot applied base shear versus "
             "control displacement."
@@ -3672,6 +3769,154 @@ class ResultsPanel(QWidget):
             dof=dof,
         )
         return time, values, quantity, node_tag, dof
+
+    def _set_cyclic_experiment_dataset(
+        self,
+        dataset: dict[str, Any],
+        *,
+        path: str = "",
+    ) -> None:
+        self._cyclic_experiment_dataset = (
+            dict(dataset) if isinstance(dataset, dict) else {}
+        )
+        self._cyclic_experiment_path = str(path or "")
+        headers = self._cyclic_experiment_dataset.get("headers", [])
+        if not isinstance(headers, list):
+            headers = []
+
+        self.cyclic_exp_x_column.blockSignals(True)
+        self.cyclic_exp_y_column.blockSignals(True)
+        self.cyclic_exp_x_column.clear()
+        self.cyclic_exp_y_column.clear()
+        for index, header in enumerate(headers):
+            label = str(header)
+            self.cyclic_exp_x_column.addItem(label, index)
+            self.cyclic_exp_y_column.addItem(label, index)
+
+        def best_column(keywords: tuple[str, ...], fallback: int) -> int:
+            for index, header in enumerate(headers):
+                normalized = str(header).strip().lower()
+                if any(keyword in normalized for keyword in keywords):
+                    return index
+            return min(max(fallback, 0), max(len(headers) - 1, 0))
+
+        if headers:
+            x_index = best_column(
+                ("displacement", "disp", "drift", "stroke", " u", "u "),
+                0,
+            )
+            y_index = best_column(
+                ("force", "load", "shear", "base shear", " v", "v "),
+                1 if len(headers) > 1 else 0,
+            )
+            self.cyclic_exp_x_column.setCurrentIndex(x_index)
+            self.cyclic_exp_y_column.setCurrentIndex(y_index)
+
+        self.cyclic_exp_x_column.blockSignals(False)
+        self.cyclic_exp_y_column.blockSignals(False)
+        self._update_cyclic_plot()
+
+    def _import_cyclic_experiment_csv(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Experimental Cyclic Data",
+            "",
+            "CSV/TSV files (*.csv *.txt *.tsv);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8-sig") as stream:
+                dataset = parse_experimental_csv_text(stream.read())
+        except (OSError, UnicodeError) as exc:
+            self.cyclic_experiment_info.setText(
+                f"Could not read experimental file: {exc}"
+            )
+            return
+
+        headers = dataset.get("headers", [])
+        rows = dataset.get("rows", [])
+        if not headers or not rows:
+            self.cyclic_experiment_info.setText(
+                "The selected file has no usable numeric experimental data."
+            )
+            return
+
+        self._set_cyclic_experiment_dataset(dataset, path=path)
+
+    def _clear_cyclic_experiment(self) -> None:
+        self._cyclic_experiment_dataset = {}
+        self._cyclic_experiment_path = ""
+        self.cyclic_exp_x_column.clear()
+        self.cyclic_exp_y_column.clear()
+        self.cyclic_compare_table.setRowCount(0)
+        self.cyclic_compare_table.hide()
+        self.cyclic_plot.clear_overlay()
+        self.cyclic_experiment_info.setText(
+            "Optional: import experimental displacement-force CSV for "
+            "overlay and descriptive validation metrics."
+        )
+        self._update_cyclic_plot()
+
+    def _cyclic_experiment_series(self) -> tuple[list[float], list[float]]:
+        x_column = self.cyclic_exp_x_column.currentData()
+        y_column = self.cyclic_exp_y_column.currentData()
+        if x_column is None or y_column is None:
+            return [], []
+        return experimental_csv_series(
+            self._cyclic_experiment_dataset,
+            int(x_column),
+            int(y_column),
+            x_scale=float(self.cyclic_exp_x_scale.value()),
+            y_scale=float(self.cyclic_exp_y_scale.value()),
+        )
+
+    def _populate_cyclic_comparison(
+        self,
+        simulation_x: list[float],
+        simulation_y: list[float],
+        experiment_x: list[float],
+        experiment_y: list[float],
+    ) -> dict[str, Any]:
+        comparison = cyclic_curve_comparison(
+            simulation_x,
+            simulation_y,
+            experiment_x,
+            experiment_y,
+        )
+        metric_rows = comparison.get("metrics", [])
+        if not isinstance(metric_rows, list) or not metric_rows:
+            self.cyclic_compare_table.setRowCount(0)
+            self.cyclic_compare_table.hide()
+            return comparison
+
+        def format_value(value: Any) -> str:
+            if value is None:
+                return "-"
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return "-"
+            if not math.isfinite(number):
+                return "-"
+            return f"{number:.6g}"
+
+        self.cyclic_compare_table.setRowCount(len(metric_rows))
+        for row, item in enumerate(metric_rows):
+            values = [
+                str(item.get("label", "-")),
+                format_value(item.get("simulation")),
+                format_value(item.get("experiment")),
+                format_value(item.get("difference_percent")),
+            ]
+            for column, value in enumerate(values):
+                self.cyclic_compare_table.setItem(
+                    row,
+                    column,
+                    QTableWidgetItem(value),
+                )
+        self.cyclic_compare_table.show()
+        return comparison
 
     def _update_cyclic_plot(self) -> None:
         x, y, control_node, control_dof = cyclic_hysteresis_curve(
