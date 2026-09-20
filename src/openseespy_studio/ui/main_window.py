@@ -6931,12 +6931,32 @@ class MainWindow(QMainWindow):
         if material is None:
             return
 
-        rows: list[tuple[str, object]] = [
+        rows = [
             ("Tag", material.tag),
-            ("Name", material.name),
+            (
+                "Name",
+                material.name,
+                {"id": "name", "editable": True, "kind": "text"},
+            ),
             ("Type", material.material_type),
-            ("Poisson ratio", f"{material.poisson_ratio:g}"),
-            ("Density", f"{material.density:g}"),
+            (
+                "Poisson ratio",
+                f"{material.poisson_ratio:g}",
+                {
+                    "id": "poisson_ratio",
+                    "editable": True,
+                    "kind": "float",
+                },
+            ),
+            (
+                "Density [kg/m³]",
+                f"{material.density:g}",
+                {
+                    "id": "density",
+                    "editable": True,
+                    "kind": "float",
+                },
+            ),
         ]
         if material.base_material_tag is not None:
             base = self.project.materials.get(material.base_material_tag)
@@ -6980,20 +7000,32 @@ class MainWindow(QMainWindow):
         from ..project import MATERIAL_PARAMETER_KINDS
         unit_system = UnitSystem.from_mapping(self.project.units)
         kinds = MATERIAL_PARAMETER_KINDS.get(material.material_type, {})
-        for key, value in material.parameters.items():
-            kind = kinds.get(key, "raw")
-            if kind == "stress":
+        for key, parameter_value in material.parameters.items():
+            parameter_kind = kinds.get(key, "raw")
+            if parameter_kind == "stress":
                 label = f"{key} [MPa]"
-                display = value / 1.0e6
-            elif kind == "length":
+                display = parameter_value / 1.0e6
+            elif parameter_kind == "length":
                 label = f"{key} [{unit_system.length}]"
-                display = unit_system.length_from_m(value)
+                display = unit_system.length_from_m(parameter_value)
             else:
                 label = key
-                display = value
-            rows.append((label, f"{display:g}"))
+                display = parameter_value
+            rows.append((
+                label,
+                f"{display:g}",
+                {
+                    "id": f"parameter:{key}",
+                    "editable": True,
+                    "kind": "float",
+                },
+            ))
 
-        self.properties_panel.set_properties("Material", rows)
+        self.properties_panel.set_properties(
+            "Material",
+            rows,
+            context={"kind": "material", "tag": int(tag)},
+        )
 
 
     def _create_section(self) -> None:
@@ -7141,15 +7173,31 @@ class MainWindow(QMainWindow):
         if section is None:
             return
 
-        rows: list[tuple[str, object]] = [
+        rows = [
             ("Tag", section.tag),
-            ("Name", section.name),
+            (
+                "Name",
+                section.name,
+                {"id": "name", "editable": True, "kind": "text"},
+            ),
             ("Type", section.section_type),
         ]
 
         if section.section_type == "Elastic":
+            material_choices = [("Manual", None)]
+            for material_tag in sorted(self.project.materials):
+                material = self.project.materials[material_tag]
+                try:
+                    material.elastic_modulus()
+                except ValueError:
+                    continue
+                material_choices.append((
+                    f"{material_tag} - {material.name}",
+                    int(material_tag),
+                ))
+
             if section.material_tag is None:
-                rows.append(("Material", "Manual"))
+                material_text = "Manual"
                 resolved = section.resolved_elastic_parameters()
             else:
                 material = self.project.materials.get(section.material_tag)
@@ -7158,7 +7206,6 @@ class MainWindow(QMainWindow):
                     if material is not None
                     else f"{section.material_tag} (missing)"
                 )
-                rows.append(("Material", material_text))
                 try:
                     resolved = section.resolved_elastic_parameters(
                         self.project.materials
@@ -7166,23 +7213,76 @@ class MainWindow(QMainWindow):
                 except ValueError:
                     resolved = dict(section.parameters)
 
+            rows.append((
+                "Material",
+                material_text,
+                {
+                    "id": "material_tag",
+                    "editable": True,
+                    "kind": "choice",
+                    "current": section.material_tag,
+                    "choices": material_choices,
+                },
+            ))
+
+            geometry_driven = bool(section.display_geometry)
             for key in ("A", "Iz", "Iy", "J"):
-                rows.append((key, f"{resolved[key]:g}"))
-            rows.append(
-                ("Resolved E [MPa]", f"{resolved['E'] / 1.0e6:g}")
-            )
-            rows.append(
-                ("Resolved G [MPa]", f"{resolved['G'] / 1.0e6:g}")
-            )
-            if section.material_tag is not None:
+                spec = {}
+                if not geometry_driven:
+                    spec = {
+                        "id": f"parameter:{key}",
+                        "editable": True,
+                        "kind": "float",
+                    }
+                rows.append((key, f"{resolved[key]:g}", spec))
+
+            if section.material_tag is None:
+                rows.extend([
+                    (
+                        "E [MPa]",
+                        f"{section.parameters['E'] / 1.0e6:g}",
+                        {
+                            "id": "parameter:E",
+                            "editable": True,
+                            "kind": "float",
+                        },
+                    ),
+                    (
+                        "G [MPa]",
+                        f"{section.parameters['G'] / 1.0e6:g}",
+                        {
+                            "id": "parameter:G",
+                            "editable": True,
+                            "kind": "float",
+                        },
+                    ),
+                ])
+            else:
+                rows.extend([
+                    ("Resolved E [MPa]", f"{resolved['E'] / 1.0e6:g}"),
+                    ("Resolved G [MPa]", f"{resolved['G'] / 1.0e6:g}"),
+                ])
                 material = self.project.materials.get(section.material_tag)
                 if material is not None:
-                    rows.append(("Density", f"{material.density:g}"))
+                    rows.append(("Density [kg/m³]", f"{material.density:g}"))
+
+            if geometry_driven:
+                shape = str(section.display_geometry.get("shape", ""))
+                rows.append(("Geometry source", shape or "Parametric"))
         else:
-            rows.extend(
-                (key, f"{value:g}")
-                for key, value in section.parameters.items()
-            )
+            for key, parameter_value in section.parameters.items():
+                if key == "GJ":
+                    rows.append((
+                        key,
+                        f"{parameter_value:g}",
+                        {
+                            "id": f"parameter:{key}",
+                            "editable": True,
+                            "kind": "float",
+                        },
+                    ))
+                else:
+                    rows.append((key, f"{parameter_value:g}"))
             compiled = section.compiled_fibers()
             total_area, (cy, cz) = section.fiber_area_and_centroid()
             rows.append(("Builder Components", len(section.fiber_components)))
@@ -7197,7 +7297,11 @@ class MainWindow(QMainWindow):
                 ", ".join(map(str, material_tags)) or "-",
             ))
 
-        self.properties_panel.set_properties("Section", rows)
+        self.properties_panel.set_properties(
+            "Section",
+            rows,
+            context={"kind": "section", "tag": int(tag)},
+        )
 
     def _create_transformation(self) -> None:
         dialog = TransformationDialog(
@@ -7338,12 +7442,55 @@ class MainWindow(QMainWindow):
             "Transformation",
             [
                 ("Tag", transformation.tag),
-                ("Name", transformation.name),
-                ("Type", transformation.transformation_type),
-                ("vecxz X", f"{transformation.vecxz[0]:g}"),
-                ("vecxz Y", f"{transformation.vecxz[1]:g}"),
-                ("vecxz Z", f"{transformation.vecxz[2]:g}"),
+                (
+                    "Name",
+                    transformation.name,
+                    {"id": "name", "editable": True, "kind": "text"},
+                ),
+                (
+                    "Type",
+                    transformation.transformation_type,
+                    {
+                        "id": "transformation_type",
+                        "editable": True,
+                        "kind": "choice",
+                        "current": transformation.transformation_type,
+                        "choices": [
+                            ("Linear", "Linear"),
+                            ("PDelta", "PDelta"),
+                            ("Corotational", "Corotational"),
+                        ],
+                    },
+                ),
+                (
+                    "vecxz X",
+                    f"{transformation.vecxz[0]:g}",
+                    {
+                        "id": "vecxz_x",
+                        "editable": True,
+                        "kind": "float",
+                    },
+                ),
+                (
+                    "vecxz Y",
+                    f"{transformation.vecxz[1]:g}",
+                    {
+                        "id": "vecxz_y",
+                        "editable": True,
+                        "kind": "float",
+                    },
+                ),
+                (
+                    "vecxz Z",
+                    f"{transformation.vecxz[2]:g}",
+                    {
+                        "id": "vecxz_z",
+                        "editable": True,
+                        "kind": "float",
+                    },
+                ),
             ],
+            context={"kind": "transformation", "tag": int(tag)},
         )
 
     def _connection_dialog_defaults(self) -> tuple[int, int, bool]:
