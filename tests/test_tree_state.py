@@ -32,6 +32,10 @@ def test_tree_expansion_state_survives_rebuild_and_count_changes():
     elements.addChild(truss)
     root.addChild(elements)
     tree.addTopLevelItem(root)
+    # Expansion state is a view property in Qt; set it after insertion.
+    root.setExpanded(True)
+    elements.setExpanded(False)
+    truss.setExpanded(True)
 
     holder = SimpleNamespace(tree=tree)
     holder._tree_item_state_key = MainWindow._tree_item_state_key
@@ -60,6 +64,9 @@ def test_tree_expansion_state_survives_rebuild_and_count_changes():
     rebuilt_elements.addChild(rebuilt_truss)
     rebuilt_root.addChild(rebuilt_elements)
     tree.addTopLevelItem(rebuilt_root)
+    rebuilt_root.setExpanded(True)
+    rebuilt_elements.setExpanded(True)
+    rebuilt_truss.setExpanded(False)
 
     MainWindow._restore_tree_expansion_state(holder, state)
 
