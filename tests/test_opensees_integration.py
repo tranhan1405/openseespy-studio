@@ -1036,3 +1036,114 @@ def test_generated_2d_elastic_frame_and_uniform_load_run_in_real_opensees(
     assert tip_ux == pytest.approx(expected, rel=1.0e-6)
     base_fx = results["final"]["node_reactions"]["1"][0]
     assert base_fx == pytest.approx(-3000.0, rel=1.0e-8)
+
+
+def test_generated_2d_force_beam_column_runs_in_real_opensees(
+    tmp_path: Path,
+):
+    model = StructuralModel("fiber-frame-2d", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 3.0)
+    model.set_fixity(1, (1, 1, 1))
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+        integration_type="Lobatto",
+        integration_points=5,
+    )
+
+    materials = {
+        1: MaterialData(
+            1,
+            "Elastic fiber",
+            "Elastic",
+            parameters={"E": 200.0e9},
+        )
+    }
+    sections = {
+        1: SectionData(
+            1,
+            "2D fiber section",
+            "Fiber",
+            parameters={"GJ": 1.0e6},
+            fibers=[
+                FiberData(-0.10, 0.0, 0.01, 1),
+                FiberData(0.10, 0.0, 0.01, 1),
+            ],
+        )
+    }
+    transformations = {
+        1: TransformationData(
+            1,
+            "2D PDelta",
+            "PDelta",
+            (0.0, 1.0, 0.0),
+        )
+    }
+    series = {
+        1: TimeSeriesData(1, "Ramp", "Linear", factor=1.0)
+    }
+    patterns = {
+        1: LoadPatternData(1, "Lateral", "Plain", time_series_tag=1)
+    }
+    loads = {
+        1: NodalLoadData(
+            1,
+            "Top lateral",
+            pattern_tag=1,
+            node_tag=2,
+            values=(1000.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        )
+    }
+    analysis = AnalysisSettingsData(
+        1,
+        "2D fiber static",
+        analysis_type="Static",
+        constraints_handler="Plain",
+        numberer="Plain",
+        system="BandGeneral",
+        test="NormDispIncr",
+        tolerance=1.0e-12,
+        max_iterations=30,
+        algorithm="Newton",
+        steps=1,
+        load_increment=1.0,
+        control_node=2,
+        control_dof=1,
+        recovery=False,
+        adaptive_step=False,
+        live_convergence=False,
+    )
+
+    script = to_openseespy(
+        model,
+        materials=materials,
+        sections=sections,
+        transformations=transformations,
+        time_series=series,
+        load_patterns=patterns,
+        nodal_loads=loads,
+        analyses={1: analysis},
+        active_analysis_tag=1,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    assert "ops.geomTransf('PDelta', 1)" in script
+    assert "ops.element('forceBeamColumn', 1, 1, 2, 1, 1" in script
+    assert "# ERROR:" not in script
+
+    script_path = tmp_path / "fiber-frame-2d.py"
+    result_path = tmp_path / "fiber-frame-2d-result.json"
+    script_path.write_text(script, encoding="utf-8")
+    exit_code = run_script(script_path, result_path)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0, payload.get("error", "")
+    assert payload["status"] == "completed"
+    tip_ux = payload["results"]["final"]["node_displacements"]["2"][0]
+    assert tip_ux > 0.0
+    base_fx = payload["results"]["final"]["node_reactions"]["1"][0]
+    assert base_fx == pytest.approx(-1000.0, rel=1.0e-7)
