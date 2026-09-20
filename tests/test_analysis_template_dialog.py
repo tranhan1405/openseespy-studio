@@ -363,7 +363,7 @@ def test_nlth_bundled_el_centro_can_create_request_without_browse(qapp):
         assert len(dialog._ground_motion_values[1]) == 1559
         assert dialog.gm_dt.value() == pytest.approx(0.02)
         assert dialog.gm_unit.currentText() == "g"
-        assert dialog.gm_files[1].text().startswith("[Built-in]")
+        assert dialog.gm_files[1].text().startswith("[Library]")
         request = dialog.request()
         assert len(request["components"]) == 1
         assert request["components"][0]["direction"] == 1
@@ -374,8 +374,8 @@ def test_nlth_bundled_el_centro_can_create_request_without_browse(qapp):
         qapp.processEvents()
 
 
-def test_nlth_reference_only_preset_clears_previous_auto_record(qapp):
-    model = StructuralModel("nlth-reference-only")
+def test_nlth_reference_only_presets_are_hidden_and_custom_clears_auto_record(qapp):
+    model = StructuralModel("nlth-library")
     model.add_node(1, 0.0, 0.0, 0.0)
     project = ProjectDatabase(model=model)
 
@@ -386,6 +386,8 @@ def test_nlth_reference_only_preset_clears_previous_auto_record(qapp):
         project=project,
     )
     try:
+        assert dialog.gm_library.findData("kobe-1995-kjma") == -1
+
         dialog.gm_library.setCurrentIndex(
             dialog.gm_library.findData("el-centro-1940")
         )
@@ -393,11 +395,11 @@ def test_nlth_reference_only_preset_clears_previous_auto_record(qapp):
         assert dialog._ground_motion_values[1]
 
         dialog.gm_library.setCurrentIndex(
-            dialog.gm_library.findData("kobe-1995-kjma")
+            dialog.gm_library.findData("custom")
         )
         qapp.processEvents()
         assert not dialog._ground_motion_values[1]
-        assert "Reference only" in dialog.gm_library_info.text()
+        assert "Custom / Local Record" in dialog.gm_library_info.text()
     finally:
         dialog.close()
         dialog.deleteLater()

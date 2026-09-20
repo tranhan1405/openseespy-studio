@@ -11,8 +11,10 @@ from PySide6.QtWidgets import (
 )
 
 from ..ground_motion_library import (
-    GROUND_MOTION_LIBRARY,
-    load_bundled_ground_motion_record,
+    available_ground_motion_presets,
+    download_fema_p695_farfield_library,
+    fema_p695_library_installed,
+    load_ground_motion_record,
     parse_ground_motion_record_text,
     pga_in_g,
     record_preset,
@@ -278,14 +280,14 @@ class GroundMotionDialog(QDialog):
         self.source_mode.addItem("Manual / Paste", "manual")
 
         self.library = QComboBox()
-        for preset in GROUND_MOTION_LIBRARY:
-            if preset.key == "custom":
-                continue
-            status = "Built-in" if preset.bundled_resource else "Import required"
-            self.library.addItem(
-                f"{preset.label}  [{status}]",
-                preset.key,
-            )
+        self.library_download = QPushButton()
+        self.library_download.clicked.connect(self._download_fema_library)
+        self.library_host = QWidget()
+        library_layout = QHBoxLayout(self.library_host)
+        library_layout.setContentsMargins(0, 0, 0, 0)
+        library_layout.addWidget(self.library, 1)
+        library_layout.addWidget(self.library_download)
+        self._populate_library()
 
         self.library_info = QLabel()
         self.library_info.setWordWrap(True)
@@ -331,7 +333,7 @@ class GroundMotionDialog(QDialog):
         form.addRow("Name:", self.name)
         form.addRow("Direction:", self.direction)
         form.addRow("Source:", self.source_mode)
-        form.addRow("Record library:", self.library)
+        form.addRow("Record library:", self.library_host)
         form.addRow("Record info:", self.library_info)
         form.addRow("File:", file_host)
         form.addRow("TXT/CSV column:", self.column)
@@ -409,7 +411,7 @@ class GroundMotionDialog(QDialog):
 
     def _sync_source_mode(self, *_args) -> None:
         mode = str(self.source_mode.currentData() or "manual")
-        self._set_form_row_visible(self.library, mode == "builtin")
+        self._set_form_row_visible(self.library_host, mode == "builtin")
         self._set_form_row_visible(self.library_info, mode == "builtin")
         self._set_form_row_visible(self.file_path.parentWidget(), mode == "file")
         self._set_form_row_visible(self.column, mode == "file")
@@ -423,26 +425,95 @@ class GroundMotionDialog(QDialog):
             self._library_changed()
         self._refresh_preview()
 
+    def _populate_library(self, select_key: str | None = None) -> None:
+        current = (
+            str(select_key)
+            if select_key is not None
+            else str(self.library.currentData() or "")
+        )
+        self.library.blockSignals(True)
+        self.library.clear()
+        for preset in available_ground_motion_presets(
+            include_custom=False
+        ):
+            status = (
+                "FEMA P695 local"
+                if preset.local_path
+                else "Bundled"
+            )
+            self.library.addItem(
+                f"{preset.label}  [{status}]",
+                preset.key,
+            )
+        if current:
+            index = self.library.findData(current)
+            if index >= 0:
+                self.library.setCurrentIndex(index)
+        self.library.blockSignals(False)
+        installed = fema_p695_library_installed()
+        self.library_download.setText(
+            "Refresh FEMA P695"
+            if installed
+            else "Download FEMA P695 FF22"
+        )
+        self.library_download.setToolTip(
+            "Download the full FEMA P695 far-field record set to the "
+            "OpenSeesPy Studio local cache. After that the records work "
+            "offline and do not need manual import."
+        )
+
+    def _download_fema_library(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "FEMA P695 Ground Motion Library",
+            (
+                "Download the full FEMA P695 far-field ground-motion "
+                "archive to this computer?\n\n"
+                "Studio downloads the original AT2 archive directly from "
+                "the public SP3/HB-Risk research-data host and stores it "
+                "in your local application-data cache. The raw records are "
+                "not copied into the Studio source repository."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self.library_download.setEnabled(False)
+        self.library_download.setText("Downloading...")
+        try:
+            records = download_fema_p695_farfield_library()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "FEMA P695 Ground Motion Library",
+                str(exc),
+            )
+            self._populate_library()
+            return
+        finally:
+            self.library_download.setEnabled(True)
+        selected = records[0].key if records else None
+        self._populate_library(selected)
+        QMessageBox.information(
+            self,
+            "FEMA P695 Ground Motion Library",
+            (
+                f"Installed {len(records)} horizontal FEMA P695 "
+                "component(s). They are now available offline."
+            ),
+        )
+        self._library_changed()
+
     def _library_changed(self, *_args) -> None:
         key = str(self.library.currentData() or "")
         if not key:
             return
         preset = record_preset(key)
         year = f" ({preset.year})" if preset.year is not None else ""
-        if not preset.bundled_resource:
-            self.library_info.setText(
-                f"{preset.event}{year} · {preset.station} · "
-                f"Source: {preset.source}. Reference preset only — use "
-                f"Import File to supply the record. {preset.notes}"
-            )
-            self._builtin_key = ""
-            self._source_format = ""
-            self.values.clear()
-            self._refresh_preview()
-            return
 
         try:
-            parsed = load_bundled_ground_motion_record(key)
+            parsed = load_ground_motion_record(key)
         except ValueError as exc:
             QMessageBox.warning(self, "Ground Motion Library", str(exc))
             return
@@ -463,7 +534,7 @@ class GroundMotionDialog(QDialog):
             self.name.setText(preset.label)
         self.library_info.setText(
             f"{preset.event}{year} · {preset.station} · Source: "
-            f"{preset.source}. Built-in offline record. {preset.notes}"
+            f"{preset.source}. Available offline. {preset.notes}"
         )
         self._refresh_preview()
 

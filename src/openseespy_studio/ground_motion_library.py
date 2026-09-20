@@ -4,7 +4,13 @@ from dataclasses import dataclass
 from importlib import resources
 import json
 import math
+import os
+from pathlib import Path
 import re
+import shutil
+import tempfile
+import urllib.request
+import zipfile
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +23,216 @@ class GroundMotionRecordPreset:
     source: str
     notes: str = ""
     bundled_resource: str = ""
+    local_path: str = ""
+    collection: str = ""
+
+
+
+FEMA_P695_FARFIELD_ARCHIVE_URL = (
+    "https://s3.us-west-2.amazonaws.com/static-assets.hbrisk.com/"
+    "ground-motion-sets/"
+    "2b_ATC-63_Far-Field_GroundMotionAccelTextFiles_"
+    "Unscaled_Original.zip"
+)
+FEMA_P695_SOURCE_URL = "https://sp3risk.com/ground-motion-sets/"
+
+_FEMA_EVENT_NAMES = {
+    "NORTHR": ("Northridge", 1994),
+    "DUZCE": ("Duzce, Turkey", 1999),
+    "HECTOR": ("Hector Mine", 1999),
+    "IMPVALL": ("Imperial Valley", 1979),
+    "KOBE": ("Kobe, Japan", 1995),
+    "KOCAELI": ("Kocaeli, Turkey", 1999),
+    "LANDERS": ("Landers", 1992),
+    "LOMAP": ("Loma Prieta", 1989),
+    "MANJIL": ("Manjil, Iran", 1990),
+    "SUPERST": ("Superstition Hills", 1987),
+    "CAPEMEND": ("Cape Mendocino", 1992),
+    "CHICHI": ("Chi-Chi, Taiwan", 1999),
+    "SFERN": ("San Fernando", 1971),
+    "FRIULI": ("Friuli, Italy", 1976),
+}
+
+
+def ground_motion_cache_root() -> Path:
+    """Return a user-writable cache root without extra dependencies."""
+    if os.name == "nt":
+        base = Path(
+            os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")
+        )
+        return base / "OpenSeesPyStudio" / "ground_motions"
+    if sys_platform := os.environ.get("XDG_DATA_HOME"):
+        return Path(sys_platform) / "openseespy-studio" / "ground_motions"
+    if os.sys.platform == "darwin":
+        return (
+            Path.home()
+            / "Library"
+            / "Application Support"
+            / "OpenSeesPyStudio"
+            / "ground_motions"
+        )
+    return Path.home() / ".local" / "share" / "openseespy-studio" / "ground_motions"
+
+
+def fema_p695_cache_dir() -> Path:
+    return ground_motion_cache_root() / "fema_p695_ff22"
+
+
+def discover_fema_p695_presets(
+    cache_dir: str | Path | None = None,
+) -> tuple[GroundMotionRecordPreset, ...]:
+    root = Path(cache_dir) if cache_dir is not None else fema_p695_cache_dir()
+    if not root.exists():
+        return ()
+    records: list[GroundMotionRecordPreset] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.suffix.lower() != ".at2":
+            continue
+        relative = path.relative_to(root)
+        stem_upper = path.stem.upper()
+        if (
+            "UP" in stem_upper
+            or "VER" in stem_upper
+            or "DWN" in stem_upper
+            or stem_upper.endswith("-V")
+        ):
+            continue
+        event_code = relative.parts[-2].upper() if len(relative.parts) > 1 else ""
+        event, year = _FEMA_EVENT_NAMES.get(
+            event_code,
+            (event_code.replace("_", " ").title() or "FEMA P695", None),
+        )
+        component = path.stem
+        records.append(
+            GroundMotionRecordPreset(
+                key=f"fema-p695:{relative.as_posix()}",
+                label=f"{event}{f' {year}' if year else ''} · {component}",
+                event=event,
+                year=year,
+                station=component,
+                source="FEMA P695 FF22 via SP3/HB-Risk research data",
+                notes=(
+                    "Original PEER-NGA-format acceleration component cached "
+                    "locally by OpenSeesPy Studio."
+                ),
+                local_path=str(path),
+                collection="FEMA P695 FF22",
+            )
+        )
+    return tuple(records)
+
+
+def available_ground_motion_presets(
+    *,
+    include_custom: bool = True,
+) -> tuple[GroundMotionRecordPreset, ...]:
+    """Return records that can be loaded immediately on this machine."""
+    packaged = tuple(
+        item
+        for item in GROUND_MOTION_LIBRARY
+        if item.bundled_resource or (include_custom and item.key == "custom")
+    )
+    return packaged + discover_fema_p695_presets()
+
+
+def fema_p695_library_installed(
+    cache_dir: str | Path | None = None,
+) -> bool:
+    return len(discover_fema_p695_presets(cache_dir)) >= 44
+
+
+def download_fema_p695_farfield_library(
+    *,
+    cache_dir: str | Path | None = None,
+    url: str = FEMA_P695_FARFIELD_ARCHIVE_URL,
+    opener=None,
+) -> tuple[GroundMotionRecordPreset, ...]:
+    """Download and cache the FEMA P695 far-field record archive.
+
+    The raw third-party records are downloaded directly from the public
+    research-data host into the user's local application-data directory; they
+    are not redistributed in the OpenSeesPy Studio source package.
+    """
+    target = Path(cache_dir) if cache_dir is not None else fema_p695_cache_dir()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    open_url = opener or urllib.request.urlopen
+
+    fd, temporary_name = tempfile.mkstemp(
+        prefix="fema_p695_ff22_",
+        suffix=".zip",
+        dir=str(target.parent),
+    )
+    os.close(fd)
+    temporary = Path(temporary_name)
+    staging = target.parent / f"{target.name}.staging"
+
+    try:
+        request = urllib.request.Request(
+            str(url),
+            headers={"User-Agent": "OpenSeesPy-Studio/0.2"},
+        )
+        response = open_url(request) if opener is None else open_url(str(url))
+        try:
+            with temporary.open("wb") as stream:
+                shutil.copyfileobj(response, stream)
+        finally:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
+
+        if staging.exists():
+            shutil.rmtree(staging)
+        staging.mkdir(parents=True, exist_ok=True)
+
+        with zipfile.ZipFile(temporary) as archive:
+            for member in archive.infolist():
+                if member.is_dir():
+                    continue
+                member_path = Path(member.filename)
+                if member_path.suffix.lower() != ".at2":
+                    continue
+                safe_parts = [
+                    part
+                    for part in member_path.parts
+                    if part not in {"", ".", ".."}
+                ]
+                if not safe_parts:
+                    continue
+                destination = staging.joinpath(*safe_parts)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member) as source, destination.open("wb") as dest:
+                    shutil.copyfileobj(source, dest)
+
+        records = discover_fema_p695_presets(staging)
+        if len(records) < 44:
+            raise ValueError(
+                "FEMA P695 download did not contain the expected 44 or more "
+                f"horizontal/component AT2 files (found {len(records)})."
+            )
+
+        if target.exists():
+            shutil.rmtree(target)
+        staging.replace(target)
+        marker = target / "_source.json"
+        marker.write_text(
+            json.dumps(
+                {
+                    "collection": "FEMA P695 FF22",
+                    "archive_url": str(url),
+                    "source_page": FEMA_P695_SOURCE_URL,
+                    "record_count": len(discover_fema_p695_presets(target)),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return discover_fema_p695_presets(target)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise ValueError(f"Could not install FEMA P695 ground motions: {exc}") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
 
 
 GROUND_MOTION_LIBRARY: tuple[GroundMotionRecordPreset, ...] = (
@@ -92,8 +308,12 @@ GROUND_MOTION_LIBRARY: tuple[GroundMotionRecordPreset, ...] = (
 
 
 def record_preset(key: str) -> GroundMotionRecordPreset:
+    target = str(key)
     for item in GROUND_MOTION_LIBRARY:
-        if item.key == str(key):
+        if item.key == target:
+            return item
+    for item in discover_fema_p695_presets():
+        if item.key == target:
             return item
     raise KeyError(key)
 
@@ -271,6 +491,23 @@ def parse_ground_motion_record_text(
         values=values,
         format="text/CSV",
     )
+
+
+def load_ground_motion_record(
+    key: str,
+) -> GroundMotionParseResult:
+    """Load either a packaged record or a locally cached library record."""
+    preset = record_preset(key)
+    if preset.local_path:
+        path = Path(preset.local_path)
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            raise ValueError(
+                f"Cached ground-motion record is unavailable: {path}"
+            ) from exc
+        return parse_ground_motion_record_text(text, filename=str(path))
+    return load_bundled_ground_motion_record(key)
 
 
 def load_bundled_ground_motion_record(
