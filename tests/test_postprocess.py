@@ -13,6 +13,8 @@ from openseespy_studio.postprocess import (
     cyclic_hysteresis_curve,
     cyclic_hysteresis_metrics,
     cyclic_reversal_points,
+    column_cyclic_cycle_metrics,
+    column_cyclic_reversal_metrics,
     enrich_fiber_state_results,
     enrich_member_force_results,
     equilibrium_component_samples,
@@ -1180,3 +1182,174 @@ def test_test_column_research_metrics_capture_interface_share_and_bond_slip():
     assert metrics["peak_abs_bond_slip"] == pytest.approx(1.0)
     assert metrics["interface_signed_work"] == pytest.approx(0.0018)
     assert metrics["interface_path_energy"] == pytest.approx(0.0018)
+
+
+
+def _cyclic_specimen_research_result():
+    displacement = [1.0, 2.0, 1.0, 0.0, -1.0, -2.0, -1.0, 0.0, 1.0, 2.0, 1.0]
+    shear = [10.0, 20.0, 8.0, 0.0, -10.0, -18.0, -7.0, 0.0, 9.0, 16.0, 6.0]
+    moments = [30.0, 60.0, 24.0, 0.0, -30.0, -54.0, -21.0, 0.0, 27.0, 48.0, 18.0]
+    curvature = [0.001, 0.002, 0.001, 0.0, -0.001, -0.002, -0.001, 0.0, 0.001, 0.002, 0.001]
+    interface_rotation = [
+        0.0001, 0.0002, 0.0001, 0.0, -0.0001, -0.0002,
+        -0.0001, 0.0, 0.0001, 0.0002, 0.0001,
+    ]
+    result = {
+        "analysis": {
+            "type": "Cyclic",
+            "control_node": 2,
+            "control_dof": 1,
+        },
+        "specimen": {
+            "kind": "test-column",
+            "element_tag": 10,
+            "base_node": 1,
+            "top_node": 2,
+            "ground_node": 3,
+            "height": 1000.0,
+            "lateral_direction": 1,
+            "bending_rotation_dof": 5,
+            "moment_component": "My",
+            "moment_index": 2,
+            "moment_sign": -1.0,
+            "interface_type": "zeroLengthSection",
+            "interface_name": "Bond_SP01 strain penetration",
+        },
+        "history": {
+            "time": [float(index + 1) for index in range(len(displacement))],
+            "control_dof": 1,
+            "displacement": [
+                [value, 0.0, 0.0, 0.0, 0.0, 0.0]
+                for value in displacement
+            ],
+            "base_shear": [-value for value in shear],
+            "nodes": {
+                "1": {
+                    "disp": [
+                        [0.0, 0.0, 0.0, 0.0, theta, 0.0]
+                        for theta in interface_rotation
+                    ]
+                },
+                "2": {
+                    "disp": [
+                        [value, 0.0, 0.0, 0.0, theta, 0.0]
+                        for value, theta in zip(
+                            displacement,
+                            interface_rotation,
+                        )
+                    ]
+                },
+                "3": {
+                    "disp": [
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                        for _ in displacement
+                    ]
+                },
+            },
+            "specimen": {
+                "section_force": [
+                    [100.0, 0.0, -value, 0.0]
+                    for value in moments
+                ],
+                "section_deformation": [
+                    [0.0, 0.0, -value, 0.0]
+                    for value in curvature
+                ],
+                "interface_force": [
+                    [100.0, 0.0, -0.9 * value, 0.0]
+                    for value in moments
+                ],
+                "interface_deformation": [
+                    [0.0, 0.0, -value, 0.0]
+                    for value in interface_rotation
+                ],
+                "base_fibers": [
+                    [
+                        {
+                            "label": "steel_max",
+                            "material_tag": 2,
+                            "material_type": "ReinforcingSteel",
+                            "y": 0.0,
+                            "z": 150.0,
+                            "stress": 200.0 * value,
+                            "strain": 0.001 * value,
+                        },
+                        {
+                            "label": "concrete_min",
+                            "material_tag": 4,
+                            "material_type": "Concrete02",
+                            "y": 0.0,
+                            "z": -150.0,
+                            "stress": -15.0 * abs(value),
+                            "strain": -0.0015 * abs(value),
+                        },
+                    ]
+                    for value in displacement
+                ],
+                "interface_fibers": [
+                    [
+                        {
+                            "label": "bond_max",
+                            "material_tag": 3,
+                            "material_type": "Bond_SP01",
+                            "y": 0.0,
+                            "z": 150.0,
+                            "stress": 150.0 * value,
+                            "slip": 0.1 * value,
+                        }
+                    ]
+                    for value in displacement
+                ],
+            },
+        },
+    }
+    return result
+
+
+def test_column_cyclic_reversal_metrics_synchronize_global_section_and_fibers():
+    rows = column_cyclic_reversal_metrics(
+        _cyclic_specimen_research_result()
+    )
+
+    assert len(rows) == 3
+    first_positive, negative, second_positive = rows
+
+    assert first_positive["history_step"] == 1
+    assert first_positive["displacement"] == pytest.approx(2.0)
+    assert first_positive["base_shear"] == pytest.approx(20.0)
+    assert first_positive["drift_angle"] == pytest.approx(0.002)
+    assert first_positive["moment"] == pytest.approx(60.0)
+    assert first_positive["curvature"] == pytest.approx(0.002)
+    assert first_positive["steel_strain"] == pytest.approx(0.002)
+    assert first_positive["concrete_strain"] == pytest.approx(-0.003)
+    assert first_positive["bond_slip"] == pytest.approx(0.2)
+    assert first_positive["interface_rotation"] == pytest.approx(0.0002)
+
+    assert negative["history_step"] == 5
+    assert negative["displacement"] == pytest.approx(-2.0)
+    assert negative["moment"] == pytest.approx(-54.0)
+    assert negative["steel_strain"] == pytest.approx(-0.002)
+
+    assert second_positive["history_step"] == 9
+    assert second_positive["strength_ratio"] == pytest.approx(0.8)
+    assert second_positive["stiffness_ratio"] == pytest.approx(0.8)
+    assert second_positive["closed_cycle_number"] == 1
+    assert second_positive["closed_cycle_energy"] is not None
+    assert second_positive["closed_cycle_energy"] > 0.0
+    assert second_positive["interface_closed_cycle_energy"] is not None
+
+
+def test_column_cyclic_cycle_metrics_returns_compact_closed_cycle_rows():
+    cycles = column_cyclic_cycle_metrics(
+        _cyclic_specimen_research_result()
+    )
+
+    assert len(cycles) == 1
+    assert cycles[0]["cycle"] == 1
+    assert cycles[0]["end_reversal"] == 3
+    assert cycles[0]["amplitude"] == pytest.approx(2.0)
+    assert cycles[0]["repeat_index"] == 2
+    assert cycles[0]["strength_ratio"] == pytest.approx(0.8)
+    assert cycles[0]["stiffness_ratio"] == pytest.approx(0.8)
+    assert cycles[0]["energy"] > 0.0
+    assert cycles[0]["interface_energy"] is not None
