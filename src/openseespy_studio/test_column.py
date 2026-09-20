@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .model import StructuralModel
+from .strain_penetration import build_bond_sp01_strain_penetration_section
 from .project import (
     ConnectionData,
     LoadPatternData,
@@ -41,6 +42,7 @@ class TestColumnSpec:
     base_interface_type: str = "Fixed base"
     base_interface_materials: dict[int, int] = field(default_factory=dict)
     base_interface_rayleigh: bool = False
+    strain_penetration_bond_material_tag: int | None = None
 
     top_mass: float = 0.0
     top_mass_directions: tuple[int, ...] = (1, 2, 3)
@@ -65,6 +67,7 @@ class TestColumnBuildResult:
     prescribed_pattern_tag: int | None = None
     base_ground_node: int | None = None
     base_connection_tag: int | None = None
+    base_section_tag: int | None = None
 
 
 BASE_INTERFACE_TYPES = {
@@ -72,6 +75,7 @@ BASE_INTERFACE_TYPES = {
     "Translational slip spring",
     "Bond-slip",  # legacy alias for pre-v0.1 research scripts
     "Rotational spring",
+    "Bond_SP01 strain penetration",
     "Custom zeroLength",
 }
 
@@ -297,37 +301,68 @@ def build_test_column(
         if spec.base_support != "Fixed":
             raise ValueError(
                 "Base Interface Model requires a Fixed nominal base; "
-                "the selected spring DOFs are released automatically."
+                "the selected interface DOFs are released automatically."
             )
-        if not interface_materials:
-            raise ValueError(
-                f"{interface_type} requires at least one active spring DOF."
-            )
-        if any(dof < 1 or dof > 6 for dof in interface_materials):
-            raise ValueError("Base-interface DOFs must be in the range 1..6.")
-        missing_materials = sorted({
-            material_tag
-            for material_tag in interface_materials.values()
-            if material_tag not in project.materials
-        })
-        if missing_materials:
-            raise ValueError(
-                "Base interface references missing material tag(s): "
-                + ", ".join(map(str, missing_materials))
-            )
-        if spec.planar:
-            plane_fixity = _planar_fixity(axis, lateral)
-            blocked = [
-                dof
-                for dof in interface_materials
-                if plane_fixity[dof - 1]
-            ]
-            if blocked:
+
+        if interface_type == "Bond_SP01 strain penetration":
+            if spec.section_tag is None:
                 raise ValueError(
-                    "Planar test restrains base-interface DOF(s): "
-                    + ", ".join(map(str, blocked))
-                    + ". Choose an in-plane DOF or disable Planar test."
+                    "Bond_SP01 strain penetration requires a Fiber column section."
                 )
+            source_section = project.sections.get(int(spec.section_tag))
+            if source_section is None:
+                raise ValueError(
+                    f"Section {spec.section_tag} does not exist in the project."
+                )
+            if source_section.section_type != "Fiber":
+                raise ValueError(
+                    "Bond_SP01 strain penetration requires a Fiber source section."
+                )
+            bond_tag = spec.strain_penetration_bond_material_tag
+            if bond_tag is None:
+                raise ValueError(
+                    "Select a Bond_SP01 material for strain penetration."
+                )
+            bond_material = project.materials.get(int(bond_tag))
+            if bond_material is None:
+                raise ValueError(
+                    f"Bond_SP01 material {bond_tag} does not exist."
+                )
+            if bond_material.material_type != "Bond_SP01":
+                raise ValueError(
+                    f"Material {bond_tag} is {bond_material.material_type}, "
+                    "not Bond_SP01."
+                )
+        else:
+            if not interface_materials:
+                raise ValueError(
+                    f"{interface_type} requires at least one active spring DOF."
+                )
+            if any(dof < 1 or dof > 6 for dof in interface_materials):
+                raise ValueError("Base-interface DOFs must be in the range 1..6.")
+            missing_materials = sorted({
+                material_tag
+                for material_tag in interface_materials.values()
+                if material_tag not in project.materials
+            })
+            if missing_materials:
+                raise ValueError(
+                    "Base interface references missing material tag(s): "
+                    + ", ".join(map(str, missing_materials))
+                )
+            if spec.planar:
+                plane_fixity = _planar_fixity(axis, lateral)
+                blocked = [
+                    dof
+                    for dof in interface_materials
+                    if plane_fixity[dof - 1]
+                ]
+                if blocked:
+                    raise ValueError(
+                        "Planar test restrains base-interface DOF(s): "
+                        + ", ".join(map(str, blocked))
+                        + ". Choose an in-plane DOF or disable Planar test."
+                    )
 
     if spec.replace_geometry:
         _clear_model_linked_data(project)
@@ -393,7 +428,17 @@ def build_test_column(
     base_fixity = list(
         _merge_fixity(plane, _support_fixity(spec.base_support))
     )
-    if interface_type != "Fixed base":
+    if interface_type == "Bond_SP01 strain penetration":
+        # zeroLengthSection supplies axial force and flexural moment. Shear
+        # translations remain fixed so the interface cannot slide laterally.
+        base_fixity[axis - 1] = 0
+        if spec.planar:
+            base_fixity[bending_rotation_dof(axis, lateral) - 1] = 0
+        else:
+            for rotation_dof in (4, 5, 6):
+                if rotation_dof != axis + 3:
+                    base_fixity[rotation_dof - 1] = 0
+    elif interface_type != "Fixed base":
         for dof in interface_materials:
             base_fixity[dof - 1] = 0
 
@@ -421,18 +466,58 @@ def build_test_column(
     if interface_type != "Fixed base":
         ground_node = project.create_ground_node(result.base_node)
         connection_tag = project.next_connection_tag()
-        project.add_connection(
-            ConnectionData(
-                tag=connection_tag,
-                name=f"{spec.name_prefix} · {interface_type}",
-                connection_type="zeroLength",
-                node_i=ground_node,
-                node_j=result.base_node,
-                materials_by_dof=interface_materials,
-                do_rayleigh=bool(spec.base_interface_rayleigh),
-                generated_ground_node=ground_node,
+
+        if interface_type == "Bond_SP01 strain penetration":
+            source_section = project.sections[int(spec.section_tag)]
+            penetration_section_tag = project.next_section_tag()
+            penetration = build_bond_sp01_strain_penetration_section(
+                source_section,
+                project.materials,
+                bond_material_tag=int(
+                    spec.strain_penetration_bond_material_tag
+                ),
+                section_tag=penetration_section_tag,
+                name=(
+                    f"{spec.name_prefix} · Bond_SP01 "
+                    "strain-penetration section"
+                ),
             )
-        )
+            project.add_section(penetration.section)
+
+            axis_vector = [0.0, 0.0, 0.0]
+            axis_vector[axis - 1] = 1.0
+            lateral_vector = [0.0, 0.0, 0.0]
+            lateral_vector[lateral - 1] = 1.0
+
+            project.add_connection(
+                ConnectionData(
+                    tag=connection_tag,
+                    name=f"{spec.name_prefix} · {interface_type}",
+                    connection_type="zeroLengthSection",
+                    node_i=ground_node,
+                    node_j=result.base_node,
+                    section_tag=penetration.section.tag,
+                    orient_x=tuple(axis_vector),
+                    orient_y=tuple(lateral_vector),
+                    do_rayleigh=bool(spec.base_interface_rayleigh),
+                    generated_ground_node=ground_node,
+                )
+            )
+            result.base_section_tag = penetration.section.tag
+        else:
+            project.add_connection(
+                ConnectionData(
+                    tag=connection_tag,
+                    name=f"{spec.name_prefix} · {interface_type}",
+                    connection_type="zeroLength",
+                    node_i=ground_node,
+                    node_j=result.base_node,
+                    materials_by_dof=interface_materials,
+                    do_rayleigh=bool(spec.base_interface_rayleigh),
+                    generated_ground_node=ground_node,
+                )
+            )
+
         result.base_ground_node = ground_node
         result.base_connection_tag = connection_tag
         result.node_tags.append(ground_node)
