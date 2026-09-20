@@ -1267,8 +1267,9 @@ def analysis_to_openseespy(
         lines.append("if not isinstance(_studio_eigenvalues, (list, tuple)):")
         lines.append("    _studio_eigenvalues = [_studio_eigenvalues]")
         lines.extend([
+            f"_studio_translational_dofs = {tuple(range(1, int(model_ndm) + 1))!r}",
             "_studio_total_lumped_mass = {}",
-            "for _studio_dof in (1, 2, 3):",
+            "for _studio_dof in _studio_translational_dofs:",
             "    _studio_mass_total = 0.0",
             "    for _studio_node in _studio_node_tags:",
             "        try:",
@@ -1307,7 +1308,7 @@ def analysis_to_openseespy(
             "            ops.nodeEigenvector(_studio_node, _studio_mode)",
             "        ]",
             "    _studio_participation = {}",
-            "    for _studio_dof in (1, 2, 3):",
+            "    for _studio_dof in _studio_translational_dofs:",
             "        _studio_num = 0.0",
             "        _studio_den = 0.0",
             "        for _studio_node in _studio_node_tags:",
