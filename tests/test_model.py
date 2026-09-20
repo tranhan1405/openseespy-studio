@@ -135,3 +135,31 @@ def test_hinge_integration_round_trip_dict():
     assert element.integration_type == "HingeRadauTwo"
     assert element.hinge_i_section_tag == 1
     assert element.interior_section_tag == 3
+
+
+def test_assign_truss_material_only_updates_truss_elements():
+    model = StructuralModel()
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    model.add_node(3, 2.0, 0.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="truss",
+        group="truss",
+        truss_area=0.01,
+        truss_material_tag=1,
+    )
+    model.add_element(2, 2, 3)
+
+    updated = model.assign_truss_material({1, 2, 999}, 7)
+
+    assert updated == {1}
+    assert model.elements[1].truss_material_tag == 7
+    assert model.elements[2].truss_material_tag is None
+
+    cleared = model.assign_truss_material({1}, None)
+
+    assert cleared == {1}
+    assert model.elements[1].truss_material_tag is None

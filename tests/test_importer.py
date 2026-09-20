@@ -264,3 +264,27 @@ open({str(target)!r}, 'w').write('unsafe')
     assert not target.exists()
     assert len(result.project.model.nodes) == 1
     assert result.unsupported_count >= 1
+
+
+def test_safe_import_preserves_truss_material_assignment():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 2)
+ops.node(1, 0.0, 0.0)
+ops.node(2, 2.0, 0.0)
+ops.uniaxialMaterial('Elastic', 3, 200.0e9)
+ops.element('Truss', 9, 1, 2, 0.005, 3)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="truss.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    element = result.project.model.elements[9]
+    assert element.element_type == "truss"
+    assert element.truss_area == 0.005
+    assert element.truss_material_tag == 3
+    assert 3 in result.project.materials
