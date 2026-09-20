@@ -1,0 +1,137 @@
+name: publish-v0.2.0-alpha.1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-v0.2.0-alpha.1.yml"
+      - "RELEASE_NOTES_0.2.0-alpha.1.md"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish-windows-release:
+    runs-on: windows-latest
+    env:
+      TAG: v0.2.0-alpha.1
+      DISPLAY_VERSION: 0.2.0-alpha.1
+    steps:
+      - name: Checkout exact release commit
+        uses: actions/checkout@v4
+
+      - name: Stop if release already exists
+        id: existing
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            "exists=true" >> $env:GITHUB_OUTPUT
+            Write-Host "Release $env:TAG already exists; no duplicate release will be created."
+          } else {
+            "exists=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Set up Python
+        if: steps.existing.outputs.exists != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Studio and packager
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pyinstaller
+
+      - name: Source runtime self-check
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: python -m openseespy_studio --self-check
+
+      - name: Build standalone application
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: pyinstaller packaging\openseespy_studio.spec --noconfirm --clean
+
+      - name: Packaged GUI-to-worker self-check
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          $process = Start-Process `
+            -FilePath ".\dist\OpenSeesPyStudio\OpenSeesPyStudio.exe" `
+            -ArgumentList "--self-check" `
+            -Wait `
+            -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged OpenSeesPy Studio self-check failed with exit code $($process.ExitCode)."
+          }
+
+      - name: Create portable ZIP
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          $zip = ".\dist\OpenSeesPy-Studio-$env:DISPLAY_VERSION-Windows-x64-portable.zip"
+          Compress-Archive -Path ".\dist\OpenSeesPyStudio\*" -DestinationPath $zip -Force
+
+      - name: Install Inno Setup
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build Windows installer
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            throw "Inno Setup compiler was not found at $iscc"
+          }
+          & $iscc "/DRepoRoot=$env:GITHUB_WORKSPACE" "/DAppVersion=$env:DISPLAY_VERSION" "packaging\windows_installer.iss"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup build failed."
+          }
+
+      - name: Publish GitHub prerelease with Windows assets
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $installer = (Get-ChildItem ".\dist\installer\OpenSeesPy-Studio-$env:DISPLAY_VERSION-Setup.exe").FullName
+          $portable = (Get-ChildItem ".\dist\OpenSeesPy-Studio-$env:DISPLAY_VERSION-Windows-x64-portable.zip").FullName
+
+          if (-not (Test-Path $installer)) {
+            throw "Installer asset is missing."
+          }
+          if (-not (Test-Path $portable)) {
+            throw "Portable ZIP asset is missing."
+          }
+
+          gh release create $env:TAG `
+            $installer `
+            $portable `
+            --target $env:GITHUB_SHA `
+            --title "OpenSeesPy Studio $env:DISPLAY_VERSION" `
+            --notes-file "RELEASE_NOTES_0.2.0-alpha.1.md" `
+            --prerelease
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub Release creation failed."
+          }
+
+      - name: Verify published release
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:TAG --json tagName,isPrerelease,targetCommitish,assets,url
+          if ($LASTEXITCODE -ne 0) {
+            throw "Published release could not be verified."
+          }
