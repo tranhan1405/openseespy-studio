@@ -341,3 +341,113 @@ def test_results_panel_calibration_history_plots_best_score_and_parameter_path(
         panel.close()
         panel.deleteLater()
         qapp.processEvents()
+
+
+
+def test_results_panel_pareto_tab_builds_front_projection(qapp):
+    panel = ResultsPanel()
+    rows = [
+        {
+            "rank": 1,
+            "job_id": 41,
+            "case_id": 1,
+            "round": 1,
+            "score": 4.0,
+            "components": {
+                "peak_force": 2.0,
+                "reversal_nrmse": 9.0,
+                "cycle_energy": 7.0,
+                "max_displacement": 1.0,
+            },
+            "matched_reversal_count": 5,
+            "values": {"material:1:Fy": 450.0},
+            "pareto_rank": 1,
+            "pareto_front": True,
+            "pareto_eligible": True,
+            "pareto_objectives": [
+                "peak_force",
+                "reversal_nrmse",
+                "cycle_energy",
+            ],
+            "status": "Scored",
+        },
+        {
+            "rank": 2,
+            "job_id": 42,
+            "case_id": 2,
+            "round": 1,
+            "score": 5.0,
+            "components": {
+                "peak_force": 4.0,
+                "reversal_nrmse": 4.0,
+                "cycle_energy": 4.0,
+                "max_displacement": 2.0,
+            },
+            "matched_reversal_count": 5,
+            "values": {"material:1:Fy": 500.0},
+            "pareto_rank": 1,
+            "pareto_front": True,
+            "pareto_eligible": True,
+            "pareto_objectives": [
+                "peak_force",
+                "reversal_nrmse",
+                "cycle_energy",
+            ],
+            "status": "Scored",
+        },
+        {
+            "rank": 3,
+            "job_id": 43,
+            "case_id": 3,
+            "round": 1,
+            "score": 9.0,
+            "components": {
+                "peak_force": 8.0,
+                "reversal_nrmse": 8.0,
+                "cycle_energy": 8.0,
+                "max_displacement": 3.0,
+            },
+            "matched_reversal_count": 5,
+            "values": {"material:1:Fy": 550.0},
+            "pareto_rank": 2,
+            "pareto_front": False,
+            "pareto_eligible": True,
+            "pareto_objectives": [
+                "peak_force",
+                "reversal_nrmse",
+                "cycle_energy",
+            ],
+            "status": "Scored",
+        },
+    ]
+    selected: list[int] = []
+    panel.job_selected.connect(selected.append)
+    try:
+        panel.set_calibration_results(rows)
+        qapp.processEvents()
+
+        assert panel.calibration_table.columnCount() == 11
+        assert panel.calibration_table.item(0, 9).text() == "P1"
+        assert panel.calibration_table.item(2, 9).text() == "P2"
+
+        assert panel.calibration_pareto_x.findData("peak_force") >= 0
+        assert panel.calibration_pareto_y.findData("cycle_energy") >= 0
+        assert len(panel.calibration_pareto_plot._points) == 3
+        assert sum(
+            bool(point["global_pareto_front"])
+            for point in panel.calibration_pareto_plot._points
+        ) == 2
+        assert "global P1: 2" in panel.calibration_pareto_info.text()
+        assert "Global Pareto objectives:" in (
+            panel.calibration_pareto_info.text()
+        )
+
+        panel._calibration_pareto_job_selected(42)
+        qapp.processEvents()
+        assert selected == [42]
+        assert panel.calibration_table.currentRow() == 1
+        assert panel.calibration_pareto_plot._selected_job_id == 42
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
