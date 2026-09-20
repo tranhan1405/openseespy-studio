@@ -46,10 +46,15 @@ jobs:
       - name: Packaged executable self-check
         shell: pwsh
         run: |
-          & ".\dist\OpenSeesPyStudio\OpenSeesPyStudio.exe" --self-check
-          if ($LASTEXITCODE -ne 0) {
-            throw "Packaged OpenSeesPy Studio self-check failed."
+          $process = Start-Process `
+            -FilePath ".\dist\OpenSeesPyStudio\OpenSeesPyStudio.exe" `
+            -ArgumentList "--self-check" `
+            -Wait `
+            -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged OpenSeesPy Studio self-check failed with exit code $($process.ExitCode)."
           }
+          Write-Host "Packaged runtime self-check exited successfully."
 
       - name: Create portable ZIP
         shell: pwsh
