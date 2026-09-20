@@ -1064,6 +1064,8 @@ def analysis_to_openseespy(
     monitor_node: int | None = None,
     fiber_response_specs: dict[int, dict[str, object]] | None = None,
     specimen_response_spec: dict[str, object] | None = None,
+    model_ndm: int = 3,
+    model_ndf: int = 6,
 ) -> list[str]:
     node_tags = list(node_tags or [])
     element_tags = list(element_tags or [])
@@ -1115,6 +1117,11 @@ def analysis_to_openseespy(
         "",
         "_studio_results = {",
         "    'schema_version': 11,",
+        (
+            "    'model': {'ndm': "
+            f"{int(model_ndm)}, 'ndf': {int(model_ndf)}"
+            "},"
+        ),
         "    'analysis': {",
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
@@ -2924,6 +2931,8 @@ def to_openseespy(
                 monitor_node=monitor_node,
                 fiber_response_specs=fiber_response_specs,
                 specimen_response_spec=specimen_response_spec,
+                model_ndm=model.ndm,
+                model_ndf=model.ndf,
             )
         )
 
