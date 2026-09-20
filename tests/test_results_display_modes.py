@@ -130,3 +130,81 @@ def test_solution_result_restores_display_mode(qapp):
         panel.close()
         panel.deleteLater()
         qapp.processEvents()
+
+
+
+def test_specimen_response_tab_loads_moment_curvature_and_fiber_choices(qapp):
+    panel = ResultsPanel()
+    result = {
+        "specimen": {
+            "kind": "test-column",
+            "element_tag": 10,
+            "base_node": 1,
+            "top_node": 2,
+            "ground_node": 3,
+            "height": 3.0,
+            "lateral_direction": 1,
+            "bending_rotation_dof": 5,
+            "moment_component": "My",
+            "moment_index": 2,
+            "moment_sign": -1.0,
+            "interface_type": "zeroLengthSection",
+            "interface_name": "Bond_SP01 strain penetration",
+        },
+        "history": {
+            "time": [1.0],
+            "nodes": {
+                "1": {"disp": [[0.001, 0, 0, 0, 0.0001, 0]]},
+                "2": {"disp": [[0.01, 0, 0, 0, 0.001, 0]]},
+                "3": {"disp": [[0, 0, 0, 0, 0, 0]]},
+            },
+            "specimen": {
+                "section_force": [[0.0, 0.0, -20.0, 0.0]],
+                "section_deformation": [[0.0, 0.0, -0.002, 0.0]],
+                "base_fibers": [[{
+                    "label": "steel_max",
+                    "material_tag": 2,
+                    "material_type": "ReinforcingSteel",
+                    "y": 0.0,
+                    "z": 0.15,
+                    "stress": 400.0,
+                    "strain": 0.002,
+                }]],
+                "interface_force": [[0.0, 0.0, -18.0, 0.0]],
+                "interface_deformation": [[0.0, 0.0, -0.0002, 0.0]],
+                "interface_fibers": [[{
+                    "label": "bond_max",
+                    "material_tag": 3,
+                    "material_type": "Bond_SP01",
+                    "y": 0.0,
+                    "z": 0.15,
+                    "stress": 350.0,
+                    "slip": 0.001,
+                }]],
+            },
+        },
+        "analysis": {"type": "Cyclic"},
+        "final": {},
+        "convergence": {"steps": []},
+        "modes": {},
+    }
+    try:
+        panel.set_result(result)
+        panel.show_solution_result("SpecimenResponse")
+        qapp.processEvents()
+
+        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Specimen Response"
+        assert panel.specimen_quantity.findData("moment_curvature") >= 0
+        assert (
+            panel.specimen_quantity.findData(
+                "interface_fibers:bond_max:slip"
+            )
+            >= 0
+        )
+        assert panel.specimen_fiber_table.rowCount() == 4
+        assert panel.specimen_plot._x == pytest.approx([0.0, 0.002])
+        assert panel.specimen_plot._y == pytest.approx([0.0, 20.0])
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
