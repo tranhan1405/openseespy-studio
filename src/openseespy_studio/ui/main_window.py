@@ -72,7 +72,11 @@ from ..result_catalog import (
     result_choices_for_analysis,
 )
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData
-from ..runtime import build_worker_pythonpath, probe_opensees_runtime
+from ..runtime import (
+    build_worker_pythonpath,
+    probe_opensees_runtime,
+    worker_process_command,
+)
 from ..validation import ValidationIssue, validate_project
 from ..units import UnitSystem
 from .analysis_dialog import AnalysisDialog
@@ -9335,10 +9339,12 @@ class MainWindow(QMainWindow):
             ),
         )
         process.setProcessEnvironment(environment)
-        process.setProgram(sys.executable)
+        worker_program, worker_prefix = worker_process_command(
+            "openseespy_studio.calibration_worker"
+        )
+        process.setProgram(worker_program)
         process.setArguments([
-            "-m",
-            "openseespy_studio.calibration_worker",
+            *worker_prefix,
             plan_path,
             "--result-file",
             result_path,
@@ -9925,10 +9931,12 @@ class MainWindow(QMainWindow):
             ),
         )
         process.setProcessEnvironment(process_environment)
-        process.setProgram(sys.executable)
+        worker_program, worker_prefix = worker_process_command(
+            "openseespy_studio.solver_worker"
+        )
+        process.setProgram(worker_program)
         process.setArguments([
-            "-m",
-            "openseespy_studio.solver_worker",
+            *worker_prefix,
             path,
             "--result-file",
             result_path,
