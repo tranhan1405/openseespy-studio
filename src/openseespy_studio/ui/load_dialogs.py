@@ -170,7 +170,10 @@ class GroundMotionDialog(QDialog):
         self.name = QLineEdit(default_name)
 
         self.direction = QComboBox()
-        for dof, label in enumerate(("X", "Y", "Z"), start=1):
+        for dof, label in enumerate(
+            ("X", "Y", "Z", "RX", "RY", "RZ"),
+            start=1,
+        ):
             self.direction.addItem(f"{label} (DOF {dof})", dof)
         if pattern is not None:
             index = self.direction.findData(pattern.direction)
