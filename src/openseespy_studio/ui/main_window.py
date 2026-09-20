@@ -10450,6 +10450,21 @@ class MainWindow(QMainWindow):
         self._refresh_tree()
 
     def _reset_runtime_results(self) -> None:
+        calibration = self._calibration_process
+        if (
+            calibration is not None
+            and calibration.state() != QProcess.NotRunning
+        ):
+            calibration.kill()
+            calibration.waitForFinished(1000)
+        self._calibration_process = None
+        self._calibration_stop_requested = False
+        self._cleanup_calibration_files()
+        if "calibration" in self.actions:
+            self.actions["calibration"].setText("Calibration...")
+        if "run" in self.actions:
+            self.actions["run"].setEnabled(True)
+
         self._jobs.clear()
         self._job_counter = 0
         self._current_job_id = None
