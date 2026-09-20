@@ -97,6 +97,162 @@ class LoadPatternDialog(QDialog):
         self.accept()
 
 
+class GroundMotionDialog(QDialog):
+    """Edit a Path time series and UniformExcitation pattern as one object."""
+
+    def __init__(
+        self,
+        *,
+        series=None,
+        pattern=None,
+        next_series_tag=1,
+        next_pattern_tag=1,
+        units=None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Ground Motion Editor")
+        self.setModal(True)
+        self.resize(520, 500)
+        self.unit_system = UnitSystem.from_mapping(units)
+
+        if (series is None) != (pattern is None):
+            raise ValueError(
+                "Ground motion editing requires both a Path time series "
+                "and a UniformExcitation pattern."
+            )
+        if series is not None and series.series_type != "Path":
+            raise ValueError("Ground motion time series must be Path.")
+        if pattern is not None and pattern.pattern_type != "UniformExcitation":
+            raise ValueError(
+                "Ground motion pattern must be UniformExcitation."
+            )
+
+        root = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.pattern_tag = QSpinBox()
+        self.pattern_tag.setRange(1, 2147483647)
+        self.pattern_tag.setValue(
+            pattern.tag if pattern else int(next_pattern_tag)
+        )
+        self.series_tag = QSpinBox()
+        self.series_tag.setRange(1, 2147483647)
+        self.series_tag.setValue(
+            series.tag if series else int(next_series_tag)
+        )
+        # Changing IDs of a paired object during edit complicates external
+        # references. Creation may choose IDs; editing keeps them stable.
+        self.pattern_tag.setEnabled(pattern is None)
+        self.series_tag.setEnabled(series is None)
+
+        default_name = (
+            pattern.name
+            if pattern is not None
+            else f"Ground Motion {next_pattern_tag}"
+        )
+        self.name = QLineEdit(default_name)
+
+        self.direction = QComboBox()
+        for dof, label in enumerate(("X", "Y", "Z"), start=1):
+            self.direction.addItem(f"{label} (DOF {dof})", dof)
+        if pattern is not None:
+            index = self.direction.findData(pattern.direction)
+            if index >= 0:
+                self.direction.setCurrentIndex(index)
+
+        self.dt = _spin(
+            series.dt if series is not None else 0.01,
+            1.0e-12,
+            1.0e20,
+        )
+        combined_scale = 1.0
+        if series is not None and pattern is not None:
+            combined_scale = float(series.factor) * float(pattern.factor)
+        self.scale = _spin(combined_scale)
+        self.vel0 = _spin(pattern.vel0 if pattern is not None else 0.0)
+
+        acceleration_unit = (
+            f"{self.unit_system.length}/{self.unit_system.time}²"
+        )
+        form.addRow("Ground motion tag:", self.pattern_tag)
+        form.addRow("Path series tag:", self.series_tag)
+        form.addRow("Name:", self.name)
+        form.addRow("Direction:", self.direction)
+        form.addRow(f"dt [{self.unit_system.time}]:", self.dt)
+        form.addRow("Scale factor:", self.scale)
+        form.addRow(
+            f"Initial velocity [{self.unit_system.length}/{self.unit_system.time}]:",
+            self.vel0,
+        )
+        root.addLayout(form)
+
+        note = QLabel(
+            "Ground Motion is stored as one Path TimeSeries plus one "
+            "UniformExcitation pattern. Pushover and Cyclic loading protocols "
+            "remain Analysis settings, not load objects."
+        )
+        note.setWordWrap(True)
+        root.addWidget(note)
+
+        root.addWidget(
+            QLabel(
+                f"Acceleration values [{acceleration_unit}] "
+                "(space/comma/newline separated):"
+            )
+        )
+        self.values = QPlainTextEdit()
+        if series is not None and series.values:
+            self.values.setPlainText(
+                " ".join(f"{value:g}" for value in series.values)
+            )
+        root.addWidget(self.values, 1)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    def _parsed_values(self) -> list[float]:
+        text = self.values.toPlainText().replace(",", " ")
+        return [float(value) for value in text.split()] if text.strip() else []
+
+    def data(self) -> tuple[TimeSeriesData, LoadPatternData]:
+        values = self._parsed_values()
+        name = (
+            self.name.text().strip()
+            or f"Ground Motion {self.pattern_tag.value()}"
+        )
+        series = TimeSeriesData(
+            tag=self.series_tag.value(),
+            name=f"{name} Acceleration",
+            series_type="Path",
+            factor=self.scale.value(),
+            dt=self.dt.value(),
+            values=values,
+        )
+        pattern = LoadPatternData(
+            tag=self.pattern_tag.value(),
+            name=name,
+            pattern_type="UniformExcitation",
+            time_series_tag=series.tag,
+            direction=int(self.direction.currentData()),
+            factor=1.0,
+            vel0=self.vel0.value(),
+        )
+        return series, pattern
+
+    def _accept(self) -> None:
+        try:
+            self.data()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Ground Motion Editor", str(exc))
+            return
+        self.accept()
+
+
 class NodalLoadDialog(QDialog):
     labels=("FX","FY","FZ","MX","MY","MZ")
     def __init__(self, patterns, load=None, *, next_tag=1, node_tag=1, units=None, parent=None):
