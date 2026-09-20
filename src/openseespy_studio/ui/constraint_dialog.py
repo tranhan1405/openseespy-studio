@@ -21,6 +21,32 @@ from .selection import parse_tag_expression
 class ConstraintDialog(QDialog):
     DOF_LABELS = ("UX", "UY", "UZ", "RX", "RY", "RZ")
 
+    @staticmethod
+    def dof_labels_for_model(ndm: int, ndf: int) -> tuple[str, ...]:
+        ndm = int(ndm)
+        ndf = int(ndf)
+        if ndm == 2:
+            labels = ["UX", "UY"]
+            if ndf >= 3:
+                labels.append("RZ")
+            return tuple(labels[:ndf])
+        return ConstraintDialog.DOF_LABELS[:ndf]
+
+    @staticmethod
+    def diaphragm_directions_for_model(
+        ndm: int,
+    ) -> tuple[tuple[str, int], ...]:
+        if int(ndm) == 2:
+            return (
+                ("X perpendicular direction (1)", 1),
+                ("Y perpendicular direction (2)", 2),
+            )
+        return (
+            ("X normal (DOF 1)", 1),
+            ("Y normal (DOF 2)", 2),
+            ("Z normal (DOF 3)", 3),
+        )
+
     def __init__(
         self,
         constraint: ConstraintData | None = None,
@@ -28,12 +54,20 @@ class ConstraintDialog(QDialog):
         next_tag: int = 1,
         initial_retained: int = 1,
         initial_constrained: list[int] | None = None,
+        ndm: int = 3,
+        ndf: int = 6,
         parent=None,
     ):
         super().__init__(parent)
         self.setWindowTitle("MPC Constraint Editor")
         self.setModal(True)
         self.resize(430, 430)
+        self.ndm = int(ndm)
+        self.ndf = int(ndf)
+        self.dof_labels = self.dof_labels_for_model(
+            self.ndm,
+            self.ndf,
+        )
 
         root = QVBoxLayout(self)
         form = QFormLayout()
@@ -91,7 +125,7 @@ class ConstraintDialog(QDialog):
         self.dof_group = QGroupBox("equalDOF directions")
         dof_form = QFormLayout(self.dof_group)
         self.dof_checks: list[QCheckBox] = []
-        for index, label in enumerate(self.DOF_LABELS, start=1):
+        for index, label in enumerate(self.dof_labels, start=1):
             check = QCheckBox(f"DOF {index}")
             self.dof_checks.append(check)
             dof_form.addRow(f"{label}:", check)
@@ -99,10 +133,10 @@ class ConstraintDialog(QDialog):
 
         if constraint and constraint.constraint_type == "equalDOF":
             for dof in constraint.dofs:
-                if 1 <= dof <= 6:
+                if 1 <= dof <= len(self.dof_checks):
                     self.dof_checks[dof - 1].setChecked(True)
         elif constraint is None:
-            for check in self.dof_checks[:3]:
+            for check in self.dof_checks[: min(self.ndm, self.ndf)]:
                 check.setChecked(True)
 
         self.link_group = QGroupBox("rigidLink options")
@@ -117,15 +151,18 @@ class ConstraintDialog(QDialog):
         self.diaphragm_group = QGroupBox("rigidDiaphragm options")
         diaphragm_form = QFormLayout(self.diaphragm_group)
         self.perp_dirn = QComboBox()
-        self.perp_dirn.addItem("X normal (DOF 1)", 1)
-        self.perp_dirn.addItem("Y normal (DOF 2)", 2)
-        self.perp_dirn.addItem("Z normal (DOF 3)", 3)
+        for label, direction in self.diaphragm_directions_for_model(
+            self.ndm
+        ):
+            self.perp_dirn.addItem(label, direction)
         if constraint:
             index = self.perp_dirn.findData(constraint.perp_dirn)
             if index >= 0:
                 self.perp_dirn.setCurrentIndex(index)
-        else:
-            self.perp_dirn.setCurrentIndex(2)
+        elif self.ndm >= 3:
+            index = self.perp_dirn.findData(3)
+            if index >= 0:
+                self.perp_dirn.setCurrentIndex(index)
         diaphragm_form.addRow("Perpendicular direction:", self.perp_dirn)
         root.addWidget(self.diaphragm_group)
 
