@@ -1031,3 +1031,32 @@ def test_generated_native_2d_elastic_frame_with_uniform_load_runs(
 
     base_reaction_y = payload["results"]["final"]["node_reactions"]["1"][1]
     assert base_reaction_y == pytest.approx(-w * 4.0, rel=1.0e-8)
+
+
+def test_modal_properties_include_distributed_element_mass(tmp_path: Path):
+    model, sections, transformations = _elastic_cantilever()
+    model.elements[1].mass_per_length = 100.0
+    analysis = AnalysisSettingsData(
+        1,
+        "Modal element mass",
+        analysis_type="Modal",
+        num_modes=1,
+        eigen_solver="-fullGenLapack",
+        live_convergence=False,
+    )
+
+    results = _run_real_generated(
+        tmp_path,
+        "modal-element-mass",
+        model=model,
+        sections=sections,
+        transformations=transformations,
+        analysis=analysis,
+    )
+
+    summary = results["modal_summary"]
+    assert summary["mass_source"] == "OpenSees modalProperties"
+    assert float(summary["total_lumped_mass"]["1"]) > 0.0
+    participation = results["modes"]["1"]["participation"]["1"]
+    assert float(participation["effective_mass"]) > 0.0
+    assert 0.0 < float(participation["mass_ratio"]) <= 1.0
