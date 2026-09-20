@@ -116,28 +116,70 @@ def build_grid_cases(
     return cases
 
 
-def apply_calibration_case(
+def calibration_case_changes(
     project: ProjectDatabase,
     case: CalibrationCase,
-) -> ProjectDatabase:
-    clone = ProjectDatabase.from_dict(project.to_dict())
-    for key, value in case.values.items():
+) -> list[dict[str, Any]]:
+    """Describe and validate material-parameter changes for a case."""
+    changes: list[dict[str, Any]] = []
+    for key, raw_value in sorted(case.values.items()):
         parts = str(key).split(":", 2)
         if len(parts) != 3 or parts[0] != "material":
             raise ValueError(f"Unsupported calibration target: {key}")
-        material_tag = int(parts[1])
+        try:
+            material_tag = int(parts[1])
+            new_value = float(raw_value)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Invalid calibration target/value: {key}={raw_value!r}"
+            ) from None
+        if not math.isfinite(new_value):
+            raise ValueError(
+                f"Calibration value for {key} must be finite."
+            )
         parameter = str(parts[2])
-        material = clone.materials.get(material_tag)
+        material = project.materials.get(material_tag)
         if material is None:
             raise ValueError(
-                f"Calibration material {material_tag} does not exist."
+                f"Calibration material {material_tag} no longer exists."
             )
         if parameter not in material.parameters:
             raise ValueError(
                 f"Material {material_tag} ({material.material_type}) "
-                f"has no parameter '{parameter}'."
+                f"no longer has parameter '{parameter}'."
             )
-        material.parameters[parameter] = float(value)
+        old_value = float(material.parameters[parameter])
+        changes.append({
+            "target": str(key),
+            "material_tag": material_tag,
+            "material_name": material.name,
+            "material_type": material.material_type,
+            "parameter": parameter,
+            "old_value": old_value,
+            "new_value": new_value,
+            "changed": not math.isclose(
+                old_value,
+                new_value,
+                rel_tol=1.0e-12,
+                abs_tol=1.0e-15,
+            ),
+        })
+    if not changes:
+        raise ValueError("Calibration case contains no parameter changes.")
+    return changes
+
+
+def apply_calibration_case(
+    project: ProjectDatabase,
+    case: CalibrationCase,
+) -> ProjectDatabase:
+    changes = calibration_case_changes(project, case)
+    clone = ProjectDatabase.from_dict(project.to_dict())
+    for change in changes:
+        material = clone.materials[int(change["material_tag"])]
+        material.parameters[str(change["parameter"])] = float(
+            change["new_value"]
+        )
     return clone
 
 

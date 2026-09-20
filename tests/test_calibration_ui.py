@@ -5,10 +5,13 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QTableWidget
 
 from openseespy_studio.project import MaterialData, ProjectDatabase
-from openseespy_studio.ui.calibration_dialog import CalibrationDialog
+from openseespy_studio.ui.calibration_dialog import (
+    ApplyCalibrationCaseDialog,
+    CalibrationDialog,
+)
 from openseespy_studio.ui.results_panel import ResultsPanel
 
 
@@ -129,4 +132,82 @@ def test_results_panel_calibration_table_links_ranked_case_to_job(qapp):
     finally:
         panel.close()
         panel.deleteLater()
+        qapp.processEvents()
+
+
+
+def test_results_panel_apply_selected_emits_only_scored_case(qapp):
+    panel = ResultsPanel()
+    captured: list[dict] = []
+    panel.calibration_case_apply_requested.connect(captured.append)
+    try:
+        panel.set_calibration_results([
+            {
+                "rank": 1,
+                "job_id": 21,
+                "case_id": 4,
+                "score": 2.5,
+                "components": {},
+                "matched_reversal_count": 5,
+                "values": {"material:1:fpc": -31.0e6},
+                "status": "Scored",
+            },
+            {
+                "rank": None,
+                "job_id": 22,
+                "case_id": 5,
+                "score": None,
+                "components": {},
+                "matched_reversal_count": 0,
+                "values": {"material:1:fpc": -35.0e6},
+                "status": "Failed",
+            },
+        ])
+
+        panel.calibration_table.selectRow(0)
+        qapp.processEvents()
+        assert panel.calibration_apply.isEnabled()
+        panel._request_apply_calibration_case()
+        assert len(captured) == 1
+        assert captured[0]["case_id"] == 4
+
+        panel.calibration_table.selectRow(1)
+        qapp.processEvents()
+        assert not panel.calibration_apply.isEnabled()
+        panel._request_apply_calibration_case()
+        assert len(captured) == 1
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_apply_calibration_case_dialog_displays_old_and_new_values(qapp):
+    dialog = ApplyCalibrationCaseDialog(
+        [
+            {
+                "material_tag": 1,
+                "material_name": "Concrete",
+                "material_type": "Concrete02",
+                "parameter": "fpc",
+                "old_value": -30.0e6,
+                "new_value": -33.0e6,
+                "changed": True,
+            }
+        ],
+        case_id=2,
+        rank=1,
+        score=3.25,
+    )
+    try:
+        tables = dialog.findChildren(QTableWidget)
+        assert len(tables) == 1
+        table = tables[0]
+        assert table.rowCount() == 1
+        assert table.item(0, 0).text() == "[1] Concrete"
+        assert table.item(0, 2).text() == "fpc"
+        assert float(table.item(0, 4).text()) == pytest.approx(-33.0e6)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
         qapp.processEvents()
