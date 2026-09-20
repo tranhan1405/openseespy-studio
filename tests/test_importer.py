@@ -154,6 +154,13 @@ def test_studio_generated_static_script_round_trips_to_project():
     assert len(imported.project.transformations) == 1
     assert len(imported.project.nodal_loads) == 1
     assert imported.project.active_analysis_tag == 1
+    restored_analysis = imported.project.analyses[1]
+    assert restored_analysis.analysis_type == "Static"
+    assert restored_analysis.constraints_handler == "Plain"
+    assert restored_analysis.numberer == "Plain"
+    assert restored_analysis.system == "BandGeneral"
+    assert restored_analysis.steps == 1
+    assert restored_analysis.load_increment == 1.0
 
     regenerated = to_openseespy(
         imported.project.model,
@@ -171,6 +178,72 @@ def test_studio_generated_static_script_round_trips_to_project():
     )
     assert "# ERROR:" not in regenerated
     compile(regenerated, "<roundtrip>", "exec")
+
+
+def test_importer_recovers_loads_recorders_and_wrapper_materials():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 3, '-ndf', 6)
+ops.node(1, 0, 0, 0)
+ops.node(2, 0, 0, 3)
+ops.fix(1, 1, 1, 1, 1, 1, 1)
+ops.uniaxialMaterial('Elastic', 1, 200e9)
+ops.uniaxialMaterial('MinMax', 2, 1, '-min', -0.01, '-max', 0.01)
+ops.section('Elastic', 1, 200e9, 0.02, 8e-5, 8e-5, 80e9, 1e-4)
+ops.geomTransf('Linear', 1, 1, 0, 0)
+ops.element('elasticBeamColumn', 1, 1, 2, 0.02, 200e9, 80e9, 1e-4, 8e-5, 8e-5, 1)
+ops.timeSeries('Linear', 1, '-factor', 1.0)
+ops.pattern('Plain', 1, 1)
+ops.load(2, 10, 0, 0, 0, 0, 0)
+ops.eleLoad('-ele', 1, '-type', '-beamUniform', -2.0, 0.0, 0.0)
+ops.recorder('Node', '-file', 'top.out', '-time', '-node', 2, '-dof', 1, 'disp')
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="loads.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    assert result.project.materials[2].material_type == "MinMax"
+    assert result.project.materials[2].base_material_tag == 1
+    assert len(result.project.nodal_loads) == 1
+    assert len(result.project.element_loads) == 1
+    assert result.project.element_loads[1].wy == -2.0
+    assert len(result.project.recorders) == 1
+    recorder = result.project.recorders[1]
+    assert recorder.recorder_type == "Node"
+    assert recorder.target_tags == [2]
+    assert recorder.dofs == [1]
+    assert recorder.response == "disp"
+
+
+def test_importer_recovers_zero_length_section_orientation():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 3, '-ndf', 6)
+ops.node(1, 0, 0, 0)
+ops.node(2, 0, 0, 0)
+ops.fix(1, 1, 1, 1, 1, 1, 1)
+ops.section('Elastic', 10, 1000, 1, 1, 1, 1000, 1)
+ops.element('zeroLengthSection', 20, 1, 2, 10,
+            '-orient', 0, 0, 1, 0, 1, 0, '-doRayleigh', 1)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="zero_length_section.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    connection = result.project.connections[20]
+    assert connection.connection_type == "zeroLengthSection"
+    assert connection.section_tag == 10
+    assert connection.orient_x == (0.0, 0.0, 1.0)
+    assert connection.orient_y == (0.0, 1.0, 0.0)
+    assert connection.do_rayleigh is True
 
 
 def test_importer_never_executes_custom_python(tmp_path):
