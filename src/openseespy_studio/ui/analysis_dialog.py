@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtWidgets import (
-    QCheckBox,QComboBox,QDialog,QDialogButtonBox,QDoubleSpinBox,QFormLayout,
-    QLineEdit,QScrollArea,QSpinBox,QVBoxLayout,QWidget
+    QCheckBox,QComboBox,QDialog,QDialogButtonBox,QDoubleSpinBox,QFileDialog,
+    QFormLayout,QHBoxLayout,QLineEdit,QMessageBox,QPushButton,QScrollArea,
+    QSpinBox,QVBoxLayout,QWidget
+)
+from ..analysis_templates import (
+    expand_cyclic_protocol,
+    parse_cyclic_protocol_text,
+    parse_cyclic_targets_text,
 )
 from ..project import AnalysisSettingsData
 
@@ -93,6 +101,26 @@ class AnalysisDialog(QDialog):
         self.cyclic_targets.setToolTip(
             "Absolute control-displacement targets, visited in order."
         )
+        self.cyclic_protocol_mode=QComboBox()
+        self.cyclic_protocol_mode.addItem(
+            "Absolute targets · one column",
+            "targets",
+        )
+        self.cyclic_protocol_mode.addItem(
+            "Amplitude + cycles · two columns",
+            "amplitude_cycles",
+        )
+        self.cyclic_import_button=QPushButton("Import CSV/TXT...")
+        self.cyclic_import_button.setToolTip(
+            "Import a cyclic protocol. Absolute-target mode reads column 1; "
+            "Amplitude+cycles mode reads columns 1 and 2 and expands reversals."
+        )
+        cyclic_import_host=QWidget()
+        cyclic_import_layout=QHBoxLayout(cyclic_import_host)
+        cyclic_import_layout.setContentsMargins(0,0,0,0)
+        cyclic_import_layout.addWidget(self.cyclic_protocol_mode,1)
+        cyclic_import_layout.addWidget(self.cyclic_import_button)
+        self.cyclic_protocol_import=cyclic_import_host
         self.cyclic_inc=fs(
             analysis.cyclic_increment if analysis else 0.001,
             1e-12,
@@ -263,6 +291,7 @@ class AnalysisDialog(QDialog):
             ("control_dof","Control DOF",self.control_dof),
             ("disp_inc","Disp. increment",self.disp_inc),
             ("cyclic_targets","Cyclic targets",self.cyclic_targets),
+            ("cyclic_protocol_import","Protocol import",self.cyclic_protocol_import),
             ("cyclic_inc","Cyclic max increment",self.cyclic_inc),
             ("dt","Time step dt",self.dt),
             ("gamma","Newmark gamma",self.gamma),
@@ -307,6 +336,9 @@ class AnalysisDialog(QDialog):
         b.rejected.connect(self.reject)
         root.addWidget(b)
         self.kind.currentTextChanged.connect(self._sync)
+        self.cyclic_import_button.clicked.connect(
+            self._import_cyclic_protocol
+        )
         self.integrator.currentTextChanged.connect(
             lambda _text: self._sync(self.kind.currentText())
         )
@@ -400,7 +432,7 @@ class AnalysisDialog(QDialog):
         elif cyclic:
             visible.update({
                 "control_node","control_dof",
-                "cyclic_targets","cyclic_inc",
+                "cyclic_targets","cyclic_protocol_import","cyclic_inc",
             })
         elif transient:
             visible.update({
@@ -440,6 +472,60 @@ class AnalysisDialog(QDialog):
 
         for key in self._row_widgets:
             self._set_row_visible(key,key in visible)
+    def _apply_cyclic_protocol_text(
+        self,
+        text: str,
+        *,
+        mode: str,
+    ) -> list[float]:
+        if mode == "amplitude_cycles":
+            rows = parse_cyclic_protocol_text(
+                text,
+                amplitude_column=1,
+                cycles_column=2,
+            )
+            targets = expand_cyclic_protocol(
+                rows,
+                finish_at_zero=True,
+            )
+        else:
+            targets = parse_cyclic_targets_text(
+                text,
+                column=1,
+            )
+        self.cyclic_targets.setText(
+            ", ".join(f"{value:g}" for value in targets)
+        )
+        return targets
+
+    def _import_cyclic_protocol(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Cyclic Protocol",
+            "",
+            "Protocol (*.csv *.txt *.dat);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            text = Path(path).read_text(
+                encoding="utf-8",
+                errors="replace",
+            )
+            self._apply_cyclic_protocol_text(
+                text,
+                mode=str(
+                    self.cyclic_protocol_mode.currentData()
+                    or "targets"
+                ),
+            )
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Import Cyclic Protocol",
+                str(exc),
+            )
+
     def driving_load_config(self) -> dict[str, object]:
         kind = self.kind.currentText()
         if kind not in {"Pushover", "Cyclic"}:
