@@ -96,6 +96,7 @@ from .geometry_dialogs import (
     NodeDialog,
     RotateDialog,
     SelectByIdDialog,
+    TrussDialog,
     VectorDialog,
 )
 from .history import ProjectSnapshotCommand
@@ -1396,6 +1397,7 @@ class MainWindow(QMainWindow):
         self._dirty = False
         self._measure_first_node_tag: int | None = None
         self._frame_first_node_tag: int | None = None
+        self._truss_first_node_tag: int | None = None
         self._job_ui_timer = QTimer(self)
         self._job_ui_timer.setInterval(1000)
         self._job_ui_timer.timeout.connect(self._refresh_running_job_ui)
@@ -1677,6 +1679,21 @@ class MainWindow(QMainWindow):
             "element",
             self._create_frame,
             "Create a frame member by entering nodes and assignments",
+        )
+        self._make_action(
+            "truss_pick",
+            "Create by Picking",
+            "element",
+            self._activate_truss_pick_tool,
+            "Click two nodes in the viewport to create a Truss element",
+            checkable=True,
+        )
+        self._make_action(
+            "truss_input",
+            "Create by Input...",
+            "element",
+            self._create_truss,
+            "Create a Truss element by entering nodes, area, and material",
         )
         self._make_action("grid", "Grid", "grid", self._show_frame_grid, "Create frame grid")
         self._make_action(
@@ -2013,6 +2030,10 @@ class MainWindow(QMainWindow):
         frame_menu.setIcon(studio_icon("element"))
         frame_menu.addAction(self.actions["frame_pick"])
         frame_menu.addAction(self.actions["frame_input"])
+        truss_menu = geometry_menu.addMenu("Truss")
+        truss_menu.setIcon(studio_icon("element"))
+        truss_menu.addAction(self.actions["truss_pick"])
+        truss_menu.addAction(self.actions["truss_input"])
         geometry_menu.addSeparator()
         geometry_menu.addActions([
             self.actions["column_1d"],
@@ -2413,6 +2434,20 @@ class MainWindow(QMainWindow):
         frame_popup.addAction(self.actions["frame_input"])
         frame_button.setMenu(frame_popup)
 
+        truss_button = QToolButton()
+        truss_button.setObjectName("RibbonLargeButton")
+        truss_button.setDefaultAction(self.actions["truss_pick"])
+        truss_button.setText("Truss")
+        truss_button.setIcon(self.actions["truss_pick"].icon())
+        truss_button.setIconSize(QSize(28, 28))
+        truss_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        truss_button.setPopupMode(QToolButton.MenuButtonPopup)
+        truss_button.setAutoRaise(True)
+        truss_popup = QMenu(truss_button)
+        truss_popup.addAction(self.actions["truss_pick"])
+        truss_popup.addAction(self.actions["truss_input"])
+        truss_button.setMenu(truss_popup)
+
         add_group(
             home,
             "Geometry",
@@ -2423,7 +2458,7 @@ class MainWindow(QMainWindow):
                 "node",
                 "extrude",
             ),
-            widgets=(frame_button,),
+            widgets=(frame_button, truss_button),
         )
         add_group(
             home,
