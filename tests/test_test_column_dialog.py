@@ -217,7 +217,7 @@ def test_translational_slip_interface_prefers_macro_spring(qapp):
     project = ProjectDatabase()
     project.add_material(
         MaterialData(
-            3,
+            30,
             "Generic",
             "Elastic",
             parameters={"E": 1000.0},
