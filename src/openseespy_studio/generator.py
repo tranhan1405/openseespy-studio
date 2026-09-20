@@ -1937,11 +1937,85 @@ def to_openseespy(
 
         if e.element_type in {"forceBeamColumn", "dispBeamColumn"}:
             integration_tag = tag
-            lines.append(
-                "ops.beamIntegration("
-                f"'{e.integration_type}', {integration_tag}, "
-                f"{assigned_section.tag}, {e.integration_points})"
-            )
+            distributed_types = {"Lobatto", "Legendre", "Radau"}
+            hinge_types = {
+                "HingeRadau",
+                "HingeRadauTwo",
+                "HingeMidpoint",
+                "HingeEndpoint",
+            }
+
+            if e.integration_type in distributed_types:
+                lines.append(
+                    "ops.beamIntegration("
+                    f"'{e.integration_type}', {integration_tag}, "
+                    f"{assigned_section.tag}, {e.integration_points})"
+                )
+            elif e.integration_type in hinge_types:
+                required = (
+                    e.hinge_i_section_tag,
+                    e.hinge_j_section_tag,
+                    e.interior_section_tag,
+                )
+                if any(section_tag is None for section_tag in required):
+                    lines.append(
+                        f"# ERROR: {e.integration_type} element {tag} is missing "
+                        "hinge/interior section assignments; element not generated."
+                    )
+                    continue
+                missing = [
+                    int(section_tag)
+                    for section_tag in required
+                    if sections is None or int(section_tag) not in sections
+                ]
+                if missing:
+                    lines.append(
+                        f"# ERROR: {e.integration_type} element {tag} references "
+                        f"missing section tag(s) {missing}; element not generated."
+                    )
+                    continue
+                lines.append(
+                    "ops.beamIntegration("
+                    f"'{e.integration_type}', {integration_tag}, "
+                    f"{e.hinge_i_section_tag}, {e.hinge_i_length:g}, "
+                    f"{e.hinge_j_section_tag}, {e.hinge_j_length:g}, "
+                    f"{e.interior_section_tag})"
+                )
+            elif e.integration_type == "ConcentratedPlasticity":
+                required = (
+                    e.hinge_i_section_tag,
+                    e.hinge_j_section_tag,
+                    e.interior_section_tag,
+                )
+                if any(section_tag is None for section_tag in required):
+                    lines.append(
+                        f"# ERROR: ConcentratedPlasticity element {tag} is missing "
+                        "end/interior section assignments; element not generated."
+                    )
+                    continue
+                missing = [
+                    int(section_tag)
+                    for section_tag in required
+                    if sections is None or int(section_tag) not in sections
+                ]
+                if missing:
+                    lines.append(
+                        f"# ERROR: ConcentratedPlasticity element {tag} references "
+                        f"missing section tag(s) {missing}; element not generated."
+                    )
+                    continue
+                lines.append(
+                    "ops.beamIntegration("
+                    f"'ConcentratedPlasticity', {integration_tag}, "
+                    f"{e.hinge_i_section_tag}, {e.hinge_j_section_tag}, "
+                    f"{e.interior_section_tag})"
+                )
+            else:
+                lines.append(
+                    f"# ERROR: Beam integration {e.integration_type!r} for "
+                    f"element {tag} is not implemented; element not generated."
+                )
+                continue
 
             if e.element_type == "forceBeamColumn":
                 args = (
