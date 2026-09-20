@@ -186,6 +186,100 @@ class ElementDialog(_BaseDialog):
         )
 
 
+class TrussDialog(_BaseDialog):
+    """Create an axial-only OpenSees Truss element."""
+
+    def __init__(
+        self,
+        tag: int,
+        node_i: int = 1,
+        node_j: int = 2,
+        *,
+        materials=None,
+        units=None,
+        default_area: float | None = None,
+        parent=None,
+    ):
+        super().__init__("Create Truss Element", parent)
+        self._materials = dict(materials or {})
+        self.unit_system = UnitSystem.from_mapping(units)
+
+        self.tag = _tag_spin(tag)
+        self.node_i = _tag_spin(node_i)
+        self.node_j = _tag_spin(node_j)
+
+        self.area = QDoubleSpinBox()
+        self.area.setDecimals(9)
+        self.area.setRange(1.0e-12, 1.0e18)
+        if default_area is None:
+            default_area = 1.0e-3 / (self.unit_system.length_to_m ** 2)
+        self.area.setValue(float(default_area))
+
+        self.material = QComboBox()
+        for material_tag in sorted(self._materials):
+            material = self._materials[material_tag]
+            self.material.addItem(
+                f"{material_tag} - {material.name} ({material.material_type})",
+                int(material_tag),
+            )
+
+        self.group = QComboBox()
+        self.group.setEditable(True)
+        self.group.addItems(["truss", "brace", "tie", "bar"])
+
+        self.rho = QDoubleSpinBox()
+        self.rho.setDecimals(9)
+        self.rho.setRange(0.0, 1.0e18)
+        self.rho.setValue(0.0)
+
+        self.consistent_mass = QCheckBox("Use consistent mass matrix")
+        self.do_rayleigh = QCheckBox("Include in Rayleigh damping")
+
+        self.form.addRow("Tag:", self.tag)
+        self.form.addRow("Node I:", self.node_i)
+        self.form.addRow("Node J:", self.node_j)
+        self.form.addRow(
+            f"Area [{self.unit_system.length}²]:",
+            self.area,
+        )
+        self.form.addRow("Uniaxial material:", self.material)
+        self.form.addRow("Group:", self.group)
+        self.form.addRow(
+            f"rho [{self.unit_system.mass_per_length_label}]:",
+            self.rho,
+        )
+        self.form.addRow("Mass:", self.consistent_mass)
+        self.form.addRow("Rayleigh:", self.do_rayleigh)
+
+        note = QLabel(
+            "Truss is axial-only: it uses area + uniaxial material and "
+            "does not require a Section, geometric Transformation, or "
+            "beam Integration."
+        )
+        note.setWordWrap(True)
+        self.root.insertWidget(1, note)
+
+    def values(self):
+        material_tag = self.material.currentData()
+        if material_tag is None:
+            raise ValueError(
+                "Select a uniaxial material before creating the Truss element."
+            )
+        if self.node_i.value() == self.node_j.value():
+            raise ValueError("Truss end nodes must be different.")
+        return (
+            self.tag.value(),
+            self.node_i.value(),
+            self.node_j.value(),
+            self.area.value(),
+            int(material_tag),
+            self.group.currentText().strip() or "truss",
+            self.rho.value(),
+            self.consistent_mass.isChecked(),
+            self.do_rayleigh.isChecked(),
+        )
+
+
 class ElementFormulationDialog(_BaseDialog):
     def __init__(
         self,
