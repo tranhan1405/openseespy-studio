@@ -52,6 +52,12 @@ class AnalysisDialog(QDialog):
         self.tol=fs(analysis.tolerance if analysis else 1e-8,1e-16,1e10)
         self.max_iter=QSpinBox(); self.max_iter.setRange(1,100000); self.max_iter.setValue(analysis.max_iterations if analysis else 50)
         self.algorithm=QComboBox(); self.algorithm.addItems(["Newton","NewtonLineSearch","ModifiedNewton"]); self.algorithm.setCurrentText(analysis.algorithm if analysis else "Newton")
+        self.integrator=QComboBox()
+        self._initial_integrator=(analysis.integrator if analysis else None)
+        self.integrator.setToolTip(
+            "Controls the analysis stepping/integration scheme. Available choices "
+            "depend on the selected analysis type."
+        )
         self.steps=QSpinBox(); self.steps.setRange(1,10000000); self.steps.setValue(analysis.steps if analysis else 10)
         self.load_inc=fs(analysis.load_increment if analysis else 0.1,-1e20,1e20)
         self.control_node=QSpinBox(); self.control_node.setRange(1,2147483647); self.control_node.setValue(analysis.control_node if analysis else default_node)
@@ -93,6 +99,23 @@ class AnalysisDialog(QDialog):
         self.dt=fs(analysis.dt if analysis else 0.01,1e-12,1e20)
         self.gamma=fs(analysis.gamma if analysis else 0.5)
         self.beta=fs(analysis.beta if analysis else 0.25)
+        self.hht_alpha=fs(analysis.hht_alpha if analysis else 0.9)
+        self.generalized_alpha_m=fs(
+            analysis.generalized_alpha_m if analysis else 1.0
+        )
+        self.generalized_alpha_f=fs(
+            analysis.generalized_alpha_f if analysis else 1.0
+        )
+        self.arc_length_s=fs(
+            analysis.arc_length_s if analysis else 0.01,
+            1e-12,
+            1e20,
+        )
+        self.arc_length_alpha=fs(
+            analysis.arc_length_alpha if analysis else 1.0,
+            1e-12,
+            1e20,
+        )
         self.damping_ratio=fs(
             analysis.rayleigh_damping_ratio if analysis else 0.0,
             0.0,
@@ -182,6 +205,7 @@ class AnalysisDialog(QDialog):
             ("tol","Tolerance",self.tol),
             ("max_iter","Max iterations",self.max_iter),
             ("algorithm","Algorithm",self.algorithm),
+            ("integrator","Integrator",self.integrator),
             ("steps","Steps",self.steps),
             ("load_inc","Load increment",self.load_inc),
             ("control_node","Control node",self.control_node),
@@ -192,6 +216,11 @@ class AnalysisDialog(QDialog):
             ("dt","Time step dt",self.dt),
             ("gamma","Newmark gamma",self.gamma),
             ("beta","Newmark beta",self.beta),
+            ("hht_alpha","HHT alpha",self.hht_alpha),
+            ("generalized_alpha_m","Generalized-alpha alphaM",self.generalized_alpha_m),
+            ("generalized_alpha_f","Generalized-alpha alphaF",self.generalized_alpha_f),
+            ("arc_length_s","ArcLength s",self.arc_length_s),
+            ("arc_length_alpha","ArcLength alpha",self.arc_length_alpha),
             ("damping_ratio","Rayleigh damping ratio",self.damping_ratio),
             ("damping_mode_i","Rayleigh mode i",self.damping_mode_i),
             ("damping_mode_j","Rayleigh mode j",self.damping_mode_j),
@@ -224,6 +253,9 @@ class AnalysisDialog(QDialog):
         b.rejected.connect(self.reject)
         root.addWidget(b)
         self.kind.currentTextChanged.connect(self._sync)
+        self.integrator.currentTextChanged.connect(
+            lambda _text: self._sync(self.kind.currentText())
+        )
         self.preload_gravity.toggled.connect(
             lambda _checked: self._sync(self.kind.currentText())
         )
@@ -242,7 +274,36 @@ class AnalysisDialog(QDialog):
         if label is not None:
             label.setVisible(bool(visible))
 
+    def _sync_integrator(self, kind):
+        options = {
+            "Static": ["LoadControl", "DisplacementControl", "ArcLength"],
+            "Pushover": ["DisplacementControl"],
+            "Cyclic": ["DisplacementControl"],
+            "Transient": ["Newmark", "HHT", "GeneralizedAlpha"],
+            "Modal": ["None"],
+        }[kind]
+        defaults = {
+            "Static": "LoadControl",
+            "Pushover": "DisplacementControl",
+            "Cyclic": "DisplacementControl",
+            "Transient": "Newmark",
+            "Modal": "None",
+        }
+        current=self.integrator.currentText()
+        desired=current if current in options else defaults[kind]
+        if self._initial_integrator in options:
+            desired=self._initial_integrator
+            self._initial_integrator=None
+        self.integrator.blockSignals(True)
+        self.integrator.clear()
+        self.integrator.addItems(options)
+        self.integrator.setCurrentText(desired)
+        self.integrator.blockSignals(False)
+        self.integrator.setEnabled(kind in {"Static","Transient"})
+
     def _sync(self,kind):
+        self._sync_integrator(kind)
+        integrator=self.integrator.currentText()
         modal=kind=="Modal"
         transient=kind=="Transient"
         push=kind=="Pushover"
@@ -254,7 +315,7 @@ class AnalysisDialog(QDialog):
         # Identity and core solver configuration are common to every analysis.
         common={
             "tag","name","kind","constraints","numberer","system",
-            "external_console",
+            "integrator","external_console",
         }
         visible=set(common)
 
@@ -266,7 +327,15 @@ class AnalysisDialog(QDialog):
             })
 
         if static:
-            visible.update({"steps","load_inc"})
+            visible.add("steps")
+            if integrator=="LoadControl":
+                visible.add("load_inc")
+            elif integrator=="DisplacementControl":
+                visible.update({
+                    "control_node","control_dof","disp_inc",
+                })
+            elif integrator=="ArcLength":
+                visible.update({"arc_length_s","arc_length_alpha"})
         elif push:
             visible.update({
                 "steps","control_node","control_dof","disp_inc",
@@ -278,9 +347,16 @@ class AnalysisDialog(QDialog):
             })
         elif transient:
             visible.update({
-                "steps","dt","gamma","beta",
-                "damping_ratio",
+                "steps","dt","damping_ratio",
             })
+            if integrator=="Newmark":
+                visible.update({"gamma","beta"})
+            elif integrator=="HHT":
+                visible.add("hht_alpha")
+            elif integrator=="GeneralizedAlpha":
+                visible.update({
+                    "generalized_alpha_m","generalized_alpha_f",
+                })
             if self.damping_ratio.value() > 0.0:
                 visible.update({"damping_mode_i","damping_mode_j"})
         elif modal:
@@ -320,10 +396,16 @@ class AnalysisDialog(QDialog):
             analysis_type=self.kind.currentText(),constraints_handler=self.constraints.currentText(),
             numberer=self.numberer.currentText(),system=self.system.currentText(),test=self.test.currentText(),
             tolerance=self.tol.value(),max_iterations=self.max_iter.value(),algorithm=self.algorithm.currentText(),
+            integrator=self.integrator.currentText(),
             steps=self.steps.value(),load_increment=self.load_inc.value(),control_node=self.control_node.value(),
             control_dof=int(self.control_dof.currentData()),displacement_increment=self.disp_inc.value(),
             cyclic_targets=cyclic_targets,cyclic_increment=self.cyclic_inc.value(),
             dt=self.dt.value(),gamma=self.gamma.value(),beta=self.beta.value(),
+            hht_alpha=self.hht_alpha.value(),
+            generalized_alpha_m=self.generalized_alpha_m.value(),
+            generalized_alpha_f=self.generalized_alpha_f.value(),
+            arc_length_s=self.arc_length_s.value(),
+            arc_length_alpha=self.arc_length_alpha.value(),
             rayleigh_damping_ratio=self.damping_ratio.value(),
             rayleigh_mode_i=self.damping_mode_i.value(),
             rayleigh_mode_j=self.damping_mode_j.value(),

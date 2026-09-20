@@ -29,6 +29,9 @@ def test_static_analysis_hides_irrelevant_fields():
         assert _shown(dialog.steps)
         assert _shown(dialog.test)
         assert _shown(dialog.algorithm)
+        assert _shown(dialog.integrator)
+        assert dialog.integrator.currentText() == "LoadControl"
+        assert dialog.integrator.isEnabled()
 
         assert not _shown(dialog.control_node)
         assert not _shown(dialog.cyclic_targets)
@@ -48,6 +51,9 @@ def test_modal_analysis_shows_only_modal_specific_solver_fields():
         assert _shown(dialog.system)
         assert _shown(dialog.modes)
         assert _shown(dialog.eigen_solver)
+        assert _shown(dialog.integrator)
+        assert dialog.integrator.currentText() == "None"
+        assert not dialog.integrator.isEnabled()
 
         assert not _shown(dialog.test)
         assert not _shown(dialog.steps)
@@ -67,6 +73,13 @@ def test_transient_and_adaptive_rows_expand_only_when_needed():
         assert _shown(dialog.gamma)
         assert _shown(dialog.beta)
         assert _shown(dialog.damping_ratio)
+        assert _shown(dialog.integrator)
+        assert dialog.integrator.currentText() == "Newmark"
+        assert dialog.integrator.isEnabled()
+        assert _shown(dialog.gamma)
+        assert _shown(dialog.beta)
+        assert not _shown(dialog.hht_alpha)
+        assert not _shown(dialog.generalized_alpha_m)
         assert not _shown(dialog.damping_mode_i)
         assert not _shown(dialog.damping_mode_j)
 
@@ -103,9 +116,52 @@ def test_cyclic_protocol_hides_nominal_steps_and_uses_model_ndf():
         assert _shown(dialog.cyclic_inc)
         assert not _shown(dialog.steps)
         assert not _shown(dialog.disp_inc)
+        assert _shown(dialog.integrator)
+        assert dialog.integrator.currentText() == "DisplacementControl"
+        assert not dialog.integrator.isEnabled()
 
         assert dialog.control_dof.count() == 2
         assert dialog.control_dof.itemData(0) == 1
         assert dialog.control_dof.itemData(1) == 2
+    finally:
+        _close(dialog)
+
+
+def test_static_integrator_switches_parameter_rows():
+    dialog = AnalysisDialog(analysis_type="Static")
+    try:
+        dialog.integrator.setCurrentText("DisplacementControl")
+        _APP.processEvents()
+        assert _shown(dialog.control_node)
+        assert _shown(dialog.control_dof)
+        assert _shown(dialog.disp_inc)
+        assert not _shown(dialog.load_inc)
+        assert not _shown(dialog.arc_length_s)
+
+        dialog.integrator.setCurrentText("ArcLength")
+        _APP.processEvents()
+        assert _shown(dialog.arc_length_s)
+        assert _shown(dialog.arc_length_alpha)
+        assert not _shown(dialog.control_node)
+        assert not _shown(dialog.load_inc)
+    finally:
+        _close(dialog)
+
+
+def test_transient_integrator_switches_parameter_rows():
+    dialog = AnalysisDialog(analysis_type="Transient")
+    try:
+        dialog.integrator.setCurrentText("HHT")
+        _APP.processEvents()
+        assert _shown(dialog.hht_alpha)
+        assert not _shown(dialog.gamma)
+        assert not _shown(dialog.beta)
+
+        dialog.integrator.setCurrentText("GeneralizedAlpha")
+        _APP.processEvents()
+        assert _shown(dialog.generalized_alpha_m)
+        assert _shown(dialog.generalized_alpha_f)
+        assert not _shown(dialog.hht_alpha)
+        assert not _shown(dialog.gamma)
     finally:
         _close(dialog)
