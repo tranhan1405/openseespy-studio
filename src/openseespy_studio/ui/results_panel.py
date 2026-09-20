@@ -41,8 +41,12 @@ from ..postprocess import (
     convergence_steps,
     convergence_trace,
     convergence_summary,
+    cyclic_backbone_curve,
+    cyclic_curve_comparison,
     cyclic_hysteresis_curve,
     cyclic_hysteresis_metrics,
+    experimental_csv_series,
+    parse_experimental_csv_text,
     column_cyclic_cycle_metrics,
     column_cyclic_reversal_metrics,
     fiber_response_element_tags,
@@ -72,6 +76,9 @@ class TimeHistoryPlot(QWidget):
         super().__init__(parent)
         self._x: list[float] = []
         self._y: list[float] = []
+        self._overlay_x: list[float] = []
+        self._overlay_y: list[float] = []
+        self._overlay_label = ""
         self._empty_message = str(empty_message)
         self._marker_index: int | None = None
         self.setMinimumHeight(140)
@@ -85,6 +92,21 @@ class TimeHistoryPlot(QWidget):
         ):
             self._marker_index = None
         self.update()
+
+    def set_overlay(
+        self,
+        x: list[float],
+        y: list[float],
+        *,
+        label: str = "",
+    ) -> None:
+        self._overlay_x = list(x)
+        self._overlay_y = list(y)
+        self._overlay_label = str(label)
+        self.update()
+
+    def clear_overlay(self) -> None:
+        self.set_overlay([], [], label="")
 
     def set_marker(self, index: int | None) -> None:
         self._marker_index = (
@@ -109,8 +131,14 @@ class TimeHistoryPlot(QWidget):
         top = margin_top
         bottom = max(top + 1, self.height() - margin_bottom)
 
-        xmin, xmax = min(self._x), max(self._x)
-        ymin, ymax = min(self._y), max(self._y)
+        all_x = list(self._x)
+        all_y = list(self._y)
+        if len(self._overlay_x) >= 2 and len(self._overlay_y) >= 2:
+            all_x.extend(self._overlay_x)
+            all_y.extend(self._overlay_y)
+
+        xmin, xmax = min(all_x), max(all_x)
+        ymin, ymax = min(all_y), max(all_y)
         if abs(xmax - xmin) < 1.0e-15:
             xmax = xmin + 1.0
         if abs(ymax - ymin) < 1.0e-15:
@@ -133,6 +161,24 @@ class TimeHistoryPlot(QWidget):
             current = point(x, y)
             painter.drawLine(previous, current)
             previous = current
+
+        if len(self._overlay_x) >= 2 and len(self._overlay_y) >= 2:
+            overlay_pen = QPen(QColor("#d35400"), 2)
+            overlay_pen.setStyle(Qt.DashLine)
+            painter.setPen(overlay_pen)
+            previous = point(self._overlay_x[0], self._overlay_y[0])
+            for x, y in zip(self._overlay_x[1:], self._overlay_y[1:]):
+                current = point(x, y)
+                painter.drawLine(previous, current)
+                previous = current
+
+            painter.setPen(QColor("#526579"))
+            label = self._overlay_label or "Experiment"
+            painter.drawText(
+                left + 6,
+                top + 14,
+                f"Solid: OpenSees   Dashed: {label}",
+            )
 
         marker_index = self._marker_index
         if (
