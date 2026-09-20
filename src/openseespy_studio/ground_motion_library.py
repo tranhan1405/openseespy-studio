@@ -89,6 +89,14 @@ def discover_fema_p695_presets(
         if not path.is_file() or path.suffix.lower() != ".at2":
             continue
         relative = path.relative_to(root)
+        stem_upper = path.stem.upper()
+        if (
+            "UP" in stem_upper
+            or "VER" in stem_upper
+            or "DWN" in stem_upper
+            or stem_upper.endswith("-V")
+        ):
+            continue
         event_code = relative.parts[-2].upper() if len(relative.parts) > 1 else ""
         event, year = _FEMA_EVENT_NAMES.get(
             event_code,
