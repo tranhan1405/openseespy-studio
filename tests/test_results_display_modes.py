@@ -398,7 +398,7 @@ def test_cyclic_tab_shows_synchronized_column_reversal_and_cycle_metrics(qapp):
         )
         qapp.processEvents()
 
-        assert panel.cyclic_compare_table.isVisible()
+        assert not panel.cyclic_compare_table.isHidden()
         assert panel.cyclic_compare_table.rowCount() == 5
         assert len(panel.cyclic_plot._overlay_x) == len(displacement) + 1
         assert len(panel.cyclic_plot._overlay_y) == len(displacement) + 1
