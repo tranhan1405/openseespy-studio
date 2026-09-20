@@ -2537,6 +2537,8 @@ class MainWindow(QMainWindow):
         before = self.project.to_dict()
         try:
             spec = dialog.data()
+            for material in dialog.new_materials():
+                self.project.add_material(material)
             for section in dialog.new_sections():
                 self.project.add_section(section)
 
@@ -2574,6 +2576,11 @@ class MainWindow(QMainWindow):
             )
         if spec.top_mass > 0.0:
             extras.append("top mass")
+        if result.base_connection_tag is not None:
+            extras.append(
+                f"{spec.base_interface_type} "
+                f"(connection {result.base_connection_tag})"
+            )
 
         message = (
             f"Created 1D test column · {len(result.node_tags)} nodes · "
