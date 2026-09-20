@@ -158,15 +158,59 @@ class ConnectionDialog(QDialog):
         ("RZ", "Local rotation Z"),
     )
 
-    PRESETS = (
-        ("Custom", ()),
-        ("Axial / translational slip spring", (1,)),
-        ("Shear spring Y", (2,)),
-        ("Rotational hinge RZ", (6,)),
-        ("Planar joint UX-UY-RZ", (1, 2, 6)),
-        ("3D interface / bearing", (1, 2, 3)),
-        ("Full 6-DOF spring", (1, 2, 3, 4, 5, 6)),
-    )
+    @staticmethod
+    def dof_labels_for_model(
+        ndm: int,
+        ndf: int,
+    ) -> tuple[tuple[str, str], ...]:
+        ndm = int(ndm)
+        ndf = int(ndf)
+        if ndm == 2:
+            labels = [
+                ("UX", "Local translation X"),
+                ("UY", "Local translation Y"),
+            ]
+            if ndf >= 3:
+                labels.append(("RZ", "Local rotation Z"))
+            return tuple(labels[:ndf])
+        return ConnectionDialog.DOF_LABELS[:ndf]
+
+    @staticmethod
+    def presets_for_model(
+        ndm: int,
+        ndf: int,
+    ) -> tuple[tuple[str, tuple[int, ...]], ...]:
+        ndm = int(ndm)
+        ndf = int(ndf)
+        presets: list[tuple[str, tuple[int, ...]]] = [
+            ("Custom", ()),
+            ("Axial / translational slip spring", (1,)),
+        ]
+        if ndf >= 2:
+            presets.append(("Shear spring Y", (2,)))
+        if ndm == 2:
+            if ndf >= 3:
+                presets.extend([
+                    ("Rotational hinge RZ", (3,)),
+                    ("Planar joint UX-UY-RZ", (1, 2, 3)),
+                    ("Full 3-DOF spring", (1, 2, 3)),
+                ])
+            else:
+                presets.append(("Full 2-DOF spring", (1, 2)))
+            return tuple(presets)
+
+        if ndf >= 3:
+            presets.append(("3D interface / bearing", (1, 2, 3)))
+        if ndf >= 6:
+            presets.extend([
+                ("Rotational hinge RZ", (6,)),
+                ("Full 6-DOF spring", (1, 2, 3, 4, 5, 6)),
+            ])
+        else:
+            presets.append(
+                (f"Full {ndf}-DOF spring", tuple(range(1, ndf + 1)))
+            )
+        return tuple(presets)
 
     def __init__(
         self,
@@ -179,6 +223,8 @@ class ConnectionDialog(QDialog):
         default_to_ground: bool = False,
         node_positions: dict[int, tuple[float, float, float]] | None = None,
         units=None,
+        ndm: int = 3,
+        ndf: int = 6,
         parent=None,
     ):
         super().__init__(parent)
@@ -189,6 +235,16 @@ class ConnectionDialog(QDialog):
         self.pending_materials: list[MaterialData] = []
         self.node_positions = dict(node_positions or {})
         self.units = dict(units or {})
+        self.ndm = int(ndm)
+        self.ndf = int(ndf)
+        self.dof_labels = self.dof_labels_for_model(
+            self.ndm,
+            self.ndf,
+        )
+        self.presets = self.presets_for_model(
+            self.ndm,
+            self.ndf,
+        )
 
         root = QVBoxLayout(self)
 
@@ -230,7 +286,7 @@ class ConnectionDialog(QDialog):
             self.connection_type.setCurrentText(connection.connection_type)
 
         self.preset = QComboBox()
-        for label, dofs in self.PRESETS:
+        for label, dofs in self.presets:
             self.preset.addItem(label, tuple(dofs))
 
         self.to_ground = QCheckBox("Create coincident fixed ground node")
@@ -299,7 +355,7 @@ class ConnectionDialog(QDialog):
         self.test_buttons: list[QPushButton] = []
         self.chain_buttons: list[QPushButton] = []
 
-        for dof, (label, meaning) in enumerate(self.DOF_LABELS, start=1):
+        for dof, (label, meaning) in enumerate(self.dof_labels, start=1):
             row = QHBoxLayout()
             check = QCheckBox("Active")
             combo = QComboBox()
@@ -418,7 +474,7 @@ class ConnectionDialog(QDialog):
 
         if connection:
             for dof, material_tag in connection.materials_by_dof.items():
-                if 1 <= dof <= 6:
+                if 1 <= dof <= len(self.dof_checks):
                     self.dof_checks[dof - 1].setChecked(True)
                     index = self.material_combos[dof - 1].findData(
                         material_tag
@@ -442,7 +498,7 @@ class ConnectionDialog(QDialog):
         self.preset.currentIndexChanged.connect(self._preset_changed)
 
         self._sync_ground_state(self.to_ground.isChecked())
-        for index in range(6):
+        for index in range(len(self.dof_checks)):
             self._sync_dof_row(index, self.dof_checks[index].isChecked())
             self._sync_material_type(index)
         self._update_orientation_preview()
@@ -465,10 +521,20 @@ class ConnectionDialog(QDialog):
                 {"Pinching4", "Hysteretic", "ElasticPPGap", "Steel02", "Elastic"},
             )
         elif "rotational hinge" in label.lower():
-            self._select_material_type(
-                5,
-                {"Pinching4", "Hysteretic", "Steel02"},
+            row = next(
+                (
+                    index
+                    for index, (name, _meaning)
+                    in enumerate(self.dof_labels)
+                    if name == "RZ"
+                ),
+                None,
             )
+            if row is not None:
+                self._select_material_type(
+                    row,
+                    {"Pinching4", "Hysteretic", "Steel02"},
+                )
 
     def _select_material_type(
         self,
@@ -513,7 +579,7 @@ class ConnectionDialog(QDialog):
             self._sync_material_type(row)
 
     def _build_dof_chain(self, index: int) -> None:
-        label = self.DOF_LABELS[index][0]
+        label = self.dof_labels[index][0]
         dialog = MaterialChainDialog(
             self.materials,
             units=self.units,
