@@ -2635,6 +2635,28 @@ class ProjectDatabase:
             raise ValueError(
                 "Beam element loads require a beam-column element."
             )
+        if int(self.model.ndm) == 2:
+            if (
+                load.load_type == "Uniform"
+                and abs(float(load.wz)) > 1.0e-15
+            ):
+                raise ValueError(
+                    "2D Uniform element loads cannot have local Wz."
+                )
+            if (
+                load.load_type == "Point"
+                and abs(float(load.pz)) > 1.0e-15
+            ):
+                raise ValueError(
+                    "2D Point element loads cannot have local Pz."
+                )
+            if (
+                load.load_type == "SelfWeight"
+                and abs(float(load.gravity[2])) > 1.0e-15
+            ):
+                raise ValueError(
+                    "2D Self Weight cannot use global GZ; use GX/GY."
+                )
 
     def add_element_load(self, load: ElementLoadData) -> None:
         if load.tag in self.element_loads:
