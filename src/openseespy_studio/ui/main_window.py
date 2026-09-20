@@ -1643,7 +1643,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "measure_distance",
             "Distance",
-            "select",
+            "ruler",
             self._activate_measure_distance,
             "Measure distance and XYZ offsets between two nodes",
             checkable=True,
