@@ -2404,14 +2404,9 @@ class ResultsPanel(QWidget):
                     pass
             parameters = row.get("values", {})
             if isinstance(parameters, dict):
-                def parameter_label(key: str) -> str:
-                    parts = str(key).split(":", 2)
-                    if len(parts) == 3 and parts[0] == "material":
-                        return f"M{parts[1]}.{parts[2]}"
-                    return str(key)
-
                 parameter_text = ", ".join(
-                    f"{parameter_label(str(key))}={float(value):.6g}"
+                    f"{calibration_parameter_label(str(key))}="
+                    f"{float(value):.6g}"
                     for key, value in sorted(parameters.items())
                 )
             else:
@@ -2474,6 +2469,7 @@ class ResultsPanel(QWidget):
             "row to preview/apply its parameters to the model."
         )
         self.calibration_apply.setEnabled(False)
+        self._update_calibration_history()
 
     def _update_calibration_history(self) -> None:
         history = calibration_best_score_history(
