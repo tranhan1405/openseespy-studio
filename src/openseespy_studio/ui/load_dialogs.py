@@ -137,8 +137,6 @@ class GroundMotionDialog(QDialog):
                 "Ground motion editing requires both a Path time series "
                 "and a UniformExcitation pattern."
             )
-        if series is not None and series.series_type != "Path":
-            raise ValueError("Ground motion time series must be Path.")
         if pattern is not None and pattern.pattern_type != "UniformExcitation":
             raise ValueError(
                 "Ground motion pattern must be UniformExcitation."
