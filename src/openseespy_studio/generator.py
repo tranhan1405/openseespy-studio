@@ -561,8 +561,13 @@ def load_pattern_to_openseespy(pattern: LoadPatternData) -> str:
     raise ValueError(f"Unsupported load pattern type: {pattern.pattern_type}")
 
 
-def nodal_load_to_openseespy(load: NodalLoadData) -> str:
-    values = ", ".join(f"{value:g}" for value in load.values)
+def nodal_load_to_openseespy(
+    load: NodalLoadData,
+    ndf: int = 6,
+) -> str:
+    values = ", ".join(
+        f"{value:g}" for value in load.values[:max(int(ndf), 0)]
+    )
     return f"ops.load({load.node_tag}, {values})"
 
 
@@ -630,7 +635,7 @@ def load_pattern_block_to_openseespy(
 
     for load in sorted(nodal_loads or [], key=lambda item: item.tag):
         lines.append(f"# Nodal load {load.tag}: {load.name}")
-        lines.append(nodal_load_to_openseespy(load))
+        lines.append(nodal_load_to_openseespy(load, model.ndf))
     for displacement in sorted(
         prescribed_displacements or [],
         key=lambda item: item.tag,
@@ -2305,8 +2310,9 @@ def to_openseespy(
 
     for tag in sorted(model.nodes):
         node = model.nodes[tag]
-        x, y, z = node.xyz
-        lines.append(f"ops.node({tag}, {x:g}, {y:g}, {z:g})")
+        coordinates = tuple(node.xyz[:model.ndm])
+        coordinate_text = ", ".join(f"{value:g}" for value in coordinates)
+        lines.append(f"ops.node({tag}, {coordinate_text})")
 
     mass_nodes = [
         tag for tag, node in model.nodes.items()
@@ -2315,14 +2321,19 @@ def to_openseespy(
     if mass_nodes:
         lines.extend(["", "# Nodal masses"])
         for tag in sorted(mass_nodes):
-            mass = ", ".join(f"{value:g}" for value in model.nodes[tag].mass)
+            mass = ", ".join(
+                f"{value:g}"
+                for value in model.nodes[tag].mass[:model.ndf]
+            )
             lines.append(f"ops.mass({tag}, {mass})")
 
     lines.extend(["", "# Boundary conditions"])
     for tag in sorted(model.nodes):
         node = model.nodes[tag]
         if any(node.fixity):
-            fix = ", ".join(str(v) for v in node.fixity)
+            fix = ", ".join(
+                str(v) for v in node.fixity[:model.ndf]
+            )
             lines.append(f"ops.fix({tag}, {fix})")
 
     if constraints:
