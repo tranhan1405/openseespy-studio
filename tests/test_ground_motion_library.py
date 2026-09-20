@@ -1,12 +1,6 @@
-import io
-import zipfile
-
 from openseespy_studio.ground_motion_library import (
     GROUND_MOTION_LIBRARY,
     available_ground_motion_presets,
-    discover_fema_p695_presets,
-    download_fema_p695_farfield_library,
-    fema_p695_library_installed,
     common_scale_factor_for_target_pga,
     load_bundled_ground_motion_record,
     parse_ground_motion_record_text,
@@ -22,7 +16,8 @@ def test_ground_motion_library_keys_are_unique():
     assert "custom" in keys
     assert "el-centro-1940" in keys
     assert "northridge-1994-rinaldi" in keys
-    assert "kobe-1995-kjma" in keys
+    assert "northridge-1994-arleta-360" in keys
+    assert "chi-chi-1999-nsk-e" in keys
 
 
 def test_parse_peer_at2_reads_all_values_and_header_metadata():
@@ -133,63 +128,42 @@ def test_bundled_northridge_rinaldi_record_loads_without_user_file():
     assert pga_in_g(record.values, "g") > 0.50
 
 
-def test_available_library_hides_reference_only_presets():
+def test_available_library_is_fully_offline():
     available = available_ground_motion_presets()
-    assert any(item.key == "el-centro-1940" for item in available)
-    assert any(
-        item.key == "northridge-1994-rinaldi"
-        for item in available
-    )
-    assert not any(
-        item.key == "kobe-1995-kjma"
-        for item in available
-    )
+    keys = {item.key for item in available}
+
+    assert {
+        "custom",
+        "el-centro-1940",
+        "northridge-1994-rinaldi",
+        "northridge-1994-arleta-360",
+        "chi-chi-1999-nsk-e",
+    }.issubset(keys)
     assert all(
-        item.key == "custom"
-        or item.bundled_resource
-        or item.local_path
+        item.key == "custom" or item.bundled_resource
         for item in available
     )
 
 
-def test_fema_p695_downloader_caches_horizontal_records_and_skips_vertical(
-    tmp_path,
-):
-    payload = io.BytesIO()
-    with zipfile.ZipFile(payload, "w") as archive:
-        for index in range(44):
-            archive.writestr(
-                f"ATC63/NORTHR/H{index:02d}000.AT2",
-                (
-                    "PEER NGA RECORD\n"
-                    "ACCELERATION TIME HISTORY IN UNITS OF G\n"
-                    "NPTS= 2, DT= 0.010 SEC\n"
-                    "0.0 0.1\n"
-                ),
-            )
-        archive.writestr(
-            "ATC63/NORTHR/H-UP.AT2",
-            (
-                "PEER NGA RECORD\n"
-                "ACCELERATION TIME HISTORY IN UNITS OF G\n"
-                "NPTS= 2, DT= 0.010 SEC\n"
-                "0.0 0.2\n"
-            ),
-        )
-    zip_bytes = payload.getvalue()
-
-    class Response(io.BytesIO):
-        def close(self):
-            super().close()
-
-    cache = tmp_path / "fema_p695_ff22"
-    records = download_fema_p695_farfield_library(
-        cache_dir=cache,
-        opener=lambda _url: Response(zip_bytes),
+def test_bundled_northridge_arleta_record_loads_offline():
+    record = load_bundled_ground_motion_record(
+        "northridge-1994-arleta-360"
     )
+    assert record.format == "PEER AT2"
+    assert record.npts == 2000
+    assert record.dt == 0.02
+    assert record.input_unit == "g"
+    assert len(record.values) == 2000
+    assert pga_in_g(record.values, "g") > 0.20
 
-    assert len(records) == 44
-    assert fema_p695_library_installed(cache)
-    assert len(discover_fema_p695_presets(cache)) == 44
-    assert all("UP" not in item.station for item in records)
-    assert (cache / "_source.json").exists()
+
+def test_bundled_chichi_nsk_record_loads_offline():
+    record = load_bundled_ground_motion_record(
+        "chi-chi-1999-nsk-e"
+    )
+    assert record.format == "PEER AT2"
+    assert record.npts == 9200
+    assert record.dt == 0.005
+    assert record.input_unit == "g"
+    assert len(record.values) == 9200
+    assert pga_in_g(record.values, "g") > 0.10
