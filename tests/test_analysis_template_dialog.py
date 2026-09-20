@@ -594,3 +594,46 @@ def test_mass_source_dialog_2d_defaults_to_global_y_and_free_translations(qapp):
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+
+def test_manual_pushover_height_edit_disables_auto_height(qapp):
+    model = StructuralModel("2d-pushover-manual", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 3.0, 0.0)
+    model.add_node(3, 0.0, 6.0, 0.0)
+    model.set_fixity(1, (1, 1, 1))
+    project = ProjectDatabase(model=model)
+
+    dialog = AnalysisTemplateDialog(
+        default_node=3,
+        units={"length": "m", "force": "kN", "time": "s"},
+        initial_template="Pushover",
+        project=project,
+    )
+    try:
+        dialog.push_target_mode.setCurrentText("Roof drift ratio")
+        dialog.push_height_axis.setCurrentIndex(
+            dialog.push_height_axis.findData(2)
+        )
+        qapp.processEvents()
+
+        assert dialog.push_auto_height.isChecked() is True
+        assert dialog.push_reference_height.isEnabled() is True
+        assert dialog.push_reference_height.value() == pytest.approx(6.0)
+
+        dialog.push_reference_height.setValue(10.0)
+        qapp.processEvents()
+
+        assert dialog.push_auto_height.isChecked() is False
+        request = dialog.request()
+        assert request["reference_height"] == pytest.approx(10.0)
+        assert request["target_displacement"] == pytest.approx(0.20)
+
+        dialog.push_auto_height.setChecked(True)
+        qapp.processEvents()
+        assert dialog.push_reference_height.value() == pytest.approx(6.0)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
