@@ -2332,8 +2332,14 @@ class ResultsPanel(QWidget):
                     pass
             parameters = row.get("values", {})
             if isinstance(parameters, dict):
+                def parameter_label(key: str) -> str:
+                    parts = str(key).split(":", 2)
+                    if len(parts) == 3 and parts[0] == "material":
+                        return f"M{parts[1]}.{parts[2]}"
+                    return str(key)
+
                 parameter_text = ", ".join(
-                    f"{key.split(':')[-1]}={float(value):.6g}"
+                    f"{parameter_label(str(key))}={float(value):.6g}"
                     for key, value in sorted(parameters.items())
                 )
             else:
