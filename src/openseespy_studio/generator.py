@@ -1239,6 +1239,12 @@ def analysis_to_openseespy(
             ),
             "_studio_omega_i = math.sqrt(max(_studio_lambda_i, 0.0))",
             "_studio_omega_j = math.sqrt(max(_studio_lambda_j, 0.0))",
+            "if _studio_omega_i <= 0.0 or _studio_omega_j <= 0.0:",
+            "    raise RuntimeError(",
+            "        'Rayleigh damping modes must have positive eigenvalues. '",
+            "        f'Got lambda_i={_studio_lambda_i:g}, '",
+            "        f'lambda_j={_studio_lambda_j:g}.'",
+            "    )",
             (
                 f"_studio_zeta = {settings.rayleigh_damping_ratio:g}"
             ),
