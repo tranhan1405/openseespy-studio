@@ -1043,7 +1043,7 @@ class PropertiesPanel(QWidget):
         self._building_property_grid = True
         self.table.blockSignals(True)
         try:
-            self.table.clearContents()
+            self.table.setRowCount(0)
             self.table.setRowCount(len(rows))
             for index, raw_row in enumerate(rows):
                 key, value, spec = self._property_spec(raw_row)
@@ -1467,6 +1467,9 @@ class MainWindow(QMainWindow):
         )
         self.properties_panel.solution_scope_from_selection.connect(
             self._use_current_selection_for_solution_result
+        )
+        self.properties_panel.property_edited.connect(
+            self._apply_direct_property_edit
         )
         dock.setWidget(self.properties_panel)
 
