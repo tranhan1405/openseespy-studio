@@ -1394,10 +1394,16 @@ class MainWindow(QMainWindow):
             QSizePolicy.Expanding,
         )
         self.script = CodeEditor()
+        self.script.setReadOnly(True)
+        self.script.setToolTip(
+            "Generated OpenSeesPy preview. The Project database is the source "
+            "of truth; use File > Export OpenSeesPy to regenerate and verify "
+            "a standalone script."
+        )
         command = QPlainTextEdit()
         command.setReadOnly(True)
         command.setPlaceholderText("Interactive OpenSeesPy command console (planned)")
-        script_tabs.addTab(self.script, "Python Script")
+        script_tabs.addTab(self.script, "Generated Python")
         script_tabs.addTab(command, "Command")
         script_dock.setWidget(script_tabs)
         self.addDockWidget(Qt.BottomDockWidgetArea, script_dock)
@@ -3025,6 +3031,26 @@ class MainWindow(QMainWindow):
             sync_viewport_display=False,
         )
 
+    def _generate_project_script(self) -> str:
+        """Generate a fresh standalone OpenSeesPy script from Project data."""
+        return to_openseespy(
+            self.model,
+            self.project.materials,
+            self.project.sections,
+            self.project.transformations,
+            self.project.constraints,
+            self.project.connections,
+            self.project.time_series,
+            self.project.load_patterns,
+            self.project.nodal_loads,
+            self.project.analyses,
+            self.project.active_analysis_tag,
+            element_loads=self.project.element_loads,
+            prescribed_displacements=self.project.prescribed_displacements,
+            recorders=self.project.recorders,
+            units=self.project.units,
+        )
+
     def _refresh_project_metadata(
         self,
         message: str = "",
@@ -3045,25 +3071,15 @@ class MainWindow(QMainWindow):
             self.project.transformations,
         )
         self._refresh_tree()
-        self.script.setPlainText(
-            to_openseespy(
-                self.model,
-                self.project.materials,
-                self.project.sections,
-                self.project.transformations,
-                self.project.constraints,
-                self.project.connections,
-                self.project.time_series,
-                self.project.load_patterns,
-                self.project.nodal_loads,
-                self.project.analyses,
-                self.project.active_analysis_tag,
-                element_loads=self.project.element_loads,
-                prescribed_displacements=self.project.prescribed_displacements,
-                recorders=self.project.recorders,
-                units=self.project.units,
+        try:
+            generated_script = self._generate_project_script()
+        except (KeyError, TypeError, ValueError) as exc:
+            generated_script = (
+                "# OpenSeesPy Studio generation error\n"
+                f"# {type(exc).__name__}: {exc}\n"
             )
-        )
+            self._log(f"Script generation error: {exc}")
+        self.script.setPlainText(generated_script)
         self._selection_changed(self.selection.snapshot())
 
         if message:
@@ -9440,6 +9456,97 @@ class MainWindow(QMainWindow):
             selection_set.element_tags.intersection_update(element_tags)
 
     def _export_script(self) -> None:
+        """Regenerate, validate and export a standalone OpenSeesPy script."""
+        settings = self.project.analyses.get(
+            self.project.active_analysis_tag
+        )
+        issues = self._model_check_issues(settings)
+        errors = [
+            issue for issue in issues
+            if issue.severity == "ERROR"
+        ]
+        warnings = [
+            issue for issue in issues
+            if issue.severity == "WARNING"
+        ]
+
+        if errors:
+            self.status_message.setText(
+                f"Export blocked: {len(errors)} model-check error(s)"
+            )
+            self._show_model_check(issues, allow_run=False)
+            return
+
+        if warnings:
+            answer = QMessageBox.question(
+                self,
+                "Export OpenSeesPy with warnings?",
+                (
+                    f"Model Check found {len(warnings)} warning(s) and no "
+                    "errors. Warnings do not necessarily prevent OpenSeesPy "
+                    "from running, but they should be reviewed.\n\n"
+                    "Export the generated script anyway?"
+                ),
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+        try:
+            source = self._generate_project_script()
+        except (KeyError, TypeError, ValueError) as exc:
+            QMessageBox.critical(
+                self,
+                "Export OpenSeesPy",
+                f"Script generation failed:\n\n{exc}",
+            )
+            self.status_message.setText("OpenSeesPy export failed")
+            return
+
+        generator_errors = [
+            line.strip()
+            for line in source.splitlines()
+            if line.lstrip().startswith("# ERROR:")
+        ]
+        if generator_errors:
+            preview = "\n".join(generator_errors[:8])
+            if len(generator_errors) > 8:
+                preview += (
+                    f"\n... and {len(generator_errors) - 8} more error(s)"
+                )
+            QMessageBox.critical(
+                self,
+                "Export OpenSeesPy",
+                (
+                    "The generator found incomplete or unsupported model "
+                    "entities. Export is blocked until these are fixed.\n\n"
+                    f"{preview}"
+                ),
+            )
+            self.status_message.setText(
+                f"Export blocked: {len(generator_errors)} generator error(s)"
+            )
+            return
+
+        try:
+            compile(source, "<OpenSeesPy Studio export>", "exec")
+        except SyntaxError as exc:
+            QMessageBox.critical(
+                self,
+                "Export OpenSeesPy",
+                (
+                    "Generated Python failed the syntax check.\n\n"
+                    f"Line {exc.lineno}: {exc.msg}"
+                ),
+            )
+            self.status_message.setText(
+                "Export blocked: generated Python syntax error"
+            )
+            return
+
+        runtime_ok, runtime_detail = probe_opensees_runtime(timeout=10.0)
+
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Export OpenSeesPy script",
@@ -9448,8 +9555,58 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
-        Path(path).write_text(self.script.toPlainText(), encoding="utf-8")
-        self._log(f"Exported: {path}")
+        if not path.lower().endswith(".py"):
+            path += ".py"
+
+        try:
+            Path(path).write_text(source, encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.critical(
+                self,
+                "Export OpenSeesPy",
+                f"Could not write the script:\n\n{exc}",
+            )
+            self.status_message.setText("OpenSeesPy export failed")
+            return
+
+        # Keep the preview synchronized with exactly what was exported.
+        self.script.setPlainText(source)
+        self._log(
+            f"Exported verified OpenSeesPy script: {path} "
+            f"(warnings={len(warnings)}, runtime_probe={runtime_ok})"
+        )
+        self.status_message.setText(
+            f"Exported verified OpenSeesPy script: {Path(path).name}"
+        )
+
+        summary = (
+            "Export completed.\n\n"
+            "✓ Regenerated from Project database\n"
+            "✓ Model Check: 0 errors"
+            + (f", {len(warnings)} warning(s)\n" if warnings else "\n")
+            + "✓ Generator error markers: none\n"
+            "✓ Python syntax check: passed\n"
+            + (
+                "✓ Local OpenSeesPy runtime probe: passed"
+                if runtime_ok
+                else "⚠ Local OpenSeesPy runtime probe: not verified"
+            )
+        )
+        if not runtime_ok and runtime_detail:
+            summary += f"\n\nRuntime probe detail:\n{runtime_detail}"
+
+        if runtime_ok:
+            QMessageBox.information(
+                self,
+                "OpenSeesPy Export Verified",
+                summary,
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "OpenSeesPy Exported with Runtime Warning",
+                summary,
+            )
 
     def _focus_validation_issue(
         self,
