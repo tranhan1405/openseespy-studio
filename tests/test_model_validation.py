@@ -2,8 +2,11 @@ from openseespy_studio.generator import FrameGridSpec, generate_frame_grid
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
     AnalysisSettingsData,
+    ConnectionData,
+    ConstraintData,
     ElementLoadData,
     LoadPatternData,
+    MaterialData,
     ProjectDatabase,
     RecorderData,
     SectionData,
@@ -377,5 +380,137 @@ def test_invalid_recorder_target_blocks_run():
         issue.severity == "ERROR"
         and issue.category == "Recorder"
         and "missing node" in issue.message
+        for issue in issues
+    )
+
+
+def test_true_2d_model_ignores_vecxz_orientation():
+    model = StructuralModel("2d-frame", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 3.0, 0.0)
+    model.set_fixity(1, (1, 1, 1))
+    model.add_element(1, 1, 2, section_tag=1, transf_tag=1)
+    project = ProjectDatabase(model=model)
+    project.sections[1] = _elastic_section()
+    project.transformations[1] = TransformationData(
+        1, "2D", "Linear", (1.0, 0.0, 0.0)
+    )
+
+    issues = validate_project(
+        project,
+        AnalysisSettingsData(1, "Static", "Static"),
+    )
+
+    assert not any(
+        issue.category == "Transformation orientation"
+        for issue in issues
+    )
+
+
+def test_displacement_control_rejects_missing_control_node_and_invalid_dof():
+    project = _frame_project()
+    analysis = AnalysisSettingsData(
+        1,
+        "Push",
+        "Pushover",
+        control_node=999,
+        control_dof=1,
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Analysis control"
+        and "missing control node 999" in issue.message
+        for issue in issues
+    )
+
+    model_2d = StructuralModel("2d-control", ndm=2, ndf=3)
+    model_2d.add_node(1, 0.0, 0.0)
+    model_2d.add_node(2, 1.0, 0.0)
+    model_2d.set_fixity(1, (1, 1, 1))
+    model_2d.add_element(1, 1, 2, section_tag=1, transf_tag=1)
+    project_2d = ProjectDatabase(model=model_2d)
+    project_2d.sections[1] = _elastic_section()
+    project_2d.transformations[1] = TransformationData(
+        1, "2D", "Linear", (0.0, 0.0, 1.0)
+    )
+    analysis_2d = AnalysisSettingsData(
+        2,
+        "Push 2D",
+        "Pushover",
+        control_node=2,
+        control_dof=4,
+    )
+    issues = validate_project(project_2d, analysis_2d)
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Analysis control"
+        and "ndf=3" in issue.message
+        for issue in issues
+    )
+
+
+def test_dynamic_model_check_accepts_distributed_element_mass():
+    project = _frame_project()
+    for element in project.model.elements.values():
+        element.mass_per_length = 2.0
+    analysis = AnalysisSettingsData(
+        1,
+        "Transient",
+        "Transient",
+        control_node=min(project.model.nodes),
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert not any(
+        issue.severity == "ERROR"
+        and issue.category == "Mass"
+        for issue in issues
+    )
+
+
+def test_2d_connection_and_equal_dof_reject_out_of_range_dofs():
+    model = StructuralModel("2d-links", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    model.set_fixity(1, (1, 1, 1))
+    project = ProjectDatabase(model=model)
+    project.add_material(
+        MaterialData(1, "Spring", "Elastic", {"E": 1000.0})
+    )
+    project.add_connection(
+        ConnectionData(
+            1,
+            "Bad rotational spring",
+            "zeroLength",
+            1,
+            2,
+            materials_by_dof={4: 1},
+        )
+    )
+    project.add_constraint(
+        ConstraintData(
+            1,
+            "Bad equalDOF",
+            "equalDOF",
+            1,
+            [2],
+            dofs=(1, 4),
+        )
+    )
+
+    issues = validate_project(project)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Connection DOF"
+        for issue in issues
+    )
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Constraint DOF"
         for issue in issues
     )

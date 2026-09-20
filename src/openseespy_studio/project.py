@@ -1724,6 +1724,7 @@ SOLUTION_RESULT_TYPES = {
     "HingeState",
     "PushoverCurve",
     "CyclicHysteresis",
+    "ForceDisplacement",
     "TimeHistory",
     "ModeShape",
     "Motion",

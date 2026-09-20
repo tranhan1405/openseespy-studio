@@ -107,3 +107,30 @@ def test_force_displacement_catalog_default_uses_base_shear():
     assert item.category == "Charts / History"
     assert item.label == "Force–Displacement"
     assert item.settings["force_source"] == "Base shear"
+
+
+def test_2d_result_catalog_exposes_only_physical_components():
+    choices = result_choices_for_analysis(
+        "Static",
+        ndm=2,
+        ndf=3,
+    )
+    displacement = {
+        choice.settings.get("component")
+        for choice in choices
+        if choice.result_type == "NodalDisplacement"
+    }
+    reaction = {
+        choice.settings.get("component")
+        for choice in choices
+        if choice.result_type == "NodalReaction"
+    }
+    member = {
+        choice.settings.get("component")
+        for choice in choices
+        if choice.result_type == "MemberForce"
+    }
+
+    assert displacement == {"|U|", "UX", "UY", "RZ"}
+    assert reaction == {"FX", "FY", "MZ"}
+    assert member == {"N", "Vy", "Mz"}

@@ -202,3 +202,32 @@ def test_solution_result_details_settings_update_and_round_trip():
         "quantity": "Displacement",
         "dof": 2,
     }
+
+
+def test_force_displacement_solution_result_round_trips():
+    project = build_project()
+    project.add_analysis(
+        AnalysisSettingsData(
+            1,
+            "Cyclic",
+            "Cyclic",
+            control_node=2,
+        )
+    )
+    project.add_solution_result(
+        SolutionResultData(
+            2,
+            1,
+            "Force–Displacement",
+            "ForceDisplacement",
+            node_scope=[2],
+            settings={"force_source": "Base shear"},
+        )
+    )
+
+    restored = ProjectDatabase.from_dict(project.to_dict())
+
+    result = restored.solution_results[2]
+    assert result.result_type == "ForceDisplacement"
+    assert result.node_scope == [2]
+    assert result.settings["force_source"] == "Base shear"

@@ -3525,6 +3525,12 @@ class ModelViewport(QWidget):
             self.clear_result_overlay()
             return
 
+        analysis = result.get("analysis", {}) if isinstance(result, dict) else {}
+        if not isinstance(analysis, dict):
+            analysis = {}
+        ndm = int(analysis.get("ndm", self._model.ndm))
+        ndf = int(analysis.get("ndf", self._model.ndf))
+
         key = (
             "node_displacements"
             if quantity == "Displacement"
@@ -3540,7 +3546,12 @@ class ModelViewport(QWidget):
             if not isinstance(raw, (list, tuple)):
                 return None
             try:
-                return nodal_result_scalar(raw, component)
+                return nodal_result_scalar(
+                    raw,
+                    component,
+                    ndm=ndm,
+                    ndf=ndf,
+                )
             except ValueError:
                 return None
 
@@ -4286,10 +4297,11 @@ class ModelViewport(QWidget):
             values = list(raw) if raw is not None else []
             while len(values) < 3:
                 values.append(0.0)
+            dz = 0.0 if int(self._model.ndm) == 2 else float(values[2])
             return (
                 node.xyz[0] + effective_scale * float(values[0]),
                 node.xyz[1] + effective_scale * float(values[1]),
-                node.xyz[2] + effective_scale * float(values[2]),
+                node.xyz[2] + effective_scale * dz,
             )
 
         if self._motion_element_mesh is not None:
@@ -4408,11 +4420,14 @@ class ModelViewport(QWidget):
             self.clear_result_overlay()
             return
 
+        translation_count = 2 if (
+            self._model is not None and int(self._model.ndm) == 2
+        ) else 3
         max_component = max(
             (
                 abs(float(value))
                 for vector in vectors.values()
-                for value in list(vector)[:3]
+                for value in list(vector)[:translation_count]
             ),
             default=0.0,
         )

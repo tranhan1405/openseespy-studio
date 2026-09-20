@@ -41,51 +41,102 @@ SECTION_FORCE_INDEX: dict[str, int] = {
 }
 
 
-NODAL_COMPONENT_INDEX: dict[str, int] = {
-    "UX": 0,
-    "UY": 1,
-    "UZ": 2,
-    "RX": 3,
-    "RY": 4,
-    "RZ": 5,
-    "FX": 0,
-    "FY": 1,
-    "FZ": 2,
-    "MX": 3,
-    "MY": 4,
-    "MZ": 5,
-}
+def nodal_dof_component_labels(
+    *,
+    ndm: int = 3,
+    ndf: int = 6,
+    quantity: str = "Displacement",
+) -> list[str]:
+    """Return physical component labels for the model DOF ordering."""
+    ndm = int(ndm)
+    ndf = int(ndf)
+    quantity_key = str(quantity).strip().lower()
+    if ndm == 2:
+        translational = (
+            ["FX", "FY"]
+            if quantity_key == "reaction"
+            else ["UX", "UY"]
+        )
+        rotational = (
+            ["MZ"]
+            if quantity_key == "reaction"
+            else ["RZ"]
+        )
+        labels = translational + (rotational if ndf >= 3 else [])
+        return labels[:ndf]
 
-NODAL_MAGNITUDE_COMPONENTS: dict[str, tuple[int, ...]] = {
-    "|U|": (0, 1, 2),
-    "|R|": (3, 4, 5),
-    "|F|": (0, 1, 2),
-    "|M|": (3, 4, 5),
-}
+    translational = (
+        ["FX", "FY", "FZ"]
+        if quantity_key == "reaction"
+        else ["UX", "UY", "UZ"]
+    )
+    rotational = (
+        ["MX", "MY", "MZ"]
+        if quantity_key == "reaction"
+        else ["RX", "RY", "RZ"]
+    )
+    labels = translational + rotational
+    return labels[:ndf]
 
 
 def nodal_result_scalar(
     values: Sequence[float],
     component: str,
+    *,
+    ndm: int = 3,
+    ndf: int = 6,
 ) -> float | None:
-    """Extract one scalar from a six-DOF nodal result vector.
+    """Extract a physically valid scalar from a nodal result vector.
 
-    Displacement aliases (UX..RZ) and reaction aliases (FX..MZ) share the
-    same six-DOF ordering. Magnitude components keep translation/force and
-    rotation/moment groups separate so incompatible units are never mixed.
+    The OpenSees DOF order depends on model dimension. A common 2D frame has
+    [UX, UY, RZ] / [FX, FY, MZ], not the first three entries of the 3D
+    convention. Magnitudes therefore use only the translational or rotational
+    entries that physically exist in the active model.
     """
     component = str(component).strip().upper()
-    index = NODAL_COMPONENT_INDEX.get(component)
+    displacement_labels = nodal_dof_component_labels(
+        ndm=ndm,
+        ndf=ndf,
+        quantity="Displacement",
+    )
+    reaction_labels = nodal_dof_component_labels(
+        ndm=ndm,
+        ndf=ndf,
+        quantity="Reaction",
+    )
+    component_index: dict[str, int] = {
+        label: index
+        for index, label in enumerate(displacement_labels)
+    }
+    component_index.update(
+        {
+            label: index
+            for index, label in enumerate(reaction_labels)
+        }
+    )
+    index = component_index.get(component)
     if index is not None:
         if len(values) <= index:
             return None
         return float(values[index])
 
-    magnitude_indices = NODAL_MAGNITUDE_COMPONENTS.get(component)
+    translational_count = min(max(int(ndm), 0), len(values), int(ndf))
+    rotational_indices = tuple(
+        range(translational_count, min(len(values), int(ndf)))
+    )
+    translational_indices = tuple(range(translational_count))
+    magnitude_indices: tuple[int, ...] | None = {
+        "|U|": translational_indices,
+        "|F|": translational_indices,
+        "|R|": rotational_indices,
+        "|M|": rotational_indices,
+    }.get(component)
     if magnitude_indices is not None:
-        if len(values) <= max(magnitude_indices):
+        if not magnitude_indices:
             return None
-        return math.sqrt(sum(float(values[index]) ** 2 for index in magnitude_indices))
+        return math.sqrt(
+            sum(float(values[index]) ** 2 for index in magnitude_indices)
+        )
 
     raise ValueError(f"Unsupported nodal result component: {component}")
 
@@ -2985,6 +3036,30 @@ def member_end_resultants(
     return result
 
 
+def normalize_frame_local_force(
+    values: Sequence[float],
+    *,
+    ndm: int,
+) -> list[float]:
+    """Normalize OpenSees frame localForce to Studio's 12-value convention.
+
+    OpenSees 2D frame elements return
+    [Ni, Vi, Mi, Nj, Vj, Mj]. Studio's member-force plotting convention is
+    the 3D order [N, Vy, Vz, T, My, Mz] at I then J. Embedding 2D responses
+    in that convention lets the same equilibrium reconstruction serve both
+    dimensions without changing 3D behavior.
+    """
+    raw = [float(value) for value in values]
+    if int(ndm) == 2:
+        if len(raw) < 6:
+            return []
+        return [
+            raw[0], raw[1], 0.0, 0.0, 0.0, raw[2],
+            raw[3], raw[4], 0.0, 0.0, 0.0, raw[5],
+        ]
+    return raw[:12] if len(raw) >= 12 else []
+
+
 def component_end_resultants(
     values: Sequence[float],
     component: str,
@@ -3411,8 +3486,14 @@ def enrich_member_force_results(
             }
             continue
 
-        raw = local_forces.get(str(tag), local_forces.get(tag))
-        if not isinstance(raw, (list, tuple)) or len(raw) < 12:
+        raw_source = local_forces.get(str(tag), local_forces.get(tag))
+        if not isinstance(raw_source, (list, tuple)):
+            continue
+        raw = normalize_frame_local_force(
+            raw_source,
+            ndm=model.ndm,
+        )
+        if not raw:
             continue
 
         active_loads = _active_local_element_loads(
@@ -3431,7 +3512,12 @@ def enrich_member_force_results(
         )
         per_component: dict[str, Any] = {}
 
-        for component in LOCAL_FORCE_COMPONENTS:
+        components = (
+            ("N", "Vy", "Mz")
+            if int(model.ndm) == 2
+            else LOCAL_FORCE_COMPONENTS
+        )
+        for component in components:
             end_values = component_end_resultants(raw, component)
             if end_values is None:
                 continue

@@ -277,6 +277,10 @@ def _element_geometry_checks(
         if length <= 1.0e-12:
             continue
 
+        # OpenSees 2D geometric transformations do not use vecxz.
+        if int(model.ndm) == 2:
+            continue
+
         vecxz = transformation.vecxz
         sine = _norm(_cross(axis, vecxz)) / (length * _norm(vecxz))
         if sine <= 1.0e-8:
@@ -421,6 +425,122 @@ def _support_and_connectivity_checks(
                 "Confirm that independent structural components are intentional.",
             )
         )
+
+
+def _constraint_and_connection_checks(
+    project: ProjectDatabase,
+    issues: list[ValidationIssue],
+) -> None:
+    model = project.model
+
+    for tag in sorted(project.constraints):
+        constraint = project.constraints[tag]
+        referenced = [
+            constraint.retained_node,
+            *constraint.constrained_nodes,
+        ]
+        missing = [node for node in referenced if node not in model.nodes]
+        if missing:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Constraint",
+                    f"Constraint {tag} references missing node(s): "
+                    + ", ".join(map(str, sorted(set(missing)))),
+                    "constraint",
+                    tag,
+                    "Update the constraint to use existing model nodes.",
+                )
+            )
+        if (
+            constraint.constraint_type == "equalDOF"
+            and any(dof > model.ndf for dof in constraint.dofs)
+        ):
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Constraint DOF",
+                    f"equalDOF constraint {tag} uses DOF(s) "
+                    f"{list(constraint.dofs)} but the model has ndf={model.ndf}.",
+                    "constraint",
+                    tag,
+                    f"Use only DOFs 1..{model.ndf}.",
+                )
+            )
+
+    for tag in sorted(project.connections):
+        connection = project.connections[tag]
+        missing_nodes = [
+            node
+            for node in (connection.node_i, connection.node_j)
+            if node not in model.nodes
+        ]
+        if missing_nodes:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Connection",
+                    f"Connection {tag} references missing node(s): "
+                    + ", ".join(map(str, sorted(set(missing_nodes)))),
+                    "connection",
+                    tag,
+                    "Update the connection to use existing model nodes.",
+                )
+            )
+
+        if connection.connection_type == "zeroLengthSection":
+            if (
+                connection.section_tag is None
+                or connection.section_tag not in project.sections
+            ):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Connection section",
+                        f"zeroLengthSection connection {tag} references "
+                        f"missing section {connection.section_tag}.",
+                        "connection",
+                        tag,
+                        "Assign an existing Section object.",
+                    )
+                )
+        else:
+            invalid_dofs = sorted(
+                dof
+                for dof in connection.materials_by_dof
+                if dof > model.ndf
+            )
+            if invalid_dofs:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Connection DOF",
+                        f"Connection {tag} uses DOF(s) {invalid_dofs} but "
+                        f"the model has ndf={model.ndf}.",
+                        "connection",
+                        tag,
+                        f"Use only DOFs 1..{model.ndf}.",
+                    )
+                )
+            missing_materials = sorted(
+                {
+                    material_tag
+                    for material_tag in connection.materials_by_dof.values()
+                    if material_tag not in project.materials
+                }
+            )
+            if missing_materials:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Connection material",
+                        f"Connection {tag} references missing material(s): "
+                        + ", ".join(map(str, missing_materials)),
+                        "connection",
+                        tag,
+                        "Assign existing UniaxialMaterial objects.",
+                    )
+                )
 
 
 def _prescribed_displacement_checks(
@@ -672,6 +792,62 @@ def _driving_load_checks(
             )
 
 
+def _analysis_reference_checks(
+    project: ProjectDatabase,
+    analysis: AnalysisSettingsData,
+    issues: list[ValidationIssue],
+) -> None:
+    model = project.model
+
+    control_required = (
+        analysis.analysis_type in {"Pushover", "Cyclic"}
+        or (
+            analysis.analysis_type == "Static"
+            and analysis.integrator == "DisplacementControl"
+        )
+    )
+
+    if analysis.control_dof > model.ndf:
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Analysis control",
+                f"Analysis {analysis.tag} uses control/monitor DOF "
+                f"{analysis.control_dof}, but the model has ndf={model.ndf}.",
+                suggestion=(
+                    f"Choose a DOF between 1 and {model.ndf} for this model."
+                ),
+            )
+        )
+
+    if control_required and analysis.control_node not in model.nodes:
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Analysis control",
+                f"{analysis.analysis_type} analysis {analysis.tag} references "
+                f"missing control node {analysis.control_node}.",
+                "node",
+                analysis.control_node,
+                "Choose an existing control node before running.",
+            )
+        )
+    elif (
+        analysis.analysis_type == "Transient"
+        and analysis.control_node not in model.nodes
+    ):
+        issues.append(
+            ValidationIssue(
+                "WARNING",
+                "Analysis monitor",
+                f"Transient analysis {analysis.tag} references missing "
+                f"monitor node {analysis.control_node}; Studio would otherwise "
+                "fall back to another node when capturing results.",
+                suggestion="Choose an existing monitor node for unambiguous results.",
+            )
+        )
+
+
 def _dynamic_checks(
     project: ProjectDatabase,
     analysis: AnalysisSettingsData,
@@ -682,10 +858,31 @@ def _dynamic_checks(
 
     model = project.model
     translational_mass = sum(
-        sum(max(0.0, float(value)) for value in node.mass[:3])
+        sum(
+            max(0.0, float(value))
+            for value in node.mass[: min(3, model.ndf)]
+        )
         for node in model.nodes.values()
     )
-    if translational_mass <= 0.0:
+    element_mass = 0.0
+    for element in model.elements.values():
+        rho = max(0.0, float(element.mass_per_length))
+        if rho <= 0.0:
+            continue
+        node_i = model.nodes.get(element.i)
+        node_j = model.nodes.get(element.j)
+        if node_i is None or node_j is None:
+            continue
+        length = math.sqrt(
+            sum(
+                (node_j.xyz[index] - node_i.xyz[index]) ** 2
+                for index in range(3)
+            )
+        )
+        element_mass += rho * length
+
+    total_dynamic_mass = translational_mass + element_mass
+    if total_dynamic_mass <= 0.0:
         issues.append(
             ValidationIssue(
                 "ERROR",
@@ -697,11 +894,22 @@ def _dynamic_checks(
             )
         )
     else:
+        nodes_with_element_mass: set[int] = set()
+        for element in model.elements.values():
+            if float(element.mass_per_length) > 0.0:
+                nodes_with_element_mass.update((element.i, element.j))
         zero_mass_free_nodes = [
             tag
             for tag, node in model.nodes.items()
-            if any(value == 0 for value in node.fixity[:3])
-            and sum(max(0.0, float(value)) for value in node.mass[:3]) <= 0.0
+            if any(
+                value == 0
+                for value in node.fixity[: min(3, model.ndf)]
+            )
+            and sum(
+                max(0.0, float(value))
+                for value in node.mass[: min(3, model.ndf)]
+            ) <= 0.0
+            and tag not in nodes_with_element_mass
         ]
         if zero_mass_free_nodes:
             issues.append(
@@ -827,11 +1035,13 @@ def validate_project(
 
     _element_geometry_checks(project, issues)
     _support_and_connectivity_checks(project, issues)
+    _constraint_and_connection_checks(project, issues)
     _prescribed_displacement_checks(project, issues)
     _element_load_checks(project, issues)
     _recorder_checks(project, issues)
 
     if analysis is not None:
+        _analysis_reference_checks(project, analysis, issues)
         _driving_load_checks(project, analysis, issues)
         _dynamic_checks(project, analysis, issues)
 

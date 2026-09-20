@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .postprocess import nodal_dof_component_labels
+
 
 @dataclass(frozen=True)
 class ResultChoice:
@@ -28,6 +30,9 @@ def convergence_result_label(test: str | None) -> str:
 def result_choices_for_analysis(
     analysis_type: str,
     convergence_test: str | None = None,
+    *,
+    ndm: int = 3,
+    ndf: int = 6,
 ) -> list[ResultChoice]:
     """Return the shared result catalog for Solution and Job menus."""
     kind = str(analysis_type)
@@ -75,12 +80,24 @@ def result_choices_for_analysis(
         ),
     ]
 
-    for label, component in (
+    displacement_labels = nodal_dof_component_labels(
+        ndm=ndm,
+        ndf=ndf,
+        quantity="Displacement",
+    )
+    translational_count = min(int(ndm), len(displacement_labels))
+    displacement_components = [
         ("Total Deformation", "|U|"),
-        ("Directional UX", "UX"),
-        ("Directional UY", "UY"),
-        ("Directional UZ", "UZ"),
-    ):
+        *[
+            (f"Directional {component}", component)
+            for component in displacement_labels[:translational_count]
+        ],
+    ]
+    for component in displacement_labels[translational_count:]:
+        displacement_components.append(
+            (f"Rotation {component}", component)
+        )
+    for label, component in displacement_components:
         choices.append(
             ResultChoice(
                 "Nodal Displacement",
@@ -91,7 +108,12 @@ def result_choices_for_analysis(
             )
         )
 
-    for component in ("FX", "FY", "FZ", "MX", "MY", "MZ"):
+    reaction_components = nodal_dof_component_labels(
+        ndm=ndm,
+        ndf=ndf,
+        quantity="Reaction",
+    )
+    for component in reaction_components:
         choices.append(
             ResultChoice(
                 "Nodal Reaction",
@@ -102,7 +124,12 @@ def result_choices_for_analysis(
             )
         )
 
-    for component in ("N", "Vy", "Vz", "T", "My", "Mz"):
+    member_components = (
+        ("N", "Vy", "Mz")
+        if int(ndm) == 2
+        else ("N", "Vy", "Vz", "T", "My", "Mz")
+    )
+    for component in member_components:
         choices.append(
             ResultChoice(
                 "Member Forces",

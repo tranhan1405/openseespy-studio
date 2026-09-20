@@ -37,11 +37,28 @@ def available_modal_modes(result: dict[str, Any]) -> list[int]:
     return sorted(set(values))
 
 
-def _vector3(raw: object) -> list[float]:
+def _translation_vector3(
+    raw: object,
+    *,
+    ndm: int = 3,
+) -> list[float]:
+    """Return XYZ translations without treating rotational DOFs as UZ."""
     values = list(raw) if isinstance(raw, (list, tuple)) else []
     while len(values) < 3:
         values.append(0.0)
+    if int(ndm) == 2:
+        return [float(values[0]), float(values[1]), 0.0]
     return [float(values[0]), float(values[1]), float(values[2])]
+
+
+def _result_ndm(result: dict[str, Any]) -> int:
+    analysis = result.get("analysis", {}) if isinstance(result, dict) else {}
+    if not isinstance(analysis, dict):
+        return 3
+    try:
+        return int(analysis.get("ndm", 3))
+    except (TypeError, ValueError):
+        return 3
 
 
 def _magnitude(values: list[float]) -> float:
@@ -66,7 +83,12 @@ def _modal_reference_magnitude(
     if not isinstance(vectors, dict):
         return 0.0
     return max(
-        (_magnitude(_vector3(vector)) for vector in vectors.values()),
+        (
+            _magnitude(
+                _translation_vector3(vector, ndm=_result_ndm(result))
+            )
+            for vector in vectors.values()
+        ),
         default=0.0,
     )
 
@@ -99,7 +121,12 @@ def _history_reference_magnitude(result: dict[str, Any]) -> float:
         if not isinstance(rows, list):
             continue
         for row in rows:
-            maximum = max(maximum, _magnitude(_vector3(row)))
+            maximum = max(
+                maximum,
+                _magnitude(
+                    _translation_vector3(row, ndm=_result_ndm(result))
+                ),
+            )
     return maximum
 
 
@@ -262,7 +289,13 @@ def motion_frame(
         phase = 2.0 * math.pi * frame_index / info.frame_count
         amplitude = math.sin(phase)
         vectors = {
-            str(tag): [amplitude * value for value in _vector3(vector)]
+            str(tag): [
+                amplitude * value
+                for value in _translation_vector3(
+                    vector,
+                    ndm=_result_ndm(result),
+                )
+            ]
             for tag, vector in (
                 raw_vectors.items()
                 if isinstance(raw_vectors, dict)
@@ -291,7 +324,10 @@ def motion_frame(
             rows = node_data.get("disp", [])
             if not isinstance(rows, list) or frame_index >= len(rows):
                 continue
-            vectors[str(tag)] = _vector3(rows[frame_index])
+            vectors[str(tag)] = _translation_vector3(
+                rows[frame_index],
+                ndm=_result_ndm(result),
+            )
 
         times = history.get("time", []) if isinstance(history, dict) else []
         coordinate: float | None = None
@@ -334,7 +370,13 @@ def motion_frame(
         else 1.0
     )
     vectors = {
-        str(tag): [factor * value for value in _vector3(vector)]
+        str(tag): [
+            factor * value
+            for value in _translation_vector3(
+                vector,
+                ndm=_result_ndm(result),
+            )
+        ]
         for tag, vector in (
             raw_vectors.items()
             if isinstance(raw_vectors, dict)

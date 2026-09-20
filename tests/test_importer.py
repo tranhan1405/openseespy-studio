@@ -288,3 +288,96 @@ ops.element('Truss', 9, 1, 2, 0.005, 3)
     assert element.truss_area == 0.005
     assert element.truss_material_tag == 3
     assert 3 in result.project.materials
+
+
+def test_importer_supports_native_2d_elastic_frame_and_beam_loads():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+ops.node(1, 0.0, 0.0)
+ops.node(2, 4.0, 0.0)
+ops.fix(1, 1, 1, 1)
+ops.geomTransf('Linear', 1)
+ops.element(
+    'elasticBeamColumn',
+    1, 1, 2,
+    0.02, 200.0e9, 8.0e-5, 1,
+    '-mass', 3.0
+)
+ops.timeSeries('Linear', 1)
+ops.pattern('Plain', 1, 1)
+ops.eleLoad('-ele', 1, '-type', '-beamUniform', -5.0, 1.5)
+ops.eleLoad('-ele', 1, '-type', '-beamPoint', -10.0, 0.25, 2.0)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="frame2d.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    assert result.project.model.ndm == 2
+    assert result.project.model.ndf == 3
+    element = result.project.model.elements[1]
+    assert element.element_type == "elasticBeamColumn"
+    assert element.mass_per_length == 3.0
+    section = result.project.sections[element.section_tag]
+    assert section.parameters["A"] == 0.02
+    assert section.parameters["Iz"] == 8.0e-5
+
+    loads = sorted(
+        result.project.element_loads.values(),
+        key=lambda item: item.tag,
+    )
+    assert len(loads) == 2
+    assert loads[0].load_type == "Uniform"
+    assert loads[0].wy == -5.0
+    assert loads[0].wz == 0.0
+    assert loads[0].wx == 1.5
+    assert loads[1].load_type == "Point"
+    assert loads[1].py == -10.0
+    assert loads[1].pz == 0.0
+    assert loads[1].x_over_l == 0.25
+    assert loads[1].px == 2.0
+
+    exported = to_openseespy(
+        result.project.model,
+        sections=result.project.sections,
+        transformations=result.project.transformations,
+        time_series=result.project.time_series,
+        load_patterns=result.project.load_patterns,
+        element_loads=result.project.element_loads,
+        units=result.project.units,
+    )
+    assert "ops.geomTransf('Linear', 1)" in exported
+    assert (
+        "ops.element('elasticBeamColumn', 1, 1, 2, 0.02, "
+        "2e+11, 8e-05, 1"
+    ) in exported
+    assert "'-beamUniform', -5, 1.5)" in exported
+    assert "'-beamPoint', -10, 0.25, 2)" in exported
+
+
+def test_importer_supports_native_2d_elastic_section():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+ops.uniaxialMaterial('Elastic', 1, 200000000000.0)
+ops.section('Elastic', 7, 200000000000.0, 0.02, 8.0e-5)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="section2d.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    section = result.project.sections[7]
+    assert section.section_type == "Elastic"
+    assert section.parameters["E"] == pytest.approx(200.0e9)
+    assert section.parameters["A"] == pytest.approx(0.02)
+    assert section.parameters["Iz"] == pytest.approx(8.0e-5)
+    assert section.parameters["Iy"] == 0.0
+    assert section.parameters["J"] == 0.0

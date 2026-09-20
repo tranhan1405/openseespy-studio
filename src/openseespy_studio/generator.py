@@ -433,6 +433,8 @@ def section_to_openseespy(
     section: SectionData,
     materials: dict[int, MaterialData] | None = None,
     units: dict[str, str] | None = None,
+    *,
+    ndm: int = 3,
 ) -> list[str]:
     p = (
         elastic_section_parameters_in_model_units(
@@ -444,6 +446,12 @@ def section_to_openseespy(
         else section.parameters
     )
     if section.section_type == "Elastic":
+        if int(ndm) == 2:
+            return [
+                "ops.section('Elastic', "
+                f"{section.tag}, {p['E']:g}, {p['A']:g}, "
+                f"{p['Iz']:g})"
+            ]
         return [
             "ops.section('Elastic', "
             f"{section.tag}, {p['E']:g}, {p['A']:g}, "
@@ -451,9 +459,11 @@ def section_to_openseespy(
         ]
 
     if section.section_type == "Fiber":
-        lines = [
-            f"ops.section('Fiber', {section.tag}, '-GJ', {p['GJ']:g})"
-        ]
+        lines = (
+            [f"ops.section('Fiber', {section.tag})"]
+            if int(ndm) == 2
+            else [f"ops.section('Fiber', {section.tag}, '-GJ', {p['GJ']:g})"]
+        )
 
         # Keep manually entered fibers explicit. Builder primitives remain
         # native OpenSees patch/layer commands instead of being flattened.
@@ -591,6 +601,12 @@ def element_load_to_openseespy(
     if load.load_type == "Uniform":
         wx, wy, wz = load.wx, load.wy, load.wz
     elif load.load_type == "Point":
+        if int(model.ndm) == 2:
+            return (
+                "ops.eleLoad('-ele', "
+                f"{load.element_tag}, '-type', '-beamPoint', "
+                f"{load.py:g}, {load.x_over_l:g}, {load.px:g})"
+            )
         return (
             "ops.eleLoad('-ele', "
             f"{load.element_tag}, '-type', '-beamPoint', "
@@ -610,6 +626,12 @@ def element_load_to_openseespy(
             f"Unsupported element load type: {load.load_type}"
         )
 
+    if int(model.ndm) == 2:
+        return (
+            "ops.eleLoad('-ele', "
+            f"{load.element_tag}, '-type', '-beamUniform', "
+            f"{wy:g}, {wx:g})"
+        )
     return (
         "ops.eleLoad('-ele', "
         f"{load.element_tag}, '-type', '-beamUniform', "
@@ -1026,6 +1048,8 @@ def analysis_to_openseespy(
     monitor_node: int | None = None,
     fiber_response_specs: dict[int, dict[str, object]] | None = None,
     specimen_response_spec: dict[str, object] | None = None,
+    ndm: int = 3,
+    ndf: int = 6,
 ) -> list[str]:
     node_tags = list(node_tags or [])
     element_tags = list(element_tags or [])
@@ -1081,6 +1105,8 @@ def analysis_to_openseespy(
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
         f"        'type': {settings.analysis_type!r},",
+        f"        'ndm': {int(ndm)},",
+        f"        'ndf': {int(ndf)},",
         f"        'constraints_handler': {settings.constraints_handler!r},",
         f"        'numberer': {settings.numberer!r},",
         f"        'system': {settings.system!r},",
@@ -1222,20 +1248,51 @@ def analysis_to_openseespy(
         lines.append("if not isinstance(_studio_eigenvalues, (list, tuple)):")
         lines.append("    _studio_eigenvalues = [_studio_eigenvalues]")
         lines.extend([
+            "try:",
+            "    _studio_modal_props = ops.modalProperties('-return') or {}",
+            "except Exception:",
+            "    _studio_modal_props = {}",
+            "_studio_modal_source = (",
+            "    'OpenSees modalProperties'",
+            "    if isinstance(_studio_modal_props, dict) and _studio_modal_props",
+            "    else 'nodal-mass fallback'",
+            ")",
             "_studio_total_lumped_mass = {}",
-            "for _studio_dof in (1, 2, 3):",
-            "    _studio_mass_total = 0.0",
-            "    for _studio_node in _studio_node_tags:",
-            "        try:",
-            "            _studio_mass_total += max(",
-            "                0.0, float(ops.nodeMass(_studio_node, _studio_dof))",
+            "if _studio_modal_source == 'OpenSees modalProperties':",
+            "    _studio_domain_size = int((",
+            "        _studio_modal_props.get('domainSize') or [0]",
+            "    )[0])",
+            "    _studio_total_mass_raw = [",
+            "        float(v) for v in (_studio_modal_props.get('totalMass') or [])",
+            "    ]",
+            "    for _studio_dof, _studio_key in ((1, 'MX'), (2, 'MY'), (3, 'MZ')):",
+            "        _studio_mass_key = 'totalMass'",
+            "        if _studio_dof <= min(3, _studio_domain_size):",
+            "            _studio_index = _studio_dof - 1",
+            "            _studio_total_lumped_mass[str(_studio_dof)] = (",
+            "                float(_studio_total_mass_raw[_studio_index])",
+            "                if _studio_index < len(_studio_total_mass_raw)",
+            "                else 0.0",
             "            )",
-            "        except Exception:",
-            "            pass",
-            "    _studio_total_lumped_mass[str(_studio_dof)] = _studio_mass_total",
+            "        else:",
+            "            _studio_total_lumped_mass[str(_studio_dof)] = 0.0",
+            "else:",
+            "    for _studio_dof in (1, 2, 3):",
+            "        _studio_mass_total = 0.0",
+            "        for _studio_node in _studio_node_tags:",
+            "            try:",
+            "                _studio_mass_total += max(",
+            "                    0.0, float(ops.nodeMass(_studio_node, _studio_dof))",
+            "                )",
+            "            except Exception:",
+            "                pass",
+            "        _studio_total_lumped_mass[str(_studio_dof)] = _studio_mass_total",
             "_studio_results['modal_summary'] = {",
             f"    'eigen_solver': {settings.eigen_solver!r},",
+            "    'mass_source': _studio_modal_source,",
             "    'total_lumped_mass': dict(_studio_total_lumped_mass),",
+            "    'native_modal_properties': dict(_studio_modal_props)",
+            "        if isinstance(_studio_modal_props, dict) else {},",
             "}",
         ])
         lines.append(
@@ -1262,42 +1319,71 @@ def analysis_to_openseespy(
             "            ops.nodeEigenvector(_studio_node, _studio_mode)",
             "        ]",
             "    _studio_participation = {}",
-            "    for _studio_dof in (1, 2, 3):",
-            "        _studio_num = 0.0",
-            "        _studio_den = 0.0",
-            "        for _studio_node in _studio_node_tags:",
-            "            try:",
-            "                _studio_mass = max(",
-            "                    0.0, float(ops.nodeMass(_studio_node, _studio_dof))",
-            "                )",
-            "            except Exception:",
-            "                _studio_mass = 0.0",
-            "            _studio_vector = _studio_vectors.get(str(_studio_node), [])",
-            "            _studio_phi = (",
-            "                float(_studio_vector[_studio_dof - 1])",
-            "                if len(_studio_vector) >= _studio_dof",
-            "                else 0.0",
+            "    if _studio_modal_source == 'OpenSees modalProperties':",
+            "        for _studio_dof, _studio_axis in ((1, 'X'), (2, 'Y'), (3, 'Z')):",
+            "            _studio_factors = _studio_modal_props.get(",
+            "                'partiFactorM' + _studio_axis, []",
+            "            ) or []",
+            "            _studio_masses = _studio_modal_props.get(",
+            "                'partiMassM' + _studio_axis, []",
+            "            ) or []",
+            "            _studio_ratios = _studio_modal_props.get(",
+            "                'partiMassRatiosM' + _studio_axis, []",
+            "            ) or []",
+            "            _studio_index = _studio_mode - 1",
+            "            _studio_gamma = (",
+            "                float(_studio_factors[_studio_index])",
+            "                if _studio_index < len(_studio_factors) else 0.0",
             "            )",
-            "            _studio_num += _studio_mass * _studio_phi",
-            "            _studio_den += _studio_mass * _studio_phi * _studio_phi",
-            "        _studio_gamma = (",
-            "            _studio_num / _studio_den",
-            "            if _studio_den > 0.0 else 0.0",
-            "        )",
-            "        _studio_effective_mass = (",
-            "            (_studio_num * _studio_num) / _studio_den",
-            "            if _studio_den > 0.0 else 0.0",
-            "        )",
-            "        _studio_total_mass = _studio_total_lumped_mass[str(_studio_dof)]",
-            "        _studio_mass_ratio = (",
-            "            _studio_effective_mass / _studio_total_mass",
-            "            if _studio_total_mass > 0.0 else 0.0",
-            "        )",
-            "        _studio_participation[str(_studio_dof)] = {",
-            "            'factor': float(_studio_gamma),",
-            "            'effective_mass': float(_studio_effective_mass),",
-            "            'mass_ratio': float(_studio_mass_ratio),",
-            "        }",
+            "            _studio_effective_mass = (",
+            "                float(_studio_masses[_studio_index])",
+            "                if _studio_index < len(_studio_masses) else 0.0",
+            "            )",
+            "            _studio_mass_ratio = (",
+            "                float(_studio_ratios[_studio_index]) / 100.0",
+            "                if _studio_index < len(_studio_ratios) else 0.0",
+            "            )",
+            "            _studio_participation[str(_studio_dof)] = {",
+            "                'factor': _studio_gamma,",
+            "                'effective_mass': _studio_effective_mass,",
+            "                'mass_ratio': _studio_mass_ratio,",
+            "            }",
+            "    else:",
+            "        for _studio_dof in (1, 2, 3):",
+            "            _studio_num = 0.0",
+            "            _studio_den = 0.0",
+            "            for _studio_node in _studio_node_tags:",
+            "                try:",
+            "                    _studio_mass = max(",
+            "                        0.0, float(ops.nodeMass(_studio_node, _studio_dof))",
+            "                    )",
+            "                except Exception:",
+            "                    _studio_mass = 0.0",
+            "                _studio_vector = _studio_vectors.get(str(_studio_node), [])",
+            "                _studio_phi = (",
+            "                    float(_studio_vector[_studio_dof - 1])",
+            "                    if len(_studio_vector) >= _studio_dof",
+            "                    else 0.0",
+            "                )",
+            "                _studio_num += _studio_mass * _studio_phi",
+            "                _studio_den += _studio_mass * _studio_phi * _studio_phi",
+            "            _studio_gamma = (",
+            "                _studio_num / _studio_den if _studio_den > 0.0 else 0.0",
+            "            )",
+            "            _studio_effective_mass = (",
+            "                (_studio_num * _studio_num) / _studio_den",
+            "                if _studio_den > 0.0 else 0.0",
+            "            )",
+            "            _studio_total_mass = _studio_total_lumped_mass[str(_studio_dof)]",
+            "            _studio_mass_ratio = (",
+            "                _studio_effective_mass / _studio_total_mass",
+            "                if _studio_total_mass > 0.0 else 0.0",
+            "            )",
+            "            _studio_participation[str(_studio_dof)] = {",
+            "                'factor': float(_studio_gamma),",
+            "                'effective_mass': float(_studio_effective_mass),",
+            "                'mass_ratio': float(_studio_mass_ratio),",
+            "            }",
             "    _studio_results['modes'][str(_studio_mode)] = {",
             "        'eigenvalue': _studio_lambda,",
             "        'omega_rad_s': float(_studio_omega),",
@@ -2312,7 +2398,14 @@ def analysis_to_openseespy(
 
 def transformation_to_openseespy(
     transformation: TransformationData,
+    *,
+    ndm: int = 3,
 ) -> str:
+    if int(ndm) == 2:
+        return (
+            f"ops.geomTransf('{transformation.transformation_type}', "
+            f"{transformation.tag})"
+        )
     x, y, z = transformation.vecxz
     return (
         f"ops.geomTransf('{transformation.transformation_type}', "
@@ -2417,14 +2510,22 @@ def to_openseespy(
         lines.extend(["", "# Sections"])
         for tag in sorted(sections):
             lines.extend(
-                section_to_openseespy(sections[tag], materials, units)
+                section_to_openseespy(
+                    sections[tag],
+                    materials,
+                    units,
+                    ndm=model.ndm,
+                )
             )
 
     if transformations:
         lines.extend(["", "# Geometric transformations"])
         for tag in sorted(transformations):
             lines.append(
-                transformation_to_openseespy(transformations[tag])
+                transformation_to_openseespy(
+                    transformations[tag],
+                    ndm=model.ndm,
+                )
             )
 
     lines.extend([
@@ -2517,12 +2618,19 @@ def to_openseespy(
                 materials,
                 units,
             )
-            args = (
-                "ops.element('elasticBeamColumn', "
-                f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
-                f"{p['G']:g}, {p['J']:g}, {p['Iy']:g}, {p['Iz']:g}, "
-                f"{transf_tag}"
-            )
+            if int(model.ndm) == 2:
+                args = (
+                    "ops.element('elasticBeamColumn', "
+                    f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
+                    f"{p['Iz']:g}, {transf_tag}"
+                )
+            else:
+                args = (
+                    "ops.element('elasticBeamColumn', "
+                    f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
+                    f"{p['G']:g}, {p['J']:g}, {p['Iy']:g}, {p['Iz']:g}, "
+                    f"{transf_tag}"
+                )
             if e.mass_per_length > 0.0:
                 args += f", '-mass', {e.mass_per_length:g}"
                 if e.consistent_mass:
@@ -2869,6 +2977,8 @@ def to_openseespy(
                 monitor_node=monitor_node,
                 fiber_response_specs=fiber_response_specs,
                 specimen_response_spec=specimen_response_spec,
+                ndm=model.ndm,
+                ndf=model.ndf,
             )
         )
 
