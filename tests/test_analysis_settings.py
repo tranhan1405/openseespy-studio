@@ -325,3 +325,87 @@ def test_adaptive_cyclic_generator_keeps_explicit_protocol_increments():
     )
     assert "_studio_remaining -= _studio_trial_increment" in text
     compile(text, "<adaptive-cyclic>", "exec")
+
+
+def test_static_integrator_variants_generate_expected_commands():
+    displacement = AnalysisSettingsData(
+        30,
+        "Static displacement",
+        "Static",
+        integrator="DisplacementControl",
+        steps=4,
+        control_node=2,
+        control_dof=1,
+        displacement_increment=0.002,
+    )
+    displacement_text = "\n".join(
+        analysis_to_openseespy(displacement, node_tags=[1, 2])
+    )
+    assert "ops.integrator('DisplacementControl', 2, 1, 0.002)" in displacement_text
+    assert "'integrator': 'DisplacementControl'" in displacement_text
+
+    arc = AnalysisSettingsData(
+        31,
+        "Arc length",
+        "Static",
+        integrator="ArcLength",
+        steps=4,
+        arc_length_s=0.02,
+        arc_length_alpha=0.5,
+    )
+    arc_text = "\n".join(analysis_to_openseespy(arc))
+    assert "ops.integrator('ArcLength', 0.02, 0.5)" in arc_text
+    assert "'integrator': 'ArcLength'" in arc_text
+
+
+def test_transient_integrator_variants_generate_expected_commands():
+    hht = AnalysisSettingsData(
+        32,
+        "HHT EQ",
+        "Transient",
+        integrator="HHT",
+        steps=2,
+        dt=0.01,
+        hht_alpha=0.9,
+    )
+    hht_text = "\n".join(analysis_to_openseespy(hht))
+    assert "ops.integrator('HHT', 0.9)" in hht_text
+
+    generalized = AnalysisSettingsData(
+        33,
+        "Generalized alpha EQ",
+        "Transient",
+        integrator="GeneralizedAlpha",
+        steps=2,
+        dt=0.01,
+        generalized_alpha_m=0.8,
+        generalized_alpha_f=0.7,
+    )
+    generalized_text = "\n".join(analysis_to_openseespy(generalized))
+    assert "ops.integrator('GeneralizedAlpha', 0.8, 0.7)" in generalized_text
+
+
+def test_integrator_defaults_keep_old_project_behavior():
+    assert AnalysisSettingsData(40, "Static", "Static").integrator == "LoadControl"
+    assert (
+        AnalysisSettingsData(41, "Push", "Pushover").integrator
+        == "DisplacementControl"
+    )
+    assert AnalysisSettingsData(42, "EQ", "Transient").integrator == "Newmark"
+    assert AnalysisSettingsData(43, "Modes", "Modal").integrator == "None"
+
+
+def test_integrator_round_trip_preserves_advanced_parameters():
+    project = ProjectDatabase(model=model())
+    project.add_analysis(
+        AnalysisSettingsData(
+            44,
+            "HHT",
+            "Transient",
+            integrator="HHT",
+            hht_alpha=0.85,
+        )
+    )
+    restored = ProjectDatabase.from_dict(project.to_dict()).analyses[44]
+    assert restored.integrator == "HHT"
+    assert restored.hht_alpha == 0.85
