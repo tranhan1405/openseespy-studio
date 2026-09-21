@@ -499,3 +499,86 @@ def test_2d_modal_summary_does_not_fake_uz_mass_participation(qapp):
         panel.close()
         panel.deleteLater()
         qapp.processEvents()
+
+
+def test_modal_mass_coverage_warns_when_relevant_direction_is_below_reference(qapp):
+    panel = ResultsPanel()
+    result = {
+        "analysis": {"type": "Modal"},
+        "modal_summary": {
+            "total_free_mass": {"1": 10.0, "2": 8.0}
+        },
+        "final": {},
+        "convergence": {"steps": []},
+        "modes": {
+            "1": {
+                "eigenvalue": 4.0,
+                "frequency_hz": 1.0,
+                "period_s": 1.0,
+                "vectors": {},
+                "participation": {
+                    "1": {"mass_ratio": 0.50},
+                    "2": {"mass_ratio": 0.40},
+                },
+            },
+            "2": {
+                "eigenvalue": 9.0,
+                "frequency_hz": 1.5,
+                "period_s": 2.0 / 3.0,
+                "vectors": {},
+                "participation": {
+                    "1": {"mass_ratio": 0.25},
+                    "2": {"mass_ratio": 0.55},
+                },
+            },
+        },
+    }
+    try:
+        panel.set_result(result)
+        qapp.processEvents()
+
+        text = panel.modal_mass_coverage.text()
+        assert "UX=75.00%" in text
+        assert "UY=95.00%" in text
+        assert "below 90% reference in UX" in text
+        assert "consider extracting more modes" in text
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_modal_mass_coverage_ignores_direction_without_positive_free_mass(qapp):
+    panel = ResultsPanel()
+    result = {
+        "analysis": {"type": "Modal"},
+        "modal_summary": {
+            "total_free_mass": {"1": 10.0, "2": 0.0}
+        },
+        "final": {},
+        "convergence": {"steps": []},
+        "modes": {
+            "1": {
+                "eigenvalue": 4.0,
+                "frequency_hz": 1.0,
+                "period_s": 1.0,
+                "vectors": {},
+                "participation": {
+                    "1": {"mass_ratio": 0.92},
+                    "2": {"mass_ratio": 0.0},
+                },
+            },
+        },
+    }
+    try:
+        panel.set_result(result)
+        qapp.processEvents()
+
+        text = panel.modal_mass_coverage.text()
+        assert "UX=92.00%" in text
+        assert "UY=" not in text
+        assert "All shown translational directions ≥ 90% reference." in text
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()

@@ -1560,6 +1560,16 @@ class ResultsPanel(QWidget):
         self.mode_info.setWordWrap(True)
         layout.addWidget(self.mode_info)
 
+        self.modal_mass_coverage = QLabel(
+            "Cumulative translational modal mass: -"
+        )
+        self.modal_mass_coverage.setWordWrap(True)
+        self.modal_mass_coverage.setToolTip(
+            "90% is used here only as a QA reference threshold. "
+            "Check the governing standard and analysis purpose."
+        )
+        layout.addWidget(self.modal_mass_coverage)
+
         self.modal_summary_table = QTableWidget(0, 10)
         self.modal_summary_table.setHorizontalHeaderLabels(
             [
@@ -3449,6 +3459,9 @@ class ResultsPanel(QWidget):
             "Run a non-modal analysis to view deformation."
         )
         self.mode_info.setText("Run a Modal analysis to populate mode shapes.")
+        self.modal_mass_coverage.setText(
+            "Cumulative translational modal mass: -"
+        )
         self.force_disp_node.clear()
         self.force_disp_force_node.clear()
         self.force_disp_info.setText(
@@ -3592,6 +3605,63 @@ class ResultsPanel(QWidget):
                     column,
                     QTableWidgetItem(value),
                 )
+
+        if not ordered or not active_dofs:
+            self.modal_mass_coverage.setText(
+                "Cumulative translational modal mass: -"
+            )
+            return
+
+        modal_summary = (
+            self._result.get("modal_summary", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        total_free_mass = (
+            modal_summary.get("total_free_mass", {})
+            if isinstance(modal_summary, dict)
+            else {}
+        )
+        relevant_dofs: list[int] = []
+        for dof in sorted(active_dofs):
+            if isinstance(total_free_mass, dict) and total_free_mass:
+                try:
+                    free_mass = float(total_free_mass.get(str(dof), 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    free_mass = 0.0
+                if free_mass <= 0.0:
+                    continue
+            relevant_dofs.append(dof)
+
+        if not relevant_dofs:
+            self.modal_mass_coverage.setText(
+                "Cumulative translational modal mass: no positive free mass."
+            )
+            return
+
+        labels = {1: "UX", 2: "UY", 3: "UZ"}
+        coverage = " · ".join(
+            f"{labels[dof]}={cumulative[dof - 1]:.2f}%"
+            for dof in relevant_dofs
+        )
+        below_reference = [
+            labels[dof]
+            for dof in relevant_dofs
+            if cumulative[dof - 1] < 90.0 - 1.0e-9
+        ]
+        if below_reference:
+            warning = (
+                " · QA warning: below 90% reference in "
+                + ", ".join(below_reference)
+                + "; consider extracting more modes."
+            )
+        else:
+            warning = " · All shown translational directions ≥ 90% reference."
+        self.modal_mass_coverage.setText(
+            "Cumulative translational modal mass: "
+            + coverage
+            + warning
+        )
 
     def _update_mode_summary(self, *_args) -> None:
         mode_number = self.mode_combo.currentData()
