@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from .model import StructuralModel
+from .result_catalog import result_choices_for_analysis
+from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 def _strict_bool(value: object, label: str) -> bool:
@@ -25,8 +27,6 @@ def _strict_bool(value: object, label: str) -> bool:
         if normalized in {"false", "0", "no", "off"}:
             return False
     raise ValueError(f"{label} must be a boolean.")
-from .result_catalog import result_choices_for_analysis
-from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
 PROJECT_FORMAT = "openseespy-studio"
