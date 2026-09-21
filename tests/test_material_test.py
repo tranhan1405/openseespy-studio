@@ -128,3 +128,46 @@ def test_frp_material_test_requires_safe_n_mm_mpa_project_units():
         assert "mm - N - s" in str(exc)
     else:
         raise AssertionError("Expected unsafe FRP project units to be rejected")
+
+
+def test_new_steel_materials_get_cyclic_material_test_defaults():
+    for tag, material_type in enumerate(
+        ("Hardening", "ElasticPP", "ElasticBilin"),
+        start=20,
+    ):
+        spec = default_material_test_spec(_material(tag, material_type))
+        assert spec.protocol == "symmetric_cyclic"
+        assert spec.amplitude >= 0.01
+
+
+def test_hysteretic_smooth_gets_cyclic_material_test_default():
+    spec = default_material_test_spec(_material(30, "HystereticSmooth"))
+
+    assert spec.protocol == "symmetric_cyclic"
+    assert spec.amplitude > 0.0
+
+
+def test_hardening_material_test_uses_stress_strain_axes():
+    from openseespy_studio.material_test import material_test_axis_labels
+
+    material = _material(31, "Hardening")
+    x_label, y_label = material_test_axis_labels(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+
+    assert x_label == "Strain"
+    assert y_label == "Stress [MPa]"
+
+
+def test_hardening_material_test_script_uses_real_constitutive_command():
+    material = _material(32, "Hardening")
+    spec = default_material_test_spec(material)
+    script = build_material_test_script(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+        spec,
+    )
+
+    assert "ops.uniaxialMaterial('Hardening', 32," in script
+    assert "ops.testUniaxialMaterial(32)" in script
