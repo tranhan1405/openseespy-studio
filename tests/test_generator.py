@@ -344,3 +344,63 @@ def test_generator_rejects_prescribed_displacement_as_static_dc_driver():
             analyses=analyses,
             active_analysis_tag=1,
         )
+
+
+def test_generator_rejects_control_dof_above_model_ndf():
+    model = StructuralModel("ndf-control-dof", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    analysis = AnalysisSettingsData(
+        10,
+        "Invalid model-aware control DOF",
+        "Static",
+        control_dof=5,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"control DOF 5 .* model ndf=3",
+    ):
+        to_openseespy(
+            model,
+            analyses={10: analysis},
+            active_analysis_tag=10,
+        )
+
+
+def test_generator_accepts_control_dof_within_model_ndf():
+    model = StructuralModel("valid-control-dof", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    analysis = AnalysisSettingsData(
+        11,
+        "Valid model-aware control DOF",
+        "Static",
+        control_dof=3,
+    )
+
+    code = to_openseespy(
+        model,
+        analyses={11: analysis},
+        active_analysis_tag=11,
+    )
+
+    assert "'control_dof': 3" in code
+
+
+def test_generator_does_not_apply_control_dof_ndf_preflight_to_modal():
+    model = StructuralModel("modal-control-dof", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0)
+    analysis = AnalysisSettingsData(
+        12,
+        "Modal ignores control DOF",
+        "Modal",
+        num_modes=1,
+        control_dof=6,
+    )
+
+    code = to_openseespy(
+        model,
+        analyses={12: analysis},
+        active_analysis_tag=12,
+    )
+
+    assert "ops.eigen('-genBandArpack', 1)" in code

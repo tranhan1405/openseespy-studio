@@ -2438,6 +2438,17 @@ def to_openseespy(
             + ", ".join(map(str, missing_deferred))
         )
 
+    if (
+        active_analysis is not None
+        and active_analysis.analysis_type != "Modal"
+        and not (1 <= int(active_analysis.control_dof) <= int(model.ndf))
+    ):
+        raise ValueError(
+            "Analysis control DOF "
+            f"{active_analysis.control_dof} is incompatible with "
+            f"model ndf={model.ndf}; choose a DOF from 1 to {model.ndf}."
+        )
+
     lines: list[str] = [
         "import json",
         "import math",
