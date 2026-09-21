@@ -73,7 +73,7 @@ when it can be traced to a specific source and parameter-evidence location.
 Journal references require a DOI. Unsupported or merely "commonly used"
 values are not silently promoted to verified presets.
 
-The library currently contains **170 verified parameter records**:
+The library currently contains **175 verified parameter records**:
 
 - 2 Steel02 Grade-60 reinforcing-steel records from Carreño et al. (2020),
   DOI `10.1061/(ASCE)ST.1943-541X.0002505`.
@@ -122,8 +122,14 @@ The library currently contains **170 verified parameter records**:
   Hung and El-Tawil (2009), DOI `10.1002/eqe.921`.
 - 1 Concrete04 beam-column concrete record from Yigitbas, Grande and
   Imbimbo (2026), DOI `10.65102/is202545`.
+- 3 calibrated Fatigue wrapper records for 6082-T6, 6063-T6 and 6060-T5
+  aluminium alloys from Georgantzia, Vardanega and Kashani (2025), DOI
+  `10.1007/s10518-025-02097-x`.
+- 2 slenderness-dependent Fatigue wrapper records for vertical reinforcing
+  bars (L/D = 5 and 12.5) from Zhang et al. (2025), DOI
+  `10.1007/s10518-025-02131-y`.
 
-These are **published/calibrated parameter records**, not 170 unrelated
+These are **published/calibrated parameter records**, not 175 unrelated
 chemical materials. SARE exposes specimen/configuration, modelling
 representation, applicability and limitations so a paper-specific parameter
 set is not mistaken for a universal material-grade default.
@@ -144,7 +150,10 @@ copied into the project and written as comments when OpenSeesPy source is
 exported.
 
 Use **Material Library... → Insert into Project** to create a new project
-material directly. The regular **New/Edit Material** dialog also provides
+material directly. Verified wrapper presets such as **Fatigue** require the
+user to select an existing project base material before insertion; the same
+base-material selection is preserved when a verified wrapper preset is loaded
+through the Material Editor. The regular **New/Edit Material** dialog also provides
 **Load Verified Preset...**, which loads the selected constitutive model,
 parameters and provenance into the material being edited while preserving an
 existing project's tag/name and engineering properties. If a verified
