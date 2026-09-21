@@ -67,55 +67,60 @@ Research interface workflows include:
 
 #### Verified Material Library
 
-SARE also includes a provenance-first **Material Library** inspired by
-Engineering Data workflows. The official library intentionally stays small:
-an entry is accepted only when the constitutive parameter set can be traced to
-a specific source and parameter-evidence location. Journal references require
-a DOI. Unsupported or merely "commonly used" values are not silently promoted
-to verified presets.
+SARE includes a provenance-first **Material Library** inspired by Engineering
+Data workflows. The official library accepts a constitutive parameter set only
+when it can be traced to a specific source and parameter-evidence location.
+Journal references require a DOI. Unsupported or merely "commonly used"
+values are not silently promoted to verified presets.
 
-The initial verified records are two OpenSees **Steel02** parameter sets for
-ASTM Grade 60 reinforcing steel:
+The library currently contains **100 verified parameter records**:
 
-- ASTM A615 Grade 60
-- ASTM A706 Grade 60
+- 2 Steel02 Grade-60 reinforcing-steel records from Carreño et al. (2020),
+  DOI `10.1061/(ASCE)ST.1943-541X.0002505`.
+- 50 Steel02 reinforcing-steel records from Moodley, De Risi and Afshan
+  (2026), DOI `10.1016/j.jobe.2026.115378`, covering five
+  material/diameter groups, five L/D ratios and two modelling
+  representations.
+- 12 Pinching4 grooved-fit piping-joint records from Qiu et al. (2023),
+  DOI `10.1016/j.engstruct.2023.116615`.
+- 17 Pinching4 cold-formed-steel wall records from Singh et al. (2024),
+  DOI `10.1016/j.engstruct.2024.118833`.
+- 3 Pinching4 light-frame timber connection records from Benedetti et al.
+  (2022), DOI `10.3390/buildings12070981`.
+- 4 Pinching4 modular CLT connection records from Bhandari et al. (2023),
+  DOI `10.1016/j.engstruct.2023.116846`.
+- 6 Pinching4 five-story CLT connection records from Benedetti et al.
+  (2025), DOI `10.3390/buildings15050727`.
+- 6 Pinching4 seismic sway-brace records from Shang et al. (2022),
+  DOI `10.1016/j.jobe.2022.104826`.
 
-The library now also includes **50 additional exact Steel02 parameter sets**
-from Moodley, De Risi and Afshan (2026), covering five tested rebar
-material/diameter groups (EN 1.4301 cold-rolled 12 mm, EN 1.4301 hot-rolled
-12 mm, EN 1.4482 hot-rolled 16 mm, B500C 12 mm and B500C 16 mm), five
-rebar slenderness ratios (L/D = 5, 8, 10, 12 and 15), and two OpenSees
-rebar representations (truss/fibre-oriented and beam-column/continuum-
-oriented). Source: *Journal of Building Engineering* 121, 115378,
-DOI `10.1016/j.jobe.2026.115378`. Exact Steel02 calibration values are taken
-from Appendix B Tables B.1 and B.4; E values are from Table 4; cR1, cR2,
-a2 and a4 follow the constants explicitly retained in Section 4.2.1.
+These are **published/calibrated parameter records**, not 100 unrelated
+chemical materials. SARE exposes specimen/configuration, modelling
+representation, applicability and limitations so a paper-specific parameter
+set is not mistaken for a universal material-grade default.
 
-These are 50 distinct **published parameter sets**, not 50 unrelated chemical
-materials. SARE exposes their diameter, L/D and modelling representation in
-the preset name/applicability so users do not mistake them for generic grade
-defaults.
+For response-based models such as Pinching4, the library also records the
+physical response context and source units. Force-displacement records are
+stored internally in N/m-based SI quantities, while moment-rotation records
+are stored in N·m/rad. SARE converts these values to the active project unit
+system when displaying, editing and generating OpenSeesPy. Legacy/manual
+Pinching4 definitions without response metadata retain their previous raw
+behavior for backward compatibility.
 
-The peer-reviewed source is Carreño, Lotfizadeh, Conte and Restrepo (2020),
-*Material Model Parameters for the Giuffrè-Menegotto-Pinto Uniaxial Steel
-Stress-Strain Model*, *Journal of Structural Engineering*, 146(2), 04019205,
-DOI `10.1061/(ASCE)ST.1943-541X.0002505`. Exact values are linked to the
-corresponding parameter evidence in Carreño's UC San Diego dissertation,
-Chapter 3, Table 3.12.
-
-Library records store the material/grade, constitutive model, full parameter
-set, applicability, limitations, primary citation, DOI and exact evidence
-location. This provenance is copied into the project and written as comments
-when OpenSeesPy source is exported.
+Library records store the material/grade, constitutive model, complete
+parameter set, applicability, limitations, primary citation, DOI, exact
+evidence location, response quantity and published units. This provenance is
+copied into the project and written as comments when OpenSeesPy source is
+exported.
 
 Use **Material Library... → Insert into Project** to create a new project
 material directly. The regular **New/Edit Material** dialog also provides
 **Load Verified Preset...**, which loads the selected constitutive model,
 parameters and provenance into the material being edited while preserving an
-existing project's tag/name and engineering properties. If a verified constitutive parameter is
-edited, SARE changes the project material status to
-`modified_from_verified` rather than continuing to present it as the unchanged
-published set.
+existing project's tag/name and engineering properties. If a verified
+constitutive parameter is edited, SARE changes the project material status to
+`modified_from_verified` rather than continuing to present it as the
+unchanged published set.
 
 Density, Poisson ratio, or other engineering defaults are not automatically
 claimed as verified by a constitutive-model paper unless the library record
