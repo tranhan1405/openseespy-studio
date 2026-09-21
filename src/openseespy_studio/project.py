@@ -2358,7 +2358,7 @@ class ProjectDatabase:
             visit(tag)
 
     def materials_using_material(self, material_tag: int) -> list[int]:
-        target = int(material_tag)
+        target = _strict_int(material_tag, "Material tag")
         return sorted(
             material.tag
             for material in self.materials.values()
@@ -2375,7 +2375,10 @@ class ProjectDatabase:
         self.materials[material.tag] = material
 
     def update_material(self, original_tag: int, material: MaterialData) -> None:
-        original_tag = int(original_tag)
+        original_tag = _strict_int(
+            original_tag,
+            "Material original tag",
+        )
         if original_tag not in self.materials:
             raise ValueError(f"Material tag {original_tag} does not exist.")
         if material.tag != original_tag and material.tag in self.materials:
@@ -2464,7 +2467,7 @@ class ProjectDatabase:
                     recorder.material_tag = material.tag
 
     def remove_material(self, tag: int) -> None:
-        tag = int(tag)
+        tag = _strict_int(tag, "Material tag")
         dependent_materials = self.materials_using_material(tag)
         dependent_sections = self.sections_using_material(tag)
         dependent_trusses = sorted(
@@ -2532,7 +2535,10 @@ class ProjectDatabase:
         self.sections[section.tag] = section
 
     def update_section(self, original_tag: int, section: SectionData) -> None:
-        original_tag = int(original_tag)
+        original_tag = _strict_int(
+            original_tag,
+            "Section original tag",
+        )
         if original_tag not in self.sections:
             raise ValueError(f"Section tag {original_tag} does not exist.")
         if section.tag != original_tag and section.tag in self.sections:
@@ -2608,7 +2614,7 @@ class ProjectDatabase:
                     connection.generated_section_tag = section.tag
 
     def connections_using_section(self, section_tag: int) -> list[int]:
-        target = int(section_tag)
+        target = _strict_int(section_tag, "Section tag")
         return sorted(
             connection.tag
             for connection in self.connections.values()
@@ -2619,7 +2625,7 @@ class ProjectDatabase:
         )
 
     def remove_section(self, tag: int) -> None:
-        tag = int(tag)
+        tag = _strict_int(tag, "Section tag")
         element_users = sorted(
             element.tag
             for element in self.model.elements.values()
@@ -2686,7 +2692,7 @@ class ProjectDatabase:
             )
 
     def sections_using_material(self, material_tag: int) -> list[int]:
-        material_tag = int(material_tag)
+        material_tag = _strict_int(material_tag, "Material tag")
         return sorted(
             section.tag
             for section in self.sections.values()
@@ -2772,7 +2778,10 @@ class ProjectDatabase:
         original_tag: int,
         transformation: TransformationData,
     ) -> None:
-        original_tag = int(original_tag)
+        original_tag = _strict_int(
+            original_tag,
+            "Transformation original tag",
+        )
         if original_tag not in self.transformations:
             raise ValueError(
                 f"Transformation tag {original_tag} does not exist."
@@ -2798,7 +2807,7 @@ class ProjectDatabase:
                     element.transf_tag = transformation.tag
 
     def remove_transformation(self, tag: int) -> None:
-        tag = int(tag)
+        tag = _strict_int(tag, "Transformation tag")
         element_users = sorted(
             element.tag
             for element in self.model.elements.values()
@@ -3563,7 +3572,10 @@ class ProjectDatabase:
         return sorted(set(updated))
 
     def create_ground_node(self, source_node_tag: int) -> int:
-        source_node_tag = int(source_node_tag)
+        source_node_tag = _strict_int(
+            source_node_tag,
+            "Source node tag",
+        )
         source = self.model.nodes.get(source_node_tag)
         if source is None:
             raise ValueError(
@@ -3575,7 +3587,7 @@ class ProjectDatabase:
         return tag
 
     def connections_using_material(self, material_tag: int) -> list[int]:
-        material_tag = int(material_tag)
+        material_tag = _strict_int(material_tag, "Material tag")
         return sorted(
             connection.tag
             for connection in self.connections.values()
@@ -3603,7 +3615,7 @@ class ProjectDatabase:
 
     def validate_node_state(self, node_tag: int) -> None:
         """Validate cross-object constraints after an in-place node edit."""
-        node_tag = int(node_tag)
+        node_tag = _strict_int(node_tag, "Node tag")
         node = self.model.nodes.get(node_tag)
         if node is None:
             raise ValueError(f"Node {node_tag} does not exist.")
@@ -3656,7 +3668,7 @@ class ProjectDatabase:
 
     def validate_element_state(self, element_tag: int) -> None:
         """Validate objects whose semantics depend on an edited element."""
-        element_tag = int(element_tag)
+        element_tag = _strict_int(element_tag, "Element tag")
         if element_tag not in self.model.elements:
             raise ValueError(f"Element {element_tag} does not exist.")
 
@@ -3701,11 +3713,11 @@ class ProjectDatabase:
         element_tags: Iterable[int],
         mutator,
     ) -> set[int]:
-        tags = {
-            int(tag)
-            for tag in element_tags
-            if int(tag) in self.model.elements
-        }
+        tags: set[int] = set()
+        for tag in element_tags:
+            normalized_tag = _strict_int(tag, "Element tag")
+            if normalized_tag in self.model.elements:
+                tags.add(normalized_tag)
         snapshots = {
             tag: deepcopy(self.model.elements[tag])
             for tag in tags
@@ -3741,7 +3753,11 @@ class ProjectDatabase:
         element_tags: Iterable[int],
         section_tag: int | None,
     ) -> set[int]:
-        value = None if section_tag is None else int(section_tag)
+        value = (
+            None
+            if section_tag is None
+            else _strict_int(section_tag, "Section tag")
+        )
         if value is not None and value not in self.sections:
             raise ValueError(f"Section {value} does not exist.")
         return self._mutate_elements_transactionally(
@@ -3757,7 +3773,10 @@ class ProjectDatabase:
         value = (
             None
             if transformation_tag is None
-            else int(transformation_tag)
+            else _strict_int(
+                transformation_tag,
+                "Transformation tag",
+            )
         )
         if value is not None and value not in self.transformations:
             raise ValueError(
@@ -3775,8 +3794,14 @@ class ProjectDatabase:
         element_tags: Iterable[int] = (),
         cascade_nodes: bool = True,
     ) -> None:
-        node_tags = {int(tag) for tag in node_tags}
-        element_tags = {int(tag) for tag in element_tags}
+        node_tags = {
+            _strict_int(tag, "Node tag")
+            for tag in node_tags
+        }
+        element_tags = {
+            _strict_int(tag, "Element tag")
+            for tag in element_tags
+        }
 
         control_users = sorted(
             analysis.tag
@@ -5044,7 +5069,7 @@ class ProjectDatabase:
             self.active_analysis_tag=min(self.analyses,default=None)
 
     def set_active_analysis(self, tag:int) -> None:
-        tag=int(tag)
+        tag = _strict_int(tag, "Analysis tag")
         if tag not in self.analyses: raise ValueError(f"Analysis tag {tag} does not exist.")
         self.active_analysis_tag=tag
 
@@ -5225,7 +5250,10 @@ class ProjectDatabase:
         original_tag: int,
         result: SolutionResultData,
     ) -> None:
-        original_tag = int(original_tag)
+        original_tag = _strict_int(
+            original_tag,
+            "Solution result original tag",
+        )
         if original_tag not in self.solution_results:
             raise ValueError(
                 f"Solution result tag {original_tag} does not exist."
