@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "openseespy-studio"
 version = "0.2.0a1"
-description = "GUI pre/post processor for OpenSeesPy"
+description = "SARE - Structural Analysis & Research Environment for OpenSees"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 authors = [{name = "Tran-Van Han"}]
@@ -26,6 +26,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 openseespy_studio = [
   "resources/icons/*.svg",
+  "resources/branding/*.svg",
   "resources/ground_motions/*.at2",
   "resources/ground_motions/*.json",
   "resources/ground_motions/*.txt",
