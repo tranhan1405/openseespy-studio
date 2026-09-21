@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .model import StructuralModel
@@ -286,9 +287,23 @@ class _Importer:
         source: str,
         source_name: str,
         units: dict[str, str] | None,
+        source_path: str | Path | None = None,
     ):
         self.source = str(source)
         self.source_name = str(source_name)
+        self.source_path = (
+            Path(source_path).resolve()
+            if source_path is not None
+            else None
+        )
+        self.source_dir = (
+            self.source_path.parent
+            if self.source_path is not None
+            else None
+        )
+        self._imported_local_modules: set[Path] = set()
+        if self.source_path is not None:
+            self._imported_local_modules.add(self.source_path)
         self.units = UnitSystem.from_mapping(units)
         stem = self.source_name.rsplit(".", 1)[0] or "Imported"
         self.project = ProjectDatabase(
@@ -1312,8 +1327,14 @@ class _Importer:
     def analysis_command(self, command: str, args: list[Any]) -> None:
         if command == "wipeAnalysis":
             self.analysis_state.clear()
-        elif command in {"constraints", "numberer", "system", "algorithm"} and args:
+        elif command in {"constraints", "numberer", "system"} and args:
             self.analysis_state[command] = str(args[0])
+        elif command == "algorithm" and args:
+            self.analysis_state["algorithm"] = str(args[0])
+            self.analysis_state["algorithm_initial"] = (
+                str(args[0]) == "ModifiedNewton"
+                and "-initial" in args[1:]
+            )
         elif command == "test" and args:
             self.analysis_state["test"] = str(args[0])
             if len(args) > 1:
@@ -1554,6 +1575,167 @@ class _Importer:
             return
         raise _Unresolved("assignment target")
 
+    def _import_local_module(
+        self,
+        module_name: str,
+        stmt: ast.Import,
+    ) -> bool:
+        """Safely inline a sibling Python module for OpenSees side effects."""
+        if (
+            self.source_dir is None
+            or not module_name
+            or "." in module_name
+            or not module_name.isidentifier()
+        ):
+            return False
+
+        candidate = (self.source_dir / f"{module_name}.py").resolve()
+        if candidate.parent != self.source_dir or not candidate.is_file():
+            return False
+        if candidate in self._imported_local_modules:
+            return True
+
+        try:
+            module_source = candidate.read_text(encoding="utf-8")
+            module_tree = ast.parse(
+                module_source,
+                filename=str(candidate),
+            )
+        except (OSError, UnicodeError, SyntaxError) as exc:
+            self.issue(
+                "WARNING",
+                stmt,
+                f"import {module_name}",
+                f"Could not safely read sibling module {candidate.name}: {exc}",
+            )
+            return True
+
+        self._imported_local_modules.add(candidate)
+        saved_env = dict(self.env)
+        saved_functions = dict(self.functions)
+        saved_direct_ops = self.direct_ops
+        saved_source_name = self.source_name
+        self.env["__name__"] = module_name
+        self.source_name = candidate.name
+        try:
+            for child in module_tree.body:
+                self.statement(child)
+        finally:
+            self.env.clear()
+            self.env.update(saved_env)
+            self.functions.clear()
+            self.functions.update(saved_functions)
+            self.direct_ops = saved_direct_ops
+            self.source_name = saved_source_name
+
+        self.count("Local modules")
+        return True
+
+    def _recognize_pushover_while(self, stmt: ast.While) -> bool:
+        """Recognize common OpenSees displacement-control pushover loops."""
+        if self.analysis_state.get("integrator") != "DisplacementControl":
+            return False
+
+        displacement_name: str | None = None
+        control_node: int | None = None
+        control_dof: int | None = None
+        runtime_targets: set[str] = set()
+
+        for child in ast.walk(stmt):
+            if not isinstance(child, ast.Assign):
+                continue
+            if not isinstance(child.value, ast.Call):
+                continue
+            runtime_name = self._runtime_call_name(child.value)
+            if runtime_name == "nodeDisp":
+                args = self.call_args(child.value)
+                if len(args) >= 2:
+                    for target in child.targets:
+                        if isinstance(target, ast.Name):
+                            displacement_name = target.id
+                            runtime_targets.add(target.id)
+                            control_node = int(args[0])
+                            control_dof = int(args[1])
+            if self.command_name(child.value) == "analyze":
+                for target in child.targets:
+                    if isinstance(target, ast.Name):
+                        runtime_targets.add(target.id)
+
+        if (
+            displacement_name is None
+            or control_node is None
+            or control_dof is None
+        ):
+            return False
+
+        has_analyze = any(
+            isinstance(child, ast.Call)
+            and self.command_name(child) == "analyze"
+            for child in ast.walk(stmt)
+        )
+        if not has_analyze:
+            return False
+
+        limit: float | None = None
+        for child in ast.walk(stmt.test):
+            if not isinstance(child, ast.Compare):
+                continue
+            if (
+                isinstance(child.left, ast.Name)
+                and child.left.id == displacement_name
+                and len(child.ops) == 1
+                and isinstance(child.ops[0], (ast.Lt, ast.LtE))
+                and len(child.comparators) == 1
+            ):
+                try:
+                    limit = float(self.eval.eval(child.comparators[0]))
+                except (TypeError, ValueError, _Unresolved):
+                    limit = None
+                if limit is not None:
+                    break
+
+        values = list(self.analysis_state.get("integrator_args", []))
+        if len(values) < 3 or limit is None:
+            return False
+        increment = float(values[2])
+        if abs(increment) <= 1.0e-30:
+            return False
+
+        current = float(self.env.get(displacement_name, 0.0) or 0.0)
+        travel = limit - current
+        if travel * increment <= 0.0:
+            return False
+        steps = max(
+            1,
+            int(math.ceil(abs(travel / increment) - 1.0e-12)),
+        )
+
+        self.analysis_state.update({
+            "recognized_pushover": True,
+            "steps": steps,
+            "control_node": control_node,
+            "control_dof": control_dof,
+            "displacement_increment": increment,
+            "pushover_max_displacement": limit,
+            "recovery": False,
+        })
+        self.runtime_only_names.update(runtime_targets)
+        self.analysis_events.append({
+            "steps": steps,
+            "dt": None,
+            "integrator": "DisplacementControl",
+            "integrator_args": list(values),
+            "analysis_kind": self.analysis_state.get(
+                "analysis_kind",
+                "Static",
+            ),
+            "pattern_tags": sorted(self.project.load_patterns),
+            "current_pattern": self.current_pattern,
+            "recognized_pushover": True,
+        })
+        self.count("Pushover drivers")
+        return True
+
     def _statement_budget_available(self, stmt: ast.stmt) -> bool:
         if self._statement_steps >= self.MAX_STATEMENT_STEPS:
             if self._statement_steps == self.MAX_STATEMENT_STEPS:
@@ -1576,6 +1758,8 @@ class _Importer:
             for alias in stmt.names:
                 if alias.name == "openseespy.opensees":
                     self.ops_aliases.add(alias.asname or "ops")
+                    continue
+                self._import_local_module(alias.name, stmt)
             return
 
         if isinstance(stmt, ast.ImportFrom):
@@ -1848,7 +2032,20 @@ class _Importer:
                 )
             return
 
-        if isinstance(stmt, (ast.Try, ast.While, ast.With)):
+        if isinstance(stmt, ast.While):
+            if self._recognize_pushover_while(stmt):
+                return
+            if not self._studio_source:
+                self.issue(
+                    "UNSUPPORTED",
+                    stmt,
+                    "While",
+                    "This while loop is not a recognized bounded OpenSees "
+                    "analysis driver and was not executed.",
+                )
+            return
+
+        if isinstance(stmt, (ast.Try, ast.With)):
             if not self._studio_source:
                 self.issue(
                     "UNSUPPORTED",
@@ -1891,7 +2088,9 @@ class _Importer:
 
         analysis_type = str(meta.get("type", ""))
         if not analysis_type:
-            if state.get("modal"):
+            if state.get("recognized_pushover"):
+                analysis_type = "Pushover"
+            elif state.get("modal"):
                 analysis_type = "Modal"
             elif state.get("analysis_kind") == "Transient":
                 analysis_type = "Transient"
@@ -1935,6 +2134,12 @@ class _Importer:
             "algorithm": str(
                 meta.get("algorithm", state.get("algorithm", "Newton"))
             ),
+            "algorithm_initial": bool(
+                meta.get(
+                    "algorithm_initial",
+                    state.get("algorithm_initial", False),
+                )
+            ),
             "steps": max(
                 1,
                 int(meta.get("steps", state.get("steps", 1)) or 1),
@@ -1943,13 +2148,25 @@ class _Importer:
             "control_node": int(
                 meta.get(
                     "control_node",
-                    min(self.project.model.nodes, default=1),
+                    state.get(
+                        "control_node",
+                        min(self.project.model.nodes, default=1),
+                    ),
                 )
                 or 1
             ),
-            "control_dof": int(meta.get("control_dof", 1) or 1),
+            "control_dof": int(
+                meta.get(
+                    "control_dof",
+                    state.get("control_dof", 1),
+                )
+                or 1
+            ),
             "displacement_increment": float(
-                meta.get("displacement_increment", 0.001)
+                meta.get(
+                    "displacement_increment",
+                    state.get("displacement_increment", 0.001),
+                )
             ),
             "cyclic_increment": float(meta.get("cyclic_increment", 0.001)),
             "dt": float(meta.get("dt", state.get("dt", 0.01)) or 0.01),
@@ -1986,7 +2203,9 @@ class _Importer:
                     state.get("eigen_solver", "-genBandArpack"),
                 )
             ),
-            "recovery": bool(meta.get("recovery", True)),
+            "recovery": bool(
+                meta.get("recovery", state.get("recovery", True))
+            ),
             "adaptive_step": bool(meta.get("adaptive_step", False)),
             "adaptive_cutback_factor": float(
                 meta.get("adaptive_cutback_factor", 0.5)
@@ -2081,6 +2300,17 @@ def import_openseespy_source(
     *,
     source_name: str = "imported.py",
     units: dict[str, str] | None = None,
+    source_path: str | Path | None = None,
 ) -> OpenSeesImportResult:
-    """Parse OpenSeesPy source without executing arbitrary Python."""
-    return _Importer(source, source_name, units).run()
+    """Parse OpenSeesPy source without executing arbitrary Python.
+
+    With source_path, simple sibling-module imports may be reconstructed from
+    Python files in the same directory. They are parsed by the same restricted
+    AST interpreter and are never executed through exec.
+    """
+    return _Importer(
+        source,
+        source_name,
+        units,
+        source_path=source_path,
+    ).run()
