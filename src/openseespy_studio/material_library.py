@@ -158,14 +158,14 @@ def _record_from_dict(raw: dict[str, Any]) -> MaterialLibraryRecord:
             raw.get("source_units", {})
         ).items()
     }
-    if model == "Pinching4":
+    if model in {"Pinching4", "Hysteretic"}:
         if response_quantity not in {
             "force_displacement",
             "moment_rotation",
             "stress_strain",
         }:
             raise ValueError(
-                f"Verified Pinching4 record {record_id!r} must declare "
+                f"Verified {model} record {record_id!r} must declare "
                 "response_quantity."
             )
         if (
@@ -173,7 +173,7 @@ def _record_from_dict(raw: dict[str, Any]) -> MaterialLibraryRecord:
             or not source_units.get("deformation", "").strip()
         ):
             raise ValueError(
-                f"Verified Pinching4 record {record_id!r} must declare "
+                f"Verified {model} record {record_id!r} must declare "
                 "source response/deformation units."
             )
 
