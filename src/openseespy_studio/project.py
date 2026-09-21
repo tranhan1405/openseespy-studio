@@ -2162,13 +2162,18 @@ class ProjectDatabase:
             for connection in self.connections.values():
                 if connection.section_tag == original_tag:
                     connection.section_tag = section.tag
+                if connection.generated_section_tag == original_tag:
+                    connection.generated_section_tag = section.tag
 
     def connections_using_section(self, section_tag: int) -> list[int]:
         target = int(section_tag)
         return sorted(
             connection.tag
             for connection in self.connections.values()
-            if connection.section_tag == target
+            if (
+                connection.section_tag == target
+                or connection.generated_section_tag == target
+            )
         )
 
     def remove_section(self, tag: int) -> None:
@@ -2750,9 +2755,17 @@ class ProjectDatabase:
         self._validate_constraint_control_conflicts(constraint)
         self.constraints.pop(original_tag)
         self.constraints[constraint.tag] = constraint
+        if constraint.tag != original_tag:
+            for connection in self.connections.values():
+                if connection.generated_constraint_tag == original_tag:
+                    connection.generated_constraint_tag = constraint.tag
 
     def remove_constraint(self, tag: int) -> None:
-        self.constraints.pop(int(tag), None)
+        tag = int(tag)
+        self.constraints.pop(tag, None)
+        for connection in self.connections.values():
+            if connection.generated_constraint_tag == tag:
+                connection.generated_constraint_tag = None
 
     def prune_constraints(self) -> list[int]:
         removed: list[int] = []
@@ -2771,6 +2784,11 @@ class ProjectDatabase:
             if not constraint.constrained_nodes:
                 self.constraints.pop(tag)
                 removed.append(tag)
+        if removed:
+            removed_set = set(removed)
+            for connection in self.connections.values():
+                if connection.generated_constraint_tag in removed_set:
+                    connection.generated_constraint_tag = None
         return sorted(removed)
 
     def next_connection_tag(self) -> int:
