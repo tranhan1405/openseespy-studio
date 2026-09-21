@@ -1420,6 +1420,111 @@ def column_cyclic_cycle_metrics(
 
 
 
+
+def section_response_curve(
+    result: dict[str, Any] | None,
+    *,
+    element_tag: int | None = None,
+    section_number: int | None = None,
+    component: str | None = None,
+    request_tag: int | None = None,
+) -> tuple[list[float], list[float], dict[str, Any]]:
+    """Return one semantic section force-deformation history.
+
+    Explicit SectionResponse requests and the automatic classic moment-
+    curvature workflow use the same storage schema. Selection is semantic,
+    not based on caller knowledge of raw OpenSees vector indices.
+    """
+    if not isinstance(result, dict):
+        return [], [], {}
+    specs = result.get("section_responses", {})
+    history = result.get("history", {})
+    responses = (
+        history.get("section_responses", {})
+        if isinstance(history, dict)
+        else {}
+    )
+    if not isinstance(specs, dict) or not isinstance(responses, dict):
+        return [], [], {}
+
+    candidates: list[tuple[str, dict[str, Any]]] = []
+    for key, raw_spec in specs.items():
+        if not isinstance(raw_spec, dict):
+            continue
+        spec = dict(raw_spec)
+        try:
+            spec_element = int(spec.get("element_tag"))
+        except (TypeError, ValueError):
+            continue
+        if element_tag is not None and spec_element != int(element_tag):
+            continue
+        if section_number is not None:
+            try:
+                if int(spec.get("section_number", 1)) != int(section_number):
+                    continue
+            except (TypeError, ValueError):
+                continue
+        if component is not None and str(spec.get("component", "")) != str(component):
+            continue
+        if request_tag is not None:
+            try:
+                if int(spec.get("request_tag")) != int(request_tag):
+                    continue
+            except (TypeError, ValueError):
+                continue
+        candidates.append((str(key), spec))
+
+    if not candidates:
+        return [], [], {}
+
+    key, spec = candidates[0]
+    response = responses.get(key, {})
+    if not isinstance(response, dict):
+        return [], [], spec
+    force_rows = response.get("force", [])
+    deformation_rows = response.get("deformation", [])
+    if not isinstance(force_rows, (list, tuple)):
+        force_rows = []
+    if not isinstance(deformation_rows, (list, tuple)):
+        deformation_rows = []
+
+    try:
+        force_index = int(spec.get("force_index", spec.get("index", 0)))
+        deformation_index = int(
+            spec.get("deformation_index", spec.get("index", 0))
+        )
+    except (TypeError, ValueError):
+        return [], [], spec
+
+    x: list[float] = []
+    y: list[float] = []
+    for force_row, deformation_row in zip(force_rows, deformation_rows):
+        if (
+            not isinstance(force_row, (list, tuple))
+            or not isinstance(deformation_row, (list, tuple))
+            or len(force_row) <= force_index
+            or len(deformation_row) <= deformation_index
+        ):
+            continue
+        try:
+            force_value = float(force_row[force_index])
+            deformation_value = float(deformation_row[deformation_index])
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(force_value) and math.isfinite(deformation_value):
+            x.append(deformation_value)
+            y.append(force_value)
+
+    if (
+        bool(spec.get("include_origin", False))
+        and x
+        and (abs(x[0]) > 1.0e-15 or abs(y[0]) > 1.0e-15)
+    ):
+        x.insert(0, 0.0)
+        y.insert(0, 0.0)
+    return x, y, spec
+
+
 def moment_curvature_curve(
     result: dict[str, Any] | None,
 ) -> tuple[list[float], list[float], str, int | None]:

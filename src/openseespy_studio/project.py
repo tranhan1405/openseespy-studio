@@ -9,6 +9,7 @@ from typing import Any
 
 from .model import StructuralModel
 from .result_catalog import result_choices_for_analysis
+from .section_response import validate_section_response_request
 from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
@@ -2199,6 +2200,8 @@ SOLUTION_RESULT_TYPES = {
     "Motion",
     "Convergence",
     "SpecimenResponse",
+    "MomentCurvature",
+    "SectionResponse",
 }
 
 
@@ -5146,6 +5149,15 @@ class ProjectDatabase:
             )
         analysis = self.analyses[result.analysis_tag]
         allowed = self._allowed_solution_result_types(analysis)
+        # MomentCurvature is retained as a backward-compatible saved-result
+        # type. New user-created section histories use SectionResponse.
+        if (
+            result.result_type == "MomentCurvature"
+            and analysis.analysis_type == "Static"
+            and analysis.integrator == "DisplacementControl"
+        ):
+            allowed = set(allowed)
+            allowed.add("MomentCurvature")
         if result.result_type not in allowed:
             raise ValueError(
                 f"Solution result type {result.result_type} is not valid for "
@@ -5223,6 +5235,25 @@ class ProjectDatabase:
                         f"ForceDisplacement setting {key}={dof} is invalid "
                         f"for ndf={self.model.ndf}."
                     )
+
+        if result.result_type == "SectionResponse":
+            if len(result.element_scope) != 1:
+                raise ValueError(
+                    "SectionResponse requires exactly one element in its "
+                    "element scope. Select one zeroLengthSection, "
+                    "forceBeamColumn, or dispBeamColumn element."
+                )
+            section_number = setting_int("section")
+            if section_number is None:
+                section_number = 1
+            component = str(result.settings.get("component", "Mz"))
+            validate_section_response_request(
+                self.model,
+                self.connections,
+                element_tag=result.element_scope[0],
+                section_number=section_number,
+                component=component,
+            )
 
         if result.result_type in {"FiberStress", "FiberStrain"}:
             section_number = setting_int("section")

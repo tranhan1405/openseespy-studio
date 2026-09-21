@@ -66,24 +66,29 @@ def test_static_and_transient_catalogs_exclude_specialized_curves():
 
 
 
-def test_static_displacement_control_exposes_moment_curvature_result():
-    dc_types = {
+def test_section_response_catalog_is_capability_gated():
+    available = {
         choice.result_type
         for choice in result_choices_for_analysis(
             "Static",
             integrator="DisplacementControl",
+            section_response_available=True,
         )
     }
-    load_types = {
+    unavailable = {
         choice.result_type
         for choice in result_choices_for_analysis(
             "Static",
-            integrator="LoadControl",
+            integrator="DisplacementControl",
+            section_response_available=False,
         )
     }
 
-    assert "MomentCurvature" in dc_types
-    assert "MomentCurvature" not in load_types
+    assert "SectionResponse" in available
+    assert "SectionResponse" not in unavailable
+    # MomentCurvature is now an automatic recognized workflow rather than
+    # a generic manual result request exposed for every Static DC analysis.
+    assert "MomentCurvature" not in available
 
 
 def test_convergence_result_label_matches_analysis_test():

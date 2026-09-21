@@ -65,6 +65,7 @@ from ..postprocess import (
     fiber_state_sections,
     force_displacement_curve,
     moment_curvature_curve,
+    section_response_curve,
     pushover_capacity_curve,
     time_history_node_tags,
     time_history_series,
@@ -971,6 +972,7 @@ class ResultsPanel(QWidget):
         self._build_fiber_tab()
         self._build_hinge_tab()
         self._build_force_displacement_tab()
+        self._build_section_response_tab()
         self._build_moment_curvature_tab()
         self._build_pushover_tab()
         self._build_cyclic_tab()
@@ -1170,6 +1172,10 @@ class ResultsPanel(QWidget):
 
             self._update_force_displacement_controls()
             self._select_tab("Force–Displacement")
+            return
+        if kind == "SectionResponse":
+            self._select_section_response(options)
+            self._select_tab("Section Response")
             return
         if kind == "MomentCurvature":
             self._select_tab("Moment–Curvature")
@@ -1892,6 +1898,228 @@ class ResultsPanel(QWidget):
         layout.addWidget(self.force_disp_plot, 1)
         self.tabs.addTab(page, "Force–Displacement")
         self._update_force_displacement_controls()
+
+    def _build_section_response_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(5)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Section source:"))
+        self.section_response_source = QComboBox()
+        self.section_response_source.currentIndexChanged.connect(
+            self._update_section_response_plot
+        )
+        controls.addWidget(self.section_response_source, 1)
+
+        export = QPushButton("Export CSV")
+        export.clicked.connect(self._export_section_response_csv)
+        controls.addWidget(export)
+        layout.addLayout(controls)
+
+        self.section_response_info = QLabel(
+            "Create a Section Response result request for a "
+            "zeroLengthSection or nonlinear beam-column section/IP."
+        )
+        self.section_response_info.setWordWrap(True)
+        layout.addWidget(self.section_response_info)
+
+        self.section_response_metrics = QLabel(
+            "Points: -   Peak |Y|: -   Peak |X|: -   Final: -"
+        )
+        self.section_response_metrics.setWordWrap(True)
+        layout.addWidget(self.section_response_metrics)
+
+        self.section_response_plot = TimeHistoryPlot(
+            empty_message="No section-response data"
+        )
+        layout.addWidget(self.section_response_plot, 1)
+        self.tabs.addTab(page, "Section Response")
+
+    def _populate_section_response_sources(self) -> None:
+        previous = self.section_response_source.currentData()
+        self.section_response_source.blockSignals(True)
+        self.section_response_source.clear()
+        specs = self._result.get("section_responses", {})
+        if isinstance(specs, dict):
+            for key, raw_spec in specs.items():
+                if not isinstance(raw_spec, dict):
+                    continue
+                spec = dict(raw_spec)
+                element_tag = spec.get("element_tag", "-")
+                element_kind = str(spec.get("element_kind", "section"))
+                section_number = spec.get("section_number", 1)
+                pair_label = str(
+                    spec.get(
+                        "pair_label",
+                        spec.get("component", "Section response"),
+                    )
+                )
+                location = (
+                    f" · IP {section_number}"
+                    if spec.get("query_mode") == "indexed"
+                    else ""
+                )
+                automatic = " · auto" if spec.get("automatic") else ""
+                self.section_response_source.addItem(
+                    f"{element_kind} {element_tag}{location} · "
+                    f"{pair_label}{automatic}",
+                    str(key),
+                )
+        if previous is not None:
+            index = self.section_response_source.findData(previous)
+            if index >= 0:
+                self.section_response_source.setCurrentIndex(index)
+        self.section_response_source.blockSignals(False)
+        self._update_section_response_plot()
+
+    def _select_section_response(
+        self,
+        options: dict[str, Any],
+    ) -> None:
+        element_scope = options.get("_element_scope", [])
+        element_tag = None
+        if isinstance(element_scope, (list, tuple)) and element_scope:
+            try:
+                element_tag = int(element_scope[0])
+            except (TypeError, ValueError):
+                element_tag = None
+        try:
+            section_number = int(options.get("section", 1))
+        except (TypeError, ValueError):
+            section_number = 1
+        component = str(options.get("component", "Mz"))
+
+        specs = self._result.get("section_responses", {})
+        if not isinstance(specs, dict):
+            return
+        for key, raw_spec in specs.items():
+            if not isinstance(raw_spec, dict):
+                continue
+            try:
+                same_element = (
+                    element_tag is None
+                    or int(raw_spec.get("element_tag")) == element_tag
+                )
+                same_section = (
+                    int(raw_spec.get("section_number", 1))
+                    == section_number
+                )
+            except (TypeError, ValueError):
+                continue
+            if (
+                same_element
+                and same_section
+                and str(raw_spec.get("component", "")) == component
+            ):
+                index = self.section_response_source.findData(str(key))
+                if index >= 0:
+                    self.section_response_source.setCurrentIndex(index)
+                return
+
+    def _current_section_response(
+        self,
+    ) -> tuple[list[float], list[float], dict[str, Any]]:
+        key = self.section_response_source.currentData()
+        specs = self._result.get("section_responses", {})
+        if key is None or not isinstance(specs, dict):
+            return [], [], {}
+        raw_spec = specs.get(str(key), {})
+        if not isinstance(raw_spec, dict):
+            return [], [], {}
+        spec = dict(raw_spec)
+        try:
+            return section_response_curve(
+                self._result,
+                element_tag=int(spec.get("element_tag")),
+                section_number=int(spec.get("section_number", 1)),
+                component=str(spec.get("component", "")),
+            )
+        except (TypeError, ValueError):
+            return [], [], spec
+
+    def _update_section_response_plot(self) -> None:
+        x, y, spec = self._current_section_response()
+        if not x or not y:
+            if self.section_response_source.count():
+                self.section_response_info.setText(
+                    "Section response was requested, but no complete "
+                    "force/deformation history is available."
+                )
+            else:
+                self.section_response_info.setText(
+                    "No Section Response was requested for this analysis. "
+                    "Select one section-capable element, insert Section "
+                    "Response, then run the analysis."
+                )
+            self.section_response_metrics.setText(
+                "Points: -   Peak |Y|: -   Peak |X|: -   Final: -"
+            )
+            self.section_response_plot.set_series([], [])
+            return
+
+        element_tag = spec.get("element_tag", "-")
+        source_kind = spec.get("element_kind", "section")
+        section_number = spec.get("section_number", 1)
+        location = (
+            f" · IP {section_number}"
+            if spec.get("query_mode") == "indexed"
+            else ""
+        )
+        x_label = str(spec.get("deformation_label", "Section deformation"))
+        y_label = str(spec.get("force_label", "Section force"))
+        pair_label = str(spec.get("pair_label", "Section response"))
+        self.section_response_info.setText(
+            f"{source_kind} element {element_tag}{location} · "
+            f"{pair_label} · X = {x_label} · Y = {y_label}"
+        )
+        self.section_response_metrics.setText(
+            f"Points: {len(x)}   Peak |Y|: {max(abs(v) for v in y):.6g}   "
+            f"Peak |X|: {max(abs(v) for v in x):.6g}   "
+            f"Final: ({x[-1]:.6g}, {y[-1]:.6g})"
+        )
+        self.section_response_plot.set_series(x, y)
+
+    def _export_section_response_csv(self) -> None:
+        x, y, spec = self._current_section_response()
+        if not x or not y:
+            self.section_response_info.setText(
+                "No section-response data is available to export."
+            )
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Section Response",
+            "section_response.csv",
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+        x_label = str(spec.get("deformation_label", "Section deformation"))
+        y_label = str(spec.get("force_label", "Section force"))
+        with open(path, "w", newline="", encoding="utf-8") as stream:
+            writer = csv.writer(stream)
+            writer.writerow([
+                x_label,
+                y_label,
+                "Element",
+                "Section / IP",
+                "Component",
+            ])
+            for x_value, y_value in zip(x, y):
+                writer.writerow([
+                    x_value,
+                    y_value,
+                    spec.get("element_tag", ""),
+                    spec.get("section_number", 1),
+                    spec.get("component", ""),
+                ])
+        self.section_response_info.setText(
+            f"Exported {len(x)} section-response point(s) to {path}."
+        )
 
     def _build_moment_curvature_tab(self) -> None:
         page = QWidget()
@@ -3508,6 +3736,15 @@ class ResultsPanel(QWidget):
             "Points: -   Peak |F|: -   Peak |u|: -"
         )
         self.force_disp_plot.set_series([], [])
+        self.section_response_source.clear()
+        self.section_response_info.setText(
+            "Create a Section Response result request for a "
+            "zeroLengthSection or nonlinear beam-column section/IP."
+        )
+        self.section_response_metrics.setText(
+            "Points: -   Peak |Y|: -   Peak |X|: -   Final: -"
+        )
+        self.section_response_plot.set_series([], [])
         self.moment_curvature_info.setText(
             "Run a recognized zeroLengthSection moment-curvature workflow "
             "to plot section moment versus curvature."
@@ -4088,6 +4325,7 @@ class ResultsPanel(QWidget):
         self._populate_history_nodes()
         self._populate_force_displacement_nodes()
         self._update_force_displacement_plot()
+        self._populate_section_response_sources()
         self._update_moment_curvature_plot()
         self._update_pushover_plot()
         self._update_cyclic_plot()

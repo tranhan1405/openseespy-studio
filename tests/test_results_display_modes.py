@@ -630,3 +630,64 @@ def test_dedicated_moment_curvature_result_selects_and_populates_tab(qapp):
         panel.close()
         panel.deleteLater()
         qapp.processEvents()
+
+
+def test_generic_section_response_result_selects_requested_beam_ip(qapp):
+    panel = ResultsPanel()
+    result = {
+        "analysis": {"type": "Static", "integrator": "LoadControl"},
+        "section_responses": {
+            "request:12": {
+                "key": "request:12",
+                "kind": "section-response",
+                "request_tag": 12,
+                "element_tag": 23,
+                "element_kind": "forceBeamColumn",
+                "section_tag": 4,
+                "query_mode": "indexed",
+                "section_number": 2,
+                "component": "Mz",
+                "force_index": 1,
+                "deformation_index": 1,
+                "force_label": "Moment Mz",
+                "deformation_label": "Curvature κz",
+                "pair_label": "Mz–κz",
+                "automatic": False,
+            }
+        },
+        "history": {
+            "time": [1.0, 2.0],
+            "nodes": {},
+            "section_responses": {
+                "request:12": {
+                    "force": [[-10.0, 12.0], [-10.0, 24.0]],
+                    "deformation": [[-0.001, 0.002], [-0.002, 0.004]],
+                }
+            },
+        },
+        "final": {},
+        "convergence": {"steps": []},
+        "modes": {},
+    }
+    try:
+        panel.set_result(result)
+        panel.show_solution_result(
+            "SectionResponse",
+            {
+                "_element_scope": [23],
+                "section": 2,
+                "component": "Mz",
+            },
+        )
+        qapp.processEvents()
+
+        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Section Response"
+        assert panel.section_response_plot._x == pytest.approx([0.002, 0.004])
+        assert panel.section_response_plot._y == pytest.approx([12.0, 24.0])
+        assert "forceBeamColumn element 23" in panel.section_response_info.text()
+        assert "IP 2" in panel.section_response_info.text()
+        assert "Mz–κz" in panel.section_response_info.text()
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()

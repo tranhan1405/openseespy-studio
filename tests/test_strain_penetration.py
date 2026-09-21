@@ -468,7 +468,7 @@ def test_full_generator_captures_specimen_histories_for_active_analysis():
         units=project.units,
     )
 
-    assert "'schema_version': 11" in script
+    assert "'schema_version': 12" in script
     assert "_studio_specimen_response_spec" in script
     assert "'section_deformation': []" in script
     assert "'interface_deformation': []" in script

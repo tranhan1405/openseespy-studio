@@ -32,6 +32,7 @@ from openseespy_studio.postprocess import (
     local_end_actions,
     member_end_resultants,
     moment_curvature_curve,
+    section_response_curve,
     nodal_result_scalar,
     pushover_capacity_curve,
     section_component_samples,
@@ -1600,3 +1601,74 @@ def test_dedicated_moment_curvature_curve_uses_zero_length_section_history():
     assert moment == pytest.approx([0.0, 12.0, 24.0])
     assert component == "Mz"
     assert element_tag == 4
+
+
+def test_generic_section_response_curve_uses_semantic_component_indices():
+    result = {
+        "section_responses": {
+            "request:7": {
+                "key": "request:7",
+                "kind": "section-response",
+                "element_tag": 12,
+                "element_kind": "forceBeamColumn",
+                "query_mode": "indexed",
+                "section_number": 2,
+                "component": "Mz",
+                "force_index": 1,
+                "deformation_index": 1,
+                "pair_label": "Mz–κz",
+                "include_origin": False,
+            }
+        },
+        "history": {
+            "section_responses": {
+                "request:7": {
+                    "force": [[-5.0, 10.0], [-5.0, 20.0]],
+                    "deformation": [[-0.001, 0.01], [-0.002, 0.02]],
+                }
+            }
+        },
+    }
+
+    x, y, spec = section_response_curve(
+        result,
+        element_tag=12,
+        section_number=2,
+        component="Mz",
+    )
+
+    assert x == [0.01, 0.02]
+    assert y == [10.0, 20.0]
+    assert spec["pair_label"] == "Mz–κz"
+
+
+def test_generic_section_response_curve_can_include_origin_for_auto_workflow():
+    result = {
+        "section_responses": {
+            "auto:moment-curvature": {
+                "key": "auto:moment-curvature",
+                "kind": "moment-curvature",
+                "element_tag": 1,
+                "element_kind": "zeroLengthSection",
+                "query_mode": "direct",
+                "section_number": 1,
+                "component": "Mz",
+                "force_index": 1,
+                "deformation_index": 1,
+                "include_origin": True,
+            }
+        },
+        "history": {
+            "section_responses": {
+                "auto:moment-curvature": {
+                    "force": [[0.0, 3.0]],
+                    "deformation": [[0.0, 0.001]],
+                }
+            }
+        },
+    }
+
+    x, y, _spec = section_response_curve(result, component="Mz")
+
+    assert x == [0.0, 0.001]
+    assert y == [0.0, 3.0]
