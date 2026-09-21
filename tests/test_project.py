@@ -3912,3 +3912,116 @@ def test_project_load_rejects_duplicate_analysis_tags():
     with pytest.raises(ValueError, match=r"Duplicate analysis tag 1"):
         ProjectDatabase.from_dict(data)
 
+
+def test_project_load_rejects_duplicate_prescribed_displacement_tags():
+    data = ProjectDatabase(name="Duplicate SPs").to_dict()
+    data["prescribed_displacements"] = [
+        {
+            "tag": 1,
+            "name": "SP A",
+            "pattern_tag": 1,
+            "node_tag": 1,
+            "dof": 1,
+            "value": 0.01,
+        },
+        {
+            "tag": 1,
+            "name": "SP B",
+            "pattern_tag": 2,
+            "node_tag": 2,
+            "dof": 1,
+            "value": 0.02,
+        },
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match=r"Duplicate prescribed displacement tag 1",
+    ):
+        ProjectDatabase.from_dict(data)
+
+
+def test_project_load_rejects_duplicate_selection_set_names():
+    data = ProjectDatabase(name="Duplicate selections").to_dict()
+    data["selection_sets"] = [
+        {
+            "name": "Columns",
+            "node_tags": [1],
+            "element_tags": [],
+        },
+        {
+            "name": "Columns",
+            "node_tags": [2],
+            "element_tags": [],
+        },
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match=r"Duplicate selection set name 'Columns'",
+    ):
+        ProjectDatabase.from_dict(data)
+
+
+def test_legacy_material_loader_rejects_normalized_duplicate_tags():
+    raw = {
+        "legacy-a": {
+            "tag": 1,
+            "name": "Material A",
+            "material_type": "Elastic",
+            "parameters": {"E": 2.0e11},
+        },
+        "legacy-b": {
+            "tag": 1,
+            "name": "Material B",
+            "material_type": "Elastic",
+            "parameters": {"E": 1.0e11},
+        },
+    }
+
+    with pytest.raises(ValueError, match=r"Duplicate material tag 1"):
+        ProjectDatabase._load_materials(raw)
+
+
+def test_legacy_section_loader_rejects_normalized_duplicate_tags():
+    raw = {
+        "legacy-a": {
+            "tag": 1,
+            "name": "Section A",
+            "section_type": "Elastic",
+            "parameters": {},
+        },
+        "legacy-b": {
+            "tag": 1,
+            "name": "Section B",
+            "section_type": "Elastic",
+            "parameters": {},
+        },
+    }
+
+    with pytest.raises(ValueError, match=r"Duplicate section tag 1"):
+        ProjectDatabase._load_sections(raw)
+
+
+def test_legacy_transformation_loader_rejects_normalized_duplicate_tags():
+    raw = {
+        "legacy-a": {
+            "tag": 1,
+            "name": "Transformation A",
+            "transformation_type": "Linear",
+            "vecxz": [0.0, 0.0, 1.0],
+        },
+        "legacy-b": {
+            "tag": 1,
+            "name": "Transformation B",
+            "transformation_type": "Linear",
+            "vecxz": [0.0, 1.0, 0.0],
+        },
+    }
+
+    with pytest.raises(
+        ValueError,
+        match=r"Duplicate transformation tag 1",
+    ):
+        ProjectDatabase._load_transformations(raw)
+
