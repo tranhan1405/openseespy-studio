@@ -33,7 +33,7 @@ def test_pushover_without_driving_pattern_is_blocked():
     assert any(
         issue.severity == "ERROR"
         and issue.category == "Driving load"
-        and "no driving/reference load pattern" in issue.message
+        and "no nonzero driving/reference force pattern" in issue.message
         for issue in issues
     )
 
@@ -228,9 +228,7 @@ def test_zero_element_load_does_not_count_as_displacement_control_driver():
         1,
         1,
         2,
-        element_type="truss",
-        truss_area=1.0,
-        truss_material_tag=1,
+        element_type="elasticBeamColumn",
     )
     project.add_time_series(
         TimeSeriesData(1, "Reference", "Linear", factor=1.0)
