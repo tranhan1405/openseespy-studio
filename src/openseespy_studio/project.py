@@ -2998,6 +2998,15 @@ class ProjectDatabase:
             raise ValueError(
                 f"Connection tag {connection.tag} conflicts with an element tag."
             )
+        if (
+            connection.generated_ground_node is not None
+            and connection.generated_ground_node
+            not in {connection.node_i, connection.node_j}
+        ):
+            raise ValueError(
+                "Generated ground node must be one of the connection "
+                "endpoint nodes."
+            )
         missing_nodes = [
             tag
             for tag in (connection.node_i, connection.node_j)
@@ -3156,6 +3165,8 @@ class ProjectDatabase:
             and not self._ground_node_in_use_elsewhere(ground_tag)
         ):
             self.model.remove_node(ground_tag, cascade=True)
+            self.prune_selection_sets()
+            self.prune_solution_results()
 
         generated_section = connection.generated_section_tag
         if (
@@ -3223,6 +3234,13 @@ class ProjectDatabase:
             for connection in self.connections.values()
             if material_tag in connection.materials_by_dof.values()
         )
+
+    def prune_selection_sets(self) -> None:
+        valid_nodes = set(self.model.nodes)
+        valid_elements = set(self.model.elements)
+        for selection_set in self.selection_sets.values():
+            selection_set.node_tags.intersection_update(valid_nodes)
+            selection_set.element_tags.intersection_update(valid_elements)
 
     def prune_connections(self) -> list[int]:
         removed: list[int] = []
@@ -3340,11 +3358,7 @@ class ProjectDatabase:
         self.prune_recorders()
         self.prune_solution_results()
 
-        existing_nodes = set(self.model.nodes)
-        existing_elements = set(self.model.elements)
-        for selection_set in self.selection_sets.values():
-            selection_set.node_tags.intersection_update(existing_nodes)
-            selection_set.element_tags.intersection_update(existing_elements)
+        self.prune_selection_sets()
 
     def next_time_series_tag(self) -> int:
         return max(self.time_series, default=0) + 1
@@ -4550,6 +4564,60 @@ class ProjectDatabase:
                 "Solution result references missing element tag(s): "
                 + ", ".join(map(str, missing_elements))
             )
+
+        def setting_int(name: str) -> int | None:
+            if name not in result.settings:
+                return None
+            try:
+                return int(result.settings[name])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Solution result setting {name} must be an integer."
+                ) from exc
+
+        if result.result_type == "TimeHistory":
+            node_tag = setting_int("node")
+            dof = setting_int("dof")
+            if node_tag is not None and node_tag not in self.model.nodes:
+                raise ValueError(
+                    f"TimeHistory references missing node {node_tag}."
+                )
+            if dof is not None and not 1 <= dof <= int(self.model.ndf):
+                raise ValueError(
+                    f"TimeHistory DOF {dof} is invalid for ndf={self.model.ndf}."
+                )
+
+        if result.result_type == "ForceDisplacement":
+            for key in ("displacement_node", "force_node"):
+                node_tag = setting_int(key)
+                if node_tag is not None and node_tag not in self.model.nodes:
+                    raise ValueError(
+                        f"ForceDisplacement setting {key} references missing "
+                        f"node {node_tag}."
+                    )
+            for key in ("displacement_dof", "force_dof"):
+                dof = setting_int(key)
+                if dof is not None and not 1 <= dof <= int(self.model.ndf):
+                    raise ValueError(
+                        f"ForceDisplacement setting {key}={dof} is invalid "
+                        f"for ndf={self.model.ndf}."
+                    )
+
+        if (
+            result.result_type == "ModeShape"
+            or (
+                result.result_type == "Motion"
+                and analysis.analysis_type == "Modal"
+            )
+        ):
+            mode = setting_int("mode")
+            if mode is None:
+                mode = 1
+            if not 1 <= mode <= int(analysis.num_modes):
+                raise ValueError(
+                    f"Requested mode {mode} exceeds Modal analysis "
+                    f"{analysis.tag} num_modes={analysis.num_modes}."
+                )
 
     def add_solution_result(self, result: SolutionResultData) -> None:
         if result.tag in self.solution_results:
