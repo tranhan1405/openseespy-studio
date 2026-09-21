@@ -88,6 +88,7 @@ def default_material_test_spec(
         "Concrete02",
         "Concrete04",
         "FRPConfinedConcrete",
+        "FRPConfinedConcrete",
         "FRPConfinedConcrete02",
     }:
         strains: list[float] = []
@@ -237,6 +238,7 @@ def material_test_axis_labels(
         "Concrete01",
         "Concrete02",
         "Concrete04",
+        "FRPConfinedConcrete",
         "FRPConfinedConcrete02",
     }:
         return "Strain", f"Stress [{stress_label}]"
