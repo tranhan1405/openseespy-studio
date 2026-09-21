@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication, QTreeWidget
 
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import AnalysisSettingsData, ProjectDatabase
-from openseespy_studio.ui.main_window import MainWindow
+from openseespy_studio.ui.main_window import MainWindow, PropertiesPanel
 
 
 _APP = QApplication.instance() or QApplication([])
@@ -54,13 +54,10 @@ def _holder(project: ProjectDatabase):
     return holder
 
 
-def test_cyclic_protocol_is_visible_in_model_tree():
+def _project_with_cyclic(targets: list[float]) -> ProjectDatabase:
     model = StructuralModel("Cyclic tree", ndm=2, ndf=3)
     model.add_node(4, 0.0, 0.0)
-    project = ProjectDatabase(
-        name="Cyclic tree",
-        model=model,
-    )
+    project = ProjectDatabase(name="Cyclic tree", model=model)
     project.add_analysis(
         AnalysisSettingsData(
             1,
@@ -68,13 +65,18 @@ def test_cyclic_protocol_is_visible_in_model_tree():
             analysis_type="Cyclic",
             control_node=4,
             control_dof=1,
-            cyclic_targets=[-1.0, 1.0, -2.0, 2.0, 0.0],
+            cyclic_targets=targets,
             cyclic_increment=0.25,
             recovery=False,
         )
     )
+    return project
 
+
+def test_cyclic_protocol_is_one_compact_model_tree_item():
+    project = _project_with_cyclic([-1.0, 1.0, -2.0, 2.0, 0.0])
     holder = _holder(project)
+
     MainWindow._refresh_tree(holder)
 
     protocol = _find_payload(
@@ -83,52 +85,48 @@ def test_cyclic_protocol_is_visible_in_model_tree():
     )
     assert protocol is not None
     assert protocol.text(0) == "Cyclic Protocol (5 targets)"
-    texts = [
-        protocol.child(index).text(0)
-        for index in range(protocol.childCount())
-    ]
-    assert "Control · Node 4 · DOF 1" in texts
-    assert "Max increment · 0.25" in texts
-    assert "Target 1 · -1" in texts
-    assert "Target 5 · 0" in texts
+    assert protocol.childCount() == 0
 
 
-def test_long_cyclic_protocol_is_collapsed_in_model_tree():
-    model = StructuralModel("Long cyclic tree", ndm=2, ndf=3)
-    model.add_node(4, 0.0, 0.0)
-    project = ProjectDatabase(
-        name="Long cyclic tree",
-        model=model,
+def test_long_cyclic_protocol_does_not_expand_targets_in_tree():
+    project = _project_with_cyclic(
+        [float(value) for value in range(100)]
     )
-    targets = [float(value) for value in range(100)]
-    project.add_analysis(
-        AnalysisSettingsData(
-            7,
-            "Imported long history",
-            analysis_type="Cyclic",
-            control_node=4,
-            control_dof=1,
-            cyclic_targets=targets,
-            cyclic_increment=1.0,
-            recovery=False,
-        )
-    )
-
     holder = _holder(project)
+
     MainWindow._refresh_tree(holder)
 
     protocol = _find_payload(
         holder.tree,
-        ("analysis_cyclic_protocol", 7),
+        ("analysis_cyclic_protocol", 1),
     )
     assert protocol is not None
-    texts = [
-        protocol.child(index).text(0)
-        for index in range(protocol.childCount())
+    assert protocol.text(0) == "Cyclic Protocol (100 targets)"
+    assert protocol.childCount() == 0
+
+
+def test_cyclic_protocol_properties_use_table_and_plot():
+    settings = _project_with_cyclic(
+        [-1.0, 1.0, -2.0, 2.0, 0.0]
+    ).analyses[1]
+    panel = PropertiesPanel()
+
+    panel.set_cyclic_protocol(settings)
+
+    assert panel.entity_label.text() == "Cyclic Protocol"
+    assert panel.cyclic_protocol_view.isHidden() is False
+    assert panel.table.isHidden() is True
+    assert panel.cyclic_protocol_table.rowCount() == 5
+    assert panel.cyclic_protocol_table.item(0, 0).text() == "1"
+    assert panel.cyclic_protocol_table.item(0, 1).text() == "-1"
+    assert panel.cyclic_protocol_table.item(4, 1).text() == "0"
+    assert panel.cyclic_protocol_preview._targets == [
+        0.0,
+        -1.0,
+        1.0,
+        -2.0,
+        2.0,
+        0.0,
     ]
-    assert "Target 1 · 0" in texts
-    assert "Target 12 · 11" in texts
-    assert "Target 97 · 96" in texts
-    assert "Target 100 · 99" in texts
-    assert "… 84 target(s) hidden in tree" in texts
-    assert protocol.childCount() == 19
+    assert "Node 4" in panel.cyclic_protocol_summary.text()
+    assert "DOF 1" in panel.cyclic_protocol_summary.text()
