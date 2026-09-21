@@ -209,27 +209,20 @@ def test_disp_beam_column_uses_real_beam_integration():
     )
 
 
-def test_unknown_element_is_not_silently_replaced_by_elastic_beam():
+def test_unknown_element_is_rejected_instead_of_silently_replaced():
     model = StructuralModel()
     model.add_node(1, 0, 0, 0)
     model.add_node(2, 1, 0, 0)
-    model.add_element(
-        1,
-        1,
-        2,
-        element_type="unsupportedElement",
-        section_tag=3,
-        transf_tag=4,
-    )
 
-    script = to_openseespy(
-        model,
-        sections={3: elastic_section(3)},
-        transformations={4: transformation(4)},
-    )
-
-    assert "type 'unsupportedElement' is not implemented" in script
-    assert "ops.element('elasticBeamColumn', 1" not in script
+    with pytest.raises(ValueError, match="Unsupported element type"):
+        model.add_element(
+            1,
+            1,
+            2,
+            element_type="unsupportedElement",
+            section_tag=3,
+            transf_tag=4,
+        )
 
 
 def test_force_beam_column_generates_hinge_radau_integration():
