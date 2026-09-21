@@ -2500,3 +2500,32 @@ def test_project_validate_element_state_rejects_incompatible_recorder_after_form
         match=r"Section/Fiber recorders require forceBeamColumn or dispBeamColumn",
     ):
         project.validate_element_state(1)
+
+
+def test_project_load_pattern_tag_rename_preserves_driver_order():
+    model = StructuralModel("pattern-rename-order", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    project = ProjectDatabase(name="Pattern rename order", model=model)
+    project.add_time_series(TimeSeriesData(1, "One", "Linear"))
+    project.add_time_series(TimeSeriesData(2, "Two", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "First", "Plain", time_series_tag=1)
+    )
+    project.add_load_pattern(
+        LoadPatternData(2, "Second", "Plain", time_series_tag=2)
+    )
+    project.add_analysis(
+        AnalysisSettingsData(
+            80,
+            "Transient",
+            "Transient",
+            deferred_pattern_tags=[1, 2],
+        )
+    )
+
+    project.update_load_pattern(
+        1,
+        LoadPatternData(5, "First renamed", "Plain", time_series_tag=1),
+    )
+
+    assert project.analyses[80].deferred_pattern_tags == [5, 2]
