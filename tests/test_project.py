@@ -3800,3 +3800,115 @@ def test_fiber_result_rejects_section_beyond_scoped_element_ip_count():
                 settings={"section": 1},
             )
         )
+
+
+def test_project_load_rejects_duplicate_time_series_tags():
+    data = ProjectDatabase(name="Duplicate time series").to_dict()
+    data["time_series"] = [
+        {
+            "tag": 1,
+            "name": "TS A",
+            "series_type": "Linear",
+            "factor": 1.0,
+            "dt": 0.01,
+            "values": [],
+        },
+        {
+            "tag": 1,
+            "name": "TS B",
+            "series_type": "Constant",
+            "factor": 1.0,
+            "dt": 0.01,
+            "values": [],
+        },
+    ]
+
+    with pytest.raises(ValueError, match=r"Duplicate time series tag 1"):
+        ProjectDatabase.from_dict(data)
+
+
+def test_project_load_rejects_duplicate_load_pattern_tags():
+    data = ProjectDatabase(name="Duplicate patterns").to_dict()
+    data["load_patterns"] = [
+        {
+            "tag": 1,
+            "name": "Pattern A",
+            "pattern_type": "Plain",
+            "time_series_tag": 1,
+        },
+        {
+            "tag": 1,
+            "name": "Pattern B",
+            "pattern_type": "Plain",
+            "time_series_tag": 1,
+        },
+    ]
+
+    with pytest.raises(ValueError, match=r"Duplicate load pattern tag 1"):
+        ProjectDatabase.from_dict(data)
+
+
+def test_project_load_rejects_duplicate_nodal_load_tags():
+    data = ProjectDatabase(name="Duplicate nodal loads").to_dict()
+    data["nodal_loads"] = [
+        {
+            "tag": 1,
+            "name": "Load A",
+            "pattern_tag": 1,
+            "node_tag": 1,
+            "values": [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        },
+        {
+            "tag": 1,
+            "name": "Load B",
+            "pattern_tag": 1,
+            "node_tag": 2,
+            "values": [2.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        },
+    ]
+
+    with pytest.raises(ValueError, match=r"Duplicate nodal load tag 1"):
+        ProjectDatabase.from_dict(data)
+
+
+def test_project_load_rejects_duplicate_element_load_tags():
+    data = ProjectDatabase(name="Duplicate element loads").to_dict()
+    data["element_loads"] = [
+        {
+            "tag": 1,
+            "name": "Beam load A",
+            "pattern_tag": 1,
+            "element_tag": 1,
+            "load_type": "Uniform",
+        },
+        {
+            "tag": 1,
+            "name": "Beam load B",
+            "pattern_tag": 1,
+            "element_tag": 2,
+            "load_type": "Uniform",
+        },
+    ]
+
+    with pytest.raises(ValueError, match=r"Duplicate element load tag 1"):
+        ProjectDatabase.from_dict(data)
+
+
+def test_project_load_rejects_duplicate_analysis_tags():
+    data = ProjectDatabase(name="Duplicate analyses").to_dict()
+    data["analyses"] = [
+        {
+            "tag": 1,
+            "name": "Static A",
+            "analysis_type": "Static",
+        },
+        {
+            "tag": 1,
+            "name": "Static B",
+            "analysis_type": "Static",
+        },
+    ]
+
+    with pytest.raises(ValueError, match=r"Duplicate analysis tag 1"):
+        ProjectDatabase.from_dict(data)
+
