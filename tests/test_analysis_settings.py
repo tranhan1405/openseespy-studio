@@ -1042,3 +1042,56 @@ def test_active_eigen_solver_usage_rejects_unsupported_solver(
             analysis_type,
             **kwargs,
         )
+
+
+def test_modal_generated_script_rejects_negative_or_nonfinite_eigenvalues_before_sqrt():
+    analysis = AnalysisSettingsData(
+        77,
+        "Modal eigenvalue guard",
+        "Modal",
+        num_modes=3,
+    )
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            analysis,
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
+
+    guard = (
+        "if (not math.isfinite(_studio_lambda)) or "
+        "_studio_lambda < 0.0:"
+    )
+    sqrt_line = "_studio_omega = math.sqrt(_studio_lambda)"
+
+    assert guard in text
+    assert "math.sqrt(max(_studio_lambda, 0.0))" not in text
+    assert "expected a finite, non-negative value" in text
+    assert text.index(guard) < text.index(sqrt_line)
+    compile(text, "<modal-eigenvalue-guard>", "exec")
+
+
+def test_modal_generated_script_preserves_zero_eigenvalue_as_rigid_body_mode():
+    analysis = AnalysisSettingsData(
+        78,
+        "Modal zero mode",
+        "Modal",
+        num_modes=1,
+    )
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            analysis,
+            node_tags=[1],
+            support_node_tags=[],
+        )
+    )
+
+    assert "_studio_lambda < 0.0" in text
+    assert "_studio_lambda <= 0.0" not in text
+    assert (
+        "_studio_frequency = _studio_omega / (2.0 * math.pi) "
+        "if _studio_omega > 0.0 else None"
+    ) in text

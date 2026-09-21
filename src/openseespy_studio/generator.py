@@ -1276,7 +1276,18 @@ def analysis_to_openseespy(
         )
         lines.extend([
             "    _studio_lambda = float(_studio_lambda)",
-            "    _studio_omega = math.sqrt(max(_studio_lambda, 0.0))",
+            (
+                "    if (not math.isfinite(_studio_lambda)) or "
+                "_studio_lambda < 0.0:"
+            ),
+            (
+                "        raise RuntimeError("
+                "f'Modal mode {_studio_mode} returned an invalid eigenvalue '"
+                "f'({_studio_lambda!r}); expected a finite, non-negative value. '"
+                "'Check constraints, mass, stiffness, and geometric stability.'"
+                ")"
+            ),
+            "    _studio_omega = math.sqrt(_studio_lambda)",
             (
                 "    _studio_frequency = "
                 "_studio_omega / (2.0 * math.pi) "
