@@ -5134,6 +5134,7 @@ class ProjectDatabase:
             for choice in result_choices_for_analysis(
                 analysis.analysis_type,
                 analysis.test,
+                integrator=analysis.integrator,
             )
         }
 
