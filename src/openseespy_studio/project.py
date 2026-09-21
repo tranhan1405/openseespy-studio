@@ -5095,6 +5095,10 @@ class ProjectDatabase:
                         if key in data
                     }
                 material = MaterialData.from_dict(data)
+                if material.tag in materials:
+                    raise ValueError(
+                        f"Duplicate material tag {material.tag}."
+                    )
                 materials[material.tag] = material
 
         return materials
@@ -5135,6 +5139,10 @@ class ProjectDatabase:
                         if key in data
                     }
                 section = SectionData.from_dict(data)
+                if section.tag in sections:
+                    raise ValueError(
+                        f"Duplicate section tag {section.tag}."
+                    )
                 sections[section.tag] = section
 
         return sections
@@ -5173,6 +5181,10 @@ class ProjectDatabase:
                 )
                 data.setdefault("vecxz", [0.0, 0.0, 1.0])
                 transformation = TransformationData.from_dict(data)
+                if transformation.tag in transformations:
+                    raise ValueError(
+                        f"Duplicate transformation tag {transformation.tag}."
+                    )
                 transformations[transformation.tag] = transformation
 
         return transformations
@@ -5254,6 +5266,11 @@ class ProjectDatabase:
                 displacement = PrescribedDisplacementData.from_dict(
                     dict(item)
                 )
+                if displacement.tag in result:
+                    raise ValueError(
+                        "Duplicate prescribed displacement tag "
+                        f"{displacement.tag}."
+                    )
                 result[displacement.tag] = displacement
         return result
 
@@ -5343,6 +5360,10 @@ class ProjectDatabase:
         selection_sets = {}
         for item in data.get("selection_sets", []):
             selection_set = SelectionSetData.from_dict(item)
+            if selection_set.name in selection_sets:
+                raise ValueError(
+                    f"Duplicate selection set name {selection_set.name!r}."
+                )
             selection_sets[selection_set.name] = selection_set
 
         return cls(
