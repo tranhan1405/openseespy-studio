@@ -2499,6 +2499,88 @@ def to_openseespy(
             f"ndm={model.ndm}, ndf={model.ndf}."
         )
 
+    def constraint_dependent_dofs(
+        constraint: ConstraintData,
+    ) -> set[int]:
+        if constraint.constraint_type == "equalDOF":
+            return {
+                int(dof)
+                for dof in constraint.dofs
+                if 1 <= int(dof) <= int(model.ndf)
+            }
+        if constraint.constraint_type == "rigidLink":
+            if constraint.link_type == "beam":
+                return set(range(1, int(model.ndf) + 1))
+            return set(
+                range(
+                    1,
+                    min(int(model.ndm), int(model.ndf)) + 1,
+                )
+            )
+        if constraint.constraint_type == "rigidDiaphragm":
+            if model.ndm == 3 and model.ndf == 6:
+                return {
+                    1: {2, 3, 4},
+                    2: {1, 3, 5},
+                    3: {1, 2, 6},
+                }.get(int(constraint.perp_dirn), set())
+            if model.ndm == 2 and model.ndf == 3:
+                return {
+                    1: {1},
+                    2: {2},
+                    3: {1, 2, 3},
+                }.get(int(constraint.perp_dirn), set())
+        return set()
+
+    dependent_owners: dict[tuple[int, int], list[int]] = {}
+    support_mpc_conflicts: list[tuple[int, int, int]] = []
+    for constraint in (constraints or {}).values():
+        dependent_dofs = constraint_dependent_dofs(constraint)
+        for node_tag in constraint.constrained_nodes:
+            node_tag = int(node_tag)
+            node = model.nodes.get(node_tag)
+            for dof in sorted(dependent_dofs):
+                dependent_owners.setdefault(
+                    (node_tag, int(dof)),
+                    [],
+                ).append(int(constraint.tag))
+                if (
+                    node is not None
+                    and dof <= len(node.fixity)
+                    and bool(node.fixity[dof - 1])
+                ):
+                    support_mpc_conflicts.append(
+                        (node_tag, int(dof), int(constraint.tag))
+                    )
+
+    overlapping_mpcs = {
+        key: sorted(tags)
+        for key, tags in dependent_owners.items()
+        if len(set(tags)) > 1
+    }
+    if overlapping_mpcs:
+        details = "; ".join(
+            f"node {node_tag} DOF {dof}: "
+            + ", ".join(map(str, sorted(set(tags))))
+            for (node_tag, dof), tags in sorted(overlapping_mpcs.items())
+        )
+        raise ValueError(
+            "Multiple MPC constraints assign the same dependent DOF(s): "
+            + details
+            + "."
+        )
+
+    if support_mpc_conflicts:
+        details = "; ".join(
+            f"constraint {tag}: node {node_tag} DOF {dof}"
+            for node_tag, dof, tag in sorted(support_mpc_conflicts)
+        )
+        raise ValueError(
+            "MPC dependent DOF(s) are also fixed by supports: "
+            + details
+            + "."
+        )
+
     missing_deferred = sorted(
         deferred_pattern_tags - set((load_patterns or {}).keys())
     )

@@ -2225,6 +2225,97 @@ class ProjectDatabase:
             }.get(int(constraint.perp_dirn), set())
         return set()
 
+    def _constraint_dependent_dofs(
+        self,
+        constraint: ConstraintData,
+    ) -> set[int]:
+        if constraint.constraint_type == "equalDOF":
+            return {
+                int(dof)
+                for dof in constraint.dofs
+                if 1 <= int(dof) <= int(self.model.ndf)
+            }
+        if constraint.constraint_type == "rigidLink":
+            if constraint.link_type == "beam":
+                return set(range(1, int(self.model.ndf) + 1))
+            return set(
+                range(
+                    1,
+                    min(int(self.model.ndm), int(self.model.ndf)) + 1,
+                )
+            )
+        if constraint.constraint_type == "rigidDiaphragm":
+            return self._rigid_diaphragm_dependent_dofs(constraint)
+        return set()
+
+    def _validate_constraint_dependency_conflicts(
+        self,
+        constraint: ConstraintData,
+        *,
+        ignore_constraint_tags: set[int] | None = None,
+    ) -> None:
+        dependent_dofs = self._constraint_dependent_dofs(constraint)
+        if not dependent_dofs:
+            return
+
+        support_conflicts: list[tuple[int, int]] = []
+        for node_tag in constraint.constrained_nodes:
+            node = self.model.nodes.get(node_tag)
+            if node is None:
+                continue
+            for dof in sorted(dependent_dofs):
+                if (
+                    dof <= len(node.fixity)
+                    and bool(node.fixity[dof - 1])
+                ):
+                    support_conflicts.append((int(node_tag), int(dof)))
+        if support_conflicts:
+            details = ", ".join(
+                f"node {node_tag} DOF {dof}"
+                for node_tag, dof in support_conflicts
+            )
+            raise ValueError(
+                f"{constraint.constraint_type} constraint {constraint.tag} "
+                "assigns dependent DOF(s) that are already fixed by a "
+                f"support: {details}."
+            )
+
+        ignored = {
+            int(tag) for tag in (ignore_constraint_tags or set())
+        }
+        overlap_conflicts: list[tuple[int, int, int]] = []
+        constrained_nodes = {
+            int(tag) for tag in constraint.constrained_nodes
+        }
+        for existing_tag, existing in self.constraints.items():
+            if int(existing_tag) in ignored:
+                continue
+            common_nodes = constrained_nodes & {
+                int(tag) for tag in existing.constrained_nodes
+            }
+            if not common_nodes:
+                continue
+            common_dofs = dependent_dofs & self._constraint_dependent_dofs(
+                existing
+            )
+            for node_tag in sorted(common_nodes):
+                for dof in sorted(common_dofs):
+                    overlap_conflicts.append(
+                        (node_tag, dof, int(existing.tag))
+                    )
+
+        if overlap_conflicts:
+            details = ", ".join(
+                f"node {node_tag} DOF {dof} (existing constraint {tag})"
+                for node_tag, dof, tag in overlap_conflicts
+            )
+            raise ValueError(
+                f"{constraint.constraint_type} constraint {constraint.tag} "
+                "overlaps an existing MPC on the same dependent DOF(s): "
+                + details
+                + "."
+            )
+
     def _validate_constraint_control_conflicts(
         self,
         constraint: ConstraintData,
@@ -2285,6 +2376,7 @@ class ProjectDatabase:
             )
         self._validate_constraint_model_compatibility(constraint)
         self._validate_constraint_nodes(constraint)
+        self._validate_constraint_dependency_conflicts(constraint)
         self._validate_constraint_control_conflicts(constraint)
         self.constraints[constraint.tag] = constraint
 
@@ -2307,6 +2399,10 @@ class ProjectDatabase:
             )
         self._validate_constraint_model_compatibility(constraint)
         self._validate_constraint_nodes(constraint)
+        self._validate_constraint_dependency_conflicts(
+            constraint,
+            ignore_constraint_tags={original_tag},
+        )
         self._validate_constraint_control_conflicts(constraint)
         self.constraints.pop(original_tag)
         self.constraints[constraint.tag] = constraint

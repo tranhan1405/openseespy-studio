@@ -817,3 +817,126 @@ def test_project_accepts_3d_6dof_rigid_link_beam():
     )
 
     assert project.constraints[47].link_type == "beam"
+
+
+def test_project_rejects_overlapping_mpcs_on_same_dependent_dof():
+    model = StructuralModel("project-overlap-mpc", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+    project = ProjectDatabase(name="Overlap MPC", model=model)
+
+    project.add_constraint(
+        ConstraintData(
+            48,
+            "Tie UX",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        )
+    )
+
+    try:
+        project.add_constraint(
+            ConstraintData(
+                49,
+                "Rigid bar",
+                "rigidLink",
+                retained_node=3,
+                constrained_nodes=[2],
+                link_type="bar",
+            )
+        )
+    except ValueError as exc:
+        assert "overlaps an existing MPC" in str(exc)
+        assert "node 2 DOF 1" in str(exc)
+    else:
+        raise AssertionError("Expected overlapping MPC validation")
+
+
+def test_project_allows_disjoint_mpcs_on_same_constrained_node():
+    model = StructuralModel("project-disjoint-mpc", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+    project = ProjectDatabase(name="Disjoint MPC", model=model)
+
+    project.add_constraint(
+        ConstraintData(
+            50,
+            "Tie RZ",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(3,),
+        )
+    )
+    project.add_constraint(
+        ConstraintData(
+            51,
+            "Rigid bar",
+            "rigidLink",
+            retained_node=3,
+            constrained_nodes=[2],
+            link_type="bar",
+        )
+    )
+
+    assert set(project.constraints) == {50, 51}
+
+
+def test_project_rejects_mpc_dependent_dof_fixed_by_support():
+    model = StructuralModel("project-fixed-mpc", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.set_fixity(2, (1, 0, 0))
+    project = ProjectDatabase(name="Fixed MPC", model=model)
+
+    try:
+        project.add_constraint(
+            ConstraintData(
+                52,
+                "Tie fixed UX",
+                "equalDOF",
+                retained_node=1,
+                constrained_nodes=[2],
+                dofs=(1,),
+            )
+        )
+    except ValueError as exc:
+        assert "already fixed by a support" in str(exc)
+        assert "node 2 DOF 1" in str(exc)
+    else:
+        raise AssertionError("Expected support/MPC conflict validation")
+
+
+def test_project_update_ignores_original_constraint_when_checking_overlap():
+    model = StructuralModel("project-update-mpc", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Update MPC", model=model)
+    project.add_constraint(
+        ConstraintData(
+            53,
+            "Tie UX",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        )
+    )
+
+    project.update_constraint(
+        53,
+        ConstraintData(
+            53,
+            "Tie UX UY",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1, 2),
+        ),
+    )
+
+    assert project.constraints[53].dofs == (1, 2)

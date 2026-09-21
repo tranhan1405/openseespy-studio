@@ -1344,3 +1344,109 @@ def test_generator_accepts_supported_rigid_link_beam_signatures(
 
     code = to_openseespy(model, constraints={19: constraint})
     assert "ops.rigidLink('beam', 1, 2)" in code
+
+
+def test_generator_rejects_overlapping_mpcs_on_same_dependent_dof():
+    model = StructuralModel("overlapping-mpc", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+
+    constraints = {
+        20: ConstraintData(
+            20,
+            "Tie UX",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        ),
+        21: ConstraintData(
+            21,
+            "Rigid bar",
+            "rigidLink",
+            retained_node=3,
+            constrained_nodes=[2],
+            link_type="bar",
+        ),
+    }
+
+    with pytest.raises(
+        ValueError,
+        match=r"Multiple MPC constraints assign the same dependent DOF",
+    ):
+        to_openseespy(model, constraints=constraints)
+
+
+def test_generator_allows_multiple_mpcs_on_disjoint_dependent_dofs():
+    model = StructuralModel("disjoint-mpc", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+
+    constraints = {
+        22: ConstraintData(
+            22,
+            "Tie RZ",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(3,),
+        ),
+        23: ConstraintData(
+            23,
+            "Rigid bar",
+            "rigidLink",
+            retained_node=3,
+            constrained_nodes=[2],
+            link_type="bar",
+        ),
+    }
+
+    code = to_openseespy(model, constraints=constraints)
+
+    assert "ops.equalDOF(1, 2, 3)" in code
+    assert "ops.rigidLink('bar', 3, 2)" in code
+
+
+def test_generator_rejects_mpc_dependent_dof_also_fixed_by_support():
+    model = StructuralModel("fixed-mpc-dof", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.set_fixity(2, (1, 0, 0))
+
+    constraint = ConstraintData(
+        24,
+        "Tie fixed UX",
+        "equalDOF",
+        retained_node=1,
+        constrained_nodes=[2],
+        dofs=(1,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"MPC dependent DOF\(s\) are also fixed by supports",
+    ):
+        to_openseespy(model, constraints={24: constraint})
+
+
+def test_generator_allows_support_on_dof_not_owned_by_mpc():
+    model = StructuralModel("fixed-free-mpc-dof", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.set_fixity(2, (0, 0, 1))
+
+    constraint = ConstraintData(
+        25,
+        "Rigid bar translations",
+        "rigidLink",
+        retained_node=1,
+        constrained_nodes=[2],
+        link_type="bar",
+    )
+
+    code = to_openseespy(model, constraints={25: constraint})
+
+    assert "ops.fix(2, 0, 0, 1)" in code
+    assert "ops.rigidLink('bar', 1, 2)" in code
