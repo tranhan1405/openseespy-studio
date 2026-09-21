@@ -9980,7 +9980,18 @@ class MainWindow(QMainWindow):
             ("Integrator", settings.integrator),
             ("Active", "Yes" if tag == self.project.active_analysis_tag else "No"),
             ("Constraints", settings.constraints_handler),
-            ("Numberer", settings.numberer), ("System", settings.system),
+            ("Numberer", settings.numberer),
+            (
+                "System",
+                (
+                    "SparseGeneral (-piv)"
+                    if (
+                        settings.system == "SparseGeneral"
+                        and settings.system_pivoting
+                    )
+                    else settings.system
+                ),
+            ),
             (
                 "Gravity preload",
                 (
