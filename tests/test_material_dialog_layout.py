@@ -171,17 +171,15 @@ def test_eta_label_is_material_specific():
     )
     try:
         _select_material_type(dialog, "Hardening")
-        hardening_label = dialog.parameter_form.labelForField(
-            dialog._parameter_spins["eta"]
+        assert "Viscoplastic" in dialog._parameter_label(
+            "Hardening",
+            "eta",
         )
-        assert hardening_label is not None
-        assert "Viscoplastic" in hardening_label.text()
 
         _select_material_type(dialog, "ElasticPPGap")
-        gap_label = dialog.parameter_form.labelForField(
-            dialog._parameter_spins["eta"]
+        assert "Hardening ratio" in dialog._parameter_label(
+            "ElasticPPGap",
+            "eta",
         )
-        assert gap_label is not None
-        assert "Hardening ratio" in gap_label.text()
     finally:
         _close(dialog)
