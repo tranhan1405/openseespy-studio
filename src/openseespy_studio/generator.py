@@ -1219,6 +1219,7 @@ def analysis_to_openseespy(
         f"        'arc_length_alpha': {settings.arc_length_alpha:g},",
         f"        'preload_gravity': {settings.preload_gravity!r},",
         f"        'gravity_steps': {settings.gravity_steps},",
+        f"        'gravity_algorithm': {settings.gravity_algorithm!r},",
         f"        'deferred_pattern_tags': {settings.deferred_pattern_tags!r},",
         f"        'num_modes': {settings.num_modes},",
         f"        'recovery': {settings.recovery!r},",
@@ -3998,7 +3999,7 @@ def to_openseespy(
                     f"ops.test({active.test!r}, {active.tolerance:g}, "
                     f"{active.max_iterations}, 0)"
                 ),
-                f"ops.algorithm({active.algorithm!r})",
+                f"ops.algorithm({(active.algorithm if active.gravity_algorithm == 'Auto' else active.gravity_algorithm)!r})",
                 f"ops.integrator('LoadControl', {gravity_increment:g})",
                 "ops.analysis('Static')",
                 f"_studio_gravity_ok = ops.analyze({active.gravity_steps})",
