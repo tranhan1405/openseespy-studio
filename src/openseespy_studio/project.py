@@ -177,6 +177,53 @@ MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
     "Series": {},
 }
 
+PINCHING4_RESPONSE_KEYS = {
+    "ePf1", "ePf2", "ePf3", "ePf4",
+    "eNf1", "eNf2", "eNf3", "eNf4",
+}
+PINCHING4_DEFORMATION_KEYS = {
+    "ePd1", "ePd2", "ePd3", "ePd4",
+    "eNd1", "eNd2", "eNd3", "eNd4",
+}
+
+
+def material_parameter_kind(
+    material: "MaterialData",
+    key: str,
+) -> str:
+    """Return the physical storage/display kind for one material parameter.
+
+    Most OpenSees uniaxial materials have fixed semantics. Pinching4 is more
+    general: its envelope may represent force-displacement, moment-rotation,
+    or stress-strain. Verified library records declare that context explicitly
+    in source metadata so values can remain unit-safe across project systems.
+    Legacy/manual Pinching4 definitions without metadata remain raw for
+    backward compatibility.
+    """
+    if material.material_type != "Pinching4":
+        return MATERIAL_PARAMETER_KINDS.get(
+            material.material_type,
+            {},
+        ).get(key, "raw")
+
+    response_quantity = str(
+        material.source.get("response_quantity", "")
+    ).strip().lower()
+    if key in PINCHING4_RESPONSE_KEYS:
+        return {
+            "force_displacement": "force",
+            "moment_rotation": "moment",
+            "stress_strain": "stress",
+        }.get(response_quantity, "raw")
+    if key in PINCHING4_DEFORMATION_KEYS:
+        return {
+            "force_displacement": "length",
+            "moment_rotation": "rotation",
+            "stress_strain": "strain",
+        }.get(response_quantity, "raw")
+    return "raw"
+
+
 MATERIAL_ENGINEERING_DEFAULTS: dict[str, dict[str, float]] = {
     name: {
         "poisson_ratio": 0.2 if "Concrete" in name else 0.3,
