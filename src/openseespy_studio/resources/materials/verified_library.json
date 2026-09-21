@@ -16390,6 +16390,94 @@
         "parameter_location_identified": true,
         "units_checked": true
       }
+    },
+    {
+      "id": "megalooikonomou-2012-opensees-reference-frpconfinedconcrete",
+      "family": "FRP-Confined Concrete",
+      "material": "CFRP-and-steel confined circular reinforced concrete",
+      "grade": "OpenSees official reference example",
+      "standard": "Megalooikonomou-Monti-Santini / OpenSees reference input",
+      "model": "FRPConfinedConcrete",
+      "preset_name": "Megalooikonomou et al. (2012) · OpenSees reference · FRPConfinedConcrete",
+      "parameters_si": {
+        "fpc1": 27500000,
+        "fpc2": 27500000,
+        "epsc0": 0.002,
+        "D": 0.4,
+        "c": 0.035,
+        "Ej": 266000000000,
+        "Sj": 0,
+        "tj": 0.000222,
+        "eju": 0.0163,
+        "S": 0.15,
+        "fyl": 374000000,
+        "fyh": 363000000,
+        "dlong": 0.016,
+        "dtrans": 0.006,
+        "Es": 200000000000,
+        "nu0": 0.2,
+        "k": 0.8,
+        "useBuck": 1
+      },
+      "verified_parameters": [
+        "fpc1",
+        "fpc2",
+        "epsc0",
+        "D",
+        "c",
+        "Ej",
+        "Sj",
+        "tj",
+        "eju",
+        "S",
+        "fyl",
+        "fyh",
+        "dlong",
+        "dtrans",
+        "Es",
+        "nu0",
+        "k",
+        "useBuck"
+      ],
+      "applicability": [
+        "Official OpenSees FRPConfinedConcrete reference/test input",
+        "Circular reinforced-concrete section with continuous FRP jacket",
+        "Combined FRP-and-internal-steel confinement model",
+        "N-mm-MPa input convention required by OpenSees",
+        "Buckling-triggered FRP rupture interaction enabled (useBuck=1)"
+      ],
+      "limitations": [
+        "This is an authoritative OpenSees reference parameter set, not a universal CFRP material grade or a substitute for project-specific test data.",
+        "The peer-reviewed ACI paper establishes and validates the constitutive model; the exact 18-number OpenSees input tuple is taken from the official OpenSees reference test script.",
+        "FRPConfinedConcrete is unit-sensitive and SARE intentionally restricts generation to mm-N-s.",
+        "Some stock OpenSeesPy builds may omit this legacy material at runtime; SARE supports reference-backed definition, editing and export while runtime support should be checked in the user's solver build."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Constitutive Model for Fiber-Reinforced Polymer- and Tie-Confined Concrete",
+        "authors": "Konstantinos G. Megalooikonomou; Giorgio Monti; Silvia Santini",
+        "journal": "ACI Structural Journal",
+        "volume_issue": "109(4)",
+        "pages": "569–578",
+        "year": 2012,
+        "doi": "10.14359/51683876"
+      },
+      "parameter_evidence": {
+        "type": "official_opensees_reference_script",
+        "title": "FRPConfinedConcrete_Test.py",
+        "author": "OpenSees / FRPConfinedConcrete material contributors",
+        "institution": "OpenSees, University of California Berkeley",
+        "year": 2023,
+        "location": "Official OpenSees FRPConfinedConcrete uniaxial test script — complete material command: 27.5, 27.5, 0.002, 400, 35, 266000, 0, 0.222, 0.0163, 150, 374, 363, 16, 6, 200000, 0.2, 0.8, 1",
+        "url": "https://opensees.berkeley.edu/wiki/images/8/8b/FRPConfinedConcrete_Test_dot_py.pdf",
+        "relationship": "The ACI Structural Journal paper is the peer-reviewed constitutive-model source. The exact numerical preset is reproduced from the official OpenSees reference test script and converted from its documented N-mm-MPa convention to SARE SI storage."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
     }
   ]
 }
