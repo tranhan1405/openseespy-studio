@@ -185,6 +185,12 @@ PINCHING4_DEFORMATION_KEYS = {
     "ePd1", "ePd2", "ePd3", "ePd4",
     "eNd1", "eNd2", "eNd3", "eNd4",
 }
+HYSTERETIC_RESPONSE_KEYS = {
+    "s1p", "s2p", "s3p", "s1n", "s2n", "s3n",
+}
+HYSTERETIC_DEFORMATION_KEYS = {
+    "e1p", "e2p", "e3p", "e1n", "e2n", "e3n",
+}
 
 
 def material_parameter_kind(
@@ -200,7 +206,7 @@ def material_parameter_kind(
     Legacy/manual Pinching4 definitions without metadata remain raw for
     backward compatibility.
     """
-    if material.material_type != "Pinching4":
+    if material.material_type not in {"Pinching4", "Hysteretic"}:
         return MATERIAL_PARAMETER_KINDS.get(
             material.material_type,
             {},
@@ -209,13 +215,23 @@ def material_parameter_kind(
     response_quantity = str(
         material.source.get("response_quantity", "")
     ).strip().lower()
-    if key in PINCHING4_RESPONSE_KEYS:
+    response_keys = (
+        PINCHING4_RESPONSE_KEYS
+        if material.material_type == "Pinching4"
+        else HYSTERETIC_RESPONSE_KEYS
+    )
+    deformation_keys = (
+        PINCHING4_DEFORMATION_KEYS
+        if material.material_type == "Pinching4"
+        else HYSTERETIC_DEFORMATION_KEYS
+    )
+    if key in response_keys:
         return {
             "force_displacement": "force",
             "moment_rotation": "moment",
             "stress_strain": "stress",
         }.get(response_quantity, "raw")
-    if key in PINCHING4_DEFORMATION_KEYS:
+    if key in deformation_keys:
         return {
             "force_displacement": "length",
             "moment_rotation": "rotation",
