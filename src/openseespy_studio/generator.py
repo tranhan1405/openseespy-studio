@@ -2605,6 +2605,95 @@ def to_openseespy(
             + "."
         )
 
+    def plain_handler_supports_constraint(
+        constraint: ConstraintData,
+    ) -> bool:
+        if constraint.constraint_type in {"equalDOF"}:
+            return True
+        if constraint.constraint_type == "rigidLink":
+            if constraint.link_type == "bar":
+                return True
+            if int(model.ndf) == int(model.ndm):
+                return True
+            retained = model.nodes[int(constraint.retained_node)]
+            retained_xyz = retained.xyz
+            for node_tag in constraint.constrained_nodes:
+                constrained = model.nodes[int(node_tag)]
+                if any(
+                    float(constrained.xyz[i]) != float(retained_xyz[i])
+                    for i in range(int(model.ndm))
+                ):
+                    return False
+            return True
+        if constraint.constraint_type == "rigidDiaphragm":
+            retained = model.nodes[int(constraint.retained_node)]
+            retained_xyz = retained.xyz
+            for node_tag in constraint.constrained_nodes:
+                constrained_xyz = model.nodes[int(node_tag)].xyz
+                if model.ndm == 2 and model.ndf == 3:
+                    dx = float(constrained_xyz[0]) - float(retained_xyz[0])
+                    dy = float(constrained_xyz[1]) - float(retained_xyz[1])
+                    if int(constraint.perp_dirn) == 3 and (
+                        dx != 0.0 or dy != 0.0
+                    ):
+                        return False
+                elif model.ndm == 3 and model.ndf == 6:
+                    dx = float(constrained_xyz[0]) - float(retained_xyz[0])
+                    dy = float(constrained_xyz[1]) - float(retained_xyz[1])
+                    dz = float(constrained_xyz[2]) - float(retained_xyz[2])
+                    coupled_offsets = {
+                        1: (dy, dz),
+                        2: (dx, dz),
+                        3: (dx, dy),
+                    }.get(int(constraint.perp_dirn), ())
+                    if any(value != 0.0 for value in coupled_offsets):
+                        return False
+            return True
+        return True
+
+    if active_analysis is not None and constraints:
+        if active_analysis.constraints_handler == "Transformation":
+            mpc_objects_by_node: dict[int, list[int]] = {}
+            for constraint in constraints.values():
+                for node_tag in constraint.constrained_nodes:
+                    mpc_objects_by_node.setdefault(
+                        int(node_tag),
+                        [],
+                    ).append(int(constraint.tag))
+            multiple_mps = {
+                node_tag: sorted(tags)
+                for node_tag, tags in mpc_objects_by_node.items()
+                if len(tags) > 1
+            }
+            if multiple_mps:
+                details = "; ".join(
+                    f"node {node_tag}: "
+                    + ", ".join(map(str, tags))
+                    for node_tag, tags in sorted(multiple_mps.items())
+                )
+                raise ValueError(
+                    "Transformation constraint handler supports only one "
+                    "MP constraint object per constrained node in Studio; "
+                    "multiple MP objects found at "
+                    + details
+                    + ". Merge compatible equalDOF DOFs or use a supported "
+                    "single MPC definition."
+                )
+
+        if active_analysis.constraints_handler == "Plain":
+            unsupported_plain = sorted(
+                int(constraint.tag)
+                for constraint in constraints.values()
+                if not plain_handler_supports_constraint(constraint)
+            )
+            if unsupported_plain:
+                raise ValueError(
+                    "Plain constraint handler would ignore non-identity "
+                    "MP transformation matrix for constraint(s): "
+                    + ", ".join(map(str, unsupported_plain))
+                    + ". Use the Transformation constraint handler."
+                )
+
     missing_deferred = sorted(
         deferred_pattern_tags - set((load_patterns or {}).keys())
     )

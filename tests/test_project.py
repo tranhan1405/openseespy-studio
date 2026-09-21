@@ -940,3 +940,149 @@ def test_project_update_ignores_original_constraint_when_checking_overlap():
     )
 
     assert project.constraints[53].dofs == (1, 2)
+
+
+def test_project_transformation_analysis_rejects_multiple_mp_objects_same_node():
+    model = StructuralModel("project-transformation-mp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+    project = ProjectDatabase(name="Transformation MP", model=model)
+    project.add_constraint(
+        ConstraintData(
+            54,
+            "Tie UX",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        )
+    )
+    project.add_constraint(
+        ConstraintData(
+            55,
+            "Tie RZ",
+            "equalDOF",
+            retained_node=3,
+            constrained_nodes=[2],
+            dofs=(3,),
+        )
+    )
+
+    try:
+        project.add_analysis(
+            AnalysisSettingsData(
+                54,
+                "Transformation static",
+                "Static",
+                constraints_handler="Transformation",
+            )
+        )
+    except ValueError as exc:
+        assert "supports only one MP constraint object" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected Transformation multi-MP node validation"
+        )
+
+
+def test_project_rejects_second_mp_added_after_transformation_analysis():
+    model = StructuralModel("project-late-mp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+    project = ProjectDatabase(name="Late MP", model=model)
+    project.add_analysis(
+        AnalysisSettingsData(
+            55,
+            "Transformation static",
+            "Static",
+            constraints_handler="Transformation",
+        )
+    )
+    project.add_constraint(
+        ConstraintData(
+            56,
+            "Tie UX",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        )
+    )
+
+    try:
+        project.add_constraint(
+            ConstraintData(
+                57,
+                "Tie RZ",
+                "equalDOF",
+                retained_node=3,
+                constrained_nodes=[2],
+                dofs=(3,),
+            )
+        )
+    except ValueError as exc:
+        assert "supports only one MP constraint object" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected late Transformation multi-MP validation"
+        )
+
+
+def test_project_plain_analysis_rejects_offset_rigid_link_beam():
+    model = StructuralModel("project-plain-rigid-beam", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Plain rigid beam", model=model)
+    project.add_constraint(
+        ConstraintData(
+            58,
+            "Offset rigid beam",
+            "rigidLink",
+            retained_node=1,
+            constrained_nodes=[2],
+            link_type="beam",
+        )
+    )
+
+    try:
+        project.add_analysis(
+            AnalysisSettingsData(
+                56,
+                "Plain static",
+                "Static",
+                constraints_handler="Plain",
+            )
+        )
+    except ValueError as exc:
+        assert "would ignore non-identity MP transformation matrix" in str(exc)
+    else:
+        raise AssertionError("Expected Plain rigid beam validation")
+
+
+def test_project_plain_analysis_allows_equal_dof():
+    model = StructuralModel("project-plain-equal-dof", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Plain equalDOF", model=model)
+    project.add_constraint(
+        ConstraintData(
+            59,
+            "Tie UX",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        )
+    )
+    project.add_analysis(
+        AnalysisSettingsData(
+            57,
+            "Plain static",
+            "Static",
+            constraints_handler="Plain",
+        )
+    )
+
+    assert project.analyses[57].constraints_handler == "Plain"

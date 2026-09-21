@@ -2316,6 +2316,111 @@ class ProjectDatabase:
                 + "."
             )
 
+    def _plain_handler_supports_constraint(
+        self,
+        constraint: ConstraintData,
+    ) -> bool:
+        if constraint.constraint_type == "equalDOF":
+            return True
+        if constraint.constraint_type == "rigidLink":
+            if constraint.link_type == "bar":
+                return True
+            if int(self.model.ndf) == int(self.model.ndm):
+                return True
+            retained = self.model.nodes[constraint.retained_node]
+            for node_tag in constraint.constrained_nodes:
+                constrained = self.model.nodes[node_tag]
+                if any(
+                    float(constrained.xyz[i]) != float(retained.xyz[i])
+                    for i in range(int(self.model.ndm))
+                ):
+                    return False
+            return True
+        if constraint.constraint_type == "rigidDiaphragm":
+            retained = self.model.nodes[constraint.retained_node]
+            for node_tag in constraint.constrained_nodes:
+                constrained = self.model.nodes[node_tag]
+                if self.model.ndm == 2 and self.model.ndf == 3:
+                    dx = float(constrained.xyz[0]) - float(retained.xyz[0])
+                    dy = float(constrained.xyz[1]) - float(retained.xyz[1])
+                    if constraint.perp_dirn == 3 and (
+                        dx != 0.0 or dy != 0.0
+                    ):
+                        return False
+                elif self.model.ndm == 3 and self.model.ndf == 6:
+                    dx = float(constrained.xyz[0]) - float(retained.xyz[0])
+                    dy = float(constrained.xyz[1]) - float(retained.xyz[1])
+                    dz = float(constrained.xyz[2]) - float(retained.xyz[2])
+                    offsets = {
+                        1: (dy, dz),
+                        2: (dx, dz),
+                        3: (dx, dy),
+                    }.get(constraint.perp_dirn, ())
+                    if any(value != 0.0 for value in offsets):
+                        return False
+            return True
+        return True
+
+    def _validate_analysis_constraint_handler_compatibility(
+        self,
+        analysis: AnalysisSettingsData,
+        *,
+        candidate_constraint: ConstraintData | None = None,
+        ignore_constraint_tags: set[int] | None = None,
+    ) -> None:
+        ignored = {
+            int(tag) for tag in (ignore_constraint_tags or set())
+        }
+        active_constraints = [
+            constraint
+            for tag, constraint in self.constraints.items()
+            if int(tag) not in ignored
+        ]
+        if candidate_constraint is not None:
+            active_constraints.append(candidate_constraint)
+        if not active_constraints:
+            return
+
+        if analysis.constraints_handler == "Transformation":
+            by_node: dict[int, list[int]] = {}
+            for constraint in active_constraints:
+                for node_tag in constraint.constrained_nodes:
+                    by_node.setdefault(int(node_tag), []).append(
+                        int(constraint.tag)
+                    )
+            conflicts = {
+                node_tag: sorted(tags)
+                for node_tag, tags in by_node.items()
+                if len(tags) > 1
+            }
+            if conflicts:
+                details = "; ".join(
+                    f"node {node_tag}: "
+                    + ", ".join(map(str, tags))
+                    for node_tag, tags in sorted(conflicts.items())
+                )
+                raise ValueError(
+                    "Transformation constraint handler supports only one "
+                    "MP constraint object per constrained node in Studio; "
+                    "multiple MP objects found at "
+                    + details
+                    + "."
+                )
+
+        if analysis.constraints_handler == "Plain":
+            unsupported = sorted(
+                int(constraint.tag)
+                for constraint in active_constraints
+                if not self._plain_handler_supports_constraint(constraint)
+            )
+            if unsupported:
+                raise ValueError(
+                    "Plain constraint handler would ignore non-identity "
+                    "MP transformation matrix for constraint(s): "
+                    + ", ".join(map(str, unsupported))
+                    + ". Use the Transformation constraint handler."
+                )
+
     def _validate_constraint_control_conflicts(
         self,
         constraint: ConstraintData,
@@ -2377,6 +2482,11 @@ class ProjectDatabase:
         self._validate_constraint_model_compatibility(constraint)
         self._validate_constraint_nodes(constraint)
         self._validate_constraint_dependency_conflicts(constraint)
+        for analysis in self.analyses.values():
+            self._validate_analysis_constraint_handler_compatibility(
+                analysis,
+                candidate_constraint=constraint,
+            )
         self._validate_constraint_control_conflicts(constraint)
         self.constraints[constraint.tag] = constraint
 
@@ -2403,6 +2513,12 @@ class ProjectDatabase:
             constraint,
             ignore_constraint_tags={original_tag},
         )
+        for analysis in self.analyses.values():
+            self._validate_analysis_constraint_handler_compatibility(
+                analysis,
+                candidate_constraint=constraint,
+                ignore_constraint_tags={original_tag},
+            )
         self._validate_constraint_control_conflicts(constraint)
         self.constraints.pop(original_tag)
         self.constraints[constraint.tag] = constraint
@@ -3265,6 +3381,7 @@ class ProjectDatabase:
     def add_analysis(self, analysis: AnalysisSettingsData) -> None:
         if analysis.tag in self.analyses:
             raise ValueError(f"Analysis tag {analysis.tag} already exists.")
+        self._validate_analysis_constraint_handler_compatibility(analysis)
         uses_control_node = self._analysis_uses_control_node(analysis)
         if uses_control_node and analysis.control_node not in self.model.nodes:
             raise ValueError(
@@ -3294,6 +3411,7 @@ class ProjectDatabase:
         original_tag=int(original_tag)
         if original_tag not in self.analyses: raise ValueError(f"Analysis tag {original_tag} does not exist.")
         if analysis.tag!=original_tag and analysis.tag in self.analyses: raise ValueError(f"Analysis tag {analysis.tag} already exists.")
+        self._validate_analysis_constraint_handler_compatibility(analysis)
         uses_control_node = self._analysis_uses_control_node(analysis)
         if uses_control_node and analysis.control_node not in self.model.nodes:
             raise ValueError(

@@ -1567,3 +1567,182 @@ def test_generator_reports_all_missing_nodes_by_constraint():
     message = str(exc_info.value)
     assert "28: 97, 98" in message
     assert "29: 99" in message
+
+
+def test_generator_transformation_rejects_multiple_mp_objects_same_node():
+    model = StructuralModel("transformation-multiple-mp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+
+    constraints = {
+        30: ConstraintData(
+            30,
+            "Tie UX",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        ),
+        31: ConstraintData(
+            31,
+            "Tie RZ",
+            "equalDOF",
+            retained_node=3,
+            constrained_nodes=[2],
+            dofs=(3,),
+        ),
+    }
+    analysis = AnalysisSettingsData(
+        40,
+        "Transformation static",
+        "Static",
+        constraints_handler="Transformation",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Transformation constraint handler supports only one MP constraint object",
+    ):
+        to_openseespy(
+            model,
+            constraints=constraints,
+            analyses={40: analysis},
+            active_analysis_tag=40,
+        )
+
+
+def test_generator_plain_allows_disjoint_equal_dof_objects_same_node():
+    model = StructuralModel("plain-multiple-mp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+
+    constraints = {
+        32: ConstraintData(
+            32,
+            "Tie UX",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        ),
+        33: ConstraintData(
+            33,
+            "Tie RZ",
+            "equalDOF",
+            retained_node=3,
+            constrained_nodes=[2],
+            dofs=(3,),
+        ),
+    }
+    analysis = AnalysisSettingsData(
+        41,
+        "Plain static",
+        "Static",
+        constraints_handler="Plain",
+    )
+
+    code = to_openseespy(
+        model,
+        constraints=constraints,
+        analyses={41: analysis},
+        active_analysis_tag=41,
+    )
+
+    assert "ops.equalDOF(1, 2, 1)" in code
+    assert "ops.equalDOF(3, 2, 3)" in code
+
+
+def test_generator_plain_rejects_offset_rigid_link_beam():
+    model = StructuralModel("plain-rigid-beam", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    constraint = ConstraintData(
+        34,
+        "Offset rigid beam",
+        "rigidLink",
+        retained_node=1,
+        constrained_nodes=[2],
+        link_type="beam",
+    )
+    analysis = AnalysisSettingsData(
+        42,
+        "Plain static",
+        "Static",
+        constraints_handler="Plain",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Plain constraint handler would ignore non-identity MP transformation matrix",
+    ):
+        to_openseespy(
+            model,
+            constraints={34: constraint},
+            analyses={42: analysis},
+            active_analysis_tag=42,
+        )
+
+
+def test_generator_plain_allows_rigid_link_bar_with_offset():
+    model = StructuralModel("plain-rigid-bar", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    constraint = ConstraintData(
+        35,
+        "Rigid bar",
+        "rigidLink",
+        retained_node=1,
+        constrained_nodes=[2],
+        link_type="bar",
+    )
+    analysis = AnalysisSettingsData(
+        43,
+        "Plain static",
+        "Static",
+        constraints_handler="Plain",
+    )
+
+    code = to_openseespy(
+        model,
+        constraints={35: constraint},
+        analyses={43: analysis},
+        active_analysis_tag=43,
+    )
+
+    assert "ops.rigidLink('bar', 1, 2)" in code
+
+
+def test_generator_plain_rejects_coupled_rigid_diaphragm():
+    model = StructuralModel("plain-rigid-diaphragm", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 1.0, 0.0)
+
+    constraint = ConstraintData(
+        36,
+        "XY diaphragm",
+        "rigidDiaphragm",
+        retained_node=1,
+        constrained_nodes=[2],
+        perp_dirn=3,
+    )
+    analysis = AnalysisSettingsData(
+        44,
+        "Plain static",
+        "Static",
+        constraints_handler="Plain",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Plain constraint handler would ignore non-identity MP transformation matrix",
+    ):
+        to_openseespy(
+            model,
+            constraints={36: constraint},
+            analyses={44: analysis},
+            active_analysis_tag=44,
+        )
