@@ -2480,6 +2480,27 @@ def to_openseespy(
                 f"{active_analysis.control_dof} is restrained by a support."
             )
 
+        equal_dof_conflicts = sorted(
+            constraint.tag
+            for constraint in (constraints or {}).values()
+            if (
+                constraint.constraint_type == "equalDOF"
+                and int(active_analysis.control_node)
+                in {int(tag) for tag in constraint.constrained_nodes}
+                and int(active_analysis.control_dof)
+                in {int(dof) for dof in constraint.dofs}
+            )
+        )
+        if equal_dof_conflicts:
+            raise ValueError(
+                f"{active_analysis.analysis_type} control node "
+                f"{active_analysis.control_node} DOF "
+                f"{active_analysis.control_dof} is a constrained/dependent "
+                "DOF in equalDOF constraint(s): "
+                + ", ".join(map(str, equal_dof_conflicts))
+                + ". Use the retained node or another independent DOF."
+            )
+
     lines: list[str] = [
         "import json",
         "import math",

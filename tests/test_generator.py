@@ -10,6 +10,7 @@ from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
     MATERIAL_DEFAULTS,
     AnalysisSettingsData,
+    ConstraintData,
     LoadPatternData,
     MaterialData,
     PrescribedDisplacementData,
@@ -664,3 +665,105 @@ def test_generator_ignores_prescribed_displacement_in_other_deferred_analysis():
     )
 
     assert "ops.sp(2, 1, 0.001)" not in code
+
+
+def test_generator_rejects_equal_dof_constrained_control_dof():
+    model = StructuralModel("equal-dof-control", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+
+    constraint = ConstraintData(
+        1,
+        "Tie node 2 to node 3",
+        "equalDOF",
+        retained_node=3,
+        constrained_nodes=[2],
+        dofs=(1, 2),
+    )
+    analysis = AnalysisSettingsData(
+        24,
+        "Push dependent DOF",
+        "Pushover",
+        control_node=2,
+        control_dof=1,
+        displacement_increment=0.001,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"control node 2 DOF 1 is a constrained/dependent DOF in equalDOF",
+    ):
+        to_openseespy(
+            model,
+            constraints={1: constraint},
+            analyses={24: analysis},
+            active_analysis_tag=24,
+        )
+
+
+def test_generator_allows_equal_dof_retained_node_as_control():
+    model = StructuralModel("equal-dof-retained-control", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+
+    constraint = ConstraintData(
+        2,
+        "Tie node 2 to node 3",
+        "equalDOF",
+        retained_node=3,
+        constrained_nodes=[2],
+        dofs=(1,),
+    )
+    analysis = AnalysisSettingsData(
+        25,
+        "Push retained DOF",
+        "Pushover",
+        control_node=3,
+        control_dof=1,
+        displacement_increment=0.001,
+    )
+
+    code = to_openseespy(
+        model,
+        constraints={2: constraint},
+        analyses={25: analysis},
+        active_analysis_tag=25,
+    )
+
+    assert "ops.equalDOF(3, 2, 1)" in code
+    assert "ops.integrator('DisplacementControl', 3, 1" in code
+
+
+def test_generator_allows_unconstrained_dof_on_equal_dof_secondary_node():
+    model = StructuralModel("equal-dof-free-control", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+
+    constraint = ConstraintData(
+        3,
+        "Tie UX only",
+        "equalDOF",
+        retained_node=3,
+        constrained_nodes=[2],
+        dofs=(1,),
+    )
+    analysis = AnalysisSettingsData(
+        26,
+        "Push free UY",
+        "Pushover",
+        control_node=2,
+        control_dof=2,
+        displacement_increment=0.001,
+    )
+
+    code = to_openseespy(
+        model,
+        constraints={3: constraint},
+        analyses={26: analysis},
+        active_analysis_tag=26,
+    )
+
+    assert "ops.integrator('DisplacementControl', 2, 2" in code

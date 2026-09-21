@@ -2156,12 +2156,42 @@ class ProjectDatabase:
                 + ", ".join(map(str, sorted(set(missing))))
             )
 
+    def _validate_constraint_control_conflicts(
+        self,
+        constraint: ConstraintData,
+        *,
+        ignore_analysis_tags: set[int] | None = None,
+    ) -> None:
+        if constraint.constraint_type != "equalDOF":
+            return
+        ignored = {
+            int(tag) for tag in (ignore_analysis_tags or set())
+        }
+        conflicts = sorted(
+            analysis.tag
+            for analysis_tag, analysis in self.analyses.items()
+            if (
+                int(analysis_tag) not in ignored
+                and self._analysis_uses_control_node(analysis)
+                and analysis.control_node in constraint.constrained_nodes
+                and analysis.control_dof in constraint.dofs
+            )
+        )
+        if conflicts:
+            raise ValueError(
+                f"equalDOF constraint {constraint.tag} makes a "
+                "DisplacementControl DOF dependent for analysis tag(s): "
+                + ", ".join(map(str, conflicts))
+                + ". Use the retained node or another independent DOF."
+            )
+
     def add_constraint(self, constraint: ConstraintData) -> None:
         if constraint.tag in self.constraints:
             raise ValueError(
                 f"Constraint tag {constraint.tag} already exists."
             )
         self._validate_constraint_nodes(constraint)
+        self._validate_constraint_control_conflicts(constraint)
         self.constraints[constraint.tag] = constraint
 
     def update_constraint(
@@ -2182,6 +2212,7 @@ class ProjectDatabase:
                 f"Constraint tag {constraint.tag} already exists."
             )
         self._validate_constraint_nodes(constraint)
+        self._validate_constraint_control_conflicts(constraint)
         self.constraints.pop(original_tag)
         self.constraints[constraint.tag] = constraint
 
@@ -2930,6 +2961,30 @@ class ProjectDatabase:
             and pattern.pattern_type == "Plain"
         )
 
+    def _validate_analysis_equal_dof_control_conflict(
+        self,
+        analysis: AnalysisSettingsData,
+    ) -> None:
+        if not self._analysis_uses_control_node(analysis):
+            return
+        conflicts = sorted(
+            constraint.tag
+            for constraint in self.constraints.values()
+            if (
+                constraint.constraint_type == "equalDOF"
+                and analysis.control_node in constraint.constrained_nodes
+                and analysis.control_dof in constraint.dofs
+            )
+        )
+        if conflicts:
+            raise ValueError(
+                f"{analysis.analysis_type} control node "
+                f"{analysis.control_node} DOF {analysis.control_dof} "
+                "is a constrained/dependent DOF in equalDOF constraint(s): "
+                + ", ".join(map(str, conflicts))
+                + ". Use the retained node or another independent DOF."
+            )
+
     def _validate_analysis_prescribed_control_conflict(
         self,
         analysis: AnalysisSettingsData,
@@ -2980,6 +3035,7 @@ class ProjectDatabase:
                     f"{analysis.control_node} DOF {analysis.control_dof} "
                     "is restrained by a support."
                 )
+        self._validate_analysis_equal_dof_control_conflict(analysis)
         self._validate_analysis_prescribed_control_conflict(analysis)
         self.analyses[analysis.tag]=analysis
         if self.active_analysis_tag is None:
@@ -3006,6 +3062,7 @@ class ProjectDatabase:
                     f"{analysis.control_node} DOF {analysis.control_dof} "
                     "is restrained by a support."
                 )
+        self._validate_analysis_equal_dof_control_conflict(analysis)
         self._validate_analysis_prescribed_control_conflict(
             analysis,
             ignore_analysis_tags={original_tag},

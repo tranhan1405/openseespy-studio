@@ -1,6 +1,7 @@
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
     AnalysisSettingsData,
+    ConstraintData,
     LoadPatternData,
     PrescribedDisplacementData,
     ProjectDatabase,
@@ -335,3 +336,93 @@ def test_project_rejects_prescribed_displacement_when_control_analysis_exists():
         raise AssertionError(
             "Expected prescribed displacement/control analysis conflict"
         )
+
+
+def test_project_rejects_analysis_using_equal_dof_dependent_control_dof():
+    project = build_project()
+    project.model.add_node(3, 10.0, 0.0, 0.0)
+    project.add_constraint(
+        ConstraintData(
+            30,
+            "Tie node 2",
+            "equalDOF",
+            retained_node=3,
+            constrained_nodes=[2],
+            dofs=(1,),
+        )
+    )
+
+    try:
+        project.add_analysis(
+            AnalysisSettingsData(
+                30,
+                "Conflicting push",
+                "Pushover",
+                control_node=2,
+                control_dof=1,
+                displacement_increment=0.001,
+            )
+        )
+    except ValueError as exc:
+        assert "constrained/dependent DOF in equalDOF constraint" in str(exc)
+    else:
+        raise AssertionError("Expected equalDOF/control analysis conflict")
+
+
+def test_project_rejects_equal_dof_added_after_control_analysis():
+    project = build_project()
+    project.model.add_node(3, 10.0, 0.0, 0.0)
+    project.add_analysis(
+        AnalysisSettingsData(
+            31,
+            "Push",
+            "Pushover",
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    )
+
+    try:
+        project.add_constraint(
+            ConstraintData(
+                31,
+                "Tie controlled DOF",
+                "equalDOF",
+                retained_node=3,
+                constrained_nodes=[2],
+                dofs=(1,),
+            )
+        )
+    except ValueError as exc:
+        assert "makes a DisplacementControl DOF dependent" in str(exc)
+    else:
+        raise AssertionError("Expected analysis/equalDOF conflict")
+
+
+def test_project_allows_retained_equal_dof_node_as_control():
+    project = build_project()
+    project.model.add_node(3, 10.0, 0.0, 0.0)
+    project.add_constraint(
+        ConstraintData(
+            32,
+            "Tie node 2",
+            "equalDOF",
+            retained_node=3,
+            constrained_nodes=[2],
+            dofs=(1,),
+        )
+    )
+
+    project.add_analysis(
+        AnalysisSettingsData(
+            32,
+            "Push master",
+            "Pushover",
+            control_node=3,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    )
+
+    assert project.analyses[32].control_node == 3
