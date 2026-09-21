@@ -2053,6 +2053,24 @@ class ProjectDatabase:
             material,
             replacing_tag=original_tag,
         )
+        elastic_section_users = sorted(
+            section.tag
+            for section in self.sections.values()
+            if (
+                section.section_type == "Elastic"
+                and section.material_tag == original_tag
+            )
+        )
+        if elastic_section_users:
+            try:
+                material.elastic_modulus()
+                material.shear_modulus()
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Material {original_tag} is linked to Elastic section(s) "
+                    + ", ".join(map(str, elastic_section_users))
+                    + " and must continue to expose elastic/shear modulus."
+                ) from exc
         self.materials.pop(original_tag)
         self.materials[material.tag] = material
         if material.tag != original_tag:
@@ -2167,6 +2185,21 @@ class ProjectDatabase:
         if section.tag != original_tag and section.tag in self.sections:
             raise ValueError(f"Section tag {section.tag} already exists.")
         self._validate_section_materials(section)
+        elastic_beam_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type == "elasticBeamColumn"
+                and element.section_tag == original_tag
+            )
+        )
+        if elastic_beam_users and section.section_type != "Elastic":
+            raise ValueError(
+                f"Section {original_tag} is used by elasticBeamColumn "
+                "element(s) "
+                + ", ".join(map(str, elastic_beam_users))
+                + " and must remain an Elastic section."
+            )
         self.sections.pop(original_tag)
         self.sections[section.tag] = section
         if section.tag != original_tag:
@@ -2227,15 +2260,27 @@ class ProjectDatabase:
         self.sections.pop(tag, None)
 
     def _validate_section_materials(self, section: SectionData) -> None:
-        if (
-            section.section_type == "Elastic"
-            and section.material_tag is not None
-            and section.material_tag not in self.materials
-        ):
-            raise ValueError(
-                f"Elastic section references missing material tag "
-                f"{section.material_tag}."
-            )
+        if section.section_type == "Elastic":
+            if (
+                section.material_tag is not None
+                and section.material_tag not in self.materials
+            ):
+                raise ValueError(
+                    f"Elastic section references missing material tag "
+                    f"{section.material_tag}."
+                )
+            if section.material_tag is not None:
+                material = self.materials[section.material_tag]
+                try:
+                    material.elastic_modulus()
+                    material.shear_modulus()
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise ValueError(
+                        "Elastic section material "
+                        f"{section.material_tag} does not expose a usable "
+                        "elastic/shear modulus."
+                    ) from exc
+            return
 
         if section.section_type != "Fiber":
             return
