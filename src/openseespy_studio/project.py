@@ -3064,6 +3064,23 @@ class ProjectDatabase:
                     f"{analysis.control_dof} is restrained by a support."
                 )
 
+    def validate_element_state(self, element_tag: int) -> None:
+        """Validate objects whose semantics depend on an edited element."""
+        element_tag = int(element_tag)
+        if element_tag not in self.model.elements:
+            raise ValueError(f"Element {element_tag} does not exist.")
+
+        for load in self.element_loads.values():
+            if int(load.element_tag) == element_tag:
+                self._validate_element_load(load)
+
+        for recorder in self.recorders.values():
+            if (
+                recorder.recorder_type != "Node"
+                and element_tag in recorder.target_tags
+            ):
+                self._validate_recorder(recorder)
+
     def delete_entities(
         self,
         *,
