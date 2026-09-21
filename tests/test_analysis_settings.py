@@ -918,3 +918,49 @@ def test_analyses_using_deferred_patterns_reject_nonpositive_tags(
             analysis_type,
             **kwargs,
         )
+
+
+@pytest.mark.parametrize(
+    "analysis_type",
+    ["Static", "Pushover", "Cyclic", "Transient"],
+)
+def test_nonmodal_analyses_ignore_unused_nonpositive_num_modes(analysis_type):
+    kwargs = {"num_modes": 0}
+
+    if analysis_type == "Pushover":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    elif analysis_type == "Cyclic":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            cyclic_targets=[0.001, -0.001],
+            cyclic_increment=0.0005,
+        )
+    elif analysis_type == "Transient":
+        kwargs.update(dt=0.01)
+
+    analysis = AnalysisSettingsData(
+        72,
+        f"{analysis_type} ignores num_modes",
+        analysis_type,
+        **kwargs,
+    )
+    assert analysis.num_modes == 0
+
+
+@pytest.mark.parametrize("num_modes", [0, -1, -5])
+def test_modal_rejects_nonpositive_num_modes(num_modes):
+    with pytest.raises(
+        ValueError,
+        match="Number of modes must be at least 1",
+    ):
+        AnalysisSettingsData(
+            73,
+            "Invalid modal mode count",
+            "Modal",
+            num_modes=num_modes,
+        )

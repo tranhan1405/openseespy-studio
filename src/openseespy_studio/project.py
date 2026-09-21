@@ -1640,7 +1640,8 @@ class AnalysisSettingsData:
             and any(tag <= 0 for tag in self.deferred_pattern_tags)
         ):
             raise ValueError("Deferred load-pattern tags must be positive.")
-        if self.num_modes<1: raise ValueError("Number of modes must be at least 1.")
+        if self.analysis_type == "Modal" and self.num_modes < 1:
+            raise ValueError("Number of modes must be at least 1.")
         if self.eigen_solver not in {
             "-genBandArpack",
             "-fullGenLapack",
