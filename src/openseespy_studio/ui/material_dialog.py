@@ -407,46 +407,7 @@ class MaterialEnvelopePreview(QWidget):
                 (x3, y3, "η·E"),
             ]
 
-        if material_type == "Hardening":
-            self._add_group(
-                "Elastic and yield",
-                material_type,
-                ("E", "sigmaY"),
-            )
-            self._add_group(
-                "Combined hardening",
-                material_type,
-                ("H_iso", "H_kin"),
-            )
-            self._add_group(
-                "Optional viscoplasticity",
-                material_type,
-                ("eta",),
-            )
-        elif material_type == "ElasticPP":
-            self._add_group(
-                "Elastic-perfectly plastic",
-                material_type,
-                ("E", "epsyP", "epsyN", "eps0"),
-            )
-        elif material_type == "ElasticBilin":
-            self._add_group(
-                "Positive branch",
-                material_type,
-                ("EP1", "EP2", "epsP2"),
-            )
-            self._add_group(
-                "Negative branch",
-                material_type,
-                ("EN1", "EN2", "epsN2"),
-            )
-        elif material_type == "HystereticSmooth":
-            self._add_group(
-                "Smooth hysteresis",
-                material_type,
-                ("ka", "kb", "fbar", "beta"),
-            )
-        elif material_type == "Hysteretic":
+        if material_type == "Hysteretic":
             pts = [
                 (p.get("e3n", 0.0), p.get("s3n", 0.0)),
                 (p.get("e2n", 0.0), p.get("s2n", 0.0)),
@@ -1025,7 +986,46 @@ class MaterialDialog(QDialog):
     def _rebuild_parameters(self, material_type: str) -> None:
         self._clear_parameter_form()
 
-        if material_type == "Hysteretic":
+        if material_type == "Hardening":
+            self._add_group(
+                "Elastic and yield",
+                material_type,
+                ("E", "sigmaY"),
+            )
+            self._add_group(
+                "Combined hardening",
+                material_type,
+                ("H_iso", "H_kin"),
+            )
+            self._add_group(
+                "Optional viscoplasticity",
+                material_type,
+                ("eta",),
+            )
+        elif material_type == "ElasticPP":
+            self._add_group(
+                "Elastic-perfectly plastic",
+                material_type,
+                ("E", "epsyP", "epsyN", "eps0"),
+            )
+        elif material_type == "ElasticBilin":
+            self._add_group(
+                "Positive branch",
+                material_type,
+                ("EP1", "EP2", "epsP2"),
+            )
+            self._add_group(
+                "Negative branch",
+                material_type,
+                ("EN1", "EN2", "epsN2"),
+            )
+        elif material_type == "HystereticSmooth":
+            self._add_group(
+                "Smooth hysteresis",
+                material_type,
+                ("ka", "kb", "fbar", "beta"),
+            )
+        elif material_type == "Hysteretic":
             self._add_group(
                 "Positive envelope",
                 material_type,
