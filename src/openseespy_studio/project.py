@@ -1194,10 +1194,7 @@ class LoadPatternData:
             self.time_series_tag,
             "Load pattern time series tag",
         )
-        self.direction = _strict_int(
-            self.direction,
-            "Load pattern direction",
-        )
+        self.direction = int(self.direction)
         self.factor = float(self.factor)
         self.vel0 = float(self.vel0)
         if self.tag <= 0:
@@ -1231,7 +1228,7 @@ class LoadPatternData:
             name=str(data.get("name", f"Load Pattern {data['tag']}")),
             pattern_type=str(data.get("pattern_type", "Plain")),
             time_series_tag=data["time_series_tag"],
-            direction=data.get("direction", 1),
+            direction=int(data.get("direction", 1)),
             factor=float(data.get("factor", 1.0)),
             vel0=float(data.get("vel0", 0.0)),
         )
@@ -1305,7 +1302,10 @@ class PrescribedDisplacementData:
             str(self.name).strip()
             or f"Prescribed Displacement {self.tag}"
         )
-        self.pattern_tag = int(self.pattern_tag)
+        self.pattern_tag = _strict_int(
+            self.pattern_tag,
+            "Prescribed displacement pattern tag",
+        )
         self.node_tag = int(self.node_tag)
         self.dof = _strict_int(
             self.dof,
@@ -1352,7 +1352,7 @@ class PrescribedDisplacementData:
                     f"Prescribed Displacement {data['tag']}",
                 )
             ),
-            pattern_tag=int(data["pattern_tag"]),
+            pattern_tag=data["pattern_tag"],
             node_tag=int(data["node_tag"]),
             dof=data.get("dof", 1),
             value=float(data.get("value", 0.0)),
