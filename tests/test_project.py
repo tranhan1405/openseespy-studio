@@ -3622,3 +3622,181 @@ def test_time_series_rejects_nonfinite_numeric_values():
             dt=0.01,
             values=[0.0, float("inf")],
         )
+
+
+def test_connection_rejects_nonfinite_orientation_vectors():
+    with pytest.raises(
+        ValueError,
+        match=r"orientation vector values must be finite",
+    ):
+        ConnectionData(
+            1,
+            "Bad orientation",
+            "zeroLength",
+            1,
+            2,
+            materials_by_dof={1: 1},
+            orient_x=(float("nan"), 0.0, 0.0),
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"orientation vector values must be finite",
+    ):
+        ConnectionData(
+            2,
+            "Bad orientation Y",
+            "zeroLength",
+            1,
+            2,
+            materials_by_dof={1: 1},
+            orient_y=(0.0, float("inf"), 0.0),
+        )
+
+
+def test_fiber_recorder_rejects_nonfinite_coordinates():
+    with pytest.raises(
+        ValueError,
+        match=r"Recorder fiber coordinates must be finite",
+    ):
+        RecorderData(
+            1,
+            "Bad fiber",
+            "Fiber",
+            target_tags=[1],
+            response="stress",
+            fiber_y=float("nan"),
+            fiber_z=0.0,
+        )
+
+
+def test_solution_result_rejects_nonfinite_or_nonpositive_scale():
+    project = build_project()
+    project.add_analysis(
+        AnalysisSettingsData(1, "Static", "Static")
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"scale must be a finite positive number",
+    ):
+        project.add_solution_result(
+            SolutionResultData(
+                1,
+                1,
+                "Bad scale",
+                "DeformedShape",
+                settings={"scale": float("inf")},
+            )
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"scale must be a finite positive number",
+    ):
+        project.add_solution_result(
+            SolutionResultData(
+                2,
+                1,
+                "Zero scale",
+                "DeformedShape",
+                settings={"scale": 0.0},
+            )
+        )
+
+
+def test_solution_result_integer_settings_do_not_truncate_or_overflow():
+    project = build_project()
+    project.add_analysis(
+        AnalysisSettingsData(
+            1,
+            "History",
+            "Transient",
+            steps=10,
+            dt=0.01,
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"setting dof must be an integer",
+    ):
+        project.add_solution_result(
+            SolutionResultData(
+                1,
+                1,
+                "Fractional DOF",
+                "TimeHistory",
+                settings={
+                    "node": 2,
+                    "dof": 1.5,
+                    "quantity": "Displacement",
+                },
+            )
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"setting node must be an integer",
+    ):
+        project.add_solution_result(
+            SolutionResultData(
+                2,
+                1,
+                "Infinite node",
+                "TimeHistory",
+                settings={
+                    "node": float("inf"),
+                    "dof": 1,
+                    "quantity": "Displacement",
+                },
+            )
+        )
+
+
+def test_fiber_result_rejects_section_beyond_scoped_element_ip_count():
+    model = StructuralModel("fiber-result", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        integration_points=3,
+    )
+    project = ProjectDatabase(name="Fiber result", model=model)
+    project.add_analysis(
+        AnalysisSettingsData(1, "Static", "Static")
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"section/IP 4 exceeds the integration-point count",
+    ):
+        project.add_solution_result(
+            SolutionResultData(
+                1,
+                1,
+                "Bad fiber section",
+                "FiberStress",
+                element_scope=[1],
+                settings={"section": 4},
+            )
+        )
+
+    project.model.elements[1].element_type = "elasticBeamColumn"
+    with pytest.raises(
+        ValueError,
+        match=r"Fiber results require forceBeamColumn or dispBeamColumn",
+    ):
+        project.add_solution_result(
+            SolutionResultData(
+                2,
+                1,
+                "Bad fiber formulation",
+                "FiberStrain",
+                element_scope=[1],
+                settings={"section": 1},
+            )
+        )
