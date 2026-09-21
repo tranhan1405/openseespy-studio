@@ -1553,3 +1553,69 @@ def test_nonmodal_analyses_reject_control_dof_outside_supported_range(
             analysis_type,
             **kwargs,
         )
+
+
+def test_analysis_load_parses_false_preload_gravity_string():
+    analysis = AnalysisSettingsData.from_dict(
+        {
+            "tag": 101,
+            "name": "No gravity preload",
+            "analysis_type": "Static",
+            "preload_gravity": "false",
+        }
+    )
+    assert analysis.preload_gravity is False
+
+
+def test_analysis_load_parses_false_recovery_string():
+    analysis = AnalysisSettingsData.from_dict(
+        {
+            "tag": 102,
+            "name": "No recovery",
+            "analysis_type": "Static",
+            "recovery": "false",
+        }
+    )
+    assert analysis.recovery is False
+
+
+def test_analysis_load_parses_false_adaptive_step_string():
+    analysis = AnalysisSettingsData.from_dict(
+        {
+            "tag": 103,
+            "name": "Fixed stepping",
+            "analysis_type": "Static",
+            "adaptive_step": "false",
+            "adaptive_cutback_factor": 2.0,
+            "adaptive_min_factor": 0.0,
+            "adaptive_growth_factor": 0.5,
+            "adaptive_easy_iterations": 0,
+            "adaptive_growth_after": 0,
+        }
+    )
+    assert analysis.adaptive_step is False
+
+
+def test_analysis_load_parses_false_live_convergence_string():
+    analysis = AnalysisSettingsData.from_dict(
+        {
+            "tag": 104,
+            "name": "No live convergence",
+            "analysis_type": "Static",
+            "live_convergence": "false",
+        }
+    )
+    assert analysis.live_convergence is False
+
+
+def test_analysis_load_parses_false_external_console_string():
+    analysis = AnalysisSettingsData.from_dict(
+        {
+            "tag": 105,
+            "name": "Internal console",
+            "analysis_type": "Static",
+            "show_external_console": "false",
+        }
+    )
+    assert analysis.show_external_console is False
+
