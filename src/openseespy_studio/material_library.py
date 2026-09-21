@@ -6,7 +6,7 @@ import json
 from importlib import resources
 from typing import Any
 
-from .project import MaterialData
+from .project import MATERIAL_PARAMETER_ORDER, MaterialData
 
 
 _LIBRARY_RESOURCE = (
@@ -124,13 +124,66 @@ def _record_from_dict(raw: dict[str, Any]) -> MaterialLibraryRecord:
             "unverified parameter(s): " + ", ".join(missing)
         )
 
+    model = str(raw.get("model", "")).strip()
+    expected = tuple(MATERIAL_PARAMETER_ORDER.get(model, ()))
+    if expected:
+        missing_model_parameters = [
+            key for key in expected if key not in parameters
+        ]
+        extra_model_parameters = [
+            key for key in parameters if key not in expected
+        ]
+        if missing_model_parameters or extra_model_parameters:
+            details: list[str] = []
+            if missing_model_parameters:
+                details.append(
+                    "missing " + ", ".join(missing_model_parameters)
+                )
+            if extra_model_parameters:
+                details.append(
+                    "unexpected " + ", ".join(extra_model_parameters)
+                )
+            raise ValueError(
+                f"Official material library record {record_id!r} does "
+                f"not exactly match {model} parameters: "
+                + "; ".join(details)
+            )
+
+    response_quantity = str(
+        raw.get("response_quantity", "")
+    ).strip().lower()
+    source_units = {
+        str(key): str(value)
+        for key, value in dict(
+            raw.get("source_units", {})
+        ).items()
+    }
+    if model == "Pinching4":
+        if response_quantity not in {
+            "force_displacement",
+            "moment_rotation",
+            "stress_strain",
+        }:
+            raise ValueError(
+                f"Verified Pinching4 record {record_id!r} must declare "
+                "response_quantity."
+            )
+        if (
+            not source_units.get("response", "").strip()
+            or not source_units.get("deformation", "").strip()
+        ):
+            raise ValueError(
+                f"Verified Pinching4 record {record_id!r} must declare "
+                "source response/deformation units."
+            )
+
     return MaterialLibraryRecord(
         id=record_id,
         family=str(raw.get("family", "")).strip(),
         material=str(raw.get("material", "")).strip(),
         grade=str(raw.get("grade", "")).strip(),
         standard=str(raw.get("standard", "")).strip(),
-        model=str(raw.get("model", "")).strip(),
+        model=model,
         preset_name=str(raw.get("preset_name", "")).strip(),
         parameters_si=parameters,
         verified_parameters=verified,
@@ -143,15 +196,8 @@ def _record_from_dict(raw: dict[str, Any]) -> MaterialLibraryRecord:
         primary_reference=reference,
         parameter_evidence=evidence,
         verification=verification,
-        response_quantity=str(
-            raw.get("response_quantity", "")
-        ).strip().lower(),
-        source_units={
-            str(key): str(value)
-            for key, value in dict(
-                raw.get("source_units", {})
-            ).items()
-        },
+        response_quantity=response_quantity,
+        source_units=source_units,
     )
 
 
