@@ -2449,6 +2449,25 @@ def to_openseespy(
             f"model ndf={model.ndf}; choose a DOF from 1 to {model.ndf}."
         )
 
+    uses_control_node = (
+        active_analysis is not None
+        and (
+            active_analysis.analysis_type in {"Pushover", "Cyclic"}
+            or (
+                active_analysis.analysis_type == "Static"
+                and active_analysis.integrator == "DisplacementControl"
+            )
+        )
+    )
+    if (
+        uses_control_node
+        and int(active_analysis.control_node) not in model.nodes
+    ):
+        raise ValueError(
+            f"{active_analysis.analysis_type} control node "
+            f"{active_analysis.control_node} does not exist in the model."
+        )
+
     lines: list[str] = [
         "import json",
         "import math",

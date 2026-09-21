@@ -404,3 +404,96 @@ def test_generator_does_not_apply_control_dof_ndf_preflight_to_modal():
     )
 
     assert "ops.eigen('-genBandArpack', 1)" in code
+
+
+@pytest.mark.parametrize(
+    ("analysis_type", "integrator"),
+    [
+        ("Static", "DisplacementControl"),
+        ("Pushover", "DisplacementControl"),
+        ("Cyclic", "DisplacementControl"),
+    ],
+)
+def test_generator_rejects_missing_active_control_node(
+    analysis_type,
+    integrator,
+):
+    model = StructuralModel("missing-control-node", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+
+    kwargs = {
+        "integrator": integrator,
+        "control_node": 99,
+        "control_dof": 1,
+    }
+    if analysis_type == "Static":
+        kwargs["displacement_increment"] = 0.001
+    elif analysis_type == "Pushover":
+        kwargs["displacement_increment"] = 0.001
+    else:
+        kwargs.update(
+            cyclic_targets=[0.001, -0.001],
+            cyclic_increment=0.0005,
+        )
+
+    analysis = AnalysisSettingsData(
+        13,
+        "Missing control node",
+        analysis_type,
+        **kwargs,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"control node 99 does not exist in the model",
+    ):
+        to_openseespy(
+            model,
+            analyses={13: analysis},
+            active_analysis_tag=13,
+        )
+
+
+@pytest.mark.parametrize(
+    ("analysis_type", "integrator"),
+    [
+        ("Static", "LoadControl"),
+        ("Static", "ArcLength"),
+        ("Transient", "Newmark"),
+        ("Modal", "None"),
+    ],
+)
+def test_generator_ignores_stale_control_node_when_analysis_does_not_use_it(
+    analysis_type,
+    integrator,
+):
+    model = StructuralModel("unused-control-node", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+
+    kwargs = {
+        "integrator": integrator,
+        "control_node": 99,
+        "control_dof": 1,
+    }
+    if analysis_type == "Transient":
+        kwargs.update(dt=0.01)
+    elif analysis_type == "Modal":
+        kwargs.update(num_modes=1)
+
+    analysis = AnalysisSettingsData(
+        14,
+        "Unused stale control node",
+        analysis_type,
+        **kwargs,
+    )
+
+    code = to_openseespy(
+        model,
+        analyses={14: analysis},
+        active_analysis_tag=14,
+    )
+
+    if analysis_type == "Modal":
+        assert "ops.eigen('-genBandArpack', 1)" in code
+    else:
+        assert "ops.analysis(" in code
