@@ -126,3 +126,59 @@ def test_material_generator_can_use_n_m_s_without_stress_scaling():
 
     assert "3.55e+08" in line
     assert "2e+11" in line
+
+
+def test_frp_confined_concrete_generator_preserves_documented_n_mm_mpa_inputs():
+    material = MaterialData(
+        tag=9,
+        name="FRP confined circular concrete",
+        material_type="FRPConfinedConcrete",
+        parameters={
+            "fpc1": 27.5e6,
+            "fpc2": 27.5e6,
+            "epsc0": 0.002,
+            "D": 0.400,
+            "c": 0.035,
+            "Ej": 266.0e9,
+            "Sj": 0.0,
+            "tj": 0.000222,
+            "eju": 0.0163,
+            "S": 0.150,
+            "fyl": 374.0e6,
+            "fyh": 363.0e6,
+            "dlong": 0.016,
+            "dtrans": 0.006,
+            "Es": 200.0e9,
+            "nu0": 0.2,
+            "k": 0.8,
+            "useBuck": 1.0,
+        },
+    )
+    line = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+    assert line == (
+        "ops.uniaxialMaterial('FRPConfinedConcrete', 9, "
+        "27.5, 27.5, 0.002, 400, 35, 266000, 0, 0.222, "
+        "0.0163, 150, 374, 363, 16, 6, 200000, 0.2, 0.8, 1)"
+    )
+
+
+def test_frp_confined_concrete_rejects_non_documented_project_units():
+    material = MaterialData(
+        tag=9,
+        name="FRP confined circular concrete",
+        material_type="FRPConfinedConcrete",
+    )
+    try:
+        material_to_openseespy(
+            material,
+            {"length": "m", "force": "N", "time": "s"},
+        )
+    except ValueError as exc:
+        assert "mm - N - s" in str(exc)
+    else:
+        raise AssertionError(
+            "FRPConfinedConcrete should reject non-mm/N project units"
+        )

@@ -61,6 +61,25 @@ class AnalysisDialog(QDialog):
         self.constraints=QComboBox(); self.constraints.addItems(["Transformation","Plain"]); self.constraints.setCurrentText(analysis.constraints_handler if analysis else "Transformation")
         self.numberer=QComboBox(); self.numberer.addItems(["RCM","Plain"]); self.numberer.setCurrentText(analysis.numberer if analysis else "RCM")
         self.system=QComboBox(); self.system.addItems(["UmfPack","BandGeneral","ProfileSPD","SparseGeneral"]); self.system.setCurrentText(analysis.system if analysis else "UmfPack")
+        self.system_pivoting=QCheckBox("Use pivoting (-piv)")
+        self.system_pivoting.setChecked(
+            analysis.system_pivoting if analysis else False
+        )
+        self.system_pivoting.setToolTip(
+            "Preserve OpenSees SparseGeneral -piv for models that require "
+            "partial pivoting."
+        )
+        self.system_pivoting.setEnabled(
+            self.system.currentText() == "SparseGeneral"
+        )
+        self.system.currentTextChanged.connect(
+            lambda text: self.system_pivoting.setEnabled(
+                text == "SparseGeneral"
+            )
+        )
+        self.system.currentTextChanged.connect(
+            lambda _text: self._sync(self.kind.currentText())
+        )
         self.test=QComboBox(); self.test.addItems(["NormDispIncr","NormUnbalance","EnergyIncr"]); self.test.setCurrentText(analysis.test if analysis else "NormDispIncr")
         self.tol=fs(analysis.tolerance if analysis else 1e-8,1e-16,1e10)
         self.max_iter=QSpinBox(); self.max_iter.setRange(1,100000); self.max_iter.setValue(analysis.max_iterations if analysis else 50)
@@ -82,6 +101,9 @@ class AnalysisDialog(QDialog):
             lambda text: self.algorithm_initial.setEnabled(
                 text == "ModifiedNewton"
             )
+        )
+        self.algorithm.currentTextChanged.connect(
+            lambda _text: self._sync(self.kind.currentText())
         )
         self.integrator=QComboBox()
         self._initial_integrator=(analysis.integrator if analysis else None)
@@ -220,6 +242,17 @@ class AnalysisDialog(QDialog):
         )
         self.gravity_steps=QSpinBox(); self.gravity_steps.setRange(1,100000)
         self.gravity_steps.setValue(analysis.gravity_steps if analysis else 10)
+        self.gravity_algorithm=QComboBox()
+        self.gravity_algorithm.addItems(
+            ["Auto", "Newton", "NewtonLineSearch", "ModifiedNewton", "Linear"]
+        )
+        self.gravity_algorithm.setCurrentText(
+            analysis.gravity_algorithm if analysis else "Auto"
+        )
+        self.gravity_algorithm.setToolTip(
+            "Algorithm used only for gravity preload. Auto reuses the main "
+            "analysis algorithm."
+        )
         self.deferred_patterns=QLineEdit(
             ", ".join(
                 str(tag)
@@ -340,6 +373,11 @@ class AnalysisDialog(QDialog):
             ("constraints","Constraints",self.constraints),
             ("numberer","Numberer",self.numberer),
             ("system","System",self.system),
+            (
+                "system_pivoting",
+                "System option",
+                self.system_pivoting,
+            ),
             ("test","Test",self.test),
             ("tol","Tolerance",self.tol),
             ("max_iter","Max iterations",self.max_iter),
@@ -373,6 +411,7 @@ class AnalysisDialog(QDialog):
             ("eigen_solver","Eigen solver",self.eigen_solver),
             ("preload_gravity","Gravity preload",self.preload_gravity),
             ("gravity_steps","Gravity preload steps",self.gravity_steps),
+            ("gravity_algorithm","Gravity algorithm",self.gravity_algorithm),
             ("driver_mode","Driving load",self.driver_mode),
             ("driver_pattern","Existing Plain pattern",self.driver_pattern),
             ("driver_distribution","Auto load distribution",self.driver_distribution),
@@ -470,7 +509,7 @@ class AnalysisDialog(QDialog):
         # Identity and core solver configuration are common to every analysis.
         common={
             "tag","name","kind","constraints","numberer","system",
-            "integrator","external_console",
+            "system_pivoting","integrator","external_console",
         }
         visible=set(common)
 
@@ -480,6 +519,8 @@ class AnalysisDialog(QDialog):
                 "test","tol","max_iter","algorithm",
                 "recovery","adaptive","live_convergence",
             })
+            if self.algorithm.currentText() == "ModifiedNewton":
+                visible.add("algorithm_initial")
 
         if static:
             visible.add("steps")
@@ -533,7 +574,7 @@ class AnalysisDialog(QDialog):
             elif transient:
                 visible.add("deferred_patterns")
             if self.preload_gravity.isChecked():
-                visible.add("gravity_steps")
+                visible.update({"gravity_steps", "gravity_algorithm"})
 
         if non_modal and self.adaptive.isChecked():
             visible.update({
@@ -663,7 +704,12 @@ class AnalysisDialog(QDialog):
         return AnalysisSettingsData(
             tag=self.tag.value(),name=self.name.text().strip() or f"Analysis {self.tag.value()}",
             analysis_type=self.kind.currentText(),constraints_handler=self.constraints.currentText(),
-            numberer=self.numberer.currentText(),system=self.system.currentText(),test=self.test.currentText(),
+            numberer=self.numberer.currentText(),system=self.system.currentText(),
+            system_pivoting=(
+                self.system_pivoting.isChecked()
+                and self.system.currentText() == "SparseGeneral"
+            ),
+            test=self.test.currentText(),
             tolerance=self.tol.value(),max_iterations=self.max_iter.value(),algorithm=self.algorithm.currentText(),
             algorithm_initial=(
                 self.algorithm_initial.isChecked()
@@ -684,6 +730,7 @@ class AnalysisDialog(QDialog):
             rayleigh_mode_j=self.damping_mode_j.value(),
             preload_gravity=preload_gravity,
             gravity_steps=self.gravity_steps.value(),
+            gravity_algorithm=self.gravity_algorithm.currentText(),
             deferred_pattern_tags=deferred_pattern_tags,
             num_modes=self.modes.value(),
             eigen_solver=str(self.eigen_solver.currentData()),

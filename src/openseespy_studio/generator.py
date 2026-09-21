@@ -273,6 +273,30 @@ def material_to_openseespy(
             f"{p['eta']:g}, {damage!r})"
         )
 
+    if material.material_type == "FRPConfinedConcrete":
+        if not (
+            unit_system.length == "mm"
+            and unit_system.force == "N"
+        ):
+            raise ValueError(
+                "FRPConfinedConcrete is unit-sensitive and requires "
+                "project units mm - N - s (stress in MPa), matching the "
+                "OpenSees material documentation."
+            )
+        length = unit_system.length_from_m
+        return (
+            "ops.uniaxialMaterial('FRPConfinedConcrete', "
+            f"{material.tag}, "
+            f"{stress(p['fpc1']):g}, {stress(p['fpc2']):g}, "
+            f"{p['epsc0']:g}, {length(p['D']):g}, {length(p['c']):g}, "
+            f"{stress(p['Ej']):g}, {length(p['Sj']):g}, "
+            f"{length(p['tj']):g}, {p['eju']:g}, {length(p['S']):g}, "
+            f"{stress(p['fyl']):g}, {stress(p['fyh']):g}, "
+            f"{length(p['dlong']):g}, {length(p['dtrans']):g}, "
+            f"{stress(p['Es']):g}, {p['nu0']:g}, {p['k']:g}, "
+            f"{p['useBuck']:g})"
+        )
+
     if material.material_type == "FRPConfinedConcrete02":
         if not (
             unit_system.length == "mm"
@@ -1117,6 +1141,11 @@ def analysis_to_openseespy(
         key: {'force': [], 'deformation': []}
         for key in section_response_catalog
     }
+    system_command = (
+        "ops.system('SparseGeneral', '-piv')"
+        if settings.system == "SparseGeneral" and settings.system_pivoting
+        else f"ops.system({settings.system!r})"
+    )
     cyclic_steps = (
         cyclic_displacement_steps(
             settings.cyclic_targets,
@@ -1166,6 +1195,7 @@ def analysis_to_openseespy(
         f"        'constraints_handler': {settings.constraints_handler!r},",
         f"        'numberer': {settings.numberer!r},",
         f"        'system': {settings.system!r},",
+        f"        'system_pivoting': {settings.system_pivoting!r},",
         f"        'test': {settings.test!r},",
         f"        'tolerance': {settings.tolerance:g},",
         f"        'max_iterations': {settings.max_iterations},",
@@ -1189,6 +1219,7 @@ def analysis_to_openseespy(
         f"        'arc_length_alpha': {settings.arc_length_alpha:g},",
         f"        'preload_gravity': {settings.preload_gravity!r},",
         f"        'gravity_steps': {settings.gravity_steps},",
+        f"        'gravity_algorithm': {settings.gravity_algorithm!r},",
         f"        'deferred_pattern_tags': {settings.deferred_pattern_tags!r},",
         f"        'num_modes': {settings.num_modes},",
         f"        'recovery': {settings.recovery!r},",
@@ -1254,7 +1285,7 @@ def analysis_to_openseespy(
         f"_studio_monitor_node = {monitor_node}",
         f"ops.constraints('{settings.constraints_handler}')",
         f"ops.numberer('{settings.numberer}')",
-        f"ops.system('{settings.system}')",
+        system_command,
     ]
 
     if (
@@ -3956,12 +3987,19 @@ def to_openseespy(
                 "# Template sequence: gravity / existing Plain-load preload",
                 f"ops.constraints({active.constraints_handler!r})",
                 f"ops.numberer({active.numberer!r})",
-                f"ops.system({active.system!r})",
+                (
+                    "ops.system('SparseGeneral', '-piv')"
+                    if (
+                        active.system == "SparseGeneral"
+                        and active.system_pivoting
+                    )
+                    else f"ops.system({active.system!r})"
+                ),
                 (
                     f"ops.test({active.test!r}, {active.tolerance:g}, "
                     f"{active.max_iterations}, 0)"
                 ),
-                f"ops.algorithm({active.algorithm!r})",
+                f"ops.algorithm({(active.algorithm if active.gravity_algorithm == 'Auto' else active.gravity_algorithm)!r})",
                 f"ops.integrator('LoadControl', {gravity_increment:g})",
                 "ops.analysis('Static')",
                 f"_studio_gravity_ok = ops.analyze({active.gravity_steps})",

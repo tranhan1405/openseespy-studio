@@ -1139,23 +1139,37 @@ class MaterialDialog(QDialog):
         if preview_available:
             self.preview.set_material(material_type, values)
 
-        if material_type == "FRPConfinedConcrete02":
+        if material_type in {
+            "FRPConfinedConcrete",
+            "FRPConfinedConcrete02",
+        }:
             unit_ok = (
                 self.unit_system.length == "mm"
                 and self.unit_system.force == "N"
             )
             if unit_ok:
+                model_note = (
+                    "FRPConfinedConcrete is the Megalooikonomou-Monti-Santini "
+                    "circular RC confinement model. Some stock OpenSeesPy builds "
+                    "(including 3.8.0 used by Studio CI) omit this legacy material "
+                    "from the compiled runtime; import/edit/export remains available."
+                    if material_type == "FRPConfinedConcrete"
+                    else (
+                        "FRPConfinedConcrete02 represents the wrap through the "
+                        "concrete constitutive law; do not create a duplicate "
+                        "column element."
+                    )
+                )
                 self.material_note.setText(
-                    "FRPConfinedConcrete02 uses the OpenSees SI metric convention "
-                    "(N, mm, MPa). JacketC represents the wrap through the concrete "
-                    "constitutive law; do not create a duplicate column element."
+                    f"{material_type} uses the OpenSees SI metric convention "
+                    f"(N, mm, MPa). {model_note}"
                 )
                 self.material_note.setStyleSheet(
                     "padding: 7px; background: #eaf6ee; color: #276738;"
                 )
             else:
                 self.material_note.setText(
-                    "FRPConfinedConcrete02 is unit-sensitive. For research-safe "
+                    f"{material_type} is unit-sensitive. For research-safe "
                     "generation use project units mm - N - s (stress = MPa). "
                     "Studio will block generation in other unit systems."
                 )

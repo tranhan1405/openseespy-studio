@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 28
+PROJECT_FORMAT_VERSION = 29
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -73,6 +73,7 @@ MATERIAL_CATEGORIES: dict[str, str] = {
     "Pinching4": "Hysteretic / Connection",
     "Bond_SP01": "Bond / Interface",
     "ElasticPPGap": "Hysteretic / Connection",
+    "FRPConfinedConcrete": "Concrete / FRP",
     "FRPConfinedConcrete02": "Concrete / FRP",
     "MinMax": "Wrapper / Composite",
     "Fatigue": "Wrapper / Composite",
@@ -107,6 +108,11 @@ MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     ),
     "Bond_SP01": ("Fy", "Sy", "Fu", "Su", "b", "R"),
     "ElasticPPGap": ("E", "Fy", "gap", "eta", "damage"),
+    "FRPConfinedConcrete": (
+        "fpc1", "fpc2", "epsc0", "D", "c", "Ej", "Sj", "tj",
+        "eju", "S", "fyl", "fyh", "dlong", "dtrans", "Es",
+        "nu0", "k", "useBuck",
+    ),
     "FRPConfinedConcrete02": (
         "fc0", "Ec", "ec0", "mode", "tfrp", "Efrp", "erup", "R",
         "fcu", "ecu", "ft", "Ets",
@@ -150,6 +156,13 @@ MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
         "Fy": "stress", "Fu": "stress", "Sy": "length", "Su": "length",
     },
     "ElasticPPGap": {},
+    "FRPConfinedConcrete": {
+        "fpc1": "stress", "fpc2": "stress",
+        "D": "length", "c": "length", "Ej": "stress",
+        "Sj": "length", "tj": "length", "S": "length",
+        "fyl": "stress", "fyh": "stress",
+        "dlong": "length", "dtrans": "length", "Es": "stress",
+    },
     "FRPConfinedConcrete02": {
         "fc0": "stress", "Ec": "stress", "tfrp": "length",
         "Efrp": "stress", "R": "length", "fcu": "stress",
@@ -218,6 +231,14 @@ MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
     },
     "Bond_SP01": {"Fy": 5.0e8, "Sy": 0.001, "Fu": 6.5e8, "Su": 0.01, "b": 0.4, "R": 0.8},
     "ElasticPPGap": {"E": 1.0, "Fy": 1.0, "gap": 0.0, "eta": 0.0, "damage": 0.0},
+    "FRPConfinedConcrete": {
+        "fpc1": 27.5e6, "fpc2": 27.5e6, "epsc0": 0.002,
+        "D": 0.400, "c": 0.035, "Ej": 266.0e9,
+        "Sj": 0.0, "tj": 0.000222, "eju": 0.0163,
+        "S": 0.150, "fyl": 374.0e6, "fyh": 363.0e6,
+        "dlong": 0.016, "dtrans": 0.006, "Es": 200.0e9,
+        "nu0": 0.2, "k": 0.8, "useBuck": 1.0,
+    },
     "FRPConfinedConcrete02": {"fc0": -30.0e6, "Ec": 3.0e10, "ec0": -0.002, "mode": 0.0, "tfrp": 0.000334, "Efrp": 7.2e10, "erup": 0.015, "R": 0.2, "fcu": -45.0e6, "ecu": -0.015, "ft": 3.0e6, "Ets": 1.5e9},
     "MinMax": {"min": -1.0e16, "max": 1.0e16},
     "Fatigue": {"E0": 0.191, "m": -0.458, "min": -1.0e16, "max": 1.0e16},
@@ -1760,6 +1781,8 @@ class AnalysisSettingsData:
     arc_length_s: float = 0.01
     arc_length_alpha: float = 1.0
     algorithm_initial: bool = False
+    system_pivoting: bool = False
+    gravity_algorithm: str = "Auto"
 
     def __post_init__(self) -> None:
         self.tag=_strict_int(self.tag, "Analysis tag"); self.name=str(self.name).strip() or f"Analysis {self.tag}"
@@ -1849,6 +1872,11 @@ class AnalysisSettingsData:
             self.algorithm_initial,
             "Analysis algorithm_initial",
         )
+        self.system_pivoting=_strict_bool(
+            self.system_pivoting,
+            "Analysis system_pivoting",
+        )
+        self.gravity_algorithm=str(self.gravity_algorithm or "Auto")
         numeric_values = (
             self.tolerance,
             self.load_increment,
@@ -1948,12 +1976,20 @@ class AnalysisSettingsData:
             raise ValueError("Unsupported constraints handler.")
         if self.numberer not in {"RCM","Plain"}: raise ValueError("Unsupported numberer.")
         if self.system not in {"UmfPack","BandGeneral","ProfileSPD","SparseGeneral"}: raise ValueError("Unsupported system.")
+        if self.system_pivoting and self.system != "SparseGeneral":
+            raise ValueError(
+                "System pivoting (-piv) is only supported for SparseGeneral."
+            )
         uses_iterative_convergence = self.analysis_type != "Modal"
         if (
             uses_iterative_convergence
             and self.test not in {"NormDispIncr","NormUnbalance","EnergyIncr"}
         ):
             raise ValueError("Unsupported convergence test.")
+        if self.gravity_algorithm not in {
+            "Auto", "Linear", "Newton", "ModifiedNewton", "NewtonLineSearch"
+        }:
+            raise ValueError("Unsupported gravity preload algorithm.")
         if self.algorithm_initial and self.algorithm != "ModifiedNewton":
             raise ValueError(
                 "Initial-tangent option is only valid for ModifiedNewton."
@@ -2130,7 +2166,7 @@ class AnalysisSettingsData:
             "adaptive_cutback_factor","adaptive_min_factor",
             "adaptive_growth_factor","adaptive_easy_iterations",
             "adaptive_growth_after","live_convergence","show_external_console",
-            "algorithm_initial"
+            "algorithm_initial","system_pivoting","gravity_algorithm"
         )}
 
     @classmethod
