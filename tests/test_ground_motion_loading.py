@@ -115,7 +115,7 @@ def test_validation_rejects_uniform_excitation_without_path_series():
     )
 
 
-def test_validation_rejects_ground_motion_direction_beyond_model_ndf():
+def test_validation_rejects_ground_motion_direction_beyond_model_ndm():
     model = StructuralModel("dynamic", ndm=2, ndf=2)
     model.add_node(1, 0.0, 0.0)
     model.add_node(2, 1.0, 0.0)
@@ -153,7 +153,7 @@ def test_validation_rejects_ground_motion_direction_beyond_model_ndf():
 
     assert any(
         issue.severity == "ERROR"
-        and "model has ndf=2" in issue.message
+        and "model has ndm=2" in issue.message
         for issue in issues
     )
 
@@ -229,3 +229,168 @@ def test_ground_motion_dialog_library_is_offline_only_without_download_button():
         dialog.close()
         dialog.deleteLater()
         app.processEvents()
+
+
+def test_validation_rejects_rotational_uniform_excitation_in_2d_ndf3_model():
+    model = StructuralModel("dynamic", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.set_fixity(1, (1, 1, 1))
+    model.nodes[2].mass = (1.0, 1.0, 0.0)
+
+    project = ProjectDatabase(model=model)
+    project.add_time_series(
+        TimeSeriesData(
+            1,
+            "Record",
+            "Path",
+            dt=0.01,
+            values=[0.0, 0.1],
+        )
+    )
+    project.add_load_pattern(
+        LoadPatternData(
+            1,
+            "Bad rotational excitation",
+            "UniformExcitation",
+            time_series_tag=1,
+            direction=3,
+        )
+    )
+    analysis = AnalysisSettingsData(
+        1,
+        "NLTH",
+        "Transient",
+        steps=2,
+        dt=0.01,
+        deferred_pattern_tags=[1],
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Ground motion"
+        and "ndm=2" in issue.message
+        for issue in issues
+    )
+
+
+def test_transient_validation_ignores_stale_inactive_ground_motion():
+    model = StructuralModel("dynamic", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.set_fixity(1, (1, 1))
+    model.nodes[2].mass = (1.0, 1.0)
+
+    project = ProjectDatabase(model=model)
+    project.add_time_series(
+        TimeSeriesData(
+            1,
+            "Current record",
+            "Path",
+            dt=0.01,
+            values=[0.0, 0.1],
+        )
+    )
+    project.add_load_pattern(
+        LoadPatternData(
+            1,
+            "Current EQ",
+            "UniformExcitation",
+            time_series_tag=1,
+            direction=1,
+        )
+    )
+    project.add_time_series(
+        TimeSeriesData(2, "Stale wrong series", "Linear", factor=1.0)
+    )
+    project.add_load_pattern(
+        LoadPatternData(
+            2,
+            "Stale EQ",
+            "UniformExcitation",
+            time_series_tag=2,
+            direction=1,
+        )
+    )
+    analysis = AnalysisSettingsData(
+        1,
+        "Current NLTH",
+        "Transient",
+        steps=2,
+        dt=0.01,
+        deferred_pattern_tags=[1],
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert not any(
+        issue.category == "Ground motion"
+        and "pattern 2" in issue.message
+        for issue in issues
+    )
+    assert not any(
+        issue.category == "Ground motion"
+        and issue.severity == "ERROR"
+        for issue in issues
+    )
+
+
+def test_modal_validation_ignores_ground_motion_objects():
+    model = StructuralModel("modal", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.set_fixity(1, (1, 1, 1))
+    model.nodes[2].mass = (1.0, 1.0, 0.0)
+
+    project = ProjectDatabase(model=model)
+    project.add_time_series(
+        TimeSeriesData(1, "Wrong for EQ", "Linear", factor=1.0)
+    )
+    project.add_load_pattern(
+        LoadPatternData(
+            1,
+            "Unused EQ",
+            "UniformExcitation",
+            time_series_tag=1,
+            direction=3,
+        )
+    )
+    analysis = AnalysisSettingsData(
+        1,
+        "Modes",
+        "Modal",
+        num_modes=1,
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert not any(issue.category == "Ground motion" for issue in issues)
+
+
+def test_transient_validation_reports_missing_owned_excitation_pattern():
+    model = StructuralModel("dynamic", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.set_fixity(1, (1, 1))
+    model.nodes[2].mass = (1.0, 1.0)
+
+    project = ProjectDatabase(model=model)
+    analysis = AnalysisSettingsData(
+        1,
+        "NLTH",
+        "Transient",
+        steps=2,
+        dt=0.01,
+        deferred_pattern_tags=[99],
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Ground motion"
+        and "missing excitation pattern 99" in issue.message
+        for issue in issues
+    )
