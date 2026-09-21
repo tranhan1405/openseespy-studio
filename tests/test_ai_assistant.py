@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from openseespy_studio.ai_assistant import (
+    OllamaProvider,
     OpenAIProvider,
     execute_read_only_tool,
     prepare_project_snapshot,
@@ -253,3 +254,73 @@ def test_optional_tool_ids_fail_closed_instead_of_raising():
         snapshot,
     )
     assert job["found"] is False
+
+
+def test_ollama_provider_executes_local_read_only_tool_loop():
+    calls = []
+
+    def transport(path, payload):
+        calls.append((path, payload))
+        if len(calls) == 1:
+            return {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "get_model_summary",
+                                "arguments": {},
+                            }
+                        }
+                    ],
+                }
+            }
+        return {
+            "message": {
+                "role": "assistant",
+                "content": "The model has two nodes and one element.",
+            }
+        }
+
+    provider = OllamaProvider(
+        model="qwen3.5:4b",
+        host="http://localhost:11434",
+        transport=transport,
+    )
+    answer = provider.ask(
+        "Summarize the model.",
+        snapshot=_snapshot(),
+        history=[],
+    )
+
+    assert "two nodes" in answer
+    assert len(calls) == 2
+    assert calls[0][0] == "/api/chat"
+    assert calls[0][1]["stream"] is False
+    assert calls[0][1]["tools"][0]["type"] == "function"
+    assert "function" in calls[0][1]["tools"][0]
+    assert any(
+        item.get("role") == "tool"
+        and "node_count" in item.get("content", "")
+        for item in calls[1][1]["messages"]
+        if isinstance(item, dict)
+    )
+
+
+def test_ollama_provider_rejects_remote_hosts():
+    provider = OllamaProvider(
+        model="qwen3.5:4b",
+        host="https://example.com",
+        transport=lambda path, payload: {},
+    )
+    try:
+        provider.ask(
+            "hi",
+            snapshot=_snapshot(),
+            history=[],
+        )
+    except RuntimeError as exc:
+        assert "local-only" in str(exc)
+    else:
+        raise AssertionError("Remote Ollama host should be rejected")
