@@ -1432,12 +1432,17 @@ class _Importer:
             self.analysis_state[command] = str(args[0])
         elif command == "system" and args:
             system_name = str(args[0])
-            self.analysis_state["system"] = {
+            normalized_system = {
                 "BandGEN": "BandGeneral",
                 "BandGen": "BandGeneral",
                 "SparseGEN": "SparseGeneral",
                 "SparseGen": "SparseGeneral",
             }.get(system_name, system_name)
+            self.analysis_state["system"] = normalized_system
+            self.analysis_state["system_pivoting"] = (
+                normalized_system == "SparseGeneral"
+                and "-piv" in args[1:]
+            )
         elif command == "algorithm" and args:
             self.analysis_state["algorithm"] = str(args[0])
             self.analysis_state["algorithm_initial"] = (
@@ -1740,6 +1745,118 @@ class _Importer:
         self.count("Local modules")
         return True
 
+    def _recognize_cyclic_history_for(self, stmt: ast.For) -> bool:
+        """Recognize absolute-target cyclic DisplacementControl histories."""
+        if not isinstance(stmt.target, ast.Name):
+            return False
+
+        try:
+            raw_targets = list(self.eval.eval(stmt.iter))
+        except (TypeError, _Unresolved):
+            return False
+        if len(raw_targets) < 2:
+            return False
+        try:
+            targets = [float(value) for value in raw_targets]
+        except (TypeError, ValueError):
+            return False
+        if any(not math.isfinite(value) for value in targets):
+            return False
+
+        integrator_call: ast.Call | None = None
+        analyze_call: ast.Call | None = None
+        analyze_targets: set[str] = set()
+        for child in ast.walk(stmt):
+            if isinstance(child, ast.Call):
+                command = self.command_name(child)
+                if command == "integrator":
+                    try:
+                        args = self.call_args(child)
+                    except _Unresolved:
+                        args = []
+                    if args and str(args[0]) == "DisplacementControl":
+                        integrator_call = child
+                elif command == "analyze":
+                    analyze_call = child
+            elif isinstance(child, ast.Assign) and isinstance(child.value, ast.Call):
+                if self.command_name(child.value) == "analyze":
+                    for target in child.targets:
+                        analyze_targets.update(self._simple_target_names(target))
+
+        if integrator_call is None or analyze_call is None:
+            return False
+        try:
+            integrator_args = self.call_args(integrator_call)
+            analyze_args = self.call_args(analyze_call)
+        except _Unresolved:
+            return False
+        if len(integrator_args) < 4:
+            return False
+        if not analyze_args or int(analyze_args[0]) != 1:
+            return False
+
+        control_node = int(integrator_args[1])
+        control_dof = int(integrator_args[2])
+
+        deltas: list[float] = []
+        current = 0.0
+        directions: list[int] = []
+        nonzero_steps = 0
+        for target in targets:
+            delta = target - current
+            deltas.append(delta)
+            if abs(delta) > 1.0e-15:
+                nonzero_steps += 1
+                directions.append(1 if delta > 0.0 else -1)
+            current = target
+        has_reversal = any(
+            left != right
+            for left, right in zip(directions, directions[1:])
+        )
+        if not has_reversal:
+            return False
+
+        max_increment = max(
+            (abs(delta) for delta in deltas if abs(delta) > 1.0e-15),
+            default=1.0,
+        )
+        self.analysis_state.update({
+            "recognized_cyclic": True,
+            "integrator": "DisplacementControl",
+            "integrator_args": [
+                control_node,
+                control_dof,
+                deltas[0] if deltas else 0.0,
+            ],
+            "control_node": control_node,
+            "control_dof": control_dof,
+            "cyclic_targets": targets,
+            "cyclic_increment": max_increment,
+            "steps": max(1, nonzero_steps),
+            "recovery": False,
+        })
+        self.runtime_only_names.update(analyze_targets)
+        self.analysis_events.append({
+            "steps": max(1, nonzero_steps),
+            "dt": None,
+            "integrator": "DisplacementControl",
+            "integrator_args": [
+                control_node,
+                control_dof,
+                deltas[0] if deltas else 0.0,
+            ],
+            "analysis_kind": self.analysis_state.get(
+                "analysis_kind",
+                "Static",
+            ),
+            "pattern_tags": sorted(self.project.load_patterns),
+            "current_pattern": self.current_pattern,
+            "recognized_cyclic": True,
+        })
+        self.count("Cyclic drivers")
+        self.count("Cyclic targets", len(targets))
+        return True
+
     def _recognize_pushover_while(self, stmt: ast.While) -> bool:
         """Recognize common OpenSees displacement-control pushover loops."""
         if self.analysis_state.get("integrator") != "DisplacementControl":
@@ -2036,6 +2153,8 @@ class _Importer:
             return
 
         if isinstance(stmt, ast.For):
+            if self._recognize_cyclic_history_for(stmt):
+                return
             if (
                 isinstance(stmt.target, ast.Name)
                 and stmt.target.id.startswith("_studio_")
@@ -2246,7 +2365,9 @@ class _Importer:
             or ""
         ).strip()
         if not analysis_type:
-            if (
+            if state.get("recognized_cyclic"):
+                analysis_type = "Cyclic"
+            elif (
                 state.get("recognized_pushover")
                 or analysis_type_hint.lower() == "pushover"
             ):
@@ -2282,6 +2403,12 @@ class _Importer:
             ),
             "numberer": str(meta.get("numberer", state.get("numberer", "RCM"))),
             "system": str(meta.get("system", state.get("system", "UmfPack"))),
+            "system_pivoting": bool(
+                meta.get(
+                    "system_pivoting",
+                    state.get("system_pivoting", False),
+                )
+            ),
             "test": str(meta.get("test", state.get("test", "NormDispIncr"))),
             "tolerance": float(
                 meta.get("tolerance", state.get("tolerance", 1e-8))
@@ -2335,7 +2462,12 @@ class _Importer:
                     state.get("displacement_increment", 0.001),
                 )
             ),
-            "cyclic_increment": float(meta.get("cyclic_increment", 0.001)),
+            "cyclic_increment": float(
+                meta.get(
+                    "cyclic_increment",
+                    state.get("cyclic_increment", 0.001),
+                )
+            ),
             "dt": float(meta.get("dt", state.get("dt", 0.01)) or 0.01),
             "gamma": float(meta.get("gamma", 0.5)),
             "beta": float(meta.get("beta", 0.25)),
@@ -2409,9 +2541,13 @@ class _Importer:
                 if "displacement_increment" not in meta:
                     kwargs["displacement_increment"] = float(values[2])
         elif analysis_type == "Cyclic":
-            if meta.get("cyclic_targets"):
+            cyclic_targets = meta.get(
+                "cyclic_targets",
+                state.get("cyclic_targets"),
+            )
+            if cyclic_targets:
                 kwargs["cyclic_targets"] = [
-                    float(value) for value in meta["cyclic_targets"]
+                    float(value) for value in cyclic_targets
                 ]
         elif analysis_type == "Transient":
             if integrator == "Newmark" and len(values) >= 2:
