@@ -16,6 +16,7 @@ from openseespy_studio.project import (
     SelectionSetData,
     SolutionResultData,
     TimeSeriesData,
+    TransformationData,
 )
 
 
@@ -1893,3 +1894,56 @@ def test_project_rejects_fiber_recorder_with_missing_material():
                 material_tag=99,
             )
         )
+
+
+def test_project_transformation_tag_rename_cascades_to_frame_elements():
+    model = StructuralModel("transformation-rename", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="elasticBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
+    project = ProjectDatabase(name="Transformation rename", model=model)
+    project.add_transformation(
+        TransformationData(1, "Linear", "Linear")
+    )
+
+    project.update_transformation(
+        1,
+        TransformationData(5, "Linear renamed", "Linear"),
+    )
+
+    assert 1 not in project.transformations
+    assert 5 in project.transformations
+    assert project.model.elements[1].transf_tag == 5
+
+
+def test_project_rejects_removing_transformation_used_by_element():
+    model = StructuralModel("transformation-delete", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="elasticBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
+    project = ProjectDatabase(name="Transformation delete", model=model)
+    project.add_transformation(
+        TransformationData(1, "Linear", "Linear")
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Transformation 1 is still referenced by element\(s\): 1",
+    ):
+        project.remove_transformation(1)
+
+    assert 1 in project.transformations

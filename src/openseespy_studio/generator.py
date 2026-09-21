@@ -2503,6 +2503,32 @@ def to_openseespy(
             + "."
         )
 
+    transformation_reference_errors: list[str] = []
+    frame_element_types = {
+        "elasticBeamColumn",
+        "forceBeamColumn",
+        "dispBeamColumn",
+    }
+    for element in model.elements.values():
+        if element.element_type not in frame_element_types:
+            continue
+        if element.transf_tag is None:
+            transformation_reference_errors.append(
+                f"element {element.tag} -> no geometric transformation assigned"
+            )
+        elif int(element.transf_tag) not in (transformations or {}):
+            transformation_reference_errors.append(
+                f"element {element.tag} -> missing transformation "
+                f"{element.transf_tag}"
+            )
+
+    if transformation_reference_errors:
+        raise ValueError(
+            "Geometric transformation reference error(s): "
+            + "; ".join(sorted(transformation_reference_errors))
+            + "."
+        )
+
     section_reference_errors: list[str] = []
     for element in model.elements.values():
         referenced_sections = {

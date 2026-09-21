@@ -2266,9 +2266,25 @@ class ProjectDatabase:
             )
         self.transformations.pop(original_tag)
         self.transformations[transformation.tag] = transformation
+        if transformation.tag != original_tag:
+            for element in self.model.elements.values():
+                if element.transf_tag == original_tag:
+                    element.transf_tag = transformation.tag
 
     def remove_transformation(self, tag: int) -> None:
-        self.transformations.pop(int(tag), None)
+        tag = int(tag)
+        element_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if element.transf_tag == tag
+        )
+        if element_users:
+            raise ValueError(
+                f"Transformation {tag} is still referenced by element(s): "
+                + ", ".join(map(str, element_users))
+                + ". Reassign those elements before deleting it."
+            )
+        self.transformations.pop(tag, None)
 
     def next_constraint_tag(self) -> int:
         return max(self.constraints, default=0) + 1

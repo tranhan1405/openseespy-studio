@@ -2651,3 +2651,81 @@ def test_generator_rejects_fiber_recorder_with_missing_material_reference():
             materials={},
             recorders={1: recorder},
         )
+
+
+def test_generator_rejects_frame_element_with_missing_transformation():
+    model = StructuralModel("orphan-transformation", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="elasticBeamColumn",
+        section_tag=1,
+        transf_tag=99,
+    )
+    section = SectionData(1, "Elastic", "Elastic")
+
+    with pytest.raises(
+        ValueError,
+        match=r"element 1 -> missing transformation 99",
+    ):
+        to_openseespy(
+            model,
+            sections={1: section},
+            transformations={},
+        )
+
+
+def test_generator_rejects_frame_element_without_transformation_assignment():
+    model = StructuralModel("missing-transformation-assignment", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="elasticBeamColumn",
+        section_tag=1,
+        transf_tag=None,
+    )
+    section = SectionData(1, "Elastic", "Elastic")
+
+    with pytest.raises(
+        ValueError,
+        match=r"element 1 -> no geometric transformation assigned",
+    ):
+        to_openseespy(
+            model,
+            sections={1: section},
+            transformations={},
+        )
+
+
+def test_generator_truss_does_not_require_geometric_transformation():
+    model = StructuralModel("truss-no-transformation", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="truss",
+        truss_area=0.01,
+        truss_material_tag=1,
+    )
+    material = MaterialData(
+        1,
+        "Elastic",
+        "Elastic",
+        {"E": 200000.0},
+    )
+
+    code = to_openseespy(
+        model,
+        materials={1: material},
+        transformations={},
+    )
+
+    assert "ops.element('Truss', 1" in code
