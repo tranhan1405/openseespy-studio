@@ -313,7 +313,12 @@ class AIAssistantPanel(QWidget):
         thread.finished.connect(thread.deleteLater)
         self._thread = thread
         self._worker = worker
-        self.set_busy(True, "Asking OpenAI...")
+        provider_label = (
+            "local Ollama"
+            if str(config.get("provider", "ollama")) == "ollama"
+            else "OpenAI"
+        )
+        self.set_busy(True, f"Asking {provider_label}...")
         thread.start()
 
     @Slot(str)
