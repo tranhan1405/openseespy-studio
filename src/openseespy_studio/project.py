@@ -478,7 +478,10 @@ class FiberComponentData:
         self._validate()
 
     def _positive_int(self, key: str) -> int:
-        value = int(round(self.parameters[key]))
+        numeric = self.parameters[key]
+        if not float(numeric).is_integer():
+            raise ValueError(f"{key} must be an integer.")
+        value = int(numeric)
         if value < 1:
             raise ValueError(f"{key} must be at least 1.")
         self.parameters[key] = float(value)
@@ -932,7 +935,14 @@ class ConstraintData:
             for dof in self.dofs
         }))
         self.link_type = str(self.link_type)
-        self.perp_dirn = int(self.perp_dirn)
+        self.perp_dirn = (
+            _strict_int(
+                self.perp_dirn,
+                "Rigid diaphragm perpendicular direction",
+            )
+            if self.constraint_type == "rigidDiaphragm"
+            else int(self.perp_dirn)
+        )
 
         if self.tag <= 0:
             raise ValueError("Constraint tag must be a positive integer.")
@@ -981,7 +991,7 @@ class ConstraintData:
             constrained_nodes=list(data.get("constrained_nodes", [])),
             dofs=tuple(data.get("dofs", [])),
             link_type=str(data.get("link_type", "beam")),
-            perp_dirn=int(data.get("perp_dirn", 3)),
+            perp_dirn=data.get("perp_dirn", 3),
         )
 
 
@@ -1008,7 +1018,10 @@ class ConnectionData:
         self.node_i = _strict_int(self.node_i, "Connection node i")
         self.node_j = _strict_int(self.node_j, "Connection node j")
         self.materials_by_dof = {
-            int(dof): int(material_tag)
+            _strict_int(dof, "Connection DOF"): _strict_int(
+                material_tag,
+                "Connection material tag",
+            )
             for dof, material_tag in self.materials_by_dof.items()
         }
         self.orient_x = tuple(float(v) for v in self.orient_x)
@@ -1020,10 +1033,22 @@ class ConnectionData:
         self.generated_ground_node = (
             None
             if self.generated_ground_node is None
-            else int(self.generated_ground_node)
+            else _strict_int(
+                self.generated_ground_node,
+                "Connection generated ground node",
+            )
         )
         self.section_tag = (
-            None if self.section_tag is None else int(self.section_tag)
+            None
+            if self.section_tag is None
+            else (
+                _strict_int(
+                    self.section_tag,
+                    "Connection section tag",
+                )
+                if self.connection_type == "zeroLengthSection"
+                else int(self.section_tag)
+            )
         )
         self.generated_section_tag = (
             None
@@ -1124,12 +1149,9 @@ class ConnectionData:
             ),
             node_i=data["node_i"],
             node_j=data["node_j"],
-            materials_by_dof={
-                int(dof): int(material_tag)
-                for dof, material_tag in dict(
-                    data.get("materials_by_dof", {})
-                ).items()
-            },
+            materials_by_dof=dict(
+                data.get("materials_by_dof", {})
+            ),
             orient_x=tuple(
                 float(v) for v in data.get("orient_x", (1.0, 0.0, 0.0))
             ),
