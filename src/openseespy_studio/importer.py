@@ -65,9 +65,89 @@ class _Unresolved(Exception):
     pass
 
 
+class _ReturnSignal(Exception):
+    def __init__(self, value: Any = None):
+        super().__init__()
+        self.value = value
+
+
+class _BreakSignal(Exception):
+    pass
+
+
+class _ContinueSignal(Exception):
+    pass
+
+
 class _SafeEvaluator:
-    def __init__(self, env: dict[str, Any]):
+    SAFE_CALLS = {
+        "int": int,
+        "float": float,
+        "bool": bool,
+        "str": str,
+        "abs": abs,
+        "round": round,
+        "min": min,
+        "max": max,
+        "len": len,
+        "range": range,
+        "enumerate": enumerate,
+        "zip": zip,
+        "list": list,
+        "tuple": tuple,
+        "sum": sum,
+        "sorted": sorted,
+    }
+
+    def __init__(
+        self,
+        env: dict[str, Any],
+        call_handler: Any = None,
+    ):
         self.env = env
+        self.call_handler = call_handler
+
+    @staticmethod
+    def _binary(op: ast.operator, left: Any, right: Any) -> Any:
+        if isinstance(op, ast.Add):
+            return left + right
+        if isinstance(op, ast.Sub):
+            return left - right
+        if isinstance(op, ast.Mult):
+            return left * right
+        if isinstance(op, ast.Div):
+            return left / right
+        if isinstance(op, ast.FloorDiv):
+            return left // right
+        if isinstance(op, ast.Mod):
+            return left % right
+        if isinstance(op, ast.Pow):
+            return left ** right
+        raise _Unresolved(type(op).__name__)
+
+    @staticmethod
+    def _compare(op: ast.cmpop, left: Any, right: Any) -> bool:
+        if isinstance(op, ast.Eq):
+            return left == right
+        if isinstance(op, ast.NotEq):
+            return left != right
+        if isinstance(op, ast.Lt):
+            return left < right
+        if isinstance(op, ast.LtE):
+            return left <= right
+        if isinstance(op, ast.Gt):
+            return left > right
+        if isinstance(op, ast.GtE):
+            return left >= right
+        if isinstance(op, ast.In):
+            return left in right
+        if isinstance(op, ast.NotIn):
+            return left not in right
+        if isinstance(op, ast.Is):
+            return left is right
+        if isinstance(op, ast.IsNot):
+            return left is not right
+        raise _Unresolved(type(op).__name__)
 
     def eval(self, node: ast.AST) -> Any:
         if isinstance(node, ast.Constant):
@@ -80,12 +160,20 @@ class _SafeEvaluator:
             return [self.eval(item) for item in node.elts]
         if isinstance(node, ast.Tuple):
             return tuple(self.eval(item) for item in node.elts)
+        if isinstance(node, ast.Set):
+            return {self.eval(item) for item in node.elts}
         if isinstance(node, ast.Dict):
             return {
                 self.eval(key): self.eval(value)
                 for key, value in zip(node.keys, node.values)
                 if key is not None
             }
+        if isinstance(node, ast.Slice):
+            return slice(
+                self.eval(node.lower) if node.lower is not None else None,
+                self.eval(node.upper) if node.upper is not None else None,
+                self.eval(node.step) if node.step is not None else None,
+            )
         if isinstance(node, ast.UnaryOp):
             value = self.eval(node.operand)
             if isinstance(node.op, ast.UAdd):
@@ -94,23 +182,40 @@ class _SafeEvaluator:
                 return -value
             if isinstance(node.op, ast.Not):
                 return not value
+            raise _Unresolved(type(node.op).__name__)
         if isinstance(node, ast.BinOp):
+            return self._binary(
+                node.op,
+                self.eval(node.left),
+                self.eval(node.right),
+            )
+        if isinstance(node, ast.BoolOp):
+            if isinstance(node.op, ast.And):
+                value: Any = True
+                for child in node.values:
+                    value = self.eval(child)
+                    if not value:
+                        return value
+                return value
+            if isinstance(node.op, ast.Or):
+                value = False
+                for child in node.values:
+                    value = self.eval(child)
+                    if value:
+                        return value
+                return value
+            raise _Unresolved(type(node.op).__name__)
+        if isinstance(node, ast.Compare):
             left = self.eval(node.left)
-            right = self.eval(node.right)
-            if isinstance(node.op, ast.Add):
-                return left + right
-            if isinstance(node.op, ast.Sub):
-                return left - right
-            if isinstance(node.op, ast.Mult):
-                return left * right
-            if isinstance(node.op, ast.Div):
-                return left / right
-            if isinstance(node.op, ast.FloorDiv):
-                return left // right
-            if isinstance(node.op, ast.Mod):
-                return left % right
-            if isinstance(node.op, ast.Pow):
-                return left ** right
+            for op, comparator in zip(node.ops, node.comparators):
+                right = self.eval(comparator)
+                if not self._compare(op, left, right):
+                    return False
+                left = right
+            return True
+        if isinstance(node, ast.IfExp):
+            branch = node.body if self.eval(node.test) else node.orelse
+            return self.eval(branch)
         if isinstance(node, ast.Subscript):
             return self.eval(node.value)[self.eval(node.slice)]
         if isinstance(node, ast.Attribute):
@@ -121,23 +226,30 @@ class _SafeEvaluator:
             ):
                 return getattr(math, node.attr)
         if isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id in {
-                "int", "float", "abs", "round", "min", "max", "len"
-            }:
-                fn = {
-                    "int": int,
-                    "float": float,
-                    "abs": abs,
-                    "round": round,
-                    "min": min,
-                    "max": max,
-                    "len": len,
-                }[node.func.id]
-                return fn(*(self.eval(arg) for arg in node.args))
+            if isinstance(node.func, ast.Name):
+                name = node.func.id
+                if name in self.SAFE_CALLS:
+                    if any(keyword.arg is None for keyword in node.keywords):
+                        raise _Unresolved("**kwargs")
+                    fn = self.SAFE_CALLS[name]
+                    return fn(
+                        *(self.eval(arg) for arg in node.args),
+                        **{
+                            keyword.arg: self.eval(keyword.value)
+                            for keyword in node.keywords
+                            if keyword.arg is not None
+                        },
+                    )
+                if self.call_handler is not None:
+                    return self.call_handler(node)
         raise _Unresolved(type(node).__name__)
 
 
 class _Importer:
+    MAX_LOOP_ITERATIONS = 20_000
+    MAX_CALL_DEPTH = 50
+    MAX_STATEMENT_STEPS = 100_000
+
     OPS_COMMANDS = {
         "model", "wipe", "wipeAnalysis", "node", "fix", "mass",
         "uniaxialMaterial", "section", "fiber", "patch", "layer",
@@ -166,8 +278,14 @@ class _Importer:
         self.project.units = self.units.as_mapping()
         self.issues: list[ImportIssue] = []
         self.counts: dict[str, int] = {}
-        self.env: dict[str, Any] = {"pi": math.pi}
-        self.eval = _SafeEvaluator(self.env)
+        self.env: dict[str, Any] = {
+            "pi": math.pi,
+            "__name__": "__main__",
+        }
+        self.functions: dict[str, ast.FunctionDef] = {}
+        self._call_depth = 0
+        self._statement_steps = 0
+        self.eval = _SafeEvaluator(self.env, self._call_custom_function)
         self.ops_aliases = {"ops"}
         self.direct_ops = False
         self.current_pattern: int | None = None
