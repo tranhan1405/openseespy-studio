@@ -90,7 +90,13 @@ Chapter 3, Table 3.12.
 Library records store the material/grade, constitutive model, full parameter
 set, applicability, limitations, primary citation, DOI and exact evidence
 location. This provenance is copied into the project and written as comments
-when OpenSeesPy source is exported. If a verified constitutive parameter is
+when OpenSeesPy source is exported.
+
+Use **Material Library... → Insert into Project** to create a new project
+material directly. The regular **New/Edit Material** dialog also provides
+**Load Verified Preset...**, which loads the selected constitutive model,
+parameters and provenance into the material being edited while preserving an
+existing project's tag/name and engineering properties. If a verified constitutive parameter is
 edited, SARE changes the project material status to
 `modified_from_verified` rather than continuing to present it as the unchanged
 published set.
