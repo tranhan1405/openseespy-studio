@@ -2432,3 +2432,71 @@ def test_project_validate_node_state_rejects_fixed_analysis_control_dof():
         match=r"control node 2 DOF 1 is restrained by a support",
     ):
         project.validate_node_state(2)
+
+
+def test_project_validate_element_state_rejects_recorder_after_ip_reduction():
+    model = StructuralModel("element-edit-ip", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+        integration_points=5,
+    )
+    project = ProjectDatabase(name="Element edit IP", model=model)
+    project.add_recorder(
+        RecorderData(
+            10,
+            "Section 5",
+            "Section",
+            target_tags=[1],
+            response="force",
+            section_number=5,
+        )
+    )
+
+    project.model.elements[1].integration_points = 2
+
+    with pytest.raises(
+        ValueError,
+        match=r"Recorder section 5 exceeds the integration-point count",
+    ):
+        project.validate_element_state(1)
+
+
+def test_project_validate_element_state_rejects_incompatible_recorder_after_formulation_change():
+    model = StructuralModel("element-edit-formulation", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+        integration_points=5,
+    )
+    project = ProjectDatabase(name="Element edit formulation", model=model)
+    project.add_recorder(
+        RecorderData(
+            10,
+            "Section force",
+            "Section",
+            target_tags=[1],
+            response="force",
+            section_number=1,
+        )
+    )
+
+    project.model.elements[1].element_type = "elasticBeamColumn"
+
+    with pytest.raises(
+        ValueError,
+        match=r"Section/Fiber recorders require forceBeamColumn or dispBeamColumn",
+    ):
+        project.validate_element_state(1)
