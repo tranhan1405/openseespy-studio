@@ -214,7 +214,7 @@ def test_portal_frame_2d_verification_example_imports_model_and_static_analysis(
         "72.3, 29500, 3230, 1)"
     ) in regenerated
     assert "ops.section('Elastic', " in regenerated
-    assert "ops.algorithm('Linear')" in regenerated
+    assert "_studio_primary_algorithm = 'Linear'" in regenerated
     assert "ops.test(" not in regenerated
     assert ", 0, 0, 0)" not in regenerated
     compile(regenerated, "<portal-frame-2d-roundtrip>", "exec")
