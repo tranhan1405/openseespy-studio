@@ -13,10 +13,12 @@ DEFAULT_PROJECT_UNITS: dict[str, str] = {
 _LENGTH_TO_M = {
     "m": 1.0,
     "mm": 1.0e-3,
+    "in": 0.0254,
 }
 _FORCE_TO_N = {
     "N": 1.0,
     "kN": 1.0e3,
+    "kip": 4448.2216152605,
 }
 _TIME_TO_S = {
     "s": 1.0,
