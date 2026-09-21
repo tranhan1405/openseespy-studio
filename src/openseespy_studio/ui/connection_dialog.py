@@ -23,9 +23,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..project import ConnectionData, MaterialData
+from ..project import ConnectionData, MaterialData, SectionData
 from .material_chain_dialog import MaterialChainDialog
 from .material_test_dialog import MaterialTestDialog
+from .section_dialog import SectionDialog
 
 
 def _float_spin(value: float) -> QDoubleSpinBox:
@@ -173,6 +174,7 @@ class ConnectionDialog(QDialog):
         materials: dict[int, MaterialData],
         connection: ConnectionData | None = None,
         *,
+        sections: dict[int, SectionData] | None = None,
         next_tag: int = 1,
         initial_node_i: int = 1,
         initial_node_j: int = 2,
@@ -187,6 +189,13 @@ class ConnectionDialog(QDialog):
         self.resize(760, 720)
         self.materials = dict(materials)
         self.pending_materials: list[MaterialData] = []
+        self.sections = {
+            int(tag): SectionData.from_dict(section.to_dict())
+            for tag, section in (sections or {}).items()
+        }
+        self.pending_section_operations: list[
+            tuple[str, int | None, SectionData]
+        ] = []
         self.node_positions = dict(node_positions or {})
         self.units = dict(units or {})
 
@@ -225,7 +234,11 @@ class ConnectionDialog(QDialog):
         )
 
         self.connection_type = QComboBox()
-        self.connection_type.addItems(["zeroLength", "twoNodeLink"])
+        self.connection_type.addItems([
+            "zeroLength",
+            "zeroLengthSection",
+            "twoNodeLink",
+        ])
         if connection:
             self.connection_type.setCurrentText(connection.connection_type)
 
@@ -272,8 +285,10 @@ class ConnectionDialog(QDialog):
         setup_layout.addWidget(self.node_status)
 
         type_hint = QLabel(
-            "<b>zeroLength</b>: Node I and J must be coincident. "
-            "<b>twoNodeLink</b>: use when the end nodes are physically separated."
+            "<b>zeroLength</b>: assign UniaxialMaterials by local DOF. "
+            "<b>zeroLengthSection</b>: assign one Section object; Node I/J "
+            "must be coincident. <b>twoNodeLink</b>: use when the end nodes "
+            "are physically separated."
         )
         type_hint.setWordWrap(True)
         type_hint.setStyleSheet("color: #637487;")
@@ -358,7 +373,48 @@ class ConnectionDialog(QDialog):
 
         dof_layout.addWidget(dof_group)
         dof_layout.addStretch(1)
-        self.tabs.addTab(dof_page, "DOF Materials")
+        self.dof_page = dof_page
+        self.dof_tab_index = self.tabs.addTab(dof_page, "DOF Materials")
+
+        # Section assignment tab for zeroLengthSection.
+        section_page = QWidget()
+        section_layout = QVBoxLayout(section_page)
+        section_group = QGroupBox("Section assignment")
+        section_form = QFormLayout(section_group)
+
+        self.section_combo = QComboBox()
+        self._refresh_section_combo(
+            select_tag=(
+                connection.section_tag
+                if connection is not None
+                and connection.connection_type == "zeroLengthSection"
+                else None
+            )
+        )
+        section_form.addRow("Section:", self.section_combo)
+
+        section_buttons = QHBoxLayout()
+        self.new_section_button = QPushButton("New Section...")
+        self.edit_section_button = QPushButton("Edit Selected...")
+        self.new_section_button.clicked.connect(self._create_section)
+        self.edit_section_button.clicked.connect(self._edit_selected_section)
+        section_buttons.addWidget(self.new_section_button)
+        section_buttons.addWidget(self.edit_section_button)
+        section_buttons.addStretch(1)
+        section_form.addRow("", section_buttons)
+
+        self.section_status = QLabel(
+            "zeroLengthSection uses the complete force-deformation response "
+            "of the selected Section (for example Elastic or Fiber)."
+        )
+        self.section_status.setWordWrap(True)
+        self.section_status.setStyleSheet("color: #637487;")
+        section_form.addRow(self.section_status)
+
+        section_layout.addWidget(section_group)
+        section_layout.addStretch(1)
+        self.section_page = section_page
+        self.section_tab_index = self.tabs.addTab(section_page, "Section")
 
         # Orientation tab.
         orient_page = QWidget()
@@ -431,7 +487,7 @@ class ConnectionDialog(QDialog):
 
         self.to_ground.toggled.connect(self._sync_ground_state)
         self.connection_type.currentTextChanged.connect(
-            lambda _text: self._update_node_status()
+            self._connection_type_changed
         )
         self.node_i.valueChanged.connect(
             lambda _value: self._update_node_status()
@@ -445,7 +501,128 @@ class ConnectionDialog(QDialog):
         for index in range(6):
             self._sync_dof_row(index, self.dof_checks[index].isChecked())
             self._sync_material_type(index)
+        self._connection_type_changed(self.connection_type.currentText())
         self._update_orientation_preview()
+        self._update_node_status()
+
+    def _refresh_section_combo(
+        self,
+        *,
+        select_tag: int | None = None,
+    ) -> None:
+        if not hasattr(self, "section_combo"):
+            return
+        previous = self.section_combo.currentData()
+        self.section_combo.blockSignals(True)
+        self.section_combo.clear()
+        self.section_combo.addItem("Select section...", None)
+        for tag in sorted(self.sections):
+            section = self.sections[tag]
+            self.section_combo.addItem(
+                f"{tag} - {section.name} ({section.section_type})",
+                int(tag),
+            )
+        wanted = select_tag if select_tag is not None else previous
+        index = self.section_combo.findData(wanted)
+        if index >= 0:
+            self.section_combo.setCurrentIndex(index)
+        self.section_combo.blockSignals(False)
+
+    def _next_section_tag(self) -> int:
+        return max(self.sections, default=0) + 1
+
+    def _stage_section_materials(
+        self,
+        materials: list[MaterialData],
+    ) -> None:
+        known_pending = {material.tag for material in self.pending_materials}
+        for material in materials:
+            self.materials[int(material.tag)] = MaterialData.from_dict(
+                material.to_dict()
+            )
+            if int(material.tag) not in known_pending:
+                self.pending_materials.append(
+                    MaterialData.from_dict(material.to_dict())
+                )
+                known_pending.add(int(material.tag))
+        if materials:
+            self._refresh_material_combos()
+
+    def _create_section(self) -> None:
+        dialog = SectionDialog(
+            self.materials,
+            next_tag=self._next_section_tag(),
+            units=self.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        self._stage_section_materials(dialog.pending_materials())
+        section = dialog.section_data()
+        if section.tag in self.sections:
+            QMessageBox.warning(
+                self,
+                "Section",
+                f"Section tag {section.tag} already exists.",
+            )
+            return
+        staged = SectionData.from_dict(section.to_dict())
+        self.sections[staged.tag] = staged
+        self.pending_section_operations.append(("add", None, staged))
+        self._refresh_section_combo(select_tag=staged.tag)
+
+    def _edit_selected_section(self) -> None:
+        tag = self.section_combo.currentData()
+        if tag is None:
+            QMessageBox.information(
+                self,
+                "Section",
+                "Select a section first.",
+            )
+            return
+        original_tag = int(tag)
+        section = self.sections.get(original_tag)
+        if section is None:
+            return
+        dialog = SectionDialog(
+            self.materials,
+            section=SectionData.from_dict(section.to_dict()),
+            units=self.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        self._stage_section_materials(dialog.pending_materials())
+        updated = dialog.section_data()
+        if updated.tag != original_tag and updated.tag in self.sections:
+            QMessageBox.warning(
+                self,
+                "Section",
+                f"Section tag {updated.tag} already exists.",
+            )
+            return
+        self.sections.pop(original_tag, None)
+        staged = SectionData.from_dict(updated.to_dict())
+        self.sections[staged.tag] = staged
+        self.pending_section_operations.append(
+            ("update", original_tag, staged)
+        )
+        self._refresh_section_combo(select_tag=staged.tag)
+
+    def _connection_type_changed(self, _text: str) -> None:
+        section_mode = (
+            self.connection_type.currentText() == "zeroLengthSection"
+        )
+        self.preset.setEnabled(not section_mode)
+        self.tabs.setTabEnabled(self.dof_tab_index, not section_mode)
+        self.tabs.setTabEnabled(self.section_tab_index, section_mode)
+        self.new_section_button.setEnabled(section_mode)
+        self.edit_section_button.setEnabled(section_mode)
+        self.section_combo.setEnabled(section_mode)
+        if section_mode:
+            self.tabs.setCurrentIndex(self.section_tab_index)
+        elif self.tabs.currentIndex() == self.section_tab_index:
+            self.tabs.setCurrentIndex(self.dof_tab_index)
         self._update_node_status()
 
     def _preset_changed(self, index: int) -> None:
@@ -639,7 +816,10 @@ class ConnectionDialog(QDialog):
         distance = math.sqrt(
             sum((a[i] - b[i]) ** 2 for i in range(3))
         )
-        zero_length = self.connection_type.currentText() == "zeroLength"
+        zero_length = self.connection_type.currentText() in {
+            "zeroLength",
+            "zeroLengthSection",
+        }
         if zero_length and distance > 1.0e-7:
             self.node_status.setText(
                 f"Node separation = {distance:.6g}. zeroLength requires "
@@ -756,24 +936,41 @@ class ConnectionDialog(QDialog):
             spin.setValue(value)
 
     def spec(self) -> dict:
+        connection_type = self.connection_type.currentText()
+        section_mode = connection_type == "zeroLengthSection"
+
         materials_by_dof: dict[int, int] = {}
-        for dof, (check, combo) in enumerate(
-            zip(self.dof_checks, self.material_combos),
-            start=1,
-        ):
-            if not check.isChecked():
-                continue
-            material_tag = combo.currentData()
-            if material_tag is None:
+        if not section_mode:
+            for dof, (check, combo) in enumerate(
+                zip(self.dof_checks, self.material_combos),
+                start=1,
+            ):
+                if not check.isChecked():
+                    continue
+                material_tag = combo.currentData()
+                if material_tag is None:
+                    raise ValueError(
+                        f"DOF {dof} is active but has no material."
+                    )
+                materials_by_dof[dof] = int(material_tag)
+
+            if not materials_by_dof:
+                raise ValueError("Enable at least one connection DOF.")
+
+        section_tag: int | None = None
+        if section_mode:
+            selected_section = self.section_combo.currentData()
+            if selected_section is None:
                 raise ValueError(
-                    f"DOF {dof} is active but has no material."
+                    "zeroLengthSection requires a Section assignment."
                 )
-            materials_by_dof[dof] = int(material_tag)
+            section_tag = int(selected_section)
+            if section_tag not in self.sections:
+                raise ValueError(
+                    f"Section {section_tag} is not available."
+                )
 
-        if not materials_by_dof:
-            raise ValueError("Enable at least one connection DOF.")
-
-        if self.connection_type.currentText() == "zeroLength":
+        if connection_type == "zeroLength":
             bond_tags = sorted(
                 material_tag
                 for material_tag in materials_by_dof.values()
@@ -788,7 +985,7 @@ class ConnectionDialog(QDialog):
                     "penetration and should be used in a Fiber zeroLengthSection, "
                     "not directly as a force-deformation zeroLength DOF. "
                     "Use a calibrated Pinching4/Hysteretic macro spring here "
-                    "or the dedicated strain-penetration workflow."
+                    "or a zeroLengthSection."
                 )
 
         x, y = self._axis_values()
@@ -802,7 +999,7 @@ class ConnectionDialog(QDialog):
             )
 
         if (
-            self.connection_type.currentText() == "zeroLength"
+            connection_type in {"zeroLength", "zeroLengthSection"}
             and not self.to_ground.isChecked()
         ):
             a = self._node_position(self.node_i.value())
@@ -813,7 +1010,7 @@ class ConnectionDialog(QDialog):
                 )
                 if distance > 1.0e-7:
                     raise ValueError(
-                        "zeroLength requires coincident nodes. "
+                        f"{connection_type} requires coincident nodes. "
                         f"Current separation is {distance:.6g}."
                     )
 
@@ -821,21 +1018,37 @@ class ConnectionDialog(QDialog):
             "tag": self.tag.value(),
             "name": self.name.text().strip()
             or f"Connection {self.tag.value()}",
-            "connection_type": self.connection_type.currentText(),
+            "connection_type": connection_type,
             "node_i": self.node_i.value(),
             "node_j": self.node_j.value(),
             "to_ground": self.to_ground.isChecked(),
             "materials_by_dof": materials_by_dof,
+            "section_tag": section_tag,
             "orient_x": x,
             "orient_y": y,
             "do_rayleigh": self.do_rayleigh.isChecked(),
             "pending_materials": self._pending_materials_in_use(
                 materials_by_dof
-            ),
+            ) if not section_mode else [
+                MaterialData.from_dict(material.to_dict())
+                for material in self.pending_materials
+            ],
+            "pending_section_operations": [
+                (
+                    operation,
+                    original_tag,
+                    SectionData.from_dict(section.to_dict()),
+                )
+                for operation, original_tag, section
+                in self.pending_section_operations
+            ],
         }
 
     def _validate_and_accept(self) -> None:
-        if not self.materials:
+        if (
+            self.connection_type.currentText() != "zeroLengthSection"
+            and not self.materials
+        ):
             QMessageBox.warning(
                 self,
                 "ZeroLength / Link Builder",
