@@ -487,3 +487,50 @@ def test_hht_accepts_documented_alpha_range(alpha):
         hht_alpha=alpha,
     )
     assert analysis.hht_alpha == pytest.approx(alpha)
+
+
+@pytest.mark.parametrize(
+    ("alpha_m", "alpha_f"),
+    [
+        (0.4, 0.5),
+        (0.8, 0.9),
+        (1.0, 0.49),
+    ],
+)
+def test_generalized_alpha_rejects_unstable_parameter_order(alpha_m, alpha_f):
+    with pytest.raises(
+        ValueError,
+        match="GeneralizedAlpha requires alphaM >= alphaF >= 0.5",
+    ):
+        AnalysisSettingsData(
+            55,
+            "Invalid generalized alpha",
+            "Transient",
+            integrator="GeneralizedAlpha",
+            dt=0.01,
+            generalized_alpha_m=alpha_m,
+            generalized_alpha_f=alpha_f,
+        )
+
+
+@pytest.mark.parametrize(
+    ("alpha_m", "alpha_f"),
+    [
+        (0.5, 0.5),
+        (1.0, 1.0),
+        (1.2, 0.8),
+        (2.0, 1.0),
+    ],
+)
+def test_generalized_alpha_accepts_documented_stable_order(alpha_m, alpha_f):
+    analysis = AnalysisSettingsData(
+        56,
+        "Valid generalized alpha",
+        "Transient",
+        integrator="GeneralizedAlpha",
+        dt=0.01,
+        generalized_alpha_m=alpha_m,
+        generalized_alpha_f=alpha_f,
+    )
+    assert analysis.generalized_alpha_m == pytest.approx(alpha_m)
+    assert analysis.generalized_alpha_f == pytest.approx(alpha_f)

@@ -142,10 +142,22 @@ class AnalysisDialog(QDialog):
             "alpha=1.0 reduces to Newmark."
         )
         self.generalized_alpha_m=fs(
-            analysis.generalized_alpha_m if analysis else 1.0
+            analysis.generalized_alpha_m if analysis else 1.0,
+            0.5,
+            1e20,
         )
         self.generalized_alpha_f=fs(
-            analysis.generalized_alpha_f if analysis else 1.0
+            analysis.generalized_alpha_f if analysis else 1.0,
+            0.5,
+            1e20,
+        )
+        self.generalized_alpha_m.setToolTip(
+            "For the default OpenSees GeneralizedAlpha scheme, use "
+            "alphaM >= alphaF >= 0.5."
+        )
+        self.generalized_alpha_f.setToolTip(
+            "For the default OpenSees GeneralizedAlpha scheme, use "
+            "alphaM >= alphaF >= 0.5."
         )
         self.arc_length_s=fs(
             analysis.arc_length_s if analysis else 0.01,

@@ -1578,6 +1578,18 @@ class AnalysisSettingsData:
             and not (2.0 / 3.0 <= self.hht_alpha <= 1.0)
         ):
             raise ValueError("HHT alpha must be between 2/3 and 1.0.")
+        if (
+            self.analysis_type == "Transient"
+            and self.integrator == "GeneralizedAlpha"
+            and not (
+                self.generalized_alpha_f >= 0.5
+                and self.generalized_alpha_m >= self.generalized_alpha_f
+            )
+        ):
+            raise ValueError(
+                "GeneralizedAlpha requires alphaM >= alphaF >= 0.5 "
+                "for the documented unconditionally stable default scheme."
+            )
         if not 0.0 <= self.rayleigh_damping_ratio < 1.0:
             raise ValueError("Rayleigh damping ratio must be in [0, 1).")
         if self.rayleigh_mode_i < 1 or self.rayleigh_mode_j < 1:
