@@ -247,6 +247,28 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "--runtime-probe":
         return _runtime_probe()
 
+    if args and args[0] == "--material-probe":
+        if len(args) < 2:
+            print(
+                "ValueError: --material-probe requires a material type",
+                file=sys.stderr,
+                flush=True,
+            )
+            return 2
+        try:
+            from .runtime import check_opensees_material_in_process
+
+            check_opensees_material_in_process(args[1])
+            print(f"material={args[1]}: supported", flush=True)
+            return 0
+        except BaseException as exc:
+            print(
+                f"{type(exc).__name__}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return 2
+
     if "--version" in args:
         print(package_version())
         return 0
