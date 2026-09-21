@@ -1,3 +1,5 @@
+import pytest
+
 from openseespy_studio.generator import (
     FrameGridSpec,
     generate_frame_grid,
@@ -10,6 +12,7 @@ from openseespy_studio.project import (
     AnalysisSettingsData,
     LoadPatternData,
     MaterialData,
+    PrescribedDisplacementData,
     SectionData,
     TimeSeriesData,
     TransformationData,
@@ -293,3 +296,51 @@ def test_template_preload_uses_only_background_plain_patterns():
     assert "ops.pattern('UniformExcitation', 1," in code
     assert "ops.pattern('UniformExcitation', 2," not in code
     assert "ops.pattern('UniformExcitation', 4," not in code
+
+
+def test_generator_rejects_prescribed_displacement_as_static_dc_driver():
+    model = StructuralModel("static-dc-driver", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.set_fixity(1, (1, 1))
+
+    series = {1: TimeSeriesData(1, "Reference", "Linear", factor=1.0)}
+    patterns = {
+        1: LoadPatternData(
+            1,
+            "Bad driver",
+            "Plain",
+            time_series_tag=1,
+        )
+    }
+    prescribed = {
+        1: PrescribedDisplacementData(
+            1,
+            "Bad imposed displacement",
+            1,
+            2,
+            1,
+            0.01,
+        )
+    }
+    analyses = {
+        1: AnalysisSettingsData(
+            1,
+            "Static DC",
+            "Static",
+            integrator="DisplacementControl",
+            control_node=2,
+            control_dof=1,
+            deferred_pattern_tags=[1],
+        )
+    }
+
+    with pytest.raises(ValueError, match="force reference-load pattern"):
+        to_openseespy(
+            model,
+            time_series=series,
+            load_patterns=patterns,
+            prescribed_displacements=prescribed,
+            analyses=analyses,
+            active_analysis_tag=1,
+        )

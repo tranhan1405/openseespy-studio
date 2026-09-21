@@ -636,25 +636,89 @@ def _analysis_control_checks(
         )
 
 
+def _element_load_has_nonzero_reference(load) -> bool:
+    tolerance = 1.0e-15
+    if load.load_type == "Uniform":
+        values = (load.wx, load.wy, load.wz)
+    elif load.load_type == "Point":
+        values = (load.px, load.py, load.pz)
+    elif load.load_type == "SelfWeight":
+        values = load.gravity
+    else:
+        return False
+    return any(abs(float(value)) > tolerance for value in values)
+
+
+def _pattern_has_nonzero_force_reference(
+    project: ProjectDatabase,
+    pattern_tag: int,
+) -> bool:
+    tag = int(pattern_tag)
+    if any(
+        load.pattern_tag == tag
+        and any(abs(float(value)) > 1.0e-15 for value in load.values)
+        for load in project.nodal_loads.values()
+    ):
+        return True
+    return any(
+        load.pattern_tag == tag
+        and _element_load_has_nonzero_reference(load)
+        for load in project.element_loads.values()
+    )
+
+
 def _driving_load_checks(
     project: ProjectDatabase,
     analysis: AnalysisSettingsData,
     issues: list[ValidationIssue],
 ) -> None:
-    if analysis.analysis_type not in {"Pushover", "Cyclic"}:
+    static_dc = (
+        analysis.analysis_type == "Static"
+        and analysis.integrator == "DisplacementControl"
+    )
+    if analysis.analysis_type not in {"Pushover", "Cyclic"} and not static_dc:
         return
 
-    driver_tags = list(analysis.deferred_pattern_tags)
+    driver_tags = [int(tag) for tag in analysis.deferred_pattern_tags]
+    if not driver_tags and static_dc:
+        # Backward compatibility for older/manual Static DisplacementControl
+        # analyses that predate explicit driver ownership.
+        driver_tags = [
+            int(tag)
+            for tag, pattern in project.load_patterns.items()
+            if (
+                pattern.pattern_type == "Plain"
+                and _pattern_has_nonzero_force_reference(project, int(tag))
+                and not any(
+                    item.pattern_tag == int(tag)
+                    for item in project.prescribed_displacements.values()
+                )
+            )
+        ]
+        if driver_tags:
+            issues.append(
+                ValidationIssue(
+                    "WARNING",
+                    "Driving load",
+                    "Static DisplacementControl uses unscoped project Plain "
+                    "load pattern(s) as its force reference.",
+                    suggestion=(
+                        "Edit Analysis Settings and choose an explicit Driving "
+                        "Load so the analysis is isolated from unrelated loads."
+                    ),
+                )
+            )
+
     if not driver_tags:
         issues.append(
             ValidationIssue(
                 "ERROR",
                 "Driving load",
-                f"{analysis.analysis_type} analysis has no driving/reference "
-                "load pattern.",
+                f"{analysis.analysis_type} DisplacementControl has no "
+                "nonzero driving/reference force pattern.",
                 suggestion=(
                     "Edit Analysis Settings and use Auto-generate reference "
-                    "pattern, or select an existing Plain pattern."
+                    "pattern, or select an existing nonzero Plain pattern."
                 ),
             )
         )
@@ -679,21 +743,34 @@ def _driving_load_checks(
                     "ERROR",
                     "Driving load",
                     f"Driving pattern {tag} is {pattern.pattern_type}; "
-                    "Pushover/Cyclic require a Plain reference-load pattern.",
+                    "DisplacementControl requires a Plain reference-load "
+                    "pattern.",
                     suggestion="Use a Plain force pattern as the driver.",
                 )
             )
             continue
 
-        has_nodal_reference = any(
-            load.pattern_tag == int(tag)
-            and any(abs(float(value)) > 1.0e-15 for value in load.values)
+        nodal_reference_loads = [
+            load
             for load in project.nodal_loads.values()
-        )
-        has_element_reference = any(
-            load.pattern_tag == int(tag)
+            if (
+                load.pattern_tag == int(tag)
+                and any(
+                    abs(float(value)) > 1.0e-15
+                    for value in load.values
+                )
+            )
+        ]
+        element_reference_loads = [
+            load
             for load in project.element_loads.values()
-        )
+            if (
+                load.pattern_tag == int(tag)
+                and _element_load_has_nonzero_reference(load)
+            )
+        ]
+        has_nodal_reference = bool(nodal_reference_loads)
+        has_element_reference = bool(element_reference_loads)
         if not has_nodal_reference and not has_element_reference:
             issues.append(
                 ValidationIssue(
@@ -720,6 +797,30 @@ def _driving_load_checks(
                     "objects. DisplacementControl requires a force reference "
                     "pattern instead.",
                     suggestion="Move prescribed displacements to another pattern.",
+                )
+            )
+
+        dof_index = int(analysis.control_dof) - 1
+        if (
+            has_nodal_reference
+            and not has_element_reference
+            and 0 <= dof_index < int(project.model.ndf)
+            and not any(
+                dof_index < len(load.values)
+                and abs(float(load.values[dof_index])) > 1.0e-15
+                for load in nodal_reference_loads
+            )
+        ):
+            issues.append(
+                ValidationIssue(
+                    "WARNING",
+                    "Driving load",
+                    f"Driving pattern {tag} has no direct nodal force in "
+                    f"control DOF {analysis.control_dof}.",
+                    suggestion=(
+                        "Confirm that structural coupling is intentional, or "
+                        "use a reference force aligned with the control DOF."
+                    ),
                 )
             )
 

@@ -234,3 +234,32 @@ def test_cyclic_protocol_import_expands_amplitude_cycle_rows():
         assert dialog.data().cyclic_targets == targets
     finally:
         _close(dialog)
+
+
+def test_static_displacement_control_gets_fail_safe_driving_load_controls():
+    dialog = AnalysisDialog(
+        analysis_type="Static",
+        plain_patterns={7: "Existing reference"},
+    )
+    try:
+        dialog.integrator.setCurrentText("DisplacementControl")
+        _APP.processEvents()
+
+        assert _shown(dialog.driver_mode)
+        assert _shown(dialog.driver_distribution)
+        assert not _shown(dialog.driver_pattern)
+        assert _shown(dialog.preload_gravity)
+        assert dialog.driver_mode.currentData() == "auto"
+        assert dialog.driver_distribution.currentText() == "Uniform"
+        assert dialog.driving_load_config()["mode"] == "auto"
+        assert dialog.data().deferred_pattern_tags == []
+
+        dialog.driver_mode.setCurrentIndex(
+            dialog.driver_mode.findData("existing")
+        )
+        _APP.processEvents()
+        assert _shown(dialog.driver_pattern)
+        assert not _shown(dialog.driver_distribution)
+        assert dialog.data().deferred_pattern_tags == [7]
+    finally:
+        _close(dialog)

@@ -9103,8 +9103,15 @@ class MainWindow(QMainWindow):
         settings: AnalysisSettingsData,
         dialog: AnalysisDialog,
     ) -> None:
-        """Ensure Pushover/Cyclic always have a valid reference load."""
-        if settings.analysis_type not in {"Pushover", "Cyclic"}:
+        """Ensure DisplacementControl analyses have a valid force driver."""
+        needs_driver = (
+            settings.analysis_type in {"Pushover", "Cyclic"}
+            or (
+                settings.analysis_type == "Static"
+                and settings.integrator == "DisplacementControl"
+            )
+        )
+        if not needs_driver:
             return
 
         config = dialog.driving_load_config()
@@ -9122,7 +9129,7 @@ class MainWindow(QMainWindow):
                 )
             if pattern.pattern_type != "Plain":
                 raise ValueError(
-                    "Pushover/Cyclic driving load must be a Plain pattern."
+                    "DisplacementControl driving load must be a Plain pattern."
                 )
             settings.deferred_pattern_tags = [int(pattern_tag)]
             return
@@ -9143,7 +9150,11 @@ class MainWindow(QMainWindow):
             self.project,
             dof=settings.control_dof,
             distribution=distribution,
-            prefix=settings.analysis_type,
+            prefix=(
+                "Static DC"
+                if settings.analysis_type == "Static"
+                else settings.analysis_type
+            ),
             height_axis=height_axis,
         )
         for item in series:
