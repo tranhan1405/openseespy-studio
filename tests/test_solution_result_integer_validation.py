@@ -81,3 +81,32 @@ def test_solution_result_rejects_fractional_node_scope_reference():
                 "node_scope": [1.5],
             }
         )
+
+
+def test_solution_result_rejects_fractional_element_scope_reference():
+    with pytest.raises(
+        ValueError,
+        match=r"Solution result element tag must be an integer",
+    ):
+        SolutionResultData(
+            4,
+            1,
+            "Member force",
+            "MemberForce",
+            element_scope=[1.5],
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Solution result element tag must be an integer",
+    ):
+        SolutionResultData.from_dict(
+            {
+                "tag": 4,
+                "analysis_tag": 1,
+                "name": "Member force",
+                "result_type": "MemberForce",
+                "element_scope": [1.5],
+            }
+        )
+
