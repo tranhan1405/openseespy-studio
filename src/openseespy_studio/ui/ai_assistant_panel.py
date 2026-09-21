@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..ai_assistant import OpenAIProvider
+from ..ai_assistant import OllamaProvider, OpenAIProvider
 
 
 class _AssistantWorker(QObject):
@@ -30,23 +30,33 @@ class _AssistantWorker(QObject):
         prompt: str,
         snapshot: dict[str, Any],
         history: list[dict[str, str]],
+        provider: str,
         model: str,
         api_key: str,
+        ollama_host: str,
     ):
         super().__init__()
         self.prompt = str(prompt)
         self.snapshot = snapshot
         self.history = history
+        self.provider = str(provider)
         self.model = str(model)
         self.api_key = str(api_key)
+        self.ollama_host = str(ollama_host)
 
     @Slot()
     def run(self) -> None:
         try:
-            provider = OpenAIProvider(
-                model=self.model,
-                api_key=self.api_key or None,
-            )
+            if self.provider == "ollama":
+                provider = OllamaProvider(
+                    model=self.model,
+                    host=self.ollama_host,
+                )
+            else:
+                provider = OpenAIProvider(
+                    model=self.model,
+                    api_key=self.api_key or None,
+                )
             answer = provider.ask(
                 self.prompt,
                 snapshot=self.snapshot,
@@ -88,22 +98,23 @@ class AIAssistantPanel(QWidget):
         settings.setVerticalSpacing(4)
 
         self.provider = QComboBox()
-        self.provider.addItem("OpenAI", "openai")
+        self.provider.addItem("Ollama (Local · Free)", "ollama")
+        self.provider.addItem("OpenAI (API)", "openai")
+        self.provider.currentIndexChanged.connect(
+            self._provider_changed
+        )
         settings.addRow("Provider:", self.provider)
 
         self.model = QComboBox()
         self.model.setEditable(True)
-        self.model.addItems([
-            "gpt-5.6-luna",
-            "gpt-5.6-terra",
-            "gpt-5.6-sol",
-        ])
-        self.model.setCurrentText("gpt-5.6-luna")
-        self.model.setToolTip(
-            "OpenAI Responses API model ID. Luna is the lower-cost default; "
-            "use Terra/Sol for harder engineering diagnosis."
-        )
         settings.addRow("Model:", self.model)
+
+        self.ollama_host = QLineEdit("http://localhost:11434")
+        self.ollama_host.setToolTip(
+            "Local Ollama API address. The free provider is restricted to "
+            "localhost/loopback addresses so project context stays on this PC."
+        )
+        settings.addRow("Local host:", self.ollama_host)
 
         self.api_key = QLineEdit()
         self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
@@ -115,6 +126,7 @@ class AIAssistantPanel(QWidget):
         )
         settings.addRow("API key:", self.api_key)
         root.addLayout(settings)
+        self._provider_changed()
 
         self.focus = QLabel("Context: current model")
         self.focus.setWordWrap(True)
@@ -171,6 +183,56 @@ class AIAssistantPanel(QWidget):
         self.status.setWordWrap(True)
         root.addWidget(self.status)
 
+    def _provider_changed(self) -> None:
+        provider = str(self.provider.currentData() or "ollama")
+        current = self.model.currentText().strip()
+        self.model.blockSignals(True)
+        try:
+            self.model.clear()
+            if provider == "openai":
+                self.model.addItems([
+                    "gpt-5.6-luna",
+                    "gpt-5.6-terra",
+                    "gpt-5.6-sol",
+                ])
+                self.model.setCurrentText(
+                    current if current.startswith("gpt-") else "gpt-5.6-luna"
+                )
+                self.model.setToolTip(
+                    "OpenAI Responses API model ID."
+                )
+                self.api_key.setEnabled(True)
+                self.ollama_host.setEnabled(False)
+                self.status.setText(
+                    "OpenAI API mode · API usage is billed separately."
+                )
+            else:
+                self.model.addItems([
+                    "qwen3.5:4b",
+                    "qwen3.5:9b",
+                    "qwen3:4b",
+                    "qwen3:8b",
+                ])
+                self.model.setCurrentText(
+                    current
+                    if (
+                        current.startswith("qwen")
+                        or "/" in current
+                    )
+                    else "qwen3.5:4b"
+                )
+                self.model.setToolTip(
+                    "Local Ollama model. qwen3.5:4b is the lightweight "
+                    "default with tool-calling support."
+                )
+                self.api_key.setEnabled(False)
+                self.ollama_host.setEnabled(True)
+                self.status.setText(
+                    "Free local mode · requires Ollama and a downloaded model."
+                )
+        finally:
+            self.model.blockSignals(False)
+
     def _append_turn(self, role: str, text: str) -> None:
         label = "You" if role == "user" else "SARE AI"
         if self.transcript.toPlainText().strip():
@@ -195,8 +257,9 @@ class AIAssistantPanel(QWidget):
 
         config = {
             "provider": str(self.provider.currentData()),
-            "model": self.model.currentText().strip() or "gpt-5.6-luna",
+            "model": self.model.currentText().strip(),
             "api_key": self.api_key.text().strip(),
+            "ollama_host": self.ollama_host.text().strip(),
             "include_selection": self.include_selection.isChecked(),
             "include_analysis": self.include_analysis.isChecked(),
             "include_validation": self.include_validation.isChecked(),
@@ -215,7 +278,10 @@ class AIAssistantPanel(QWidget):
     ) -> None:
         if self._thread is not None:
             return
-        if str(config.get("provider", "openai")) != "openai":
+        if str(config.get("provider", "ollama")) not in {
+            "ollama",
+            "openai",
+        }:
             self.fail_request("Unsupported LLM provider.")
             return
 
@@ -224,8 +290,15 @@ class AIAssistantPanel(QWidget):
             prompt=str(prompt),
             snapshot=snapshot,
             history=list(config.get("history", [])),
-            model=str(config.get("model", "gpt-5.6-luna")),
+            provider=str(config.get("provider", "ollama")),
+            model=str(config.get("model", "qwen3.5:4b")),
             api_key=str(config.get("api_key", "")),
+            ollama_host=str(
+                config.get(
+                    "ollama_host",
+                    "http://localhost:11434",
+                )
+            ),
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -272,7 +345,9 @@ class AIAssistantPanel(QWidget):
         self.send_button.setEnabled(not busy)
         self.provider.setEnabled(not busy)
         self.model.setEnabled(not busy)
-        self.api_key.setEnabled(not busy)
+        is_openai = str(self.provider.currentData()) == "openai"
+        self.api_key.setEnabled((not busy) and is_openai)
+        self.ollama_host.setEnabled((not busy) and not is_openai)
         if message:
             self.status.setText(str(message))
 
