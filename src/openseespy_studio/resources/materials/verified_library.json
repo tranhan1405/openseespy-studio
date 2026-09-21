@@ -9969,6 +9969,4456 @@
         "parameter_location_identified": true,
         "units_checked": true
       }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld5-truss-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=5",
+      "parameters_si": {
+        "s1p": 677000000,
+        "e1p": 0.0033,
+        "s2p": 812000000,
+        "e2p": 0.0158,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -677000000,
+        "e1n": -0.0033,
+        "s2n": -741000000,
+        "e2n": -0.0819,
+        "s3n": -469000000,
+        "e3n": -0.15,
+        "pinchX": 0.29,
+        "pinchY": 0.79,
+        "damage1": 0,
+        "damage2": 0,
+        "beta": 0.4
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 5",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for EN 1.4301-CR · 12 mm, L/D=5. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld5-beam-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=5",
+      "parameters_si": {
+        "s1p": 677000000,
+        "e1p": 0.0033,
+        "s2p": 812000000,
+        "e2p": 0.0158,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -677000000,
+        "e1n": -0.0033,
+        "s2n": -812000000,
+        "e2n": -0.0158,
+        "s3n": -872000000,
+        "e3n": -0.2175,
+        "pinchX": 0.38,
+        "pinchY": 0.97,
+        "damage1": 0,
+        "damage2": 0,
+        "beta": 0.39
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 5",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for EN 1.4301-CR · 12 mm, L/D=5; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld8-truss-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=8",
+      "parameters_si": {
+        "s1p": 677000000,
+        "e1p": 0.0033,
+        "s2p": 812000000,
+        "e2p": 0.0158,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -677000000,
+        "e1n": -0.0033,
+        "s2n": -687000000,
+        "e2n": -0.0076,
+        "s3n": -135000000,
+        "e3n": -0.1455,
+        "pinchX": 0.31,
+        "pinchY": 0.53,
+        "damage1": 0,
+        "damage2": 0.242,
+        "beta": 0.31
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 8",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for EN 1.4301-CR · 12 mm, L/D=8. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld8-beam-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=8",
+      "parameters_si": {
+        "s1p": 677000000,
+        "e1p": 0.0033,
+        "s2p": 812000000,
+        "e2p": 0.0158,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -677000000,
+        "e1n": -0.0033,
+        "s2n": -812000000,
+        "e2n": -0.0158,
+        "s3n": -872000000,
+        "e3n": -0.2175,
+        "pinchX": 0.38,
+        "pinchY": 0.87,
+        "damage1": 0,
+        "damage2": 0,
+        "beta": 0.25
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 8",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for EN 1.4301-CR · 12 mm, L/D=8; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld10-truss-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=10",
+      "parameters_si": {
+        "s1p": 677000000,
+        "e1p": 0.0033,
+        "s2p": 812000000,
+        "e2p": 0.0158,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -677000000,
+        "e1n": -0.0033,
+        "s2n": -532000000,
+        "e2n": -0.029,
+        "s3n": -135000000,
+        "e3n": -0.1281,
+        "pinchX": 0.51,
+        "pinchY": 0.7,
+        "damage1": 0,
+        "damage2": 0.519,
+        "beta": 0.3
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 10",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for EN 1.4301-CR · 12 mm, L/D=10. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld10-beam-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=10",
+      "parameters_si": {
+        "s1p": 677000000,
+        "e1p": 0.0033,
+        "s2p": 812000000,
+        "e2p": 0.0158,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -677000000,
+        "e1n": -0.0033,
+        "s2n": -812000000,
+        "e2n": -0.0158,
+        "s3n": -872000000,
+        "e3n": -0.2175,
+        "pinchX": 0.32,
+        "pinchY": 0.73,
+        "damage1": 0.001,
+        "damage2": 0.017,
+        "beta": 0.3
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 10",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for EN 1.4301-CR · 12 mm, L/D=10; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld12-truss-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=12",
+      "parameters_si": {
+        "s1p": 677000000,
+        "e1p": 0.0033,
+        "s2p": 812000000,
+        "e2p": 0.0158,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -677000000,
+        "e1n": -0.0033,
+        "s2n": -471000000,
+        "e2n": -0.0273,
+        "s3n": -135000000,
+        "e3n": -0.1111,
+        "pinchX": 0.52,
+        "pinchY": 0.5,
+        "damage1": 0,
+        "damage2": 0.57,
+        "beta": 0.3
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 12",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for EN 1.4301-CR · 12 mm, L/D=12. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld12-beam-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=12",
+      "parameters_si": {
+        "s1p": 677000000,
+        "e1p": 0.0033,
+        "s2p": 812000000,
+        "e2p": 0.0158,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -677000000,
+        "e1n": -0.0033,
+        "s2n": -812000000,
+        "e2n": -0.0158,
+        "s3n": -872000000,
+        "e3n": -0.2175,
+        "pinchX": 0.33,
+        "pinchY": 0.72,
+        "damage1": 0.001,
+        "damage2": 0.016,
+        "beta": 0.29
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 12",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for EN 1.4301-CR · 12 mm, L/D=12; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld15-truss-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=15",
+      "parameters_si": {
+        "s1p": 677000000,
+        "e1p": 0.0033,
+        "s2p": 812000000,
+        "e2p": 0.0158,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -677000000,
+        "e1n": -0.0033,
+        "s2n": -374000000,
+        "e2n": -0.026,
+        "s3n": -135000000,
+        "e3n": -0.0857,
+        "pinchX": 0.5,
+        "pinchY": 0.18,
+        "damage1": 0,
+        "damage2": 0.564,
+        "beta": 0.32
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 15",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for EN 1.4301-CR · 12 mm, L/D=15. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld15-beam-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=15",
+      "parameters_si": {
+        "s1p": 677000000,
+        "e1p": 0.0033,
+        "s2p": 812000000,
+        "e2p": 0.0158,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -677000000,
+        "e1n": -0.0033,
+        "s2n": -812000000,
+        "e2n": -0.0158,
+        "s3n": -872000000,
+        "e3n": -0.2175,
+        "pinchX": 0.24,
+        "pinchY": 0.71,
+        "damage1": 0.001,
+        "damage2": 0.033,
+        "beta": 0.29
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 15",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for EN 1.4301-CR · 12 mm, L/D=15; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld5-truss-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=5",
+      "parameters_si": {
+        "s1p": 562000000,
+        "e1p": 0.0028,
+        "s2p": 745000000,
+        "e2p": 0.0442,
+        "s3p": 819000000,
+        "e3p": 0.295,
+        "s1n": -562000000,
+        "e1n": -0.0028,
+        "s2n": -656000000,
+        "e2n": -0.0799,
+        "s3n": -376000000,
+        "e3n": -0.15,
+        "pinchX": 0.24,
+        "pinchY": 1,
+        "damage1": 0,
+        "damage2": 0.12,
+        "beta": 0.36
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 5",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for EN 1.4301-HR · 12 mm, L/D=5. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld5-beam-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=5",
+      "parameters_si": {
+        "s1p": 562000000,
+        "e1p": 0.0028,
+        "s2p": 745000000,
+        "e2p": 0.0442,
+        "s3p": 819000000,
+        "e3p": 0.295,
+        "s1n": -562000000,
+        "e1n": -0.0028,
+        "s2n": -745000000,
+        "e2n": -0.0442,
+        "s3n": -819000000,
+        "e3n": -0.295,
+        "pinchX": 0.23,
+        "pinchY": 0.98,
+        "damage1": 0,
+        "damage2": 0,
+        "beta": 0.32
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 5",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for EN 1.4301-HR · 12 mm, L/D=5; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld8-truss-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=8",
+      "parameters_si": {
+        "s1p": 562000000,
+        "e1p": 0.0028,
+        "s2p": 745000000,
+        "e2p": 0.0442,
+        "s3p": 819000000,
+        "e3p": 0.295,
+        "s1n": -562000000,
+        "e1n": -0.0028,
+        "s2n": -530000000,
+        "e2n": -0.0328,
+        "s3n": -112000000,
+        "e3n": -0.1372,
+        "pinchX": 0.44,
+        "pinchY": 0.73,
+        "damage1": 0,
+        "damage2": 0.186,
+        "beta": 0.27
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 8",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for EN 1.4301-HR · 12 mm, L/D=8. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld8-beam-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=8",
+      "parameters_si": {
+        "s1p": 562000000,
+        "e1p": 0.0028,
+        "s2p": 745000000,
+        "e2p": 0.0442,
+        "s3p": 819000000,
+        "e3p": 0.295,
+        "s1n": -562000000,
+        "e1n": -0.0028,
+        "s2n": -745000000,
+        "e2n": -0.0442,
+        "s3n": -819000000,
+        "e3n": -0.295,
+        "pinchX": 0.25,
+        "pinchY": 0.99,
+        "damage1": 0,
+        "damage2": 0.006,
+        "beta": 0.26
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 8",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for EN 1.4301-HR · 12 mm, L/D=8; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld10-truss-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=10",
+      "parameters_si": {
+        "s1p": 562000000,
+        "e1p": 0.0028,
+        "s2p": 745000000,
+        "e2p": 0.0442,
+        "s3p": 819000000,
+        "e3p": 0.295,
+        "s1n": -562000000,
+        "e1n": -0.0028,
+        "s2n": -442000000,
+        "e2n": -0.0218,
+        "s3n": -112000000,
+        "e3n": -0.1041,
+        "pinchX": 0.5,
+        "pinchY": 0.55,
+        "damage1": 0,
+        "damage2": 0.288,
+        "beta": 0.19
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 10",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for EN 1.4301-HR · 12 mm, L/D=10. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld10-beam-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=10",
+      "parameters_si": {
+        "s1p": 562000000,
+        "e1p": 0.0028,
+        "s2p": 745000000,
+        "e2p": 0.0442,
+        "s3p": 819000000,
+        "e3p": 0.295,
+        "s1n": -562000000,
+        "e1n": -0.0028,
+        "s2n": -745000000,
+        "e2n": -0.0442,
+        "s3n": -819000000,
+        "e3n": -0.295,
+        "pinchX": 0.24,
+        "pinchY": 0.98,
+        "damage1": 0,
+        "damage2": 0.027,
+        "beta": 0.16
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 10",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for EN 1.4301-HR · 12 mm, L/D=10; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld12-truss-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=12",
+      "parameters_si": {
+        "s1p": 562000000,
+        "e1p": 0.0028,
+        "s2p": 745000000,
+        "e2p": 0.0442,
+        "s3p": 819000000,
+        "e3p": 0.295,
+        "s1n": -562000000,
+        "e1n": -0.0028,
+        "s2n": -397000000,
+        "e2n": -0.0212,
+        "s3n": -112000000,
+        "e3n": -0.0923,
+        "pinchX": 0.42,
+        "pinchY": 0.32,
+        "damage1": 0,
+        "damage2": 0.552,
+        "beta": 0.26
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 12",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for EN 1.4301-HR · 12 mm, L/D=12. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld12-beam-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=12",
+      "parameters_si": {
+        "s1p": 562000000,
+        "e1p": 0.0028,
+        "s2p": 745000000,
+        "e2p": 0.0442,
+        "s3p": 819000000,
+        "e3p": 0.295,
+        "s1n": -562000000,
+        "e1n": -0.0028,
+        "s2n": -745000000,
+        "e2n": -0.0442,
+        "s3n": -819000000,
+        "e3n": -0.295,
+        "pinchX": 0.25,
+        "pinchY": 0.98,
+        "damage1": 0,
+        "damage2": 0.022,
+        "beta": 0.23
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 12",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for EN 1.4301-HR · 12 mm, L/D=12; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld15-truss-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=15",
+      "parameters_si": {
+        "s1p": 562000000,
+        "e1p": 0.0028,
+        "s2p": 745000000,
+        "e2p": 0.0442,
+        "s3p": 819000000,
+        "e3p": 0.295,
+        "s1n": -562000000,
+        "e1n": -0.0028,
+        "s2n": -327000000,
+        "e2n": -0.021,
+        "s3n": -112000000,
+        "e3n": -0.0746,
+        "pinchX": 0.51,
+        "pinchY": 0.28,
+        "damage1": 0,
+        "damage2": 0.679,
+        "beta": 0.25
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 15",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for EN 1.4301-HR · 12 mm, L/D=15. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld15-beam-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=15",
+      "parameters_si": {
+        "s1p": 562000000,
+        "e1p": 0.0028,
+        "s2p": 745000000,
+        "e2p": 0.0442,
+        "s3p": 819000000,
+        "e3p": 0.295,
+        "s1n": -562000000,
+        "e1n": -0.0028,
+        "s2n": -745000000,
+        "e2n": -0.0442,
+        "s3n": -819000000,
+        "e3n": -0.295,
+        "pinchX": 0.2,
+        "pinchY": 0.92,
+        "damage1": 0,
+        "damage2": 0.044,
+        "beta": 0.2
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 15",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for EN 1.4301-HR · 12 mm, L/D=15; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld5-truss-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=5",
+      "parameters_si": {
+        "s1p": 579000000,
+        "e1p": 0.0029,
+        "s2p": 730000000,
+        "e2p": 0.0249,
+        "s3p": 827000000,
+        "e3p": 0.362,
+        "s1n": -579000000,
+        "e1n": -0.0029,
+        "s2n": -676000000,
+        "e2n": -0.0793,
+        "s3n": -393000000,
+        "e3n": -0.15,
+        "pinchX": 0.22,
+        "pinchY": 0.85,
+        "damage1": 0,
+        "damage2": 0,
+        "beta": 0.29
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 5",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for EN 1.4482-HR · 16 mm, L/D=5. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld5-beam-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=5",
+      "parameters_si": {
+        "s1p": 579000000,
+        "e1p": 0.0029,
+        "s2p": 730000000,
+        "e2p": 0.0249,
+        "s3p": 827000000,
+        "e3p": 0.362,
+        "s1n": -579000000,
+        "e1n": -0.0029,
+        "s2n": -730000000,
+        "e2n": -0.0249,
+        "s3n": -827000000,
+        "e3n": -0.362,
+        "pinchX": 0.26,
+        "pinchY": 0.97,
+        "damage1": 0,
+        "damage2": 0,
+        "beta": 0.25
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 5",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for EN 1.4482-HR · 16 mm, L/D=5; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld8-truss-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=8",
+      "parameters_si": {
+        "s1p": 579000000,
+        "e1p": 0.0029,
+        "s2p": 730000000,
+        "e2p": 0.0249,
+        "s3p": 827000000,
+        "e3p": 0.362,
+        "s1n": -579000000,
+        "e1n": -0.0029,
+        "s2n": -611000000,
+        "e2n": -0.0232,
+        "s3n": -116000000,
+        "e3n": -0.1471,
+        "pinchX": 0.43,
+        "pinchY": 0.65,
+        "damage1": 0,
+        "damage2": 0.291,
+        "beta": 0.3
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 8",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for EN 1.4482-HR · 16 mm, L/D=8. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld8-beam-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=8",
+      "parameters_si": {
+        "s1p": 579000000,
+        "e1p": 0.0029,
+        "s2p": 730000000,
+        "e2p": 0.0249,
+        "s3p": 827000000,
+        "e3p": 0.362,
+        "s1n": -579000000,
+        "e1n": -0.0029,
+        "s2n": -730000000,
+        "e2n": -0.0249,
+        "s3n": -827000000,
+        "e3n": -0.362,
+        "pinchX": 0.31,
+        "pinchY": 0.97,
+        "damage1": 0,
+        "damage2": 0,
+        "beta": 0.25
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 8",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for EN 1.4482-HR · 16 mm, L/D=8; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld10-truss-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=10",
+      "parameters_si": {
+        "s1p": 579000000,
+        "e1p": 0.0029,
+        "s2p": 730000000,
+        "e2p": 0.0249,
+        "s3p": 827000000,
+        "e3p": 0.362,
+        "s1n": -579000000,
+        "e1n": -0.0029,
+        "s2n": -477000000,
+        "e2n": -0.0259,
+        "s3n": -116000000,
+        "e3n": -0.1162,
+        "pinchX": 0.67,
+        "pinchY": 0.64,
+        "damage1": 0,
+        "damage2": 0.408,
+        "beta": 0.3
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 10",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for EN 1.4482-HR · 16 mm, L/D=10. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld10-beam-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=10",
+      "parameters_si": {
+        "s1p": 579000000,
+        "e1p": 0.0029,
+        "s2p": 730000000,
+        "e2p": 0.0249,
+        "s3p": 827000000,
+        "e3p": 0.362,
+        "s1n": -579000000,
+        "e1n": -0.0029,
+        "s2n": -730000000,
+        "e2n": -0.0249,
+        "s3n": -827000000,
+        "e3n": -0.362,
+        "pinchX": 0.28,
+        "pinchY": 0.94,
+        "damage1": 0,
+        "damage2": 0.025,
+        "beta": 0.26
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 10",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for EN 1.4482-HR · 16 mm, L/D=10; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld12-truss-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=12",
+      "parameters_si": {
+        "s1p": 579000000,
+        "e1p": 0.0029,
+        "s2p": 730000000,
+        "e2p": 0.0249,
+        "s3p": 827000000,
+        "e3p": 0.362,
+        "s1n": -579000000,
+        "e1n": -0.0029,
+        "s2n": -435000000,
+        "e2n": -0.0229,
+        "s3n": -116000000,
+        "e3n": -0.1028,
+        "pinchX": 0.64,
+        "pinchY": 0.64,
+        "damage1": 0,
+        "damage2": 0.928,
+        "beta": 0.25
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 12",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for EN 1.4482-HR · 16 mm, L/D=12. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld12-beam-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=12",
+      "parameters_si": {
+        "s1p": 579000000,
+        "e1p": 0.0029,
+        "s2p": 730000000,
+        "e2p": 0.0249,
+        "s3p": 827000000,
+        "e3p": 0.362,
+        "s1n": -579000000,
+        "e1n": -0.0029,
+        "s2n": -730000000,
+        "e2n": -0.0249,
+        "s3n": -827000000,
+        "e3n": -0.362,
+        "pinchX": 0.24,
+        "pinchY": 0.94,
+        "damage1": 0,
+        "damage2": 0.033,
+        "beta": 0.21
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 12",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for EN 1.4482-HR · 16 mm, L/D=12; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld15-truss-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=15",
+      "parameters_si": {
+        "s1p": 579000000,
+        "e1p": 0.0029,
+        "s2p": 730000000,
+        "e2p": 0.0249,
+        "s3p": 827000000,
+        "e3p": 0.362,
+        "s1n": -579000000,
+        "e1n": -0.0029,
+        "s2n": -358000000,
+        "e2n": -0.02,
+        "s3n": -116000000,
+        "e3n": -0.0826,
+        "pinchX": 0.61,
+        "pinchY": 0.58,
+        "damage1": 0,
+        "damage2": 0.71,
+        "beta": 0.19
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 15",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for EN 1.4482-HR · 16 mm, L/D=15. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld15-beam-hysteretic",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=15",
+      "parameters_si": {
+        "s1p": 579000000,
+        "e1p": 0.0029,
+        "s2p": 730000000,
+        "e2p": 0.0249,
+        "s3p": 827000000,
+        "e3p": 0.362,
+        "s1n": -579000000,
+        "e1n": -0.0029,
+        "s2n": -730000000,
+        "e2n": -0.0249,
+        "s3n": -827000000,
+        "e3n": -0.362,
+        "pinchX": 0.22,
+        "pinchY": 0.94,
+        "damage1": 0,
+        "damage2": 0.047,
+        "beta": 0.18
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 15",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for EN 1.4482-HR · 16 mm, L/D=15; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld5-truss-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=5",
+      "parameters_si": {
+        "s1p": 560000000,
+        "e1p": 0.0028,
+        "s2p": 644000000,
+        "e2p": 0.068,
+        "s3p": 657000000,
+        "e3p": 0.114,
+        "s1n": -560000000,
+        "e1n": -0.0028,
+        "s2n": -589000000,
+        "e2n": -0.0779,
+        "s3n": -300000000,
+        "e3n": -0.15,
+        "pinchX": 0.15,
+        "pinchY": 0.67,
+        "damage1": 0,
+        "damage2": 0.135,
+        "beta": 0.28
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 5",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for B500C · 12 mm, L/D=5. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld5-beam-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=5",
+      "parameters_si": {
+        "s1p": 560000000,
+        "e1p": 0.0028,
+        "s2p": 644000000,
+        "e2p": 0.068,
+        "s3p": 657000000,
+        "e3p": 0.114,
+        "s1n": -560000000,
+        "e1n": -0.0028,
+        "s2n": -644000000,
+        "e2n": -0.068,
+        "s3n": -657000000,
+        "e3n": -0.114,
+        "pinchX": 0.09,
+        "pinchY": 0.68,
+        "damage1": 0,
+        "damage2": 0,
+        "beta": 0.33
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 5",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for B500C · 12 mm, L/D=5; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld8-truss-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=8",
+      "parameters_si": {
+        "s1p": 560000000,
+        "e1p": 0.0028,
+        "s2p": 644000000,
+        "e2p": 0.068,
+        "s3p": 657000000,
+        "e3p": 0.114,
+        "s1n": -560000000,
+        "e1n": -0.0028,
+        "s2n": -476000000,
+        "e2n": -0.0321,
+        "s3n": -112000000,
+        "e3n": -0.1232,
+        "pinchX": 0.25,
+        "pinchY": 0.45,
+        "damage1": 0.004,
+        "damage2": 0.243,
+        "beta": 0.24
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 8",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for B500C · 12 mm, L/D=8. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld8-beam-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=8",
+      "parameters_si": {
+        "s1p": 560000000,
+        "e1p": 0.0028,
+        "s2p": 644000000,
+        "e2p": 0.068,
+        "s3p": 657000000,
+        "e3p": 0.114,
+        "s1n": -560000000,
+        "e1n": -0.0028,
+        "s2n": -644000000,
+        "e2n": -0.068,
+        "s3n": -657000000,
+        "e3n": -0.114,
+        "pinchX": 0.13,
+        "pinchY": 0.63,
+        "damage1": 0,
+        "damage2": 0.017,
+        "beta": 0.14
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 8",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for B500C · 12 mm, L/D=8; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld10-truss-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=10",
+      "parameters_si": {
+        "s1p": 560000000,
+        "e1p": 0.0028,
+        "s2p": 644000000,
+        "e2p": 0.068,
+        "s3p": 657000000,
+        "e3p": 0.114,
+        "s1n": -560000000,
+        "e1n": -0.0028,
+        "s2n": -418000000,
+        "e2n": -0.02,
+        "s3n": -112000000,
+        "e3n": -0.0965,
+        "pinchX": 0.44,
+        "pinchY": 0.47,
+        "damage1": 0,
+        "damage2": 0.343,
+        "beta": 0.22
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 10",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for B500C · 12 mm, L/D=10. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld10-beam-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=10",
+      "parameters_si": {
+        "s1p": 560000000,
+        "e1p": 0.0028,
+        "s2p": 644000000,
+        "e2p": 0.068,
+        "s3p": 657000000,
+        "e3p": 0.114,
+        "s1n": -560000000,
+        "e1n": -0.0028,
+        "s2n": -644000000,
+        "e2n": -0.068,
+        "s3n": -657000000,
+        "e3n": -0.114,
+        "pinchX": 0.1,
+        "pinchY": 0.54,
+        "damage1": 0,
+        "damage2": 0.026,
+        "beta": 0.19
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 10",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for B500C · 12 mm, L/D=10; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld12-truss-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=12",
+      "parameters_si": {
+        "s1p": 560000000,
+        "e1p": 0.0028,
+        "s2p": 644000000,
+        "e2p": 0.068,
+        "s3p": 657000000,
+        "e3p": 0.114,
+        "s1n": -560000000,
+        "e1n": -0.0028,
+        "s2n": -374000000,
+        "e2n": -0.02,
+        "s3n": -112000000,
+        "e3n": -0.0855,
+        "pinchX": 0.59,
+        "pinchY": 0.41,
+        "damage1": 0.004,
+        "damage2": 0.362,
+        "beta": 0.24
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 12",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for B500C · 12 mm, L/D=12. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld12-beam-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=12",
+      "parameters_si": {
+        "s1p": 560000000,
+        "e1p": 0.0028,
+        "s2p": 644000000,
+        "e2p": 0.068,
+        "s3p": 657000000,
+        "e3p": 0.114,
+        "s1n": -560000000,
+        "e1n": -0.0028,
+        "s2n": -644000000,
+        "e2n": -0.068,
+        "s3n": -657000000,
+        "e3n": -0.114,
+        "pinchX": 0.14,
+        "pinchY": 0.62,
+        "damage1": 0,
+        "damage2": 0.037,
+        "beta": 0.16
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 12",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for B500C · 12 mm, L/D=12; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld15-truss-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=15",
+      "parameters_si": {
+        "s1p": 560000000,
+        "e1p": 0.0028,
+        "s2p": 644000000,
+        "e2p": 0.068,
+        "s3p": 657000000,
+        "e3p": 0.114,
+        "s1n": -560000000,
+        "e1n": -0.0028,
+        "s2n": -308000000,
+        "e2n": -0.0199,
+        "s3n": -112000000,
+        "e3n": -0.069,
+        "pinchX": 0.7,
+        "pinchY": 0.38,
+        "damage1": 0,
+        "damage2": 0.308,
+        "beta": 0.19
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 15",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for B500C · 12 mm, L/D=15. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld15-beam-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=15",
+      "parameters_si": {
+        "s1p": 560000000,
+        "e1p": 0.0028,
+        "s2p": 644000000,
+        "e2p": 0.068,
+        "s3p": 657000000,
+        "e3p": 0.114,
+        "s1n": -560000000,
+        "e1n": -0.0028,
+        "s2n": -644000000,
+        "e2n": -0.068,
+        "s3n": -657000000,
+        "e3n": -0.114,
+        "pinchX": 0.11,
+        "pinchY": 0.53,
+        "damage1": 0,
+        "damage2": 0.043,
+        "beta": 0.17
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 15",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for B500C · 12 mm, L/D=15; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld5-truss-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=5",
+      "parameters_si": {
+        "s1p": 594000000,
+        "e1p": 0.003,
+        "s2p": 812000000,
+        "e2p": 0.055,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -594000000,
+        "e1n": -0.003,
+        "s2n": -615000000,
+        "e2n": -0.082,
+        "s3n": -343000000,
+        "e3n": -0.15,
+        "pinchX": 0.14,
+        "pinchY": 0.64,
+        "damage1": 0,
+        "damage2": 0.131,
+        "beta": 0.23
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 5",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for B500C · 16 mm, L/D=5. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld5-beam-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=5",
+      "parameters_si": {
+        "s1p": 594000000,
+        "e1p": 0.003,
+        "s2p": 812000000,
+        "e2p": 0.055,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -594000000,
+        "e1n": -0.003,
+        "s2n": -812000000,
+        "e2n": -0.055,
+        "s3n": -872000000,
+        "e3n": -0.2175,
+        "pinchX": 0.09,
+        "pinchY": 0.69,
+        "damage1": 0,
+        "damage2": 0,
+        "beta": 0.24
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 5",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for B500C · 16 mm, L/D=5; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld8-truss-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=8",
+      "parameters_si": {
+        "s1p": 594000000,
+        "e1p": 0.003,
+        "s2p": 812000000,
+        "e2p": 0.055,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -594000000,
+        "e1n": -0.003,
+        "s2n": -499000000,
+        "e2n": -0.0309,
+        "s3n": -119000000,
+        "e3n": -0.126,
+        "pinchX": 0.37,
+        "pinchY": 0.51,
+        "damage1": 0,
+        "damage2": 0.339,
+        "beta": 0.21
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 8",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for B500C · 16 mm, L/D=8. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld8-beam-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=8",
+      "parameters_si": {
+        "s1p": 594000000,
+        "e1p": 0.003,
+        "s2p": 812000000,
+        "e2p": 0.055,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -594000000,
+        "e1n": -0.003,
+        "s2n": -812000000,
+        "e2n": -0.055,
+        "s3n": -872000000,
+        "e3n": -0.2175,
+        "pinchX": 0.17,
+        "pinchY": 0.76,
+        "damage1": 0,
+        "damage2": 0.025,
+        "beta": 0.17
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 8",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for B500C · 16 mm, L/D=8; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld10-truss-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=10",
+      "parameters_si": {
+        "s1p": 594000000,
+        "e1p": 0.003,
+        "s2p": 812000000,
+        "e2p": 0.055,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -594000000,
+        "e1n": -0.003,
+        "s2n": -438000000,
+        "e2n": -0.0217,
+        "s3n": -119000000,
+        "e3n": -0.1016,
+        "pinchX": 0.48,
+        "pinchY": 0.51,
+        "damage1": 0,
+        "damage2": 0.384,
+        "beta": 0.21
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 10",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for B500C · 16 mm, L/D=10. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld10-beam-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=10",
+      "parameters_si": {
+        "s1p": 594000000,
+        "e1p": 0.003,
+        "s2p": 812000000,
+        "e2p": 0.055,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -594000000,
+        "e1n": -0.003,
+        "s2n": -812000000,
+        "e2n": -0.055,
+        "s3n": -872000000,
+        "e3n": -0.2175,
+        "pinchX": 0.1,
+        "pinchY": 0.54,
+        "damage1": 0,
+        "damage2": 0.041,
+        "beta": 0.19
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 10",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for B500C · 16 mm, L/D=10; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld12-truss-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=12",
+      "parameters_si": {
+        "s1p": 594000000,
+        "e1p": 0.003,
+        "s2p": 812000000,
+        "e2p": 0.055,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -594000000,
+        "e1n": -0.003,
+        "s2n": -390000000,
+        "e2n": -0.0217,
+        "s3n": -119000000,
+        "e3n": -0.0896,
+        "pinchX": 0.6,
+        "pinchY": 0.42,
+        "damage1": 0,
+        "damage2": 0.368,
+        "beta": 0.2
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 12",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for B500C · 16 mm, L/D=12. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld12-beam-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=12",
+      "parameters_si": {
+        "s1p": 594000000,
+        "e1p": 0.003,
+        "s2p": 812000000,
+        "e2p": 0.055,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -594000000,
+        "e1n": -0.003,
+        "s2n": -812000000,
+        "e2n": -0.055,
+        "s3n": -872000000,
+        "e3n": -0.2175,
+        "pinchX": 0.16,
+        "pinchY": 0.58,
+        "damage1": 0,
+        "damage2": 0.026,
+        "beta": 0.14
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 12",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for B500C · 16 mm, L/D=12; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld15-truss-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Truss/Fibre · L/D=15",
+      "parameters_si": {
+        "s1p": 594000000,
+        "e1p": 0.003,
+        "s2p": 812000000,
+        "e2p": 0.055,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -594000000,
+        "e1n": -0.003,
+        "s2n": -318000000,
+        "e2n": -0.0216,
+        "s3n": -119000000,
+        "e3n": -0.0714,
+        "pinchX": 0.62,
+        "pinchY": 0.31,
+        "damage1": 0,
+        "damage2": 0.327,
+        "beta": 0.19
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 15",
+        "OpenSees Hysteretic truss calibration; suitable for fibre-based rebar modelling as described by the source.",
+        "Cyclic stress-strain response including constitutive representation of inelastic buckling."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "The published compression backbone values are magnitudes; SARE maps them deterministically to the negative OpenSees Hysteretic branch.",
+        "Density and Poisson ratio are not part of this verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (tensile/compressive Hysteretic backbones) and Table B.3 (truss cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic truss calibration for B500C · 16 mm, L/D=15. Published strain percentages are stored as decimal strain; MPa stresses are stored in Pa; compression magnitudes are assigned negative signs for the OpenSees negative branch."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld15-beam-hysteretic",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Hysteretic",
+      "preset_name": "Moodley et al. (2026) · Hysteretic · Beam-column · L/D=15",
+      "parameters_si": {
+        "s1p": 594000000,
+        "e1p": 0.003,
+        "s2p": 812000000,
+        "e2p": 0.055,
+        "s3p": 872000000,
+        "e3p": 0.2175,
+        "s1n": -594000000,
+        "e1n": -0.003,
+        "s2n": -812000000,
+        "e2n": -0.055,
+        "s3n": -872000000,
+        "e3n": -0.2175,
+        "pinchX": 0.1,
+        "pinchY": 0.53,
+        "damage1": 0,
+        "damage2": 0.053,
+        "beta": 0.17
+      },
+      "verified_parameters": [
+        "s1p",
+        "e1p",
+        "s2p",
+        "e2p",
+        "s3p",
+        "e3p",
+        "s1n",
+        "e1n",
+        "s2n",
+        "e2n",
+        "s3n",
+        "e3n",
+        "pinchX",
+        "pinchY",
+        "damage1",
+        "damage2",
+        "beta"
+      ],
+      "response_quantity": "stress_strain",
+      "source_units": {
+        "response": "MPa",
+        "deformation": "% strain"
+      },
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 15",
+        "OpenSees Hysteretic beam-column rebar calibration with geometric buckling represented explicitly.",
+        "Cyclic stress-strain response for the beam-column rebar representation defined in the source."
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "Section 4.2.2 explicitly uses the calibrated tensile backbone for both Hysteretic input branches in the beam-column rebar model; SARE mirrors it with negative OpenSees signs.",
+        "Do not substitute this beam-column calibration blindly into a truss/fibre-only rebar representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.2 (calibrated tensile backbone), Section 4.2.2 (compression input backbone set equal to tensile for beam-column model), and Table B.5 (beam-column cyclic PinchX, PinchY, Damage1, Damage2, beta_mu)",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Hysteretic beam-column calibration for B500C · 16 mm, L/D=15; the negative branch is the source-prescribed mirrored tensile backbone with OpenSees sign convention."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
     }
   ]
 }
