@@ -734,12 +734,18 @@ def recorder_to_openseespy(recorder: RecorderData) -> list[str]:
         )
         return lines
 
-    fiber_args = (
-        f", 'section', {recorder.section_number}, 'fiber', "
-        f"{recorder.fiber_y:g}, {recorder.fiber_z:g}"
-    )
-    if recorder.material_tag is not None:
-        fiber_args += f", {recorder.material_tag}"
+    if recorder.fiber_index is not None:
+        fiber_args = (
+            f", 'section', {recorder.section_number}, 'fiber', "
+            f"{recorder.fiber_index}"
+        )
+    else:
+        fiber_args = (
+            f", 'section', {recorder.section_number}, 'fiber', "
+            f"{recorder.fiber_y:g}, {recorder.fiber_z:g}"
+        )
+        if recorder.material_tag is not None:
+            fiber_args += f", {recorder.material_tag}"
     lines.append(prefix + fiber_args + f", {recorder.response!r})")
     return lines
 
