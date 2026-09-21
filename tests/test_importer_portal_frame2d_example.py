@@ -214,12 +214,16 @@ def test_portal_frame_2d_verification_example_imports_model_and_static_analysis(
         "72.3, 29500, 3230, 1)"
     ) in regenerated
     assert "ops.section('Elastic', " in regenerated
+    assert "ops.algorithm('Linear')" in regenerated
+    assert "ops.test(" not in regenerated
     assert ", 0, 0, 0)" not in regenerated
     compile(regenerated, "<portal-frame-2d-roundtrip>", "exec")
 
 
 def test_model_command_uses_native_opensees_default_ndf_when_omitted():
-    for ndm, expected_ndf in ((1, 1), (2, 3), (3, 6)):
+    # StructuralModel currently supports the frame/structural 2D and 3D
+    # builders. OpenSees' native omitted-ndf defaults are 3 and 6 respectively.
+    for ndm, expected_ndf in ((2, 3), (3, 6)):
         result = import_openseespy_source(
             "from openseespy.opensees import *\n"
             f"model('Basic', '-ndm', {ndm})\n",
