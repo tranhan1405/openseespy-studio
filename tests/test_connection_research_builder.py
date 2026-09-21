@@ -225,6 +225,22 @@ def test_builder_creates_zero_length_section_from_section_assignment():
     assert spec["materials_by_dof"] == {}
     assert dialog.tabs.isTabEnabled(dialog.section_tab_index)
     assert not dialog.tabs.isTabEnabled(dialog.dof_tab_index)
+
+    connection = ConnectionData(
+        tag=spec["tag"],
+        name=spec["name"],
+        connection_type=spec["connection_type"],
+        node_i=spec["node_i"],
+        node_j=spec["node_j"],
+        materials_by_dof=spec["materials_by_dof"],
+        section_tag=spec["section_tag"],
+        orient_x=spec["orient_x"],
+        orient_y=spec["orient_y"],
+        do_rayleigh=spec["do_rayleigh"],
+    )
+    command = connection_to_openseespy(connection)
+    assert "ops.element('zeroLengthSection'" in command
+    assert ", 7, '-orient'" in command
     dialog.close()
 
 
