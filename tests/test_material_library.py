@@ -22,7 +22,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 161
+    assert len(records) == 167
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -220,7 +220,7 @@ def test_moodley_2026_records_encode_model_applicability():
     )
 
 
-def test_verified_library_reaches_one_hundred_sixty_one_with_expected_source_counts():
+def test_verified_library_reaches_one_hundred_sixty_seven_with_expected_source_counts():
     records = load_verified_material_library()
     prefixes = {
         "carreno-2020-": 2,
@@ -235,10 +235,14 @@ def test_verified_library_reaches_one_hundred_sixty_one_with_expected_source_cou
         "georgantzia-2024-": 3,
         "doci-2024-": 2,
         "caballero-castro-2025-": 3,
+        "melo-2020-": 2,
+        "sosa-caiza-2015-": 1,
+        "hung-eltawil-2009-": 2,
+        "yigitbas-2026-": 1,
     }
 
-    assert len(records) == 161
-    assert len({record.id for record in records}) == 161
+    assert len(records) == 167
+    assert len({record.id for record in records}) == 167
     for prefix, expected in prefixes.items():
         assert sum(
             record.id.startswith(prefix)
@@ -373,6 +377,124 @@ def test_caballero_castro_2025_tadas_and_concrete_sets_are_exact():
         assert "Table 2" in str(
             record.parameter_evidence.get("location", "")
         )
+
+
+
+def test_melo_2020_bond_sp01_sets_are_complete_and_traceable():
+    plain = _record("melo-2020-cpa3-plain-bond-sp01")
+    deformed = _record("melo-2020-cd-deformed-bond-sp01")
+
+    assert plain.model == "Bond_SP01"
+    assert plain.parameters_si == {
+        "Fy": 405.0e6,
+        "Sy": 0.00046,
+        "Fu": 470.0e6,
+        "Su": 0.0184,
+        "b": 0.30,
+        "R": 0.30,
+    }
+    assert deformed.parameters_si == {
+        "Fy": 465.0e6,
+        "Sy": 0.00044,
+        "Fu": 585.0e6,
+        "Su": 0.0176,
+        "b": 0.40,
+        "R": 0.80,
+    }
+    for record in (plain, deformed):
+        assert record.doi == "10.3389/fbuil.2020.586690"
+        location = str(record.parameter_evidence.get("location", ""))
+        assert "Table 1" in location
+        assert "Table 2" in location
+
+
+def test_melo_2020_bond_sp01_is_unit_safe_in_export():
+    material = material_from_library_record(
+        _record("melo-2020-cpa3-plain-bond-sp01"),
+        tag=50,
+    )
+
+    n_mm = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+    kn_m = material_to_openseespy(
+        material,
+        {"length": "m", "force": "kN", "time": "s"},
+    )
+
+    assert "'Bond_SP01', 50, 405, 0.46, 470, 18.4, 0.3, 0.3" in n_mm
+    assert (
+        "'Bond_SP01', 50, 405000, 0.00046, 470000, 0.0184, 0.3, 0.3"
+        in kn_m
+    )
+
+
+def test_sosa_caiza_2015_reinforcingsteel_set_is_exact():
+    record = _record(
+        "sosa-caiza-2015-e1-connection-reinforcingsteel"
+    )
+
+    assert record.model == "ReinforcingSteel"
+    assert record.parameters_si == {
+        "fy": 489.53e6,
+        "fu": 675.69e6,
+        "Es": 199948.0e6,
+        "Esh": 4482.0e6,
+        "eps_sh": 0.0124,
+        "eps_ult": 0.132,
+    }
+    assert record.doi == "10.2174/1874149501509010236"
+    location = str(record.parameter_evidence.get("location", ""))
+    assert "Table 5" in location
+    assert "Table 6" in location
+
+
+def test_hung_eltawil_2009_concrete02_sets_preserve_table_i_values():
+    unconfined = _record("hung-eltawil-2009-unconfined-concrete02")
+    confined = _record("hung-eltawil-2009-confined-concrete02")
+
+    assert unconfined.model == "Concrete02"
+    assert abs(unconfined.parameters_si["fpc"] + 6.0 * 6.894757293168e6) < 1.0e-6
+    assert unconfined.parameters_si["epsc0"] == -0.002
+    assert abs(unconfined.parameters_si["fpcu"] + 0.4 * 6.894757293168e6) < 1.0e-6
+    assert unconfined.parameters_si["epsU"] == -0.01
+    assert unconfined.parameters_si["lambda"] == 0.1
+    assert abs(unconfined.parameters_si["ft"] - 0.6 * 6.894757293168e6) < 1.0e-6
+    assert abs(unconfined.parameters_si["Ets"] - 300.0 * 6.894757293168e6) < 1.0e-3
+
+    assert abs(confined.parameters_si["fpc"] + 7.2 * 6.894757293168e6) < 1.0e-6
+    assert confined.parameters_si["epsc0"] == -0.0045
+    assert abs(confined.parameters_si["fpcu"] + 2.4 * 6.894757293168e6) < 1.0e-6
+    assert confined.parameters_si["epsU"] == -0.03
+    assert confined.parameters_si["lambda"] == 0.1
+    assert abs(confined.parameters_si["ft"] - 0.72 * 6.894757293168e6) < 1.0e-6
+    assert abs(confined.parameters_si["Ets"] - 360.0 * 6.894757293168e6) < 1.0e-3
+
+    for record in (unconfined, confined):
+        assert record.doi == "10.1002/eqe.921"
+        assert "Table I" in str(
+            record.parameter_evidence.get("location", "")
+        )
+
+
+def test_yigitbas_2026_concrete04_set_is_exact():
+    record = _record("yigitbas-2026-frame-concrete04")
+
+    assert record.model == "Concrete04"
+    assert record.parameters_si == {
+        "fc": -38.59e6,
+        "epsc": -0.0022,
+        "epscu": -0.0141,
+        "Ec": 32989.0e6,
+        "fct": 2.05e6,
+        "et": 0.00004,
+        "beta": 0.1,
+    }
+    assert record.doi == "10.65102/is202545"
+    assert "Table 1" in str(
+        record.parameter_evidence.get("location", "")
+    )
 
 
 def test_all_pinching4_library_records_have_physical_context_and_full_schema():
