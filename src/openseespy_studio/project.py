@@ -3394,6 +3394,51 @@ class ProjectDatabase:
             and pattern.pattern_type == "Plain"
         )
 
+    def _validate_analysis_prescribed_mpc_conflict(
+        self,
+        analysis: AnalysisSettingsData,
+        *,
+        ignore_analysis_tags: set[int] | None = None,
+    ) -> None:
+        conflicts = []
+        for displacement in self.prescribed_displacements.values():
+            if not self._analysis_pattern_is_active(
+                analysis,
+                displacement.pattern_tag,
+                ignore_analysis_tags=ignore_analysis_tags,
+            ):
+                continue
+            owners = sorted(
+                int(constraint.tag)
+                for constraint in self.constraints.values()
+                if (
+                    displacement.node_tag in constraint.constrained_nodes
+                    and displacement.dof
+                    in self._constraint_dependent_dofs(constraint)
+                )
+            )
+            if owners:
+                conflicts.append(
+                    (
+                        int(displacement.tag),
+                        int(displacement.node_tag),
+                        int(displacement.dof),
+                        owners,
+                    )
+                )
+        if conflicts:
+            details = "; ".join(
+                f"SP {sp_tag} at node {node_tag} DOF {dof} -> MPC "
+                + ", ".join(map(str, owners))
+                for sp_tag, node_tag, dof, owners in conflicts
+            )
+            raise ValueError(
+                f"Analysis {analysis.tag} activates Prescribed "
+                "Displacement object(s) on MPC dependent DOF(s): "
+                + details
+                + "."
+            )
+
     def _validate_analysis_plain_prescribed_displacement_compatibility(
         self,
         analysis: AnalysisSettingsData,
@@ -3536,6 +3581,7 @@ class ProjectDatabase:
         if analysis.tag in self.analyses:
             raise ValueError(f"Analysis tag {analysis.tag} already exists.")
         self._validate_analysis_constraint_handler_compatibility(analysis)
+        self._validate_analysis_prescribed_mpc_conflict(analysis)
         self._validate_analysis_plain_prescribed_displacement_compatibility(
             analysis
         )
@@ -3569,6 +3615,10 @@ class ProjectDatabase:
         if original_tag not in self.analyses: raise ValueError(f"Analysis tag {original_tag} does not exist.")
         if analysis.tag!=original_tag and analysis.tag in self.analyses: raise ValueError(f"Analysis tag {analysis.tag} already exists.")
         self._validate_analysis_constraint_handler_compatibility(analysis)
+        self._validate_analysis_prescribed_mpc_conflict(
+            analysis,
+            ignore_analysis_tags={original_tag},
+        )
         self._validate_analysis_plain_prescribed_displacement_compatibility(
             analysis,
             ignore_analysis_tags={original_tag},
