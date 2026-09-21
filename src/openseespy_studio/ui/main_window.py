@@ -4639,17 +4639,39 @@ class MainWindow(QMainWindow):
                 if node is None:
                     return
 
+                managed_by = sorted(
+                    connection.tag
+                    for connection in self.project.connections.values()
+                    if connection.generated_ground_node == tag
+                )
+                if (
+                    managed_by
+                    and (
+                        property_id in {"x", "y", "z"}
+                        or property_id.startswith("fixity_")
+                    )
+                ):
+                    raise ValueError(
+                        "Generated ground node "
+                        f"{tag} is managed by connection(s) "
+                        + ", ".join(map(str, managed_by))
+                        + "; edit the structural/source node or connection "
+                        "instead."
+                    )
+
                 if property_id in {"x", "y", "z"}:
                     axis = {"x": 0, "y": 1, "z": 2}[property_id]
                     xyz = list(node.xyz)
                     xyz[axis] = float(value)
                     node.xyz = tuple(xyz)
                     self.project.sync_generated_ground_nodes()
+                    self.project.validate_node_state(tag)
                 elif property_id.startswith("fixity_"):
                     index = int(property_id.rsplit("_", 1)[1])
                     values = list(node.fixity)
                     values[index] = 1 if int(value) else 0
                     node.fixity = tuple(values)
+                    self.project.validate_node_state(tag)
                 elif property_id == "mass":
                     text = str(value).replace(";", ",")
                     parts = [
