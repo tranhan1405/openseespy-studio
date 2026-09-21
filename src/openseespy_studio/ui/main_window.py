@@ -2111,7 +2111,7 @@ class MainWindow(QMainWindow):
             "Material Library...",
             "material",
             self._show_material_library,
-            "Browse verified reference-backed material parameter sets",
+            "Browse verified sources and insert a material into this project",
         )
         self._make_action(
             "new_section",
@@ -12198,7 +12198,9 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "materials_root":
-            library_action = menu.addAction("Material Library...")
+            library_action = menu.addAction(
+                "Insert from Material Library..."
+            )
             library_action.triggered.connect(self._show_material_library)
             create_action = menu.addAction("New Material...")
             create_action.triggered.connect(self._create_material)
