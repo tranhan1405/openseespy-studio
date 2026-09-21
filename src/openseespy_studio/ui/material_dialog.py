@@ -72,7 +72,6 @@ PARAMETER_LABELS = {
     "sigmaY": "Yield stress σy",
     "H_iso": "Isotropic hardening modulus Hiso",
     "H_kin": "Kinematic hardening modulus Hkin",
-    "eta": "Viscoplastic coefficient η",
     "epsyP": "Positive yield strain εy+",
     "epsyN": "Negative yield strain εy−",
     "eps0": "Initial strain ε0",
@@ -764,6 +763,10 @@ class MaterialDialog(QDialog):
 
     def _parameter_label(self, material_type: str, key: str) -> str:
         base = PARAMETER_LABELS.get(key, key)
+        if material_type == "Hardening" and key == "eta":
+            base = "Viscoplastic coefficient η"
+        elif material_type == "ElasticPPGap" and key == "eta":
+            base = "Hardening ratio η"
         kind = self._parameter_kind(material_type, key)
         if kind == "stress":
             return f"{base} [MPa]:"
@@ -1171,6 +1174,17 @@ class MaterialDialog(QDialog):
                 f"{material_type} combines {len(tags)} referenced material(s)"
                 f"{factor_text}. Use Material Test to exercise the assembled "
                 "OpenSees constitutive object."
+            )
+            self.material_note.setStyleSheet(
+                "padding: 7px; background: #eef4fb; color: #40566c;"
+            )
+        elif material_type == "Hardening":
+            self.material_note.setText(
+                "Hardening uses combined linear isotropic + kinematic hardening. "
+                "Hiso=0 gives purely kinematic hardening; Hkin=0 gives purely "
+                "isotropic hardening; eta=0 gives the rate-independent model. "
+                "Studio treats E, sigmaY, Hiso, Hkin and eta as stress-based "
+                "engineering inputs for steel/fiber use."
             )
             self.material_note.setStyleSheet(
                 "padding: 7px; background: #eef4fb; color: #40566c;"
