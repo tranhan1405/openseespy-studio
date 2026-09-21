@@ -2874,6 +2874,28 @@ class ProjectDatabase:
                 or node_tag in constraint.constrained_nodes
             ):
                 return True
+        if any(
+            load.node_tag == node_tag
+            for load in self.nodal_loads.values()
+        ):
+            return True
+        if any(
+            displacement.node_tag == node_tag
+            for displacement in self.prescribed_displacements.values()
+        ):
+            return True
+        if any(
+            recorder.recorder_type == "Node"
+            and node_tag in recorder.target_tags
+            for recorder in self.recorders.values()
+        ):
+            return True
+        if any(
+            self._analysis_uses_control_node(analysis)
+            and analysis.control_node == node_tag
+            for analysis in self.analyses.values()
+        ):
+            return True
         return False
 
     def remove_connection(

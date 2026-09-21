@@ -2083,3 +2083,41 @@ def test_project_delete_entities_rejects_analysis_control_node():
         project.delete_entities(node_tags=[2], cascade_nodes=True)
 
     assert 2 in project.model.nodes
+
+
+def test_project_ground_node_cleanup_preserves_semantically_used_node():
+    model = StructuralModel("ground-node-protection", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    project = ProjectDatabase(name="Ground protection", model=model)
+    project.add_material(
+        MaterialData(1, "Spring", "Elastic", {"E": 1000.0})
+    )
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Plain", "Plain", time_series_tag=1)
+    )
+    connection = ConnectionData(
+        90,
+        "Ground spring",
+        "zeroLength",
+        1,
+        2,
+        materials_by_dof={1: 1},
+        generated_ground_node=2,
+    )
+    project.add_connection(connection)
+    project.add_nodal_load(
+        NodalLoadData(
+            91,
+            "Ground load",
+            1,
+            2,
+            (1.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        )
+    )
+
+    project.remove_connection(90, cleanup_ground=True)
+
+    assert 2 in project.model.nodes
+    assert 91 in project.nodal_loads

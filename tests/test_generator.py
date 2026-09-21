@@ -2734,6 +2734,7 @@ def test_generator_truss_does_not_require_geometric_transformation():
 def test_generator_rejects_element_with_missing_endpoint_node():
     model = StructuralModel("orphan-element-node", ndm=2, ndf=3)
     model.add_node(1, 0.0, 0.0)
+    model.add_node(99, 1.0, 0.0)
     model.add_element(
         1,
         1,
@@ -2742,6 +2743,7 @@ def test_generator_rejects_element_with_missing_endpoint_node():
         section_tag=1,
         transf_tag=1,
     )
+    model.nodes.pop(99)
 
     with pytest.raises(
         ValueError,
