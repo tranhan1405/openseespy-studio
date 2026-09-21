@@ -10148,27 +10148,6 @@ class MainWindow(QMainWindow):
                     ("Control DOF", settings.control_dof),
                     ("Target count", len(settings.cyclic_targets)),
                     (
-                        "Targets",
-                        (
-                            ", ".join(
-                                f"{value:g}"
-                                for value in settings.cyclic_targets
-                            )
-                            if len(settings.cyclic_targets) <= 24
-                            else (
-                                ", ".join(
-                                    f"{value:g}"
-                                    for value in settings.cyclic_targets[:12]
-                                )
-                                + f", … {len(settings.cyclic_targets) - 16} hidden …, "
-                                + ", ".join(
-                                    f"{value:g}"
-                                    for value in settings.cyclic_targets[-4:]
-                                )
-                            )
-                        ),
-                    ),
-                    (
                         "Target min / max",
                         (
                             f"{min(settings.cyclic_targets):g} / "
