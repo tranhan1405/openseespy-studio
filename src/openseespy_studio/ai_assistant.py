@@ -261,22 +261,30 @@ def execute_read_only_tool(
         result = _selection_detail(snapshot)
 
     elif name == "get_material":
-        tag = int(arguments["tag"])
-        item = _tagged(project.get("materials", []), tag)
-        result = (
-            {"found": True, "material": item}
-            if item is not None
-            else {"found": False, "tag": tag}
-        )
+        try:
+            tag = int(arguments["tag"])
+        except (KeyError, TypeError, ValueError):
+            result = {"error": "get_material requires an integer tag."}
+        else:
+            item = _tagged(project.get("materials", []), tag)
+            result = (
+                {"found": True, "material": item}
+                if item is not None
+                else {"found": False, "tag": tag}
+            )
 
     elif name == "get_section":
-        tag = int(arguments["tag"])
-        item = _tagged(project.get("sections", []), tag)
-        result = (
-            {"found": True, "section": item}
-            if item is not None
-            else {"found": False, "tag": tag}
-        )
+        try:
+            tag = int(arguments["tag"])
+        except (KeyError, TypeError, ValueError):
+            result = {"error": "get_section requires an integer tag."}
+        else:
+            item = _tagged(project.get("sections", []), tag)
+            result = (
+                {"found": True, "section": item}
+                if item is not None
+                else {"found": False, "tag": tag}
+            )
 
     elif name == "get_analysis":
         raw_tag = arguments.get("tag")
@@ -361,6 +369,7 @@ def execute_read_only_tool(
 OPENAI_READ_ONLY_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
+        "strict": False,
         "name": "get_model_summary",
         "description": (
             "Get SARE project/model dimensions, object counts, tag indexes, "
