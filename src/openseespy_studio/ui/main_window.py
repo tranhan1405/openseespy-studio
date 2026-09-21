@@ -94,7 +94,7 @@ from ..runtime import (
 from ..validation import ValidationIssue, validate_project
 from ..units import UnitSystem
 from .analysis_dialog import AnalysisDialog
-from .analysis_template_dialog import AnalysisTemplateDialog
+from .analysis_template_dialog import AnalysisTemplateDialog, CyclicProtocolPreview
 from .calibration_dialog import (
     ApplyCalibrationCaseDialog,
     CalibrationDialog,
@@ -876,6 +876,43 @@ class PropertiesPanel(QWidget):
         self.table.setColumnWidth(0, 112)
         layout.addWidget(self.table, 1)
 
+        self.cyclic_protocol_view = QWidget()
+        cyclic_layout = QVBoxLayout(self.cyclic_protocol_view)
+        cyclic_layout.setContentsMargins(0, 0, 0, 0)
+        cyclic_layout.setSpacing(6)
+
+        self.cyclic_protocol_summary = QLabel()
+        self.cyclic_protocol_summary.setWordWrap(True)
+        self.cyclic_protocol_summary.setObjectName("Muted")
+        cyclic_layout.addWidget(self.cyclic_protocol_summary)
+
+        self.cyclic_protocol_preview = CyclicProtocolPreview()
+        self.cyclic_protocol_preview.setMinimumHeight(130)
+        cyclic_layout.addWidget(self.cyclic_protocol_preview)
+
+        self.cyclic_protocol_table = QTableWidget(0, 2)
+        self.cyclic_protocol_table.setHorizontalHeaderLabels(
+            ["Target #", "Value"]
+        )
+        self.cyclic_protocol_table.verticalHeader().hide()
+        self.cyclic_protocol_table.setSelectionMode(
+            QAbstractItemView.SingleSelection
+        )
+        self.cyclic_protocol_table.setSelectionBehavior(
+            QAbstractItemView.SelectRows
+        )
+        self.cyclic_protocol_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.cyclic_protocol_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.cyclic_protocol_table.setColumnWidth(0, 72)
+        cyclic_layout.addWidget(self.cyclic_protocol_table, 1)
+
+        layout.addWidget(self.cyclic_protocol_view, 1)
+        self.cyclic_protocol_view.hide()
+
         self.result_editor = QWidget()
         result_layout = QVBoxLayout(self.result_editor)
         result_layout.setContentsMargins(0, 0, 0, 0)
@@ -1061,6 +1098,7 @@ class PropertiesPanel(QWidget):
         self._solution_result_tag = None
         self._property_context = dict(context or {})
         self.result_editor.hide()
+        self.cyclic_protocol_view.hide()
         self.table.show()
         self.apply_button.hide()
         self.entity_label.setText(title)
@@ -1123,6 +1161,43 @@ class PropertiesPanel(QWidget):
             self.table.blockSignals(False)
             self._building_property_grid = False
 
+    def set_cyclic_protocol(
+        self,
+        settings: AnalysisSettingsData,
+    ) -> None:
+        self._solution_result_tag = None
+        self._property_context = {}
+        self.result_editor.hide()
+        self.table.hide()
+        self.apply_button.hide()
+        self.cyclic_protocol_view.show()
+        self.entity_label.setText("Cyclic Protocol")
+
+        targets = [float(value) for value in settings.cyclic_targets]
+        expanded = cyclic_displacement_steps(
+            targets,
+            settings.cyclic_increment,
+        )
+        self.cyclic_protocol_summary.setText(
+            f"Control: Node {settings.control_node} · "
+            f"DOF {settings.control_dof}   |   "
+            f"Targets: {len(targets)}   |   "
+            f"Max increment: {settings.cyclic_increment:g}   |   "
+            f"Expanded steps: {len(expanded)}"
+        )
+        self.cyclic_protocol_preview.set_targets(targets)
+
+        table = self.cyclic_protocol_table
+        table.setRowCount(len(targets))
+        for index, value in enumerate(targets):
+            number_item = QTableWidgetItem(str(index + 1))
+            number_item.setTextAlignment(Qt.AlignCenter)
+            value_item = QTableWidgetItem(f"{value:g}")
+            table.setItem(index, 0, number_item)
+            table.setItem(index, 1, value_item)
+        if targets:
+            table.scrollToTop()
+
     def set_solution_result(
         self,
         result: SolutionResultData,
@@ -1131,6 +1206,7 @@ class PropertiesPanel(QWidget):
     ) -> None:
         self._solution_result_tag = int(result.tag)
         self.table.hide()
+        self.cyclic_protocol_view.hide()
         self.apply_button.hide()
         self.result_editor.show()
         self.entity_label.setText(result.name)
@@ -3917,50 +3993,7 @@ class MainWindow(QMainWindow):
                     Qt.UserRole,
                     ("analysis_cyclic_protocol", tag),
                 )
-                protocol_item.setExpanded(False)
                 item.addChild(protocol_item)
-
-                control_item = QTreeWidgetItem([
-                    f"Control · Node {settings.control_node} · "
-                    f"DOF {settings.control_dof}"
-                ])
-                control_item.setIcon(0, studio_icon("analysis"))
-                protocol_item.addChild(control_item)
-
-                increment_item = QTreeWidgetItem([
-                    f"Max increment · {settings.cyclic_increment:g}"
-                ])
-                increment_item.setIcon(0, studio_icon("analysis"))
-                protocol_item.addChild(increment_item)
-
-                preview_indices = list(range(min(12, len(targets))))
-                if len(targets) > 16:
-                    preview_indices.extend(
-                        range(max(12, len(targets) - 4), len(targets))
-                    )
-                elif len(targets) > 12:
-                    preview_indices.extend(range(12, len(targets)))
-
-                last_index = -1
-                for target_index in preview_indices:
-                    if (
-                        len(targets) > 16
-                        and last_index >= 0
-                        and target_index > last_index + 1
-                    ):
-                        omitted = target_index - last_index - 1
-                        collapsed = QTreeWidgetItem([
-                            f"… {omitted} target(s) hidden in tree"
-                        ])
-                        collapsed.setIcon(0, studio_icon("analysis"))
-                        protocol_item.addChild(collapsed)
-                    target_item = QTreeWidgetItem([
-                        f"Target {target_index + 1} · "
-                        f"{targets[target_index]:g}"
-                    ])
-                    target_item.setIcon(0, studio_icon("timeseries"))
-                    protocol_item.addChild(target_item)
-                    last_index = target_index
 
             solution_results = self.project.solution_results_for_analysis(tag)
             solution = QTreeWidgetItem([
@@ -4087,6 +4120,7 @@ class MainWindow(QMainWindow):
         element_load_tag: int | None = None
         mass_source_tag: int | None = None
         analysis_tag: int | None = None
+        cyclic_protocol_tag: int | None = None
         recorder_tag: int | None = None
         solution_result_tag: int | None = None
         solution_information_tag: int | None = None
@@ -4141,7 +4175,7 @@ class MainWindow(QMainWindow):
             elif kind == "analysis_settings":
                 analysis_tag = int(tag)
             elif kind == "analysis_cyclic_protocol":
-                analysis_tag = int(tag)
+                cyclic_protocol_tag = int(tag)
             elif kind == "recorder":
                 recorder_tag = int(tag)
             elif kind == "solution_result":
@@ -4212,6 +4246,8 @@ class MainWindow(QMainWindow):
             self._show_element_load_properties(element_load_tag)
         elif mass_source_tag is not None:
             self._show_mass_source_properties(mass_source_tag)
+        elif cyclic_protocol_tag is not None:
+            self._show_cyclic_protocol_properties(cyclic_protocol_tag)
         elif analysis_tag is not None:
             self._show_analysis_properties(analysis_tag)
         elif recorder_tag is not None:
@@ -9969,6 +10005,12 @@ class MainWindow(QMainWindow):
             return
         self._refresh_project_metadata(f"Active analysis: {tag}")
         self._record_project_change(f"Set active analysis {tag}", before)
+
+    def _show_cyclic_protocol_properties(self, tag: int) -> None:
+        settings = self.project.analyses.get(tag)
+        if settings is None or settings.analysis_type != "Cyclic":
+            return
+        self.properties_panel.set_cyclic_protocol(settings)
 
     def _show_analysis_properties(self, tag: int) -> None:
         settings = self.project.analyses.get(tag)
