@@ -293,3 +293,92 @@ def test_model_rejects_unsupported_element_formulation_early():
             element_type="mysteryBeam",
         )
 
+
+def test_model_rejects_fractional_dimension_settings():
+    with pytest.raises(ValueError, match=r"Model ndm must be an integer"):
+        StructuralModel(ndm=2.5, ndf=3)
+
+    with pytest.raises(ValueError, match=r"Model ndf must be an integer"):
+        StructuralModel(ndm=2, ndf=3.5)
+
+    data = StructuralModel(ndm=2, ndf=3).to_dict()
+    data["ndm"] = 2.5
+    with pytest.raises(ValueError, match=r"Model ndm must be an integer"):
+        StructuralModel.from_dict(data)
+
+
+def test_model_rejects_fractional_node_tags():
+    model = StructuralModel(ndm=2, ndf=3)
+
+    with pytest.raises(ValueError, match=r"Node tag must be an integer"):
+        model.add_node(1.5, 0.0, 0.0)
+
+    data = model.to_dict()
+    data["nodes"] = [
+        {
+            "tag": 1.5,
+            "xyz": [0.0, 0.0, 0.0],
+            "fixity": [0, 0, 0],
+            "mass": [0.0, 0.0, 0.0],
+        }
+    ]
+    with pytest.raises(ValueError, match=r"Node tag must be an integer"):
+        StructuralModel.from_dict(data)
+
+
+def test_model_rejects_fractional_element_tags():
+    model = StructuralModel(ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    with pytest.raises(ValueError, match=r"Element tag must be an integer"):
+        model.add_element(1.5, 1, 2)
+
+
+def test_model_rejects_invalid_element_connectivity_tags():
+    model = StructuralModel(ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    with pytest.raises(
+        ValueError,
+        match=r"Element I-node tag must be an integer",
+    ):
+        model.add_element(1, 1.5, 2)
+
+    with pytest.raises(
+        ValueError,
+        match=r"must connect two different node tags",
+    ):
+        model.add_element(2, 1, 1)
+
+
+def test_model_rejects_fractional_element_discrete_settings():
+    model = StructuralModel(ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    with pytest.raises(
+        ValueError,
+        match=r"Beam integration-point count must be an integer",
+    ):
+        model.add_element(
+            1,
+            1,
+            2,
+            element_type="forceBeamColumn",
+            integration_points=4.5,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Force-based element max iterations must be an integer",
+    ):
+        model.add_element(
+            2,
+            1,
+            2,
+            element_type="forceBeamColumn",
+            force_max_iter=10.5,
+        )
+
