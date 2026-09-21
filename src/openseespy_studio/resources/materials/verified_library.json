@@ -16068,6 +16068,148 @@
         "parameter_location_identified": true,
         "units_checked": true
       }
+    },
+    {
+      "id": "teng-2016-csr1-timehistory-frpconfinedconcrete02",
+      "family": "FRP-Confined Concrete",
+      "material": "Carbon-FRP jacketed circular RC concrete",
+      "grade": "CS-R1 · time-history jacket configuration",
+      "standard": "Validated FRP-jacketed RC column model",
+      "model": "FRPConfinedConcrete02",
+      "preset_name": "Teng et al. (2016) · CS-R1 time-history · CFRP JacketC",
+      "parameters_si": {
+        "fc0": -40820000,
+        "Ec": 30220221342.670544,
+        "ec0": -0.002,
+        "mode": 0,
+        "tfrp": 0.000671,
+        "Efrp": 231700000000,
+        "erup": 0.018,
+        "R": 0.305,
+        "ft": 4037881.583206719,
+        "Ets": 1511011067.133527
+      },
+      "verified_parameters": [
+        "fc0",
+        "Ec",
+        "ec0",
+        "mode",
+        "tfrp",
+        "Efrp",
+        "erup",
+        "R",
+        "ft",
+        "Ets"
+      ],
+      "applicability": [
+        "Circular RC column CS-R1",
+        "Carbon-FRP wet-layup jacket",
+        "Time-history configuration using tfrp = 0.671 mm along the full column height",
+        "OpenSees FRPConfinedConcrete02 using the -JacketC branch",
+        "SI metric constitutive input"
+      ],
+      "limitations": [
+        "The 0.671 mm thickness corresponds to the paper's time-history configuration; the cyclic/pushover specimen model also used a 0.503 mm jacket region.",
+        "The paper calculated FRP ultimate tensile strain from coupon tensile strength and modulus and used it provisionally as hoop rupture strain.",
+        "Ec, ec0, ft and Ets follow the documented FRPConfinedConcrete02 input relations rather than independent specimen-specific calibration."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Numerical Simulation of FRP-Jacketed RC Columns Subjected to Cyclic and Seismic Loading",
+        "authors": "J. G. Teng; L. Lam; G. Lin; J. Y. Lu; Q. G. Xiao",
+        "journal": "Journal of Composites for Construction",
+        "volume_issue": "20(1)",
+        "article": "04015021",
+        "year": 2016,
+        "doi": "10.1061/(ASCE)CC.1943-5614.0000584"
+      },
+      "parameter_evidence": {
+        "type": "journal_table_section_and_opensees_documentation",
+        "title": "Numerical Simulation of FRP-Jacketed RC Columns Subjected to Cyclic and Seismic Loading",
+        "author": "J. G. Teng; L. Lam; G. Lin; J. Y. Lu; Q. G. Xiao",
+        "institution": "Journal of Composites for Construction",
+        "year": 2016,
+        "location": "Table 1 — CS-R1: D=610 mm, fc0=40.82 MPa, CFRP Ej=231.7 GPa, fj=4171 MPa and εj=0.018; time-history section states tfrp=0.671 mm along the entire column height. OpenSees FRPConfinedConcrete02 documentation supplies the documented Ec, ec0, ft and Ets relations.",
+        "url": "https://doi.org/10.1061/(ASCE)CC.1943-5614.0000584",
+        "relationship": "The paper validates the FRP-confined concrete column model against CS-R1 tests and explicitly uses the coupon-derived FRP ultimate tensile strain as the hoop rupture strain. Radius is D/2. OpenSees FRPConfinedConcrete02 documentation defines Ec=4730√(-fc0[MPa]), ec0≈-0.002 using the compression-negative convention, ft=0.632√(-fc0[MPa]), and Ets≈0.05Ec for SI metric input."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "teng-2016-c5-frpconfinedconcrete02",
+      "family": "FRP-Confined Concrete",
+      "material": "Glass-FRP jacketed circular RC concrete",
+      "grade": "C-5 · GFRP jacket",
+      "standard": "Validated FRP-jacketed RC column model",
+      "model": "FRPConfinedConcrete02",
+      "preset_name": "Teng et al. (2016) · C-5 · GFRP JacketC",
+      "parameters_si": {
+        "fc0": -36500000,
+        "Ec": 28576403727.551163,
+        "ec0": -0.002,
+        "mode": 0,
+        "tfrp": 0.005,
+        "Efrp": 18600000000,
+        "erup": 0.0286,
+        "R": 0.1525,
+        "ft": 3818242.527655885,
+        "Ets": 1428820186.3775582
+      },
+      "verified_parameters": [
+        "fc0",
+        "Ec",
+        "ec0",
+        "mode",
+        "tfrp",
+        "Efrp",
+        "erup",
+        "R",
+        "ft",
+        "Ets"
+      ],
+      "applicability": [
+        "Circular RC column C-5",
+        "Glass-FRP wet-layup jacket",
+        "5.0 mm GFRP jacket thickness",
+        "OpenSees FRPConfinedConcrete02 using the -JacketC branch",
+        "SI metric constitutive input"
+      ],
+      "limitations": [
+        "Specimen-specific GFRP jacket and concrete properties; do not treat as a generic GFRP-confined-concrete grade.",
+        "The paper calculated FRP ultimate tensile strain from coupon tensile strength and modulus and used it provisionally as hoop rupture strain.",
+        "Ec, ec0, ft and Ets follow the documented FRPConfinedConcrete02 input relations rather than independent specimen-specific calibration."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Numerical Simulation of FRP-Jacketed RC Columns Subjected to Cyclic and Seismic Loading",
+        "authors": "J. G. Teng; L. Lam; G. Lin; J. Y. Lu; Q. G. Xiao",
+        "journal": "Journal of Composites for Construction",
+        "volume_issue": "20(1)",
+        "article": "04015021",
+        "year": 2016,
+        "doi": "10.1061/(ASCE)CC.1943-5614.0000584"
+      },
+      "parameter_evidence": {
+        "type": "journal_table_and_opensees_documentation",
+        "title": "Numerical Simulation of FRP-Jacketed RC Columns Subjected to Cyclic and Seismic Loading",
+        "author": "J. G. Teng; L. Lam; G. Lin; J. Y. Lu; Q. G. Xiao",
+        "institution": "Journal of Composites for Construction",
+        "year": 2016,
+        "location": "Table 1 and Fig. 6 — C-5: D=305 mm, fc0=36.5 MPa, GFRP tfrp=5.0 mm, Ej=18.6 GPa, fj=532 MPa and εj=0.0286. OpenSees FRPConfinedConcrete02 documentation supplies the documented Ec, ec0, ft and Ets relations.",
+        "url": "https://doi.org/10.1061/(ASCE)CC.1943-5614.0000584",
+        "relationship": "The paper validates the proposed FRP-confined concrete model against the C-5 cyclic test and uses the coupon-derived εj as hoop rupture strain. Radius is D/2. OpenSees FRPConfinedConcrete02 documentation defines Ec=4730√(-fc0[MPa]), ec0≈-0.002 using the compression-negative convention, ft=0.632√(-fc0[MPa]), and Ets≈0.05Ec for SI metric input."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
     }
   ]
 }
