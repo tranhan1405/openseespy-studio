@@ -1282,3 +1282,112 @@ def test_static_arc_length_rejects_nonpositive_active_parameters(
             "Static",
             **kwargs,
         )
+
+
+@pytest.mark.parametrize(
+    "analysis_type",
+    ["Static", "Pushover", "Cyclic", "Transient"],
+)
+def test_disabled_adaptive_step_ignores_invalid_hidden_parameters(analysis_type):
+    kwargs = {
+        "adaptive_step": False,
+        "adaptive_cutback_factor": 1.5,
+        "adaptive_min_factor": 0.0,
+        "adaptive_growth_factor": 0.5,
+        "adaptive_easy_iterations": 0,
+        "adaptive_growth_after": 0,
+    }
+
+    if analysis_type == "Pushover":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    elif analysis_type == "Cyclic":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            cyclic_targets=[0.001, -0.001],
+            cyclic_increment=0.0005,
+        )
+    elif analysis_type == "Transient":
+        kwargs.update(dt=0.01)
+
+    analysis = AnalysisSettingsData(
+        85,
+        f"{analysis_type} adaptive disabled",
+        analysis_type,
+        **kwargs,
+    )
+    assert analysis.adaptive_step is False
+
+
+def test_modal_ignores_stale_adaptive_parameters_even_if_flag_is_true():
+    analysis = AnalysisSettingsData(
+        86,
+        "Modal ignores adaptive settings",
+        "Modal",
+        num_modes=1,
+        adaptive_step=True,
+        adaptive_cutback_factor=2.0,
+        adaptive_min_factor=0.0,
+        adaptive_growth_factor=0.5,
+        adaptive_easy_iterations=0,
+        adaptive_growth_after=0,
+    )
+    assert analysis.adaptive_step is True
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        (
+            "adaptive_cutback_factor",
+            1.0,
+            "Adaptive cutback factor must be between 0 and 1",
+        ),
+        (
+            "adaptive_min_factor",
+            0.0,
+            "Adaptive minimum factor must be in",
+        ),
+        (
+            "adaptive_growth_factor",
+            0.5,
+            "Adaptive growth factor must be at least 1",
+        ),
+        (
+            "adaptive_easy_iterations",
+            0,
+            "Adaptive easy-iteration threshold must be positive",
+        ),
+        (
+            "adaptive_growth_after",
+            0,
+            "Adaptive growth-after count must be positive",
+        ),
+    ],
+)
+def test_enabled_adaptive_step_rejects_invalid_active_parameters(
+    field,
+    value,
+    message,
+):
+    kwargs = {
+        "adaptive_step": True,
+        "adaptive_cutback_factor": 0.5,
+        "adaptive_min_factor": 0.125,
+        "adaptive_growth_factor": 1.5,
+        "adaptive_easy_iterations": 4,
+        "adaptive_growth_after": 3,
+    }
+    kwargs[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        AnalysisSettingsData(
+            87,
+            "Invalid active adaptive settings",
+            "Static",
+            **kwargs,
+        )

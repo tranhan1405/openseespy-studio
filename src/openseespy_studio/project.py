@@ -1535,15 +1535,30 @@ class AnalysisSettingsData:
         if self.tolerance<=0 or self.max_iterations<1: raise ValueError("Invalid convergence settings.")
         if self.steps<1: raise ValueError("Analysis steps must be at least 1.")
         if self.control_dof not in range(1,7): raise ValueError("Control DOF must be 1..6.")
-        if self.adaptive_cutback_factor <= 0.0 or self.adaptive_cutback_factor >= 1.0:
+        uses_adaptive_step = (
+            self.adaptive_step and self.analysis_type != "Modal"
+        )
+        if (
+            uses_adaptive_step
+            and (
+                self.adaptive_cutback_factor <= 0.0
+                or self.adaptive_cutback_factor >= 1.0
+            )
+        ):
             raise ValueError("Adaptive cutback factor must be between 0 and 1.")
-        if self.adaptive_min_factor <= 0.0 or self.adaptive_min_factor > 1.0:
+        if (
+            uses_adaptive_step
+            and (
+                self.adaptive_min_factor <= 0.0
+                or self.adaptive_min_factor > 1.0
+            )
+        ):
             raise ValueError("Adaptive minimum factor must be in (0, 1].")
-        if self.adaptive_growth_factor < 1.0:
+        if uses_adaptive_step and self.adaptive_growth_factor < 1.0:
             raise ValueError("Adaptive growth factor must be at least 1.")
-        if self.adaptive_easy_iterations < 1:
+        if uses_adaptive_step and self.adaptive_easy_iterations < 1:
             raise ValueError("Adaptive easy-iteration threshold must be positive.")
-        if self.adaptive_growth_after < 1:
+        if uses_adaptive_step and self.adaptive_growth_after < 1:
             raise ValueError("Adaptive growth-after count must be positive.")
         if (
             self.analysis_type == "Static"
