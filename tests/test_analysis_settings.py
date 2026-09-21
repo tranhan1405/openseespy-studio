@@ -605,3 +605,34 @@ def test_rayleigh_damping_rejects_nonpositive_or_nonfinite_eigenvalues_before_sq
     assert text.index(guard_i) < text.index(sqrt_i)
     assert text.index(guard_j) < text.index(sqrt_j)
     compile(text, "<rayleigh-eigenvalue-guard>", "exec")
+
+
+@pytest.mark.parametrize("beta", [0.0, -1.0e-6, -0.25])
+def test_newmark_rejects_nonpositive_beta_for_default_displacement_form(beta):
+    with pytest.raises(
+        ValueError,
+        match="Newmark beta must be positive",
+    ):
+        AnalysisSettingsData(
+            59,
+            "Invalid Newmark beta",
+            "Transient",
+            integrator="Newmark",
+            dt=0.01,
+            gamma=0.5,
+            beta=beta,
+        )
+
+
+@pytest.mark.parametrize("beta", [1.0e-6, 1.0 / 6.0, 0.25])
+def test_newmark_accepts_positive_beta(beta):
+    analysis = AnalysisSettingsData(
+        60,
+        "Valid Newmark beta",
+        "Transient",
+        integrator="Newmark",
+        dt=0.01,
+        gamma=0.5,
+        beta=beta,
+    )
+    assert analysis.beta == pytest.approx(beta)

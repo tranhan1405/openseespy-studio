@@ -1574,6 +1574,15 @@ class AnalysisSettingsData:
         if self.dt<=0: raise ValueError("Transient dt must be positive.")
         if (
             self.analysis_type == "Transient"
+            and self.integrator == "Newmark"
+            and self.beta <= 0.0
+        ):
+            raise ValueError(
+                "Newmark beta must be positive for the default displacement-form "
+                "integrator used by OpenSeesPy Studio."
+            )
+        if (
+            self.analysis_type == "Transient"
             and self.integrator == "HHT"
             and not (2.0 / 3.0 <= self.hht_alpha <= 1.0)
         ):

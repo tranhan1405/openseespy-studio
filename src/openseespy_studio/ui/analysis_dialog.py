@@ -131,7 +131,15 @@ class AnalysisDialog(QDialog):
         )
         self.dt=fs(analysis.dt if analysis else 0.01,1e-12,1e20)
         self.gamma=fs(analysis.gamma if analysis else 0.5)
-        self.beta=fs(analysis.beta if analysis else 0.25)
+        self.beta=fs(
+            analysis.beta if analysis else 0.25,
+            1e-12,
+            1e20,
+        )
+        self.beta.setToolTip(
+            "OpenSeesPy Studio uses the default displacement-form Newmark "
+            "integrator, so beta must be positive."
+        )
         self.hht_alpha=fs(
             analysis.hht_alpha if analysis else 0.9,
             2.0 / 3.0,
