@@ -1783,6 +1783,7 @@ class AnalysisSettingsData:
     arc_length_s: float = 0.01
     arc_length_alpha: float = 1.0
     algorithm_initial: bool = False
+    system_pivoting: bool = False
 
     def __post_init__(self) -> None:
         self.tag=_strict_int(self.tag, "Analysis tag"); self.name=str(self.name).strip() or f"Analysis {self.tag}"
@@ -1871,6 +1872,10 @@ class AnalysisSettingsData:
         self.algorithm_initial=_strict_bool(
             self.algorithm_initial,
             "Analysis algorithm_initial",
+        )
+        self.system_pivoting=_strict_bool(
+            self.system_pivoting,
+            "Analysis system_pivoting",
         )
         numeric_values = (
             self.tolerance,
@@ -1971,6 +1976,10 @@ class AnalysisSettingsData:
             raise ValueError("Unsupported constraints handler.")
         if self.numberer not in {"RCM","Plain"}: raise ValueError("Unsupported numberer.")
         if self.system not in {"UmfPack","BandGeneral","ProfileSPD","SparseGeneral"}: raise ValueError("Unsupported system.")
+        if self.system_pivoting and self.system != "SparseGeneral":
+            raise ValueError(
+                "System pivoting (-piv) is only supported for SparseGeneral."
+            )
         uses_iterative_convergence = self.analysis_type != "Modal"
         if (
             uses_iterative_convergence
@@ -2153,7 +2162,7 @@ class AnalysisSettingsData:
             "adaptive_cutback_factor","adaptive_min_factor",
             "adaptive_growth_factor","adaptive_easy_iterations",
             "adaptive_growth_after","live_convergence","show_external_console",
-            "algorithm_initial"
+            "algorithm_initial","system_pivoting"
         )}
 
     @classmethod
