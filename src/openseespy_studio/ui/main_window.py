@@ -84,6 +84,7 @@ from ..result_catalog import (
     convergence_result_label,
     result_choices_for_analysis,
 )
+from ..section_response import section_response_sources
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SUPPORTED_CONNECTION_TYPES
 from ..runtime import (
     build_worker_pythonpath,
@@ -1182,6 +1183,8 @@ class PropertiesPanel(QWidget):
             ]
         elif kind == "MemberForce":
             component_options = ["N", "Vy", "Vz", "T", "My", "Mz"]
+        elif kind == "SectionResponse":
+            component_options = ["P", "Mz", "My", "T"]
 
         if component_options:
             self._set_form_row_visible(self.result_component, True)
@@ -1264,7 +1267,7 @@ class PropertiesPanel(QWidget):
                 max(1, min(6, int(options.get("dof", 1))))
             )
 
-        if kind in {"FiberStress", "FiberStrain"}:
+        if kind in {"FiberStress", "FiberStrain", "SectionResponse"}:
             self._set_form_row_visible(
                 self.result_fiber_section,
                 True,
@@ -1299,6 +1302,7 @@ class PropertiesPanel(QWidget):
             "NodalDisplacement",
             "NodalReaction",
             "MemberForce",
+            "SectionResponse",
         }:
             settings["component"] = self.result_component.currentText()
         if kind in {"DeformedShape", "MemberForce", "ModeShape", "Motion"}:
@@ -1330,6 +1334,8 @@ class PropertiesPanel(QWidget):
             settings["quantity"] = (
                 "Stress" if kind == "FiberStress" else "Strain"
             )
+        if kind == "SectionResponse":
+            settings["section"] = self.result_fiber_section.value()
 
         return {
             "name": self.result_name.text().strip(),
@@ -3346,6 +3352,7 @@ class MainWindow(QMainWindow):
             prescribed_displacements=self.project.prescribed_displacements,
             recorders=self.project.recorders,
             units=self.project.units,
+            solution_results=self.project.solution_results,
         )
 
     def _refresh_project_metadata(
@@ -10158,6 +10165,12 @@ class MainWindow(QMainWindow):
             analysis_type,
             convergence_test,
             integrator=integrator,
+            section_response_available=bool(
+                section_response_sources(
+                    self.model,
+                    self.project.connections,
+                )
+            ),
         ):
             submenu = categories.get(choice.category)
             if submenu is None:
