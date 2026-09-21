@@ -41,6 +41,18 @@ def _strict_int(value: object, label: str) -> int:
     return int(numeric)
 
 
+def _require_list(value: Any, label: str) -> list[Any]:
+    if not isinstance(value, list):
+        raise ValueError(f"{label} must be a list.")
+    return value
+
+
+def _require_object(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object.")
+    return value
+
+
 PROJECT_FORMAT = "openseespy-studio"
 PROJECT_FORMAT_VERSION = 28
 
@@ -1265,7 +1277,14 @@ class LoadPatternData:
             self.time_series_tag,
             "Load pattern time series tag",
         )
-        self.direction = int(self.direction)
+        self.direction = (
+            _strict_int(
+                self.direction,
+                "UniformExcitation direction",
+            )
+            if self.pattern_type == "UniformExcitation"
+            else int(self.direction)
+        )
         self.factor = float(self.factor)
         self.vel0 = float(self.vel0)
         if self.tag <= 0:
@@ -1299,7 +1318,7 @@ class LoadPatternData:
             name=str(data.get("name", f"Load Pattern {data['tag']}")),
             pattern_type=str(data.get("pattern_type", "Plain")),
             time_series_tag=data["time_series_tag"],
-            direction=int(data.get("direction", 1)),
+            direction=data.get("direction", 1),
             factor=float(data.get("factor", 1.0)),
             vel0=float(data.get("vel0", 0.0)),
         )
@@ -5511,10 +5530,11 @@ class ProjectDatabase:
     @staticmethod
     def _load_constraints(raw: Any) -> dict[int, ConstraintData]:
         constraints: dict[int, ConstraintData] = {}
-        if not isinstance(raw, list):
-            return constraints
-        for item in raw:
-            constraint = ConstraintData.from_dict(dict(item))
+        items = _require_list(raw, "Constraints")
+        for index, item in enumerate(items):
+            constraint = ConstraintData.from_dict(
+                _require_object(item, f"Constraint item {index}")
+            )
             if constraint.tag in constraints:
                 raise ValueError(
                     f"Duplicate constraint tag {constraint.tag}."
@@ -5525,10 +5545,11 @@ class ProjectDatabase:
     @staticmethod
     def _load_connections(raw: Any) -> dict[int, ConnectionData]:
         connections: dict[int, ConnectionData] = {}
-        if not isinstance(raw, list):
-            return connections
-        for item in raw:
-            connection = ConnectionData.from_dict(dict(item))
+        items = _require_list(raw, "Connections")
+        for index, item in enumerate(items):
+            connection = ConnectionData.from_dict(
+                _require_object(item, f"Connection item {index}")
+            )
             if connection.tag in connections:
                 raise ValueError(
                     f"Duplicate connection tag {connection.tag}."
@@ -5539,40 +5560,46 @@ class ProjectDatabase:
     @staticmethod
     def _load_time_series(raw: Any) -> dict[int, TimeSeriesData]:
         result: dict[int, TimeSeriesData] = {}
-        if isinstance(raw, list):
-            for item in raw:
-                series = TimeSeriesData.from_dict(dict(item))
-                if series.tag in result:
-                    raise ValueError(
-                        f"Duplicate time series tag {series.tag}."
-                    )
-                result[series.tag] = series
+        items = _require_list(raw, "Time series")
+        for index, item in enumerate(items):
+            series = TimeSeriesData.from_dict(
+                _require_object(item, f"Time series item {index}")
+            )
+            if series.tag in result:
+                raise ValueError(
+                    f"Duplicate time series tag {series.tag}."
+                )
+            result[series.tag] = series
         return result
 
     @staticmethod
     def _load_patterns(raw: Any) -> dict[int, LoadPatternData]:
         result: dict[int, LoadPatternData] = {}
-        if isinstance(raw, list):
-            for item in raw:
-                pattern = LoadPatternData.from_dict(dict(item))
-                if pattern.tag in result:
-                    raise ValueError(
-                        f"Duplicate load pattern tag {pattern.tag}."
-                    )
-                result[pattern.tag] = pattern
+        items = _require_list(raw, "Load patterns")
+        for index, item in enumerate(items):
+            pattern = LoadPatternData.from_dict(
+                _require_object(item, f"Load pattern item {index}")
+            )
+            if pattern.tag in result:
+                raise ValueError(
+                    f"Duplicate load pattern tag {pattern.tag}."
+                )
+            result[pattern.tag] = pattern
         return result
 
     @staticmethod
     def _load_nodal_loads(raw: Any) -> dict[int, NodalLoadData]:
         result: dict[int, NodalLoadData] = {}
-        if isinstance(raw, list):
-            for item in raw:
-                load = NodalLoadData.from_dict(dict(item))
-                if load.tag in result:
-                    raise ValueError(
-                        f"Duplicate nodal load tag {load.tag}."
-                    )
-                result[load.tag] = load
+        items = _require_list(raw, "Nodal loads")
+        for index, item in enumerate(items):
+            load = NodalLoadData.from_dict(
+                _require_object(item, f"Nodal load item {index}")
+            )
+            if load.tag in result:
+                raise ValueError(
+                    f"Duplicate nodal load tag {load.tag}."
+                )
+            result[load.tag] = load
         return result
 
     @staticmethod
@@ -5580,56 +5607,65 @@ class ProjectDatabase:
         raw: Any,
     ) -> dict[int, PrescribedDisplacementData]:
         result: dict[int, PrescribedDisplacementData] = {}
-        if isinstance(raw, list):
-            for item in raw:
-                displacement = PrescribedDisplacementData.from_dict(
-                    dict(item)
+        items = _require_list(raw, "Prescribed displacements")
+        for index, item in enumerate(items):
+            displacement = PrescribedDisplacementData.from_dict(
+                _require_object(
+                    item,
+                    f"Prescribed displacement item {index}",
                 )
-                if displacement.tag in result:
-                    raise ValueError(
-                        "Duplicate prescribed displacement tag "
-                        f"{displacement.tag}."
-                    )
-                result[displacement.tag] = displacement
+            )
+            if displacement.tag in result:
+                raise ValueError(
+                    "Duplicate prescribed displacement tag "
+                    f"{displacement.tag}."
+                )
+            result[displacement.tag] = displacement
         return result
 
     @staticmethod
     def _load_element_loads(raw: Any) -> dict[int, ElementLoadData]:
         result: dict[int, ElementLoadData] = {}
-        if isinstance(raw, list):
-            for item in raw:
-                load = ElementLoadData.from_dict(dict(item))
-                if load.tag in result:
-                    raise ValueError(
-                        f"Duplicate element load tag {load.tag}."
-                    )
-                result[load.tag] = load
+        items = _require_list(raw, "Element loads")
+        for index, item in enumerate(items):
+            load = ElementLoadData.from_dict(
+                _require_object(item, f"Element load item {index}")
+            )
+            if load.tag in result:
+                raise ValueError(
+                    f"Duplicate element load tag {load.tag}."
+                )
+            result[load.tag] = load
         return result
 
     @staticmethod
     def _load_mass_sources(raw: Any) -> dict[int, MassSourceData]:
         result: dict[int, MassSourceData] = {}
-        if isinstance(raw, list):
-            for item in raw:
-                source = MassSourceData.from_dict(dict(item))
-                if source.tag in result:
-                    raise ValueError(
-                        f"Duplicate mass source tag {source.tag}."
-                    )
-                result[source.tag] = source
+        items = _require_list(raw, "Mass sources")
+        for index, item in enumerate(items):
+            source = MassSourceData.from_dict(
+                _require_object(item, f"Mass source item {index}")
+            )
+            if source.tag in result:
+                raise ValueError(
+                    f"Duplicate mass source tag {source.tag}."
+                )
+            result[source.tag] = source
         return result
 
     @staticmethod
     def _load_analyses(raw: Any) -> dict[int, AnalysisSettingsData]:
         result: dict[int, AnalysisSettingsData] = {}
-        if isinstance(raw, list):
-            for item in raw:
-                analysis = AnalysisSettingsData.from_dict(dict(item))
-                if analysis.tag in result:
-                    raise ValueError(
-                        f"Duplicate analysis tag {analysis.tag}."
-                    )
-                result[analysis.tag] = analysis
+        items = _require_list(raw, "Analyses")
+        for index, item in enumerate(items):
+            analysis = AnalysisSettingsData.from_dict(
+                _require_object(item, f"Analysis item {index}")
+            )
+            if analysis.tag in result:
+                raise ValueError(
+                    f"Duplicate analysis tag {analysis.tag}."
+                )
+            result[analysis.tag] = analysis
         return result
 
     @staticmethod
@@ -5637,26 +5673,30 @@ class ProjectDatabase:
         raw: Any,
     ) -> dict[int, SolutionResultData]:
         result: dict[int, SolutionResultData] = {}
-        if isinstance(raw, list):
-            for item in raw:
-                solution_result = SolutionResultData.from_dict(dict(item))
-                if solution_result.tag in result:
-                    raise ValueError(
-                        f"Duplicate solution result tag "
-                        f"{solution_result.tag}."
-                    )
-                result[solution_result.tag] = solution_result
+        items = _require_list(raw, "Solution results")
+        for index, item in enumerate(items):
+            solution_result = SolutionResultData.from_dict(
+                _require_object(item, f"Solution result item {index}")
+            )
+            if solution_result.tag in result:
+                raise ValueError(
+                    f"Duplicate solution result tag "
+                    f"{solution_result.tag}."
+                )
+            result[solution_result.tag] = solution_result
         return result
 
     @staticmethod
     def _load_recorders(raw: Any) -> dict[int, RecorderData]:
         result: dict[int, RecorderData] = {}
-        if isinstance(raw, list):
-            for item in raw:
-                recorder = RecorderData.from_dict(dict(item))
-                if recorder.tag in result:
-                    raise ValueError(f"Duplicate recorder tag {recorder.tag}.")
-                result[recorder.tag] = recorder
+        items = _require_list(raw, "Recorders")
+        for index, item in enumerate(items):
+            recorder = RecorderData.from_dict(
+                _require_object(item, f"Recorder item {index}")
+            )
+            if recorder.tag in result:
+                raise ValueError(f"Duplicate recorder tag {recorder.tag}.")
+            result[recorder.tag] = recorder
         return result
 
     @classmethod
@@ -5680,8 +5720,14 @@ class ProjectDatabase:
             raise ValueError(f"Unsupported project version: {version}")
 
         selection_sets = {}
-        for item in data.get("selection_sets", []):
-            selection_set = SelectionSetData.from_dict(item)
+        raw_selection_sets = _require_list(
+            data.get("selection_sets", []),
+            "Selection sets",
+        )
+        for index, item in enumerate(raw_selection_sets):
+            selection_set = SelectionSetData.from_dict(
+                _require_object(item, f"Selection set item {index}")
+            )
             if selection_set.name in selection_sets:
                 raise ValueError(
                     f"Duplicate selection set name {selection_set.name!r}."
