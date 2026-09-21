@@ -86,7 +86,7 @@ from ..result_catalog import (
     result_choices_for_analysis,
 )
 from ..section_response import section_response_sources
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SUPPORTED_CONNECTION_TYPES
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
     build_worker_pythonpath,
     opensees_material_requires_runtime_probe,
@@ -5138,18 +5138,31 @@ class MainWindow(QMainWindow):
                             f"Material parameter {parameter!r} does not exist."
                         )
                     raw_value = float(str(value).strip())
-                    from ..project import MATERIAL_PARAMETER_KINDS
-                    parameter_kind = MATERIAL_PARAMETER_KINDS.get(
-                        material.material_type, {}
-                    ).get(parameter, "raw")
+                    unit_system = UnitSystem.from_mapping(
+                        self.project.units
+                    )
+                    parameter_kind = material_parameter_kind(
+                        material,
+                        parameter,
+                    )
                     if parameter_kind == "stress":
-                        raw_value = UnitSystem.from_mapping(
-                            self.project.units
-                        ).engineering_stress_to_pa(raw_value)
+                        raw_value = (
+                            unit_system.engineering_stress_to_pa(
+                                raw_value
+                            )
+                        )
                     elif parameter_kind == "length":
-                        raw_value = UnitSystem.from_mapping(
-                            self.project.units
-                        ).length_to_m_value(raw_value)
+                        raw_value = unit_system.length_to_m_value(
+                            raw_value
+                        )
+                    elif parameter_kind == "force":
+                        raw_value = unit_system.force_to_n_value(
+                            raw_value
+                        )
+                    elif parameter_kind == "moment":
+                        raw_value = unit_system.moment_to_nm_value(
+                            raw_value
+                        )
                     parameters = dict(data["parameters"])
                     parameters[parameter] = raw_value
                     data["parameters"] = parameters
@@ -8473,10 +8486,8 @@ class MainWindow(QMainWindow):
                 ),
             ])
 
-        from ..project import MATERIAL_PARAMETER_KINDS
-        kinds = MATERIAL_PARAMETER_KINDS.get(material.material_type, {})
         for key, parameter_value in material.parameters.items():
-            parameter_kind = kinds.get(key, "raw")
+            parameter_kind = material_parameter_kind(material, key)
             if parameter_kind == "stress":
                 label = (
                     f"{key} "
@@ -8488,6 +8499,18 @@ class MainWindow(QMainWindow):
             elif parameter_kind == "length":
                 label = f"{key} [{unit_system.length}]"
                 display = unit_system.length_from_m(parameter_value)
+            elif parameter_kind == "force":
+                label = f"{key} [{unit_system.force}]"
+                display = unit_system.force_from_n(parameter_value)
+            elif parameter_kind == "moment":
+                label = f"{key} [{unit_system.moment_label}]"
+                display = unit_system.moment_from_nm(parameter_value)
+            elif parameter_kind == "rotation":
+                label = f"{key} [rad]"
+                display = parameter_value
+            elif parameter_kind == "strain":
+                label = f"{key} [strain]"
+                display = parameter_value
             else:
                 label = key
                 display = parameter_value
@@ -8511,6 +8534,19 @@ class MainWindow(QMainWindow):
                 ("Reference", reference.get("title", "")),
                 ("DOI", reference.get("doi", "")),
                 ("Parameter evidence", evidence.get("location", "")),
+                (
+                    "Response quantity",
+                    source.get("response_quantity", ""),
+                ),
+                (
+                    "Published units",
+                    " / ".join(
+                        str(value)
+                        for value in dict(
+                            source.get("source_units", {})
+                        ).values()
+                    ),
+                ),
             ])
 
         self.properties_panel.set_properties(
