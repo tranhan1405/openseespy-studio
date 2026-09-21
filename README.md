@@ -73,7 +73,7 @@ when it can be traced to a specific source and parameter-evidence location.
 Journal references require a DOI. Unsupported or merely "commonly used"
 values are not silently promoted to verified presets.
 
-The library currently contains **177 verified parameter records**:
+The library currently contains **179 verified parameter records**:
 
 - 2 Steel02 Grade-60 reinforcing-steel records from Carreño et al. (2020),
   DOI `10.1061/(ASCE)ST.1943-541X.0002505`.
@@ -133,8 +133,14 @@ The library currently contains **177 verified parameter records**:
   Del Giudice et al. (2022), DOI `10.1002/eqe.3578`, and the
   -0.04/+0.12 compression/tension collapse limits used by Zhou et al.
   (2021), DOI `10.1186/s40069-021-00463-y`.
+- 2 FRPConfinedConcrete02 `-JacketC` records from Teng et al. (2016):
+  the CFRP-jacketed CS-R1 time-history configuration and GFRP-jacketed
+  C-5 column, DOI `10.1061/(ASCE)CC.1943-5614.0000584`. The
+  specimen geometry, concrete strength and FRP properties are taken from
+  the validated test-column study, while Ec, ec0, ft and Ets follow the
+  documented OpenSees FRPConfinedConcrete02 input relations.
 
-These are **published/calibrated parameter records**, not 177 unrelated
+These are **published/calibrated parameter records**, not 179 unrelated
 chemical materials. SARE exposes specimen/configuration, modelling
 representation, applicability and limitations so a paper-specific parameter
 set is not mistaken for a universal material-grade default.
