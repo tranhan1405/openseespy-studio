@@ -8601,6 +8601,31 @@ class MainWindow(QMainWindow):
             return tags[0], tags[0], True
         return 1, 2, False
 
+    def _apply_connection_dialog_resources(
+        self,
+        spec: dict,
+    ) -> None:
+        for material in spec.get("pending_materials", []):
+            if material.tag not in self.project.materials:
+                self.project.add_material(material)
+
+        for operation, original_tag, section in spec.get(
+            "pending_section_operations",
+            [],
+        ):
+            if operation == "add":
+                self.project.add_section(section)
+            elif operation == "update":
+                if original_tag is None:
+                    raise ValueError(
+                        "Section update is missing its original tag."
+                    )
+                self.project.update_section(int(original_tag), section)
+            else:
+                raise ValueError(
+                    f"Unsupported staged section operation {operation!r}."
+                )
+
     def _create_connection(self) -> None:
         if not self.model.nodes:
             QMessageBox.information(
@@ -8612,6 +8637,7 @@ class MainWindow(QMainWindow):
         node_i, node_j, to_ground = self._connection_dialog_defaults()
         dialog = ConnectionDialog(
             self.project.materials,
+            sections=self.project.sections,
             next_tag=self.project.next_connection_tag(),
             initial_node_i=node_i,
             initial_node_j=node_j,
@@ -8628,12 +8654,9 @@ class MainWindow(QMainWindow):
 
         before = self.project.to_dict()
         created_ground = None
-        added_material_tags: list[int] = []
         try:
             spec = dialog.spec()
-            for pending_material in spec.get("pending_materials", []):
-                self.project.add_material(pending_material)
-                added_material_tags.append(pending_material.tag)
+            self._apply_connection_dialog_resources(spec)
 
             node_j = int(spec["node_j"])
             if spec["to_ground"]:
@@ -8649,17 +8672,16 @@ class MainWindow(QMainWindow):
                 node_i=int(spec["node_i"]),
                 node_j=node_j,
                 materials_by_dof=dict(spec["materials_by_dof"]),
+                section_tag=spec.get("section_tag"),
                 orient_x=tuple(spec["orient_x"]),
                 orient_y=tuple(spec["orient_y"]),
                 do_rayleigh=bool(spec["do_rayleigh"]),
                 generated_ground_node=created_ground,
             )
             self.project.add_connection(connection)
-        except ValueError as exc:
-            if created_ground is not None:
-                self.model.remove_node(created_ground, cascade=True)
-            for material_tag in reversed(added_material_tags):
-                self.project.remove_material(material_tag)
+        except (KeyError, TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
             QMessageBox.warning(self, "Connection Editor", str(exc))
             return
 
@@ -8677,7 +8699,13 @@ class MainWindow(QMainWindow):
         connection = self.project.connections.get(tag)
         if connection is None:
             return
-        if connection.connection_type == "zeroLengthSection":
+        if (
+            connection.connection_type == "zeroLengthSection"
+            and (
+                connection.generated_section_tag is not None
+                or connection.generated_constraint_tag is not None
+            )
+        ):
             QMessageBox.information(
                 self,
                 "Strain Penetration Interface",
@@ -8685,7 +8713,8 @@ class MainWindow(QMainWindow):
                 "strain-penetration workflow. Edit/rebuild it through "
                 "Quick 1D Column / Test Specimen so its Fiber section, "
                 "Bond_SP01 material, base restraints, and orientation stay "
-                "consistent.",
+                "consistent. General zeroLengthSection elements created "
+                "manually or imported can be edited directly.",
             )
             self._show_connection_properties(tag)
             return
@@ -8693,6 +8722,7 @@ class MainWindow(QMainWindow):
         dialog = ConnectionDialog(
             self.project.materials,
             connection=connection,
+            sections=self.project.sections,
             node_positions={
                 node_tag: node.xyz
                 for node_tag, node in self.model.nodes.items()
@@ -8706,12 +8736,9 @@ class MainWindow(QMainWindow):
         before = self.project.to_dict()
         old_ground = connection.generated_ground_node
         created_ground = None
-        added_material_tags: list[int] = []
         try:
             spec = dialog.spec()
-            for pending_material in spec.get("pending_materials", []):
-                self.project.add_material(pending_material)
-                added_material_tags.append(pending_material.tag)
+            self._apply_connection_dialog_resources(spec)
 
             requested_ground = bool(spec["to_ground"])
             node_j = int(spec["node_j"])
@@ -8737,12 +8764,15 @@ class MainWindow(QMainWindow):
                 node_i=int(spec["node_i"]),
                 node_j=node_j,
                 materials_by_dof=dict(spec["materials_by_dof"]),
+                section_tag=spec.get("section_tag"),
                 orient_x=tuple(spec["orient_x"]),
                 orient_y=tuple(spec["orient_y"]),
                 do_rayleigh=bool(spec["do_rayleigh"]),
                 generated_ground_node=(
                     created_ground if requested_ground else None
                 ),
+                generated_section_tag=connection.generated_section_tag,
+                generated_constraint_tag=connection.generated_constraint_tag,
             )
             self.project.update_connection(tag, updated)
 
@@ -8757,15 +8787,9 @@ class MainWindow(QMainWindow):
                 )
             ):
                 self.model.remove_node(old_ground, cascade=True)
-        except ValueError as exc:
-            if (
-                created_ground is not None
-                and created_ground != old_ground
-                and created_ground in self.model.nodes
-            ):
-                self.model.remove_node(created_ground, cascade=True)
-            for material_tag in reversed(added_material_tags):
-                self.project.remove_material(material_tag)
+        except (KeyError, TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
             QMessageBox.warning(self, "Connection Editor", str(exc))
             return
 
