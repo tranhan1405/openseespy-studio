@@ -2159,6 +2159,29 @@ class ProjectDatabase:
                 )
             return
 
+        if constraint.constraint_type == "rigidLink":
+            ndm = int(self.model.ndm)
+            ndf = int(self.model.ndf)
+            if constraint.link_type == "bar":
+                if ndf < ndm:
+                    raise ValueError(
+                        f"rigidLink bar constraint {constraint.tag} requires "
+                        f"ndf >= ndm; got ndm={ndm}, ndf={ndf}."
+                    )
+                return
+
+            valid_beam_signature = (
+                ndf == ndm
+                or (ndm, ndf) in {(2, 3), (3, 6)}
+            )
+            if not valid_beam_signature:
+                raise ValueError(
+                    f"rigidLink beam constraint {constraint.tag} requires "
+                    "ndf == ndm, 2D/3DOF, or 3D/6DOF; got "
+                    f"ndm={ndm}, ndf={ndf}."
+                )
+            return
+
         if constraint.constraint_type != "rigidDiaphragm":
             return
         signature = (int(self.model.ndm), int(self.model.ndf))

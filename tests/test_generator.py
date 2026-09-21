@@ -1202,3 +1202,145 @@ def test_generator_accepts_equal_dof_up_to_model_ndf():
     )
 
     assert "ops.equalDOF(1, 2, 1, 3)" in code
+
+
+@pytest.mark.parametrize(
+    ("ndm", "ndf"),
+    [
+        (2, 1),
+        (3, 2),
+    ],
+)
+def test_generator_rejects_rigid_link_bar_when_ndf_below_ndm(
+    ndm,
+    ndf,
+):
+    model = StructuralModel("bad-rigid-bar-signature", ndm=ndm, ndf=ndf)
+    if ndm == 2:
+        model.add_node(1, 0.0, 0.0)
+        model.add_node(2, 1.0, 0.0)
+    else:
+        model.add_node(1, 0.0, 0.0, 0.0)
+        model.add_node(2, 1.0, 0.0, 0.0)
+
+    constraint = ConstraintData(
+        16,
+        "Invalid rigid bar",
+        "rigidLink",
+        retained_node=1,
+        constrained_nodes=[2],
+        link_type="bar",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"rigidLink bar requires ndf >= ndm",
+    ):
+        to_openseespy(model, constraints={16: constraint})
+
+
+@pytest.mark.parametrize(
+    ("ndm", "ndf"),
+    [
+        (2, 2),
+        (2, 3),
+        (2, 4),
+        (3, 3),
+        (3, 4),
+        (3, 6),
+    ],
+)
+def test_generator_rigid_link_bar_accepts_any_ndf_at_least_ndm(
+    ndm,
+    ndf,
+):
+    model = StructuralModel("valid-rigid-bar-signature", ndm=ndm, ndf=ndf)
+    if ndm == 2:
+        model.add_node(1, 0.0, 0.0)
+        model.add_node(2, 1.0, 0.0)
+    else:
+        model.add_node(1, 0.0, 0.0, 0.0)
+        model.add_node(2, 1.0, 0.0, 0.0)
+
+    constraint = ConstraintData(
+        17,
+        "Valid rigid bar",
+        "rigidLink",
+        retained_node=1,
+        constrained_nodes=[2],
+        link_type="bar",
+    )
+
+    code = to_openseespy(model, constraints={17: constraint})
+    assert "ops.rigidLink('bar', 1, 2)" in code
+
+
+@pytest.mark.parametrize(
+    ("ndm", "ndf"),
+    [
+        (2, 4),
+        (2, 6),
+        (3, 4),
+        (3, 5),
+    ],
+)
+def test_generator_rejects_unsupported_rigid_link_beam_signatures(
+    ndm,
+    ndf,
+):
+    model = StructuralModel("bad-rigid-beam-signature", ndm=ndm, ndf=ndf)
+    if ndm == 2:
+        model.add_node(1, 0.0, 0.0)
+        model.add_node(2, 1.0, 0.0)
+    else:
+        model.add_node(1, 0.0, 0.0, 0.0)
+        model.add_node(2, 1.0, 0.0, 0.0)
+
+    constraint = ConstraintData(
+        18,
+        "Invalid rigid beam",
+        "rigidLink",
+        retained_node=1,
+        constrained_nodes=[2],
+        link_type="beam",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"rigidLink beam requires ndf == ndm, 2D/3DOF, or 3D/6DOF",
+    ):
+        to_openseespy(model, constraints={18: constraint})
+
+
+@pytest.mark.parametrize(
+    ("ndm", "ndf"),
+    [
+        (2, 2),
+        (2, 3),
+        (3, 3),
+        (3, 6),
+    ],
+)
+def test_generator_accepts_supported_rigid_link_beam_signatures(
+    ndm,
+    ndf,
+):
+    model = StructuralModel("valid-rigid-beam-signature", ndm=ndm, ndf=ndf)
+    if ndm == 2:
+        model.add_node(1, 0.0, 0.0)
+        model.add_node(2, 1.0, 0.0)
+    else:
+        model.add_node(1, 0.0, 0.0, 0.0)
+        model.add_node(2, 1.0, 0.0, 0.0)
+
+    constraint = ConstraintData(
+        19,
+        "Valid rigid beam",
+        "rigidLink",
+        retained_node=1,
+        constrained_nodes=[2],
+        link_type="beam",
+    )
+
+    code = to_openseespy(model, constraints={19: constraint})
+    assert "ops.rigidLink('beam', 1, 2)" in code

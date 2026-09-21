@@ -2430,6 +2430,36 @@ def to_openseespy(
         active_analysis is not None and deferred_pattern_tags
     )
 
+    invalid_rigid_links: list[str] = []
+    for constraint in (constraints or {}).values():
+        if constraint.constraint_type != "rigidLink":
+            continue
+        ndm = int(model.ndm)
+        ndf = int(model.ndf)
+        if constraint.link_type == "bar":
+            if ndf < ndm:
+                invalid_rigid_links.append(
+                    f"{constraint.tag} (bar: ndm={ndm}, ndf={ndf})"
+                )
+            continue
+
+        valid_beam_signature = (
+            ndf == ndm
+            or (ndm, ndf) in {(2, 3), (3, 6)}
+        )
+        if not valid_beam_signature:
+            invalid_rigid_links.append(
+                f"{constraint.tag} (beam: ndm={ndm}, ndf={ndf})"
+            )
+
+    if invalid_rigid_links:
+        raise ValueError(
+            "Unsupported rigidLink model signature(s): "
+            + "; ".join(invalid_rigid_links)
+            + ". rigidLink bar requires ndf >= ndm; rigidLink beam "
+            "requires ndf == ndm, 2D/3DOF, or 3D/6DOF."
+        )
+
     invalid_equal_dof_dofs = {
         int(constraint.tag): sorted(
             int(dof)

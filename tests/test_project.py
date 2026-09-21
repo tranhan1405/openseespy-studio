@@ -731,3 +731,89 @@ def test_project_update_rejects_equal_dof_above_model_ndf():
         assert "DOF(s) 4 not available for model ndf=3" in str(exc)
     else:
         raise AssertionError("Expected equalDOF update model-ndf validation")
+
+
+def test_project_rejects_rigid_link_bar_when_ndf_below_ndm():
+    model = StructuralModel("3D-2DOF rigid bar", ndm=3, ndf=2)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    project = ProjectDatabase(name="Bad rigid bar", model=model)
+
+    try:
+        project.add_constraint(
+            ConstraintData(
+                44,
+                "Invalid rigid bar",
+                "rigidLink",
+                retained_node=1,
+                constrained_nodes=[2],
+                link_type="bar",
+            )
+        )
+    except ValueError as exc:
+        assert "requires ndf >= ndm" in str(exc)
+    else:
+        raise AssertionError("Expected rigidLink bar signature validation")
+
+
+def test_project_rejects_unsupported_rigid_link_beam_signature():
+    model = StructuralModel("3D-4DOF rigid beam", ndm=3, ndf=4)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    project = ProjectDatabase(name="Bad rigid beam", model=model)
+
+    try:
+        project.add_constraint(
+            ConstraintData(
+                45,
+                "Invalid rigid beam",
+                "rigidLink",
+                retained_node=1,
+                constrained_nodes=[2],
+                link_type="beam",
+            )
+        )
+    except ValueError as exc:
+        assert "requires ndf == ndm, 2D/3DOF, or 3D/6DOF" in str(exc)
+    else:
+        raise AssertionError("Expected rigidLink beam signature validation")
+
+
+def test_project_accepts_3d_4dof_rigid_link_bar():
+    model = StructuralModel("3D-4DOF rigid bar", ndm=3, ndf=4)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    project = ProjectDatabase(name="Good rigid bar", model=model)
+
+    project.add_constraint(
+        ConstraintData(
+            46,
+            "Valid rigid bar",
+            "rigidLink",
+            retained_node=1,
+            constrained_nodes=[2],
+            link_type="bar",
+        )
+    )
+
+    assert project.constraints[46].link_type == "bar"
+
+
+def test_project_accepts_3d_6dof_rigid_link_beam():
+    model = StructuralModel("3D-6DOF rigid beam", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    project = ProjectDatabase(name="Good rigid beam", model=model)
+
+    project.add_constraint(
+        ConstraintData(
+            47,
+            "Valid rigid beam",
+            "rigidLink",
+            retained_node=1,
+            constrained_nodes=[2],
+            link_type="beam",
+        )
+    )
+
+    assert project.constraints[47].link_type == "beam"
