@@ -571,6 +571,7 @@ class MaterialDialog(QDialog):
         self.setModal(True)
         self.resize(920, 680)
         self.unit_system = UnitSystem.from_mapping(units)
+        self._editing_existing = material is not None
         self.materials = dict(materials or {})
         if material is not None:
             self.materials.pop(material.tag, None)
@@ -689,29 +690,17 @@ class MaterialDialog(QDialog):
         self.source_note.setStyleSheet(
             "padding: 7px; background: #fff8e8; color: #5d4a16;"
         )
-        if material is not None and material.source:
-            reference = dict(
-                material.source.get("primary_reference", {})
-            )
-            evidence = dict(
-                material.source.get("parameter_evidence", {})
-            )
-            self.source_note.setText(
-                "Reference-backed material · "
-                f"status: {material.source.get('status', 'unknown')}\n"
-                f"{reference.get('title', '')}\n"
-                f"DOI: {reference.get('doi', '')}\n"
-                f"Evidence: {evidence.get('location', '')}\n"
-                "The verified status applies to the cited constitutive "
-                "parameters. Editing those values will mark this project "
-                "material as modified_from_verified."
-            )
-            self.source_note.show()
-        else:
-            self.source_note.hide()
+        self._show_source_metadata(material)
         root.addWidget(self.source_note)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.load_library_button = buttons.addButton(
+            "Load Verified Preset...",
+            QDialogButtonBox.ActionRole,
+        )
+        self.load_library_button.clicked.connect(
+            self._load_verified_preset
+        )
         self.test_material_button = buttons.addButton(
             "Test Material...",
             QDialogButtonBox.ActionRole,
@@ -738,6 +727,7 @@ class MaterialDialog(QDialog):
 
     def _material_type_changed(self, material_type: str) -> None:
         self._initial_material = None
+        self.source_note.hide()
         self._rebuild_parameters(material_type)
         defaults = MATERIAL_ENGINEERING_DEFAULTS[material_type]
         self.poisson_ratio.setValue(defaults["poisson_ratio"])
@@ -1307,6 +1297,92 @@ class MaterialDialog(QDialog):
             self.material_note.setStyleSheet(
                 "padding: 7px; background: #f2f5f8; color: #526578;"
             )
+
+    def _show_source_metadata(
+        self,
+        material: MaterialData | None,
+    ) -> None:
+        if material is None or not material.source:
+            self.source_note.clear()
+            self.source_note.hide()
+            return
+        reference = dict(
+            material.source.get("primary_reference", {})
+        )
+        evidence = dict(
+            material.source.get("parameter_evidence", {})
+        )
+        self.source_note.setText(
+            "Reference-backed material · "
+            f"status: {material.source.get('status', 'unknown')}\n"
+            f"{reference.get('title', '')}\n"
+            f"DOI: {reference.get('doi', '')}\n"
+            f"Evidence: {evidence.get('location', '')}\n"
+            "The verified status applies to the cited constitutive "
+            "parameters. Editing those values will mark this project "
+            "material as modified_from_verified."
+        )
+        self.source_note.show()
+
+    def _load_verified_preset(self) -> None:
+        # Local import avoids a module cycle: the library dialog reuses this
+        # module's lightweight material preview widget.
+        from .material_library_dialog import MaterialLibraryDialog
+
+        try:
+            dialog = MaterialLibraryDialog(
+                next_tag=self.tag.value(),
+                units=self.unit_system.as_mapping(),
+                accept_label="Load into Editor",
+                parent=self,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Material Library",
+                f"Could not load the verified material library:\n\n{exc}",
+            )
+            return
+        if not dialog.exec():
+            return
+
+        try:
+            preset = dialog.material_data()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Material Library", str(exc))
+            return
+
+        preset.tag = self.tag.value()
+        self._initial_material = preset
+
+        index = self.material_type.findData(preset.material_type)
+        if index < 0:
+            QMessageBox.warning(
+                self,
+                "Material Library",
+                f"Material model {preset.material_type!r} is not available "
+                "in this editor.",
+            )
+            return
+
+        self.material_type.blockSignals(True)
+        self.material_type.setCurrentIndex(index)
+        self.material_type.blockSignals(False)
+        self._rebuild_parameters(preset.material_type)
+
+        if not self._editing_existing:
+            self.name.setText(preset.name)
+            defaults = MATERIAL_ENGINEERING_DEFAULTS[
+                preset.material_type
+            ]
+            self.poisson_ratio.setValue(defaults["poisson_ratio"])
+            self.density.setValue(
+                self.unit_system.engineering_density_from_kg_per_m3(
+                    defaults["density"]
+                )
+            )
+
+        self._show_source_metadata(preset)
 
     def _open_material_test(self) -> None:
         try:
