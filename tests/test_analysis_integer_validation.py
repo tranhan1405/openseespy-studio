@@ -290,3 +290,59 @@ def test_active_deferred_patterns_reject_fractional_tag():
             }
         )
 
+
+def test_active_adaptive_step_rejects_fractional_easy_iterations():
+    with pytest.raises(
+        ValueError,
+        match=r"Analysis adaptive easy iterations must be an integer",
+    ):
+        AnalysisSettingsData(
+            11,
+            "Adaptive",
+            "Static",
+            adaptive_step=True,
+            adaptive_easy_iterations=4.5,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Analysis adaptive easy iterations must be an integer",
+    ):
+        AnalysisSettingsData.from_dict(
+            {
+                "tag": 11,
+                "name": "Adaptive",
+                "analysis_type": "Static",
+                "adaptive_step": True,
+                "adaptive_easy_iterations": 4.5,
+            }
+        )
+
+
+def test_active_adaptive_step_rejects_fractional_growth_after():
+    with pytest.raises(
+        ValueError,
+        match=r"Analysis adaptive growth after must be an integer",
+    ):
+        AnalysisSettingsData(
+            12,
+            "Adaptive",
+            "Static",
+            adaptive_step=True,
+            adaptive_growth_after=3.5,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Analysis adaptive growth after must be an integer",
+    ):
+        AnalysisSettingsData.from_dict(
+            {
+                "tag": 12,
+                "name": "Adaptive",
+                "analysis_type": "Static",
+                "adaptive_step": True,
+                "adaptive_growth_after": 3.5,
+            }
+        )
+
