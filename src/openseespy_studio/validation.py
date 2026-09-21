@@ -724,6 +724,59 @@ def _driving_load_checks(
             )
 
 
+def _node_has_incident_element_mass(
+    project: ProjectDatabase,
+    node_tag: int,
+) -> bool:
+    target = int(node_tag)
+    return any(
+        float(element.mass_per_length) > 0.0
+        and (int(element.i) == target or int(element.j) == target)
+        for element in project.model.elements.values()
+    )
+
+
+def _has_dynamic_mass_in_direction(
+    project: ProjectDatabase,
+    dof: int,
+) -> bool:
+    index = int(dof) - 1
+    if index < 0 or index >= int(project.model.ndf):
+        return False
+
+    for node in project.model.nodes.values():
+        if (
+            index < len(node.fixity)
+            and not bool(node.fixity[index])
+            and index < len(node.mass)
+            and float(node.mass[index]) > 0.0
+        ):
+            return True
+
+    for element in project.model.elements.values():
+        if float(element.mass_per_length) <= 0.0:
+            continue
+        node_i = project.model.nodes.get(int(element.i))
+        node_j = project.model.nodes.get(int(element.j))
+        for node in (node_i, node_j):
+            if (
+                node is not None
+                and index < len(node.fixity)
+                and not bool(node.fixity[index])
+            ):
+                return True
+    return False
+
+
+def _has_any_translational_dynamic_mass(
+    project: ProjectDatabase,
+) -> bool:
+    return any(
+        _has_dynamic_mass_in_direction(project, dof)
+        for dof in range(1, int(project.model.ndm) + 1)
+    )
+
+
 def _dynamic_checks(
     project: ProjectDatabase,
     analysis: AnalysisSettingsData,
@@ -733,35 +786,47 @@ def _dynamic_checks(
         return
 
     model = project.model
-    translational_mass = sum(
-        sum(max(0.0, float(value)) for value in node.mass[:3])
-        for node in model.nodes.values()
-    )
-    if translational_mass <= 0.0:
+    has_any_mass = _has_any_translational_dynamic_mass(project)
+    if not has_any_mass:
         issues.append(
             ValidationIssue(
                 "ERROR",
                 "Mass",
                 f"{analysis.analysis_type} analysis has no positive "
-                "translational nodal mass.",
-                suggestion="Assign UX/UY/UZ nodal masses before dynamic "
-                "or modal analysis.",
+                "translational nodal or element mass on a free DOF.",
+                suggestion=(
+                    "Assign nodal mass, generate mass from a Mass Source, "
+                    "or assign positive element mass/length before dynamic "
+                    "or modal analysis."
+                ),
             )
         )
     else:
+        translational_count = min(int(model.ndm), int(model.ndf), 3)
         zero_mass_free_nodes = [
             tag
             for tag, node in model.nodes.items()
-            if any(value == 0 for value in node.fixity[:3])
-            and sum(max(0.0, float(value)) for value in node.mass[:3]) <= 0.0
+            if any(
+                not bool(node.fixity[index])
+                for index in range(translational_count)
+            )
+            and not any(
+                (
+                    not bool(node.fixity[index])
+                    and float(node.mass[index]) > 0.0
+                )
+                for index in range(translational_count)
+            )
+            and not _node_has_incident_element_mass(project, tag)
         ]
         if zero_mass_free_nodes:
             issues.append(
                 ValidationIssue(
                     "WARNING",
                     "Mass",
-                    f"{len(zero_mass_free_nodes)} free node(s) have zero "
-                    "translational mass.",
+                    f"{len(zero_mass_free_nodes)} free node(s) have no "
+                    "direct nodal mass and are not connected to an element "
+                    "with positive mass/length.",
                     "node",
                     zero_mass_free_nodes[0],
                     "Confirm that the mass distribution is intentional.",
@@ -870,6 +935,37 @@ def _dynamic_checks(
                     ),
                 )
             )
+
+    active_directions = sorted({
+        int(pattern.direction)
+        for pattern in patterns
+        if (
+            pattern.pattern_type == "UniformExcitation"
+            and 1 <= int(pattern.direction) <= int(model.ndm)
+        )
+    })
+    if has_any_mass:
+        for direction in active_directions:
+            if _has_dynamic_mass_in_direction(project, direction):
+                continue
+            axis = {1: "X", 2: "Y", 3: "Z"}.get(
+                direction,
+                f"DOF {direction}",
+            )
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Mass",
+                    f"Transient excitation is active in {axis}, but the "
+                    f"model has no positive dynamic mass on a free "
+                    f"{axis} translational DOF.",
+                    suggestion=(
+                        f"Assign/generate mass in {axis} or remove the "
+                        f"{axis} excitation component."
+                    ),
+                )
+            )
+
 
 
 def _recorder_checks(
