@@ -1289,6 +1289,9 @@ def column_cyclic_reversal_metrics(
             material_types={
                 "Steel01",
                 "Steel02",
+                "Hardening",
+                "ElasticPP",
+                "ElasticBilin",
                 "ReinforcingSteel",
             },
         )
@@ -1830,6 +1833,9 @@ def column_specimen_research_metrics(
             if material_type in {
                 "Steel01",
                 "Steel02",
+                "Hardening",
+                "ElasticPP",
+                "ElasticBilin",
                 "ReinforcingSteel",
             }:
                 update_peak("steel_strain", values)
@@ -2899,10 +2905,39 @@ def classify_fiber_state(
     metric: float | None = None
     details: dict[str, Any] = {}
 
-    if material.material_type == "Steel02":
-        fy = abs(float(material.parameters["Fy"]))
-        e0 = abs(float(material.parameters["E0"]))
-        eps_y = fy / e0 if e0 > 1.0e-30 else math.inf
+    if material.material_type in {
+        "Steel01",
+        "Steel02",
+        "Hardening",
+        "ElasticPP",
+        "ElasticBilin",
+        "ReinforcingSteel",
+    }:
+        if material.material_type in {"Steel01", "Steel02"}:
+            fy = abs(float(material.parameters["Fy"]))
+            e0 = abs(float(material.parameters["E0"]))
+            eps_y = fy / e0 if e0 > 1.0e-30 else math.inf
+        elif material.material_type == "Hardening":
+            fy = abs(float(material.parameters["sigmaY"]))
+            e0 = abs(float(material.parameters["E"]))
+            eps_y = fy / e0 if e0 > 1.0e-30 else math.inf
+        elif material.material_type == "ElasticPP":
+            eps_y = (
+                abs(float(material.parameters["epsyP"]))
+                if strain >= 0.0
+                else abs(float(material.parameters["epsyN"]))
+            )
+        elif material.material_type == "ElasticBilin":
+            eps_y = (
+                abs(float(material.parameters["epsP2"]))
+                if strain >= 0.0
+                else abs(float(material.parameters["epsN2"]))
+            )
+        else:
+            fy = abs(float(material.parameters["fy"]))
+            e0 = abs(float(material.parameters["Es"]))
+            eps_y = fy / e0 if e0 > 1.0e-30 else math.inf
+
         ratio = abs(strain) / eps_y if eps_y > 1.0e-30 else 0.0
         metric = ratio
         details["yield_strain"] = eps_y
