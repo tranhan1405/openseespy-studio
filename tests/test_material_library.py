@@ -398,7 +398,7 @@ def test_benedetti_2022_sheathing_parameters():
     )
 
     assert record.parameters_si["ePf2"] == 1850.0
-    assert record.parameters_si["ePd2"] == 0.0069
+    assert abs(record.parameters_si["ePd2"] - 0.0069) < 1.0e-12
     assert record.parameters_si["rDispP"] == 0.651
     assert record.parameters_si["gK1"] == 0.0
     assert record.doi == "10.3390/buildings12070981"
@@ -412,7 +412,7 @@ def test_bhandari_2023_published_and_symmetry_derived_branches():
 
     assert tension.parameters_si["ePf1"] == 4420.0
     assert tension.parameters_si["eNf1"] == -4420.0
-    assert "symmetry" in str(
+    assert "symmetric" in str(
         tension.parameter_evidence.get("relationship", "")
     ).lower()
 
@@ -436,7 +436,7 @@ def test_shang_2022_sway_brace_parameters():
     record = _record("shang-2022-1000-60-2-pinching4")
 
     assert record.parameters_si["ePf3"] == 24800.0
-    assert record.parameters_si["ePd3"] == 0.0447
+    assert abs(record.parameters_si["ePd3"] - 0.0447) < 1.0e-12
     assert record.parameters_si["ePf4"] == 5000.0
     assert record.parameters_si["gKLim"] == -2.0
     assert record.parameters_si["dmgType"] == 0.0
