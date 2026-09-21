@@ -7340,17 +7340,19 @@ class MainWindow(QMainWindow):
             return
 
         before = self.project.to_dict()
-        self.model.delete_entities(
-            node_tags=nodes,
-            element_tags=elements,
-            cascade_nodes=True,
-        )
-        self._prune_selection_sets()
-        self.project.prune_constraints()
-        self.project.prune_connections()
-        self.project.prune_nodal_loads()
-        self.project.prune_element_loads()
-        self.project.prune_recorders()
+        try:
+            self.project.delete_entities(
+                node_tags=nodes,
+                element_tags=elements,
+                cascade_nodes=True,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Delete selected entities",
+                str(exc),
+            )
+            return
         self.selection.clear()
         self._refresh_all("Deleted selected entities")
         self._record_project_change("Delete selected entities", before)

@@ -7,7 +7,9 @@ from openseespy_studio.project import (
     ConstraintData,
     FiberComponentData,
     FiberData,
+    ElementLoadData,
     LoadPatternData,
+    NodalLoadData,
     MaterialData,
     PrescribedDisplacementData,
     RecorderData,
@@ -1947,3 +1949,137 @@ def test_project_rejects_removing_transformation_used_by_element():
         project.remove_transformation(1)
 
     assert 1 in project.transformations
+
+
+def test_project_delete_entities_cascades_node_dependencies():
+    model = StructuralModel("delete-node-cascade", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 1.0, 0.0)
+    model.add_element(
+        10,
+        1,
+        2,
+        element_type="elasticBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
+    project = ProjectDatabase(name="Delete node cascade", model=model)
+    project.add_material(
+        MaterialData(1, "Spring", "Elastic", {"E": 1000.0})
+    )
+    project.add_connection(
+        ConnectionData(
+            20,
+            "Link",
+            "zeroLength",
+            2,
+            3,
+            materials_by_dof={1: 1},
+        )
+    )
+    project.add_constraint(
+        ConstraintData(
+            30,
+            "Tie",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        )
+    )
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Plain", "Plain", time_series_tag=1)
+    )
+    project.add_nodal_load(
+        NodalLoadData(
+            40,
+            "Node load",
+            1,
+            2,
+            (1.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        )
+    )
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(
+            41,
+            "SP",
+            1,
+            2,
+            2,
+            0.0,
+        )
+    )
+    project.add_element_load(
+        ElementLoadData(
+            42,
+            "Beam load",
+            1,
+            10,
+            load_type="Uniform",
+            wy=-1.0,
+        )
+    )
+    project.add_recorder(
+        RecorderData(
+            50,
+            "Node recorder",
+            "Node",
+            target_tags=[2],
+            response="disp",
+            dofs=[1],
+        )
+    )
+    project.add_recorder(
+        RecorderData(
+            51,
+            "Element recorder",
+            "Element",
+            target_tags=[10],
+            response="force",
+        )
+    )
+    project.selection_sets["Delete"] = SelectionSetData(
+        "Delete",
+        node_tags={2},
+        element_tags={10},
+    )
+
+    project.delete_entities(node_tags=[2], cascade_nodes=True)
+
+    assert 2 not in project.model.nodes
+    assert 10 not in project.model.elements
+    assert 20 not in project.connections
+    assert 30 not in project.constraints
+    assert 40 not in project.nodal_loads
+    assert 41 not in project.prescribed_displacements
+    assert 42 not in project.element_loads
+    assert 50 not in project.recorders
+    assert 51 not in project.recorders
+    assert project.selection_sets["Delete"].node_tags == set()
+    assert project.selection_sets["Delete"].element_tags == set()
+
+
+def test_project_delete_entities_rejects_analysis_control_node():
+    model = StructuralModel("delete-control-node", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Control node delete", model=model)
+    project.add_analysis(
+        AnalysisSettingsData(
+            76,
+            "Pushover",
+            "Pushover",
+            control_node=2,
+            control_dof=1,
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Cannot delete control node\(s\) used by analysis tag\(s\): 76",
+    ):
+        project.delete_entities(node_tags=[2], cascade_nodes=True)
+
+    assert 2 in project.model.nodes

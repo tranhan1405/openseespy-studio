@@ -2729,3 +2729,87 @@ def test_generator_truss_does_not_require_geometric_transformation():
     )
 
     assert "ops.element('Truss', 1" in code
+
+
+def test_generator_rejects_element_with_missing_endpoint_node():
+    model = StructuralModel("orphan-element-node", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        99,
+        element_type="elasticBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"element 1 -> missing node 99",
+    ):
+        to_openseespy(model)
+
+
+def test_generator_rejects_connection_with_missing_endpoint_node():
+    model = StructuralModel("orphan-connection-node", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    connection = ConnectionData(
+        10,
+        "Orphan link",
+        "twoNodeLink",
+        1,
+        99,
+        materials_by_dof={1: 1},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"connection 10 -> missing node 99",
+    ):
+        to_openseespy(
+            model,
+            connections={10: connection},
+        )
+
+
+def test_generator_rejects_node_recorder_with_missing_target_node():
+    model = StructuralModel("orphan-node-recorder", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    recorder = RecorderData(
+        1,
+        "Node recorder",
+        "Node",
+        target_tags=[99],
+        response="disp",
+        dofs=[1],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"node recorder 1 -> missing node 99",
+    ):
+        to_openseespy(
+            model,
+            recorders={1: recorder},
+        )
+
+
+def test_generator_rejects_element_recorder_with_missing_target_element():
+    model = StructuralModel("orphan-element-recorder", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    recorder = RecorderData(
+        2,
+        "Element recorder",
+        "Element",
+        target_tags=[99],
+        response="force",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"element recorder 2 -> missing element 99",
+    ):
+        to_openseespy(
+            model,
+            recorders={2: recorder},
+        )

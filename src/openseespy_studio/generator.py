@@ -2430,6 +2430,67 @@ def to_openseespy(
         active_analysis is not None and deferred_pattern_tags
     )
 
+    geometry_reference_errors: list[str] = []
+
+    for element in model.elements.values():
+        missing = [
+            int(tag)
+            for tag in (element.i, element.j)
+            if int(tag) not in model.nodes
+        ]
+        if missing:
+            geometry_reference_errors.append(
+                f"element {element.tag} -> missing node "
+                + ", ".join(map(str, sorted(set(missing))))
+            )
+
+    for connection in (connections or {}).values():
+        missing = [
+            int(tag)
+            for tag in (connection.node_i, connection.node_j)
+            if int(tag) not in model.nodes
+        ]
+        if missing:
+            geometry_reference_errors.append(
+                f"connection {connection.tag} -> missing node "
+                + ", ".join(map(str, sorted(set(missing))))
+            )
+
+    valid_element_targets = set(model.elements) | set(
+        (connections or {}).keys()
+    )
+    for recorder in (recorders or {}).values():
+        if recorder.recorder_type == "Node":
+            missing = sorted(
+                int(tag)
+                for tag in recorder.target_tags
+                if int(tag) not in model.nodes
+            )
+            if missing:
+                geometry_reference_errors.append(
+                    f"node recorder {recorder.tag} -> missing node "
+                    + ", ".join(map(str, missing))
+                )
+        else:
+            missing = sorted(
+                int(tag)
+                for tag in recorder.target_tags
+                if int(tag) not in valid_element_targets
+            )
+            if missing:
+                geometry_reference_errors.append(
+                    f"{recorder.recorder_type.lower()} recorder "
+                    f"{recorder.tag} -> missing element "
+                    + ", ".join(map(str, missing))
+                )
+
+    if geometry_reference_errors:
+        raise ValueError(
+            "Geometry reference error(s): "
+            + "; ".join(sorted(geometry_reference_errors))
+            + "."
+        )
+
     material_reference_errors: list[str] = []
 
     for material in (materials or {}).values():

@@ -2945,6 +2945,50 @@ class ProjectDatabase:
                 removed.append(tag)
         return sorted(removed)
 
+    def delete_entities(
+        self,
+        *,
+        node_tags: Iterable[int] = (),
+        element_tags: Iterable[int] = (),
+        cascade_nodes: bool = True,
+    ) -> None:
+        node_tags = {int(tag) for tag in node_tags}
+        element_tags = {int(tag) for tag in element_tags}
+
+        control_users = sorted(
+            analysis.tag
+            for analysis in self.analyses.values()
+            if (
+                self._analysis_uses_control_node(analysis)
+                and int(analysis.control_node) in node_tags
+            )
+        )
+        if control_users:
+            raise ValueError(
+                "Cannot delete control node(s) used by analysis tag(s): "
+                + ", ".join(map(str, control_users))
+                + ". Reassign the analysis control node first."
+            )
+
+        self.model.delete_entities(
+            node_tags=node_tags,
+            element_tags=element_tags,
+            cascade_nodes=cascade_nodes,
+        )
+
+        self.prune_constraints()
+        self.prune_connections()
+        self.prune_nodal_loads()
+        self.prune_prescribed_displacements()
+        self.prune_element_loads()
+        self.prune_recorders()
+
+        existing_nodes = set(self.model.nodes)
+        existing_elements = set(self.model.elements)
+        for selection_set in self.selection_sets.values():
+            selection_set.node_tags.intersection_update(existing_nodes)
+            selection_set.element_tags.intersection_update(existing_elements)
+
     def next_time_series_tag(self) -> int:
         return max(self.time_series, default=0) + 1
 
