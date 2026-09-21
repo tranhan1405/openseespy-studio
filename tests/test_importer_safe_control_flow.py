@@ -166,3 +166,33 @@ else:
         issue.construct == "if" and issue.severity == "UNSUPPORTED"
         for issue in result.issues
     )
+
+
+def test_single_stage_displacement_control_remains_pushover():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+ops.node(1, 0.0, 0.0)
+ops.node(2, 0.0, 3.0)
+ops.fix(1, 1, 1, 1)
+ops.timeSeries('Linear', 1)
+ops.pattern('Plain', 1, 1)
+ops.load(2, 1.0, 0.0, 0.0)
+ops.constraints('Plain')
+ops.numberer('Plain')
+ops.system('BandGeneral')
+ops.test('NormUnbalance', 1e-8, 10)
+ops.algorithm('Newton')
+ops.integrator('DisplacementControl', 2, 1, 0.001)
+ops.analysis('Static')
+ops.analyze(10)
+"""
+    result = import_openseespy_source(source, units=UNITS)
+
+    assert result.error_count == 0
+    assert len(result.project.analyses) == 1
+    analysis = next(iter(result.project.analyses.values()))
+    assert analysis.analysis_type == "Pushover"
+    assert analysis.integrator == "DisplacementControl"
+    assert analysis.preload_gravity is False
+    assert analysis.deferred_pattern_tags == []
