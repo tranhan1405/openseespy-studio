@@ -1190,8 +1190,14 @@ class LoadPatternData:
         self.tag = _strict_int(self.tag, "Load pattern tag")
         self.name = str(self.name).strip() or f"Load Pattern {self.tag}"
         self.pattern_type = str(self.pattern_type)
-        self.time_series_tag = int(self.time_series_tag)
-        self.direction = int(self.direction)
+        self.time_series_tag = _strict_int(
+            self.time_series_tag,
+            "Load pattern time series tag",
+        )
+        self.direction = _strict_int(
+            self.direction,
+            "Load pattern direction",
+        )
         self.factor = float(self.factor)
         self.vel0 = float(self.vel0)
         if self.tag <= 0:
@@ -1224,8 +1230,8 @@ class LoadPatternData:
             tag=data["tag"],
             name=str(data.get("name", f"Load Pattern {data['tag']}")),
             pattern_type=str(data.get("pattern_type", "Plain")),
-            time_series_tag=int(data["time_series_tag"]),
-            direction=int(data.get("direction", 1)),
+            time_series_tag=data["time_series_tag"],
+            direction=data.get("direction", 1),
             factor=float(data.get("factor", 1.0)),
             vel0=float(data.get("vel0", 0.0)),
         )
@@ -1242,8 +1248,14 @@ class NodalLoadData:
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Nodal load tag")
         self.name = str(self.name).strip() or f"Nodal Load {self.tag}"
-        self.pattern_tag = int(self.pattern_tag)
-        self.node_tag = int(self.node_tag)
+        self.pattern_tag = _strict_int(
+            self.pattern_tag,
+            "Nodal load pattern tag",
+        )
+        self.node_tag = _strict_int(
+            self.node_tag,
+            "Nodal load node tag",
+        )
         self.values = tuple(float(value) for value in self.values)
         if self.tag <= 0:
             raise ValueError("Nodal load tag must be positive.")
@@ -1269,8 +1281,8 @@ class NodalLoadData:
         return cls(
             tag=data["tag"],
             name=str(data.get("name", f"Nodal Load {data['tag']}")),
-            pattern_tag=int(data["pattern_tag"]),
-            node_tag=int(data["node_tag"]),
+            pattern_tag=data["pattern_tag"],
+            node_tag=data["node_tag"],
             values=values,
         )
 
@@ -1295,7 +1307,10 @@ class PrescribedDisplacementData:
         )
         self.pattern_tag = int(self.pattern_tag)
         self.node_tag = int(self.node_tag)
-        self.dof = int(self.dof)
+        self.dof = _strict_int(
+            self.dof,
+            "Prescribed displacement DOF",
+        )
         self.value = float(self.value)
         if self.tag <= 0:
             raise ValueError(
@@ -1339,7 +1354,7 @@ class PrescribedDisplacementData:
             ),
             pattern_tag=int(data["pattern_tag"]),
             node_tag=int(data["node_tag"]),
-            dof=int(data.get("dof", 1)),
+            dof=data.get("dof", 1),
             value=float(data.get("value", 0.0)),
         )
 
