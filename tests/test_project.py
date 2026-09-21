@@ -3039,3 +3039,135 @@ def test_project_rejects_analysis_type_change_that_invalidates_solution_results(
         )
 
     assert project.analyses[1].analysis_type == "Pushover"
+
+
+def test_remove_connection_prunes_removed_ground_node_references():
+    model = StructuralModel("ground-cleanup", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    project = ProjectDatabase(name="Ground cleanup", model=model)
+    project.add_material(
+        MaterialData(1, "Spring", "Elastic", {"E": 1000.0})
+    )
+    project.add_connection(
+        ConnectionData(
+            10,
+            "Ground spring",
+            "zeroLength",
+            2,
+            1,
+            materials_by_dof={1: 1},
+            generated_ground_node=2,
+        )
+    )
+    project.selection_sets["Ground"] = SelectionSetData(
+        "Ground",
+        node_tags={2},
+    )
+    project.add_analysis(
+        AnalysisSettingsData(1, "Static", "Static")
+    )
+    project.add_solution_result(
+        SolutionResultData(
+            1,
+            1,
+            "Ground displacement",
+            "NodalDisplacement",
+            node_scope=[2],
+            settings={"component": "UX"},
+        )
+    )
+
+    project.remove_connection(10)
+
+    assert 2 not in project.model.nodes
+    assert project.selection_sets["Ground"].node_tags == set()
+    assert 1 not in project.solution_results
+
+
+def test_connection_rejects_unrelated_generated_ground_node():
+    model = StructuralModel("bad-ground-metadata", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    model.add_node(3, 5.0, 0.0)
+    project = ProjectDatabase(name="Bad ground metadata", model=model)
+    project.add_material(
+        MaterialData(1, "Spring", "Elastic", {"E": 1000.0})
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Generated ground node must be one of the connection endpoint",
+    ):
+        project.add_connection(
+            ConnectionData(
+                10,
+                "Bad managed ground",
+                "zeroLength",
+                1,
+                2,
+                materials_by_dof={1: 1},
+                generated_ground_node=3,
+            )
+        )
+
+
+def test_solution_result_validates_setting_node_and_dof():
+    project = build_project()
+    project.add_analysis(
+        AnalysisSettingsData(1, "Static", "Static")
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"TimeHistory references missing node 999",
+    ):
+        project.add_solution_result(
+            SolutionResultData(
+                1,
+                1,
+                "Bad history node",
+                "TimeHistory",
+                settings={"node": 999, "dof": 1},
+            )
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"TimeHistory DOF 7 is invalid",
+    ):
+        project.add_solution_result(
+            SolutionResultData(
+                2,
+                1,
+                "Bad history dof",
+                "TimeHistory",
+                settings={"node": 2, "dof": 7},
+            )
+        )
+
+
+def test_modal_solution_result_rejects_mode_above_analysis_count():
+    project = build_project()
+    project.add_analysis(
+        AnalysisSettingsData(
+            1,
+            "Modes",
+            "Modal",
+            num_modes=2,
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Requested mode 3 exceeds Modal analysis 1 num_modes=2",
+    ):
+        project.add_solution_result(
+            SolutionResultData(
+                1,
+                1,
+                "Mode 3",
+                "ModeShape",
+                settings={"mode": 3},
+            )
+        )
