@@ -133,3 +133,160 @@ def test_modal_analysis_rejects_fractional_mode_count():
                 "num_modes": 3.5,
             }
         )
+
+
+def test_pushover_rejects_fractional_control_node():
+    with pytest.raises(
+        ValueError,
+        match=r"Analysis control node must be an integer",
+    ):
+        AnalysisSettingsData(
+            6,
+            "Push",
+            "Pushover",
+            control_node=2.5,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Analysis control node must be an integer",
+    ):
+        AnalysisSettingsData.from_dict(
+            {
+                "tag": 6,
+                "name": "Push",
+                "analysis_type": "Pushover",
+                "control_node": 2.5,
+                "control_dof": 1,
+                "displacement_increment": 0.001,
+            }
+        )
+
+
+def test_pushover_rejects_fractional_control_dof():
+    with pytest.raises(
+        ValueError,
+        match=r"Analysis control DOF must be an integer",
+    ):
+        AnalysisSettingsData(
+            7,
+            "Push",
+            "Pushover",
+            control_node=2,
+            control_dof=1.5,
+            displacement_increment=0.001,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Analysis control DOF must be an integer",
+    ):
+        AnalysisSettingsData.from_dict(
+            {
+                "tag": 7,
+                "name": "Push",
+                "analysis_type": "Pushover",
+                "control_node": 2,
+                "control_dof": 1.5,
+                "displacement_increment": 0.001,
+            }
+        )
+
+
+def test_transient_rayleigh_rejects_fractional_mode_i():
+    with pytest.raises(
+        ValueError,
+        match=r"Analysis Rayleigh mode i must be an integer",
+    ):
+        AnalysisSettingsData(
+            8,
+            "EQ",
+            "Transient",
+            dt=0.01,
+            rayleigh_damping_ratio=0.05,
+            rayleigh_mode_i=1.5,
+            rayleigh_mode_j=3,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Analysis Rayleigh mode i must be an integer",
+    ):
+        AnalysisSettingsData.from_dict(
+            {
+                "tag": 8,
+                "name": "EQ",
+                "analysis_type": "Transient",
+                "dt": 0.01,
+                "rayleigh_damping_ratio": 0.05,
+                "rayleigh_mode_i": 1.5,
+                "rayleigh_mode_j": 3,
+            }
+        )
+
+
+def test_transient_rayleigh_rejects_fractional_mode_j():
+    with pytest.raises(
+        ValueError,
+        match=r"Analysis Rayleigh mode j must be an integer",
+    ):
+        AnalysisSettingsData(
+            9,
+            "EQ",
+            "Transient",
+            dt=0.01,
+            rayleigh_damping_ratio=0.05,
+            rayleigh_mode_i=1,
+            rayleigh_mode_j=3.5,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Analysis Rayleigh mode j must be an integer",
+    ):
+        AnalysisSettingsData.from_dict(
+            {
+                "tag": 9,
+                "name": "EQ",
+                "analysis_type": "Transient",
+                "dt": 0.01,
+                "rayleigh_damping_ratio": 0.05,
+                "rayleigh_mode_i": 1,
+                "rayleigh_mode_j": 3.5,
+            }
+        )
+
+
+def test_active_deferred_patterns_reject_fractional_tag():
+    with pytest.raises(
+        ValueError,
+        match=r"Deferred load-pattern tag must be an integer",
+    ):
+        AnalysisSettingsData(
+            10,
+            "Push",
+            "Pushover",
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+            deferred_pattern_tags=[1.5],
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Deferred load-pattern tag must be an integer",
+    ):
+        AnalysisSettingsData.from_dict(
+            {
+                "tag": 10,
+                "name": "Push",
+                "analysis_type": "Pushover",
+                "control_node": 2,
+                "control_dof": 1,
+                "displacement_increment": 0.001,
+                "deferred_pattern_tags": [1.5],
+            }
+        )
+
