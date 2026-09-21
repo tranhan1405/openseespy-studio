@@ -187,8 +187,8 @@ class AnalysisDialog(QDialog):
             "existing",
         )
         self.driver_mode.setToolTip(
-            "Pushover/Cyclic require a nonzero reference load pattern for "
-            "DisplacementControl. Auto-generate is the safe default."
+            "DisplacementControl requires a nonzero reference load pattern. "
+            "Auto-generate is the safe default for Static, Pushover, and Cyclic."
         )
         self.driver_pattern=QComboBox()
         for pattern_tag, pattern_name in sorted(self.plain_patterns.items()):
@@ -203,7 +203,13 @@ class AnalysisDialog(QDialog):
         initial_driver_tag = None
         if (
             analysis is not None
-            and analysis.analysis_type in {"Pushover", "Cyclic"}
+            and (
+                analysis.analysis_type in {"Pushover", "Cyclic"}
+                or (
+                    analysis.analysis_type == "Static"
+                    and analysis.integrator == "DisplacementControl"
+                )
+            )
             and analysis.deferred_pattern_tags
         ):
             initial_driver_tag = int(analysis.deferred_pattern_tags[0])
@@ -399,7 +405,8 @@ class AnalysisDialog(QDialog):
         cyclic=kind=="Cyclic"
         static=kind=="Static"
         non_modal=not modal
-        staged=push or cyclic or transient
+        static_dc=static and integrator=="DisplacementControl"
+        staged=push or cyclic or transient or static_dc
 
         # Identity and core solver configuration are common to every analysis.
         common={
@@ -422,7 +429,12 @@ class AnalysisDialog(QDialog):
             elif integrator=="DisplacementControl":
                 visible.update({
                     "control_node","control_dof","disp_inc",
+                    "driver_mode",
                 })
+                if self.driver_mode.currentData() == "existing":
+                    visible.add("driver_pattern")
+                else:
+                    visible.add("driver_distribution")
             elif integrator=="ArcLength":
                 visible.update({"arc_length_s","arc_length_alpha"})
         elif push:
@@ -528,7 +540,11 @@ class AnalysisDialog(QDialog):
 
     def driving_load_config(self) -> dict[str, object]:
         kind = self.kind.currentText()
-        if kind not in {"Pushover", "Cyclic"}:
+        is_static_dc = (
+            kind == "Static"
+            and self.integrator.currentText() == "DisplacementControl"
+        )
+        if kind not in {"Pushover", "Cyclic"} and not is_static_dc:
             return {"mode": "none"}
         mode = str(self.driver_mode.currentData() or "auto")
         return {
@@ -562,7 +578,13 @@ class AnalysisDialog(QDialog):
                 value=raw.strip()
                 if value:
                     deferred_pattern_tags.append(int(value))
-        elif kind in {"Pushover", "Cyclic"}:
+        elif (
+            kind in {"Pushover", "Cyclic"}
+            or (
+                kind == "Static"
+                and self.integrator.currentText() == "DisplacementControl"
+            )
+        ):
             driver = self.driving_load_config()
             if driver["mode"] == "existing":
                 pattern_tag = driver.get("pattern_tag")
