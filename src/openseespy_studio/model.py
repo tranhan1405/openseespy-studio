@@ -7,6 +7,13 @@ from typing import Dict, Iterable, Tuple
 
 Vec3 = Tuple[float, float, float]
 
+SUPPORTED_ELEMENT_TYPES = {
+    "elasticBeamColumn",
+    "forceBeamColumn",
+    "dispBeamColumn",
+    "truss",
+}
+
 FIXITY_PRESETS: dict[str, Tuple[int, ...]] = {
     "Fixed": (1, 1, 1, 1, 1, 1),
     "Pinned": (1, 1, 1, 0, 0, 0),
@@ -169,11 +176,23 @@ class StructuralModel:
     nodes: Dict[int, Node] = field(default_factory=dict)
     elements: Dict[int, Element] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        self.name = str(self.name).strip() or "Untitled"
+        self.ndm = int(self.ndm)
+        self.ndf = int(self.ndf)
+        if self.ndm not in {2, 3}:
+            raise ValueError("Model ndm must be 2 or 3.")
+        if self.ndf < 1 or self.ndf > 6:
+            raise ValueError("Model ndf must be between 1 and 6.")
+
     def clear(self) -> None:
         self.nodes.clear()
         self.elements.clear()
 
     def add_node(self, tag: int, x: float, y: float, z: float = 0.0) -> Node:
+        tag = int(tag)
+        if tag <= 0:
+            raise ValueError("Node tag must be a positive integer.")
         if tag in self.nodes:
             raise ValueError(f"Node tag {tag} already exists")
         xyz = (float(x), float(y), float(z))
@@ -225,8 +244,16 @@ class StructuralModel:
         truss_material_tag: int | None = None,
         truss_do_rayleigh: bool = False,
     ) -> Element:
+        tag = int(tag)
+        i = int(i)
+        j = int(j)
+        element_type = str(element_type)
+        if tag <= 0:
+            raise ValueError("Element tag must be a positive integer.")
         if tag in self.elements:
             raise ValueError(f"Element tag {tag} already exists")
+        if element_type not in SUPPORTED_ELEMENT_TYPES:
+            raise ValueError(f"Unsupported element type: {element_type}")
         if i not in self.nodes or j not in self.nodes:
             raise ValueError(f"Element {tag} references missing nodes {i}, {j}")
         ele = Element(
