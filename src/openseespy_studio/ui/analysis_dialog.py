@@ -60,7 +60,7 @@ class AnalysisDialog(QDialog):
         self.kind=QComboBox(); self.kind.addItems(["Static","Pushover","Cyclic","Transient","Modal"]); self.kind.setCurrentText(default_kind)
         self.constraints=QComboBox(); self.constraints.addItems(["Transformation","Plain"]); self.constraints.setCurrentText(analysis.constraints_handler if analysis else "Transformation")
         self.numberer=QComboBox(); self.numberer.addItems(["RCM","Plain"]); self.numberer.setCurrentText(analysis.numberer if analysis else "RCM")
-        self.system=QComboBox(); self.system.addItems(["UmfPack","BandGeneral","ProfileSPD"]); self.system.setCurrentText(analysis.system if analysis else "UmfPack")
+        self.system=QComboBox(); self.system.addItems(["UmfPack","BandGeneral","ProfileSPD","SparseGeneral"]); self.system.setCurrentText(analysis.system if analysis else "UmfPack")
         self.test=QComboBox(); self.test.addItems(["NormDispIncr","NormUnbalance","EnergyIncr"]); self.test.setCurrentText(analysis.test if analysis else "NormDispIncr")
         self.tol=fs(analysis.tolerance if analysis else 1e-8,1e-16,1e10)
         self.max_iter=QSpinBox(); self.max_iter.setRange(1,100000); self.max_iter.setValue(analysis.max_iterations if analysis else 50)
