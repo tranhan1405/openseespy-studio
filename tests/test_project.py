@@ -2121,3 +2121,142 @@ def test_project_ground_node_cleanup_preserves_semantically_used_node():
 
     assert 2 in project.model.nodes
     assert 91 in project.nodal_loads
+
+
+def test_project_connection_tag_rename_cascades_references():
+    model = StructuralModel("connection-rename", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    project = ProjectDatabase(name="Connection rename", model=model)
+    project.add_material(
+        MaterialData(1, "Spring", "Elastic", {"E": 1000.0})
+    )
+    project.add_connection(
+        ConnectionData(
+            10,
+            "Spring",
+            "zeroLength",
+            1,
+            2,
+            materials_by_dof={1: 1},
+        )
+    )
+    project.add_recorder(
+        RecorderData(
+            20,
+            "Connection force",
+            "Element",
+            target_tags=[10],
+            response="force",
+        )
+    )
+    project.add_analysis(
+        AnalysisSettingsData(30, "Static", "Static")
+    )
+    project.add_solution_result(
+        SolutionResultData(
+            40,
+            30,
+            "Connection result",
+            "MemberForce",
+            element_scope=[10],
+        )
+    )
+
+    project.update_connection(
+        10,
+        ConnectionData(
+            15,
+            "Spring renamed",
+            "zeroLength",
+            1,
+            2,
+            materials_by_dof={1: 1},
+        ),
+    )
+
+    assert 10 not in project.connections
+    assert 15 in project.connections
+    assert project.recorders[20].target_tags == [15]
+    assert project.solution_results[40].element_scope == [15]
+
+
+def test_project_remove_connection_prunes_element_recorder():
+    model = StructuralModel("connection-delete-recorder", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    project = ProjectDatabase(
+        name="Connection delete recorder",
+        model=model,
+    )
+    project.add_material(
+        MaterialData(1, "Spring", "Elastic", {"E": 1000.0})
+    )
+    project.add_connection(
+        ConnectionData(
+            10,
+            "Spring",
+            "zeroLength",
+            1,
+            2,
+            materials_by_dof={1: 1},
+        )
+    )
+    project.add_recorder(
+        RecorderData(
+            20,
+            "Connection force",
+            "Element",
+            target_tags=[10],
+            response="force",
+        )
+    )
+
+    project.remove_connection(10)
+
+    assert 10 not in project.connections
+    assert 20 not in project.recorders
+
+
+def test_project_connection_cleanup_preserves_generated_hinge_section():
+    model = StructuralModel("connection-generated-section", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    model.add_node(3, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        3,
+        element_type="forceBeamColumn",
+        section_tag=6,
+        transf_tag=1,
+        hinge_i_section_tag=5,
+        hinge_j_section_tag=6,
+        interior_section_tag=6,
+        integration_type="HingeRadau",
+    )
+    project = ProjectDatabase(
+        name="Generated hinge section",
+        model=model,
+    )
+    project.add_material(
+        MaterialData(1, "Spring", "Elastic", {"E": 1000.0})
+    )
+    project.add_section(SectionData(5, "Generated hinge", "Fiber"))
+    project.add_section(SectionData(6, "Member section", "Fiber"))
+    project.add_connection(
+        ConnectionData(
+            10,
+            "Spring",
+            "zeroLength",
+            1,
+            2,
+            materials_by_dof={1: 1},
+            generated_section_tag=5,
+        )
+    )
+
+    project.remove_connection(10, cleanup_ground=True)
+
+    assert 10 not in project.connections
+    assert 5 in project.sections
