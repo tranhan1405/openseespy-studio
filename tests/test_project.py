@@ -2320,3 +2320,37 @@ def test_project_remove_connection_drops_fully_scoped_solution_result():
     project.remove_connection(10)
 
     assert 30 not in project.solution_results
+
+
+def test_project_sync_generated_ground_node_after_geometry_edit():
+    model = StructuralModel("ground-sync", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    project = ProjectDatabase(name="Ground sync", model=model)
+    project.add_material(
+        MaterialData(1, "Spring", "Elastic", {"E": 1000.0})
+    )
+    project.add_connection(
+        ConnectionData(
+            10,
+            "Ground spring",
+            "zeroLength",
+            1,
+            2,
+            materials_by_dof={1: 1},
+            generated_ground_node=2,
+        )
+    )
+
+    project.model.translate_entities(node_tags=[1], dx=2.5, dy=-1.0)
+    updated = project.sync_generated_ground_nodes()
+
+    assert updated == [2]
+    assert project.model.nodes[2].xyz == project.model.nodes[1].xyz
+    assert project.model.nodes[2].fixity == (1, 1, 1)
+
+    # Managed ground nodes cannot remain detached even if they were moved
+    # directly as part of a broad geometry selection.
+    project.model.nodes[2].xyz = (99.0, 99.0, 0.0)
+    project.sync_generated_ground_nodes()
+    assert project.model.nodes[2].xyz == project.model.nodes[1].xyz
