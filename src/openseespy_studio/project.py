@@ -189,15 +189,19 @@ class MaterialData:
             normalized[key] = float(self.parameters.get(key, defaults[key]))
         self.parameters = normalized
 
-        self.base_material_tag = (
-            None
-            if self.base_material_tag is None
-            else int(self.base_material_tag)
-        )
-        self.material_tags = [int(tag) for tag in self.material_tags]
+        raw_base_material_tag = self.base_material_tag
+        raw_material_tags = list(self.material_tags)
         self.factors = [float(value) for value in self.factors]
 
         if self.material_type in {"MinMax", "Fatigue"}:
+            self.base_material_tag = (
+                None
+                if raw_base_material_tag is None
+                else _strict_int(
+                    raw_base_material_tag,
+                    "Base material tag",
+                )
+            )
             if self.base_material_tag is None or self.base_material_tag <= 0:
                 raise ValueError(
                     f"{self.material_type} requires a valid base material tag."
@@ -206,6 +210,10 @@ class MaterialData:
             self.factors = []
         elif self.material_type in {"Parallel", "Series"}:
             self.base_material_tag = None
+            self.material_tags = [
+                _strict_int(tag, "Component material tag")
+                for tag in raw_material_tags
+            ]
             if not self.material_tags:
                 raise ValueError(
                     f"{self.material_type} requires at least one component material."
@@ -317,14 +325,8 @@ class MaterialData:
                     ]["density"],
                 )
             ),
-            base_material_tag=(
-                None
-                if data.get("base_material_tag") is None
-                else int(data.get("base_material_tag"))
-            ),
-            material_tags=[
-                int(value) for value in data.get("material_tags", [])
-            ],
+            base_material_tag=data.get("base_material_tag"),
+            material_tags=list(data.get("material_tags", [])),
             factors=[
                 float(value) for value in data.get("factors", [])
             ],
@@ -362,7 +364,10 @@ class FiberData:
         self.y = float(self.y)
         self.z = float(self.z)
         self.area = float(self.area)
-        self.material_tag = int(self.material_tag)
+        self.material_tag = _strict_int(
+            self.material_tag,
+            "Fiber material tag",
+        )
         if any(
             not math.isfinite(value)
             for value in (self.y, self.z, self.area)
@@ -387,7 +392,7 @@ class FiberData:
             y=float(data["y"]),
             z=float(data["z"]),
             area=float(data["area"]),
-            material_tag=int(data["material_tag"]),
+            material_tag=data["material_tag"],
         )
 
 
@@ -448,7 +453,10 @@ class FiberComponentData:
     def __post_init__(self) -> None:
         self.component_type = str(self.component_type)
         self.name = str(self.name).strip() or self.component_type
-        self.material_tag = int(self.material_tag)
+        self.material_tag = _strict_int(
+            self.material_tag,
+            "Fiber component material tag",
+        )
         defaults = self.DEFAULTS.get(self.component_type)
         if defaults is None:
             raise ValueError(
@@ -647,7 +655,7 @@ class FiberComponentData:
         return cls(
             component_type=str(data["component_type"]),
             name=str(data.get("name", data["component_type"])),
-            material_tag=int(data["material_tag"]),
+            material_tag=data["material_tag"],
             parameters={
                 str(key): float(value)
                 for key, value in dict(data.get("parameters", {})).items()
@@ -695,10 +703,12 @@ class SectionData:
             else FiberComponentData.from_dict(component)
             for component in self.fiber_components
         ]
-        self.material_tag = (
-            None if self.material_tag is None else int(self.material_tag)
-        )
-        if self.section_type != "Elastic":
+        if self.section_type == "Elastic" and self.material_tag is not None:
+            self.material_tag = _strict_int(
+                self.material_tag,
+                "Section material tag",
+            )
+        else:
             self.material_tag = None
 
         raw_geometry = (
@@ -900,13 +910,27 @@ class ConstraintData:
         self.tag = _strict_int(self.tag, "Constraint tag")
         self.name = str(self.name).strip() or f"Constraint {self.tag}"
         self.constraint_type = str(self.constraint_type)
-        self.retained_node = int(self.retained_node)
-        self.constrained_nodes = sorted({
-            int(tag)
+        self.retained_node = _strict_int(
+            self.retained_node,
+            "Constraint retained node",
+        )
+        normalized_constrained_nodes = {
+            _strict_int(tag, "Constraint constrained node")
             for tag in self.constrained_nodes
-            if int(tag) != self.retained_node
-        })
-        self.dofs = tuple(sorted({int(dof) for dof in self.dofs}))
+        }
+        self.constrained_nodes = sorted(
+            tag
+            for tag in normalized_constrained_nodes
+            if tag != self.retained_node
+        )
+        self.dofs = tuple(sorted({
+            (
+                _strict_int(dof, "Constraint DOF")
+                if self.constraint_type == "equalDOF"
+                else int(dof)
+            )
+            for dof in self.dofs
+        }))
         self.link_type = str(self.link_type)
         self.perp_dirn = int(self.perp_dirn)
 
@@ -953,11 +977,9 @@ class ConstraintData:
             tag=data["tag"],
             name=str(data.get("name", f"Constraint {data['tag']}")),
             constraint_type=str(data.get("constraint_type", "equalDOF")),
-            retained_node=int(data["retained_node"]),
-            constrained_nodes=[
-                int(tag) for tag in data.get("constrained_nodes", [])
-            ],
-            dofs=tuple(int(dof) for dof in data.get("dofs", [])),
+            retained_node=data["retained_node"],
+            constrained_nodes=list(data.get("constrained_nodes", [])),
+            dofs=tuple(data.get("dofs", [])),
             link_type=str(data.get("link_type", "beam")),
             perp_dirn=int(data.get("perp_dirn", 3)),
         )
@@ -983,8 +1005,8 @@ class ConnectionData:
         self.tag = _strict_int(self.tag, "Connection tag")
         self.name = str(self.name).strip() or f"Connection {self.tag}"
         self.connection_type = str(self.connection_type)
-        self.node_i = int(self.node_i)
-        self.node_j = int(self.node_j)
+        self.node_i = _strict_int(self.node_i, "Connection node i")
+        self.node_j = _strict_int(self.node_j, "Connection node j")
         self.materials_by_dof = {
             int(dof): int(material_tag)
             for dof, material_tag in self.materials_by_dof.items()
@@ -1100,8 +1122,8 @@ class ConnectionData:
             connection_type=str(
                 data.get("connection_type", "zeroLength")
             ),
-            node_i=int(data["node_i"]),
-            node_j=int(data["node_j"]),
+            node_i=data["node_i"],
+            node_j=data["node_j"],
             materials_by_dof={
                 int(dof): int(material_tag)
                 for dof, material_tag in dict(
