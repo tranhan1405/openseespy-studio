@@ -166,6 +166,7 @@ def check_opensees_material_in_process(material_type: str) -> None:
 
     ops.wipe()
     try:
+        ops.model("basic", "-ndm", 1, "-ndf", 1)
         ops.uniaxialMaterial(kind, 2147483000, *args)
     finally:
         ops.wipe()
