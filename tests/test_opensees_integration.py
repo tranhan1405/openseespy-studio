@@ -114,8 +114,10 @@ def test_generated_static_cantilever_runs_in_real_opensees(tmp_path: Path):
 
     script = to_openseespy(
         model,
+        materials=materials,
         sections=sections,
         transformations=transformations,
+        connections=connections,
         time_series=time_series,
         load_patterns=load_patterns,
         nodal_loads=nodal_loads,
@@ -216,6 +218,8 @@ def _run_real_generated(
     sections: dict[int, SectionData],
     transformations: dict[int, TransformationData],
     analysis: AnalysisSettingsData,
+    materials: dict[int, MaterialData] | None = None,
+    connections: dict[int, ConnectionData] | None = None,
     time_series: dict[int, TimeSeriesData] | None = None,
     load_patterns: dict[int, LoadPatternData] | None = None,
     nodal_loads: dict[int, NodalLoadData] | None = None,
@@ -244,6 +248,123 @@ def _run_real_generated(
     assert exit_code == 0, payload.get("error", "")
     assert payload["status"] == "completed"
     return payload["results"]
+
+
+def test_generated_moment_curvature_runs_in_real_opensees(tmp_path: Path):
+    model = StructuralModel("moment-curvature-real", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    model.set_fixity(1, (1, 1, 1))
+    model.set_fixity(2, (0, 1, 0))
+
+    materials = {
+        1: MaterialData(
+            1,
+            "Elastic section material",
+            "Elastic",
+            parameters={"E": 1000.0},
+        )
+    }
+    sections = {
+        1: SectionData(
+            1,
+            "Moment-curvature fiber section",
+            "Fiber",
+            fibers=[
+                FiberData(-1.0, 0.0, 1.0, 1),
+                FiberData(1.0, 0.0, 1.0, 1),
+            ],
+        )
+    }
+    connections = {
+        1: ConnectionData(
+            1,
+            "Section test",
+            "zeroLengthSection",
+            1,
+            2,
+            section_tag=1,
+        )
+    }
+    series = {
+        1: TimeSeriesData(1, "Axial preload", "Constant", factor=1.0),
+        2: TimeSeriesData(2, "Unit moment", "Linear", factor=1.0),
+    }
+    patterns = {
+        1: LoadPatternData(1, "Axial preload", "Plain", time_series_tag=1),
+        2: LoadPatternData(2, "Moment driver", "Plain", time_series_tag=2),
+    }
+    loads = {
+        1: NodalLoadData(
+            1,
+            "Axial preload",
+            pattern_tag=1,
+            node_tag=2,
+            values=(-10.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        ),
+        2: NodalLoadData(
+            2,
+            "Unit moment",
+            pattern_tag=2,
+            node_tag=2,
+            values=(0.0, 0.0, 1.0, 0.0, 0.0, 0.0),
+        ),
+    }
+    analysis = AnalysisSettingsData(
+        1,
+        "Moment-curvature smoke",
+        analysis_type="Static",
+        constraints_handler="Plain",
+        numberer="Plain",
+        system="BandGeneral",
+        test="NormUnbalance",
+        tolerance=1.0e-10,
+        max_iterations=20,
+        algorithm="Newton",
+        integrator="DisplacementControl",
+        steps=4,
+        control_node=2,
+        control_dof=3,
+        displacement_increment=0.001,
+        preload_gravity=True,
+        gravity_steps=1,
+        deferred_pattern_tags=[2],
+        recovery=False,
+        adaptive_step=False,
+        live_convergence=False,
+    )
+
+    results = _run_real_generated(
+        tmp_path,
+        "moment-curvature",
+        model=model,
+        materials=materials,
+        sections=sections,
+        transformations={},
+        connections=connections,
+        analysis=analysis,
+        time_series=series,
+        load_patterns=patterns,
+        nodal_loads=loads,
+    )
+
+    spec = results["moment_curvature"]
+    assert spec["kind"] == "moment-curvature"
+    assert spec["element_tag"] == 1
+    assert spec["moment_component"] == "Mz"
+    assert spec["moment_index"] == 1
+
+    history = results["history"]["moment_curvature"]
+    assert len(history["force"]) == 4
+    assert len(history["deformation"]) == 4
+    curvature = [float(row[1]) for row in history["deformation"]]
+    moment = [float(row[1]) for row in history["force"]]
+    assert curvature[-1] == pytest.approx(0.004, abs=1.0e-10)
+    assert abs(moment[-1]) > 0.0
+    assert all(
+        abs(curvature[index]) > abs(curvature[index - 1])
+        for index in range(1, len(curvature))
+    )
 
 
 def test_generated_modal_runs_in_real_opensees(tmp_path: Path):
