@@ -767,3 +767,140 @@ def test_generator_allows_unconstrained_dof_on_equal_dof_secondary_node():
     )
 
     assert "ops.integrator('DisplacementControl', 2, 2" in code
+
+
+def test_generator_rejects_rigid_link_bar_translational_control_dof():
+    model = StructuralModel("rigid-link-bar-control", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+
+    constraint = ConstraintData(
+        4,
+        "Rigid bar",
+        "rigidLink",
+        retained_node=3,
+        constrained_nodes=[2],
+        link_type="bar",
+    )
+    analysis = AnalysisSettingsData(
+        27,
+        "Push dependent UX",
+        "Pushover",
+        control_node=2,
+        control_dof=1,
+        displacement_increment=0.001,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"control node 2 DOF 1 is a constrained/dependent DOF in rigidLink",
+    ):
+        to_openseespy(
+            model,
+            constraints={4: constraint},
+            analyses={27: analysis},
+            active_analysis_tag=27,
+        )
+
+
+def test_generator_allows_rigid_link_bar_rotational_control_dof():
+    model = StructuralModel("rigid-link-bar-rotation", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+
+    constraint = ConstraintData(
+        5,
+        "Rigid bar",
+        "rigidLink",
+        retained_node=3,
+        constrained_nodes=[2],
+        link_type="bar",
+    )
+    analysis = AnalysisSettingsData(
+        28,
+        "Push free RZ",
+        "Pushover",
+        control_node=2,
+        control_dof=3,
+        displacement_increment=0.001,
+    )
+
+    code = to_openseespy(
+        model,
+        constraints={5: constraint},
+        analyses={28: analysis},
+        active_analysis_tag=28,
+    )
+
+    assert "ops.rigidLink('bar', 3, 2)" in code
+    assert "ops.integrator('DisplacementControl', 2, 3" in code
+
+
+def test_generator_rejects_rigid_link_beam_rotational_control_dof():
+    model = StructuralModel("rigid-link-beam-rotation", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+
+    constraint = ConstraintData(
+        6,
+        "Rigid beam",
+        "rigidLink",
+        retained_node=3,
+        constrained_nodes=[2],
+        link_type="beam",
+    )
+    analysis = AnalysisSettingsData(
+        29,
+        "Push dependent RZ",
+        "Pushover",
+        control_node=2,
+        control_dof=3,
+        displacement_increment=0.001,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"control node 2 DOF 3 is a constrained/dependent DOF in rigidLink",
+    ):
+        to_openseespy(
+            model,
+            constraints={6: constraint},
+            analyses={29: analysis},
+            active_analysis_tag=29,
+        )
+
+
+def test_generator_allows_rigid_link_retained_node_as_control():
+    model = StructuralModel("rigid-link-master-control", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+
+    constraint = ConstraintData(
+        7,
+        "Rigid beam",
+        "rigidLink",
+        retained_node=3,
+        constrained_nodes=[2],
+        link_type="beam",
+    )
+    analysis = AnalysisSettingsData(
+        30,
+        "Push master UX",
+        "Pushover",
+        control_node=3,
+        control_dof=1,
+        displacement_increment=0.001,
+    )
+
+    code = to_openseespy(
+        model,
+        constraints={7: constraint},
+        analyses={30: analysis},
+        active_analysis_tag=30,
+    )
+
+    assert "ops.integrator('DisplacementControl', 3, 1" in code

@@ -2162,25 +2162,40 @@ class ProjectDatabase:
         *,
         ignore_analysis_tags: set[int] | None = None,
     ) -> None:
-        if constraint.constraint_type != "equalDOF":
+        if constraint.constraint_type not in {"equalDOF", "rigidLink"}:
             return
         ignored = {
             int(tag) for tag in (ignore_analysis_tags or set())
         }
+
+        def constrains_control_dof(
+            analysis: AnalysisSettingsData,
+        ) -> bool:
+            if analysis.control_node not in constraint.constrained_nodes:
+                return False
+            if constraint.constraint_type == "equalDOF":
+                return analysis.control_dof in constraint.dofs
+            if constraint.link_type == "beam":
+                return True
+            return analysis.control_dof <= min(
+                int(self.model.ndm),
+                int(self.model.ndf),
+            )
+
         conflicts = sorted(
             analysis.tag
             for analysis_tag, analysis in self.analyses.items()
             if (
                 int(analysis_tag) not in ignored
                 and self._analysis_uses_control_node(analysis)
-                and analysis.control_node in constraint.constrained_nodes
-                and analysis.control_dof in constraint.dofs
+                and constrains_control_dof(analysis)
             )
         )
         if conflicts:
             raise ValueError(
-                f"equalDOF constraint {constraint.tag} makes a "
-                "DisplacementControl DOF dependent for analysis tag(s): "
+                f"{constraint.constraint_type} constraint {constraint.tag} "
+                "makes a DisplacementControl DOF dependent for analysis "
+                "tag(s): "
                 + ", ".join(map(str, conflicts))
                 + ". Use the retained node or another independent DOF."
             )
@@ -2985,6 +3000,36 @@ class ProjectDatabase:
                 + ". Use the retained node or another independent DOF."
             )
 
+    def _validate_analysis_rigid_link_control_conflict(
+        self,
+        analysis: AnalysisSettingsData,
+    ) -> None:
+        if not self._analysis_uses_control_node(analysis):
+            return
+        conflicts = sorted(
+            constraint.tag
+            for constraint in self.constraints.values()
+            if (
+                constraint.constraint_type == "rigidLink"
+                and analysis.control_node in constraint.constrained_nodes
+                and (
+                    constraint.link_type == "beam"
+                    or analysis.control_dof <= min(
+                        int(self.model.ndm),
+                        int(self.model.ndf),
+                    )
+                )
+            )
+        )
+        if conflicts:
+            raise ValueError(
+                f"{analysis.analysis_type} control node "
+                f"{analysis.control_node} DOF {analysis.control_dof} "
+                "is a constrained/dependent DOF in rigidLink constraint(s): "
+                + ", ".join(map(str, conflicts))
+                + ". Use the retained node or another independent DOF."
+            )
+
     def _validate_analysis_prescribed_control_conflict(
         self,
         analysis: AnalysisSettingsData,
@@ -3036,6 +3081,7 @@ class ProjectDatabase:
                     "is restrained by a support."
                 )
         self._validate_analysis_equal_dof_control_conflict(analysis)
+        self._validate_analysis_rigid_link_control_conflict(analysis)
         self._validate_analysis_prescribed_control_conflict(analysis)
         self.analyses[analysis.tag]=analysis
         if self.active_analysis_tag is None:
@@ -3063,6 +3109,7 @@ class ProjectDatabase:
                     "is restrained by a support."
                 )
         self._validate_analysis_equal_dof_control_conflict(analysis)
+        self._validate_analysis_rigid_link_control_conflict(analysis)
         self._validate_analysis_prescribed_control_conflict(
             analysis,
             ignore_analysis_tags={original_tag},

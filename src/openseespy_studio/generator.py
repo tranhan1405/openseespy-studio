@@ -2501,6 +2501,30 @@ def to_openseespy(
                 + ". Use the retained node or another independent DOF."
             )
 
+        rigid_link_conflicts = sorted(
+            constraint.tag
+            for constraint in (constraints or {}).values()
+            if (
+                constraint.constraint_type == "rigidLink"
+                and int(active_analysis.control_node)
+                in {int(tag) for tag in constraint.constrained_nodes}
+                and (
+                    constraint.link_type == "beam"
+                    or int(active_analysis.control_dof)
+                    <= min(int(model.ndm), int(model.ndf))
+                )
+            )
+        )
+        if rigid_link_conflicts:
+            raise ValueError(
+                f"{active_analysis.analysis_type} control node "
+                f"{active_analysis.control_node} DOF "
+                f"{active_analysis.control_dof} is a constrained/dependent "
+                "DOF in rigidLink constraint(s): "
+                + ", ".join(map(str, rigid_link_conflicts))
+                + ". Use the retained node or another independent DOF."
+            )
+
     lines: list[str] = [
         "import json",
         "import math",

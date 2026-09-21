@@ -426,3 +426,93 @@ def test_project_allows_retained_equal_dof_node_as_control():
     )
 
     assert project.analyses[32].control_node == 3
+
+
+def test_project_rejects_analysis_using_rigid_link_bar_dependent_translation():
+    project = build_project()
+    project.model.add_node(3, 10.0, 0.0, 0.0)
+    project.add_constraint(
+        ConstraintData(
+            33,
+            "Rigid bar",
+            "rigidLink",
+            retained_node=3,
+            constrained_nodes=[2],
+            link_type="bar",
+        )
+    )
+
+    try:
+        project.add_analysis(
+            AnalysisSettingsData(
+                33,
+                "Push constrained UX",
+                "Pushover",
+                control_node=2,
+                control_dof=1,
+                displacement_increment=0.001,
+            )
+        )
+    except ValueError as exc:
+        assert "constrained/dependent DOF in rigidLink constraint" in str(exc)
+    else:
+        raise AssertionError("Expected rigidLink/control analysis conflict")
+
+
+def test_project_allows_rigid_link_bar_rotation_as_control():
+    project = build_project()
+    project.model.add_node(3, 10.0, 0.0, 0.0)
+    project.add_constraint(
+        ConstraintData(
+            34,
+            "Rigid bar",
+            "rigidLink",
+            retained_node=3,
+            constrained_nodes=[2],
+            link_type="bar",
+        )
+    )
+
+    project.add_analysis(
+        AnalysisSettingsData(
+            34,
+            "Push constrained RZ",
+            "Pushover",
+            control_node=2,
+            control_dof=3,
+            displacement_increment=0.001,
+        )
+    )
+
+    assert project.analyses[34].control_dof == 3
+
+
+def test_project_rejects_rigid_link_beam_added_after_rotation_control_analysis():
+    project = build_project()
+    project.model.add_node(3, 10.0, 0.0, 0.0)
+    project.add_analysis(
+        AnalysisSettingsData(
+            35,
+            "Push RZ",
+            "Pushover",
+            control_node=2,
+            control_dof=3,
+            displacement_increment=0.001,
+        )
+    )
+
+    try:
+        project.add_constraint(
+            ConstraintData(
+                35,
+                "Rigid beam",
+                "rigidLink",
+                retained_node=3,
+                constrained_nodes=[2],
+                link_type="beam",
+            )
+        )
+    except ValueError as exc:
+        assert "makes a DisplacementControl DOF dependent" in str(exc)
+    else:
+        raise AssertionError("Expected analysis/rigidLink conflict")
