@@ -500,9 +500,7 @@ def build_test_column(
 
     model: StructuralModel = project.model
     node_tag = model.next_node_tag()
-    element_tag = model.next_element_tag()
-    while element_tag in project.connections:
-        element_tag += 1
+    element_tag = project.next_element_tag()
 
     transformation_tag, created_transformation = _resolve_transformation(
         project,
