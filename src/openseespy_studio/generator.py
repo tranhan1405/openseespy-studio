@@ -273,6 +273,30 @@ def material_to_openseespy(
             f"{p['eta']:g}, {damage!r})"
         )
 
+    if material.material_type == "FRPConfinedConcrete":
+        if not (
+            unit_system.length == "mm"
+            and unit_system.force == "N"
+        ):
+            raise ValueError(
+                "FRPConfinedConcrete is unit-sensitive and requires "
+                "project units mm - N - s (stress in MPa), matching the "
+                "OpenSees material documentation."
+            )
+        length = unit_system.length_from_m
+        return (
+            "ops.uniaxialMaterial('FRPConfinedConcrete', "
+            f"{material.tag}, "
+            f"{stress(p['fpc1']):g}, {stress(p['fpc2']):g}, "
+            f"{p['epsc0']:g}, {length(p['D']):g}, {length(p['c']):g}, "
+            f"{stress(p['Ej']):g}, {length(p['Sj']):g}, "
+            f"{length(p['tj']):g}, {p['eju']:g}, {length(p['S']):g}, "
+            f"{stress(p['fyl']):g}, {stress(p['fyh']):g}, "
+            f"{length(p['dlong']):g}, {length(p['dtrans']):g}, "
+            f"{stress(p['Es']):g}, {p['nu0']:g}, {p['k']:g}, "
+            f"{p['useBuck']:g})"
+        )
+
     if material.material_type == "FRPConfinedConcrete02":
         if not (
             unit_system.length == "mm"
