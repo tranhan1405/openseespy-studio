@@ -1506,3 +1506,50 @@ def test_iterative_analysis_rejects_invalid_active_convergence_settings(
             "Static",
             **kwargs,
         )
+
+
+@pytest.mark.parametrize("control_dof", [0, 7, -2])
+def test_modal_ignores_unused_control_dof(control_dof):
+    analysis = AnalysisSettingsData(
+        92,
+        "Modal ignores control DOF",
+        "Modal",
+        num_modes=1,
+        control_dof=control_dof,
+    )
+    assert analysis.control_dof == control_dof
+
+
+@pytest.mark.parametrize(
+    "analysis_type",
+    ["Static", "Pushover", "Cyclic", "Transient"],
+)
+def test_nonmodal_analyses_reject_control_dof_outside_supported_range(
+    analysis_type,
+):
+    kwargs = {"control_dof": 7}
+
+    if analysis_type == "Pushover":
+        kwargs.update(
+            control_node=2,
+            displacement_increment=0.001,
+        )
+    elif analysis_type == "Cyclic":
+        kwargs.update(
+            control_node=2,
+            cyclic_targets=[0.001, -0.001],
+            cyclic_increment=0.0005,
+        )
+    elif analysis_type == "Transient":
+        kwargs.update(dt=0.01)
+
+    with pytest.raises(
+        ValueError,
+        match="Control DOF must be 1..6",
+    ):
+        AnalysisSettingsData(
+            93,
+            f"Invalid {analysis_type} control DOF",
+            analysis_type,
+            **kwargs,
+        )

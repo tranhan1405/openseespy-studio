@@ -1551,7 +1551,11 @@ class AnalysisSettingsData:
             and self.steps < 1
         ):
             raise ValueError("Analysis steps must be at least 1.")
-        if self.control_dof not in range(1,7): raise ValueError("Control DOF must be 1..6.")
+        if (
+            self.analysis_type != "Modal"
+            and self.control_dof not in range(1, 7)
+        ):
+            raise ValueError("Control DOF must be 1..6.")
         uses_adaptive_step = (
             self.adaptive_step and self.analysis_type != "Modal"
         )
