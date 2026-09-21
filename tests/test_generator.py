@@ -11,7 +11,9 @@ from openseespy_studio.project import (
     MATERIAL_DEFAULTS,
     AnalysisSettingsData,
     ConstraintData,
+    ElementLoadData,
     LoadPatternData,
+    NodalLoadData,
     MaterialData,
     PrescribedDisplacementData,
     SectionData,
@@ -2388,3 +2390,127 @@ def test_generator_allows_retained_master_sp_through_preload_and_load_const():
     driver_index = code.index("ops.pattern('Plain', 2, 2)")
     assert sp_index < const_index < driver_index
     assert "ops.equalDOF(1, 2, 1)" in code
+
+
+def test_generator_rejects_load_pattern_with_missing_time_series():
+    model = StructuralModel("orphan-time-series", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+
+    patterns = {
+        1: LoadPatternData(1, "Orphan pattern", "Plain", time_series_tag=99)
+    }
+
+    with pytest.raises(
+        ValueError,
+        match=r"Load pattern\(s\) reference missing time series",
+    ):
+        to_openseespy(
+            model,
+            time_series={},
+            load_patterns=patterns,
+        )
+
+
+def test_generator_rejects_orphan_nodal_load_pattern():
+    model = StructuralModel("orphan-nodal-pattern", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    load = NodalLoadData(
+        1,
+        "Orphan nodal load",
+        99,
+        1,
+        (1.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"nodal load 1 -> missing pattern 99",
+    ):
+        to_openseespy(
+            model,
+            nodal_loads={1: load},
+        )
+
+
+def test_generator_rejects_orphan_element_load_reference():
+    model = StructuralModel("orphan-element-load", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    series = {1: TimeSeriesData(1, "Linear", "Linear")}
+    patterns = {
+        1: LoadPatternData(1, "Plain", "Plain", time_series_tag=1)
+    }
+    load = ElementLoadData(
+        1,
+        "Orphan beam load",
+        1,
+        99,
+        load_type="Uniform",
+        wy=-1.0,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"element load 1 -> missing element 99",
+    ):
+        to_openseespy(
+            model,
+            time_series=series,
+            load_patterns=patterns,
+            element_loads={1: load},
+        )
+
+
+def test_generator_rejects_prescribed_displacement_with_missing_pattern():
+    model = StructuralModel("orphan-sp-pattern", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    displacement = PrescribedDisplacementData(
+        1,
+        "Orphan SP",
+        99,
+        1,
+        1,
+        0.01,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"prescribed displacement 1 -> missing pattern 99",
+    ):
+        to_openseespy(
+            model,
+            prescribed_displacements={1: displacement},
+        )
+
+
+def test_generator_rejects_regular_load_on_uniform_excitation_pattern():
+    model = StructuralModel("load-on-excitation", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    series = {1: TimeSeriesData(1, "Path", "Path", dt=0.01, values=[0.0, 1.0])}
+    patterns = {
+        1: LoadPatternData(
+            1,
+            "Excitation",
+            "UniformExcitation",
+            time_series_tag=1,
+            direction=1,
+        )
+    }
+    load = NodalLoadData(
+        2,
+        "Invalid nodal load",
+        1,
+        1,
+        (1.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"nodal load 2 -> non-Plain pattern 1",
+    ):
+        to_openseespy(
+            model,
+            time_series=series,
+            load_patterns=patterns,
+            nodal_loads={2: load},
+        )

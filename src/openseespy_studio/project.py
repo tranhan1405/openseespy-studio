@@ -2901,9 +2901,39 @@ class ProjectDatabase:
             for displacement in self.prescribed_displacements.values():
                 if displacement.pattern_tag == original_tag:
                     displacement.pattern_tag = pattern.tag
+            for analysis in self.analyses.values():
+                if original_tag in analysis.deferred_pattern_tags:
+                    analysis.deferred_pattern_tags = sorted(
+                        pattern.tag if int(tag) == original_tag else int(tag)
+                        for tag in analysis.deferred_pattern_tags
+                    )
 
     def remove_load_pattern(self, tag: int) -> None:
         tag = int(tag)
+        driver_users = sorted(
+            analysis.tag
+            for analysis in self.analyses.values()
+            if (
+                self._analysis_uses_deferred_patterns(analysis)
+                and tag in analysis.deferred_pattern_tags
+            )
+        )
+        if driver_users:
+            raise ValueError(
+                "Load pattern is used as a driving/excitation pattern by "
+                "analysis tag(s): "
+                + ", ".join(map(str, driver_users))
+                + ". Reassign or update those analyses before deleting it."
+            )
+
+        for analysis in self.analyses.values():
+            if tag in analysis.deferred_pattern_tags:
+                analysis.deferred_pattern_tags = [
+                    int(value)
+                    for value in analysis.deferred_pattern_tags
+                    if int(value) != tag
+                ]
+
         self.load_patterns.pop(tag, None)
         for load_tag, load in list(self.nodal_loads.items()):
             if load.pattern_tag == tag:
@@ -3385,6 +3415,37 @@ class ProjectDatabase:
             )
         )
 
+    @staticmethod
+    def _analysis_uses_deferred_patterns(
+        analysis: AnalysisSettingsData,
+    ) -> bool:
+        return bool(
+            analysis.analysis_type in {"Transient", "Pushover", "Cyclic"}
+            or (
+                analysis.analysis_type == "Static"
+                and analysis.integrator == "DisplacementControl"
+            )
+        )
+
+    def _validate_analysis_pattern_references(
+        self,
+        analysis: AnalysisSettingsData,
+    ) -> None:
+        if not self._analysis_uses_deferred_patterns(analysis):
+            return
+        missing = sorted(
+            int(tag)
+            for tag in analysis.deferred_pattern_tags
+            if int(tag) not in self.load_patterns
+        )
+        if missing:
+            raise ValueError(
+                f"{analysis.analysis_type} analysis {analysis.tag} "
+                "references missing driving load pattern tag(s): "
+                + ", ".join(map(str, missing))
+                + "."
+            )
+
     def _analysis_pattern_is_active(
         self,
         analysis: AnalysisSettingsData,
@@ -3649,6 +3710,7 @@ class ProjectDatabase:
         if analysis.tag in self.analyses:
             raise ValueError(f"Analysis tag {analysis.tag} already exists.")
         self._validate_analysis_constraint_handler_compatibility(analysis)
+        self._validate_analysis_pattern_references(analysis)
         self._validate_analysis_duplicate_prescribed_dofs(analysis)
         self._validate_analysis_prescribed_mpc_conflict(analysis)
         self._validate_analysis_plain_prescribed_displacement_compatibility(
@@ -3684,6 +3746,7 @@ class ProjectDatabase:
         if original_tag not in self.analyses: raise ValueError(f"Analysis tag {original_tag} does not exist.")
         if analysis.tag!=original_tag and analysis.tag in self.analyses: raise ValueError(f"Analysis tag {analysis.tag} already exists.")
         self._validate_analysis_constraint_handler_compatibility(analysis)
+        self._validate_analysis_pattern_references(analysis)
         self._validate_analysis_duplicate_prescribed_dofs(
             analysis,
             ignore_analysis_tags={original_tag},

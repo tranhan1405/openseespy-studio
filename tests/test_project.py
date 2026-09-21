@@ -1594,3 +1594,114 @@ def test_project_rejects_analysis_activating_two_same_dof_sp_patterns():
                 constraints_handler="Transformation",
             )
         )
+
+
+def test_project_load_pattern_tag_rename_cascades_to_analysis_driver():
+    model = StructuralModel("pattern-rename", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    project = ProjectDatabase(name="Pattern rename", model=model)
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Driver", "Plain", time_series_tag=1)
+    )
+    project.add_analysis(
+        AnalysisSettingsData(
+            71,
+            "Pushover",
+            "Pushover",
+            control_node=1,
+            control_dof=1,
+            deferred_pattern_tags=[1],
+        )
+    )
+
+    project.update_load_pattern(
+        1,
+        LoadPatternData(5, "Driver renamed", "Plain", time_series_tag=1),
+    )
+
+    assert project.analyses[71].deferred_pattern_tags == [5]
+
+
+def test_project_rejects_removing_pattern_used_by_analysis_driver():
+    model = StructuralModel("pattern-remove-driver", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    project = ProjectDatabase(name="Pattern remove", model=model)
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Driver", "Plain", time_series_tag=1)
+    )
+    project.add_analysis(
+        AnalysisSettingsData(
+            72,
+            "Transient",
+            "Transient",
+            deferred_pattern_tags=[1],
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"used as a driving/excitation pattern",
+    ):
+        project.remove_load_pattern(1)
+
+    assert 1 in project.load_patterns
+
+
+def test_project_rejects_analysis_with_missing_active_driver_pattern():
+    model = StructuralModel("missing-driver", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    project = ProjectDatabase(name="Missing driver", model=model)
+
+    with pytest.raises(
+        ValueError,
+        match=r"references missing driving load pattern tag\(s\): 99",
+    ):
+        project.add_analysis(
+            AnalysisSettingsData(
+                73,
+                "Transient",
+                "Transient",
+                deferred_pattern_tags=[99],
+            )
+        )
+
+
+def test_project_ignores_stale_modal_deferred_pattern_reference():
+    model = StructuralModel("modal-stale-driver", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    project = ProjectDatabase(name="Modal stale", model=model)
+
+    project.add_analysis(
+        AnalysisSettingsData(
+            74,
+            "Modal",
+            "Modal",
+            deferred_pattern_tags=[99],
+        )
+    )
+
+    assert project.analyses[74].deferred_pattern_tags == [99]
+
+
+def test_project_removing_pattern_cleans_inactive_stale_analysis_reference():
+    model = StructuralModel("cleanup-stale-driver", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    project = ProjectDatabase(name="Cleanup stale", model=model)
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Background", "Plain", time_series_tag=1)
+    )
+    project.add_analysis(
+        AnalysisSettingsData(
+            75,
+            "Modal",
+            "Modal",
+            deferred_pattern_tags=[1],
+        )
+    )
+
+    project.remove_load_pattern(1)
+
+    assert project.analyses[75].deferred_pattern_tags == []

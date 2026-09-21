@@ -2430,6 +2430,80 @@ def to_openseespy(
         active_analysis is not None and deferred_pattern_tags
     )
 
+    missing_pattern_series = {
+        int(pattern.tag): int(pattern.time_series_tag)
+        for pattern in (load_patterns or {}).values()
+        if int(pattern.time_series_tag) not in (time_series or {})
+    }
+    if missing_pattern_series:
+        details = "; ".join(
+            f"pattern {tag} -> time series {series_tag}"
+            for tag, series_tag in sorted(missing_pattern_series.items())
+        )
+        raise ValueError(
+            "Load pattern(s) reference missing time series: "
+            + details
+            + "."
+        )
+
+    orphan_load_references: list[str] = []
+    for load in (nodal_loads or {}).values():
+        pattern = (load_patterns or {}).get(int(load.pattern_tag))
+        if int(load.node_tag) not in model.nodes:
+            orphan_load_references.append(
+                f"nodal load {load.tag} -> missing node {load.node_tag}"
+            )
+        if pattern is None:
+            orphan_load_references.append(
+                f"nodal load {load.tag} -> missing pattern {load.pattern_tag}"
+            )
+        elif pattern.pattern_type != "Plain":
+            orphan_load_references.append(
+                f"nodal load {load.tag} -> non-Plain pattern {load.pattern_tag}"
+            )
+
+    for load in (element_loads or {}).values():
+        pattern = (load_patterns or {}).get(int(load.pattern_tag))
+        if int(load.element_tag) not in model.elements:
+            orphan_load_references.append(
+                f"element load {load.tag} -> missing element {load.element_tag}"
+            )
+        if pattern is None:
+            orphan_load_references.append(
+                f"element load {load.tag} -> missing pattern {load.pattern_tag}"
+            )
+        elif pattern.pattern_type != "Plain":
+            orphan_load_references.append(
+                f"element load {load.tag} -> non-Plain pattern {load.pattern_tag}"
+            )
+
+    for displacement in (prescribed_displacements or {}).values():
+        pattern = (load_patterns or {}).get(int(displacement.pattern_tag))
+        if int(displacement.node_tag) not in model.nodes:
+            orphan_load_references.append(
+                "prescribed displacement "
+                f"{displacement.tag} -> missing node {displacement.node_tag}"
+            )
+        if pattern is None:
+            orphan_load_references.append(
+                "prescribed displacement "
+                f"{displacement.tag} -> missing pattern "
+                f"{displacement.pattern_tag}"
+            )
+        elif pattern.pattern_type != "Plain":
+            orphan_load_references.append(
+                "prescribed displacement "
+                f"{displacement.tag} -> non-Plain pattern "
+                f"{displacement.pattern_tag}"
+            )
+
+    if orphan_load_references:
+        raise ValueError(
+            "Load object reference error(s): "
+            + "; ".join(sorted(orphan_load_references))
+            + "."
+        )
+
     missing_constraint_nodes: dict[int, list[int]] = {}
     for constraint in (constraints or {}).values():
         missing = sorted({
