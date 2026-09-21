@@ -2432,6 +2432,16 @@ def to_openseespy(
 
     geometry_reference_errors: list[str] = []
 
+    duplicate_element_tags = sorted(
+        set(model.elements) & set((connections or {}).keys())
+    )
+    if duplicate_element_tags:
+        geometry_reference_errors.append(
+            "duplicate OpenSees element tag(s) shared by frame/truss and "
+            "connection: "
+            + ", ".join(map(str, duplicate_element_tags))
+        )
+
     for element in model.elements.values():
         missing = [
             int(tag)
