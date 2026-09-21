@@ -367,7 +367,7 @@ class StructuralModel:
         value = None if section_tag is None else int(section_tag)
         for tag in element_tags:
             element = self.elements.get(int(tag))
-            if element is None:
+            if element is None or element.element_type == "truss":
                 continue
             element.section_tag = value
             assigned.add(element.tag)
@@ -447,7 +447,7 @@ class StructuralModel:
         value = None if transf_tag is None else int(transf_tag)
         for tag in element_tags:
             element = self.elements.get(int(tag))
-            if element is None:
+            if element is None or element.element_type == "truss":
                 continue
             element.transf_tag = value
             assigned.add(element.tag)
@@ -481,6 +481,9 @@ class StructuralModel:
         dy: float = 0.0,
         dz: float = 0.0,
     ) -> set[int]:
+        offsets = (float(dx), float(dy), float(dz))
+        if any(not math.isfinite(value) for value in offsets):
+            raise ValueError("Translation offsets must be finite.")
         tags = self.entity_node_tags(
             node_tags=node_tags,
             element_tags=element_tags,
@@ -488,7 +491,12 @@ class StructuralModel:
         for tag in tags:
             node = self.nodes[tag]
             x, y, z = node.xyz
-            node.xyz = (x + float(dx), y + float(dy), z + float(dz))
+            self.set_coordinates(
+                tag,
+                x + offsets[0],
+                y + offsets[1],
+                z + offsets[2],
+            )
         return tags
 
     def rotate_entities(
@@ -511,7 +519,13 @@ class StructuralModel:
             element_tags=element_tags,
         )
         px, py, pz = map(float, pivot)
-        angle = math.radians(float(angle_deg))
+        raw_angle = float(angle_deg)
+        if (
+            not math.isfinite(raw_angle)
+            or any(not math.isfinite(value) for value in (px, py, pz))
+        ):
+            raise ValueError("Rotation angle and pivot must be finite.")
+        angle = math.radians(raw_angle)
         c = math.cos(angle)
         s = math.sin(angle)
 
@@ -529,7 +543,7 @@ class StructuralModel:
             else:
                 x, y = x * c - y * s, x * s + y * c
 
-            node.xyz = (x + px, y + py, z + pz)
+            self.set_coordinates(tag, x + px, y + py, z + pz)
         return tags
 
     def mirror_entities(
@@ -549,12 +563,14 @@ class StructuralModel:
             element_tags=element_tags,
         )
         coordinate = float(coordinate)
+        if not math.isfinite(coordinate):
+            raise ValueError("Mirror coordinate must be finite.")
         for tag in tags:
             node = self.nodes[tag]
             xyz = list(node.xyz)
             index = {"x": 0, "y": 1, "z": 2}[axis]
             xyz[index] = 2.0 * coordinate - xyz[index]
-            node.xyz = (float(xyz[0]), float(xyz[1]), float(xyz[2]))
+            self.set_coordinates(tag, xyz[0], xyz[1], xyz[2])
         return tags
 
     def copy_entities(
