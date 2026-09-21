@@ -1609,11 +1609,22 @@ class AnalysisSettingsData:
                 "GeneralizedAlpha requires alphaM >= alphaF >= 0.5 "
                 "for the documented unconditionally stable default scheme."
             )
-        if not 0.0 <= self.rayleigh_damping_ratio < 1.0:
+        if (
+            self.analysis_type == "Transient"
+            and not 0.0 <= self.rayleigh_damping_ratio < 1.0
+        ):
             raise ValueError("Rayleigh damping ratio must be in [0, 1).")
-        if self.rayleigh_mode_i < 1 or self.rayleigh_mode_j < 1:
+        if (
+            self.analysis_type == "Transient"
+            and self.rayleigh_damping_ratio > 0.0
+            and (self.rayleigh_mode_i < 1 or self.rayleigh_mode_j < 1)
+        ):
             raise ValueError("Rayleigh damping modes must be positive.")
-        if self.rayleigh_mode_i == self.rayleigh_mode_j and self.rayleigh_damping_ratio > 0.0:
+        if (
+            self.analysis_type == "Transient"
+            and self.rayleigh_damping_ratio > 0.0
+            and self.rayleigh_mode_i == self.rayleigh_mode_j
+        ):
             raise ValueError("Rayleigh damping needs two different modes.")
         if self.gravity_steps < 1:
             raise ValueError("Gravity preload steps must be at least 1.")

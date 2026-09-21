@@ -710,3 +710,77 @@ def test_transient_rejects_nonpositive_dt(dt):
             "Transient",
             dt=dt,
         )
+
+
+@pytest.mark.parametrize("analysis_type", ["Static", "Pushover", "Cyclic", "Modal"])
+def test_nontransient_analyses_ignore_unused_rayleigh_settings(analysis_type):
+    kwargs = {
+        "rayleigh_damping_ratio": 2.0,
+        "rayleigh_mode_i": 0,
+        "rayleigh_mode_j": 0,
+    }
+
+    if analysis_type == "Pushover":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    elif analysis_type == "Cyclic":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            cyclic_targets=[0.001, -0.001],
+            cyclic_increment=0.0005,
+        )
+    elif analysis_type == "Modal":
+        kwargs.update(num_modes=1)
+
+    analysis = AnalysisSettingsData(
+        65,
+        f"{analysis_type} ignores Rayleigh",
+        analysis_type,
+        **kwargs,
+    )
+    assert analysis.rayleigh_damping_ratio == 2.0
+
+
+def test_transient_without_rayleigh_ignores_unused_mode_numbers():
+    analysis = AnalysisSettingsData(
+        66,
+        "Transient without Rayleigh",
+        "Transient",
+        dt=0.01,
+        rayleigh_damping_ratio=0.0,
+        rayleigh_mode_i=0,
+        rayleigh_mode_j=0,
+    )
+    assert analysis.rayleigh_damping_ratio == 0.0
+
+
+@pytest.mark.parametrize(
+    ("ratio", "mode_i", "mode_j", "message"),
+    [
+        (1.0, 1, 3, "Rayleigh damping ratio must be in"),
+        (-0.01, 1, 3, "Rayleigh damping ratio must be in"),
+        (0.05, 0, 3, "Rayleigh damping modes must be positive"),
+        (0.05, 1, 0, "Rayleigh damping modes must be positive"),
+        (0.05, 2, 2, "Rayleigh damping needs two different modes"),
+    ],
+)
+def test_transient_rayleigh_validates_only_active_settings(
+    ratio,
+    mode_i,
+    mode_j,
+    message,
+):
+    with pytest.raises(ValueError, match=message):
+        AnalysisSettingsData(
+            67,
+            "Invalid transient Rayleigh",
+            "Transient",
+            dt=0.01,
+            rayleigh_damping_ratio=ratio,
+            rayleigh_mode_i=mode_i,
+            rayleigh_mode_j=mode_j,
+        )
