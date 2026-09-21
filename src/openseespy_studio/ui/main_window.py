@@ -4644,6 +4644,7 @@ class MainWindow(QMainWindow):
                     xyz = list(node.xyz)
                     xyz[axis] = float(value)
                     node.xyz = tuple(xyz)
+                    self.project.sync_generated_ground_nodes()
                 elif property_id.startswith("fixity_"):
                     index = int(property_id.rsplit("_", 1)[1])
                     values = list(node.fixity)
@@ -7158,6 +7159,7 @@ class MainWindow(QMainWindow):
             dy=dy,
             dz=dz,
         )
+        self.project.sync_generated_ground_nodes()
         self._refresh_all("Moved selected entities")
         self._record_project_change("Move selection", before)
 
@@ -7208,6 +7210,7 @@ class MainWindow(QMainWindow):
             angle_deg=angle,
             pivot=pivot,
         )
+        self.project.sync_generated_ground_nodes()
         self._refresh_all(
             f"Rotated selection {angle:g}° about {axis.upper()}"
         )
@@ -7229,6 +7232,7 @@ class MainWindow(QMainWindow):
             normal_axis=normal_axis,
             coordinate=coordinate,
         )
+        self.project.sync_generated_ground_nodes()
         self._refresh_all(
             f"Mirrored selection about {normal_axis.upper()}={coordinate:g}"
         )
