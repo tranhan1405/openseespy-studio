@@ -1759,6 +1759,7 @@ class AnalysisSettingsData:
     generalized_alpha_f: float = 1.0
     arc_length_s: float = 0.01
     arc_length_alpha: float = 1.0
+    algorithm_initial: bool = False
 
     def __post_init__(self) -> None:
         self.tag=_strict_int(self.tag, "Analysis tag"); self.name=str(self.name).strip() or f"Analysis {self.tag}"
@@ -1843,6 +1844,10 @@ class AnalysisSettingsData:
         self.show_external_console=_strict_bool(
             self.show_external_console,
             "Analysis show_external_console",
+        )
+        self.algorithm_initial=_strict_bool(
+            self.algorithm_initial,
+            "Analysis algorithm_initial",
         )
         numeric_values = (
             self.tolerance,
@@ -1949,6 +1954,10 @@ class AnalysisSettingsData:
             and self.test not in {"NormDispIncr","NormUnbalance","EnergyIncr"}
         ):
             raise ValueError("Unsupported convergence test.")
+        if self.algorithm_initial and self.algorithm != "ModifiedNewton":
+            raise ValueError(
+                "Initial-tangent option is only valid for ModifiedNewton."
+            )
         if (
             uses_iterative_convergence
             and self.algorithm not in {
@@ -2120,7 +2129,8 @@ class AnalysisSettingsData:
             "num_modes","eigen_solver","recovery","adaptive_step",
             "adaptive_cutback_factor","adaptive_min_factor",
             "adaptive_growth_factor","adaptive_easy_iterations",
-            "adaptive_growth_after","live_convergence","show_external_console"
+            "adaptive_growth_after","live_convergence","show_external_console",
+            "algorithm_initial"
         )}
 
     @classmethod
