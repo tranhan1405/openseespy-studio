@@ -66,6 +66,26 @@ def test_static_and_transient_catalogs_exclude_specialized_curves():
 
 
 
+def test_static_displacement_control_exposes_moment_curvature_result():
+    dc_types = {
+        choice.result_type
+        for choice in result_choices_for_analysis(
+            "Static",
+            integrator="DisplacementControl",
+        )
+    }
+    load_types = {
+        choice.result_type
+        for choice in result_choices_for_analysis(
+            "Static",
+            integrator="LoadControl",
+        )
+    }
+
+    assert "MomentCurvature" in dc_types
+    assert "MomentCurvature" not in load_types
+
+
 def test_convergence_result_label_matches_analysis_test():
     assert (
         convergence_result_label("NormUnbalance")
