@@ -72,6 +72,8 @@ def section_response_sources(
         if element.element_type not in {"forceBeamColumn", "dispBeamColumn"}:
             continue
         section_tag = element.section_tag
+        if section_tag is None:
+            continue
         count = max(1, int(element.integration_points))
         sources.append({
             "element_tag": int(tag),
