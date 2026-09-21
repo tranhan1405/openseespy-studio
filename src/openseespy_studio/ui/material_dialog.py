@@ -668,6 +668,33 @@ class MaterialDialog(QDialog):
         )
         root.addWidget(self.material_note)
 
+        self.source_note = QLabel()
+        self.source_note.setWordWrap(True)
+        self.source_note.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.source_note.setStyleSheet(
+            "padding: 7px; background: #fff8e8; color: #5d4a16;"
+        )
+        if material is not None and material.source:
+            reference = dict(
+                material.source.get("primary_reference", {})
+            )
+            evidence = dict(
+                material.source.get("parameter_evidence", {})
+            )
+            self.source_note.setText(
+                "Reference-backed material · "
+                f"status: {material.source.get('status', 'unknown')}\n"
+                f"{reference.get('title', '')}\n"
+                f"DOI: {reference.get('doi', '')}\n"
+                f"Evidence: {evidence.get('location', '')}"
+            )
+            self.source_note.show()
+        else:
+            self.source_note.hide()
+        root.addWidget(self.source_note)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.test_material_button = buttons.addButton(
             "Test Material...",
