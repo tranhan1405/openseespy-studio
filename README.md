@@ -73,7 +73,7 @@ when it can be traced to a specific source and parameter-evidence location.
 Journal references require a DOI. Unsupported or merely "commonly used"
 values are not silently promoted to verified presets.
 
-The library currently contains **100 verified parameter records**:
+The library currently contains **150 verified parameter records**:
 
 - 2 Steel02 Grade-60 reinforcing-steel records from Carreño et al. (2020),
   DOI `10.1061/(ASCE)ST.1943-541X.0002505`.
@@ -81,6 +81,12 @@ The library currently contains **100 verified parameter records**:
   (2026), DOI `10.1016/j.jobe.2026.115378`, covering five
   material/diameter groups, five L/D ratios and two modelling
   representations.
+- 50 Hysteretic reinforcing-steel records from the same Moodley et al.
+  (2026) study. Exact tensile/compressive backbones come from Appendix
+  Table B.2, truss cyclic parameters from Table B.3, and beam-column cyclic
+  parameters from Table B.5. Section 4.2.2 is retained as evidence for the
+  paper's beam-column assumption that the compression input backbone equals
+  the calibrated tensile backbone.
 - 12 Pinching4 grooved-fit piping-joint records from Qiu et al. (2023),
   DOI `10.1016/j.engstruct.2023.116615`.
 - 17 Pinching4 cold-formed-steel wall records from Singh et al. (2024),
@@ -94,18 +100,19 @@ The library currently contains **100 verified parameter records**:
 - 6 Pinching4 seismic sway-brace records from Shang et al. (2022),
   DOI `10.1016/j.jobe.2022.104826`.
 
-These are **published/calibrated parameter records**, not 100 unrelated
+These are **published/calibrated parameter records**, not 150 unrelated
 chemical materials. SARE exposes specimen/configuration, modelling
 representation, applicability and limitations so a paper-specific parameter
 set is not mistaken for a universal material-grade default.
 
-For response-based models such as Pinching4, the library also records the
-physical response context and source units. Force-displacement records are
-stored internally in N/m-based SI quantities, while moment-rotation records
-are stored in N·m/rad. SARE converts these values to the active project unit
-system when displaying, editing and generating OpenSeesPy. Legacy/manual
-Pinching4 definitions without response metadata retain their previous raw
-behavior for backward compatibility.
+For response-based models such as Pinching4 and Hysteretic, the library also
+records the physical response context and source units. Force-displacement
+records are stored internally in N/m-based SI quantities, moment-rotation
+records in N·m/rad, and sourced stress-strain Hysteretic records store stress
+in Pa and strain as decimal strain. SARE converts these values to the active
+project unit system when displaying, editing and generating OpenSeesPy.
+Legacy/manual Pinching4 and Hysteretic definitions without response metadata
+retain their previous raw behavior for backward compatibility.
 
 Library records store the material/grade, constitutive model, complete
 parameter set, applicability, limitations, primary citation, DOI, exact
