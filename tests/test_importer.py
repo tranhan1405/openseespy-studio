@@ -315,3 +315,32 @@ ops.element('elasticBeamColumn', 10, 2, 3, 0.02, 200e9, 80e9, 1e-4, 8e-5, 8e-5, 
         "already used by a connection" in issue.message
         for issue in result.issues
     )
+
+
+def test_importer_preserves_full_steel02_isotropic_hardening_parameters():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+ops.uniaxialMaterial(
+    'Steel02', 7, 480.0, 202000.0, 0.02,
+    20.0, 0.9, 0.08, 0.039, 1.0, 0.029, 1.0
+)
+"""
+    result = import_openseespy_source(
+        source,
+        source_name="steel02_full.py",
+        units={"length": "mm", "force": "N", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    material = result.project.materials[7]
+    assert material.parameters["Fy"] == 480.0e6
+    assert material.parameters["E0"] == 202.0e9
+    assert material.parameters["b"] == 0.02
+    assert material.parameters["R0"] == 20.0
+    assert material.parameters["cR1"] == 0.9
+    assert material.parameters["cR2"] == 0.08
+    assert material.parameters["a1"] == 0.039
+    assert material.parameters["a2"] == 1.0
+    assert material.parameters["a3"] == 0.029
+    assert material.parameters["a4"] == 1.0
