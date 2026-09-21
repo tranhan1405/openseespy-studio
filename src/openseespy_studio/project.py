@@ -1782,6 +1782,7 @@ class AnalysisSettingsData:
     arc_length_alpha: float = 1.0
     algorithm_initial: bool = False
     system_pivoting: bool = False
+    gravity_algorithm: str = "Auto"
 
     def __post_init__(self) -> None:
         self.tag=_strict_int(self.tag, "Analysis tag"); self.name=str(self.name).strip() or f"Analysis {self.tag}"
@@ -1875,6 +1876,7 @@ class AnalysisSettingsData:
             self.system_pivoting,
             "Analysis system_pivoting",
         )
+        self.gravity_algorithm=str(self.gravity_algorithm or "Auto")
         numeric_values = (
             self.tolerance,
             self.load_increment,
@@ -1984,6 +1986,10 @@ class AnalysisSettingsData:
             and self.test not in {"NormDispIncr","NormUnbalance","EnergyIncr"}
         ):
             raise ValueError("Unsupported convergence test.")
+        if self.gravity_algorithm not in {
+            "Auto", "Linear", "Newton", "ModifiedNewton", "NewtonLineSearch"
+        }:
+            raise ValueError("Unsupported gravity preload algorithm.")
         if self.algorithm_initial and self.algorithm != "ModifiedNewton":
             raise ValueError(
                 "Initial-tangent option is only valid for ModifiedNewton."
@@ -2160,7 +2166,7 @@ class AnalysisSettingsData:
             "adaptive_cutback_factor","adaptive_min_factor",
             "adaptive_growth_factor","adaptive_easy_iterations",
             "adaptive_growth_after","live_convergence","show_external_console",
-            "algorithm_initial","system_pivoting"
+            "algorithm_initial","system_pivoting","gravity_algorithm"
         )}
 
     @classmethod
