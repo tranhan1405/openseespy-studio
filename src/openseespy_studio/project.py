@@ -2964,6 +2964,29 @@ class ProjectDatabase:
         ):
             self.sections.pop(generated_section, None)
 
+    def sync_generated_ground_nodes(self) -> list[int]:
+        """Keep managed ground nodes coincident with their source nodes."""
+        updated: list[int] = []
+        fixed = (1,) * int(self.model.ndf)
+        for connection in self.connections.values():
+            ground_tag = connection.generated_ground_node
+            if ground_tag is None:
+                continue
+            if ground_tag == connection.node_i:
+                source_tag = connection.node_j
+            elif ground_tag == connection.node_j:
+                source_tag = connection.node_i
+            else:
+                continue
+            ground = self.model.nodes.get(int(ground_tag))
+            source = self.model.nodes.get(int(source_tag))
+            if ground is None or source is None:
+                continue
+            ground.xyz = tuple(source.xyz)
+            ground.fixity = fixed
+            updated.append(int(ground_tag))
+        return sorted(set(updated))
+
     def create_ground_node(self, source_node_tag: int) -> int:
         source_node_tag = int(source_node_tag)
         source = self.model.nodes.get(source_node_tag)
