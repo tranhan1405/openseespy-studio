@@ -838,3 +838,83 @@ def test_enabled_gravity_preload_rejects_nonpositive_step_count():
             preload_gravity=True,
             gravity_steps=0,
         )
+
+
+@pytest.mark.parametrize(
+    ("analysis_type", "integrator"),
+    [
+        ("Static", "LoadControl"),
+        ("Static", "ArcLength"),
+        ("Modal", "None"),
+    ],
+)
+def test_analyses_ignore_unused_invalid_deferred_pattern_tags(
+    analysis_type,
+    integrator,
+):
+    kwargs = {
+        "integrator": integrator,
+        "deferred_pattern_tags": [0, -3],
+    }
+    if analysis_type == "Modal":
+        kwargs["num_modes"] = 1
+
+    analysis = AnalysisSettingsData(
+        70,
+        f"{analysis_type} ignores deferred tags",
+        analysis_type,
+        **kwargs,
+    )
+    assert analysis.deferred_pattern_tags == [0, -3]
+
+
+@pytest.mark.parametrize(
+    ("analysis_type", "integrator"),
+    [
+        ("Transient", "Newmark"),
+        ("Pushover", "DisplacementControl"),
+        ("Cyclic", "DisplacementControl"),
+        ("Static", "DisplacementControl"),
+    ],
+)
+def test_analyses_using_deferred_patterns_reject_nonpositive_tags(
+    analysis_type,
+    integrator,
+):
+    kwargs = {
+        "integrator": integrator,
+        "deferred_pattern_tags": [0],
+    }
+
+    if analysis_type == "Transient":
+        kwargs.update(dt=0.01)
+    elif analysis_type == "Pushover":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    elif analysis_type == "Cyclic":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            cyclic_targets=[0.001, -0.001],
+            cyclic_increment=0.0005,
+        )
+    else:
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="Deferred load-pattern tags must be positive",
+    ):
+        AnalysisSettingsData(
+            71,
+            f"{analysis_type} invalid deferred tag",
+            analysis_type,
+            **kwargs,
+        )

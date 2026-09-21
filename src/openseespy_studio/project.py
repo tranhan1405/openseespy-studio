@@ -1628,7 +1628,17 @@ class AnalysisSettingsData:
             raise ValueError("Rayleigh damping needs two different modes.")
         if self.preload_gravity and self.gravity_steps < 1:
             raise ValueError("Gravity preload steps must be at least 1.")
-        if any(tag <= 0 for tag in self.deferred_pattern_tags):
+        uses_deferred_patterns = (
+            self.analysis_type in {"Transient", "Pushover", "Cyclic"}
+            or (
+                self.analysis_type == "Static"
+                and self.integrator == "DisplacementControl"
+            )
+        )
+        if (
+            uses_deferred_patterns
+            and any(tag <= 0 for tag in self.deferred_pattern_tags)
+        ):
             raise ValueError("Deferred load-pattern tags must be positive.")
         if self.num_modes<1: raise ValueError("Number of modes must be at least 1.")
         if self.eigen_solver not in {
