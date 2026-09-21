@@ -1585,22 +1585,37 @@ class AnalysisSettingsData:
         self.rayleigh_damping_ratio=float(self.rayleigh_damping_ratio)
         self.rayleigh_mode_i=int(self.rayleigh_mode_i)
         self.rayleigh_mode_j=int(self.rayleigh_mode_j)
-        self.preload_gravity=bool(self.preload_gravity)
+        self.preload_gravity=_strict_bool(
+            self.preload_gravity,
+            "Analysis preload_gravity",
+        )
         self.gravity_steps=int(self.gravity_steps)
         self.deferred_pattern_tags=list(dict.fromkeys(
             int(tag) for tag in self.deferred_pattern_tags
         ))
         self.num_modes=int(self.num_modes)
         self.eigen_solver=str(self.eigen_solver)
-        self.recovery=bool(self.recovery)
-        self.adaptive_step=bool(self.adaptive_step)
+        self.recovery=_strict_bool(
+            self.recovery,
+            "Analysis recovery",
+        )
+        self.adaptive_step=_strict_bool(
+            self.adaptive_step,
+            "Analysis adaptive_step",
+        )
         self.adaptive_cutback_factor=float(self.adaptive_cutback_factor)
         self.adaptive_min_factor=float(self.adaptive_min_factor)
         self.adaptive_growth_factor=float(self.adaptive_growth_factor)
         self.adaptive_easy_iterations=int(self.adaptive_easy_iterations)
         self.adaptive_growth_after=int(self.adaptive_growth_after)
-        self.live_convergence=bool(self.live_convergence)
-        self.show_external_console=bool(self.show_external_console)
+        self.live_convergence=_strict_bool(
+            self.live_convergence,
+            "Analysis live_convergence",
+        )
+        self.show_external_console=_strict_bool(
+            self.show_external_console,
+            "Analysis show_external_console",
+        )
         numeric_values = (
             self.tolerance,
             self.load_increment,
