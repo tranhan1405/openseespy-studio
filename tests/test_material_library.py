@@ -22,7 +22,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 167
+    assert len(records) == 170
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -220,7 +220,7 @@ def test_moodley_2026_records_encode_model_applicability():
     )
 
 
-def test_verified_library_reaches_one_hundred_sixty_seven_with_expected_source_counts():
+def test_verified_library_reaches_one_hundred_seventy_with_expected_source_counts():
     records = load_verified_material_library()
     prefixes = {
         "carreno-2020-": 2,
@@ -236,13 +236,13 @@ def test_verified_library_reaches_one_hundred_sixty_seven_with_expected_source_c
         "doci-2024-": 2,
         "caballero-castro-2025-": 3,
         "melo-2020-": 2,
-        "sosa-caiza-2015-": 1,
+        "sosa-caiza-2015-": 4,
         "hung-eltawil-2009-": 2,
         "yigitbas-2026-": 1,
     }
 
-    assert len(records) == 167
-    assert len({record.id for record in records}) == 167
+    assert len(records) == 170
+    assert len({record.id for record in records}) == 170
     for prefix, expected in prefixes.items():
         assert sum(
             record.id.startswith(prefix)
@@ -448,6 +448,43 @@ def test_sosa_caiza_2015_reinforcingsteel_set_is_exact():
     location = str(record.parameter_evidence.get("location", ""))
     assert "Table 5" in location
     assert "Table 6" in location
+
+
+
+def test_sosa_caiza_2015_elasticpp_strand_sets_are_exact():
+    e1_e7 = _record("sosa-caiza-2015-strand-e1-e7-elasticpp")
+    e2_e5_e6 = _record(
+        "sosa-caiza-2015-strand-e2-e5-e6-elasticpp"
+    )
+    e3_e4 = _record("sosa-caiza-2015-strand-e3-e4-elasticpp")
+
+    expected = {
+        e1_e7.id: {
+            "E": 192295.0e6,
+            "epsyP": 0.0008,
+            "epsyN": -0.0004,
+            "eps0": -0.0008,
+        },
+        e2_e5_e6.id: {
+            "E": 192295.0e6,
+            "epsyP": 0.0048,
+            "epsyN": -0.0024,
+            "eps0": -0.0048,
+        },
+        e3_e4.id: {
+            "E": 192295.0e6,
+            "epsyP": 0.0078,
+            "epsyN": -0.0039,
+            "eps0": -0.0064,
+        },
+    }
+    for record in (e1_e7, e2_e5_e6, e3_e4):
+        assert record.model == "ElasticPP"
+        assert record.parameters_si == expected[record.id]
+        assert record.doi == "10.2174/1874149501509010236"
+        location = str(record.parameter_evidence.get("location", ""))
+        assert "Table 5" in location
+        assert "Table 7" in location
 
 
 def test_hung_eltawil_2009_concrete02_sets_preserve_table_i_values():
