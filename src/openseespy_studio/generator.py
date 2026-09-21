@@ -2430,6 +2430,110 @@ def to_openseespy(
         active_analysis is not None and deferred_pattern_tags
     )
 
+    material_reference_errors: list[str] = []
+
+    for material in (materials or {}).values():
+        dependency_tags: list[int] = []
+        if material.base_material_tag is not None:
+            dependency_tags.append(int(material.base_material_tag))
+        dependency_tags.extend(int(tag) for tag in material.material_tags)
+        missing = sorted({
+            tag for tag in dependency_tags if tag not in (materials or {})
+        })
+        if missing:
+            material_reference_errors.append(
+                f"material {material.tag} -> missing material "
+                + ", ".join(map(str, missing))
+            )
+
+    for section in (sections or {}).values():
+        referenced_materials: set[int] = set()
+        if section.material_tag is not None:
+            referenced_materials.add(int(section.material_tag))
+        referenced_materials.update(
+            int(tag) for tag in section.fiber_material_tags()
+        )
+        missing = sorted(
+            tag for tag in referenced_materials
+            if tag not in (materials or {})
+        )
+        if missing:
+            material_reference_errors.append(
+                f"section {section.tag} -> missing material "
+                + ", ".join(map(str, missing))
+            )
+
+    for element in model.elements.values():
+        if (
+            element.truss_material_tag is not None
+            and int(element.truss_material_tag) not in (materials or {})
+        ):
+            material_reference_errors.append(
+                f"truss element {element.tag} -> missing material "
+                f"{element.truss_material_tag}"
+            )
+
+    for connection in (connections or {}).values():
+        missing = sorted({
+            int(tag)
+            for tag in connection.materials_by_dof.values()
+            if int(tag) not in (materials or {})
+        })
+        if missing:
+            material_reference_errors.append(
+                f"connection {connection.tag} -> missing material "
+                + ", ".join(map(str, missing))
+            )
+
+    if material_reference_errors:
+        raise ValueError(
+            "Material reference error(s): "
+            + "; ".join(sorted(material_reference_errors))
+            + "."
+        )
+
+    section_reference_errors: list[str] = []
+    for element in model.elements.values():
+        referenced_sections = {
+            int(tag)
+            for tag in (
+                element.section_tag,
+                element.hinge_i_section_tag,
+                element.hinge_j_section_tag,
+                element.interior_section_tag,
+            )
+            if tag is not None
+        }
+        missing = sorted(
+            tag for tag in referenced_sections
+            if tag not in (sections or {})
+        )
+        if missing:
+            section_reference_errors.append(
+                f"element {element.tag} -> missing section "
+                + ", ".join(map(str, missing))
+            )
+
+    for connection in (connections or {}).values():
+        if (
+            connection.connection_type == "zeroLengthSection"
+            and (
+                connection.section_tag is None
+                or int(connection.section_tag) not in (sections or {})
+            )
+        ):
+            section_reference_errors.append(
+                f"connection {connection.tag} -> missing section "
+                f"{connection.section_tag}"
+            )
+
+    if section_reference_errors:
+        raise ValueError(
+            "Section reference error(s): "
+            + "; ".join(sorted(section_reference_errors))
+            + "."
+        )
+
     missing_pattern_series = {
         int(pattern.tag): int(pattern.time_series_tag)
         for pattern in (load_patterns or {}).values()

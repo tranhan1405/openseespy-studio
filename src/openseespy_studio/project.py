@@ -2035,9 +2035,95 @@ class ProjectDatabase:
         )
         self.materials.pop(original_tag)
         self.materials[material.tag] = material
+        if material.tag != original_tag:
+            for dependent in self.materials.values():
+                if dependent.base_material_tag == original_tag:
+                    dependent.base_material_tag = material.tag
+                dependent.material_tags = [
+                    material.tag if int(tag) == original_tag else int(tag)
+                    for tag in dependent.material_tags
+                ]
+            for section in self.sections.values():
+                if section.material_tag == original_tag:
+                    section.material_tag = material.tag
+                for fiber in section.fibers:
+                    if fiber.material_tag == original_tag:
+                        fiber.material_tag = material.tag
+                for component in section.fiber_components:
+                    if component.material_tag == original_tag:
+                        component.material_tag = material.tag
+            for element in self.model.elements.values():
+                if element.truss_material_tag == original_tag:
+                    element.truss_material_tag = material.tag
+            for connection in self.connections.values():
+                connection.materials_by_dof = {
+                    int(dof): (
+                        material.tag
+                        if int(material_tag) == original_tag
+                        else int(material_tag)
+                    )
+                    for dof, material_tag
+                    in connection.materials_by_dof.items()
+                }
+            for recorder in self.recorders.values():
+                if recorder.material_tag == original_tag:
+                    recorder.material_tag = material.tag
 
     def remove_material(self, tag: int) -> None:
-        self.materials.pop(int(tag), None)
+        tag = int(tag)
+        dependent_materials = self.materials_using_material(tag)
+        dependent_sections = self.sections_using_material(tag)
+        dependent_trusses = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if element.truss_material_tag == tag
+        )
+        dependent_connections = sorted(
+            connection.tag
+            for connection in self.connections.values()
+            if tag in connection.materials_by_dof.values()
+        )
+        dependent_recorders = sorted(
+            recorder.tag
+            for recorder in self.recorders.values()
+            if recorder.material_tag == tag
+        )
+        if (
+            dependent_materials
+            or dependent_sections
+            or dependent_trusses
+            or dependent_connections
+            or dependent_recorders
+        ):
+            details = []
+            if dependent_materials:
+                details.append(
+                    "materials " + ", ".join(map(str, dependent_materials))
+                )
+            if dependent_sections:
+                details.append(
+                    "sections " + ", ".join(map(str, dependent_sections))
+                )
+            if dependent_trusses:
+                details.append(
+                    "truss elements "
+                    + ", ".join(map(str, dependent_trusses))
+                )
+            if dependent_connections:
+                details.append(
+                    "connections "
+                    + ", ".join(map(str, dependent_connections))
+                )
+            if dependent_recorders:
+                details.append(
+                    "recorders " + ", ".join(map(str, dependent_recorders))
+                )
+            raise ValueError(
+                f"Material {tag} is still referenced by "
+                + "; ".join(details)
+                + ". Reassign those references before deleting it."
+            )
+        self.materials.pop(tag, None)
 
     def next_section_tag(self) -> int:
         return max(self.sections, default=0) + 1
@@ -2057,6 +2143,19 @@ class ProjectDatabase:
         self._validate_section_materials(section)
         self.sections.pop(original_tag)
         self.sections[section.tag] = section
+        if section.tag != original_tag:
+            for element in self.model.elements.values():
+                if element.section_tag == original_tag:
+                    element.section_tag = section.tag
+                if element.hinge_i_section_tag == original_tag:
+                    element.hinge_i_section_tag = section.tag
+                if element.hinge_j_section_tag == original_tag:
+                    element.hinge_j_section_tag = section.tag
+                if element.interior_section_tag == original_tag:
+                    element.interior_section_tag = section.tag
+            for connection in self.connections.values():
+                if connection.section_tag == original_tag:
+                    connection.section_tag = section.tag
 
     def connections_using_section(self, section_tag: int) -> list[int]:
         target = int(section_tag)
@@ -2067,7 +2166,34 @@ class ProjectDatabase:
         )
 
     def remove_section(self, tag: int) -> None:
-        self.sections.pop(int(tag), None)
+        tag = int(tag)
+        element_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if tag in {
+                element.section_tag,
+                element.hinge_i_section_tag,
+                element.hinge_j_section_tag,
+                element.interior_section_tag,
+            }
+        )
+        connection_users = self.connections_using_section(tag)
+        if element_users or connection_users:
+            details = []
+            if element_users:
+                details.append(
+                    "elements " + ", ".join(map(str, element_users))
+                )
+            if connection_users:
+                details.append(
+                    "connections " + ", ".join(map(str, connection_users))
+                )
+            raise ValueError(
+                f"Section {tag} is still referenced by "
+                + "; ".join(details)
+                + ". Reassign those references before deleting it."
+            )
+        self.sections.pop(tag, None)
 
     def _validate_section_materials(self, section: SectionData) -> None:
         if (

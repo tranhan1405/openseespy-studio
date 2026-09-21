@@ -10,7 +10,9 @@ from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
     MATERIAL_DEFAULTS,
     AnalysisSettingsData,
+    ConnectionData,
     ConstraintData,
+    FiberData,
     ElementLoadData,
     LoadPatternData,
     NodalLoadData,
@@ -2513,4 +2515,113 @@ def test_generator_rejects_regular_load_on_uniform_excitation_pattern():
             time_series=series,
             load_patterns=patterns,
             nodal_loads={2: load},
+        )
+
+
+def test_generator_rejects_section_with_missing_material():
+    model = StructuralModel("orphan-section-material", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    section = SectionData(
+        1,
+        "Fiber",
+        "Fiber",
+        fibers=[FiberData(0.0, 0.0, 0.01, 99)],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"section 1 -> missing material 99",
+    ):
+        to_openseespy(
+            model,
+            materials={},
+            sections={1: section},
+        )
+
+
+def test_generator_rejects_truss_with_missing_material_reference():
+    model = StructuralModel("orphan-truss-material", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="truss",
+        truss_area=0.01,
+        truss_material_tag=99,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"truss element 1 -> missing material 99",
+    ):
+        to_openseespy(model, materials={})
+
+
+def test_generator_rejects_element_with_missing_section_reference():
+    model = StructuralModel("orphan-element-section", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="elasticBeamColumn",
+        section_tag=99,
+        transf_tag=1,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"element 1 -> missing section 99",
+    ):
+        to_openseespy(model, sections={})
+
+
+def test_generator_rejects_connection_with_missing_material():
+    model = StructuralModel("orphan-connection-material", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    connection = ConnectionData(
+        10,
+        "Spring",
+        "zeroLength",
+        1,
+        2,
+        materials_by_dof={1: 99},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"connection 10 -> missing material 99",
+    ):
+        to_openseespy(
+            model,
+            materials={},
+            connections={10: connection},
+        )
+
+
+def test_generator_rejects_zero_length_section_with_missing_section():
+    model = StructuralModel("orphan-connection-section", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    connection = ConnectionData(
+        11,
+        "Section spring",
+        "zeroLengthSection",
+        1,
+        2,
+        section_tag=99,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"connection 11 -> missing section 99",
+    ):
+        to_openseespy(
+            model,
+            sections={},
+            connections={11: connection},
         )

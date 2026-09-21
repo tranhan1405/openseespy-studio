@@ -3,9 +3,15 @@ import pytest
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
     AnalysisSettingsData,
+    ConnectionData,
     ConstraintData,
+    FiberComponentData,
+    FiberData,
     LoadPatternData,
+    MaterialData,
     PrescribedDisplacementData,
+    RecorderData,
+    SectionData,
     ProjectDatabase,
     SelectionSetData,
     SolutionResultData,
@@ -1705,3 +1711,154 @@ def test_project_removing_pattern_cleans_inactive_stale_analysis_reference():
     project.remove_load_pattern(1)
 
     assert project.analyses[75].deferred_pattern_tags == []
+
+
+def test_project_material_tag_rename_cascades_all_references():
+    model = StructuralModel("material-rename", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="truss",
+        truss_area=0.01,
+        truss_material_tag=1,
+    )
+    project = ProjectDatabase(name="Material rename", model=model)
+    project.add_material(
+        MaterialData(1, "Base", "Elastic", {"E": 200000.0})
+    )
+    project.add_material(
+        MaterialData(
+            2,
+            "Wrapper",
+            "MinMax",
+            {},
+            base_material_tag=1,
+        )
+    )
+    project.add_section(
+        SectionData(
+            1,
+            "Elastic section",
+            "Elastic",
+            material_tag=1,
+        )
+    )
+    project.add_section(
+        SectionData(
+            2,
+            "Fiber section",
+            "Fiber",
+            fibers=[FiberData(0.0, 0.0, 0.01, 1)],
+            fiber_components=[
+                FiberComponentData("SingleFiber", "Extra", 1)
+            ],
+        )
+    )
+    project.add_connection(
+        ConnectionData(
+            10,
+            "Spring",
+            "zeroLength",
+            1,
+            2,
+            materials_by_dof={1: 1},
+        )
+    )
+
+    project.update_material(
+        1,
+        MaterialData(5, "Base renamed", "Elastic", {"E": 200000.0}),
+    )
+
+    assert project.materials[2].base_material_tag == 5
+    assert project.sections[1].material_tag == 5
+    assert project.sections[2].fibers[0].material_tag == 5
+    assert project.sections[2].fiber_components[0].material_tag == 5
+    assert project.model.elements[1].truss_material_tag == 5
+    assert project.connections[10].materials_by_dof[1] == 5
+
+
+def test_project_rejects_removing_referenced_material():
+    model = StructuralModel("material-delete", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    project = ProjectDatabase(name="Material delete", model=model)
+    project.add_material(
+        MaterialData(1, "Steel", "Elastic", {"E": 200000.0})
+    )
+    project.add_section(
+        SectionData(1, "Elastic", "Elastic", material_tag=1)
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Material 1 is still referenced by sections 1",
+    ):
+        project.remove_material(1)
+
+    assert 1 in project.materials
+
+
+def test_project_section_tag_rename_cascades_element_and_connection():
+    model = StructuralModel("section-rename", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+        hinge_i_section_tag=1,
+        hinge_j_section_tag=1,
+        interior_section_tag=1,
+        integration_type="HingeRadau",
+    )
+    project = ProjectDatabase(name="Section rename", model=model)
+    project.add_section(SectionData(1, "Fiber", "Fiber"))
+    project.connections[10] = ConnectionData(
+        10,
+        "Section spring",
+        "zeroLengthSection",
+        2,
+        3,
+        section_tag=1,
+    )
+
+    project.update_section(1, SectionData(5, "Fiber renamed", "Fiber"))
+
+    element = project.model.elements[1]
+    assert element.section_tag == 5
+    assert element.hinge_i_section_tag == 5
+    assert element.hinge_j_section_tag == 5
+    assert element.interior_section_tag == 5
+    assert project.connections[10].section_tag == 5
+
+
+def test_project_rejects_removing_section_used_by_element():
+    model = StructuralModel("section-delete", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="elasticBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
+    project = ProjectDatabase(name="Section delete", model=model)
+    project.add_section(SectionData(1, "Elastic", "Elastic"))
+
+    with pytest.raises(
+        ValueError,
+        match=r"Section 1 is still referenced by elements 1",
+    ):
+        project.remove_section(1)
+
+    assert 1 in project.sections
