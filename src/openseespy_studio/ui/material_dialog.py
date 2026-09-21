@@ -688,7 +688,10 @@ class MaterialDialog(QDialog):
                 f"status: {material.source.get('status', 'unknown')}\n"
                 f"{reference.get('title', '')}\n"
                 f"DOI: {reference.get('doi', '')}\n"
-                f"Evidence: {evidence.get('location', '')}"
+                f"Evidence: {evidence.get('location', '')}\n"
+                "The verified status applies to the cited constitutive "
+                "parameters. Editing those values will mark this project "
+                "material as modified_from_verified."
             )
             self.source_note.show()
         else:
