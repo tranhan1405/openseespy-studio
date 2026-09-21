@@ -6915,7 +6915,7 @@ class MainWindow(QMainWindow):
             )
             return
 
-        tag = self.model.next_element_tag()
+        tag = self.project.next_element_tag()
         material_tag = min(self.project.materials)
         area = self._default_truss_area()
         before = self.project.to_dict()
@@ -6981,7 +6981,7 @@ class MainWindow(QMainWindow):
         )
 
         dialog = TrussDialog(
-            self.model.next_element_tag(),
+            self.project.next_element_tag(),
             node_i=node_i,
             node_j=node_j,
             materials=self.project.materials,
@@ -7051,7 +7051,7 @@ class MainWindow(QMainWindow):
         node_j: int,
     ) -> None:
         """Create one quick frame member between two existing nodes."""
-        tag = self.model.next_element_tag()
+        tag = self.project.next_element_tag()
 
         section_tag = next(
             (
@@ -7154,7 +7154,7 @@ class MainWindow(QMainWindow):
         )
 
         dialog = ElementDialog(
-            self.model.next_element_tag(),
+            self.project.next_element_tag(),
             node_i=node_i,
             node_j=node_j,
             sections=self.project.sections,
