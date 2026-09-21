@@ -165,9 +165,12 @@ class StructuralModel:
     def add_node(self, tag: int, x: float, y: float, z: float = 0.0) -> Node:
         if tag in self.nodes:
             raise ValueError(f"Node tag {tag} already exists")
+        xyz = (float(x), float(y), float(z))
+        if not all(math.isfinite(value) for value in xyz):
+            raise ValueError("Node coordinates must be finite.")
         node = Node(
             tag,
-            (float(x), float(y), float(z)),
+            xyz,
             fixity=(0,) * self.ndf,
             mass=(0.0,) * self.ndf,
         )
@@ -233,6 +236,8 @@ class StructuralModel:
         vals = tuple(int(v) for v in values)
         if len(vals) != self.ndf:
             raise ValueError(f"Expected {self.ndf} fixity values, got {len(vals)}")
+        if any(value not in {0, 1} for value in vals):
+            raise ValueError("Fixity values must be 0 or 1.")
         node.fixity = vals
 
     def set_fixity_many(
@@ -245,6 +250,8 @@ class StructuralModel:
             raise ValueError(
                 f"Expected {self.ndf} fixity values, got {len(vals)}"
             )
+        if any(value not in {0, 1} for value in vals):
+            raise ValueError("Fixity values must be 0 or 1.")
         updated: set[int] = set()
         for tag in node_tags:
             node = self.nodes.get(int(tag))
@@ -264,6 +271,8 @@ class StructuralModel:
             raise ValueError(
                 f"Expected {self.ndf} mass values, got {len(vals)}"
             )
+        if any(not math.isfinite(value) for value in vals):
+            raise ValueError("Nodal mass values must be finite.")
         if any(value < 0.0 for value in vals):
             raise ValueError("Nodal mass values cannot be negative.")
         node.mass = vals
@@ -278,6 +287,8 @@ class StructuralModel:
             raise ValueError(
                 f"Expected {self.ndf} mass values, got {len(vals)}"
             )
+        if any(not math.isfinite(value) for value in vals):
+            raise ValueError("Nodal mass values must be finite.")
         if any(value < 0.0 for value in vals):
             raise ValueError("Nodal mass values cannot be negative.")
         updated: set[int] = set()
@@ -682,6 +693,10 @@ class StructuralModel:
                 raise ValueError(
                     f"Node {node.tag} has {len(fixity)} fixities; expected {model.ndf}."
                 )
+            if any(value not in {0, 1} for value in fixity):
+                raise ValueError(
+                    f"Node {node.tag} fixity values must be 0 or 1."
+                )
             node.fixity = fixity
             mass = tuple(
                 float(value)
@@ -691,6 +706,14 @@ class StructuralModel:
                 raise ValueError(
                     f"Node {node.tag} has {len(mass)} mass values; "
                     f"expected {model.ndf}."
+                )
+            if any(not math.isfinite(value) for value in mass):
+                raise ValueError(
+                    f"Node {node.tag} mass values must be finite."
+                )
+            if any(value < 0.0 for value in mass):
+                raise ValueError(
+                    f"Node {node.tag} mass values cannot be negative."
                 )
             node.mass = mass
 
