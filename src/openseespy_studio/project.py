@@ -29,6 +29,18 @@ def _strict_bool(value: object, label: str) -> bool:
     raise ValueError(f"{label} must be a boolean.")
 
 
+def _strict_int(value: object, label: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be an integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be an integer.") from exc
+    if not math.isfinite(numeric) or not numeric.is_integer():
+        raise ValueError(f"{label} must be an integer.")
+    return int(numeric)
+
+
 PROJECT_FORMAT = "openseespy-studio"
 PROJECT_FORMAT_VERSION = 28
 
@@ -163,7 +175,7 @@ class MaterialData:
     factors: list[float] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        self.tag = int(self.tag)
+        self.tag = _strict_int(self.tag, "Material tag")
         self.name = str(self.name).strip() or f"Material {self.tag}"
         self.material_type = str(self.material_type)
         if self.tag <= 0:
@@ -280,7 +292,7 @@ class MaterialData:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MaterialData":
         return cls(
-            tag=int(data["tag"]),
+            tag=data["tag"],
             name=str(data.get("name", f"Material {data['tag']}")),
             material_type=str(
                 data.get("material_type", data.get("type", "Elastic"))
@@ -655,7 +667,7 @@ class SectionData:
     display_geometry: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.tag = int(self.tag)
+        self.tag = _strict_int(self.tag, "Section tag")
         self.name = str(self.name).strip() or f"Section {self.tag}"
         self.section_type = str(self.section_type)
         if self.tag <= 0:
@@ -792,7 +804,7 @@ class SectionData:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SectionData":
         return cls(
-            tag=int(data["tag"]),
+            tag=data["tag"],
             name=str(data.get("name", f"Section {data['tag']}")),
             section_type=str(
                 data.get("section_type", data.get("type", "Elastic"))
@@ -822,7 +834,7 @@ class TransformationData:
     vecxz: tuple[float, float, float] = (0.0, 0.0, 1.0)
 
     def __post_init__(self) -> None:
-        self.tag = int(self.tag)
+        self.tag = _strict_int(self.tag, "Transformation tag")
         self.name = str(self.name).strip() or f"Transformation {self.tag}"
         self.transformation_type = str(self.transformation_type)
         if self.tag <= 0:
@@ -857,7 +869,7 @@ class TransformationData:
     def from_dict(cls, data: dict[str, Any]) -> "TransformationData":
         raw_vec = data.get("vecxz", (0.0, 0.0, 1.0))
         return cls(
-            tag=int(data["tag"]),
+            tag=data["tag"],
             name=str(data.get("name", f"Transformation {data['tag']}")),
             transformation_type=str(
                 data.get(
@@ -885,7 +897,7 @@ class ConstraintData:
     perp_dirn: int = 3
 
     def __post_init__(self) -> None:
-        self.tag = int(self.tag)
+        self.tag = _strict_int(self.tag, "Constraint tag")
         self.name = str(self.name).strip() or f"Constraint {self.tag}"
         self.constraint_type = str(self.constraint_type)
         self.retained_node = int(self.retained_node)
@@ -938,7 +950,7 @@ class ConstraintData:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ConstraintData":
         return cls(
-            tag=int(data["tag"]),
+            tag=data["tag"],
             name=str(data.get("name", f"Constraint {data['tag']}")),
             constraint_type=str(data.get("constraint_type", "equalDOF")),
             retained_node=int(data["retained_node"]),
@@ -968,7 +980,7 @@ class ConnectionData:
     generated_constraint_tag: int | None = None
 
     def __post_init__(self) -> None:
-        self.tag = int(self.tag)
+        self.tag = _strict_int(self.tag, "Connection tag")
         self.name = str(self.name).strip() or f"Connection {self.tag}"
         self.connection_type = str(self.connection_type)
         self.node_i = int(self.node_i)
@@ -1083,7 +1095,7 @@ class ConnectionData:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ConnectionData":
         return cls(
-            tag=int(data["tag"]),
+            tag=data["tag"],
             name=str(data.get("name", f"Connection {data['tag']}")),
             connection_type=str(
                 data.get("connection_type", "zeroLength")
