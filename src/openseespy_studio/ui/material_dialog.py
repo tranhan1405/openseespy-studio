@@ -1291,18 +1291,48 @@ class MaterialDialog(QDialog):
         base_material_tag, material_tags, factors = (
             self._wrapper_references(material_type)
         )
+        parameters = {
+            key: self._stored_value(
+                material_type,
+                key,
+                self._widget_value(key),
+            )
+            for key in MATERIAL_PARAMETER_ORDER[material_type]
+        }
+
+        source = (
+            dict(self._initial_material.source)
+            if self._initial_material is not None
+            else {}
+        )
+        if source and self._initial_material is not None:
+            original_parameters = dict(self._initial_material.parameters)
+            verified_keys = {
+                str(key)
+                for key in source.get("verified_parameters", [])
+            }
+            changed = (
+                material_type != self._initial_material.material_type
+                or any(
+                    key not in parameters
+                    or not math.isclose(
+                        float(parameters[key]),
+                        float(original_parameters.get(key, float("nan"))),
+                        rel_tol=1.0e-12,
+                        abs_tol=1.0e-12,
+                    )
+                    for key in verified_keys
+                )
+            )
+            if changed:
+                source["status"] = "modified_from_verified"
+                source["modified"] = True
+
         return MaterialData(
             tag=self.tag.value(),
             name=self.name.text().strip() or f"Material {self.tag.value()}",
             material_type=material_type,
-            parameters={
-                key: self._stored_value(
-                    material_type,
-                    key,
-                    self._widget_value(key),
-                )
-                for key in MATERIAL_PARAMETER_ORDER[material_type]
-            },
+            parameters=parameters,
             poisson_ratio=self.poisson_ratio.value(),
             density=self.unit_system.engineering_density_to_kg_per_m3(
                 self.density.value()
@@ -1310,4 +1340,5 @@ class MaterialDialog(QDialog):
             base_material_tag=base_material_tag,
             material_tags=material_tags,
             factors=factors,
+            source=source,
         )
