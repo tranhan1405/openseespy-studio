@@ -2354,3 +2354,81 @@ def test_project_sync_generated_ground_node_after_geometry_edit():
     project.model.nodes[2].xyz = (99.0, 99.0, 0.0)
     project.sync_generated_ground_nodes()
     assert project.model.nodes[2].xyz == project.model.nodes[1].xyz
+
+
+def test_project_validate_node_state_rejects_detached_zero_length():
+    model = StructuralModel("node-edit-zero-length", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    project = ProjectDatabase(name="Node edit zero length", model=model)
+    project.add_material(
+        MaterialData(1, "Spring", "Elastic", {"E": 1000.0})
+    )
+    project.add_connection(
+        ConnectionData(
+            10,
+            "Spring",
+            "zeroLength",
+            1,
+            2,
+            materials_by_dof={1: 1},
+        )
+    )
+
+    project.model.nodes[2].xyz = (0.1, 0.0, 0.0)
+
+    with pytest.raises(
+        ValueError,
+        match=r"zeroLength connection nodes must be coincident",
+    ):
+        project.validate_node_state(2)
+
+
+def test_project_validate_node_state_rejects_support_on_mpc_dependent_dof():
+    model = StructuralModel("node-edit-mpc", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Node edit MPC", model=model)
+    project.add_constraint(
+        ConstraintData(
+            10,
+            "Tie UX",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        )
+    )
+
+    project.model.nodes[2].fixity = (1, 0, 0)
+
+    with pytest.raises(
+        ValueError,
+        match=r"already fixed by a support",
+    ):
+        project.validate_node_state(2)
+
+
+def test_project_validate_node_state_rejects_fixed_analysis_control_dof():
+    model = StructuralModel("node-edit-control", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Node edit control", model=model)
+    project.add_analysis(
+        AnalysisSettingsData(
+            10,
+            "Push",
+            "Pushover",
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    )
+
+    project.model.nodes[2].fixity = (1, 0, 0)
+
+    with pytest.raises(
+        ValueError,
+        match=r"control node 2 DOF 1 is restrained by a support",
+    ):
+        project.validate_node_state(2)
