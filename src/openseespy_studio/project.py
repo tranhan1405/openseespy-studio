@@ -2657,6 +2657,25 @@ class ProjectDatabase:
                     "has a prescribed displacement."
                 )
 
+        for analysis_tag, analysis in self.analyses.items():
+            if (
+                not self._analysis_uses_control_node(analysis)
+                or analysis.control_node != displacement.node_tag
+                or analysis.control_dof != displacement.dof
+            ):
+                continue
+            if self._analysis_pattern_is_active(
+                analysis,
+                displacement.pattern_tag,
+                ignore_analysis_tags={int(analysis_tag)},
+            ):
+                raise ValueError(
+                    "Prescribed displacement at node "
+                    f"{displacement.node_tag} DOF {displacement.dof} "
+                    f"conflicts with active {analysis.analysis_type} "
+                    f"analysis {analysis.tag} DisplacementControl."
+                )
+
     def add_prescribed_displacement(
         self,
         displacement: PrescribedDisplacementData,
@@ -2862,16 +2881,89 @@ class ProjectDatabase:
     def next_analysis_tag(self) -> int:
         return max(self.analyses, default=0) + 1
 
-    def add_analysis(self, analysis: AnalysisSettingsData) -> None:
-        if analysis.tag in self.analyses:
-            raise ValueError(f"Analysis tag {analysis.tag} already exists.")
-        uses_control_node = (
+    @staticmethod
+    def _analysis_uses_control_node(
+        analysis: AnalysisSettingsData,
+    ) -> bool:
+        return (
             analysis.analysis_type in {"Pushover", "Cyclic"}
             or (
                 analysis.analysis_type == "Static"
                 and analysis.integrator == "DisplacementControl"
             )
         )
+
+    def _analysis_pattern_is_active(
+        self,
+        analysis: AnalysisSettingsData,
+        pattern_tag: int,
+        *,
+        ignore_analysis_tags: set[int] | None = None,
+    ) -> bool:
+        pattern_tag = int(pattern_tag)
+        deferred = {
+            int(tag) for tag in analysis.deferred_pattern_tags
+        }
+        if pattern_tag in deferred:
+            return True
+        if not deferred:
+            return pattern_tag in self.load_patterns
+
+        ignored = {int(analysis.tag)}
+        ignored.update(
+            int(tag) for tag in (ignore_analysis_tags or set())
+        )
+        other_driver_tags: set[int] = set()
+        for analysis_tag, other in self.analyses.items():
+            if int(analysis_tag) in ignored:
+                continue
+            other_driver_tags.update(
+                int(tag) for tag in other.deferred_pattern_tags
+            )
+        if pattern_tag in other_driver_tags:
+            return False
+
+        pattern = self.load_patterns.get(pattern_tag)
+        return bool(
+            analysis.preload_gravity
+            and pattern is not None
+            and pattern.pattern_type == "Plain"
+        )
+
+    def _validate_analysis_prescribed_control_conflict(
+        self,
+        analysis: AnalysisSettingsData,
+        *,
+        ignore_analysis_tags: set[int] | None = None,
+    ) -> None:
+        if not self._analysis_uses_control_node(analysis):
+            return
+        conflicts = sorted(
+            displacement.tag
+            for displacement in self.prescribed_displacements.values()
+            if (
+                displacement.node_tag == analysis.control_node
+                and displacement.dof == analysis.control_dof
+                and self._analysis_pattern_is_active(
+                    analysis,
+                    displacement.pattern_tag,
+                    ignore_analysis_tags=ignore_analysis_tags,
+                )
+            )
+        )
+        if conflicts:
+            raise ValueError(
+                f"{analysis.analysis_type} control node "
+                f"{analysis.control_node} DOF {analysis.control_dof} "
+                "conflicts with active Prescribed Displacement object(s): "
+                + ", ".join(map(str, conflicts))
+                + "."
+            )
+
+    def add_analysis(self, analysis: AnalysisSettingsData) -> None:
+        if analysis.tag in self.analyses:
+            raise ValueError(f"Analysis tag {analysis.tag} already exists.")
+        uses_control_node = self._analysis_uses_control_node(analysis)
         if uses_control_node and analysis.control_node not in self.model.nodes:
             raise ValueError(
                 f"{analysis.analysis_type} control node "
@@ -2888,6 +2980,7 @@ class ProjectDatabase:
                     f"{analysis.control_node} DOF {analysis.control_dof} "
                     "is restrained by a support."
                 )
+        self._validate_analysis_prescribed_control_conflict(analysis)
         self.analyses[analysis.tag]=analysis
         if self.active_analysis_tag is None:
             self.active_analysis_tag=analysis.tag
@@ -2896,13 +2989,7 @@ class ProjectDatabase:
         original_tag=int(original_tag)
         if original_tag not in self.analyses: raise ValueError(f"Analysis tag {original_tag} does not exist.")
         if analysis.tag!=original_tag and analysis.tag in self.analyses: raise ValueError(f"Analysis tag {analysis.tag} already exists.")
-        uses_control_node = (
-            analysis.analysis_type in {"Pushover", "Cyclic"}
-            or (
-                analysis.analysis_type == "Static"
-                and analysis.integrator == "DisplacementControl"
-            )
-        )
+        uses_control_node = self._analysis_uses_control_node(analysis)
         if uses_control_node and analysis.control_node not in self.model.nodes:
             raise ValueError(
                 f"{analysis.analysis_type} control node "
@@ -2919,6 +3006,10 @@ class ProjectDatabase:
                     f"{analysis.control_node} DOF {analysis.control_dof} "
                     "is restrained by a support."
                 )
+        self._validate_analysis_prescribed_control_conflict(
+            analysis,
+            ignore_analysis_tags={original_tag},
+        )
         self.analyses.pop(original_tag); self.analyses[analysis.tag]=analysis
         if analysis.tag != original_tag:
             for result in self.solution_results.values():

@@ -2816,6 +2816,42 @@ def to_openseespy(
                 "DisplacementControl."
             )
 
+        conflicting_displacements: list[int] = []
+        for displacement in (prescribed_displacements or {}).values():
+            if (
+                int(displacement.node_tag) != int(active_analysis.control_node)
+                or int(displacement.dof) != int(active_analysis.control_dof)
+            ):
+                continue
+
+            pattern_tag = int(displacement.pattern_tag)
+            if pattern_tag in deferred_pattern_tags:
+                is_active = True
+            elif scoped_deferred_analysis:
+                pattern = (load_patterns or {}).get(pattern_tag)
+                is_active = bool(
+                    active_analysis.preload_gravity
+                    and pattern is not None
+                    and pattern.pattern_type == "Plain"
+                    and pattern_tag not in other_analysis_driver_tags
+                )
+            else:
+                is_active = pattern_tag in (load_patterns or {})
+
+            if is_active:
+                conflicting_displacements.append(int(displacement.tag))
+
+        if conflicting_displacements:
+            raise ValueError(
+                f"{active_analysis.analysis_type} control node "
+                f"{active_analysis.control_node} DOF "
+                f"{active_analysis.control_dof} conflicts with active "
+                "Prescribed Displacement object(s): "
+                + ", ".join(map(str, sorted(conflicting_displacements)))
+                + ". Remove the prescribed displacement or choose a "
+                "different control DOF."
+            )
+
     if load_patterns:
         lines.extend(["", "# Load patterns"])
         for tag in sorted(load_patterns):

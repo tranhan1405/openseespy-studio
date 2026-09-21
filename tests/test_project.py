@@ -1,5 +1,13 @@
 from openseespy_studio.model import StructuralModel
-from openseespy_studio.project import AnalysisSettingsData, ProjectDatabase, SelectionSetData, SolutionResultData
+from openseespy_studio.project import (
+    AnalysisSettingsData,
+    LoadPatternData,
+    PrescribedDisplacementData,
+    ProjectDatabase,
+    SelectionSetData,
+    SolutionResultData,
+    TimeSeriesData,
+)
 
 
 def build_project() -> ProjectDatabase:
@@ -254,3 +262,76 @@ def test_project_rejects_restrained_displacement_control_dof_on_update():
         assert "control node 2 DOF 1 is restrained by a support" in str(exc)
     else:
         raise AssertionError("Expected restrained control DOF validation")
+
+
+def _add_plain_prescribed_fixture(project: ProjectDatabase) -> None:
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Plain", "Plain", time_series_tag=1)
+    )
+
+
+def test_project_rejects_analysis_when_active_prescribed_displacement_owns_control_dof():
+    project = build_project()
+    _add_plain_prescribed_fixture(project)
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(
+            1,
+            "Imposed UX",
+            1,
+            2,
+            1,
+            0.001,
+        )
+    )
+
+    try:
+        project.add_analysis(
+            AnalysisSettingsData(
+                22,
+                "Conflicting push",
+                "Pushover",
+                control_node=2,
+                control_dof=1,
+                displacement_increment=0.001,
+            )
+        )
+    except ValueError as exc:
+        assert "conflicts with active Prescribed Displacement" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected prescribed displacement/control DOF conflict"
+        )
+
+
+def test_project_rejects_prescribed_displacement_when_control_analysis_exists():
+    project = build_project()
+    _add_plain_prescribed_fixture(project)
+    project.add_analysis(
+        AnalysisSettingsData(
+            23,
+            "Push",
+            "Pushover",
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    )
+
+    try:
+        project.add_prescribed_displacement(
+            PrescribedDisplacementData(
+                2,
+                "Imposed UX",
+                1,
+                2,
+                1,
+                0.001,
+            )
+        )
+    except ValueError as exc:
+        assert "conflicts with active Pushover analysis 23" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected prescribed displacement/control analysis conflict"
+        )

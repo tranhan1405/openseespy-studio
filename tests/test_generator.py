@@ -570,3 +570,97 @@ def test_generator_accepts_free_control_dof_on_partially_restrained_node():
     )
 
     assert "ops.integrator('DisplacementControl', 2, 2" in code
+
+
+def test_generator_rejects_active_prescribed_displacement_on_control_dof():
+    model = StructuralModel("prescribed-control-conflict", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    series = {1: TimeSeriesData(1, "Linear", "Linear")}
+    patterns = {
+        1: LoadPatternData(1, "Background", "Plain", time_series_tag=1)
+    }
+    prescribed = {
+        1: PrescribedDisplacementData(
+            1,
+            "Imposed UX",
+            1,
+            2,
+            1,
+            0.001,
+        )
+    }
+    analysis = AnalysisSettingsData(
+        17,
+        "Push",
+        "Pushover",
+        control_node=2,
+        control_dof=1,
+        displacement_increment=0.001,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"control node 2 DOF 1 conflicts with active Prescribed Displacement",
+    ):
+        to_openseespy(
+            model,
+            time_series=series,
+            load_patterns=patterns,
+            prescribed_displacements=prescribed,
+            analyses={17: analysis},
+            active_analysis_tag=17,
+        )
+
+
+def test_generator_ignores_prescribed_displacement_in_other_deferred_analysis():
+    model = StructuralModel("inactive-prescribed-control", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    series = {
+        1: TimeSeriesData(1, "Current", "Linear"),
+        2: TimeSeriesData(2, "Other", "Linear"),
+    }
+    patterns = {
+        1: LoadPatternData(1, "Current driver", "Plain", time_series_tag=1),
+        2: LoadPatternData(2, "Other driver", "Plain", time_series_tag=2),
+    }
+    prescribed = {
+        1: PrescribedDisplacementData(
+            1,
+            "Other imposed UX",
+            2,
+            2,
+            1,
+            0.001,
+        )
+    }
+    current = AnalysisSettingsData(
+        18,
+        "Current push",
+        "Pushover",
+        control_node=2,
+        control_dof=1,
+        displacement_increment=0.001,
+        deferred_pattern_tags=[1],
+    )
+    other = AnalysisSettingsData(
+        19,
+        "Other static",
+        "Static",
+        integrator="LoadControl",
+        deferred_pattern_tags=[2],
+    )
+
+    code = to_openseespy(
+        model,
+        time_series=series,
+        load_patterns=patterns,
+        prescribed_displacements=prescribed,
+        analyses={18: current, 19: other},
+        active_analysis_tag=18,
+    )
+
+    assert "ops.sp(2, 1, 0.001)" not in code
