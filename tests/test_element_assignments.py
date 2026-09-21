@@ -1,3 +1,5 @@
+import pytest
+
 from openseespy_studio.generator import FrameGridSpec, generate_frame_grid, to_openseespy
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
