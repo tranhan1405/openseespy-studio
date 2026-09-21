@@ -3438,11 +3438,12 @@ class ProjectDatabase:
             )
         if (
             pattern.pattern_type == "UniformExcitation"
-            and pattern.direction > int(self.model.ndf)
+            and pattern.direction > int(self.model.ndm)
         ):
             raise ValueError(
                 f"UniformExcitation direction {pattern.direction} is not "
-                f"available for ndf={self.model.ndf}."
+                f"available for ndm={self.model.ndm}; excitation directions "
+                "must be translational."
             )
 
     def add_load_pattern(self, pattern: LoadPatternData) -> None:
@@ -3680,6 +3681,18 @@ class ProjectDatabase:
         if pattern.pattern_type != "Plain":
             raise ValueError(
                 "Nodal loads can only be assigned to Plain load patterns."
+            )
+        unavailable = [
+            index + 1
+            for index, value in enumerate(load.values)
+            if index >= int(self.model.ndf)
+            and abs(float(value)) > 1.0e-15
+        ]
+        if unavailable:
+            raise ValueError(
+                "Nodal load has nonzero value on unavailable DOF(s): "
+                + ", ".join(map(str, unavailable))
+                + f" for ndf={self.model.ndf}."
             )
 
     def add_nodal_load(self, load: NodalLoadData) -> None:
