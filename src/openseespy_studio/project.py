@@ -782,6 +782,10 @@ class TransformationData:
         self.vecxz = tuple(float(value) for value in self.vecxz)
         if len(self.vecxz) != 3:
             raise ValueError("Transformation orientation vector must have 3 values.")
+        if any(not math.isfinite(value) for value in self.vecxz):
+            raise ValueError(
+                "Transformation orientation vector values must be finite."
+            )
         if sum(value * value for value in self.vecxz) <= 1.0e-24:
             raise ValueError("Transformation orientation vector cannot be zero.")
 
@@ -1112,6 +1116,10 @@ class LoadPatternData:
             raise ValueError("Load pattern needs a valid time series tag.")
         if self.pattern_type not in {"Plain", "UniformExcitation"}:
             raise ValueError(f"Unsupported pattern type: {self.pattern_type}")
+        if not math.isfinite(self.factor) or not math.isfinite(self.vel0):
+            raise ValueError(
+                "Load pattern factor and initial velocity must be finite."
+            )
         if self.pattern_type == "UniformExcitation" and not 1 <= self.direction <= 6:
             raise ValueError("UniformExcitation direction must be 1..6.")
 
@@ -1159,6 +1167,8 @@ class NodalLoadData:
             raise ValueError("Nodal load needs valid pattern and node tags.")
         if len(self.values) != 6:
             raise ValueError("Nodal load needs six DOF values.")
+        if any(not math.isfinite(value) for value in self.values):
+            raise ValueError("Nodal load values must be finite.")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1292,6 +1302,19 @@ class ElementLoadData:
             )
         if len(self.gravity) != 3:
             raise ValueError("Gravity vector needs three components.")
+        numeric_values = (
+            self.wx,
+            self.wy,
+            self.wz,
+            self.px,
+            self.py,
+            self.pz,
+            self.x_over_l,
+            self.density_override,
+            *self.gravity,
+        )
+        if any(not math.isfinite(value) for value in numeric_values):
+            raise ValueError("Element load numeric values must be finite.")
         if self.density_override < 0.0:
             raise ValueError("Density override cannot be negative.")
         if self.load_type == "Point" and not 0.0 <= self.x_over_l <= 1.0:
@@ -1503,6 +1526,27 @@ class AnalysisSettingsData:
         self.adaptive_growth_after=int(self.adaptive_growth_after)
         self.live_convergence=bool(self.live_convergence)
         self.show_external_console=bool(self.show_external_console)
+        numeric_values = (
+            self.tolerance,
+            self.load_increment,
+            self.displacement_increment,
+            self.cyclic_increment,
+            self.dt,
+            self.gamma,
+            self.beta,
+            self.hht_alpha,
+            self.generalized_alpha_m,
+            self.generalized_alpha_f,
+            self.arc_length_s,
+            self.arc_length_alpha,
+            self.rayleigh_damping_ratio,
+            self.adaptive_cutback_factor,
+            self.adaptive_min_factor,
+            self.adaptive_growth_factor,
+            *self.cyclic_targets,
+        )
+        if any(not math.isfinite(value) for value in numeric_values):
+            raise ValueError("Analysis numeric settings must be finite.")
         if self.tag<=0: raise ValueError("Analysis tag must be positive.")
         if self.analysis_type not in {"Static","Pushover","Cyclic","Transient","Modal"}:
             raise ValueError(f"Unsupported analysis type: {self.analysis_type}")
