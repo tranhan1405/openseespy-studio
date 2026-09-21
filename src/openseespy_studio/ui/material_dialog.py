@@ -44,11 +44,15 @@ PREVIEW_MATERIAL_TYPES = {
     "Elastic",
     "Steel01",
     "Steel02",
+    "Hardening",
+    "ElasticPP",
+    "ElasticBilin",
     "ReinforcingSteel",
     "Concrete01",
     "Concrete02",
     "Concrete04",
     "Hysteretic",
+    "HystereticSmooth",
     "Pinching4",
     "Bond_SP01",
     "ElasticPPGap",
@@ -65,6 +69,19 @@ PARAMETER_LABELS = {
     "Su": "Ultimate slip Su",
     "eps_sh": "Strain at hardening eps_sh",
     "eps_ult": "Ultimate strain eps_ult",
+    "sigmaY": "Yield stress σy",
+    "H_iso": "Isotropic hardening modulus Hiso",
+    "H_kin": "Kinematic hardening modulus Hkin",
+    "eta": "Viscoplastic coefficient η",
+    "epsyP": "Positive yield strain εy+",
+    "epsyN": "Negative yield strain εy−",
+    "eps0": "Initial strain ε0",
+    "EP1": "Positive initial tangent EP1",
+    "EP2": "Positive secondary tangent EP2",
+    "epsP2": "Positive transition strain εP2",
+    "EN1": "Negative initial tangent EN1",
+    "EN2": "Negative secondary tangent EN2",
+    "epsN2": "Negative transition strain εN2",
 }
 
 SWITCH_OPTIONS = {
@@ -157,6 +174,112 @@ class MaterialEnvelopePreview(QWidget):
             ), [
                 (ey, fy, "Fy / E0"),
                 (0.62 * emax, dict(pts).get(0.62 * emax, 0.0), "b"),
+            ]
+
+        if material_type == "Hardening":
+            e = abs(p.get("E", 0.0))
+            fy = abs(p.get("sigmaY", 0.0))
+            h_iso = max(p.get("H_iso", 0.0), 0.0)
+            h_kin = max(p.get("H_kin", 0.0), 0.0)
+            if e <= 1.0e-15 or fy <= 1.0e-15:
+                return [], "E and sigmaY must be non-zero to draw Hardening.", []
+            ey = fy / e
+            h = h_iso + h_kin
+            ep = e * h / (e + h) if h > 0.0 else 0.0
+            emax = max(6.0 * ey, 0.01)
+            def stress_value(eps: float) -> float:
+                sign = -1.0 if eps < 0.0 else 1.0
+                value = abs(eps)
+                if value <= ey:
+                    return e * eps
+                return sign * (fy + ep * (value - ey))
+            pts = [
+                (-emax, stress_value(-emax)),
+                (-ey, -fy),
+                (0.0, 0.0),
+                (ey, fy),
+                (emax, stress_value(emax)),
+            ]
+            return pts, (
+                "Hardening monotonic guide · Hiso + Hkin control post-yield "
+                "plastic hardening; use Material Test for cyclic translation/expansion"
+            ), [
+                (ey, fy, "σy"),
+                (emax, stress_value(emax), "Et"),
+            ]
+
+        if material_type == "ElasticPP":
+            e = abs(p.get("E", 0.0))
+            eps_p = abs(p.get("epsyP", 0.0))
+            eps_n = p.get("epsyN", -eps_p)
+            eps0 = p.get("eps0", 0.0)
+            if e <= 1.0e-15 or eps_p <= 1.0e-15:
+                return [], "E and epsyP must be non-zero to draw ElasticPP.", []
+            eps_n = eps_n if eps_n < 0.0 else -abs(eps_n)
+            emax = max(2.5 * eps_p, 2.5 * abs(eps_n), 0.005)
+            fy_p = e * eps_p
+            fy_n = e * eps_n
+            pts = [
+                (-emax + eps0, fy_n),
+                (eps_n + eps0, fy_n),
+                (eps0, 0.0),
+                (eps_p + eps0, fy_p),
+                (emax + eps0, fy_p),
+            ]
+            return pts, "ElasticPP elastic-perfectly-plastic backbone", [
+                (eps_n + eps0, fy_n, "εy−"),
+                (eps_p + eps0, fy_p, "εy+"),
+                (eps0, 0.0, "ε0"),
+            ]
+
+        if material_type == "ElasticBilin":
+            ep1 = p.get("EP1", 0.0)
+            ep2 = p.get("EP2", 0.0)
+            epsp2 = p.get("epsP2", 0.0)
+            en1 = p.get("EN1", ep1)
+            en2 = p.get("EN2", ep2)
+            epsn2 = p.get("epsN2", -epsp2)
+            if abs(epsp2) <= 1.0e-15 or abs(epsn2) <= 1.0e-15:
+                return [], "epsP2 and epsN2 must be non-zero to draw ElasticBilin.", []
+            xmax = max(2.5 * abs(epsp2), 0.005)
+            xmin = -max(2.5 * abs(epsn2), 0.005)
+            yp2 = ep1 * epsp2
+            yn2 = en1 * epsn2
+            pts = [
+                (xmin, yn2 + en2 * (xmin - epsn2)),
+                (epsn2, yn2),
+                (0.0, 0.0),
+                (epsp2, yp2),
+                (xmax, yp2 + ep2 * (xmax - epsp2)),
+            ]
+            return pts, (
+                "ElasticBilin path-independent bilinear guide · unloading follows "
+                "the loading curve exactly"
+            ), [
+                (epsn2, yn2, "εN2"),
+                (epsp2, yp2, "εP2"),
+            ]
+
+        if material_type == "HystereticSmooth":
+            ka = p.get("ka", 0.0)
+            kb = p.get("kb", 0.0)
+            fbar = abs(p.get("fbar", 0.0))
+            if abs(ka) <= 1.0e-15:
+                return [], "ka must be non-zero to draw HystereticSmooth.", []
+            uy = fbar / max(abs(ka - kb), 1.0e-12)
+            umax = max(3.0 * uy, 0.01)
+            pts = [
+                (-umax, -fbar - kb * max(umax - uy, 0.0)),
+                (-uy, -fbar),
+                (0.0, 0.0),
+                (uy, fbar),
+                (umax, fbar + kb * max(umax - uy, 0.0)),
+            ]
+            return pts, (
+                "HystereticSmooth engineering guide · ka/kb/fbar define the "
+                "smooth bilinear scale; exact cyclic loop is shown in Material Test"
+            ), [
+                (uy, fbar, "fbar"),
             ]
 
         if material_type == "ReinforcingSteel":
@@ -285,7 +408,46 @@ class MaterialEnvelopePreview(QWidget):
                 (x3, y3, "η·E"),
             ]
 
-        if material_type == "Hysteretic":
+        if material_type == "Hardening":
+            self._add_group(
+                "Elastic and yield",
+                material_type,
+                ("E", "sigmaY"),
+            )
+            self._add_group(
+                "Combined hardening",
+                material_type,
+                ("H_iso", "H_kin"),
+            )
+            self._add_group(
+                "Optional viscoplasticity",
+                material_type,
+                ("eta",),
+            )
+        elif material_type == "ElasticPP":
+            self._add_group(
+                "Elastic-perfectly plastic",
+                material_type,
+                ("E", "epsyP", "epsyN", "eps0"),
+            )
+        elif material_type == "ElasticBilin":
+            self._add_group(
+                "Positive branch",
+                material_type,
+                ("EP1", "EP2", "epsP2"),
+            )
+            self._add_group(
+                "Negative branch",
+                material_type,
+                ("EN1", "EN2", "epsN2"),
+            )
+        elif material_type == "HystereticSmooth":
+            self._add_group(
+                "Smooth hysteresis",
+                material_type,
+                ("ka", "kb", "fbar", "beta"),
+            )
+        elif material_type == "Hysteretic":
             pts = [
                 (p.get("e3n", 0.0), p.get("s3n", 0.0)),
                 (p.get("e2n", 0.0), p.get("s2n", 0.0)),
@@ -1013,7 +1175,7 @@ class MaterialDialog(QDialog):
             self.material_note.setStyleSheet(
                 "padding: 7px; background: #eef4fb; color: #40566c;"
             )
-        elif material_type in {"Hysteretic", "Pinching4"}:
+        elif material_type in {"Hysteretic", "HystereticSmooth", "Pinching4"}:
             self.material_note.setText(
                 "Envelope points are shown live. These materials may represent "
                 "stress-strain or force-deformation response depending on where "
@@ -1025,6 +1187,9 @@ class MaterialDialog(QDialog):
         elif material_type in {
             "Steel01",
             "Steel02",
+            "Hardening",
+            "ElasticPP",
+            "ElasticBilin",
             "ReinforcingSteel",
             "Concrete01",
             "Concrete02",
