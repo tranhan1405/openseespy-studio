@@ -1951,7 +1951,12 @@ class AnalysisSettingsData:
             raise ValueError("Unsupported convergence test.")
         if (
             uses_iterative_convergence
-            and self.algorithm not in {"Newton","ModifiedNewton","NewtonLineSearch"}
+            and self.algorithm not in {
+                "Linear",
+                "Newton",
+                "ModifiedNewton",
+                "NewtonLineSearch",
+            }
         ):
             raise ValueError("Unsupported algorithm.")
         if (

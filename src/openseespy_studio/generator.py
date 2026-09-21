@@ -465,6 +465,7 @@ def section_to_openseespy(
     section: SectionData,
     materials: dict[int, MaterialData] | None = None,
     units: dict[str, str] | None = None,
+    ndm: int = 3,
 ) -> list[str]:
     p = (
         elastic_section_parameters_in_model_units(
@@ -476,6 +477,12 @@ def section_to_openseespy(
         else section.parameters
     )
     if section.section_type == "Elastic":
+        if int(ndm) == 2:
+            return [
+                "ops.section('Elastic', "
+                f"{section.tag}, {p['E']:g}, {p['A']:g}, "
+                f"{p['Iz']:g})"
+            ]
         return [
             "ops.section('Elastic', "
             f"{section.tag}, {p['E']:g}, {p['A']:g}, "
@@ -1463,10 +1470,11 @@ def analysis_to_openseespy(
         return lines
 
     _studio_print_flag = 1 if settings.live_convergence else 0
-    lines.append(
-        f"ops.test('{settings.test}', {settings.tolerance:g}, "
-        f"{settings.max_iterations}, {_studio_print_flag})"
-    )
+    if settings.algorithm != "Linear":
+        lines.append(
+            f"ops.test('{settings.test}', {settings.tolerance:g}, "
+            f"{settings.max_iterations}, {_studio_print_flag})"
+        )
     lines.append(f"ops.algorithm('{settings.algorithm}')")
     lines.append(f"_studio_primary_algorithm = {settings.algorithm!r}")
 
@@ -1696,7 +1704,7 @@ def analysis_to_openseespy(
             "increment=_studio_trial_increment)"
         )
 
-        if settings.recovery:
+        if settings.recovery and settings.algorithm != "Linear":
             lines.append(
                 f"            for _studio_alg in {adaptive_fallbacks!r}:"
             )
@@ -1989,7 +1997,7 @@ def analysis_to_openseespy(
             "code=int(_studio_ok))"
         )
     
-        if settings.recovery:
+        if settings.recovery and settings.algorithm != "Linear":
             fallbacks = [
                 algorithm
                 for algorithm in ("NewtonLineSearch", "ModifiedNewton", "Newton")
@@ -2533,7 +2541,13 @@ def analysis_to_openseespy(
 
 def transformation_to_openseespy(
     transformation: TransformationData,
+    ndm: int = 3,
 ) -> str:
+    if int(ndm) == 2:
+        return (
+            f"ops.geomTransf('{transformation.transformation_type}', "
+            f"{transformation.tag})"
+        )
     x, y, z = transformation.vecxz
     return (
         f"ops.geomTransf('{transformation.transformation_type}', "
@@ -3498,14 +3512,22 @@ def to_openseespy(
         lines.extend(["", "# Sections"])
         for tag in sorted(sections):
             lines.extend(
-                section_to_openseespy(sections[tag], materials, units)
+                section_to_openseespy(
+                    sections[tag],
+                    materials,
+                    units,
+                    model.ndm,
+                )
             )
 
     if transformations:
         lines.extend(["", "# Geometric transformations"])
         for tag in sorted(transformations):
             lines.append(
-                transformation_to_openseespy(transformations[tag])
+                transformation_to_openseespy(
+                    transformations[tag],
+                    model.ndm,
+                )
             )
 
     lines.extend([
@@ -3598,12 +3620,19 @@ def to_openseespy(
                 materials,
                 units,
             )
-            args = (
-                "ops.element('elasticBeamColumn', "
-                f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
-                f"{p['G']:g}, {p['J']:g}, {p['Iy']:g}, {p['Iz']:g}, "
-                f"{transf_tag}"
-            )
+            if int(model.ndm) == 2:
+                args = (
+                    "ops.element('elasticBeamColumn', "
+                    f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
+                    f"{p['Iz']:g}, {transf_tag}"
+                )
+            else:
+                args = (
+                    "ops.element('elasticBeamColumn', "
+                    f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
+                    f"{p['G']:g}, {p['J']:g}, {p['Iy']:g}, {p['Iz']:g}, "
+                    f"{transf_tag}"
+                )
             if e.mass_per_length > 0.0:
                 args += f", '-mass', {e.mass_per_length:g}"
                 if e.consistent_mass:

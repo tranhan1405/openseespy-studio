@@ -834,23 +834,55 @@ class _Importer:
             return
 
         if kind == "elasticBeamColumn":
-            if len(args) < 11:
-                self.issue(
-                    "UNSUPPORTED", node, kind,
-                    "Only the 3D elasticBeamColumn signature is imported in this pass.",
+            if int(self.project.model.ndm) == 2:
+                if len(args) < 8:
+                    raise ValueError(
+                        "2D elasticBeamColumn needs A, E, Iz and transfTag"
+                    )
+                a = float(args[4])
+                e = float(args[5])
+                iz = float(args[6])
+                transf_tag = int(args[7])
+                # G, J and Iy are not part of the native 2D signature.
+                # Store neutral placeholders; the 2D generator never emits
+                # them back into the elasticBeamColumn command.
+                section_tag = self.elastic_section_for(
+                    a,
+                    e,
+                    0.0,
+                    0.0,
+                    0.0,
+                    iz,
                 )
-                return
-            a, e, g, j, iy, iz = map(float, args[4:10])
-            section_tag = self.elastic_section_for(a, e, g, j, iy, iz)
-            rest = args[11:]
+                rest = args[8:]
+            else:
+                if len(args) < 11:
+                    raise ValueError(
+                        "3D elasticBeamColumn needs A, E, G, J, Iy, Iz "
+                        "and transfTag"
+                    )
+                a, e, g, j, iy, iz = map(float, args[4:10])
+                transf_tag = int(args[10])
+                section_tag = self.elastic_section_for(
+                    a,
+                    e,
+                    g,
+                    j,
+                    iy,
+                    iz,
+                )
+                rest = args[11:]
+
             self.project.model.add_element(
                 tag,
                 ni,
                 nj,
                 "elasticBeamColumn",
                 section_tag=section_tag,
-                transf_tag=int(args[10]),
-                mass_per_length=float(self.flag_value(rest, "-mass", 0.0) or 0.0),
+                transf_tag=transf_tag,
+                mass_per_length=float(
+                    self.flag_value(rest, "-mass", 0.0) or 0.0
+                ),
                 consistent_mass="-cMass" in rest,
             )
             self.count("Elements")
@@ -1325,7 +1357,8 @@ class _Importer:
                 return
             if command == "model":
                 ndm = int(self.flag_value(args, "-ndm", 3))
-                ndf = int(self.flag_value(args, "-ndf", 6))
+                default_ndf = {1: 1, 2: 3, 3: 6}.get(ndm, 6)
+                ndf = int(self.flag_value(args, "-ndf", default_ndf))
                 self.project.model = StructuralModel(
                     self.project.model.name,
                     ndm=ndm,

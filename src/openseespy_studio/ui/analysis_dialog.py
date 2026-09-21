@@ -64,7 +64,7 @@ class AnalysisDialog(QDialog):
         self.test=QComboBox(); self.test.addItems(["NormDispIncr","NormUnbalance","EnergyIncr"]); self.test.setCurrentText(analysis.test if analysis else "NormDispIncr")
         self.tol=fs(analysis.tolerance if analysis else 1e-8,1e-16,1e10)
         self.max_iter=QSpinBox(); self.max_iter.setRange(1,100000); self.max_iter.setValue(analysis.max_iterations if analysis else 50)
-        self.algorithm=QComboBox(); self.algorithm.addItems(["Newton","NewtonLineSearch","ModifiedNewton"]); self.algorithm.setCurrentText(analysis.algorithm if analysis else "Newton")
+        self.algorithm=QComboBox(); self.algorithm.addItems(["Linear","Newton","NewtonLineSearch","ModifiedNewton"]); self.algorithm.setCurrentText(analysis.algorithm if analysis else "Newton")
         self.integrator=QComboBox()
         self._initial_integrator=(analysis.integrator if analysis else None)
         self.integrator.setToolTip(
