@@ -445,7 +445,7 @@ def test_test_column_section_interface_creates_zero_length_section():
     assert constraint.constraint_type == "equalDOF"
     assert constraint.retained_node == result.base_ground_node
     assert constraint.constrained_nodes == [result.base_node]
-    assert constraint.dofs == [1]
+    assert constraint.dofs == (1,)
 
 
 def test_test_column_section_interface_requires_existing_section():
