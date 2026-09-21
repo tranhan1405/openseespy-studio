@@ -144,11 +144,18 @@ def evaluate_mass_source(
     if g_model <= 0.0:
         raise ValueError("Invalid model gravity acceleration.")
 
+    managed_ground_nodes = {
+        int(connection.generated_ground_node)
+        for connection in project.connections.values()
+        if connection.generated_ground_node is not None
+    }
     summary = MassSourceSummary(
         nodal_mass={tag: 0.0 for tag in project.model.nodes}
     )
 
     def add_node(tag: int, mass: float, *, category: str) -> None:
+        if int(tag) in managed_ground_nodes:
+            return
         value = max(0.0, float(mass))
         if value <= 0.0:
             return
@@ -274,7 +281,15 @@ def apply_mass_source(
             "Mass-source directions must be valid translational model DOFs."
         )
 
+    managed_ground_nodes = {
+        int(connection.generated_ground_node)
+        for connection in project.connections.values()
+        if connection.generated_ground_node is not None
+    }
     for tag, node in project.model.nodes.items():
+        if int(tag) in managed_ground_nodes:
+            project.model.set_mass(tag, (0.0,) * int(project.model.ndf))
+            continue
         values = list(node.mass)
         scalar = float(summary.nodal_mass.get(tag, 0.0))
         for dof in directions:
