@@ -4664,7 +4664,7 @@ class MainWindow(QMainWindow):
                     axis = {"x": 0, "y": 1, "z": 2}[property_id]
                     xyz = list(node.xyz)
                     xyz[axis] = float(value)
-                    node.xyz = tuple(xyz)
+                    self.model.set_coordinates(tag, *xyz)
                     self.project.sync_generated_ground_nodes()
                     self.project.validate_node_state(tag)
                 elif property_id.startswith("fixity_"):
@@ -4686,9 +4686,7 @@ class MainWindow(QMainWindow):
                         raise ValueError(
                             f"Mass requires {self.model.ndf} values."
                         )
-                    if any(item < 0.0 for item in masses):
-                        raise ValueError("Nodal mass values cannot be negative.")
-                    node.mass = masses
+                    self.model.set_mass(tag, masses)
                 else:
                     return
 
