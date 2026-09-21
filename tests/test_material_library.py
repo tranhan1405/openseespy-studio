@@ -22,7 +22,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 150
+    assert len(records) == 158
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -220,7 +220,7 @@ def test_moodley_2026_records_encode_model_applicability():
     )
 
 
-def test_verified_library_reaches_one_hundred_fifty_with_expected_source_counts():
+def test_verified_library_reaches_one_hundred_fifty_eight_with_expected_source_counts():
     records = load_verified_material_library()
     prefixes = {
         "carreno-2020-": 2,
@@ -231,15 +231,106 @@ def test_verified_library_reaches_one_hundred_fifty_with_expected_source_counts(
         "bhandari-2023-": 4,
         "benedetti-2025-": 6,
         "shang-2022-": 6,
+        "delgiudice-2022-": 3,
+        "georgantzia-2024-": 3,
+        "doci-2024-": 2,
     }
 
-    assert len(records) == 150
+    assert len(records) == 158
     assert len({record.id for record in records}) == 150
     for prefix, expected in prefixes.items():
         assert sum(
             record.id.startswith(prefix)
             for record in records
         ) == expected
+
+
+
+def test_delgiudice_2022_adds_traceable_steel02_and_concrete01_sets():
+    steel = _record("delgiudice-2022-am-microrebar-steel02")
+    hh_lh = _record("delgiudice-2022-hh-lh-core-concrete01")
+    hl_ll = _record("delgiudice-2022-hl-ll-core-concrete01")
+
+    assert steel.parameters_si == {
+        "Fy": 377.8e6,
+        "E0": 177.0e9,
+        "b": 0.003,
+        "R0": 15.0,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.0,
+        "a2": 1.0,
+        "a3": 0.02,
+        "a4": 1.0,
+    }
+    assert hh_lh.parameters_si == {
+        "fpc": -43.11e6,
+        "epsc0": -0.008,
+        "fpcu": -38.40e6,
+        "epsU": -0.059,
+    }
+    assert hl_ll.parameters_si == {
+        "fpc": -38.26e6,
+        "epsc0": -0.005,
+        "fpcu": -23.64e6,
+        "epsU": -0.048,
+    }
+    assert steel.doi == "10.1002/eqe.3578"
+    assert "Table 3" in str(steel.parameter_evidence.get("location", ""))
+    assert "Table 4" in str(hh_lh.parameter_evidence.get("location", ""))
+
+
+def test_georgantzia_2024_aluminium_steel02_sets_are_exact():
+    expected = {
+        "georgantzia-2024-6082-t6-steel02": (
+            266.0e6, 66.634e9, 0.005, 7.5, 0.051, 0.042
+        ),
+        "georgantzia-2024-6063-t6-steel02": (
+            326.0e6, 64.176e9, 0.003, 8.5, 0.035, 0.020
+        ),
+        "georgantzia-2024-6060-t5-steel02": (
+            306.0e6, 65.797e9, 0.003, 8.5, 0.046, 0.021
+        ),
+    }
+    for record_id, values in expected.items():
+        record = _record(record_id)
+        fy, e0, b, r0, a1, a3 = values
+        assert record.parameters_si["Fy"] == fy
+        assert record.parameters_si["E0"] == e0
+        assert record.parameters_si["b"] == b
+        assert record.parameters_si["R0"] == r0
+        assert record.parameters_si["cR1"] == 0.6
+        assert record.parameters_si["cR2"] == 0.15
+        assert record.parameters_si["a1"] == a1
+        assert record.parameters_si["a2"] == 1.0
+        assert record.parameters_si["a3"] == a3
+        assert record.parameters_si["a4"] == 1.0
+        assert record.doi == "10.1061/JMCEE7.MTENG-17314"
+        assert "Tables 3 and 4" in str(
+            record.parameter_evidence.get("location", "")
+        )
+
+
+def test_doci_2024_brace_steel02_sets_are_exact():
+    test1 = _record("doci-2024-cbf-test1-hss-steel02")
+    test2 = _record("doci-2024-cbf-test2-pipe-steel02")
+
+    assert test1.parameters_si["Fy"] == 475.0e6
+    assert test2.parameters_si["Fy"] == 408.0e6
+    for record in (test1, test2):
+        assert record.parameters_si["E0"] == 210.0e9
+        assert record.parameters_si["b"] == 0.0001
+        assert record.parameters_si["R0"] == 20.0
+        assert record.parameters_si["cR1"] == 0.925
+        assert record.parameters_si["cR2"] == 0.15
+        assert record.parameters_si["a1"] == 0.00001
+        assert record.parameters_si["a2"] == 0.1
+        assert record.parameters_si["a3"] == 0.00001
+        assert record.parameters_si["a4"] == 0.1
+        assert record.doi == "10.3390/met14121388"
+        assert "Table 4" in str(
+            record.parameter_evidence.get("location", "")
+        )
 
 
 def test_all_pinching4_library_records_have_physical_context_and_full_schema():
