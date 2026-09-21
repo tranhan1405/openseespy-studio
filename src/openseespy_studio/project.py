@@ -2141,6 +2141,20 @@ class ProjectDatabase:
     def next_constraint_tag(self) -> int:
         return max(self.constraints, default=0) + 1
 
+    def _validate_constraint_model_compatibility(
+        self,
+        constraint: ConstraintData,
+    ) -> None:
+        if constraint.constraint_type != "rigidDiaphragm":
+            return
+        signature = (int(self.model.ndm), int(self.model.ndf))
+        if signature not in {(2, 3), (3, 6)}:
+            raise ValueError(
+                f"rigidDiaphragm constraint {constraint.tag} requires a "
+                "2D/3DOF or 3D/6DOF model; got "
+                f"ndm={self.model.ndm}, ndf={self.model.ndf}."
+            )
+
     def _validate_constraint_nodes(self, constraint: ConstraintData) -> None:
         missing = []
         if constraint.retained_node not in self.model.nodes:
@@ -2232,6 +2246,7 @@ class ProjectDatabase:
             raise ValueError(
                 f"Constraint tag {constraint.tag} already exists."
             )
+        self._validate_constraint_model_compatibility(constraint)
         self._validate_constraint_nodes(constraint)
         self._validate_constraint_control_conflicts(constraint)
         self.constraints[constraint.tag] = constraint
@@ -2253,6 +2268,7 @@ class ProjectDatabase:
             raise ValueError(
                 f"Constraint tag {constraint.tag} already exists."
             )
+        self._validate_constraint_model_compatibility(constraint)
         self._validate_constraint_nodes(constraint)
         self._validate_constraint_control_conflicts(constraint)
         self.constraints.pop(original_tag)

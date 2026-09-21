@@ -609,3 +609,48 @@ def test_project_allows_rigid_diaphragm_retained_node_as_control():
     )
 
     assert project.analyses[38].control_node == 3
+
+
+def test_project_rejects_rigid_diaphragm_on_unsupported_model_signature():
+    model = StructuralModel("2D-2DOF", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Bad diaphragm", model=model)
+
+    try:
+        project.add_constraint(
+            ConstraintData(
+                39,
+                "Unsupported diaphragm",
+                "rigidDiaphragm",
+                retained_node=1,
+                constrained_nodes=[2],
+                perp_dirn=3,
+            )
+        )
+    except ValueError as exc:
+        assert "requires a 2D/3DOF or 3D/6DOF model" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected rigidDiaphragm model signature validation"
+        )
+
+
+def test_project_accepts_rigid_diaphragm_on_supported_2d_3dof_model():
+    model = StructuralModel("2D-3DOF", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Good diaphragm", model=model)
+
+    project.add_constraint(
+        ConstraintData(
+            40,
+            "Supported diaphragm",
+            "rigidDiaphragm",
+            retained_node=1,
+            constrained_nodes=[2],
+            perp_dirn=3,
+        )
+    )
+
+    assert project.constraints[40].constraint_type == "rigidDiaphragm"

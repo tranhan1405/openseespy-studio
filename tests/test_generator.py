@@ -1065,3 +1065,78 @@ def test_generator_allows_rigid_diaphragm_retained_node_as_control():
     )
 
     assert "ops.integrator('DisplacementControl', 3, 1" in code
+
+
+@pytest.mark.parametrize(
+    ("ndm", "ndf"),
+    [
+        (2, 2),
+        (3, 3),
+        (3, 4),
+    ],
+)
+def test_generator_rejects_rigid_diaphragm_on_unsupported_model_signature(
+    ndm,
+    ndf,
+):
+    model = StructuralModel("bad-rigid-diaphragm-signature", ndm=ndm, ndf=ndf)
+    if ndm == 2:
+        model.add_node(1, 0.0, 0.0)
+        model.add_node(2, 1.0, 0.0)
+    else:
+        model.add_node(1, 0.0, 0.0, 0.0)
+        model.add_node(2, 1.0, 0.0, 0.0)
+
+    constraint = ConstraintData(
+        12,
+        "Unsupported diaphragm",
+        "rigidDiaphragm",
+        retained_node=1,
+        constrained_nodes=[2],
+        perp_dirn=3,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"require a 2D/3DOF or 3D/6DOF model",
+    ):
+        to_openseespy(
+            model,
+            constraints={12: constraint},
+        )
+
+
+@pytest.mark.parametrize(
+    ("ndm", "ndf"),
+    [
+        (2, 3),
+        (3, 6),
+    ],
+)
+def test_generator_accepts_rigid_diaphragm_supported_model_signatures(
+    ndm,
+    ndf,
+):
+    model = StructuralModel("valid-rigid-diaphragm-signature", ndm=ndm, ndf=ndf)
+    if ndm == 2:
+        model.add_node(1, 0.0, 0.0)
+        model.add_node(2, 1.0, 0.0)
+    else:
+        model.add_node(1, 0.0, 0.0, 0.0)
+        model.add_node(2, 1.0, 0.0, 0.0)
+
+    constraint = ConstraintData(
+        13,
+        "Supported diaphragm",
+        "rigidDiaphragm",
+        retained_node=1,
+        constrained_nodes=[2],
+        perp_dirn=3,
+    )
+
+    code = to_openseespy(
+        model,
+        constraints={13: constraint},
+    )
+
+    assert "ops.rigidDiaphragm(3, 1, 2)" in code

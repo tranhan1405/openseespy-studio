@@ -2429,6 +2429,22 @@ def to_openseespy(
     scoped_deferred_analysis = bool(
         active_analysis is not None and deferred_pattern_tags
     )
+
+    rigid_diaphragm_tags = sorted(
+        constraint.tag
+        for constraint in (constraints or {}).values()
+        if constraint.constraint_type == "rigidDiaphragm"
+    )
+    if rigid_diaphragm_tags and (
+        (int(model.ndm), int(model.ndf)) not in {(2, 3), (3, 6)}
+    ):
+        raise ValueError(
+            "rigidDiaphragm constraint(s) "
+            + ", ".join(map(str, rigid_diaphragm_tags))
+            + f" require a 2D/3DOF or 3D/6DOF model; got "
+            f"ndm={model.ndm}, ndf={model.ndf}."
+        )
+
     missing_deferred = sorted(
         deferred_pattern_tags - set((load_patterns or {}).keys())
     )
