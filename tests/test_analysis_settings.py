@@ -1124,3 +1124,47 @@ def test_modal_generated_script_checks_requested_mode_count_before_processing():
     assert "returned only {len(_studio_eigenvalues)} eigenvalue(s)" in text
     assert text.index(guard) < text.index(loop)
     compile(text, "<modal-mode-count-guard>", "exec")
+
+
+def test_modal_participation_uses_only_translational_dofs_for_2d_model():
+    analysis = AnalysisSettingsData(
+        80,
+        "2D modal participation",
+        "Modal",
+        num_modes=1,
+    )
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            analysis,
+            ndm=2,
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
+
+    assert "for _studio_dof in (1, 2):" in text
+    assert "    for _studio_dof in (1, 2):" in text
+    assert "for _studio_dof in (1, 2, 3):" not in text
+    compile(text, "<modal-2d-participation>", "exec")
+
+
+def test_modal_participation_keeps_three_translational_dofs_for_3d_model():
+    analysis = AnalysisSettingsData(
+        81,
+        "3D modal participation",
+        "Modal",
+        num_modes=1,
+    )
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            analysis,
+            ndm=3,
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
+
+    assert "for _studio_dof in (1, 2, 3):" in text
+    compile(text, "<modal-3d-participation>", "exec")

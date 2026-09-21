@@ -1017,6 +1017,7 @@ def column_response_spec(
 def analysis_to_openseespy(
     settings: AnalysisSettingsData,
     *,
+    ndm: int = 3,
     node_tags: list[int] | None = None,
     element_tags: list[int] | None = None,
     frame_element_tags: list[int] | None = None,
@@ -1027,6 +1028,8 @@ def analysis_to_openseespy(
     fiber_response_specs: dict[int, dict[str, object]] | None = None,
     specimen_response_spec: dict[str, object] | None = None,
 ) -> list[str]:
+    ndm = int(ndm)
+    translational_dofs = tuple(range(1, max(ndm, 0) + 1))
     node_tags = list(node_tags or [])
     element_tags = list(element_tags or [])
     frame_element_tags = list(frame_element_tags or [])
@@ -1265,7 +1268,7 @@ def analysis_to_openseespy(
                 ")"
             ),
             "_studio_total_lumped_mass = {}",
-            "for _studio_dof in (1, 2, 3):",
+            f"for _studio_dof in {translational_dofs!r}:",
             "    _studio_mass_total = 0.0",
             "    for _studio_node in _studio_node_tags:",
             "        try:",
@@ -1315,7 +1318,7 @@ def analysis_to_openseespy(
             "            ops.nodeEigenvector(_studio_node, _studio_mode)",
             "        ]",
             "    _studio_participation = {}",
-            "    for _studio_dof in (1, 2, 3):",
+            f"    for _studio_dof in {translational_dofs!r}:",
             "        _studio_num = 0.0",
             "        _studio_den = 0.0",
             "        for _studio_node in _studio_node_tags:",
@@ -2932,6 +2935,7 @@ def to_openseespy(
         lines.extend(
             analysis_to_openseespy(
                 active,
+                ndm=model.ndm,
                 node_tags=sorted(model.nodes),
                 element_tags=result_element_tags,
                 frame_element_tags=sorted(
