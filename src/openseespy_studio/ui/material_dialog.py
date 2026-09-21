@@ -31,6 +31,7 @@ from ..project import (
     MATERIAL_DEFAULTS,
     MATERIAL_ENGINEERING_DEFAULTS,
     MATERIAL_PARAMETER_KINDS,
+    material_parameter_kind,
     MATERIAL_PARAMETER_ORDER,
     MaterialData,
 )
@@ -748,22 +749,51 @@ class MaterialDialog(QDialog):
         self._component_table = None
 
     def _parameter_kind(self, material_type: str, key: str) -> str:
-        return MATERIAL_PARAMETER_KINDS.get(material_type, {}).get(key, "raw")
+        if (
+            self._initial_material is not None
+            and self._initial_material.material_type == material_type
+        ):
+            return material_parameter_kind(
+                self._initial_material,
+                key,
+            )
+        return MATERIAL_PARAMETER_KINDS.get(
+            material_type,
+            {},
+        ).get(key, "raw")
 
-    def _display_value(self, material_type: str, key: str, stored: float) -> float:
+    def _display_value(
+        self,
+        material_type: str,
+        key: str,
+        stored: float,
+    ) -> float:
         kind = self._parameter_kind(material_type, key)
         if kind == "stress":
             return self.unit_system.engineering_stress_from_pa(stored)
         if kind == "length":
             return self.unit_system.length_from_m(stored)
+        if kind == "force":
+            return self.unit_system.force_from_n(stored)
+        if kind == "moment":
+            return self.unit_system.moment_from_nm(stored)
         return stored
 
-    def _stored_value(self, material_type: str, key: str, display: float) -> float:
+    def _stored_value(
+        self,
+        material_type: str,
+        key: str,
+        display: float,
+    ) -> float:
         kind = self._parameter_kind(material_type, key)
         if kind == "stress":
             return self.unit_system.engineering_stress_to_pa(display)
         if kind == "length":
             return self.unit_system.length_to_m_value(display)
+        if kind == "force":
+            return self.unit_system.force_to_n_value(display)
+        if kind == "moment":
+            return self.unit_system.moment_to_nm_value(display)
         return display
 
     def _parameter_label(self, material_type: str, key: str) -> str:
@@ -780,6 +810,14 @@ class MaterialDialog(QDialog):
             )
         if kind == "length":
             return f"{base} [{self.unit_system.length}]:"
+        if kind == "force":
+            return f"{base} [{self.unit_system.force}]:"
+        if kind == "moment":
+            return f"{base} [{self.unit_system.moment_label}]:"
+        if kind == "rotation":
+            return f"{base} [rad]:"
+        if kind == "strain":
+            return f"{base} [strain]:"
         if material_type == "MinMax":
             self._add_base_material_selector(material_type)
             self._add_group(
