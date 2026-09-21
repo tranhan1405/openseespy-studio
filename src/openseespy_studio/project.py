@@ -1668,8 +1668,25 @@ class AnalysisSettingsData:
         self.adaptive_cutback_factor=float(self.adaptive_cutback_factor)
         self.adaptive_min_factor=float(self.adaptive_min_factor)
         self.adaptive_growth_factor=float(self.adaptive_growth_factor)
-        self.adaptive_easy_iterations=int(self.adaptive_easy_iterations)
-        self.adaptive_growth_after=int(self.adaptive_growth_after)
+        uses_adaptive_integer_settings = (
+            self.adaptive_step and self.analysis_type != "Modal"
+        )
+        self.adaptive_easy_iterations = (
+            _strict_int(
+                self.adaptive_easy_iterations,
+                "Analysis adaptive easy iterations",
+            )
+            if uses_adaptive_integer_settings
+            else int(self.adaptive_easy_iterations)
+        )
+        self.adaptive_growth_after = (
+            _strict_int(
+                self.adaptive_growth_after,
+                "Analysis adaptive growth after",
+            )
+            if uses_adaptive_integer_settings
+            else int(self.adaptive_growth_after)
+        )
         self.live_convergence=_strict_bool(
             self.live_convergence,
             "Analysis live_convergence",
@@ -2114,7 +2131,10 @@ class SolutionResultData:
             _strict_int(tag, "Solution result node tag")
             for tag in self.node_scope
         })
-        self.element_scope = sorted({int(tag) for tag in self.element_scope})
+        self.element_scope = sorted({
+            _strict_int(tag, "Solution result element tag")
+            for tag in self.element_scope
+        })
         self.settings = dict(self.settings)
         if self.tag <= 0:
             raise ValueError("Solution result tag must be positive.")
@@ -2144,10 +2164,7 @@ class SolutionResultData:
             name=str(data.get("name", "")),
             result_type=str(data["result_type"]),
             node_scope=list(data.get("node_scope", [])),
-            element_scope=[
-                int(tag)
-                for tag in data.get("element_scope", [])
-            ],
+            element_scope=list(data.get("element_scope", [])),
             settings=dict(data.get("settings", {})),
         )
 
@@ -2157,6 +2174,17 @@ class SelectionSetData:
     name: str
     node_tags: set[int] = field(default_factory=set)
     element_tags: set[int] = field(default_factory=set)
+
+    def __post_init__(self) -> None:
+        self.name = str(self.name)
+        self.node_tags = {
+            _strict_int(tag, "Selection-set node tag")
+            for tag in self.node_tags
+        }
+        self.element_tags = {
+            _strict_int(tag, "Selection-set element tag")
+            for tag in self.element_tags
+        }
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2169,8 +2197,8 @@ class SelectionSetData:
     def from_dict(cls, data: dict[str, Any]) -> "SelectionSetData":
         return cls(
             name=str(data["name"]),
-            node_tags={int(tag) for tag in data.get("node_tags", [])},
-            element_tags={int(tag) for tag in data.get("element_tags", [])},
+            node_tags=set(data.get("node_tags", [])),
+            element_tags=set(data.get("element_tags", [])),
         )
 
 
