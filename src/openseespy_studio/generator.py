@@ -957,7 +957,14 @@ def column_response_spec(
             base_section,
             materials,
             coordinate=bending_coordinate,
-            material_types={"Steel01", "Steel02", "ReinforcingSteel"},
+            material_types={
+                "Steel01",
+                "Steel02",
+                "Hardening",
+                "ElasticPP",
+                "ElasticBilin",
+                "ReinforcingSteel",
+            },
             label_prefix="steel",
         )
     )
