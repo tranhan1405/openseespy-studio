@@ -2632,6 +2632,14 @@ def test_generator_rejects_fiber_recorder_with_missing_material_reference():
     model = StructuralModel("orphan-fiber-recorder-material", ndm=2, ndf=3)
     model.add_node(1, 0.0, 0.0)
     model.add_node(2, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
     recorder = RecorderData(
         1,
         "Fiber",
@@ -2804,7 +2812,7 @@ def test_generator_rejects_element_recorder_with_missing_target_element():
         "Element recorder",
         "Element",
         target_tags=[99],
-        response="force",
+        response="globalForce",
     )
 
     with pytest.raises(
