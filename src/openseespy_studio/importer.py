@@ -80,6 +80,8 @@ class _ContinueSignal(Exception):
 
 
 class _SafeEvaluator:
+    SAFE_NOOP_CALLS = {"print"}
+
     SAFE_CALLS = {
         "int": int,
         "float": float,
@@ -228,6 +230,8 @@ class _SafeEvaluator:
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name):
                 name = node.func.id
+                if name in self.SAFE_NOOP_CALLS:
+                    return None
                 if name in self.SAFE_CALLS:
                     if any(keyword.arg is None for keyword in node.keywords):
                         raise _Unresolved("**kwargs")
@@ -246,6 +250,22 @@ class _SafeEvaluator:
 
 
 class _Importer:
+    RUNTIME_ONLY_CALLS = {
+        "open",
+        "nodeDisp",
+        "nodeVel",
+        "nodeAccel",
+        "nodeReaction",
+        "eleResponse",
+        "sectionForce",
+        "sectionDeformation",
+        "getTime",
+        "getNodeTags",
+        "getEleTags",
+    }
+
+    RUNTIME_ONLY_METHODS = {"write", "writelines", "flush", "close"}
+
     MAX_LOOP_ITERATIONS = 20_000
     MAX_CALL_DEPTH = 50
     MAX_STATEMENT_STEPS = 100_000
@@ -283,6 +303,7 @@ class _Importer:
             "__name__": "__main__",
         }
         self.functions: dict[str, ast.FunctionDef] = {}
+        self.runtime_only_names: set[str] = set()
         self._call_depth = 0
         self._statement_steps = 0
         self.eval = _SafeEvaluator(self.env, self._call_custom_function)
@@ -1353,6 +1374,42 @@ class _Importer:
         except (IndexError, KeyError, TypeError, ValueError) as exc:
             self.issue("ERROR", node, command, str(exc))
 
+    def _runtime_call_name(self, call: ast.Call) -> str | None:
+        if isinstance(call.func, ast.Name):
+            return (
+                call.func.id
+                if call.func.id in self.RUNTIME_ONLY_CALLS
+                else None
+            )
+        if (
+            isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id in self.ops_aliases
+            and call.func.attr in self.RUNTIME_ONLY_CALLS
+        ):
+            return call.func.attr
+        return None
+
+    def _runtime_calls_in(self, node: ast.AST) -> list[str]:
+        names: list[str] = []
+        for child in ast.walk(node):
+            if isinstance(child, ast.Call):
+                name = self._runtime_call_name(child)
+                if name is not None:
+                    names.append(name)
+        return names
+
+    @staticmethod
+    def _simple_target_names(target: ast.AST) -> set[str]:
+        if isinstance(target, ast.Name):
+            return {target.id}
+        if isinstance(target, (ast.Tuple, ast.List)):
+            result: set[str] = set()
+            for child in target.elts:
+                result.update(_Importer._simple_target_names(child))
+            return result
+        return set()
+
     def _call_custom_function(self, call: ast.Call) -> Any:
         if not isinstance(call.func, ast.Name):
             raise _Unresolved("custom call target")
@@ -1479,6 +1536,21 @@ class _Importer:
             return
 
         if isinstance(stmt, ast.Assign):
+            runtime_calls = self._runtime_calls_in(stmt.value)
+            if runtime_calls:
+                target_names: set[str] = set()
+                for target in stmt.targets:
+                    target_names.update(self._simple_target_names(target))
+                self.runtime_only_names.update(target_names)
+                self.issue(
+                    "WARNING",
+                    stmt,
+                    "runtime value",
+                    "Skipped runtime-only value from "
+                    + ", ".join(sorted(set(runtime_calls)))
+                    + "; model reconstruction continues.",
+                )
+                return
             try:
                 value = self.eval.eval(stmt.value)
                 for target in stmt.targets:
@@ -1549,6 +1621,25 @@ class _Importer:
             if command is not None:
                 self.handle_call(command, stmt.value)
                 return
+
+            runtime_name = self._runtime_call_name(stmt.value)
+            if runtime_name is not None:
+                self.issue(
+                    "WARNING",
+                    stmt,
+                    "runtime call",
+                    f"Skipped runtime-only call {runtime_name} during model import.",
+                )
+                return
+
+            if (
+                isinstance(stmt.value.func, ast.Attribute)
+                and isinstance(stmt.value.func.value, ast.Name)
+                and stmt.value.func.value.id in self.runtime_only_names
+                and stmt.value.func.attr in self.RUNTIME_ONLY_METHODS
+            ):
+                return
+
             try:
                 self.eval.eval(stmt.value)
             except _Unresolved as exc:
@@ -1569,6 +1660,24 @@ class _Importer:
             # the existing behavior and do not symbolically execute it.
             if self._studio_source:
                 return
+
+            runtime_dependencies = {
+                child.id
+                for child in ast.walk(stmt.test)
+                if isinstance(child, ast.Name)
+                and child.id in self.runtime_only_names
+            }
+            if runtime_dependencies:
+                self.issue(
+                    "WARNING",
+                    stmt,
+                    "runtime condition",
+                    "Skipped runtime/post-processing condition depending on "
+                    + ", ".join(sorted(runtime_dependencies))
+                    + ".",
+                )
+                return
+
             try:
                 condition = bool(self.eval.eval(stmt.test))
             except _Unresolved as exc:
