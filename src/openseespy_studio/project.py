@@ -2865,17 +2865,29 @@ class ProjectDatabase:
     def add_analysis(self, analysis: AnalysisSettingsData) -> None:
         if analysis.tag in self.analyses:
             raise ValueError(f"Analysis tag {analysis.tag} already exists.")
-        if (
+        uses_control_node = (
             analysis.analysis_type in {"Pushover", "Cyclic"}
             or (
                 analysis.analysis_type == "Static"
                 and analysis.integrator == "DisplacementControl"
             )
-        ) and analysis.control_node not in self.model.nodes:
+        )
+        if uses_control_node and analysis.control_node not in self.model.nodes:
             raise ValueError(
                 f"{analysis.analysis_type} control node "
                 f"{analysis.control_node} does not exist."
             )
+        if uses_control_node:
+            control_node = self.model.nodes[analysis.control_node]
+            if (
+                analysis.control_dof <= len(control_node.fixity)
+                and bool(control_node.fixity[analysis.control_dof - 1])
+            ):
+                raise ValueError(
+                    f"{analysis.analysis_type} control node "
+                    f"{analysis.control_node} DOF {analysis.control_dof} "
+                    "is restrained by a support."
+                )
         self.analyses[analysis.tag]=analysis
         if self.active_analysis_tag is None:
             self.active_analysis_tag=analysis.tag
@@ -2884,17 +2896,29 @@ class ProjectDatabase:
         original_tag=int(original_tag)
         if original_tag not in self.analyses: raise ValueError(f"Analysis tag {original_tag} does not exist.")
         if analysis.tag!=original_tag and analysis.tag in self.analyses: raise ValueError(f"Analysis tag {analysis.tag} already exists.")
-        if (
+        uses_control_node = (
             analysis.analysis_type in {"Pushover", "Cyclic"}
             or (
                 analysis.analysis_type == "Static"
                 and analysis.integrator == "DisplacementControl"
             )
-        ) and analysis.control_node not in self.model.nodes:
+        )
+        if uses_control_node and analysis.control_node not in self.model.nodes:
             raise ValueError(
                 f"{analysis.analysis_type} control node "
                 f"{analysis.control_node} does not exist."
             )
+        if uses_control_node:
+            control_node = self.model.nodes[analysis.control_node]
+            if (
+                analysis.control_dof <= len(control_node.fixity)
+                and bool(control_node.fixity[analysis.control_dof - 1])
+            ):
+                raise ValueError(
+                    f"{analysis.analysis_type} control node "
+                    f"{analysis.control_node} DOF {analysis.control_dof} "
+                    "is restrained by a support."
+                )
         self.analyses.pop(original_tag); self.analyses[analysis.tag]=analysis
         if analysis.tag != original_tag:
             for result in self.solution_results.values():

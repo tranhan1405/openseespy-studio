@@ -497,3 +497,76 @@ def test_generator_ignores_stale_control_node_when_analysis_does_not_use_it(
         assert "ops.eigen('-genBandArpack', 1)" in code
     else:
         assert "ops.analysis(" in code
+
+
+@pytest.mark.parametrize(
+    ("analysis_type", "integrator"),
+    [
+        ("Static", "DisplacementControl"),
+        ("Pushover", "DisplacementControl"),
+        ("Cyclic", "DisplacementControl"),
+    ],
+)
+def test_generator_rejects_restrained_control_dof(
+    analysis_type,
+    integrator,
+):
+    model = StructuralModel("restrained-control-dof", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.set_fixity(2, (1, 0, 0))
+
+    kwargs = {
+        "integrator": integrator,
+        "control_node": 2,
+        "control_dof": 1,
+    }
+    if analysis_type == "Static":
+        kwargs["displacement_increment"] = 0.001
+    elif analysis_type == "Pushover":
+        kwargs["displacement_increment"] = 0.001
+    else:
+        kwargs.update(
+            cyclic_targets=[0.001, -0.001],
+            cyclic_increment=0.0005,
+        )
+
+    analysis = AnalysisSettingsData(
+        15,
+        "Restrained control DOF",
+        analysis_type,
+        **kwargs,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"control node 2 DOF 1 is restrained by a support",
+    ):
+        to_openseespy(
+            model,
+            analyses={15: analysis},
+            active_analysis_tag=15,
+        )
+
+
+def test_generator_accepts_free_control_dof_on_partially_restrained_node():
+    model = StructuralModel("free-control-dof", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.set_fixity(2, (1, 0, 1))
+    analysis = AnalysisSettingsData(
+        16,
+        "Free control DOF",
+        "Pushover",
+        control_node=2,
+        control_dof=2,
+        displacement_increment=0.001,
+    )
+
+    code = to_openseespy(
+        model,
+        analyses={16: analysis},
+        active_analysis_tag=16,
+    )
+
+    assert "ops.integrator('DisplacementControl', 2, 2" in code

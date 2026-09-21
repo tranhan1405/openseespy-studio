@@ -2467,6 +2467,18 @@ def to_openseespy(
             f"{active_analysis.analysis_type} control node "
             f"{active_analysis.control_node} does not exist in the model."
         )
+    if uses_control_node:
+        _control_node = model.nodes[int(active_analysis.control_node)]
+        _control_dof = int(active_analysis.control_dof)
+        if (
+            _control_dof <= len(_control_node.fixity)
+            and bool(_control_node.fixity[_control_dof - 1])
+        ):
+            raise ValueError(
+                f"{active_analysis.analysis_type} control node "
+                f"{active_analysis.control_node} DOF "
+                f"{active_analysis.control_dof} is restrained by a support."
+            )
 
     lines: list[str] = [
         "import json",

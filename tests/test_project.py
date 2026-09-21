@@ -202,3 +202,55 @@ def test_solution_result_details_settings_update_and_round_trip():
         "quantity": "Displacement",
         "dof": 2,
     }
+
+
+def test_project_rejects_restrained_displacement_control_dof_on_add():
+    project = build_project()
+    project.model.set_fixity(2, (1, 0, 0, 0, 0, 0))
+    analysis = AnalysisSettingsData(
+        20,
+        "Restrained push",
+        "Pushover",
+        control_node=2,
+        control_dof=1,
+        displacement_increment=0.001,
+    )
+
+    try:
+        project.add_analysis(analysis)
+    except ValueError as exc:
+        assert "control node 2 DOF 1 is restrained by a support" in str(exc)
+    else:
+        raise AssertionError("Expected restrained control DOF validation")
+
+
+def test_project_rejects_restrained_displacement_control_dof_on_update():
+    project = build_project()
+    project.add_analysis(
+        AnalysisSettingsData(
+            21,
+            "Initial push",
+            "Pushover",
+            control_node=2,
+            control_dof=2,
+            displacement_increment=0.001,
+        )
+    )
+    project.model.set_fixity(2, (1, 0, 0, 0, 0, 0))
+
+    try:
+        project.update_analysis(
+            21,
+            AnalysisSettingsData(
+                21,
+                "Updated push",
+                "Pushover",
+                control_node=2,
+                control_dof=1,
+                displacement_increment=0.001,
+            ),
+        )
+    except ValueError as exc:
+        assert "control node 2 DOF 1 is restrained by a support" in str(exc)
+    else:
+        raise AssertionError("Expected restrained control DOF validation")
