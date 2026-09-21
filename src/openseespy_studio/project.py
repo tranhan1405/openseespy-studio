@@ -1947,6 +1947,26 @@ class ProjectDatabase:
         default_factory=lambda: dict(DEFAULT_PROJECT_UNITS)
     )
 
+    def clear_model_linked_data(self) -> None:
+        """Clear objects whose meaning depends on the current model geometry.
+
+        Material, section, and transformation libraries are intentionally
+        preserved so a replacement geometry can reuse those definitions.
+        """
+        self.selection_sets.clear()
+        self.constraints.clear()
+        self.connections.clear()
+        self.time_series.clear()
+        self.load_patterns.clear()
+        self.nodal_loads.clear()
+        self.prescribed_displacements.clear()
+        self.element_loads.clear()
+        self.mass_sources.clear()
+        self.analyses.clear()
+        self.recorders.clear()
+        self.solution_results.clear()
+        self.active_analysis_tag = None
+
     @staticmethod
     def material_dependencies(material: MaterialData) -> list[int]:
         if material.material_type in {"MinMax", "Fatigue"}:
