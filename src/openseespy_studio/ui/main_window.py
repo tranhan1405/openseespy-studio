@@ -133,6 +133,7 @@ UNIT_PRESETS: tuple[tuple[str, dict[str, str]], ...] = (
     ("m - N - s", {"length": "m", "force": "N", "time": "s"}),
     ("mm - N - s", {"length": "mm", "force": "N", "time": "s"}),
     ("mm - kN - s", {"length": "mm", "force": "kN", "time": "s"}),
+    ("in - kip - s", {"length": "in", "force": "kip", "time": "s"}),
 )
 
 
