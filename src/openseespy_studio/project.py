@@ -1930,14 +1930,22 @@ class RecorderData:
             self.include_time,
             "Recorder include_time",
         )
-        self.section_number = int(self.section_number)
+        if self.recorder_type in {"Section", "Fiber"}:
+            self.section_number = _strict_int(
+                self.section_number,
+                "Recorder section number",
+            )
+        else:
+            self.section_number = int(self.section_number)
         self.fiber_y = float(self.fiber_y)
         self.fiber_z = float(self.fiber_z)
-        self.material_tag = (
-            int(self.material_tag)
-            if self.material_tag is not None
-            else None
-        )
+        if self.recorder_type == "Fiber" and self.material_tag is not None:
+            self.material_tag = _strict_int(
+                self.material_tag,
+                "Recorder material tag",
+            )
+        elif self.material_tag is not None:
+            self.material_tag = int(self.material_tag)
         if self.tag <= 0:
             raise ValueError("Recorder tag must be positive.")
         if not math.isfinite(self.fiber_y) or not math.isfinite(self.fiber_z):
@@ -1998,14 +2006,10 @@ class RecorderData:
             dofs=list(data.get("dofs", [1])),
             file_name=str(data.get("file_name", "")),
             include_time=data.get("include_time", True),
-            section_number=int(data.get("section_number", 1)),
+            section_number=data.get("section_number", 1),
             fiber_y=float(data.get("fiber_y", 0.0)),
             fiber_z=float(data.get("fiber_z", 0.0)),
-            material_tag=(
-                int(data["material_tag"])
-                if data.get("material_tag") is not None
-                else None
-            ),
+            material_tag=data.get("material_tag"),
         )
 
 
@@ -2039,11 +2043,17 @@ class SolutionResultData:
     settings: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.tag = int(self.tag)
-        self.analysis_tag = int(self.analysis_tag)
+        self.tag = _strict_int(self.tag, "Solution result tag")
+        self.analysis_tag = _strict_int(
+            self.analysis_tag,
+            "Solution result analysis tag",
+        )
         self.name = str(self.name).strip() or f"Result {self.tag}"
         self.result_type = str(self.result_type)
-        self.node_scope = sorted({int(tag) for tag in self.node_scope})
+        self.node_scope = sorted({
+            _strict_int(tag, "Solution result node tag")
+            for tag in self.node_scope
+        })
         self.element_scope = sorted({int(tag) for tag in self.element_scope})
         self.settings = dict(self.settings)
         if self.tag <= 0:
@@ -2069,14 +2079,11 @@ class SolutionResultData:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SolutionResultData":
         return cls(
-            tag=int(data["tag"]),
-            analysis_tag=int(data["analysis_tag"]),
+            tag=data["tag"],
+            analysis_tag=data["analysis_tag"],
             name=str(data.get("name", "")),
             result_type=str(data["result_type"]),
-            node_scope=[
-                int(tag)
-                for tag in data.get("node_scope", [])
-            ],
+            node_scope=list(data.get("node_scope", [])),
             element_scope=[
                 int(tag)
                 for tag in data.get("element_scope", [])
