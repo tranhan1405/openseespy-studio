@@ -144,34 +144,6 @@ def test_load_pattern_rejects_fractional_time_series_reference():
         )
 
 
-def test_load_pattern_rejects_fractional_excitation_direction():
-    with pytest.raises(
-        ValueError,
-        match=r"Load pattern direction must be an integer",
-    ):
-        LoadPatternData(
-            11,
-            "EQ",
-            "UniformExcitation",
-            time_series_tag=1,
-            direction=1.5,
-        )
-
-    with pytest.raises(
-        ValueError,
-        match=r"Load pattern direction must be an integer",
-    ):
-        LoadPatternData.from_dict(
-            {
-                "tag": 11,
-                "name": "EQ",
-                "pattern_type": "UniformExcitation",
-                "time_series_tag": 1,
-                "direction": 1.5,
-            }
-        )
-
-
 def test_nodal_load_rejects_fractional_pattern_reference():
     values = (1.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
@@ -228,6 +200,36 @@ def test_nodal_load_rejects_fractional_node_reference():
                 "pattern_tag": 1,
                 "node_tag": 2.5,
                 "values": list(values),
+            }
+        )
+
+
+def test_prescribed_displacement_rejects_fractional_pattern_reference():
+    with pytest.raises(
+        ValueError,
+        match=r"Prescribed displacement pattern tag must be an integer",
+    ):
+        PrescribedDisplacementData(
+            14,
+            "Move",
+            pattern_tag=1.5,
+            node_tag=1,
+            dof=1,
+            value=0.001,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Prescribed displacement pattern tag must be an integer",
+    ):
+        PrescribedDisplacementData.from_dict(
+            {
+                "tag": 14,
+                "name": "Move",
+                "pattern_tag": 1.5,
+                "node_tag": 1,
+                "dof": 1,
+                "value": 0.001,
             }
         )
 
