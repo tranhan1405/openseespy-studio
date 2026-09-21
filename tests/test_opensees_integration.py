@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from openseespy_studio.generator import to_openseespy
+from openseespy_studio.generator import material_to_openseespy, to_openseespy
 from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
@@ -250,6 +250,63 @@ def _run_real_generated(
     assert exit_code == 0, payload.get("error", "")
     assert payload["status"] == "completed"
     return payload["results"]
+
+
+def test_frp_confined_concrete_material_constructs_in_real_opensees(
+    tmp_path: Path,
+):
+    material = MaterialData(
+        77,
+        "FRP confined concrete",
+        "FRPConfinedConcrete",
+        parameters={
+            "fpc1": 27.5e6,
+            "fpc2": 27.5e6,
+            "epsc0": 0.002,
+            "D": 0.400,
+            "c": 0.035,
+            "Ej": 266.0e9,
+            "Sj": 0.0,
+            "tj": 0.000222,
+            "eju": 0.0163,
+            "S": 0.150,
+            "fyl": 374.0e6,
+            "fyh": 363.0e6,
+            "dlong": 0.016,
+            "dtrans": 0.006,
+            "Es": 200.0e9,
+            "nu0": 0.2,
+            "k": 0.8,
+            "useBuck": 1.0,
+        },
+    )
+    material_line = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+    script = "\n".join([
+        "import openseespy.opensees as ops",
+        "ops.wipe()",
+        "ops.model('basic', '-ndm', 1, '-ndf', 1)",
+        material_line,
+        "ops.node(1, 0.0)",
+        "ops.node(2, 1.0)",
+        "ops.fix(1, 1)",
+        "ops.element('truss', 1, 1, 2, 1.0, 77)",
+        "print('FRP_MATERIAL_OK')",
+    ])
+    script_path = tmp_path / "frp-material-smoke.py"
+    script_path.write_text(script, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRP_MATERIAL_OK" in completed.stdout
 
 
 def test_imported_wfsection2d_conversion_runs_in_real_opensees(
