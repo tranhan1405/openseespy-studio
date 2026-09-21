@@ -1627,7 +1627,8 @@ class AnalysisSettingsData:
             else int(self.steps)
         )
         self.load_increment=float(self.load_increment)
-        self.control_node=int(self.control_node); self.control_dof=int(self.control_dof)
+        raw_control_node = self.control_node
+        raw_control_dof = self.control_dof
         self.displacement_increment=float(self.displacement_increment)
         self.cyclic_targets=[float(value) for value in self.cyclic_targets]
         self.cyclic_increment=abs(float(self.cyclic_increment))
@@ -1638,8 +1639,8 @@ class AnalysisSettingsData:
         self.arc_length_s=float(self.arc_length_s)
         self.arc_length_alpha=float(self.arc_length_alpha)
         self.rayleigh_damping_ratio=float(self.rayleigh_damping_ratio)
-        self.rayleigh_mode_i=int(self.rayleigh_mode_i)
-        self.rayleigh_mode_j=int(self.rayleigh_mode_j)
+        raw_rayleigh_mode_i = self.rayleigh_mode_i
+        raw_rayleigh_mode_j = self.rayleigh_mode_j
         self.preload_gravity=_strict_bool(
             self.preload_gravity,
             "Analysis preload_gravity",
@@ -1649,9 +1650,7 @@ class AnalysisSettingsData:
             if self.preload_gravity
             else int(self.gravity_steps)
         )
-        self.deferred_pattern_tags=list(dict.fromkeys(
-            int(tag) for tag in self.deferred_pattern_tags
-        ))
+        raw_deferred_pattern_tags = list(self.deferred_pattern_tags)
         self.num_modes=(
             _strict_int(self.num_modes, "Analysis number of modes")
             if self.analysis_type == "Modal"
@@ -1724,6 +1723,56 @@ class AnalysisSettingsData:
                 f"Integrator {self.integrator!r} is not valid for "
                 f"{self.analysis_type} analysis."
             )
+
+        uses_control_node = (
+            self.analysis_type in {"Pushover", "Cyclic"}
+            or (
+                self.analysis_type == "Static"
+                and self.integrator == "DisplacementControl"
+            )
+        )
+        self.control_node = (
+            _strict_int(raw_control_node, "Analysis control node")
+            if uses_control_node
+            else int(raw_control_node)
+        )
+        self.control_dof = (
+            _strict_int(raw_control_dof, "Analysis control DOF")
+            if self.analysis_type != "Modal"
+            else int(raw_control_dof)
+        )
+
+        uses_rayleigh_modes = (
+            self.analysis_type == "Transient"
+            and self.rayleigh_damping_ratio > 0.0
+        )
+        self.rayleigh_mode_i = (
+            _strict_int(raw_rayleigh_mode_i, "Analysis Rayleigh mode i")
+            if uses_rayleigh_modes
+            else int(raw_rayleigh_mode_i)
+        )
+        self.rayleigh_mode_j = (
+            _strict_int(raw_rayleigh_mode_j, "Analysis Rayleigh mode j")
+            if uses_rayleigh_modes
+            else int(raw_rayleigh_mode_j)
+        )
+
+        uses_deferred_patterns = (
+            self.analysis_type in {"Transient", "Pushover", "Cyclic"}
+            or (
+                self.analysis_type == "Static"
+                and self.integrator == "DisplacementControl"
+            )
+        )
+        self.deferred_pattern_tags = list(dict.fromkeys(
+            (
+                _strict_int(tag, "Deferred load-pattern tag")
+                if uses_deferred_patterns
+                else int(tag)
+            )
+            for tag in raw_deferred_pattern_tags
+        ))
+
         if self.constraints_handler not in {"Transformation","Plain"}:
             raise ValueError("Unsupported constraints handler.")
         if self.numberer not in {"RCM","Plain"}: raise ValueError("Unsupported numberer.")
@@ -1866,13 +1915,6 @@ class AnalysisSettingsData:
             raise ValueError("Rayleigh damping needs two different modes.")
         if self.preload_gravity and self.gravity_steps < 1:
             raise ValueError("Gravity preload steps must be at least 1.")
-        uses_deferred_patterns = (
-            self.analysis_type in {"Transient", "Pushover", "Cyclic"}
-            or (
-                self.analysis_type == "Static"
-                and self.integrator == "DisplacementControl"
-            )
-        )
         if (
             uses_deferred_patterns
             and any(tag <= 0 for tag in self.deferred_pattern_tags)
