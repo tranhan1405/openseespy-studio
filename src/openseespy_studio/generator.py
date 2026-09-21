@@ -282,12 +282,28 @@ def material_to_openseespy(
         )
 
     if material.material_type == "Hysteretic":
-        args = [
-            p["s1p"], p["e1p"], p["s2p"], p["e2p"], p["s3p"], p["e3p"],
-            p["s1n"], p["e1n"], p["s2n"], p["e2n"], p["s3n"], p["e3n"],
-            p["pinchX"], p["pinchY"], p["damage1"], p["damage2"], p["beta"],
-        ]
-        return "ops.uniaxialMaterial('Hysteretic', " + str(material.tag) + ", " + ", ".join(f"{v:g}" for v in args) + ")"
+        keys = MATERIAL_PARAMETER_ORDER["Hysteretic"]
+
+        def hysteretic_value(key: str) -> float:
+            value = float(p[key])
+            kind = material_parameter_kind(material, key)
+            if kind == "force":
+                return unit_system.force_from_n(value)
+            if kind == "moment":
+                return unit_system.moment_from_nm(value)
+            if kind == "stress":
+                return unit_system.stress_from_pa(value)
+            if kind == "length":
+                return unit_system.length_from_m(value)
+            return value
+
+        args = ", ".join(
+            f"{hysteretic_value(key):g}"
+            for key in keys
+        )
+        return (
+            f"ops.uniaxialMaterial('Hysteretic', {material.tag}, {args})"
+        )
 
     if material.material_type == "HystereticSmooth":
         return (
