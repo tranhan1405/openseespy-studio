@@ -490,12 +490,12 @@ def test_project_allows_rigid_link_bar_rotation_as_control():
             "Push constrained RZ",
             "Pushover",
             control_node=2,
-            control_dof=3,
+            control_dof=6,
             displacement_increment=0.001,
         )
     )
 
-    assert project.analyses[34].control_dof == 3
+    assert project.analyses[34].control_dof == 6
 
 
 def test_project_rejects_rigid_link_beam_added_after_rotation_control_analysis():
@@ -1658,23 +1658,21 @@ def test_project_rejects_removing_pattern_used_by_analysis_driver():
     assert 1 in project.load_patterns
 
 
-def test_project_rejects_analysis_with_missing_active_driver_pattern():
+def test_project_allows_staged_analysis_with_future_driver_pattern():
     model = StructuralModel("missing-driver", ndm=2, ndf=3)
     model.add_node(1, 0.0, 0.0)
     project = ProjectDatabase(name="Missing driver", model=model)
 
-    with pytest.raises(
-        ValueError,
-        match=r"references missing driving load pattern tag\(s\): 99",
-    ):
-        project.add_analysis(
-            AnalysisSettingsData(
-                73,
-                "Transient",
-                "Transient",
-                deferred_pattern_tags=[99],
-            )
+    project.add_analysis(
+        AnalysisSettingsData(
+            73,
+            "Transient",
+            "Transient",
+            deferred_pattern_tags=[99],
         )
+    )
+
+    assert project.analyses[73].deferred_pattern_tags == [99]
 
 
 def test_project_ignores_stale_modal_deferred_pattern_reference():
@@ -1867,7 +1865,7 @@ def test_project_rejects_removing_section_used_by_element():
     assert 1 in project.sections
 
 
-def test_project_rejects_fiber_recorder_with_missing_material():
+def test_project_allows_staged_fiber_recorder_material_reference():
     model = StructuralModel("fiber-recorder-material", ndm=2, ndf=3)
     model.add_node(1, 0.0, 0.0)
     model.add_node(2, 1.0, 0.0)
@@ -1881,21 +1879,19 @@ def test_project_rejects_fiber_recorder_with_missing_material():
     )
     project = ProjectDatabase(name="Fiber recorder", model=model)
 
-    with pytest.raises(
-        ValueError,
-        match=r"Fiber recorder references missing material tag 99",
-    ):
-        project.add_recorder(
-            RecorderData(
-                1,
-                "Fiber",
-                "Fiber",
-                target_tags=[1],
-                response="stressStrain",
-                section_number=1,
-                material_tag=99,
-            )
+    project.add_recorder(
+        RecorderData(
+            1,
+            "Fiber",
+            "Fiber",
+            target_tags=[1],
+            response="stressStrain",
+            section_number=1,
+            material_tag=99,
         )
+    )
+
+    assert project.recorders[1].material_tag == 99
 
 
 def test_project_transformation_tag_rename_cascades_to_frame_elements():
@@ -2037,7 +2033,7 @@ def test_project_delete_entities_cascades_node_dependencies():
             "Element recorder",
             "Element",
             target_tags=[10],
-            response="force",
+            response="globalForce",
         )
     )
     project.selection_sets["Delete"] = SelectionSetData(
@@ -2147,7 +2143,7 @@ def test_project_connection_tag_rename_cascades_references():
             "Connection force",
             "Element",
             target_tags=[10],
-            response="force",
+            response="globalForce",
         )
     )
     project.add_analysis(
@@ -2208,7 +2204,7 @@ def test_project_remove_connection_prunes_element_recorder():
             "Connection force",
             "Element",
             target_tags=[10],
-            response="force",
+            response="globalForce",
         )
     )
 
