@@ -132,7 +132,15 @@ class AnalysisDialog(QDialog):
         self.dt=fs(analysis.dt if analysis else 0.01,1e-12,1e20)
         self.gamma=fs(analysis.gamma if analysis else 0.5)
         self.beta=fs(analysis.beta if analysis else 0.25)
-        self.hht_alpha=fs(analysis.hht_alpha if analysis else 0.9)
+        self.hht_alpha=fs(
+            analysis.hht_alpha if analysis else 0.9,
+            2.0 / 3.0,
+            1.0,
+        )
+        self.hht_alpha.setToolTip(
+            "OpenSees HHT alpha should be between 2/3 and 1.0; "
+            "alpha=1.0 reduces to Newmark."
+        )
         self.generalized_alpha_m=fs(
             analysis.generalized_alpha_m if analysis else 1.0
         )

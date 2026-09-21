@@ -1572,6 +1572,12 @@ class AnalysisSettingsData:
             if self.cyclic_increment <= 0.0:
                 raise ValueError("Cyclic max displacement increment must be positive.")
         if self.dt<=0: raise ValueError("Transient dt must be positive.")
+        if (
+            self.analysis_type == "Transient"
+            and self.integrator == "HHT"
+            and not (2.0 / 3.0 <= self.hht_alpha <= 1.0)
+        ):
+            raise ValueError("HHT alpha must be between 2/3 and 1.0.")
         if not 0.0 <= self.rayleigh_damping_ratio < 1.0:
             raise ValueError("Rayleigh damping ratio must be in [0, 1).")
         if self.rayleigh_mode_i < 1 or self.rayleigh_mode_j < 1:

@@ -458,3 +458,32 @@ def test_static_load_control_rejects_zero_increment_even_without_adaptive_step()
             load_increment=0.0,
             adaptive_step=False,
         )
+
+
+@pytest.mark.parametrize("alpha", [0.0, 0.5, 1.0001, 2.0])
+def test_hht_rejects_alpha_outside_opensees_range(alpha):
+    with pytest.raises(
+        ValueError,
+        match="HHT alpha must be between 2/3 and 1.0",
+    ):
+        AnalysisSettingsData(
+            53,
+            "Invalid HHT alpha",
+            "Transient",
+            integrator="HHT",
+            dt=0.01,
+            hht_alpha=alpha,
+        )
+
+
+@pytest.mark.parametrize("alpha", [2.0 / 3.0, 0.9, 1.0])
+def test_hht_accepts_documented_alpha_range(alpha):
+    analysis = AnalysisSettingsData(
+        54,
+        "Valid HHT alpha",
+        "Transient",
+        integrator="HHT",
+        dt=0.01,
+        hht_alpha=alpha,
+    )
+    assert analysis.hht_alpha == pytest.approx(alpha)
