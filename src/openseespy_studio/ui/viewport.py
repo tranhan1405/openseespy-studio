@@ -163,11 +163,13 @@ class ModelViewport(QWidget):
         self.model_label.setStyleSheet("font-weight: 700; color: #203a55;")
         self.node_label = QLabel("Nodes: 0")
         self.element_label = QLabel("Elements: 0")
+        self.connection_label = QLabel("Connections: 0")
         self.material_label = QLabel("Materials: 0")
         self.section_label = QLabel("Sections: 0")
         for label in (
             self.node_label,
             self.element_label,
+            self.connection_label,
             self.material_label,
             self.section_label,
         ):
@@ -175,6 +177,7 @@ class ModelViewport(QWidget):
         info.addWidget(self.model_label)
         info.addWidget(self.node_label)
         info.addWidget(self.element_label)
+        info.addWidget(self.connection_label)
         info.addWidget(self.material_label)
         info.addWidget(self.section_label)
         header.addLayout(info)
@@ -1188,10 +1191,12 @@ class ModelViewport(QWidget):
         elements: int,
         materials: int = 0,
         sections: int = 0,
+        connections: int = 0,
     ) -> None:
         self.model_label.setText(f"Model: {name}")
         self.node_label.setText(f"Nodes: {nodes}")
         self.element_label.setText(f"Elements: {elements}")
+        self.connection_label.setText(f"Connections: {connections}")
         self.material_label.setText(f"Materials: {materials}")
         self.section_label.setText(f"Sections: {sections}")
 
