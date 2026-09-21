@@ -135,6 +135,20 @@ def test_read_only_tools_return_selection_analysis_and_diagnostics():
     assert selection["element_tags"] == [1]
     assert selection["elements"][0]["section"]["tag"] == 1
 
+    node = execute_read_only_tool("get_node", {"tag": 2}, snapshot)
+    assert node["found"] is True
+    assert node["node"]["xyz"][1] == 3000.0
+    assert node["connected_elements"] == [1]
+
+    element = execute_read_only_tool(
+        "get_element",
+        {"tag": 1},
+        snapshot,
+    )
+    assert element["found"] is True
+    assert element["element"]["section"]["tag"] == 1
+    assert element["element"]["transformation"]["tag"] == 1
+
     material = execute_read_only_tool("get_material", {"tag": 1}, snapshot)
     assert material["found"] is True
     assert material["material"]["material_type"] == "Steel02"
@@ -203,9 +217,29 @@ def test_openai_provider_executes_read_only_function_call_round_trip():
     first = client.responses.calls[0]
     assert first["model"] == "test-model"
     assert first["tools"]
+    assert first["store"] is False
 
     second = client.responses.calls[1]
     assert second["previous_response_id"] == "response-1"
+    assert second["store"] is False
     assert second["input"][0]["type"] == "function_call_output"
     assert second["input"][0]["call_id"] == "call-1"
     assert "node_count" in second["input"][0]["output"]
+
+
+def test_optional_tool_ids_fail_closed_instead_of_raising():
+    snapshot = _snapshot()
+
+    analysis = execute_read_only_tool(
+        "get_analysis",
+        {"tag": "not-a-tag"},
+        snapshot,
+    )
+    assert "error" in analysis
+
+    job = execute_read_only_tool(
+        "get_job_results",
+        {"job_id": "not-a-job"},
+        snapshot,
+    )
+    assert job["found"] is False
