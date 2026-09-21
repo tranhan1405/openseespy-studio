@@ -784,3 +784,57 @@ def test_transient_rayleigh_validates_only_active_settings(
             rayleigh_mode_i=mode_i,
             rayleigh_mode_j=mode_j,
         )
+
+
+@pytest.mark.parametrize(
+    "analysis_type",
+    ["Static", "Pushover", "Cyclic", "Transient", "Modal"],
+)
+def test_analysis_ignores_unused_gravity_steps_when_preload_is_disabled(
+    analysis_type,
+):
+    kwargs = {
+        "preload_gravity": False,
+        "gravity_steps": 0,
+    }
+
+    if analysis_type == "Pushover":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    elif analysis_type == "Cyclic":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            cyclic_targets=[0.001, -0.001],
+            cyclic_increment=0.0005,
+        )
+    elif analysis_type == "Transient":
+        kwargs.update(dt=0.01)
+    elif analysis_type == "Modal":
+        kwargs.update(num_modes=1)
+
+    analysis = AnalysisSettingsData(
+        68,
+        f"{analysis_type} ignores disabled gravity steps",
+        analysis_type,
+        **kwargs,
+    )
+    assert analysis.gravity_steps == 0
+
+
+def test_enabled_gravity_preload_rejects_nonpositive_step_count():
+    with pytest.raises(
+        ValueError,
+        match="Gravity preload steps must be at least 1",
+    ):
+        AnalysisSettingsData(
+            69,
+            "Invalid gravity steps",
+            "Transient",
+            dt=0.01,
+            preload_gravity=True,
+            gravity_steps=0,
+        )

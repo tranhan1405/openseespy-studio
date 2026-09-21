@@ -1626,7 +1626,7 @@ class AnalysisSettingsData:
             and self.rayleigh_mode_i == self.rayleigh_mode_j
         ):
             raise ValueError("Rayleigh damping needs two different modes.")
-        if self.gravity_steps < 1:
+        if self.preload_gravity and self.gravity_steps < 1:
             raise ValueError("Gravity preload steps must be at least 1.")
         if any(tag <= 0 for tag in self.deferred_pattern_tags):
             raise ValueError("Deferred load-pattern tags must be positive.")
