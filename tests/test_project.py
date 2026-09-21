@@ -2586,3 +2586,35 @@ def test_project_clear_model_linked_data_preserves_definition_libraries():
     assert 1 in project.materials
     assert 1 in project.sections
     assert 1 in project.transformations
+
+
+def test_project_next_element_tag_shares_namespace_with_connections():
+    model = StructuralModel("shared-element-tags", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    model.add_node(3, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        3,
+        element_type="truss",
+        truss_area=0.01,
+        truss_material_tag=1,
+    )
+    project = ProjectDatabase(name="Shared tags", model=model)
+    project.add_material(
+        MaterialData(1, "Elastic", "Elastic", {"E": 1000.0})
+    )
+    project.add_connection(
+        ConnectionData(
+            2,
+            "Spring",
+            "zeroLength",
+            1,
+            2,
+            materials_by_dof={1: 1},
+        )
+    )
+
+    assert project.next_element_tag() == 3
+    assert project.next_connection_tag() == 3
