@@ -1,3 +1,4 @@
+from openseespy_studio.generator import to_openseespy
 from openseespy_studio.importer import import_openseespy_source
 
 
@@ -102,7 +103,7 @@ results.close()
     assert set(result.project.materials) == {1, 2, 3}
     section = result.project.sections[1]
     assert section.section_type == "Fiber"
-    assert len(section.fiber_components) == 7
+    assert len(section.fiber_components) == 8
 
     assert set(result.project.connections) == {1}
     connection = result.project.connections[1]
@@ -117,12 +118,54 @@ results.close()
 
     assert len(result.project.analyses) == 1
     analysis = next(iter(result.project.analyses.values()))
-    assert analysis.analysis_type == "Pushover"
+    assert analysis.analysis_type == "Static"
+    assert analysis.integrator == "DisplacementControl"
     assert analysis.system == "SparseGeneral"
     assert analysis.test == "NormUnbalance"
     assert analysis.control_node == 2
     assert analysis.control_dof == 3
     assert analysis.steps == 100
+    assert analysis.preload_gravity is True
+    assert analysis.gravity_steps == 1
+    assert analysis.deferred_pattern_tags == [2]
+
+    regenerated = to_openseespy(
+        result.project.model,
+        materials=result.project.materials,
+        sections=result.project.sections,
+        transformations=result.project.transformations,
+        constraints=result.project.constraints,
+        connections=result.project.connections,
+        time_series=result.project.time_series,
+        load_patterns=result.project.load_patterns,
+        nodal_loads=result.project.nodal_loads,
+        analyses=result.project.analyses,
+        active_analysis_tag=result.project.active_analysis_tag,
+        element_loads=result.project.element_loads,
+        prescribed_displacements=result.project.prescribed_displacements,
+        recorders=result.project.recorders,
+        units=result.project.units,
+    )
+
+    preload_pattern_pos = regenerated.index("ops.pattern('Plain', 1, 1)")
+    preload_analysis_pos = regenerated.index(
+        "# Template sequence: gravity / existing Plain-load preload"
+    )
+    hold_pos = regenerated.index("ops.loadConst('-time', 0.0)")
+    driver_pattern_pos = regenerated.index("ops.pattern('Plain', 2, 2)")
+    control_pos = regenerated.index(
+        "ops.integrator('DisplacementControl', 2, 3,"
+    )
+
+    assert (
+        preload_pattern_pos
+        < preload_analysis_pos
+        < hold_pos
+        < driver_pattern_pos
+        < control_pos
+    )
+    assert "ops.load(2, -180" in regenerated
+    assert "ops.load(2, 0, 0, 1" in regenerated
 
     assert any(
         issue.construct == "runtime value"
