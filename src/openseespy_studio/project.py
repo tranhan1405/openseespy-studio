@@ -84,7 +84,10 @@ MATERIAL_CATEGORIES: dict[str, str] = {
 MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
     "Steel01": ("Fy", "E0", "b", "a1", "a2", "a3", "a4"),
-    "Steel02": ("Fy", "E0", "b", "R0", "cR1", "cR2"),
+    "Steel02": (
+        "Fy", "E0", "b", "R0", "cR1", "cR2",
+        "a1", "a2", "a3", "a4",
+    ),
     "Hardening": ("E", "sigmaY", "H_iso", "H_kin", "eta"),
     "ElasticPP": ("E", "epsyP", "epsyN", "eps0"),
     "ElasticBilin": ("EP1", "EP2", "epsP2", "EN1", "EN2", "epsN2"),
@@ -188,7 +191,18 @@ MATERIAL_ENGINEERING_DEFAULTS: dict[str, dict[str, float]] = {
 MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
     "Elastic": {"E": 2.0e11},
     "Steel01": {"Fy": 3.55e8, "E0": 2.0e11, "b": 0.01, "a1": 0.0, "a2": 1.0, "a3": 0.0, "a4": 1.0},
-    "Steel02": {"Fy": 3.55e8, "E0": 2.0e11, "b": 0.01, "R0": 20.0, "cR1": 0.925, "cR2": 0.15},
+    "Steel02": {
+        "Fy": 3.55e8,
+        "E0": 2.0e11,
+        "b": 0.01,
+        "R0": 20.0,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.0,
+        "a2": 1.0,
+        "a3": 0.0,
+        "a4": 1.0,
+    },
     "Hardening": {
         "E": 2.0e11,
         "sigmaY": 3.55e8,
@@ -258,11 +272,15 @@ class MaterialData:
     base_material_tag: int | None = None
     material_tags: list[int] = field(default_factory=list)
     factors: list[float] = field(default_factory=list)
+    source: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Material tag")
         self.name = str(self.name).strip() or f"Material {self.tag}"
         self.material_type = str(self.material_type)
+        if not isinstance(self.source, dict):
+            raise ValueError("Material source metadata must be an object.")
+        self.source = deepcopy(self.source)
         if self.tag <= 0:
             raise ValueError("Material tag must be a positive integer.")
         if self.material_type not in MATERIAL_PARAMETER_ORDER:
@@ -384,6 +402,7 @@ class MaterialData:
             "base_material_tag": self.base_material_tag,
             "material_tags": list(self.material_tags),
             "factors": list(self.factors),
+            "source": deepcopy(self.source),
         }
 
     @classmethod
@@ -419,6 +438,7 @@ class MaterialData:
             factors=[
                 float(value) for value in data.get("factors", [])
             ],
+            source=deepcopy(dict(data.get("source", {}))),
         )
 
 
