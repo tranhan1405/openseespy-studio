@@ -1506,9 +1506,15 @@ class MassSourceData:
             for tag, factor in raw_load_factors.items()
             if factor > 0.0
         }
-        self.gravity_axis = int(self.gravity_axis)
+        self.gravity_axis = _strict_int(
+            self.gravity_axis,
+            "Mass source gravity axis",
+        )
         self.directions = tuple(
-            sorted({int(dof) for dof in self.directions})
+            sorted({
+                _strict_int(dof, "Mass source direction")
+                for dof in self.directions
+            })
         )
         if self.tag <= 0:
             raise ValueError("Mass source tag must be positive.")
@@ -1548,9 +1554,9 @@ class MassSourceData:
                     data.get("load_factors", {})
                 ).items()
             },
-            gravity_axis=int(data.get("gravity_axis", 3)),
+            gravity_axis=data.get("gravity_axis", 3),
             directions=tuple(
-                int(dof) for dof in data.get("directions", (1, 2))
+                data.get("directions", (1, 2))
             ),
         )
 
@@ -1907,12 +1913,18 @@ class RecorderData:
     material_tag: int | None = None
 
     def __post_init__(self) -> None:
-        self.tag = int(self.tag)
+        self.tag = _strict_int(self.tag, "Recorder tag")
         self.name = str(self.name).strip() or f"Recorder {self.tag}"
         self.recorder_type = str(self.recorder_type)
-        self.target_tags = sorted({int(tag) for tag in self.target_tags})
+        self.target_tags = sorted({
+            _strict_int(tag, "Recorder target tag")
+            for tag in self.target_tags
+        })
         self.response = str(self.response)
-        self.dofs = sorted({int(dof) for dof in self.dofs})
+        self.dofs = sorted({
+            _strict_int(dof, "Recorder DOF")
+            for dof in self.dofs
+        })
         self.file_name = str(self.file_name).strip()
         self.include_time = _strict_bool(
             self.include_time,
@@ -1978,12 +1990,12 @@ class RecorderData:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecorderData":
         return cls(
-            tag=int(data["tag"]),
+            tag=data["tag"],
             name=str(data.get("name", f"Recorder {data['tag']}")),
             recorder_type=str(data.get("recorder_type", "Node")),
-            target_tags=[int(tag) for tag in data.get("target_tags", [])],
+            target_tags=list(data.get("target_tags", [])),
             response=str(data.get("response", "disp")),
-            dofs=[int(dof) for dof in data.get("dofs", [1])],
+            dofs=list(data.get("dofs", [1])),
             file_name=str(data.get("file_name", "")),
             include_time=data.get("include_time", True),
             section_number=int(data.get("section_number", 1)),
