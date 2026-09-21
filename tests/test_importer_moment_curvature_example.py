@@ -166,6 +166,11 @@ results.close()
     )
     assert "ops.load(2, -180" in regenerated
     assert "ops.load(2, 0, 0, 1" in regenerated
+    assert "'kind': 'moment-curvature'" in regenerated
+    assert "'element_tag': 1" in regenerated
+    assert "_studio_moment_curvature_spec" in regenerated
+    assert "ops.eleResponse(_studio_mc_element, 'force')" in regenerated
+    assert "ops.eleResponse(_studio_mc_element, 'deformation')" in regenerated
 
     assert any(
         issue.construct == "runtime value"
