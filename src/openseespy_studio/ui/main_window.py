@@ -10159,17 +10159,22 @@ class MainWindow(QMainWindow):
         *,
         convergence_test: str | None = None,
         integrator: str | None = None,
+        section_response_available: bool | None = None,
     ) -> None:
         categories: dict[str, QMenu] = {}
+        if section_response_available is None:
+            section_response_available = bool(
+                section_response_sources(
+                    self.model,
+                    self.project.connections,
+                )
+            )
         for choice in result_choices_for_analysis(
             analysis_type,
             convergence_test,
             integrator=integrator,
             section_response_available=bool(
-                section_response_sources(
-                    self.model,
-                    self.project.connections,
-                )
+                section_response_available
             ),
         ):
             submenu = categories.get(choice.category)
@@ -10274,6 +10279,9 @@ class MainWindow(QMainWindow):
             integrator=str(
                 job.results.get("analysis", {}).get("integrator", "")
             ) if isinstance(job.results.get("analysis", {}), dict) else None,
+            section_response_available=bool(
+                job.results.get("section_responses", {})
+            ),
         )
 
         menu.addSeparator()
@@ -11540,6 +11548,9 @@ class MainWindow(QMainWindow):
                     integrator=str(
                         job.results.get("analysis", {}).get("integrator", "")
                     ) if isinstance(job.results.get("analysis", {}), dict) else None,
+                    section_response_available=bool(
+                        job.results.get("section_responses", {})
+                    ),
                 )
 
             menu.addSeparator()
