@@ -288,3 +288,30 @@ ops.element('Truss', 9, 1, 2, 0.005, 3)
     assert element.truss_area == 0.005
     assert element.truss_material_tag == 3
     assert 3 in result.project.materials
+
+
+def test_importer_rejects_frame_tag_already_used_by_connection():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 3, '-ndf', 6)
+ops.node(1, 0.0, 0.0, 0.0)
+ops.node(2, 0.0, 0.0, 0.0)
+ops.node(3, 0.0, 0.0, 3.0)
+ops.uniaxialMaterial('Elastic', 1, 1000.0)
+ops.element('zeroLength', 10, 1, 2, '-mat', 1, '-dir', 1)
+ops.element('elasticBeamColumn', 10, 2, 3, 0.02, 200e9, 80e9, 1e-4, 8e-5, 8e-5, 1)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="duplicate_element_tag.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert result.error_count == 1
+    assert 10 in result.project.connections
+    assert 10 not in result.project.model.elements
+    assert any(
+        "already used by a connection" in issue.message
+        for issue in result.issues
+    )
