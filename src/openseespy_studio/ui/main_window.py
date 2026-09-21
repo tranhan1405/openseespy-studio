@@ -7647,8 +7647,8 @@ class MainWindow(QMainWindow):
         stored = self._recent_project_paths()
         if paths != stored:
             QSettings(
-                "OpenSeesPy Studio",
-                "OpenSeesPy Studio",
+                LEGACY_SETTINGS_ORGANIZATION,
+                LEGACY_SETTINGS_APPLICATION,
             ).setValue("recentProjects", paths[:10])
         if not paths:
             action = menu.addAction("No recent projects")
