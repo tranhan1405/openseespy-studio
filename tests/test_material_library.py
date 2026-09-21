@@ -24,7 +24,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 177
+    assert len(records) == 179
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -222,7 +222,7 @@ def test_moodley_2026_records_encode_model_applicability():
     )
 
 
-def test_verified_library_reaches_one_hundred_seventy_seven_with_expected_source_counts():
+def test_verified_library_reaches_one_hundred_seventy_nine_with_expected_source_counts():
     records = load_verified_material_library()
     prefixes = {
         "carreno-2020-": 2,
@@ -244,10 +244,11 @@ def test_verified_library_reaches_one_hundred_seventy_seven_with_expected_source
         "georgantzia-2025-": 3,
         "zhang-2025-": 2,
         "zhou-2021-": 1,
+        "teng-2016-": 2,
     }
 
-    assert len(records) == 177
-    assert len({record.id for record in records}) == 177
+    assert len(records) == 179
+    assert len({record.id for record in records}) == 179
     for prefix, expected in prefixes.items():
         assert sum(
             record.id.startswith(prefix)
@@ -657,6 +658,65 @@ def test_verified_minmax_exports_selected_base_material():
         "ops.uniaxialMaterial('MinMax', 81, 80, "
         "'-min', -0.04, '-max', 0.12)"
     )
+
+
+
+def test_teng_2016_frpconfinedconcrete02_jacketc_sets_use_active_schema():
+    csr1 = _record(
+        "teng-2016-csr1-timehistory-frpconfinedconcrete02"
+    )
+    c5 = _record("teng-2016-c5-frpconfinedconcrete02")
+
+    expected_keys = {
+        "fc0", "Ec", "ec0", "mode",
+        "tfrp", "Efrp", "erup", "R",
+        "ft", "Ets",
+    }
+    for record in (csr1, c5):
+        assert record.model == "FRPConfinedConcrete02"
+        assert set(record.parameters_si) == expected_keys
+        assert "fcu" not in record.parameters_si
+        assert "ecu" not in record.parameters_si
+        assert record.parameters_si["mode"] == 0.0
+        assert (
+            record.doi
+            == "10.1061/(ASCE)CC.1943-5614.0000584"
+        )
+        assert "Table 1" in str(
+            record.parameter_evidence.get("location", "")
+        )
+
+    assert csr1.parameters_si["fc0"] == -40.82e6
+    assert csr1.parameters_si["tfrp"] == 0.000671
+    assert csr1.parameters_si["Efrp"] == 231.7e9
+    assert csr1.parameters_si["erup"] == 0.018
+    assert csr1.parameters_si["R"] == 0.305
+
+    assert c5.parameters_si["fc0"] == -36.5e6
+    assert c5.parameters_si["tfrp"] == 0.005
+    assert c5.parameters_si["Efrp"] == 18.6e9
+    assert c5.parameters_si["erup"] == 0.0286
+    assert c5.parameters_si["R"] == 0.1525
+
+
+def test_teng_c5_frpconfinedconcrete02_exports_jacketc_command():
+    material = material_from_library_record(
+        _record("teng-2016-c5-frpconfinedconcrete02"),
+        tag=90,
+    )
+
+    command = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+
+    assert command.startswith(
+        "ops.uniaxialMaterial('FRPConfinedConcrete02', 90, "
+        "-36.5, 28576.4, -0.002, '-JacketC', 5, 18600, "
+        "0.0286, 152.5"
+    )
+    assert ", 3.81824, 1428.82, 1)" in command
+    assert "'-Ultimate'" not in command
 
 
 def test_all_pinching4_library_records_have_physical_context_and_full_schema():
