@@ -24,7 +24,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 179
+    assert len(records) == 180
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -222,7 +222,7 @@ def test_moodley_2026_records_encode_model_applicability():
     )
 
 
-def test_verified_library_reaches_one_hundred_seventy_nine_with_expected_source_counts():
+def test_verified_library_reaches_one_hundred_eighty_with_expected_source_counts():
     records = load_verified_material_library()
     prefixes = {
         "carreno-2020-": 2,
@@ -245,10 +245,11 @@ def test_verified_library_reaches_one_hundred_seventy_nine_with_expected_source_
         "zhang-2025-": 2,
         "zhou-2021-": 1,
         "teng-2016-": 2,
+        "jafari-2023-": 1,
     }
 
-    assert len(records) == 179
-    assert len({record.id for record in records}) == 179
+    assert len(records) == 180
+    assert len({record.id for record in records}) == 180
     for prefix, expected in prefixes.items():
         assert sum(
             record.id.startswith(prefix)
@@ -717,6 +718,31 @@ def test_teng_c5_frpconfinedconcrete02_exports_jacketc_command():
     )
     assert ", 3.81824, 1428.82, 1)" in command
     assert "'-Ultimate'" not in command
+
+
+
+def test_jafari_2023_cfrp_elastic_preset_is_exact():
+    record = _record("jafari-2023-cfrp-fibre-direction-elastic")
+
+    assert record.model == "Elastic"
+    assert record.parameters_si == {"E": 240.0e9}
+    assert record.doi == "10.3390/polym15030618"
+    location = str(record.parameter_evidence.get("location", ""))
+    assert "Section 3.1.1" in location
+    assert "Table 2" in location
+
+
+def test_jafari_2023_cfrp_elastic_exports_in_project_units():
+    material = material_from_library_record(
+        _record("jafari-2023-cfrp-fibre-direction-elastic"),
+        tag=95,
+    )
+    command = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+
+    assert command == "ops.uniaxialMaterial('Elastic', 95, 240000)"
 
 
 def test_all_pinching4_library_records_have_physical_context_and_full_schema():
