@@ -1672,3 +1672,67 @@ def test_generic_section_response_curve_can_include_origin_for_auto_workflow():
 
     assert x == [0.0, 0.001]
     assert y == [0.0, 3.0]
+
+
+@pytest.mark.parametrize(
+    ("material_type", "parameters", "yield_strain"),
+    [
+        (
+            "Hardening",
+            {
+                "E": 200.0e9,
+                "sigmaY": 400.0e6,
+                "H_iso": 0.0,
+                "H_kin": 2.0e9,
+                "eta": 0.0,
+            },
+            0.002,
+        ),
+        (
+            "ElasticPP",
+            {
+                "E": 200.0e9,
+                "epsyP": 0.002,
+                "epsyN": -0.002,
+                "eps0": 0.0,
+            },
+            0.002,
+        ),
+        (
+            "ElasticBilin",
+            {
+                "EP1": 200.0e9,
+                "EP2": 2.0e9,
+                "epsP2": 0.002,
+                "EN1": 200.0e9,
+                "EN2": 2.0e9,
+                "epsN2": -0.002,
+            },
+            0.002,
+        ),
+    ],
+)
+def test_new_steel_materials_participate_in_fiber_state_diagnostics(
+    material_type,
+    parameters,
+    yield_strain,
+):
+    material = MaterialData(
+        77,
+        material_type,
+        material_type,
+        parameters=parameters,
+    )
+
+    near = classify_fiber_state(
+        {"material_tag": 77, "strain": 0.9 * yield_strain, "stress": 1.0},
+        {77: material},
+    )
+    yielding = classify_fiber_state(
+        {"material_tag": 77, "strain": 1.1 * yield_strain, "stress": 1.0},
+        {77: material},
+    )
+
+    assert near["severity"] == 1
+    assert yielding["severity"] == 2
+    assert yielding["yield_strain"] == pytest.approx(yield_strain)

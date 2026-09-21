@@ -61,11 +61,15 @@ MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
     "Steel01": "Steel",
     "Steel02": "Steel",
+    "Hardening": "Steel",
+    "ElasticPP": "Steel",
+    "ElasticBilin": "Steel",
     "ReinforcingSteel": "Steel",
     "Concrete01": "Concrete",
     "Concrete02": "Concrete",
     "Concrete04": "Concrete",
     "Hysteretic": "Hysteretic / Connection",
+    "HystereticSmooth": "Hysteretic / Connection",
     "Pinching4": "Hysteretic / Connection",
     "Bond_SP01": "Bond / Interface",
     "ElasticPPGap": "Hysteretic / Connection",
@@ -80,10 +84,14 @@ MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E",),
     "Steel01": ("Fy", "E0", "b", "a1", "a2", "a3", "a4"),
     "Steel02": ("Fy", "E0", "b", "R0", "cR1", "cR2"),
+    "Hardening": ("E", "sigmaY", "H_iso", "H_kin", "eta"),
+    "ElasticPP": ("E", "epsyP", "epsyN", "eps0"),
+    "ElasticBilin": ("EP1", "EP2", "epsP2", "EN1", "EN2", "epsN2"),
     "ReinforcingSteel": ("fy", "fu", "Es", "Esh", "eps_sh", "eps_ult"),
     "Concrete01": ("fpc", "epsc0", "fpcu", "epsU"),
     "Concrete02": ("fpc", "epsc0", "fpcu", "epsU", "lambda", "ft", "Ets"),
     "Concrete04": ("fc", "epsc", "epscu", "Ec", "fct", "et", "beta"),
+    "HystereticSmooth": ("ka", "kb", "fbar", "beta"),
     "Hysteretic": (
         "s1p", "e1p", "s2p", "e2p", "s3p", "e3p",
         "s1n", "e1n", "s2n", "e2n", "s3n", "e3n",
@@ -113,6 +121,18 @@ MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
     "Elastic": {"E": "stress"},
     "Steel01": {"Fy": "stress", "E0": "stress"},
     "Steel02": {"Fy": "stress", "E0": "stress"},
+    "Hardening": {
+        "E": "stress",
+        "sigmaY": "stress",
+        "H_iso": "stress",
+        "H_kin": "stress",
+        "eta": "stress",
+    },
+    "ElasticPP": {"E": "stress"},
+    "ElasticBilin": {
+        "EP1": "stress", "EP2": "stress",
+        "EN1": "stress", "EN2": "stress",
+    },
     "ReinforcingSteel": {
         "fy": "stress", "fu": "stress", "Es": "stress", "Esh": "stress",
     },
@@ -124,6 +144,7 @@ MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
         "fc": "stress", "Ec": "stress", "fct": "stress",
     },
     "Hysteretic": {},
+    "HystereticSmooth": {},
     "Pinching4": {},
     "Bond_SP01": {
         "Fy": "stress", "Fu": "stress", "Sy": "length", "Su": "length",
@@ -143,7 +164,10 @@ MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
 MATERIAL_ENGINEERING_DEFAULTS: dict[str, dict[str, float]] = {
     name: {
         "poisson_ratio": 0.2 if "Concrete" in name else 0.3,
-        "density": 2400.0 if "Concrete" in name else 7850.0 if name in {"Steel01", "Steel02", "ReinforcingSteel"} else 0.0,
+        "density": 2400.0 if "Concrete" in name else 7850.0 if name in {
+            "Steel01", "Steel02", "Hardening", "ElasticPP",
+            "ElasticBilin", "ReinforcingSteel",
+        } else 0.0,
     }
     for name in MATERIAL_PARAMETER_ORDER
 }
@@ -152,11 +176,38 @@ MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
     "Elastic": {"E": 2.0e11},
     "Steel01": {"Fy": 3.55e8, "E0": 2.0e11, "b": 0.01, "a1": 0.0, "a2": 1.0, "a3": 0.0, "a4": 1.0},
     "Steel02": {"Fy": 3.55e8, "E0": 2.0e11, "b": 0.01, "R0": 20.0, "cR1": 0.925, "cR2": 0.15},
+    "Hardening": {
+        "E": 2.0e11,
+        "sigmaY": 3.55e8,
+        "H_iso": 0.0,
+        "H_kin": 2.02e9,
+        "eta": 0.0,
+    },
+    "ElasticPP": {
+        "E": 2.0e11,
+        "epsyP": 0.001775,
+        "epsyN": -0.001775,
+        "eps0": 0.0,
+    },
+    "ElasticBilin": {
+        "EP1": 2.0e11,
+        "EP2": 2.0e9,
+        "epsP2": 0.001775,
+        "EN1": 2.0e11,
+        "EN2": 2.0e9,
+        "epsN2": -0.001775,
+    },
     "ReinforcingSteel": {"fy": 5.0e8, "fu": 6.5e8, "Es": 2.0e11, "Esh": 5.0e9, "eps_sh": 0.01, "eps_ult": 0.12},
     "Concrete01": {"fpc": -30.0e6, "epsc0": -0.002, "fpcu": -6.0e6, "epsU": -0.006},
     "Concrete02": {"fpc": -30.0e6, "epsc0": -0.002, "fpcu": -6.0e6, "epsU": -0.006, "lambda": 0.1, "ft": 3.0e6, "Ets": 2.0e8},
     "Concrete04": {"fc": -30.0e6, "epsc": -0.002, "epscu": -0.006, "Ec": 3.0e10, "fct": 3.0e6, "et": 0.0002, "beta": 0.1},
     "Hysteretic": {"s1p": 1.0, "e1p": 0.001, "s2p": 1.2, "e2p": 0.01, "s3p": 1.0, "e3p": 0.03, "s1n": -1.0, "e1n": -0.001, "s2n": -1.2, "e2n": -0.01, "s3n": -1.0, "e3n": -0.03, "pinchX": 0.5, "pinchY": 0.5, "damage1": 0.0, "damage2": 0.0, "beta": 0.0},
+    "HystereticSmooth": {
+        "ka": 1.0,
+        "kb": 0.01,
+        "fbar": 1.0,
+        "beta": -1.0,
+    },
     "Pinching4": {
         "ePf1": 1.0, "ePd1": 0.001, "ePf2": 1.2, "ePd2": 0.01, "ePf3": 1.1, "ePd3": 0.02, "ePf4": 0.8, "ePd4": 0.04,
         "eNf1": -1.0, "eNd1": -0.001, "eNf2": -1.2, "eNd2": -0.01, "eNf3": -1.1, "eNd3": -0.02, "eNf4": -0.8, "eNd4": -0.04,
@@ -277,6 +328,10 @@ class MaterialData:
             return float(self.parameters["E"])
         if self.material_type in {"Steel01", "Steel02"}:
             return float(self.parameters["E0"])
+        if self.material_type in {"Hardening", "ElasticPP"}:
+            return float(self.parameters["E"])
+        if self.material_type == "ElasticBilin":
+            return float(self.parameters["EP1"])
         if self.material_type == "ReinforcingSteel":
             return float(self.parameters["Es"])
         if self.material_type in {"Concrete01", "Concrete02"}:

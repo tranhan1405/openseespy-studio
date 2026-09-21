@@ -140,3 +140,46 @@ def test_reinforcing_steel_diagram_marks_hardening_and_ultimate_strain():
         preview.close()
         preview.deleteLater()
         _APP.processEvents()
+
+
+def test_new_material_types_build_parameter_groups_and_previews():
+    expected = {
+        "Hardening": {"E", "sigmaY", "H_iso", "H_kin", "eta"},
+        "ElasticPP": {"E", "epsyP", "epsyN", "eps0"},
+        "ElasticBilin": {"EP1", "EP2", "epsP2", "EN1", "EN2", "epsN2"},
+        "HystereticSmooth": {"ka", "kb", "fbar", "beta"},
+    }
+    dialog = MaterialDialog(
+        next_tag=1,
+        units={"length": "mm", "force": "N", "time": "s"},
+    )
+    try:
+        for material_type, keys in expected.items():
+            _select_material_type(dialog, material_type)
+            assert set(dialog._parameter_widgets) == keys
+            assert not dialog.preview_host.isHidden()
+            points, _note, _annotations = dialog.preview._curve()
+            assert len(points) >= 3
+    finally:
+        _close(dialog)
+
+
+def test_eta_label_is_material_specific():
+    dialog = MaterialDialog(
+        next_tag=1,
+        units={"length": "mm", "force": "N", "time": "s"},
+    )
+    try:
+        _select_material_type(dialog, "Hardening")
+        assert "Viscoplastic" in dialog._parameter_label(
+            "Hardening",
+            "eta",
+        )
+
+        _select_material_type(dialog, "ElasticPPGap")
+        assert "Hardening ratio" in dialog._parameter_label(
+            "ElasticPPGap",
+            "eta",
+        )
+    finally:
+        _close(dialog)

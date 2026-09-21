@@ -112,13 +112,60 @@ def default_material_test_spec(
             steps_per_segment=20,
         )
 
-    if material_type in {"Steel01", "Steel02"}:
+    if material_type in {"Steel01", "Steel02", "Hardening"}:
         return MaterialTestSpec(
             protocol="symmetric_cyclic",
             amplitude=0.03,
             levels=4,
             cycles_per_level=2,
             steps_per_segment=20,
+        )
+
+    if material_type == "ElasticPP":
+        amplitude = max(
+            6.0 * max(
+                abs(float(p["epsyP"])),
+                abs(float(p["epsyN"])),
+            ),
+            0.01,
+        )
+        return MaterialTestSpec(
+            protocol="symmetric_cyclic",
+            amplitude=min(amplitude, 0.06),
+            levels=4,
+            cycles_per_level=2,
+            steps_per_segment=20,
+        )
+
+    if material_type == "ElasticBilin":
+        amplitude = max(
+            6.0 * max(
+                abs(float(p["epsP2"])),
+                abs(float(p["epsN2"])),
+            ),
+            0.01,
+        )
+        return MaterialTestSpec(
+            protocol="symmetric_cyclic",
+            amplitude=min(amplitude, 0.06),
+            levels=4,
+            cycles_per_level=2,
+            steps_per_segment=20,
+        )
+
+    if material_type == "HystereticSmooth":
+        denominator = abs(float(p["ka"]) - float(p["kb"]))
+        yield_scale = (
+            abs(float(p["fbar"])) / denominator
+            if denominator > 1.0e-15
+            else 0.0
+        )
+        return MaterialTestSpec(
+            protocol="symmetric_cyclic",
+            amplitude=max(3.0 * yield_scale, 0.01),
+            levels=4,
+            cycles_per_level=2,
+            steps_per_segment=18,
         )
 
     if material_type in {"Hysteretic", "Pinching4"}:
@@ -177,6 +224,9 @@ def material_test_axis_labels(
         "Elastic",
         "Steel01",
         "Steel02",
+        "Hardening",
+        "ElasticPP",
+        "ElasticBilin",
         "ReinforcingSteel",
         "Concrete01",
         "Concrete02",

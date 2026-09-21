@@ -815,6 +815,30 @@ def test_research_material_commands_load_in_real_opensees(tmp_path: Path):
             "FRPConfinedConcrete02",
             parameters=MATERIAL_DEFAULTS["FRPConfinedConcrete02"],
         ),
+        3: MaterialData(
+            3,
+            "Combined hardening",
+            "Hardening",
+            parameters=MATERIAL_DEFAULTS["Hardening"],
+        ),
+        4: MaterialData(
+            4,
+            "Elastic perfectly plastic",
+            "ElasticPP",
+            parameters=MATERIAL_DEFAULTS["ElasticPP"],
+        ),
+        5: MaterialData(
+            5,
+            "Elastic bilinear",
+            "ElasticBilin",
+            parameters=MATERIAL_DEFAULTS["ElasticBilin"],
+        ),
+        6: MaterialData(
+            6,
+            "Smooth hysteresis",
+            "HystereticSmooth",
+            parameters=MATERIAL_DEFAULTS["HystereticSmooth"],
+        ),
     }
 
     script = to_openseespy(
