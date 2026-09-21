@@ -1150,7 +1150,9 @@ class MaterialDialog(QDialog):
             if unit_ok:
                 model_note = (
                     "FRPConfinedConcrete is the Megalooikonomou-Monti-Santini "
-                    "circular RC confinement model."
+                    "circular RC confinement model. Some stock OpenSeesPy builds "
+                    "(including 3.8.0 used by Studio CI) omit this legacy material "
+                    "from the compiled runtime; import/edit/export remains available."
                     if material_type == "FRPConfinedConcrete"
                     else (
                         "FRPConfinedConcrete02 represents the wrap through the "
