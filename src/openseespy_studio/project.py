@@ -5211,6 +5211,10 @@ class ProjectDatabase:
         if isinstance(raw, list):
             for item in raw:
                 series = TimeSeriesData.from_dict(dict(item))
+                if series.tag in result:
+                    raise ValueError(
+                        f"Duplicate time series tag {series.tag}."
+                    )
                 result[series.tag] = series
         return result
 
@@ -5220,6 +5224,10 @@ class ProjectDatabase:
         if isinstance(raw, list):
             for item in raw:
                 pattern = LoadPatternData.from_dict(dict(item))
+                if pattern.tag in result:
+                    raise ValueError(
+                        f"Duplicate load pattern tag {pattern.tag}."
+                    )
                 result[pattern.tag] = pattern
         return result
 
@@ -5229,6 +5237,10 @@ class ProjectDatabase:
         if isinstance(raw, list):
             for item in raw:
                 load = NodalLoadData.from_dict(dict(item))
+                if load.tag in result:
+                    raise ValueError(
+                        f"Duplicate nodal load tag {load.tag}."
+                    )
                 result[load.tag] = load
         return result
 
@@ -5251,6 +5263,10 @@ class ProjectDatabase:
         if isinstance(raw, list):
             for item in raw:
                 load = ElementLoadData.from_dict(dict(item))
+                if load.tag in result:
+                    raise ValueError(
+                        f"Duplicate element load tag {load.tag}."
+                    )
                 result[load.tag] = load
         return result
 
@@ -5270,10 +5286,14 @@ class ProjectDatabase:
     @staticmethod
     def _load_analyses(raw: Any) -> dict[int, AnalysisSettingsData]:
         result: dict[int, AnalysisSettingsData] = {}
-        if isinstance(raw,list):
+        if isinstance(raw, list):
             for item in raw:
-                analysis=AnalysisSettingsData.from_dict(dict(item))
-                result[analysis.tag]=analysis
+                analysis = AnalysisSettingsData.from_dict(dict(item))
+                if analysis.tag in result:
+                    raise ValueError(
+                        f"Duplicate analysis tag {analysis.tag}."
+                    )
+                result[analysis.tag] = analysis
         return result
 
     @staticmethod
