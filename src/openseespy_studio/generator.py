@@ -1141,6 +1141,11 @@ def analysis_to_openseespy(
         key: {'force': [], 'deformation': []}
         for key in section_response_catalog
     }
+    system_command = (
+        "ops.system('SparseGeneral', '-piv')"
+        if settings.system == "SparseGeneral" and settings.system_pivoting
+        else f"ops.system({settings.system!r})"
+    )
     cyclic_steps = (
         cyclic_displacement_steps(
             settings.cyclic_targets,
@@ -1190,6 +1195,7 @@ def analysis_to_openseespy(
         f"        'constraints_handler': {settings.constraints_handler!r},",
         f"        'numberer': {settings.numberer!r},",
         f"        'system': {settings.system!r},",
+        f"        'system_pivoting': {settings.system_pivoting!r},",
         f"        'test': {settings.test!r},",
         f"        'tolerance': {settings.tolerance:g},",
         f"        'max_iterations': {settings.max_iterations},",
@@ -1278,7 +1284,7 @@ def analysis_to_openseespy(
         f"_studio_monitor_node = {monitor_node}",
         f"ops.constraints('{settings.constraints_handler}')",
         f"ops.numberer('{settings.numberer}')",
-        f"ops.system('{settings.system}')",
+        system_command,
     ]
 
     if (
@@ -3980,7 +3986,14 @@ def to_openseespy(
                 "# Template sequence: gravity / existing Plain-load preload",
                 f"ops.constraints({active.constraints_handler!r})",
                 f"ops.numberer({active.numberer!r})",
-                f"ops.system({active.system!r})",
+                (
+                    "ops.system('SparseGeneral', '-piv')"
+                    if (
+                        active.system == "SparseGeneral"
+                        and active.system_pivoting
+                    )
+                    else f"ops.system({active.system!r})"
+                ),
                 (
                     f"ops.test({active.test!r}, {active.tolerance:g}, "
                     f"{active.max_iterations}, 0)"
