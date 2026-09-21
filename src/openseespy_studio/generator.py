@@ -2430,6 +2430,30 @@ def to_openseespy(
         active_analysis is not None and deferred_pattern_tags
     )
 
+    missing_constraint_nodes: dict[int, list[int]] = {}
+    for constraint in (constraints or {}).values():
+        missing = sorted({
+            int(tag)
+            for tag in (
+                [constraint.retained_node]
+                + list(constraint.constrained_nodes)
+            )
+            if int(tag) not in model.nodes
+        })
+        if missing:
+            missing_constraint_nodes[int(constraint.tag)] = missing
+
+    if missing_constraint_nodes:
+        details = "; ".join(
+            f"{tag}: " + ", ".join(map(str, nodes))
+            for tag, nodes in sorted(missing_constraint_nodes.items())
+        )
+        raise ValueError(
+            "Constraint(s) reference missing model node tag(s): "
+            + details
+            + "."
+        )
+
     invalid_rigid_links: list[str] = []
     for constraint in (constraints or {}).values():
         if constraint.constraint_type != "rigidLink":

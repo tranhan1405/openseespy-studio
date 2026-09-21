@@ -1450,3 +1450,120 @@ def test_generator_allows_support_on_dof_not_owned_by_mpc():
 
     assert "ops.fix(2, 0, 0, 1)" in code
     assert "ops.rigidLink('bar', 1, 2)" in code
+
+
+@pytest.mark.parametrize(
+    ("constraint_type", "kwargs"),
+    [
+        (
+            "equalDOF",
+            {"dofs": (1,)},
+        ),
+        (
+            "rigidLink",
+            {"link_type": "bar"},
+        ),
+        (
+            "rigidDiaphragm",
+            {"perp_dirn": 3},
+        ),
+    ],
+)
+def test_generator_rejects_constraint_with_missing_retained_node(
+    constraint_type,
+    kwargs,
+):
+    model = StructuralModel("missing-retained-node", ndm=2, ndf=3)
+    model.add_node(2, 1.0, 0.0)
+
+    constraint = ConstraintData(
+        26,
+        "Missing retained node",
+        constraint_type,
+        retained_node=99,
+        constrained_nodes=[2],
+        **kwargs,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Constraint\(s\) reference missing model node tag\(s\): 26: 99",
+    ):
+        to_openseespy(
+            model,
+            constraints={26: constraint},
+        )
+
+
+@pytest.mark.parametrize(
+    ("constraint_type", "kwargs"),
+    [
+        (
+            "equalDOF",
+            {"dofs": (1,)},
+        ),
+        (
+            "rigidLink",
+            {"link_type": "beam"},
+        ),
+        (
+            "rigidDiaphragm",
+            {"perp_dirn": 3},
+        ),
+    ],
+)
+def test_generator_rejects_constraint_with_missing_constrained_node(
+    constraint_type,
+    kwargs,
+):
+    model = StructuralModel("missing-secondary-node", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+
+    constraint = ConstraintData(
+        27,
+        "Missing constrained node",
+        constraint_type,
+        retained_node=1,
+        constrained_nodes=[98],
+        **kwargs,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Constraint\(s\) reference missing model node tag\(s\): 27: 98",
+    ):
+        to_openseespy(
+            model,
+            constraints={27: constraint},
+        )
+
+
+def test_generator_reports_all_missing_nodes_by_constraint():
+    model = StructuralModel("multiple-missing-constraint-nodes", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+
+    constraints = {
+        28: ConstraintData(
+            28,
+            "Missing equalDOF nodes",
+            "equalDOF",
+            retained_node=97,
+            constrained_nodes=[98],
+            dofs=(1,),
+        ),
+        29: ConstraintData(
+            29,
+            "Missing rigidLink node",
+            "rigidLink",
+            retained_node=1,
+            constrained_nodes=[99],
+            link_type="bar",
+        ),
+    }
+
+    with pytest.raises(ValueError) as exc_info:
+        to_openseespy(model, constraints=constraints)
+
+    message = str(exc_info.value)
+    assert "28: 97, 98" in message
+    assert "29: 99" in message
