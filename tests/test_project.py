@@ -3214,7 +3214,7 @@ def test_uniform_excitation_rejects_direction_above_model_ndf():
 
     with pytest.raises(
         ValueError,
-        match=r"UniformExcitation direction 3 is not available for ndf=2",
+        match=r"UniformExcitation direction 3 is not available for ndm=2",
     ):
         project.add_load_pattern(
             LoadPatternData(
