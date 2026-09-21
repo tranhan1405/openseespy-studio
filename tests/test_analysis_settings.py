@@ -667,3 +667,46 @@ def test_newmark_accepts_gamma_at_or_above_half(gamma):
         beta=0.25,
     )
     assert analysis.gamma == pytest.approx(gamma)
+
+
+@pytest.mark.parametrize("analysis_type", ["Static", "Pushover", "Cyclic", "Modal"])
+def test_nontransient_analyses_ignore_unused_nonpositive_dt(analysis_type):
+    kwargs = {"dt": 0.0}
+
+    if analysis_type == "Pushover":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    elif analysis_type == "Cyclic":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            cyclic_targets=[0.001, -0.001],
+            cyclic_increment=0.0005,
+        )
+    elif analysis_type == "Modal":
+        kwargs.update(num_modes=1)
+
+    analysis = AnalysisSettingsData(
+        63,
+        f"{analysis_type} ignores dt",
+        analysis_type,
+        **kwargs,
+    )
+    assert analysis.dt == 0.0
+
+
+@pytest.mark.parametrize("dt", [0.0, -1.0e-6])
+def test_transient_rejects_nonpositive_dt(dt):
+    with pytest.raises(
+        ValueError,
+        match="Transient dt must be positive",
+    ):
+        AnalysisSettingsData(
+            64,
+            "Invalid transient dt",
+            "Transient",
+            dt=dt,
+        )

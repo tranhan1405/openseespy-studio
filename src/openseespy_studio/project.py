@@ -1571,7 +1571,8 @@ class AnalysisSettingsData:
                 raise ValueError("Cyclic analysis needs at least one displacement target.")
             if self.cyclic_increment <= 0.0:
                 raise ValueError("Cyclic max displacement increment must be positive.")
-        if self.dt<=0: raise ValueError("Transient dt must be positive.")
+        if self.analysis_type == "Transient" and self.dt <= 0:
+            raise ValueError("Transient dt must be positive.")
         if (
             self.analysis_type == "Transient"
             and self.integrator == "Newmark"
