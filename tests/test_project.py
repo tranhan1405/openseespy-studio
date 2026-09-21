@@ -654,3 +654,80 @@ def test_project_accepts_rigid_diaphragm_on_supported_2d_3dof_model():
     )
 
     assert project.constraints[40].constraint_type == "rigidDiaphragm"
+
+
+def test_project_rejects_equal_dof_above_model_ndf():
+    model = StructuralModel("2D-3DOF equalDOF", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Bad equalDOF", model=model)
+
+    try:
+        project.add_constraint(
+            ConstraintData(
+                41,
+                "Invalid equalDOF",
+                "equalDOF",
+                retained_node=1,
+                constrained_nodes=[2],
+                dofs=(1, 5),
+            )
+        )
+    except ValueError as exc:
+        assert "DOF(s) 5 not available for model ndf=3" in str(exc)
+    else:
+        raise AssertionError("Expected equalDOF model-ndf validation")
+
+
+def test_project_accepts_equal_dof_at_model_ndf():
+    model = StructuralModel("2D-3DOF equalDOF", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Good equalDOF", model=model)
+
+    project.add_constraint(
+        ConstraintData(
+            42,
+            "Valid equalDOF",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1, 3),
+        )
+    )
+
+    assert project.constraints[42].dofs == (1, 3)
+
+
+def test_project_update_rejects_equal_dof_above_model_ndf():
+    model = StructuralModel("2D-3DOF equalDOF update", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Update equalDOF", model=model)
+    project.add_constraint(
+        ConstraintData(
+            43,
+            "Initial equalDOF",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        )
+    )
+
+    try:
+        project.update_constraint(
+            43,
+            ConstraintData(
+                43,
+                "Invalid updated equalDOF",
+                "equalDOF",
+                retained_node=1,
+                constrained_nodes=[2],
+                dofs=(1, 4),
+            ),
+        )
+    except ValueError as exc:
+        assert "DOF(s) 4 not available for model ndf=3" in str(exc)
+    else:
+        raise AssertionError("Expected equalDOF update model-ndf validation")

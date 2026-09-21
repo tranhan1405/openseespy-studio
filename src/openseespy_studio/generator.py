@@ -2430,6 +2430,30 @@ def to_openseespy(
         active_analysis is not None and deferred_pattern_tags
     )
 
+    invalid_equal_dof_dofs = {
+        int(constraint.tag): sorted(
+            int(dof)
+            for dof in constraint.dofs
+            if int(dof) > int(model.ndf)
+        )
+        for constraint in (constraints or {}).values()
+        if constraint.constraint_type == "equalDOF"
+    }
+    invalid_equal_dof_dofs = {
+        tag: dofs
+        for tag, dofs in invalid_equal_dof_dofs.items()
+        if dofs
+    }
+    if invalid_equal_dof_dofs:
+        details = "; ".join(
+            f"{tag}: " + ", ".join(map(str, dofs))
+            for tag, dofs in sorted(invalid_equal_dof_dofs.items())
+        )
+        raise ValueError(
+            "equalDOF constraint DOF(s) exceed "
+            f"model ndf={model.ndf} ({details})."
+        )
+
     rigid_diaphragm_tags = sorted(
         constraint.tag
         for constraint in (constraints or {}).values()

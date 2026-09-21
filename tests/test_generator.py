@@ -1140,3 +1140,65 @@ def test_generator_accepts_rigid_diaphragm_supported_model_signatures(
     )
 
     assert "ops.rigidDiaphragm(3, 1, 2)" in code
+
+
+@pytest.mark.parametrize(
+    ("ndm", "ndf", "invalid_dof"),
+    [
+        (2, 2, 3),
+        (2, 3, 5),
+        (3, 3, 4),
+    ],
+)
+def test_generator_rejects_equal_dof_above_model_ndf(
+    ndm,
+    ndf,
+    invalid_dof,
+):
+    model = StructuralModel("bad-equal-dof", ndm=ndm, ndf=ndf)
+    if ndm == 2:
+        model.add_node(1, 0.0, 0.0)
+        model.add_node(2, 1.0, 0.0)
+    else:
+        model.add_node(1, 0.0, 0.0, 0.0)
+        model.add_node(2, 1.0, 0.0, 0.0)
+
+    constraint = ConstraintData(
+        14,
+        "Invalid equalDOF",
+        "equalDOF",
+        retained_node=1,
+        constrained_nodes=[2],
+        dofs=(1, invalid_dof),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=rf"equalDOF constraint DOF\(s\) exceed model ndf={ndf}",
+    ):
+        to_openseespy(
+            model,
+            constraints={14: constraint},
+        )
+
+
+def test_generator_accepts_equal_dof_up_to_model_ndf():
+    model = StructuralModel("valid-equal-dof", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    constraint = ConstraintData(
+        15,
+        "Valid equalDOF",
+        "equalDOF",
+        retained_node=1,
+        constrained_nodes=[2],
+        dofs=(1, 3),
+    )
+
+    code = to_openseespy(
+        model,
+        constraints={15: constraint},
+    )
+
+    assert "ops.equalDOF(1, 2, 1, 3)" in code

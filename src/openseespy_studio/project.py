@@ -2145,6 +2145,20 @@ class ProjectDatabase:
         self,
         constraint: ConstraintData,
     ) -> None:
+        if constraint.constraint_type == "equalDOF":
+            invalid_dofs = sorted(
+                dof
+                for dof in constraint.dofs
+                if dof > int(self.model.ndf)
+            )
+            if invalid_dofs:
+                raise ValueError(
+                    f"equalDOF constraint {constraint.tag} references DOF(s) "
+                    + ", ".join(map(str, invalid_dofs))
+                    + f" not available for model ndf={self.model.ndf}."
+                )
+            return
+
         if constraint.constraint_type != "rigidDiaphragm":
             return
         signature = (int(self.model.ndm), int(self.model.ndf))
