@@ -14,6 +14,18 @@ SUPPORTED_ELEMENT_TYPES = {
     "truss",
 }
 
+
+def _strict_int(value: object, label: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be an integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be an integer.") from exc
+    if not math.isfinite(numeric) or not numeric.is_integer():
+        raise ValueError(f"{label} must be an integer.")
+    return int(numeric)
+
 FIXITY_PRESETS: dict[str, Tuple[int, ...]] = {
     "Fixed": (1, 1, 1, 1, 1, 1),
     "Pinned": (1, 1, 1, 0, 0, 0),
@@ -66,14 +78,20 @@ class Element:
     truss_do_rayleigh: bool = False
 
     def __post_init__(self) -> None:
-        self.tag = int(self.tag)
-        self.i = int(self.i)
-        self.j = int(self.j)
+        self.tag = _strict_int(self.tag, "Element tag")
+        self.i = _strict_int(self.i, "Element I-node tag")
+        self.j = _strict_int(self.j, "Element J-node tag")
         self.element_type = str(self.element_type)
         self.group = str(self.group)
         self.integration_type = str(self.integration_type)
-        self.integration_points = int(self.integration_points)
-        self.force_max_iter = int(self.force_max_iter)
+        self.integration_points = _strict_int(
+            self.integration_points,
+            "Beam integration-point count",
+        )
+        self.force_max_iter = _strict_int(
+            self.force_max_iter,
+            "Force-based element max iterations",
+        )
         self.force_tolerance = float(self.force_tolerance)
         self.mass_per_length = float(self.mass_per_length)
         self.consistent_mass = bool(self.consistent_mass)
@@ -178,8 +196,8 @@ class StructuralModel:
 
     def __post_init__(self) -> None:
         self.name = str(self.name).strip() or "Untitled"
-        self.ndm = int(self.ndm)
-        self.ndf = int(self.ndf)
+        self.ndm = _strict_int(self.ndm, "Model ndm")
+        self.ndf = _strict_int(self.ndf, "Model ndf")
         if self.ndm not in {2, 3}:
             raise ValueError("Model ndm must be 2 or 3.")
         if self.ndf < 1 or self.ndf > 6:
@@ -190,7 +208,7 @@ class StructuralModel:
         self.elements.clear()
 
     def add_node(self, tag: int, x: float, y: float, z: float = 0.0) -> Node:
-        tag = int(tag)
+        tag = _strict_int(tag, "Node tag")
         if tag <= 0:
             raise ValueError("Node tag must be a positive integer.")
         if tag in self.nodes:
@@ -244,9 +262,9 @@ class StructuralModel:
         truss_material_tag: int | None = None,
         truss_do_rayleigh: bool = False,
     ) -> Element:
-        tag = int(tag)
-        i = int(i)
-        j = int(j)
+        tag = _strict_int(tag, "Element tag")
+        i = _strict_int(i, "Element I-node tag")
+        j = _strict_int(j, "Element J-node tag")
         element_type = str(element_type)
         if tag <= 0:
             raise ValueError("Element tag must be a positive integer.")
@@ -254,6 +272,10 @@ class StructuralModel:
             raise ValueError(f"Element tag {tag} already exists")
         if element_type not in SUPPORTED_ELEMENT_TYPES:
             raise ValueError(f"Unsupported element type: {element_type}")
+        if i == j:
+            raise ValueError(
+                f"Element {tag} must connect two different node tags."
+            )
         if i not in self.nodes or j not in self.nodes:
             raise ValueError(f"Element {tag} references missing nodes {i}, {j}")
         ele = Element(
@@ -743,14 +765,14 @@ class StructuralModel:
     def from_dict(cls, data: dict) -> "StructuralModel":
         model = cls(
             name=str(data.get("name", "Untitled")),
-            ndm=int(data.get("ndm", 3)),
-            ndf=int(data.get("ndf", 6)),
+            ndm=data.get("ndm", 3),
+            ndf=data.get("ndf", 6),
         )
 
         for item in data.get("nodes", []):
             xyz = item.get("xyz", (0.0, 0.0, 0.0))
             node = model.add_node(
-                int(item["tag"]),
+                item["tag"],
                 float(xyz[0]),
                 float(xyz[1]),
                 float(xyz[2]) if len(xyz) > 2 else 0.0,
@@ -786,16 +808,16 @@ class StructuralModel:
 
         for item in data.get("elements", []):
             model.add_element(
-                int(item["tag"]),
-                int(item["i"]),
-                int(item["j"]),
+                item["tag"],
+                item["i"],
+                item["j"],
                 str(item.get("element_type", "elasticBeamColumn")),
                 item.get("section_tag"),
                 item.get("transf_tag"),
                 str(item.get("group", "frame")),
                 str(item.get("integration_type", "Lobatto")),
-                int(item.get("integration_points", 5)),
-                int(item.get("force_max_iter", 10)),
+                item.get("integration_points", 5),
+                item.get("force_max_iter", 10),
                 float(item.get("force_tolerance", 1.0e-12)),
                 float(item.get("mass_per_length", 0.0)),
                 bool(item.get("consistent_mass", False)),
