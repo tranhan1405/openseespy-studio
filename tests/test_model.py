@@ -234,3 +234,62 @@ def test_element_rejects_nonfinite_numeric_values():
             2,
             force_tolerance=float("nan"),
         )
+
+
+def test_model_rejects_invalid_spatial_dimension():
+    with pytest.raises(ValueError, match=r"ndm must be 2 or 3"):
+        StructuralModel(ndm=1, ndf=3)
+
+    with pytest.raises(ValueError, match=r"ndm must be 2 or 3"):
+        StructuralModel(ndm=4, ndf=6)
+
+
+def test_model_rejects_invalid_dof_count():
+    with pytest.raises(ValueError, match=r"ndf must be between 1 and 6"):
+        StructuralModel(ndm=2, ndf=0)
+
+    with pytest.raises(ValueError, match=r"ndf must be between 1 and 6"):
+        StructuralModel(ndm=3, ndf=7)
+
+
+def test_model_rejects_nonpositive_node_tags():
+    model = StructuralModel(ndm=2, ndf=3)
+
+    with pytest.raises(ValueError, match=r"Node tag must be a positive integer"):
+        model.add_node(0, 0.0, 0.0)
+
+    with pytest.raises(ValueError, match=r"Node tag must be a positive integer"):
+        model.add_node(-1, 0.0, 0.0)
+
+
+def test_model_rejects_nonpositive_element_tags():
+    model = StructuralModel(ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    with pytest.raises(
+        ValueError,
+        match=r"Element tag must be a positive integer",
+    ):
+        model.add_element(0, 1, 2)
+
+    with pytest.raises(
+        ValueError,
+        match=r"Element tag must be a positive integer",
+    ):
+        model.add_element(-1, 1, 2)
+
+
+def test_model_rejects_unsupported_element_formulation_early():
+    model = StructuralModel(ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    with pytest.raises(ValueError, match=r"Unsupported element type"):
+        model.add_element(
+            1,
+            1,
+            2,
+            element_type="mysteryBeam",
+        )
+
