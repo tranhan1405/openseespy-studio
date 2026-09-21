@@ -53,7 +53,10 @@ FIXITY_PRESETS: dict[str, Tuple[int, ...]] = {
 
 
 def classify_fixity(values: Iterable[int]) -> str:
-    fixity = tuple(int(v) for v in values)
+    fixity = tuple(
+        _strict_int(value, "Fixity value")
+        for value in values
+    )
     if not any(fixity):
         return "Free"
     for name, preset in FIXITY_PRESETS.items():
@@ -391,8 +394,12 @@ class StructuralModel:
         return ele
 
     def set_fixity(self, tag: int, values: Iterable[int]) -> None:
+        tag = _strict_int(tag, "Node tag")
         node = self.nodes[tag]
-        vals = tuple(int(v) for v in values)
+        vals = tuple(
+            _strict_int(value, "Fixity value")
+            for value in values
+        )
         if len(vals) != self.ndf:
             raise ValueError(f"Expected {self.ndf} fixity values, got {len(vals)}")
         if any(value not in {0, 1} for value in vals):
@@ -404,7 +411,10 @@ class StructuralModel:
         node_tags: Iterable[int],
         values: Iterable[int],
     ) -> set[int]:
-        vals = tuple(int(v) for v in values)
+        vals = tuple(
+            _strict_int(value, "Fixity value")
+            for value in values
+        )
         if len(vals) != self.ndf:
             raise ValueError(
                 f"Expected {self.ndf} fixity values, got {len(vals)}"
@@ -413,7 +423,8 @@ class StructuralModel:
             raise ValueError("Fixity values must be 0 or 1.")
         updated: set[int] = set()
         for tag in node_tags:
-            node = self.nodes.get(int(tag))
+            normalized_tag = _strict_int(tag, "Node tag")
+            node = self.nodes.get(normalized_tag)
             if node is None:
                 continue
             node.fixity = vals
@@ -424,6 +435,7 @@ class StructuralModel:
         return self.set_fixity_many(node_tags, (0,) * self.ndf)
 
     def set_mass(self, tag: int, values: Iterable[float]) -> None:
+        tag = _strict_int(tag, "Node tag")
         node = self.nodes[tag]
         vals = tuple(float(v) for v in values)
         if len(vals) != self.ndf:
@@ -452,7 +464,8 @@ class StructuralModel:
             raise ValueError("Nodal mass values cannot be negative.")
         updated: set[int] = set()
         for tag in node_tags:
-            node = self.nodes.get(int(tag))
+            normalized_tag = _strict_int(tag, "Node tag")
+            node = self.nodes.get(normalized_tag)
             if node is None:
                 continue
             node.mass = vals
@@ -463,9 +476,11 @@ class StructuralModel:
         return self.set_mass_many(node_tags, (0.0,) * self.ndf)
 
     def remove_element(self, tag: int) -> None:
+        tag = _strict_int(tag, "Element tag")
         self.elements.pop(tag, None)
 
     def remove_node(self, tag: int, *, cascade: bool = False) -> None:
+        tag = _strict_int(tag, "Node tag")
         if tag not in self.nodes:
             return
         connected = [
@@ -499,9 +514,14 @@ class StructuralModel:
         section_tag: int | None,
     ) -> set[int]:
         assigned: set[int] = set()
-        value = None if section_tag is None else int(section_tag)
+        value = (
+            None
+            if section_tag is None
+            else _strict_int(section_tag, "Section tag")
+        )
         for tag in element_tags:
-            element = self.elements.get(int(tag))
+            normalized_tag = _strict_int(tag, "Element tag")
+            element = self.elements.get(normalized_tag)
             if element is None or element.element_type == "truss":
                 continue
             element.section_tag = value
@@ -515,9 +535,14 @@ class StructuralModel:
     ) -> set[int]:
         """Assign a uniaxial material only to Truss elements."""
         assigned: set[int] = set()
-        value = None if material_tag is None else int(material_tag)
+        value = (
+            None
+            if material_tag is None
+            else _strict_int(material_tag, "Material tag")
+        )
         for tag in element_tags:
-            element = self.elements.get(int(tag))
+            normalized_tag = _strict_int(tag, "Element tag")
+            element = self.elements.get(normalized_tag)
             if element is None or element.element_type != "truss":
                 continue
             element.truss_material_tag = value
@@ -543,7 +568,8 @@ class StructuralModel:
     ) -> set[int]:
         updated: set[int] = set()
         for tag in element_tags:
-            element = self.elements.get(int(tag))
+            normalized_tag = _strict_int(tag, "Element tag")
+            element = self.elements.get(normalized_tag)
             if element is None:
                 continue
             candidate = Element(
@@ -579,9 +605,14 @@ class StructuralModel:
         transf_tag: int | None,
     ) -> set[int]:
         assigned: set[int] = set()
-        value = None if transf_tag is None else int(transf_tag)
+        value = (
+            None
+            if transf_tag is None
+            else _strict_int(transf_tag, "Transformation tag")
+        )
         for tag in element_tags:
-            element = self.elements.get(int(tag))
+            normalized_tag = _strict_int(tag, "Element tag")
+            element = self.elements.get(normalized_tag)
             if element is None or element.element_type == "truss":
                 continue
             element.transf_tag = value
@@ -600,9 +631,14 @@ class StructuralModel:
         node_tags: Iterable[int] = (),
         element_tags: Iterable[int] = (),
     ) -> set[int]:
-        tags = {int(tag) for tag in node_tags if int(tag) in self.nodes}
+        tags: set[int] = set()
+        for tag in node_tags:
+            normalized_tag = _strict_int(tag, "Node tag")
+            if normalized_tag in self.nodes:
+                tags.add(normalized_tag)
         for element_tag in element_tags:
-            element = self.elements.get(int(element_tag))
+            normalized_tag = _strict_int(element_tag, "Element tag")
+            element = self.elements.get(normalized_tag)
             if element is not None:
                 tags.update((element.i, element.j))
         return tags
@@ -723,9 +759,11 @@ class StructuralModel:
         if copies < 1:
             raise ValueError("copies must be at least 1")
 
-        selected_elements = {
-            int(tag) for tag in element_tags if int(tag) in self.elements
-        }
+        selected_elements: set[int] = set()
+        for tag in element_tags:
+            normalized_tag = _strict_int(tag, "Element tag")
+            if normalized_tag in self.elements:
+                selected_elements.add(normalized_tag)
         source_nodes = self.entity_node_tags(
             node_tags=node_tags,
             element_tags=selected_elements,
@@ -748,7 +786,8 @@ class StructuralModel:
 
         next_node = self.next_node_tag()
         reserved_elements = {
-            int(tag) for tag in reserved_element_tags
+            _strict_int(tag, "Reserved element tag")
+            for tag in reserved_element_tags
         } | set(self.elements)
         next_element = self.next_element_tag()
         created_nodes: set[int] = set()
