@@ -184,7 +184,7 @@ class ConnectionDialog(QDialog):
         parent=None,
     ):
         super().__init__(parent)
-        self.setWindowTitle("ZeroLength / Link Research Builder")
+        self.setWindowTitle("Zero-Length Element Research Builder")
         self.setModal(True)
         self.resize(760, 720)
         self.materials = dict(materials)
@@ -202,11 +202,11 @@ class ConnectionDialog(QDialog):
         root = QVBoxLayout(self)
 
         intro = QLabel(
-            "Research spring/interface builder. Assign one UniaxialMaterial "
-            "per active local DOF; nonlinear materials such as Pinching4, "
-            "Hysteretic, Fatigue, MinMax, Parallel and Series can be tested "
-            "directly before assignment. Use Chain... on any DOF to build "
-            "Steel02 → Fatigue → MinMax in one research workflow."
+            "Create zeroLength, zeroLengthSection, or twoNodeLink elements. "
+            "zeroLength/twoNodeLink assign UniaxialMaterials by local DOF; "
+            "zeroLengthSection assigns one complete Section object such as "
+            "Elastic or Fiber. Sections can be created or edited directly "
+            "from the Section tab."
         )
         intro.setWordWrap(True)
         intro.setStyleSheet(
@@ -822,7 +822,7 @@ class ConnectionDialog(QDialog):
         }
         if zero_length and distance > 1.0e-7:
             self.node_status.setText(
-                f"Node separation = {distance:.6g}. zeroLength requires "
+                f"Node separation = {distance:.6g}. {self.connection_type.currentText()} requires "
                 "coincident nodes; use twoNodeLink or create a coincident node."
             )
             self.node_status.setStyleSheet(
