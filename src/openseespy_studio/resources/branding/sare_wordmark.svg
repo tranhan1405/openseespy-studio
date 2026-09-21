@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 220" role="img" aria-label="SARE wordmark">
+  <rect width="960" height="220" fill="white"/>
+  <text x="42" y="112"
+        font-family="Arial, Helvetica, sans-serif"
+        font-size="104" font-weight="800"
+        letter-spacing="5" fill="#0B315C">SARE</text>
+  <path d="M48 137
+           C90 137 112 135 139 119
+           C157 108 171 95 187 101
+           C204 107 215 128 233 135
+           C251 142 273 140 300 137"
+        fill="none" stroke="#E5252A" stroke-width="8"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="350" y="91"
+        font-family="Arial, Helvetica, sans-serif"
+        font-size="27" font-weight="400"
+        fill="#52697D">Structural Analysis &amp; Research</text>
+  <text x="350" y="126"
+        font-family="Arial, Helvetica, sans-serif"
+        font-size="27" font-weight="400"
+        fill="#52697D">Environment for OpenSees</text>
+  <text x="350" y="161"
+        font-family="Arial, Helvetica, sans-serif"
+        font-size="17" font-weight="700"
+        letter-spacing="2" fill="#0B315C">STRUCTURAL SIMULATION · RESEARCH</text>
+</svg>
