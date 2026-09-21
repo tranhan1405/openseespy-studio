@@ -6,7 +6,7 @@ import math
 from .beam_loads import resolve_self_weight_local
 from .units import UnitSystem
 from .model import StructuralModel
-from .project import MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SectionData, TimeSeriesData, TransformationData
+from .project import MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SectionData, TimeSeriesData, TransformationData, material_parameter_kind
 from .section_response import automatic_moment_curvature_spec, build_section_response_specs
 
 
@@ -284,9 +284,29 @@ def material_to_openseespy(
 
     if material.material_type == "Pinching4":
         keys = MATERIAL_PARAMETER_ORDER["Pinching4"][:-1]
-        args = ", ".join(f"{p[key]:g}" for key in keys)
+
+        def pinching_value(key: str) -> float:
+            value = float(p[key])
+            kind = material_parameter_kind(material, key)
+            if kind == "force":
+                return unit_system.force_from_n(value)
+            if kind == "moment":
+                return unit_system.moment_from_nm(value)
+            if kind == "stress":
+                return unit_system.stress_from_pa(value)
+            if kind == "length":
+                return unit_system.length_from_m(value)
+            return value
+
+        args = ", ".join(
+            f"{pinching_value(key):g}"
+            for key in keys
+        )
         dmg_type = "cycle" if p["dmgType"] < 0.5 else "energy"
-        return f"ops.uniaxialMaterial('Pinching4', {material.tag}, {args}, {dmg_type!r})"
+        return (
+            f"ops.uniaxialMaterial('Pinching4', {material.tag}, "
+            f"{args}, {dmg_type!r})"
+        )
 
     if material.material_type == "Bond_SP01":
         sy = unit_system.length_from_m(p["Sy"])
