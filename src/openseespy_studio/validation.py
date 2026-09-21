@@ -878,6 +878,16 @@ def _has_any_translational_dynamic_mass(
     )
 
 
+def _free_equation_upper_bound(project: ProjectDatabase) -> int:
+    """Upper bound on active equations before MPC condensation."""
+    return sum(
+        1
+        for node in project.model.nodes.values()
+        for value in node.fixity[: project.model.ndf]
+        if not bool(value)
+    )
+
+
 def _dynamic_checks(
     project: ProjectDatabase,
     analysis: AnalysisSettingsData,
@@ -887,6 +897,42 @@ def _dynamic_checks(
         return
 
     model = project.model
+    free_equation_upper_bound = _free_equation_upper_bound(project)
+    requested_eigen_modes = (
+        int(analysis.num_modes)
+        if analysis.analysis_type == "Modal"
+        else (
+            max(
+                int(analysis.rayleigh_mode_i),
+                int(analysis.rayleigh_mode_j),
+            )
+            if analysis.rayleigh_damping_ratio > 0.0
+            else 0
+        )
+    )
+    if (
+        requested_eigen_modes > 0
+        and requested_eigen_modes > free_equation_upper_bound
+    ):
+        context = (
+            "Modal analysis"
+            if analysis.analysis_type == "Modal"
+            else "Rayleigh damping"
+        )
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Eigen analysis",
+                f"{context} requests mode {requested_eigen_modes}, but the "
+                f"model has at most {free_equation_upper_bound} free "
+                "equation(s) before constraint condensation.",
+                suggestion=(
+                    "Request fewer modes, free the required DOFs, or review "
+                    "the model supports/constraints."
+                ),
+            )
+        )
+
     has_any_mass = _has_any_translational_dynamic_mass(project)
     if not has_any_mass:
         issues.append(
