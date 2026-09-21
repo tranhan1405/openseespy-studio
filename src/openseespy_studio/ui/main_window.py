@@ -88,6 +88,8 @@ from ..section_response import section_response_sources
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SUPPORTED_CONNECTION_TYPES
 from ..runtime import (
     build_worker_pythonpath,
+    opensees_material_requires_runtime_probe,
+    probe_opensees_material_support,
     probe_opensees_runtime,
     worker_process_command,
 )
@@ -13097,6 +13099,53 @@ class MainWindow(QMainWindow):
         )
         for line in runtime_detail.splitlines():
             self.console.appendPlainText(">> " + line)
+
+        required_material_probes = sorted({
+            material.material_type
+            for material in self.project.materials.values()
+            if opensees_material_requires_runtime_probe(
+                material.material_type
+            )
+        })
+        for material_type in required_material_probes:
+            material_ok, material_detail = (
+                probe_opensees_material_support(
+                    material_type,
+                    sys.executable,
+                )
+            )
+            if not material_ok:
+                self.console.appendPlainText(
+                    f">> OpenSees material check FAILED: {material_type}"
+                )
+                for line in material_detail.splitlines():
+                    self.console.appendPlainText(">> " + line)
+                self.status_message.setText(
+                    f"Run blocked: {material_type} unavailable"
+                )
+                QMessageBox.critical(
+                    self,
+                    "OpenSees Material Unavailable",
+                    (
+                        f"The current OpenSeesPy binary does not provide "
+                        f"{material_type}.\n\n"
+                        "Studio has kept the imported material definition "
+                        "unchanged, but this analysis cannot run with the "
+                        "current binary.\n\n"
+                        "OpenSees reports that this legacy material may be "
+                        "temporarily removed from compiled Tcl/Python builds. "
+                        "Use a compatible/custom OpenSees build if you must "
+                        "reproduce this constitutive model. Do not substitute "
+                        "another material automatically unless you have "
+                        "validated that constitutive choice for your study.\n\n"
+                        "Runtime detail:\n"
+                        + material_detail
+                    ),
+                )
+                return
+            self.console.appendPlainText(
+                f">> OpenSees material check OK: {material_type}"
+            )
 
         fd, path = tempfile.mkstemp(
             prefix="openseespy_studio_",
