@@ -1391,3 +1391,59 @@ def test_enabled_adaptive_step_rejects_invalid_active_parameters(
             "Static",
             **kwargs,
         )
+
+
+@pytest.mark.parametrize(
+    "analysis_type",
+    ["Cyclic", "Modal"],
+)
+def test_analyses_without_nominal_step_count_ignore_nonpositive_steps(
+    analysis_type,
+):
+    kwargs = {"steps": 0}
+
+    if analysis_type == "Cyclic":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            cyclic_targets=[0.001, -0.001],
+            cyclic_increment=0.0005,
+        )
+    else:
+        kwargs.update(num_modes=1)
+
+    analysis = AnalysisSettingsData(
+        88,
+        f"{analysis_type} ignores nominal steps",
+        analysis_type,
+        **kwargs,
+    )
+    assert analysis.steps == 0
+
+
+@pytest.mark.parametrize(
+    "analysis_type",
+    ["Static", "Pushover", "Transient"],
+)
+def test_step_driven_analyses_reject_nonpositive_steps(analysis_type):
+    kwargs = {"steps": 0}
+
+    if analysis_type == "Pushover":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    elif analysis_type == "Transient":
+        kwargs.update(dt=0.01)
+
+    with pytest.raises(
+        ValueError,
+        match="Analysis steps must be at least 1",
+    ):
+        AnalysisSettingsData(
+            89,
+            f"Invalid {analysis_type} steps",
+            analysis_type,
+            **kwargs,
+        )

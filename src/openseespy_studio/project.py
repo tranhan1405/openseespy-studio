@@ -1533,7 +1533,11 @@ class AnalysisSettingsData:
         if self.test not in {"NormDispIncr","NormUnbalance","EnergyIncr"}: raise ValueError("Unsupported convergence test.")
         if self.algorithm not in {"Newton","ModifiedNewton","NewtonLineSearch"}: raise ValueError("Unsupported algorithm.")
         if self.tolerance<=0 or self.max_iterations<1: raise ValueError("Invalid convergence settings.")
-        if self.steps<1: raise ValueError("Analysis steps must be at least 1.")
+        if (
+            self.analysis_type in {"Static", "Pushover", "Transient"}
+            and self.steps < 1
+        ):
+            raise ValueError("Analysis steps must be at least 1.")
         if self.control_dof not in range(1,7): raise ValueError("Control DOF must be 1..6.")
         uses_adaptive_step = (
             self.adaptive_step and self.analysis_type != "Modal"
