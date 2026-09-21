@@ -90,6 +90,8 @@ results.close()
 
     assert result.error_count == 0
     assert result.unsupported_count == 0
+    assert result.imported_counts.get("Elements") == 1
+    assert result.imported_counts.get("Connections", 0) == 0
 
     assert result.project.model.ndm == 2
     assert result.project.model.ndf == 3
