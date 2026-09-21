@@ -1,3 +1,5 @@
+import pytest
+
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
     AnalysisSettingsData,
