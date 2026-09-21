@@ -84,7 +84,7 @@ from ..result_catalog import (
     convergence_result_label,
     result_choices_for_analysis,
 )
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SUPPORTED_CONNECTION_TYPES
 from ..runtime import (
     build_worker_pythonpath,
     probe_opensees_runtime,
@@ -3669,11 +3669,7 @@ class MainWindow(QMainWindow):
         root.addChild(connections_root)
 
         connection_groups: dict[str, QTreeWidgetItem] = {}
-        for connection_type in (
-            "zeroLength",
-            "zeroLengthSection",
-            "twoNodeLink",
-        ):
+        for connection_type in SUPPORTED_CONNECTION_TYPES:
             tags = [
                 tag
                 for tag, connection in self.project.connections.items()
