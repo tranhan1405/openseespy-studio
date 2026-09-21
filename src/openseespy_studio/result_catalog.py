@@ -30,6 +30,7 @@ def result_choices_for_analysis(
     convergence_test: str | None = None,
     *,
     integrator: str | None = None,
+    section_response_available: bool = True,
 ) -> list[ResultChoice]:
     """Return the shared result catalog for Solution and Job menus."""
     kind = str(analysis_type)
@@ -125,6 +126,17 @@ def result_choices_for_analysis(
         )
     )
 
+    if section_response_available:
+        choices.append(
+            ResultChoice(
+                "Nonlinear Results",
+                "Section Response",
+                "SectionResponse",
+                "Section Response",
+                {"component": "Mz", "section": 1},
+            )
+        )
+
     choices.extend(
         [
             ResultChoice(
@@ -162,17 +174,6 @@ def result_choices_for_analysis(
             },
         )
     )
-
-    if kind == "Static" and str(integrator or "") == "DisplacementControl":
-        choices.append(
-            ResultChoice(
-                "Charts / History",
-                "Moment–Curvature",
-                "MomentCurvature",
-                "Moment–Curvature",
-                {},
-            )
-        )
 
     if kind == "Pushover":
         choices.append(
