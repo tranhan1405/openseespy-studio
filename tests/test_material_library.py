@@ -22,7 +22,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 100
+    assert len(records) == 150
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -138,7 +138,10 @@ def test_moodley_2026_adds_fifty_exact_steel02_parameter_sets():
     records = [
         record
         for record in load_verified_material_library()
-        if record.id.startswith("moodley-2026-")
+        if (
+            record.id.startswith("moodley-2026-")
+            and record.model == "Steel02"
+        )
     ]
 
     assert len(records) == 50
@@ -193,7 +196,10 @@ def test_moodley_2026_records_encode_model_applicability():
     records = [
         record
         for record in load_verified_material_library()
-        if record.id.startswith("moodley-2026-")
+        if (
+            record.id.startswith("moodley-2026-")
+            and record.model == "Steel02"
+        )
     ]
     truss = [record for record in records if "-truss-" in record.id]
     beam = [record for record in records if "-beam-" in record.id]
@@ -214,11 +220,11 @@ def test_moodley_2026_records_encode_model_applicability():
     )
 
 
-def test_verified_library_reaches_one_hundred_with_expected_source_counts():
+def test_verified_library_reaches_one_hundred_fifty_with_expected_source_counts():
     records = load_verified_material_library()
     prefixes = {
         "carreno-2020-": 2,
-        "moodley-2026-": 50,
+        "moodley-2026-": 100,
         "qiu-2023-": 12,
         "singh-2024-": 17,
         "benedetti-2022-": 3,
@@ -227,8 +233,8 @@ def test_verified_library_reaches_one_hundred_with_expected_source_counts():
         "shang-2022-": 6,
     }
 
-    assert len(records) == 100
-    assert len({record.id for record in records}) == 100
+    assert len(records) == 150
+    assert len({record.id for record in records}) == 150
     for prefix, expected in prefixes.items():
         assert sum(
             record.id.startswith(prefix)
@@ -396,3 +402,121 @@ def test_legacy_manual_pinching4_remains_raw_for_backward_compatibility():
     )
 
     assert "'Pinching4', 32, 1, 0.001" in command
+
+
+
+def test_moodley_2026_adds_fifty_exact_hysteretic_parameter_sets():
+    records = [
+        record
+        for record in load_verified_material_library()
+        if (
+            record.id.startswith("moodley-2026-")
+            and record.model == "Hysteretic"
+        )
+    ]
+
+    assert len(records) == 50
+    assert all(record.response_quantity == "stress_strain" for record in records)
+    assert all(
+        record.source_units == {
+            "response": "MPa",
+            "deformation": "% strain",
+        }
+        for record in records
+    )
+    assert all(
+        record.doi == "10.1016/j.jobe.2026.115378"
+        for record in records
+    )
+
+
+def test_moodley_hysteretic_truss_exact_backbone_and_cyclic_parameters():
+    record = _record(
+        "moodley-2026-en14301-cr-12-ld8-truss-hysteretic"
+    )
+
+    assert record.parameters_si == {
+        "s1p": 677.0e6,
+        "e1p": 0.0033,
+        "s2p": 812.0e6,
+        "e2p": 0.0158,
+        "s3p": 872.0e6,
+        "e3p": 0.2175,
+        "s1n": -677.0e6,
+        "e1n": -0.0033,
+        "s2n": -687.0e6,
+        "e2n": -0.0076,
+        "s3n": -135.0e6,
+        "e3n": -0.1455,
+        "pinchX": 0.31,
+        "pinchY": 0.53,
+        "damage1": 0.0,
+        "damage2": 0.242,
+        "beta": 0.31,
+    }
+    location = str(record.parameter_evidence.get("location", ""))
+    assert "Table B.2" in location
+    assert "Table B.3" in location
+
+
+def test_moodley_hysteretic_beam_uses_source_prescribed_mirrored_backbone():
+    record = _record(
+        "moodley-2026-b500c-16-ld15-beam-hysteretic"
+    )
+
+    assert record.parameters_si["s1p"] == 594.0e6
+    assert record.parameters_si["e1p"] == 0.0030
+    assert record.parameters_si["s2p"] == 812.0e6
+    assert record.parameters_si["e2p"] == 0.0550
+    assert record.parameters_si["s3p"] == 872.0e6
+    assert record.parameters_si["e3p"] == 0.2175
+    assert record.parameters_si["s1n"] == -594.0e6
+    assert record.parameters_si["e1n"] == -0.0030
+    assert record.parameters_si["s2n"] == -812.0e6
+    assert record.parameters_si["e2n"] == -0.0550
+    assert record.parameters_si["s3n"] == -872.0e6
+    assert record.parameters_si["e3n"] == -0.2175
+    assert record.parameters_si["pinchX"] == 0.10
+    assert record.parameters_si["pinchY"] == 0.53
+    assert record.parameters_si["damage1"] == 0.0
+    assert record.parameters_si["damage2"] == 0.053
+    assert record.parameters_si["beta"] == 0.17
+    location = str(record.parameter_evidence.get("location", ""))
+    assert "Section 4.2.2" in location
+    assert "Table B.5" in location
+
+
+def test_sourced_stress_strain_hysteretic_converts_stress_between_units():
+    material = material_from_library_record(
+        _record(
+            "moodley-2026-en14301-hr-12-ld5-truss-hysteretic"
+        ),
+        tag=40,
+    )
+
+    n_mm = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+    kn_m = material_to_openseespy(
+        material,
+        {"length": "m", "force": "kN", "time": "s"},
+    )
+
+    assert "'Hysteretic', 40, 562, 0.0028, 745, 0.0442" in n_mm
+    assert "'Hysteretic', 40, 562000, 0.0028, 745000, 0.0442" in kn_m
+
+
+def test_legacy_manual_hysteretic_remains_raw_for_backward_compatibility():
+    material = MaterialData(
+        tag=41,
+        name="Legacy raw Hysteretic",
+        material_type="Hysteretic",
+    )
+
+    command = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+
+    assert "'Hysteretic', 41, 1, 0.001, 1.2, 0.01" in command
