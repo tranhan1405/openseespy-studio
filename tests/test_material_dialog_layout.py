@@ -6,6 +6,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
+from openseespy_studio.project import MaterialData
+from openseespy_studio.ui.material_library_dialog import MaterialLibraryDialog
 from openseespy_studio.ui.material_dialog import (
     MaterialDialog,
     MaterialEnvelopePreview,
@@ -181,5 +183,86 @@ def test_eta_label_is_material_specific():
             "ElasticPPGap",
             "eta",
         )
+    finally:
+        _close(dialog)
+
+
+def test_verified_fatigue_preset_selects_existing_base_material():
+    base = MaterialData(
+        tag=10,
+        name="6082-T6 base",
+        material_type="Steel02",
+    )
+    dialog = MaterialLibraryDialog(
+        next_tag=11,
+        units={"length": "mm", "force": "N", "time": "s"},
+        materials={10: base},
+    )
+    try:
+        target = "georgantzia-2025-6082-t6-fatigue"
+        root = dialog.tree.invisibleRootItem()
+        stack = [
+            root.child(index)
+            for index in range(root.childCount())
+        ]
+        item = None
+        while stack:
+            current = stack.pop(0)
+            if current.data(0, 256) == target:
+                item = current
+                break
+            stack.extend(
+                current.child(index)
+                for index in range(current.childCount())
+            )
+
+        assert item is not None
+        dialog.tree.setCurrentItem(item)
+        _APP.processEvents()
+
+        assert not dialog.wrapper_base_host.isHidden()
+        assert dialog.wrapper_base_combo.currentData() == 10
+        assert dialog.add_button.isEnabled()
+
+        material = dialog.material_data()
+        assert material.material_type == "Fatigue"
+        assert material.base_material_tag == 10
+        assert material.parameters["E0"] == 0.168
+        assert material.parameters["m"] == -0.375
+    finally:
+        _close(dialog)
+
+
+def test_verified_fatigue_preset_disables_insert_without_base_material():
+    dialog = MaterialLibraryDialog(
+        next_tag=1,
+        units={"length": "mm", "force": "N", "time": "s"},
+        materials={},
+    )
+    try:
+        target = "zhang-2025-rebar-ld5-fatigue"
+        root = dialog.tree.invisibleRootItem()
+        stack = [
+            root.child(index)
+            for index in range(root.childCount())
+        ]
+        item = None
+        while stack:
+            current = stack.pop(0)
+            if current.data(0, 256) == target:
+                item = current
+                break
+            stack.extend(
+                current.child(index)
+                for index in range(current.childCount())
+            )
+
+        assert item is not None
+        dialog.tree.setCurrentItem(item)
+        _APP.processEvents()
+
+        assert not dialog.wrapper_base_host.isHidden()
+        assert dialog.wrapper_base_combo.count() == 0
+        assert not dialog.add_button.isEnabled()
     finally:
         _close(dialog)
