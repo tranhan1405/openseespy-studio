@@ -10151,11 +10151,13 @@ class MainWindow(QMainWindow):
         callback,
         *,
         convergence_test: str | None = None,
+        integrator: str | None = None,
     ) -> None:
         categories: dict[str, QMenu] = {}
         for choice in result_choices_for_analysis(
             analysis_type,
             convergence_test,
+            integrator=integrator,
         ):
             submenu = categories.get(choice.category)
             if submenu is None:
@@ -10256,6 +10258,9 @@ class MainWindow(QMainWindow):
                 settings,
             ),
             convergence_test=self._job_convergence_test(job),
+            integrator=str(
+                job.results.get("analysis", {}).get("integrator", "")
+            ) if isinstance(job.results.get("analysis", {}), dict) else None,
         )
 
         menu.addSeparator()
@@ -11380,6 +11385,11 @@ class MainWindow(QMainWindow):
                     if analysis_settings is not None
                     else None
                 ),
+                integrator=(
+                    analysis_settings.integrator
+                    if analysis_settings is not None
+                    else None
+                ),
             )
 
             menu.addSeparator()
@@ -11514,6 +11524,9 @@ class MainWindow(QMainWindow):
                         settings,
                     ),
                     convergence_test=self._job_convergence_test(job),
+                    integrator=str(
+                        job.results.get("analysis", {}).get("integrator", "")
+                    ) if isinstance(job.results.get("analysis", {}), dict) else None,
                 )
 
             menu.addSeparator()
@@ -13604,6 +13617,14 @@ class MainWindow(QMainWindow):
                 result,
                 cache_key=self._last_result_cache_key,
             )
+            moment_curvature = result.get("moment_curvature", {})
+            if (
+                isinstance(moment_curvature, dict)
+                and moment_curvature.get("kind") == "moment-curvature"
+            ):
+                self.results_panel.show_solution_result("MomentCurvature")
+                self.results_dock.show()
+                self.results_dock.raise_()
             analysis_type = str(result.get("analysis", {}).get("type", ""))
             if analysis_type == "Modal":
                 modes = result.get("modes", {})
