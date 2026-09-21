@@ -15960,6 +15960,114 @@
         "parameter_location_identified": true,
         "units_checked": true
       }
+    },
+    {
+      "id": "delgiudice-2022-am-microrebar-minmax",
+      "family": "Additively Manufactured Reinforcing Steel / Failure Limit",
+      "material": "AM micro-rebar strain-failure wrapper",
+      "grade": "0.6 mm AM micro-rebar · εlim=0.135",
+      "standard": "1:40-scale RC cyclic-test calibration",
+      "model": "MinMax",
+      "preset_name": "Del Giudice et al. (2022) · AM micro-rebar fracture limit",
+      "parameters_si": {
+        "min": -10000000000000000,
+        "max": 0.135
+      },
+      "verified_parameters": [
+        "min",
+        "max"
+      ],
+      "applicability": [
+        "0.6 mm additively manufactured reinforcing steel",
+        "1:40-scale RC physical models",
+        "OpenSees MinMax wrapper around the corresponding Steel02 reinforcement model",
+        "Tensile strain-at-failure limit εlim = 0.135"
+      ],
+      "limitations": [
+        "MinMax is a wrapper and requires an existing base material in the project.",
+        "The journal study identifies a tensile strain-at-failure limit; the compression-side min is left at the official OpenSees no-cutoff default -1e16.",
+        "Designed to pair with the verified Del Giudice et al. AM micro-rebar Steel02 record already in the SARE library."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Physical modelling of reinforced concrete at a 1:40 scale using additively manufactured reinforcement cages",
+        "authors": "Lorenzo Del Giudice; Rafał Wróbel; Antonios A. Katsamakas; Christian Leinenbach; Michalis F. Vassiliou",
+        "journal": "Earthquake Engineering & Structural Dynamics",
+        "volume_issue": "51(3)",
+        "pages": "537–551",
+        "year": 2022,
+        "doi": "10.1002/eqe.3578"
+      },
+      "parameter_evidence": {
+        "type": "journal_table_and_official_documentation",
+        "title": "Physical modelling of reinforced concrete at a 1:40 scale using additively manufactured reinforcement cages",
+        "author": "Lorenzo Del Giudice et al.",
+        "institution": "Earthquake Engineering & Structural Dynamics",
+        "year": 2022,
+        "location": "Table 3 — reinforcement Steel02 parameters and εlim=0.135 (tests); numerical-model section states that Steel02 is enhanced with MinMax using εlim. OpenSees MinMax documentation supplies the untouched minimum default -1e16.",
+        "url": "https://doi.org/10.1002/eqe.3578",
+        "relationship": "The published model explicitly wraps the reinforcement constitutive law with MinMax at the experimentally determined strain-at-failure εlim=0.135. SARE sets max=0.135 and retains the official OpenSees no-compression-cutoff default min=-1e16."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "zhou-2021-rc-rebar-collapse-minmax",
+      "family": "Reinforcing Steel / Failure Limit",
+      "material": "RC-frame reinforcing-steel collapse strain limits",
+      "grade": "Collapse study · compression -0.04 / tension +0.12",
+      "standard": "IDA-informed RC building collapse model",
+      "model": "MinMax",
+      "preset_name": "Zhou et al. (2021) · Rebar collapse strain limits",
+      "parameters_si": {
+        "min": -0.04,
+        "max": 0.12
+      },
+      "verified_parameters": [
+        "min",
+        "max"
+      ],
+      "applicability": [
+        "Reinforcing-steel fibres in nonlinear RC frame collapse analysis",
+        "OpenSees MinMax wrapper around Steel02 or Hysteretic reinforcement materials",
+        "Tensile failure strain +12%",
+        "Compression/buckling failure strain -4%"
+      ],
+      "limitations": [
+        "MinMax is a wrapper and requires an existing base material in the project.",
+        "The limits were selected from average peak reinforcing-steel strains observed at collapse in preliminary IDA of the study building; they are modelling limits, not universal rebar material constants.",
+        "Apply only when this collapse-modelling assumption is appropriate to the structure and reinforcing-steel model."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Challenges in Evaluating Seismic Collapse Risk for RC Buildings",
+        "authors": "Jin Zhou; Zhelun Zhang; Tessa Williams; Sashi K. Kunnath",
+        "journal": "International Journal of Concrete Structures and Materials",
+        "volume_issue": "15",
+        "article": "27",
+        "year": 2021,
+        "doi": "10.1186/s40069-021-00463-y"
+      },
+      "parameter_evidence": {
+        "type": "journal_section",
+        "title": "Challenges in Evaluating Seismic Collapse Risk for RC Buildings",
+        "author": "Jin Zhou; Zhelun Zhang; Tessa Williams; Sashi K. Kunnath",
+        "institution": "International Journal of Concrete Structures and Materials",
+        "year": 2021,
+        "location": "Reinforcing-steel constitutive modelling section associated with Fig. 4 — tensile failure strain set to 12% and compression/buckling failure strain set to 4% using the OpenSees MinMax material object.",
+        "url": "https://doi.org/10.1186/s40069-021-00463-y",
+        "relationship": "The paper explicitly states that MinMax was applied to Steel02 and Hysteretic reinforcement fibres, with zero stress returned when the assumed capping strains are exceeded. SARE stores the published tension and compression limits directly as max=0.12 and min=-0.04."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
     }
   ]
 }
