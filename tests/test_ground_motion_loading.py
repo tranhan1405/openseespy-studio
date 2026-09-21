@@ -394,3 +394,133 @@ def test_transient_validation_reports_missing_owned_excitation_pattern():
         and "missing excitation pattern 99" in issue.message
         for issue in issues
     )
+
+
+def _directional_mass_project(
+    *,
+    mass_x: float,
+    mass_y: float,
+    element_mass: float = 0.0,
+):
+    model = StructuralModel("directional-mass", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.set_fixity(1, (1, 1))
+    model.nodes[2].mass = (mass_x, mass_y)
+    if element_mass > 0.0:
+        model.add_element(
+            1,
+            1,
+            2,
+            element_type="truss",
+            truss_area=1.0,
+            truss_material_tag=1,
+            mass_per_length=element_mass,
+        )
+
+    project = ProjectDatabase(model=model)
+    project.add_time_series(
+        TimeSeriesData(
+            1,
+            "EQ",
+            "Path",
+            dt=0.01,
+            values=[0.0, 0.1],
+        )
+    )
+    project.add_load_pattern(
+        LoadPatternData(
+            1,
+            "EQ X",
+            "UniformExcitation",
+            time_series_tag=1,
+            direction=1,
+        )
+    )
+    analysis = AnalysisSettingsData(
+        1,
+        "NLTH X",
+        "Transient",
+        steps=1,
+        dt=0.01,
+        deferred_pattern_tags=[1],
+    )
+    return project, analysis
+
+
+def test_transient_requires_mass_in_active_excitation_direction():
+    project, analysis = _directional_mass_project(
+        mass_x=0.0,
+        mass_y=1.0,
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Mass"
+        and "active in X" in issue.message
+        for issue in issues
+    )
+
+
+def test_transient_accepts_nodal_mass_in_active_excitation_direction():
+    project, analysis = _directional_mass_project(
+        mass_x=1.0,
+        mass_y=0.0,
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert not any(
+        issue.severity == "ERROR"
+        and issue.category == "Mass"
+        for issue in issues
+    )
+
+
+def test_transient_accepts_positive_element_mass_for_active_direction():
+    project, analysis = _directional_mass_project(
+        mass_x=0.0,
+        mass_y=0.0,
+        element_mass=2.5,
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert not any(
+        issue.severity == "ERROR"
+        and issue.category == "Mass"
+        for issue in issues
+    )
+
+
+def test_modal_accepts_positive_element_mass_without_nodal_mass():
+    model = StructuralModel("modal-element-mass", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.set_fixity(1, (1, 1))
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="truss",
+        truss_area=1.0,
+        truss_material_tag=1,
+        mass_per_length=1.0,
+    )
+    project = ProjectDatabase(model=model)
+    analysis = AnalysisSettingsData(
+        1,
+        "Modes",
+        "Modal",
+        num_modes=1,
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert not any(
+        issue.severity == "ERROR"
+        and issue.category == "Mass"
+        for issue in issues
+    )
