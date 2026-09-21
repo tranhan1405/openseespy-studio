@@ -2874,3 +2874,35 @@ def test_generator_rejects_parallel_vecxz_for_3d_member():
             sections={1: section},
             transformations={1: transformation},
         )
+
+
+def test_generator_rejects_frame_connection_duplicate_element_tag():
+    model = StructuralModel("duplicate-shared-tag", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    model.add_node(3, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        3,
+        element_type="truss",
+        truss_area=0.01,
+        truss_material_tag=1,
+    )
+    connection = ConnectionData(
+        1,
+        "Duplicate tag spring",
+        "zeroLength",
+        1,
+        2,
+        materials_by_dof={1: 1},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"duplicate OpenSees element tag\(s\).*1",
+    ):
+        to_openseespy(
+            model,
+            connections={1: connection},
+        )
