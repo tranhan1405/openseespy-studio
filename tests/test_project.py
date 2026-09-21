@@ -1453,3 +1453,47 @@ def test_project_allows_prescribed_displacement_on_other_dof_with_mpc():
     )
 
     assert project.prescribed_displacements[70].dof == 2
+
+
+def test_project_rejects_analysis_that_activates_existing_sp_mpc_conflict():
+    model = StructuralModel("project-analysis-sp-mpc", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Analysis activates SP MPC", model=model)
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Imposed UX", "Plain", time_series_tag=1)
+    )
+    project.add_constraint(
+        ConstraintData(
+            71,
+            "Tie UX",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        )
+    )
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(
+            71,
+            "SP UX",
+            1,
+            2,
+            1,
+            0.0,
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"activates Prescribed Displacement object\(s\) on MPC dependent DOF",
+    ):
+        project.add_analysis(
+            AnalysisSettingsData(
+                67,
+                "Static",
+                "Static",
+                constraints_handler="Transformation",
+            )
+        )
