@@ -16210,6 +16210,58 @@
         "parameter_location_identified": true,
         "units_checked": true
       }
+    },
+    {
+      "id": "jafari-2023-cfrp-fibre-direction-elastic",
+      "family": "FRP Laminate",
+      "material": "Carbon-fibre-reinforced polymer sheet",
+      "grade": "CFRP · fibre direction",
+      "standard": "FRP joint-retrofit OpenSees model",
+      "model": "Elastic",
+      "preset_name": "Jafari & Mahini (2023) · CFRP fibre direction · Elastic",
+      "parameters_si": {
+        "E": 240000000000
+      },
+      "verified_parameters": [
+        "E"
+      ],
+      "applicability": [
+        "CFRP sheets used for RC beam-column joint retrofit",
+        "Uniaxial response in the fibre direction",
+        "OpenSees Elastic material",
+        "Linear-elastic FRP sheet modelling prior to failure-limit wrapping"
+      ],
+      "limitations": [
+        "This record represents only the fibre-direction elastic modulus used in the published OpenSees model.",
+        "Tensile/compressive failure limits, sheet thickness and debonding criteria are separate modelling inputs and are intentionally not embedded in this Elastic record.",
+        "Do not use the fibre-direction modulus for transverse or shear response."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Enhancement of the Fragility Capacity of RC Frames Using FRPs with Different Configurations at Joints",
+        "authors": "Saeed Jafari; Seyed Saeed Mahini",
+        "journal": "Polymers",
+        "volume_issue": "15(3)",
+        "article": "618",
+        "year": 2023,
+        "doi": "10.3390/polym15030618"
+      },
+      "parameter_evidence": {
+        "type": "journal_table_and_method",
+        "title": "Enhancement of the Fragility Capacity of RC Frames Using FRPs with Different Configurations at Joints",
+        "author": "Saeed Jafari; Seyed Saeed Mahini",
+        "institution": "Polymers",
+        "year": 2023,
+        "location": "Section 3.1.1 states that the Elastic command was used to model FRP sheets; Table 2 reports CFRP fibre-direction modulus Ex = 240,000 MPa.",
+        "url": "https://doi.org/10.3390/polym15030618",
+        "relationship": "The complete OpenSees Elastic input consists only of E. SARE stores the published fibre-direction modulus 240,000 MPa as 240 GPa in SI."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
     }
   ]
 }
