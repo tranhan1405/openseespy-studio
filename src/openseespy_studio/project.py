@@ -209,6 +209,14 @@ class MaterialData:
 
         self.poisson_ratio = float(self.poisson_ratio)
         self.density = float(self.density)
+        numeric_values = [
+            *self.parameters.values(),
+            *self.factors,
+            self.poisson_ratio,
+            self.density,
+        ]
+        if any(not math.isfinite(value) for value in numeric_values):
+            raise ValueError("Material numeric values must be finite.")
         if not (-0.99 < self.poisson_ratio < 0.5):
             raise ValueError("Poisson ratio must be between -0.99 and 0.5.")
         if self.density < 0.0:
@@ -321,6 +329,21 @@ class FiberData:
     area: float
     material_tag: int
 
+    def __post_init__(self) -> None:
+        self.y = float(self.y)
+        self.z = float(self.z)
+        self.area = float(self.area)
+        self.material_tag = int(self.material_tag)
+        if any(
+            not math.isfinite(value)
+            for value in (self.y, self.z, self.area)
+        ):
+            raise ValueError("Fiber coordinates and area must be finite.")
+        if self.area <= 0.0:
+            raise ValueError("Fiber area must be positive.")
+        if self.material_tag <= 0:
+            raise ValueError("Fiber material tag must be positive.")
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "y": float(self.y),
@@ -410,6 +433,11 @@ class FiberComponentData:
             key: float(self.parameters.get(key, default))
             for key, default in defaults.items()
         }
+        if any(
+            not math.isfinite(value)
+            for value in self.parameters.values()
+        ):
+            raise ValueError("Fiber component parameters must be finite.")
         self._validate()
 
     def _positive_int(self, key: str) -> int:
@@ -623,6 +651,11 @@ class SectionData:
             key: float(self.parameters.get(key, defaults[key]))
             for key in SECTION_PARAMETER_ORDER[self.section_type]
         }
+        if any(
+            not math.isfinite(value)
+            for value in self.parameters.values()
+        ):
+            raise ValueError("Section parameters must be finite.")
         self.fibers = [
             fiber if isinstance(fiber, FiberData) else FiberData.from_dict(fiber)
             for fiber in self.fibers
@@ -650,9 +683,14 @@ class SectionData:
         if isinstance(raw_dimensions, dict):
             for key, value in raw_dimensions.items():
                 try:
-                    dimensions[str(key)] = float(value)
+                    numeric = float(value)
                 except (TypeError, ValueError):
                     continue
+                if not math.isfinite(numeric):
+                    raise ValueError(
+                        "Section display-geometry dimensions must be finite."
+                    )
+                dimensions[str(key)] = numeric
         self.display_geometry = (
             {"shape": shape, "dimensions": dimensions}
             if shape and dimensions
@@ -1063,6 +1101,12 @@ class TimeSeriesData:
         self.values = [float(value) for value in self.values]
         if self.tag <= 0:
             raise ValueError("Time series tag must be positive.")
+        if (
+            not math.isfinite(self.factor)
+            or not math.isfinite(self.dt)
+            or any(not math.isfinite(value) for value in self.values)
+        ):
+            raise ValueError("Time series numeric values must be finite.")
         if self.series_type not in {"Constant", "Linear", "Path"}:
             raise ValueError(f"Unsupported time series type: {self.series_type}")
         if self.series_type == "Path":
