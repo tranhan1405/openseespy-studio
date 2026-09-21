@@ -636,3 +636,34 @@ def test_newmark_accepts_positive_beta(beta):
         beta=beta,
     )
     assert analysis.beta == pytest.approx(beta)
+
+
+@pytest.mark.parametrize("gamma", [-1.0, 0.0, 0.49, 0.499999])
+def test_newmark_rejects_gamma_below_half(gamma):
+    with pytest.raises(
+        ValueError,
+        match="Newmark gamma must be at least 0.5",
+    ):
+        AnalysisSettingsData(
+            61,
+            "Invalid Newmark gamma",
+            "Transient",
+            integrator="Newmark",
+            dt=0.01,
+            gamma=gamma,
+            beta=0.25,
+        )
+
+
+@pytest.mark.parametrize("gamma", [0.5, 0.55, 0.6, 1.0])
+def test_newmark_accepts_gamma_at_or_above_half(gamma):
+    analysis = AnalysisSettingsData(
+        62,
+        "Valid Newmark gamma",
+        "Transient",
+        integrator="Newmark",
+        dt=0.01,
+        gamma=gamma,
+        beta=0.25,
+    )
+    assert analysis.gamma == pytest.approx(gamma)

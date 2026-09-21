@@ -1583,6 +1583,15 @@ class AnalysisSettingsData:
             )
         if (
             self.analysis_type == "Transient"
+            and self.integrator == "Newmark"
+            and self.gamma < 0.5
+        ):
+            raise ValueError(
+                "Newmark gamma must be at least 0.5; gamma below 0.5 is outside "
+                "the standard stable range documented by OpenSees."
+            )
+        if (
+            self.analysis_type == "Transient"
             and self.integrator == "HHT"
             and not (2.0 / 3.0 <= self.hht_alpha <= 1.0)
         ):

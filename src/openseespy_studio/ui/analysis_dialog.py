@@ -130,7 +130,15 @@ class AnalysisDialog(QDialog):
             "Maximum absolute displacement increment used to subdivide each branch."
         )
         self.dt=fs(analysis.dt if analysis else 0.01,1e-12,1e20)
-        self.gamma=fs(analysis.gamma if analysis else 0.5)
+        self.gamma=fs(
+            analysis.gamma if analysis else 0.5,
+            0.5,
+            1e20,
+        )
+        self.gamma.setToolTip(
+            "OpenSees Newmark uses gamma=0.5 for no numerical damping; "
+            "gamma>0.5 adds numerical damping. Values below 0.5 are not allowed."
+        )
         self.beta=fs(
             analysis.beta if analysis else 0.25,
             1e-12,
