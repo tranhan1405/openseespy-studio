@@ -1007,7 +1007,6 @@ class ConstraintData:
         )
 
 
-@dataclass
 SUPPORTED_CONNECTION_TYPES: tuple[str, ...] = (
     "zeroLength",
     "zeroLengthSection",
@@ -1015,6 +1014,7 @@ SUPPORTED_CONNECTION_TYPES: tuple[str, ...] = (
 )
 
 
+@dataclass
 class ConnectionData:
     tag: int
     name: str
