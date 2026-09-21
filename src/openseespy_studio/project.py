@@ -1488,9 +1488,9 @@ class AnalysisSettingsData:
         self.rayleigh_mode_j=int(self.rayleigh_mode_j)
         self.preload_gravity=bool(self.preload_gravity)
         self.gravity_steps=int(self.gravity_steps)
-        self.deferred_pattern_tags=sorted({
+        self.deferred_pattern_tags=list(dict.fromkeys(
             int(tag) for tag in self.deferred_pattern_tags
-        })
+        ))
         self.num_modes=int(self.num_modes)
         self.eigen_solver=str(self.eigen_solver)
         self.recovery=bool(self.recovery)
@@ -3588,15 +3588,6 @@ class ProjectDatabase:
                 "Recorder references missing element tag(s): "
                 + ", ".join(map(str, missing))
             )
-        if (
-            recorder.recorder_type == "Fiber"
-            and recorder.material_tag is not None
-            and recorder.material_tag not in self.materials
-        ):
-            raise ValueError(
-                "Fiber recorder references missing material tag "
-                f"{recorder.material_tag}."
-            )
         if recorder.recorder_type in {"Section", "Fiber"}:
             incompatible = [
                 tag
@@ -3990,7 +3981,6 @@ class ProjectDatabase:
         if analysis.tag in self.analyses:
             raise ValueError(f"Analysis tag {analysis.tag} already exists.")
         self._validate_analysis_constraint_handler_compatibility(analysis)
-        self._validate_analysis_pattern_references(analysis)
         self._validate_analysis_duplicate_prescribed_dofs(analysis)
         self._validate_analysis_prescribed_mpc_conflict(analysis)
         self._validate_analysis_plain_prescribed_displacement_compatibility(
@@ -4026,7 +4016,6 @@ class ProjectDatabase:
         if original_tag not in self.analyses: raise ValueError(f"Analysis tag {original_tag} does not exist.")
         if analysis.tag!=original_tag and analysis.tag in self.analyses: raise ValueError(f"Analysis tag {analysis.tag} already exists.")
         self._validate_analysis_constraint_handler_compatibility(analysis)
-        self._validate_analysis_pattern_references(analysis)
         self._validate_analysis_duplicate_prescribed_dofs(
             analysis,
             ignore_analysis_tags={original_tag},
