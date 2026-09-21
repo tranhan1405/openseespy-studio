@@ -3334,3 +3334,106 @@ def test_nodal_load_rejects_nonzero_unavailable_dof():
                 (1.0, 0.0, 0.0, 5.0, 0.0, 0.0),
             )
         )
+
+
+def test_transformation_rejects_nonfinite_orientation_vector():
+    with pytest.raises(
+        ValueError,
+        match=r"orientation vector values must be finite",
+    ):
+        TransformationData(
+            1,
+            "Bad transform",
+            "Linear",
+            vecxz=(0.0, float("nan"), 1.0),
+        )
+
+
+def test_load_pattern_rejects_nonfinite_factor_or_initial_velocity():
+    with pytest.raises(
+        ValueError,
+        match=r"factor and initial velocity must be finite",
+    ):
+        LoadPatternData(
+            1,
+            "Bad factor",
+            "UniformExcitation",
+            time_series_tag=1,
+            factor=float("inf"),
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"factor and initial velocity must be finite",
+    ):
+        LoadPatternData(
+            2,
+            "Bad vel0",
+            "UniformExcitation",
+            time_series_tag=1,
+            vel0=float("nan"),
+        )
+
+
+def test_nodal_load_rejects_nonfinite_values():
+    with pytest.raises(ValueError, match=r"Nodal load values must be finite"):
+        NodalLoadData(
+            1,
+            "Bad load",
+            1,
+            1,
+            (1.0, 0.0, float("nan"), 0.0, 0.0, 0.0),
+        )
+
+
+def test_element_load_rejects_nonfinite_numeric_values():
+    with pytest.raises(
+        ValueError,
+        match=r"Element load numeric values must be finite",
+    ):
+        ElementLoadData(
+            1,
+            "Bad beam load",
+            1,
+            1,
+            load_type="Point",
+            py=1.0,
+            x_over_l=float("nan"),
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Element load numeric values must be finite",
+    ):
+        ElementLoadData(
+            2,
+            "Bad gravity",
+            1,
+            1,
+            load_type="SelfWeight",
+            gravity=(0.0, 0.0, float("inf")),
+        )
+
+
+def test_analysis_rejects_nonfinite_numeric_settings():
+    with pytest.raises(
+        ValueError,
+        match=r"Analysis numeric settings must be finite",
+    ):
+        AnalysisSettingsData(
+            1,
+            "Bad transient",
+            "Transient",
+            dt=float("nan"),
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Analysis numeric settings must be finite",
+    ):
+        AnalysisSettingsData(
+            2,
+            "Bad cyclic",
+            "Cyclic",
+            cyclic_targets=[0.01, float("inf")],
+        )
