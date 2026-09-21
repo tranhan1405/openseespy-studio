@@ -201,3 +201,36 @@ def test_model_rejects_nonbinary_fixity_values():
     data["nodes"][0]["fixity"] = [1, -1, 0]
     with pytest.raises(ValueError, match=r"fixity values must be 0 or 1"):
         StructuralModel.from_dict(data)
+
+
+def test_node_edit_apis_reject_nonfinite_coordinate_and_mass():
+    model = StructuralModel(ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+
+    with pytest.raises(ValueError, match=r"coordinates must be finite"):
+        model.set_coordinates(1, float("nan"), 0.0, 0.0)
+
+    with pytest.raises(ValueError, match=r"mass values must be finite"):
+        model.set_mass(1, (1.0, float("inf"), 0.0))
+
+
+def test_element_rejects_nonfinite_numeric_values():
+    model = StructuralModel()
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+
+    with pytest.raises(ValueError, match=r"Element numeric values must be finite"):
+        model.add_element(
+            1,
+            1,
+            2,
+            mass_per_length=float("inf"),
+        )
+
+    with pytest.raises(ValueError, match=r"Element numeric values must be finite"):
+        model.add_element(
+            2,
+            1,
+            2,
+            force_tolerance=float("nan"),
+        )
