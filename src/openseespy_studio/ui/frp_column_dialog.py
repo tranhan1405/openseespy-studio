@@ -336,20 +336,20 @@ class FRPColumnWizardDialog(QDialog):
         defaults = MATERIAL_DEFAULTS["Concrete02"]
         self.concrete_inputs = QGroupBox("New Concrete02 parameters")
         cform = QFormLayout(self.concrete_inputs)
-        self.fc = _spin(defaults["fpc"] / PA_PER_MPA)
+        self.fc = _spin(self.unit_system.engineering_stress_from_pa(defaults["fpc"]))
         self.epsc0 = _spin(defaults["epsc0"], decimals=10)
-        self.fcu = _spin(defaults["fpcu"] / PA_PER_MPA)
+        self.fcu = _spin(self.unit_system.engineering_stress_from_pa(defaults["fpcu"]))
         self.epsu = _spin(defaults["epsU"], decimals=10)
         self.lambda_c = _spin(defaults["lambda"], decimals=8)
-        self.ft = _spin(defaults["ft"] / PA_PER_MPA)
-        self.ets = _spin(defaults["Ets"] / PA_PER_MPA)
-        cform.addRow("fpc [MPa]:", self.fc)
+        self.ft = _spin(self.unit_system.engineering_stress_from_pa(defaults["ft"]))
+        self.ets = _spin(self.unit_system.engineering_stress_from_pa(defaults["Ets"]))
+        cform.addRow(f"fpc [{self.unit_system.engineering_stress_label}]:", self.fc)
         cform.addRow("epsc0:", self.epsc0)
-        cform.addRow("fpcu [MPa]:", self.fcu)
+        cform.addRow(f"fpcu [{self.unit_system.engineering_stress_label}]:", self.fcu)
         cform.addRow("epsU:", self.epsu)
         cform.addRow("lambda:", self.lambda_c)
-        cform.addRow("ft [MPa]:", self.ft)
-        cform.addRow("Ets [MPa]:", self.ets)
+        cform.addRow(f"ft [{self.unit_system.engineering_stress_label}]:", self.ft)
+        cform.addRow(f"Ets [{self.unit_system.engineering_stress_label}]:", self.ets)
         concrete_layout.addWidget(self.concrete_inputs)
         root.addWidget(concrete_group)
 
@@ -371,16 +371,16 @@ class FRPColumnWizardDialog(QDialog):
         steel = MATERIAL_DEFAULTS["ReinforcingSteel"]
         self.rebar_inputs = QGroupBox("New ReinforcingSteel parameters")
         sform = QFormLayout(self.rebar_inputs)
-        self.fy = _spin(steel["fy"] / PA_PER_MPA)
-        self.fu = _spin(steel["fu"] / PA_PER_MPA)
-        self.es = _spin(steel["Es"] / PA_PER_MPA)
-        self.esh = _spin(steel["Esh"] / PA_PER_MPA)
+        self.fy = _spin(self.unit_system.engineering_stress_from_pa(steel["fy"]))
+        self.fu = _spin(self.unit_system.engineering_stress_from_pa(steel["fu"]))
+        self.es = _spin(self.unit_system.engineering_stress_from_pa(steel["Es"]))
+        self.esh = _spin(self.unit_system.engineering_stress_from_pa(steel["Esh"]))
         self.eps_sh = _spin(steel["eps_sh"], decimals=10)
         self.eps_ult = _spin(steel["eps_ult"], decimals=10)
-        sform.addRow("fy [MPa]:", self.fy)
-        sform.addRow("fu [MPa]:", self.fu)
-        sform.addRow("Es [MPa]:", self.es)
-        sform.addRow("Esh [MPa]:", self.esh)
+        sform.addRow(f"fy [{self.unit_system.engineering_stress_label}]:", self.fy)
+        sform.addRow(f"fu [{self.unit_system.engineering_stress_label}]:", self.fu)
+        sform.addRow(f"Es [{self.unit_system.engineering_stress_label}]:", self.es)
+        sform.addRow(f"Esh [{self.unit_system.engineering_stress_label}]:", self.esh)
         sform.addRow("eps_sh:", self.eps_sh)
         sform.addRow("eps_ult:", self.eps_ult)
         rebar_layout.addWidget(self.rebar_inputs)
@@ -404,7 +404,10 @@ class FRPColumnWizardDialog(QDialog):
             minimum=1.0e-9,
             decimals=8,
         )
-        self.efrp = _spin(72_000.0, minimum=1.0)
+        self.efrp = _spin(
+            self.unit_system.engineering_stress_from_pa(72_000.0 * PA_PER_MPA),
+            minimum=1.0,
+        )
         self.erup = _spin(0.015, minimum=1.0e-8, decimals=10)
 
         self.scope = QComboBox()
@@ -423,7 +426,7 @@ class FRPColumnWizardDialog(QDialog):
             f"Layer thickness [{self.unit_system.length}]:",
             self.layer_t,
         )
-        form.addRow("Efrp [MPa]:", self.efrp)
+        form.addRow(f"Efrp [{self.unit_system.engineering_stress_label}]:", self.efrp)
         form.addRow("FRP rupture strain:", self.erup)
         form.addRow("Confinement assignment:", self.scope)
         root.addLayout(form)
@@ -436,18 +439,24 @@ class FRPColumnWizardDialog(QDialog):
             "Rectangular section · user-supplied confined ultimate point"
         )
         ultimate = QFormLayout(self.ultimate_group)
-        self.ultimate_fcu = _spin(-45.0)
+        self.ultimate_fcu = _spin(
+            self.unit_system.engineering_stress_from_pa(-45.0 * PA_PER_MPA)
+        )
         self.ultimate_ecu = _spin(-0.015, decimals=10)
-        ultimate.addRow("fcu [MPa]:", self.ultimate_fcu)
+        ultimate.addRow(f"fcu [{self.unit_system.engineering_stress_label}]:", self.ultimate_fcu)
         ultimate.addRow("ecu:", self.ultimate_ecu)
         root.addWidget(self.ultimate_group)
 
         tension_group = QGroupBox("FRP-confined concrete tension branch")
         tension = QFormLayout(tension_group)
-        self.frp_ft = _spin(3.0)
-        self.frp_ets = _spin(1500.0)
-        tension.addRow("ft [MPa]:", self.frp_ft)
-        tension.addRow("Ets [MPa]:", self.frp_ets)
+        self.frp_ft = _spin(
+            self.unit_system.engineering_stress_from_pa(3.0 * PA_PER_MPA)
+        )
+        self.frp_ets = _spin(
+            self.unit_system.engineering_stress_from_pa(1500.0 * PA_PER_MPA)
+        )
+        tension.addRow(f"ft [{self.unit_system.engineering_stress_label}]:", self.frp_ft)
+        tension.addRow(f"Ets [{self.unit_system.engineering_stress_label}]:", self.frp_ets)
         root.addWidget(tension_group)
 
         warning = QLabel(
@@ -558,23 +567,23 @@ class FRPColumnWizardDialog(QDialog):
             ),
             create_concrete02=concrete_source == "__new__",
             concrete02_parameters={
-                "fpc": self.fc.value() * PA_PER_MPA,
+                "fpc": self.unit_system.engineering_stress_to_pa(self.fc.value()),
                 "epsc0": self.epsc0.value(),
-                "fpcu": self.fcu.value() * PA_PER_MPA,
+                "fpcu": self.unit_system.engineering_stress_to_pa(self.fcu.value()),
                 "epsU": self.epsu.value(),
                 "lambda": self.lambda_c.value(),
-                "ft": self.ft.value() * PA_PER_MPA,
-                "Ets": self.ets.value() * PA_PER_MPA,
+                "ft": self.unit_system.engineering_stress_to_pa(self.ft.value()),
+                "Ets": self.unit_system.engineering_stress_to_pa(self.ets.value()),
             },
             rebar_material_tag=(
                 None if rebar_source == "__new__" else int(rebar_source)
             ),
             create_reinforcing_steel=rebar_source == "__new__",
             reinforcing_steel_parameters={
-                "fy": self.fy.value() * PA_PER_MPA,
-                "fu": self.fu.value() * PA_PER_MPA,
-                "Es": self.es.value() * PA_PER_MPA,
-                "Esh": self.esh.value() * PA_PER_MPA,
+                "fy": self.unit_system.engineering_stress_to_pa(self.fy.value()),
+                "fu": self.unit_system.engineering_stress_to_pa(self.fu.value()),
+                "Es": self.unit_system.engineering_stress_to_pa(self.es.value()),
+                "Esh": self.unit_system.engineering_stress_to_pa(self.esh.value()),
                 "eps_sh": self.eps_sh.value(),
                 "eps_ult": self.eps_ult.value(),
             },
@@ -592,13 +601,13 @@ class FRPColumnWizardDialog(QDialog):
             frp_layer_thickness_m=self.unit_system.length_to_m_value(
                 self.layer_t.value()
             ),
-            frp_modulus_pa=self.efrp.value() * PA_PER_MPA,
+            frp_modulus_pa=self.unit_system.engineering_stress_to_pa(self.efrp.value()),
             frp_rupture_strain=self.erup.value(),
             confinement_scope=str(self.scope.currentData()),
-            ultimate_fcu_pa=self.ultimate_fcu.value() * PA_PER_MPA,
+            ultimate_fcu_pa=self.unit_system.engineering_stress_to_pa(self.ultimate_fcu.value()),
             ultimate_ecu=self.ultimate_ecu.value(),
-            tensile_strength_pa=self.frp_ft.value() * PA_PER_MPA,
-            tension_softening_pa=self.frp_ets.value() * PA_PER_MPA,
+            tensile_strength_pa=self.unit_system.engineering_stress_to_pa(self.frp_ft.value()),
+            tension_softening_pa=self.unit_system.engineering_stress_to_pa(self.frp_ets.value()),
         )
 
     def build_result(self) -> FRPColumnBuildResult:
@@ -629,7 +638,8 @@ class FRPColumnWizardDialog(QDialog):
                 f"rebar: {rebar}\n"
                 f"FRP: {spec.frp_family}, {spec.frp_layers} layer(s), "
                 f"total t = {total_t:.6g} {self.unit_system.length}, "
-                f"Efrp = {self.efrp.value():.6g} MPa, "
+                f"Efrp = {self.efrp.value():.6g} "
+                f"{self.unit_system.engineering_stress_label}, "
                 f"eps_fu = {spec.frp_rupture_strain:.6g}\n"
                 f"Constitutive mode: {mode} · assignment: "
                 f"{self.scope.currentText()}"
