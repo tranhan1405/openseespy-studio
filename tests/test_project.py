@@ -3437,3 +3437,69 @@ def test_analysis_rejects_nonfinite_numeric_settings():
             "Cyclic",
             cyclic_targets=[0.01, float("inf")],
         )
+
+
+def test_project_validate_node_state_rejects_zero_length_incident_member():
+    model = StructuralModel("member-node-edit", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_element(1, 1, 2)
+    project = ProjectDatabase(name="Member node edit", model=model)
+
+    project.model.set_coordinates(2, 0.0, 0.0)
+
+    with pytest.raises(ValueError, match=r"coincident end nodes and zero length"):
+        project.validate_node_state(2)
+
+
+def test_project_validate_node_state_rejects_parallel_member_transformation():
+    model = StructuralModel("member-axis-edit", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="elasticBeamColumn",
+        transf_tag=1,
+    )
+    project = ProjectDatabase(name="Member axis edit", model=model)
+    project.add_transformation(
+        TransformationData(
+            1,
+            "Linear",
+            "Linear",
+            (0.0, 0.0, 1.0),
+        )
+    )
+
+    project.model.set_coordinates(2, 0.0, 0.0, 1.0)
+
+    with pytest.raises(ValueError, match=r"vecxz is parallel to element 1"):
+        project.validate_node_state(2)
+
+
+def test_project_sync_generated_ground_node_clears_accidental_mass():
+    model = StructuralModel("ground-mass-sync", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    model.set_mass(2, (2.0, 3.0, 4.0))
+    project = ProjectDatabase(name="Ground mass sync", model=model)
+    project.add_material(
+        MaterialData(1, "Spring", "Elastic", {"E": 1000.0})
+    )
+    project.add_connection(
+        ConnectionData(
+            10,
+            "Ground spring",
+            "zeroLength",
+            1,
+            2,
+            materials_by_dof={1: 1},
+            generated_ground_node=2,
+        )
+    )
+
+    project.sync_generated_ground_nodes()
+
+    assert project.model.nodes[2].mass == (0.0, 0.0, 0.0)
