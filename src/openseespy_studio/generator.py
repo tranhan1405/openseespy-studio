@@ -2492,6 +2492,9 @@ def to_openseespy(
         )
 
     material_reference_errors: list[str] = []
+    material_catalog = (
+        None if materials is None else set(materials)
+    )
 
     for material in (materials or {}).values():
         dependency_tags: list[int] = []
@@ -2499,7 +2502,8 @@ def to_openseespy(
             dependency_tags.append(int(material.base_material_tag))
         dependency_tags.extend(int(tag) for tag in material.material_tags)
         missing = sorted({
-            tag for tag in dependency_tags if tag not in (materials or {})
+            tag for tag in dependency_tags
+            if material_catalog is not None and tag not in material_catalog
         })
         if missing:
             material_reference_errors.append(
@@ -2516,7 +2520,7 @@ def to_openseespy(
         )
         missing = sorted(
             tag for tag in referenced_materials
-            if tag not in (materials or {})
+            if material_catalog is not None and tag not in material_catalog
         )
         if missing:
             material_reference_errors.append(
@@ -2527,7 +2531,8 @@ def to_openseespy(
     for element in model.elements.values():
         if (
             element.truss_material_tag is not None
-            and int(element.truss_material_tag) not in (materials or {})
+            and material_catalog is not None
+            and int(element.truss_material_tag) not in material_catalog
         ):
             material_reference_errors.append(
                 f"truss element {element.tag} -> missing material "
@@ -2538,7 +2543,8 @@ def to_openseespy(
         missing = sorted({
             int(tag)
             for tag in connection.materials_by_dof.values()
-            if int(tag) not in (materials or {})
+            if material_catalog is not None
+            and int(tag) not in material_catalog
         })
         if missing:
             material_reference_errors.append(
@@ -2550,7 +2556,8 @@ def to_openseespy(
         if (
             recorder.recorder_type == "Fiber"
             and recorder.material_tag is not None
-            and int(recorder.material_tag) not in (materials or {})
+            and material_catalog is not None
+            and int(recorder.material_tag) not in material_catalog
         ):
             material_reference_errors.append(
                 f"fiber recorder {recorder.tag} -> missing material "
@@ -2565,6 +2572,9 @@ def to_openseespy(
         )
 
     transformation_reference_errors: list[str] = []
+    transformation_catalog = (
+        None if transformations is None else set(transformations)
+    )
     frame_element_types = {
         "elasticBeamColumn",
         "forceBeamColumn",
@@ -2573,11 +2583,13 @@ def to_openseespy(
     for element in model.elements.values():
         if element.element_type not in frame_element_types:
             continue
+        if transformation_catalog is None:
+            continue
         if element.transf_tag is None:
             transformation_reference_errors.append(
                 f"element {element.tag} -> no geometric transformation assigned"
             )
-        elif int(element.transf_tag) not in (transformations or {}):
+        elif int(element.transf_tag) not in transformation_catalog:
             transformation_reference_errors.append(
                 f"element {element.tag} -> missing transformation "
                 f"{element.transf_tag}"
@@ -2591,6 +2603,7 @@ def to_openseespy(
         )
 
     section_reference_errors: list[str] = []
+    section_catalog = None if sections is None else set(sections)
     for element in model.elements.values():
         referenced_sections = {
             int(tag)
@@ -2604,7 +2617,7 @@ def to_openseespy(
         }
         missing = sorted(
             tag for tag in referenced_sections
-            if tag not in (sections or {})
+            if section_catalog is not None and tag not in section_catalog
         )
         if missing:
             section_reference_errors.append(
@@ -2616,8 +2629,11 @@ def to_openseespy(
         if (
             connection.connection_type == "zeroLengthSection"
             and (
-                connection.section_tag is None
-                or int(connection.section_tag) not in (sections or {})
+                section_catalog is not None
+                and (
+                    connection.section_tag is None
+                    or int(connection.section_tag) not in section_catalog
+                )
             )
         ):
             section_reference_errors.append(
