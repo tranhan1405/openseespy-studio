@@ -405,3 +405,58 @@ def test_appended_test_column_skips_existing_connection_element_tag():
     assert 1 in project.connections
     assert 1 not in project.model.elements
     assert 2 in project.model.elements
+
+
+
+def test_test_column_section_interface_creates_zero_length_section():
+    project = project_with_section()
+    project.add_section(
+        SectionData(
+            tag=2,
+            name="Base interface section",
+            section_type="Elastic",
+        )
+    )
+
+    result = build_test_column(
+        project,
+        TestColumnSpec(
+            height=3.0,
+            axis=3,
+            lateral_direction=1,
+            planar=True,
+            section_tag=1,
+            base_interface_type="Section interface",
+            base_interface_section_tag=2,
+            base_interface_rayleigh=False,
+        ),
+    )
+
+    connection = project.connections[result.base_connection_tag]
+    assert connection.connection_type == "zeroLengthSection"
+    assert connection.section_tag == 2
+    assert connection.generated_section_tag is None
+    assert connection.generated_ground_node == result.base_ground_node
+    assert connection.do_rayleigh is False
+    assert result.base_section_tag == 2
+
+    assert result.base_constraint_tag is not None
+    constraint = project.constraints[result.base_constraint_tag]
+    assert constraint.constraint_type == "equalDOF"
+    assert constraint.retained_node == result.base_ground_node
+    assert constraint.constrained_nodes == [result.base_node]
+    assert constraint.dofs == [1]
+
+
+def test_test_column_section_interface_requires_existing_section():
+    project = project_with_section()
+
+    with pytest.raises(ValueError, match="does not exist"):
+        build_test_column(
+            project,
+            TestColumnSpec(
+                section_tag=1,
+                base_interface_type="Section interface",
+                base_interface_section_tag=999,
+            ),
+        )
