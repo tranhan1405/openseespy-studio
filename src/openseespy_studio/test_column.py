@@ -513,6 +513,8 @@ def build_test_column(
     model: StructuralModel = project.model
     node_tag = model.next_node_tag()
     element_tag = model.next_element_tag()
+    while element_tag in project.connections:
+        element_tag += 1
 
     transformation_tag, created_transformation = _resolve_transformation(
         project,
@@ -534,7 +536,10 @@ def build_test_column(
     element_tags: list[int] = []
     next_element = element_tag
     for index in range(count):
-        while next_element in model.elements:
+        while (
+            next_element in model.elements
+            or next_element in project.connections
+        ):
             next_element += 1
         model.add_element(
             next_element,
