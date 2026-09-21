@@ -927,7 +927,7 @@ class _Importer:
                     ),
                 )
             )
-            self.count("Connections")
+            self.count("Elements")
             return
 
         if kind == "zeroLengthSection":
@@ -963,7 +963,7 @@ class _Importer:
                     ),
                 )
             )
-            self.count("Connections")
+            self.count("Elements")
             return
 
         self.issue(
