@@ -120,6 +120,7 @@ from .history import ProjectSnapshotCommand
 from .import_report_dialog import ImportReportDialog
 from .load_dialogs import ElementLoadDialog, GroundMotionDialog, LoadPatternDialog, MassDialog, NodalLoadDialog, PrescribedDisplacementDialog, TimeSeriesDialog
 from .material_dialog import MaterialDialog
+from .material_library_dialog import MaterialLibraryDialog
 from .mass_source_dialog import MassSourceDialog
 from .model_check_dialog import ModelCheckDialog
 from .recorder_dialog import RecorderDialog
@@ -2106,6 +2107,13 @@ class MainWindow(QMainWindow):
             "Create OpenSees uniaxial material",
         )
         self._make_action(
+            "material_library",
+            "Material Library...",
+            "material",
+            self._show_material_library,
+            "Browse verified reference-backed material parameter sets",
+        )
+        self._make_action(
             "new_section",
             "New Section...",
             "section",
@@ -2399,6 +2407,7 @@ class MainWindow(QMainWindow):
         ])
 
         model_menu = menus["Model"]
+        model_menu.addAction(self.actions["material_library"])
         model_menu.addAction(self.actions["new_material"])
         model_menu.addAction(self.actions["new_section"])
         model_menu.addAction(self.actions["new_transformation"])
@@ -2794,7 +2803,7 @@ class MainWindow(QMainWindow):
             model_page,
             "Definition",
             large=("new_section",),
-            small=("new_material", "new_transformation"),
+            small=("material_library", "new_material", "new_transformation"),
         )
         add_group(
             model_page,
@@ -5144,6 +5153,21 @@ class MainWindow(QMainWindow):
                     parameters = dict(data["parameters"])
                     parameters[parameter] = raw_value
                     data["parameters"] = parameters
+                    source = dict(data.get("source", {}))
+                    if (
+                        source
+                        and parameter
+                        in {
+                            str(key)
+                            for key in source.get(
+                                "verified_parameters",
+                                [],
+                            )
+                        }
+                    ):
+                        source["status"] = "modified_from_verified"
+                        source["modified"] = True
+                        data["source"] = source
                 else:
                     return
                 updated = MaterialData.from_dict(data)
@@ -8159,6 +8183,42 @@ class MainWindow(QMainWindow):
             return self._save_project()
         return True
 
+    def _show_material_library(self) -> None:
+        try:
+            dialog = MaterialLibraryDialog(
+                next_tag=self.project.next_material_tag(),
+                units=self.project.units,
+                parent=self,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Material Library",
+                f"Could not load the verified material library:\n\n{exc}",
+            )
+            return
+
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            material = dialog.material_data()
+            self.project.add_material(material)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Material Library", str(exc))
+            return
+
+        self._refresh_project_metadata(
+            f"Added verified {material.material_type} material "
+            f"{material.tag} from library"
+        )
+        self._show_material_properties(material.tag)
+        self._record_project_change(
+            f"Add verified material {material.tag}",
+            before,
+        )
+
     def _create_material(self) -> None:
         dialog = MaterialDialog(
             next_tag=self.project.next_material_tag(),
@@ -8263,6 +8323,7 @@ class MainWindow(QMainWindow):
             base_material_tag=source.base_material_tag,
             material_tags=list(source.material_tags),
             factors=list(source.factors),
+            source=dict(source.source),
         )
         self.project.add_material(duplicate)
         self._refresh_project_metadata(
@@ -8439,6 +8500,18 @@ class MainWindow(QMainWindow):
                     "kind": "float",
                 },
             ))
+
+        if material.source:
+            source = material.source
+            reference = dict(source.get("primary_reference", {}))
+            evidence = dict(source.get("parameter_evidence", {}))
+            rows.extend([
+                ("Source status", source.get("status", "unknown")),
+                ("Library record", source.get("record_id", "")),
+                ("Reference", reference.get("title", "")),
+                ("DOI", reference.get("doi", "")),
+                ("Parameter evidence", evidence.get("location", "")),
+            ])
 
         self.properties_panel.set_properties(
             "Material",
@@ -12125,6 +12198,8 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "materials_root":
+            library_action = menu.addAction("Material Library...")
+            library_action.triggered.connect(self._show_material_library)
             create_action = menu.addAction("New Material...")
             create_action.triggered.connect(self._create_material)
             menu.exec(self.tree.viewport().mapToGlobal(position))
