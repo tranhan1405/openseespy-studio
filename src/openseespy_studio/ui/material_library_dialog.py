@@ -83,7 +83,9 @@ class MaterialLibraryDialog(QDialog):
         root.addWidget(splitter, 1)
 
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabel("Material / grade / constitutive model")
+        self.tree.setHeaderLabel(
+            "Material family / grade / OpenSees model / parameter set"
+        )
         self.tree.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection
         )
@@ -197,6 +199,7 @@ class MaterialLibraryDialog(QDialog):
         self.tree.clear()
         families: dict[str, QTreeWidgetItem] = {}
         grades: dict[tuple[str, str], QTreeWidgetItem] = {}
+        models: dict[tuple[str, str, str], QTreeWidgetItem] = {}
         for record in self._records:
             family_item = families.get(record.family)
             if family_item is None:
@@ -215,13 +218,21 @@ class MaterialLibraryDialog(QDialog):
                 family_item.addChild(grade_item)
                 grades[grade_key] = grade_item
 
+            model_key = (record.family, record.grade, record.model)
+            model_item = models.get(model_key)
+            if model_item is None:
+                model_item = QTreeWidgetItem([record.model])
+                model_item.setExpanded(True)
+                grade_item.addChild(model_item)
+                models[model_key] = model_item
+
             item = QTreeWidgetItem([record.preset_name])
             item.setData(0, Qt.ItemDataRole.UserRole, record.id)
             item.setToolTip(
                 0,
                 f"{record.model} · verified source · DOI {record.doi}",
             )
-            grade_item.addChild(item)
+            model_item.addChild(item)
 
     def _select_first_record(self) -> None:
         if not self._records:
@@ -251,26 +262,41 @@ class MaterialLibraryDialog(QDialog):
             for grade_index in range(family.childCount()):
                 grade = family.child(grade_index)
                 grade_visible = False
-                for record_index in range(grade.childCount()):
-                    item = grade.child(record_index)
-                    record = self._record_by_id.get(
-                        str(item.data(0, Qt.ItemDataRole.UserRole))
-                    )
-                    haystack = ""
-                    if record is not None:
-                        haystack = " ".join([
-                            record.family,
-                            record.material,
-                            record.grade,
-                            record.standard,
-                            record.model,
-                            record.preset_name,
-                            str(record.primary_reference.get("authors", "")),
-                            record.doi,
-                        ]).lower()
-                    visible = not query or query in haystack
-                    item.setHidden(not visible)
-                    grade_visible = grade_visible or visible
+                for model_index in range(grade.childCount()):
+                    model = grade.child(model_index)
+                    model_visible = False
+                    for record_index in range(model.childCount()):
+                        item = model.child(record_index)
+                        record = self._record_by_id.get(
+                            str(
+                                item.data(
+                                    0,
+                                    Qt.ItemDataRole.UserRole,
+                                )
+                            )
+                        )
+                        haystack = ""
+                        if record is not None:
+                            haystack = " ".join([
+                                record.family,
+                                record.material,
+                                record.grade,
+                                record.standard,
+                                record.model,
+                                record.preset_name,
+                                str(
+                                    record.primary_reference.get(
+                                        "authors",
+                                        "",
+                                    )
+                                ),
+                                record.doi,
+                            ]).lower()
+                        visible = not query or query in haystack
+                        item.setHidden(not visible)
+                        model_visible = model_visible or visible
+                    model.setHidden(not model_visible)
+                    grade_visible = grade_visible or model_visible
                 grade.setHidden(not grade_visible)
                 family_visible = family_visible or grade_visible
             family.setHidden(not family_visible)
