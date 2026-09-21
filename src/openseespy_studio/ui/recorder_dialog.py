@@ -97,6 +97,16 @@ class RecorderDialog(QDialog):
         )
         form.addRow("Section/IP no.:", self.section_number)
 
+        self.fiber_index = QSpinBox()
+        self.fiber_index.setRange(-1, 2_000_000_000)
+        self.fiber_index.setSpecialValueText("Coordinates / nearest")
+        self.fiber_index.setValue(
+            recorder.fiber_index
+            if recorder is not None and recorder.fiber_index is not None
+            else -1
+        )
+        form.addRow("Fiber index:", self.fiber_index)
+
         self.fiber_y = QDoubleSpinBox()
         self.fiber_y.setRange(-1.0e12, 1.0e12)
         self.fiber_y.setDecimals(9)
@@ -138,7 +148,8 @@ class RecorderDialog(QDialog):
 
         note = QLabel(
             "Node: disp/vel/accel/reaction · Element: global/local force · "
-            "Section: force/deformation · Fiber: stress/strain/stressStrain."
+            "Section: force/deformation · Fiber: stress/strain/stressStrain. "
+            "Fiber selection may use an explicit index or nearest y-z coordinates."
         )
         note.setWordWrap(True)
         root.addWidget(note)
@@ -151,6 +162,9 @@ class RecorderDialog(QDialog):
         root.addWidget(buttons)
 
         self.recorder_type.currentTextChanged.connect(
+            self._update_type_controls
+        )
+        self.fiber_index.valueChanged.connect(
             self._update_type_controls
         )
         self._update_type_controls()
@@ -173,6 +187,13 @@ class RecorderDialog(QDialog):
         self.fiber_y.setEnabled(is_fiber)
         self.fiber_z.setEnabled(is_fiber)
         self.material_tag.setEnabled(is_fiber)
+        self.fiber_index.setEnabled(is_fiber)
+        use_coordinates = (
+            is_fiber and self.fiber_index.value() < 0
+        )
+        self.fiber_y.setEnabled(use_coordinates)
+        self.fiber_z.setEnabled(use_coordinates)
+        self.material_tag.setEnabled(use_coordinates)
 
     def _accept(self) -> None:
         try:
@@ -190,6 +211,11 @@ class RecorderDialog(QDialog):
             else []
         )
         material_tag = self.material_tag.value() or None
+        fiber_index = (
+            self.fiber_index.value()
+            if self.fiber_index.value() >= 0
+            else None
+        )
         return RecorderData(
             tag=self.tag.value(),
             name=self.name.text().strip(),
@@ -203,4 +229,5 @@ class RecorderDialog(QDialog):
             fiber_y=self.fiber_y.value(),
             fiber_z=self.fiber_z.value(),
             material_tag=material_tag,
+            fiber_index=fiber_index,
         )

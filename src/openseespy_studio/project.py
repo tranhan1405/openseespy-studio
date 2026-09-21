@@ -2152,6 +2152,7 @@ class RecorderData:
     fiber_y: float = 0.0
     fiber_z: float = 0.0
     material_tag: int | None = None
+    fiber_index: int | None = None
 
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Recorder tag")
@@ -2187,6 +2188,14 @@ class RecorderData:
             )
         elif self.material_tag is not None:
             self.material_tag = int(self.material_tag)
+
+        if self.recorder_type == "Fiber" and self.fiber_index is not None:
+            self.fiber_index = _strict_int(
+                self.fiber_index,
+                "Recorder fiber index",
+            )
+        elif self.fiber_index is not None:
+            self.fiber_index = int(self.fiber_index)
         if self.tag <= 0:
             raise ValueError("Recorder tag must be positive.")
         if not math.isfinite(self.fiber_y) or not math.isfinite(self.fiber_z):
@@ -2219,6 +2228,8 @@ class RecorderData:
                 raise ValueError("Fiber recorder section number must be at least 1.")
             if self.material_tag is not None and self.material_tag <= 0:
                 raise ValueError("Fiber recorder material tag must be positive.")
+            if self.fiber_index is not None and self.fiber_index < 0:
+                raise ValueError("Fiber recorder index must be zero or positive.")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2234,6 +2245,7 @@ class RecorderData:
             "fiber_y": self.fiber_y,
             "fiber_z": self.fiber_z,
             "material_tag": self.material_tag,
+            "fiber_index": self.fiber_index,
         }
 
     @classmethod
@@ -2251,6 +2263,7 @@ class RecorderData:
             fiber_y=float(data.get("fiber_y", 0.0)),
             fiber_z=float(data.get("fiber_z", 0.0)),
             material_tag=data.get("material_tag"),
+            fiber_index=data.get("fiber_index"),
         )
 
 

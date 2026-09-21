@@ -9,6 +9,7 @@ import sys
 import pytest
 
 from openseespy_studio.generator import to_openseespy
+from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
     MATERIAL_DEFAULTS,
@@ -249,6 +250,78 @@ def _run_real_generated(
     assert exit_code == 0, payload.get("error", "")
     assert payload["status"] == "completed"
     return payload["results"]
+
+
+def test_imported_wfsection2d_conversion_runs_in_real_opensees(
+    tmp_path: Path,
+):
+    source = r"""
+from openseespy.opensees import *
+wipe()
+model('basic', '-ndm', 2, '-ndf', 3)
+uniaxialMaterial(
+    'Steel02', 1, 60.0, 29000.0, 0.10,
+    18.0, 0.925, 0.15, 0.05, 1.0, 0.05, 1.0, 0.0
+)
+section('WFSection2d', 1, 1, 10.5, 0.26, 5.77, 0.44, 15, 16)
+node(1, 0.0, 0.0)
+node(2, 0.0, 120.0)
+fix(1, 1, 1, 1)
+geomTransf('PDelta', 1)
+beamIntegration('Lobatto', 1, 1, 4)
+element('forceBeamColumn', 1, 1, 2, 1, 1)
+timeSeries('Linear', 1)
+pattern('Plain', 1, 1)
+load(2, 1.0, 0.0, 0.0)
+system('BandGeneral')
+numberer('Plain')
+constraints('Plain')
+test('NormUnbalance', 1.0e-10, 30)
+algorithm('Newton')
+integrator('LoadControl', 1.0)
+analysis('Static')
+analyze(1)
+"""
+    imported = import_openseespy_source(
+        source,
+        source_name="wf-real-smoke.py",
+        units={"length": "in", "force": "kip", "time": "s"},
+    )
+    assert imported.error_count == 0
+    assert imported.project.sections[1].section_type == "Fiber"
+    assert len(imported.project.sections[1].compiled_fibers()) == 47
+
+    project = imported.project
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        time_series=project.time_series,
+        load_patterns=project.load_patterns,
+        nodal_loads=project.nodal_loads,
+        analyses=project.analyses,
+        active_analysis_tag=project.active_analysis_tag,
+        recorders=project.recorders,
+        units=project.units,
+    )
+    assert "WFSection2d" not in script
+    assert "ops.patch('rect'" in script
+    assert "# ERROR:" not in script
+
+    script_path = tmp_path / "wf-converted.py"
+    result_path = tmp_path / "wf-converted-result.json"
+    script_path.write_text(script, encoding="utf-8")
+    exit_code = run_script(script_path, result_path)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0, payload.get("error", "")
+    assert payload["status"] == "completed"
+    assert payload["results"]["analysis"]["type"] == "Static"
+    displacement = payload["results"]["final"]["node_displacements"]["2"][0]
+    assert displacement > 0.0
 
 
 def test_generated_2d_elastic_frame_with_linear_algorithm_runs(
