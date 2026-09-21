@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "name": "SARE verified material library",
+    "rule": "Official presets require a traceable primary source and exact parameter evidence. Journal references require a DOI.",
+    "unverified_values_allowed": false
+  },
+  "records": [
+    {
+      "id": "carreno-2020-a615-grade60-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon reinforcing steel",
+      "grade": "ASTM A615 Grade 60",
+      "standard": "ASTM A615",
+      "model": "Steel02",
+      "preset_name": "Carreño et al. (2020) · A615 Grade 60",
+      "parameters_si": {
+        "Fy": 480000000.0,
+        "E0": 202000000000.0,
+        "b": 0.02,
+        "R0": 20.0,
+        "cR1": 0.9,
+        "cR2": 0.08,
+        "a1": 0.039,
+        "a2": 1.0,
+        "a3": 0.029,
+        "a4": 1.0
+      },
+      "verified_parameters": [
+        "Fy", "E0", "b", "R0", "cR1", "cR2", "a1", "a2", "a3", "a4"
+      ],
+      "applicability": [
+        "Grade 60 reinforcing steel",
+        "Unmachined reinforcing bars",
+        "Reversed cyclic stress-strain response",
+        "Giuffrè-Menegotto-Pinto / OpenSees Steel02"
+      ],
+      "limitations": [
+        "Baseline parameter set; specimen-specific calibration may still be required.",
+        "Density and Poisson ratio are not part of the verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Material Model Parameters for the Giuffrè-Menegotto-Pinto Uniaxial Steel Stress-Strain Model",
+        "authors": "Rodrigo P. Carreño; Koorosh H. Lotfizadeh; Joel P. Conte; José I. Restrepo",
+        "journal": "Journal of Structural Engineering",
+        "volume_issue": "146(2)",
+        "article": "04019205",
+        "year": 2020,
+        "doi": "10.1061/(ASCE)ST.1943-541X.0002505"
+      },
+      "parameter_evidence": {
+        "type": "dissertation",
+        "title": "Characterization of Large Diameter Reinforcement Under Large Strain Cyclic Reversals",
+        "author": "Rodrigo Carreño Vallejos",
+        "institution": "University of California San Diego",
+        "year": 2018,
+        "location": "Chapter 3, Table 3.12 — Proposed Material Model Parameters (Unmachined Reinforcing Bars)",
+        "url": "https://escholarship.org/uc/item/0zh283tf",
+        "relationship": "Chapter 3 contains the parameter study that was submitted and subsequently published as the peer-reviewed Journal of Structural Engineering article above."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "carreno-2020-a706-grade60-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Low-alloy reinforcing steel",
+      "grade": "ASTM A706 Grade 60",
+      "standard": "ASTM A706",
+      "model": "Steel02",
+      "preset_name": "Carreño et al. (2020) · A706 Grade 60",
+      "parameters_si": {
+        "Fy": 476000000.0,
+        "E0": 202000000000.0,
+        "b": 0.012,
+        "R0": 20.0,
+        "cR1": 0.9,
+        "cR2": 0.08,
+        "a1": 0.039,
+        "a2": 1.0,
+        "a3": 0.029,
+        "a4": 1.0
+      },
+      "verified_parameters": [
+        "Fy", "E0", "b", "R0", "cR1", "cR2", "a1", "a2", "a3", "a4"
+      ],
+      "applicability": [
+        "Grade 60 reinforcing steel",
+        "Unmachined reinforcing bars",
+        "Reversed cyclic stress-strain response",
+        "Giuffrè-Menegotto-Pinto / OpenSees Steel02"
+      ],
+      "limitations": [
+        "Baseline parameter set; specimen-specific calibration may still be required.",
+        "Density and Poisson ratio are not part of the verified constitutive parameter set."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Material Model Parameters for the Giuffrè-Menegotto-Pinto Uniaxial Steel Stress-Strain Model",
+        "authors": "Rodrigo P. Carreño; Koorosh H. Lotfizadeh; Joel P. Conte; José I. Restrepo",
+        "journal": "Journal of Structural Engineering",
+        "volume_issue": "146(2)",
+        "article": "04019205",
+        "year": 2020,
+        "doi": "10.1061/(ASCE)ST.1943-541X.0002505"
+      },
+      "parameter_evidence": {
+        "type": "dissertation",
+        "title": "Characterization of Large Diameter Reinforcement Under Large Strain Cyclic Reversals",
+        "author": "Rodrigo Carreño Vallejos",
+        "institution": "University of California San Diego",
+        "year": 2018,
+        "location": "Chapter 3, Table 3.12 — Proposed Material Model Parameters (Unmachined Reinforcing Bars)",
+        "url": "https://escholarship.org/uc/item/0zh283tf",
+        "relationship": "Chapter 3 contains the parameter study that was submitted and subsequently published as the peer-reviewed Journal of Structural Engineering article above."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    }
+  ]
+}
