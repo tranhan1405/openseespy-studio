@@ -301,3 +301,22 @@ def test_static_displacement_control_only_serializes_preload_while_supported():
         assert dialog.data().preload_gravity is False
     finally:
         _close(dialog)
+
+
+def test_sparse_general_pivoting_is_editable_and_serialized():
+    dialog = AnalysisDialog(analysis_type="Cyclic")
+    try:
+        dialog.system.setCurrentText("SparseGeneral")
+        _APP.processEvents()
+        assert dialog.system_pivoting.isEnabled()
+        dialog.system_pivoting.setChecked(True)
+        settings = dialog.data()
+        assert settings.system == "SparseGeneral"
+        assert settings.system_pivoting is True
+
+        dialog.system.setCurrentText("BandGeneral")
+        _APP.processEvents()
+        assert not dialog.system_pivoting.isEnabled()
+        assert dialog.data().system_pivoting is False
+    finally:
+        _close(dialog)
