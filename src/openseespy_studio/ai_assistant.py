@@ -434,13 +434,17 @@ def execute_read_only_tool(
         if raw_tag is None:
             result = {"found": False, "reason": "No active analysis."}
         else:
-            tag = int(raw_tag)
-            item = _tagged(project.get("analyses", []), tag)
-            result = (
-                {"found": True, "analysis": item}
-                if item is not None
-                else {"found": False, "tag": tag}
-            )
+            try:
+                tag = int(raw_tag)
+            except (TypeError, ValueError):
+                result = {"error": "get_analysis tag must be an integer."}
+            else:
+                item = _tagged(project.get("analyses", []), tag)
+                result = (
+                    {"found": True, "analysis": item}
+                    if item is not None
+                    else {"found": False, "tag": tag}
+                )
 
     elif name == "get_validation_issues":
         if "validation" not in snapshot:
@@ -480,14 +484,19 @@ def execute_read_only_tool(
             if raw_job_id is None:
                 job = jobs[-1]
             else:
-                target = int(raw_job_id)
-                job = next(
-                    (
-                        item for item in jobs
-                        if int(item.get("job_id", -1)) == target
-                    ),
-                    None,
-                )
+                try:
+                    target = int(raw_job_id)
+                except (TypeError, ValueError):
+                    target = None
+                    job = None
+                else:
+                    job = next(
+                        (
+                            item for item in jobs
+                            if int(item.get("job_id", -1)) == target
+                        ),
+                        None,
+                    )
             if job is None:
                 result = {
                     "available": True,
