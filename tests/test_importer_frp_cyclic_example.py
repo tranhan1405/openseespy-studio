@@ -113,7 +113,12 @@ def test_frp_confined_cyclic_history_imports_as_cyclic_analysis():
     assert result.project.model.ndm == 2
     assert result.project.model.ndf == 3
     assert len(result.project.model.nodes) == 4
-    assert len(result.project.model.elements) == 3
+    assert len(result.project.model.elements) == 2
+    assert len(result.project.connections) == 1
+    connection = result.project.connections[1]
+    assert connection.connection_type == "zeroLength"
+    assert connection.i_node == 1
+    assert connection.j_node == 2
     assert len(result.project.materials) == 3
     assert len(result.project.sections) == 2  # Fiber + inline Elastic beam section
     assert len(result.project.load_patterns) == 2
