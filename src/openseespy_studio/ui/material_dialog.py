@@ -1350,12 +1350,28 @@ class MaterialDialog(QDialog):
         evidence = dict(
             material.source.get("parameter_evidence", {})
         )
+        source_units = dict(
+            material.source.get("source_units", {})
+        )
+        unit_text = " / ".join(
+            str(value) for value in source_units.values()
+        )
+        response_quantity = str(
+            material.source.get("response_quantity", "")
+        ).strip()
+        context_text = (
+            f"\nResponse: {response_quantity} · published units: "
+            f"{unit_text}"
+            if response_quantity
+            else ""
+        )
         self.source_note.setText(
             "Reference-backed material · "
             f"status: {material.source.get('status', 'unknown')}\n"
             f"{reference.get('title', '')}\n"
             f"DOI: {reference.get('doi', '')}\n"
-            f"Evidence: {evidence.get('location', '')}\n"
+            f"Evidence: {evidence.get('location', '')}"
+            f"{context_text}\n"
             "The verified status applies to the cited constitutive "
             "parameters. Editing those values will mark this project "
             "material as modified_from_verified."
