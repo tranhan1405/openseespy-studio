@@ -335,7 +335,7 @@ def test_generated_2d_elastic_frame_with_linear_algorithm_runs(
         "ops.element('elasticBeamColumn', 1, 1, 2, "
         "0.02, 2e+11, 8e-05, 1)"
     ) in script
-    assert "ops.algorithm('Linear')" in script
+    assert "_studio_primary_algorithm = 'Linear'" in script
     assert "ops.test(" not in script
 
     script_path = tmp_path / "frame2d-linear.py"
