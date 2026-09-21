@@ -2951,7 +2951,7 @@ class ProjectDatabase:
             return
         generated_constraint = connection.generated_constraint_tag
         if generated_constraint is not None:
-            self.constraints.pop(generated_constraint, None)
+            self.remove_constraint(generated_constraint)
 
         ground_tag = connection.generated_ground_node
         if (
@@ -2976,7 +2976,10 @@ class ProjectDatabase:
                 for element in self.model.elements.values()
             )
             and not any(
-                other.section_tag == generated_section
+                generated_section in {
+                    other.section_tag,
+                    other.generated_section_tag,
+                }
                 for other in self.connections.values()
             )
         ):
