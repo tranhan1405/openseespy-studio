@@ -2761,3 +2761,102 @@ def test_project_validate_element_state_rejects_zero_length_member():
         match=r"coincident end nodes and zero length",
     ):
         project.validate_element_state(1)
+
+
+def test_project_self_weight_requires_density_source():
+    model = StructuralModel("selfweight-density", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 2.0, 0.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="elasticBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
+    project = ProjectDatabase(name="SelfWeight density", model=model)
+    project.add_section(
+        SectionData(1, "Manual", "Elastic", {"A": 0.1})
+    )
+    project.add_transformation(
+        TransformationData(1, "Linear", "Linear", (0.0, 0.0, 1.0))
+    )
+    project.add_time_series(TimeSeriesData(1, "Dead", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Dead", "Plain", time_series_tag=1)
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"positive density override",
+    ):
+        project.add_element_load(
+            ElementLoadData(
+                1,
+                "Self weight",
+                1,
+                1,
+                "SelfWeight",
+            )
+        )
+
+    project.add_element_load(
+        ElementLoadData(
+            2,
+            "Self weight override",
+            1,
+            1,
+            "SelfWeight",
+            density_override=500.0,
+        )
+    )
+    assert 2 in project.element_loads
+
+
+def test_project_self_weight_rejects_fiber_section():
+    model = StructuralModel("selfweight-fiber", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 2.0, 0.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
+    project = ProjectDatabase(name="SelfWeight fiber", model=model)
+    project.add_material(
+        MaterialData(1, "Steel", "Elastic", {"E": 2.0e11}, density=7850.0)
+    )
+    project.add_section(
+        SectionData(
+            1,
+            "Fiber",
+            "Fiber",
+            fibers=[FiberData(0.0, 0.0, 0.01, 1)],
+        )
+    )
+    project.add_transformation(
+        TransformationData(1, "Linear", "Linear", (0.0, 0.0, 1.0))
+    )
+    project.add_time_series(TimeSeriesData(1, "Dead", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Dead", "Plain", time_series_tag=1)
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"requires an Elastic section",
+    ):
+        project.add_element_load(
+            ElementLoadData(
+                1,
+                "Self weight",
+                1,
+                1,
+                "SelfWeight",
+                density_override=7850.0,
+            )
+        )
