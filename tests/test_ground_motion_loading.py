@@ -249,14 +249,12 @@ def test_validation_rejects_rotational_uniform_excitation_in_2d_ndf3_model():
             values=[0.0, 0.1],
         )
     )
-    project.add_load_pattern(
-        LoadPatternData(
-            1,
-            "Bad rotational excitation",
-            "UniformExcitation",
-            time_series_tag=1,
-            direction=3,
-        )
+    project.load_patterns[1] = LoadPatternData(
+        1,
+        "Bad rotational excitation",
+        "UniformExcitation",
+        time_series_tag=1,
+        direction=3,
     )
     analysis = AnalysisSettingsData(
         1,
@@ -349,14 +347,12 @@ def test_modal_validation_ignores_ground_motion_objects():
     project.add_time_series(
         TimeSeriesData(1, "Wrong for EQ", "Linear", factor=1.0)
     )
-    project.add_load_pattern(
-        LoadPatternData(
-            1,
-            "Unused EQ",
-            "UniformExcitation",
-            time_series_tag=1,
-            direction=3,
-        )
+    project.load_patterns[1] = LoadPatternData(
+        1,
+        "Unused EQ",
+        "UniformExcitation",
+        time_series_tag=1,
+        direction=3,
     )
     analysis = AnalysisSettingsData(
         1,
