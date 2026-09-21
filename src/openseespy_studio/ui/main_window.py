@@ -8706,15 +8706,30 @@ class MainWindow(QMainWindow):
                 or connection.generated_constraint_tag is not None
             )
         ):
+            strain_penetration = (
+                connection.generated_section_tag is not None
+            )
+            if strain_penetration:
+                title = "Strain Penetration Interface"
+                detail = (
+                    "its generated Fiber section, Bond_SP01 material, "
+                    "base restraints, and orientation"
+                )
+            else:
+                title = "Managed Section Interface"
+                detail = (
+                    "its selected Section, automatic shear-transfer "
+                    "constraint, base restraints, and orientation"
+                )
             QMessageBox.information(
                 self,
-                "Strain Penetration Interface",
+                title,
                 "This zeroLengthSection was created by the specimen-level "
-                "strain-penetration workflow. Edit/rebuild it through "
-                "Quick 1D Column / Test Specimen so its Fiber section, "
-                "Bond_SP01 material, base restraints, and orientation stay "
-                "consistent. General zeroLengthSection elements created "
-                "manually or imported can be edited directly.",
+                "Quick 1D Column / Test Specimen workflow. Edit/rebuild it "
+                "through that wizard so "
+                + detail
+                + " stay consistent. General zeroLengthSection elements "
+                "created manually or imported can be edited directly.",
             )
             self._show_connection_properties(tag)
             return
