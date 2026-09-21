@@ -8,6 +8,7 @@ from openseespy_studio.project import (
     MATERIAL_DEFAULTS,
     MaterialData,
     ProjectDatabase,
+    SectionData,
 )
 from openseespy_studio.ui.connection_dialog import ConnectionDialog
 
@@ -185,4 +186,118 @@ def test_builder_rejects_direct_bond_sp01_zero_length_assignment():
         assert "Bond_SP01" in str(exc)
     else:
         raise AssertionError("Expected direct Bond_SP01 zeroLength use to fail")
+    dialog.close()
+
+
+
+def _sections() -> dict[int, SectionData]:
+    return {
+        7: SectionData(
+            tag=7,
+            name="Fiber Section",
+            section_type="Fiber",
+            parameters={"GJ": 1.0e6},
+        ),
+    }
+
+
+def test_builder_creates_zero_length_section_from_section_assignment():
+    _app()
+    dialog = ConnectionDialog(
+        _materials(),
+        sections=_sections(),
+        next_tag=10,
+        initial_node_i=1,
+        initial_node_j=2,
+        node_positions={
+            1: (0.0, 0.0, 0.0),
+            2: (0.0, 0.0, 0.0),
+        },
+    )
+    dialog.connection_type.setCurrentText("zeroLengthSection")
+    section_index = dialog.section_combo.findData(7)
+    dialog.section_combo.setCurrentIndex(section_index)
+
+    spec = dialog.spec()
+
+    assert spec["connection_type"] == "zeroLengthSection"
+    assert spec["section_tag"] == 7
+    assert spec["materials_by_dof"] == {}
+    assert dialog.tabs.isTabEnabled(dialog.section_tab_index)
+    assert not dialog.tabs.isTabEnabled(dialog.dof_tab_index)
+    dialog.close()
+
+
+def test_builder_zero_length_section_requires_section_assignment():
+    _app()
+    dialog = ConnectionDialog(
+        _materials(),
+        sections={},
+        initial_node_i=1,
+        initial_node_j=2,
+        node_positions={
+            1: (0.0, 0.0, 0.0),
+            2: (0.0, 0.0, 0.0),
+        },
+    )
+    dialog.connection_type.setCurrentText("zeroLengthSection")
+
+    try:
+        dialog.spec()
+    except ValueError as exc:
+        assert "requires a Section assignment" in str(exc)
+    else:
+        raise AssertionError("Expected missing zeroLengthSection section to fail")
+    dialog.close()
+
+
+def test_builder_zero_length_section_requires_coincident_nodes():
+    _app()
+    dialog = ConnectionDialog(
+        _materials(),
+        sections=_sections(),
+        initial_node_i=1,
+        initial_node_j=2,
+        node_positions={
+            1: (0.0, 0.0, 0.0),
+            2: (0.25, 0.0, 0.0),
+        },
+    )
+    dialog.connection_type.setCurrentText("zeroLengthSection")
+    dialog.section_combo.setCurrentIndex(
+        dialog.section_combo.findData(7)
+    )
+
+    try:
+        dialog.spec()
+    except ValueError as exc:
+        assert "zeroLengthSection requires coincident nodes" in str(exc)
+    else:
+        raise AssertionError("Expected separated zeroLengthSection pair to fail")
+    dialog.close()
+
+
+def test_builder_edits_general_zero_length_section_selection():
+    _app()
+    connection = ConnectionData(
+        4,
+        "Section interface",
+        "zeroLengthSection",
+        1,
+        2,
+        section_tag=7,
+    )
+    dialog = ConnectionDialog(
+        _materials(),
+        connection=connection,
+        sections=_sections(),
+        node_positions={
+            1: (0.0, 0.0, 0.0),
+            2: (0.0, 0.0, 0.0),
+        },
+    )
+
+    assert dialog.connection_type.currentText() == "zeroLengthSection"
+    assert dialog.section_combo.currentData() == 7
+    assert dialog.spec()["section_tag"] == 7
     dialog.close()
