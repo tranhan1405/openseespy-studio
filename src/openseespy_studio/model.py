@@ -99,6 +99,10 @@ class Element:
         self.i = _strict_int(self.i, "Element I-node tag")
         self.j = _strict_int(self.j, "Element J-node tag")
         self.element_type = str(self.element_type)
+        if self.element_type not in SUPPORTED_ELEMENT_TYPES:
+            raise ValueError(
+                f"Unsupported element type: {self.element_type}"
+            )
         self.group = str(self.group)
         self.integration_type = str(self.integration_type)
         self.integration_points = _strict_int(
@@ -115,14 +119,49 @@ class Element:
             self.consistent_mass,
             "Element consistent_mass",
         )
+        hinge_types = {
+            "HingeRadau",
+            "HingeRadauTwo",
+            "HingeMidpoint",
+            "HingeEndpoint",
+            "ConcentratedPlasticity",
+        }
+        uses_hinge_sections = self.integration_type in hinge_types
         self.hinge_i_section_tag = (
-            None if self.hinge_i_section_tag is None else int(self.hinge_i_section_tag)
+            None
+            if self.hinge_i_section_tag is None
+            else (
+                _strict_int(
+                    self.hinge_i_section_tag,
+                    "Element I-hinge section tag",
+                )
+                if uses_hinge_sections
+                else int(self.hinge_i_section_tag)
+            )
         )
         self.hinge_j_section_tag = (
-            None if self.hinge_j_section_tag is None else int(self.hinge_j_section_tag)
+            None
+            if self.hinge_j_section_tag is None
+            else (
+                _strict_int(
+                    self.hinge_j_section_tag,
+                    "Element J-hinge section tag",
+                )
+                if uses_hinge_sections
+                else int(self.hinge_j_section_tag)
+            )
         )
         self.interior_section_tag = (
-            None if self.interior_section_tag is None else int(self.interior_section_tag)
+            None
+            if self.interior_section_tag is None
+            else (
+                _strict_int(
+                    self.interior_section_tag,
+                    "Element interior section tag",
+                )
+                if uses_hinge_sections
+                else int(self.interior_section_tag)
+            )
         )
         self.hinge_i_length = float(self.hinge_i_length)
         self.hinge_j_length = float(self.hinge_j_length)
@@ -130,17 +169,40 @@ class Element:
         self.truss_material_tag = (
             None
             if self.truss_material_tag is None
-            else int(self.truss_material_tag)
+            else (
+                _strict_int(
+                    self.truss_material_tag,
+                    "Truss material tag",
+                )
+                if self.element_type == "truss"
+                else int(self.truss_material_tag)
+            )
         )
         self.truss_do_rayleigh = _strict_bool(
             self.truss_do_rayleigh,
             "Truss Rayleigh flag",
         )
+        uses_frame_references = self.element_type != "truss"
         self.section_tag = (
-            None if self.section_tag is None else int(self.section_tag)
+            None
+            if self.section_tag is None
+            else (
+                _strict_int(self.section_tag, "Element section tag")
+                if uses_frame_references
+                else int(self.section_tag)
+            )
         )
         self.transf_tag = (
-            None if self.transf_tag is None else int(self.transf_tag)
+            None
+            if self.transf_tag is None
+            else (
+                _strict_int(
+                    self.transf_tag,
+                    "Element transformation tag",
+                )
+                if uses_frame_references
+                else int(self.transf_tag)
+            )
         )
 
         if self.integration_type not in {
@@ -156,7 +218,7 @@ class Element:
             raise ValueError(
                 f"Unsupported beam integration type: {self.integration_type}"
             )
-        hinge_types = {
+        beam_hinge_types = {
             "HingeRadau",
             "HingeRadauTwo",
             "HingeMidpoint",
@@ -165,7 +227,7 @@ class Element:
         if self.integration_type in {"Lobatto", "Legendre", "Radau"}:
             if self.integration_points < 2:
                 raise ValueError("Beam integration needs at least 2 points.")
-        elif self.integration_type in hinge_types:
+        elif self.integration_type in beam_hinge_types:
             if (
                 self.hinge_i_section_tag is None
                 or self.hinge_j_section_tag is None
@@ -255,7 +317,8 @@ class StructuralModel:
         y: float,
         z: float = 0.0,
     ) -> None:
-        node = self.nodes[int(tag)]
+        tag = _strict_int(tag, "Node tag")
+        node = self.nodes[tag]
         xyz = (float(x), float(y), float(z))
         if not all(math.isfinite(value) for value in xyz):
             raise ValueError("Node coordinates must be finite.")
@@ -656,7 +719,7 @@ class StructuralModel:
         copies: int = 1,
         reserved_element_tags: Iterable[int] = (),
     ) -> tuple[set[int], set[int]]:
-        copies = int(copies)
+        copies = _strict_int(copies, "Copy count")
         if copies < 1:
             raise ValueError("copies must be at least 1")
 
