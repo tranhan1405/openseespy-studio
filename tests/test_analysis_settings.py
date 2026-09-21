@@ -534,3 +534,34 @@ def test_generalized_alpha_accepts_documented_stable_order(alpha_m, alpha_f):
     )
     assert analysis.generalized_alpha_m == pytest.approx(alpha_m)
     assert analysis.generalized_alpha_f == pytest.approx(alpha_f)
+
+
+def test_rayleigh_damping_generated_script_checks_eigenvalue_count_before_indexing():
+    analysis = AnalysisSettingsData(
+        57,
+        "Rayleigh guarded",
+        "Transient",
+        steps=2,
+        dt=0.01,
+        rayleigh_damping_ratio=0.05,
+        rayleigh_mode_i=1,
+        rayleigh_mode_j=4,
+    )
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            analysis,
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
+
+    guard = "if len(_studio_damping_eigs) < 4:"
+    first_index = "_studio_lambda_i = float(_studio_damping_eigs[0])"
+    second_index = "_studio_lambda_j = float(_studio_damping_eigs[3])"
+
+    assert guard in text
+    assert "Rayleigh damping requested mode 4" in text
+    assert text.index(guard) < text.index(first_index)
+    assert text.index(guard) < text.index(second_index)
+    compile(text, "<rayleigh-guard>", "exec")

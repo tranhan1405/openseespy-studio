@@ -1185,6 +1185,16 @@ def analysis_to_openseespy(
             "if not isinstance(_studio_damping_eigs, (list, tuple)):",
             "    _studio_damping_eigs = [_studio_damping_eigs]",
             (
+                f"if len(_studio_damping_eigs) < {max_mode}:"
+            ),
+            (
+                "    raise RuntimeError("
+                f"'Rayleigh damping requested mode {max_mode}, but OpenSees '"
+                "f'returned only {len(_studio_damping_eigs)} eigenvalue(s). '"
+                "'Reduce the damping mode numbers or fix the model mass/stiffness.'"
+                ")"
+            ),
+            (
                 f"_studio_lambda_i = float(_studio_damping_eigs["
                 f"{settings.rayleigh_mode_i - 1}])"
             ),
