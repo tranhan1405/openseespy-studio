@@ -4785,9 +4785,10 @@ class MainWindow(QMainWindow):
                 else:
                     return
 
-                # Re-run Element's own normalization and validity checks after
-                # an in-place Details-pane edit.
+                # Re-run Element's own checks plus dependent recorder/load
+                # validation after an in-place Details-pane edit.
                 element.__post_init__()
+                self.project.validate_element_state(tag)
 
             elif kind == "material":
                 material = self.project.materials.get(tag)
