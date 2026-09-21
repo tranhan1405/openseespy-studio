@@ -1053,12 +1053,18 @@ class ConnectionData:
         self.generated_section_tag = (
             None
             if self.generated_section_tag is None
-            else int(self.generated_section_tag)
+            else _strict_int(
+                self.generated_section_tag,
+                "Connection generated section tag",
+            )
         )
         self.generated_constraint_tag = (
             None
             if self.generated_constraint_tag is None
-            else int(self.generated_constraint_tag)
+            else _strict_int(
+                self.generated_constraint_tag,
+                "Connection generated constraint tag",
+            )
         )
 
         if self.tag <= 0:
@@ -1073,6 +1079,27 @@ class ConnectionData:
             )
         if self.node_i <= 0 or self.node_j <= 0:
             raise ValueError("Connection node tags must be positive.")
+        if (
+            self.generated_ground_node is not None
+            and self.generated_ground_node <= 0
+        ):
+            raise ValueError(
+                "Connection generated ground node must be positive."
+            )
+        if (
+            self.generated_section_tag is not None
+            and self.generated_section_tag <= 0
+        ):
+            raise ValueError(
+                "Connection generated section tag must be positive."
+            )
+        if (
+            self.generated_constraint_tag is not None
+            and self.generated_constraint_tag <= 0
+        ):
+            raise ValueError(
+                "Connection generated constraint tag must be positive."
+            )
         if self.node_i == self.node_j:
             raise ValueError("Connection needs two different node tags.")
         if self.connection_type == "zeroLengthSection":
@@ -5124,20 +5151,10 @@ class ProjectDatabase:
         def setting_int(name: str) -> int | None:
             if name not in result.settings:
                 return None
-            raw = result.settings[name]
-            try:
-                value = int(raw)
-            except (TypeError, ValueError, OverflowError) as exc:
-                raise ValueError(
-                    f"Solution result setting {name} must be an integer."
-                ) from exc
-            if isinstance(raw, float) and (
-                not math.isfinite(raw) or not raw.is_integer()
-            ):
-                raise ValueError(
-                    f"Solution result setting {name} must be an integer."
-                )
-            return value
+            return _strict_int(
+                result.settings[name],
+                f"Solution result setting {name}",
+            )
 
         if result.result_type in {
             "DeformedShape",
@@ -5270,13 +5287,14 @@ class ProjectDatabase:
         self.solution_results[result.tag] = result
 
     def remove_solution_result(self, tag: int) -> None:
-        self.solution_results.pop(int(tag), None)
+        tag = _strict_int(tag, "Solution result tag")
+        self.solution_results.pop(tag, None)
 
     def solution_results_for_analysis(
         self,
         analysis_tag: int,
     ) -> list[SolutionResultData]:
-        target = int(analysis_tag)
+        target = _strict_int(analysis_tag, "Analysis tag")
         return [
             self.solution_results[tag]
             for tag in sorted(self.solution_results)
@@ -5369,13 +5387,15 @@ class ProjectDatabase:
         if isinstance(raw, dict):
             for raw_tag, raw_data in raw.items():
                 if not isinstance(raw_data, dict):
-                    continue
+                    raise ValueError(
+                        f"Legacy material {raw_tag!r} must be an object."
+                    )
                 data = dict(raw_data)
                 if "tag" not in data:
-                    try:
-                        data["tag"] = int(raw_tag)
-                    except (TypeError, ValueError):
-                        continue
+                    data["tag"] = _strict_int(
+                        raw_tag,
+                        "Legacy material tag",
+                    )
                 data.setdefault("name", f"Material {data['tag']}")
                 data.setdefault(
                     "material_type",
@@ -5413,13 +5433,15 @@ class ProjectDatabase:
         if isinstance(raw, dict):
             for raw_tag, raw_data in raw.items():
                 if not isinstance(raw_data, dict):
-                    continue
+                    raise ValueError(
+                        f"Legacy section {raw_tag!r} must be an object."
+                    )
                 data = dict(raw_data)
                 if "tag" not in data:
-                    try:
-                        data["tag"] = int(raw_tag)
-                    except (TypeError, ValueError):
-                        continue
+                    data["tag"] = _strict_int(
+                        raw_tag,
+                        "Legacy section tag",
+                    )
                 data.setdefault("name", f"Section {data['tag']}")
                 data.setdefault(
                     "section_type",
@@ -5459,13 +5481,15 @@ class ProjectDatabase:
         if isinstance(raw, dict):
             for raw_tag, raw_data in raw.items():
                 if not isinstance(raw_data, dict):
-                    continue
+                    raise ValueError(
+                        f"Legacy transformation {raw_tag!r} must be an object."
+                    )
                 data = dict(raw_data)
                 if "tag" not in data:
-                    try:
-                        data["tag"] = int(raw_tag)
-                    except (TypeError, ValueError):
-                        continue
+                    data["tag"] = _strict_int(
+                        raw_tag,
+                        "Legacy transformation tag",
+                    )
                 data.setdefault(
                     "name",
                     f"Transformation {data['tag']}",
@@ -5643,7 +5667,10 @@ class ProjectDatabase:
                 f"Not an OpenSeesPy Studio project: format={project_format!r}"
             )
 
-        version = int(data.get("version", 0))
+        version = _strict_int(
+            data.get("version", 0),
+            "Project version",
+        )
         if version > PROJECT_FORMAT_VERSION:
             raise ValueError(
                 f"Project version {version} is newer than supported "
@@ -5661,7 +5688,7 @@ class ProjectDatabase:
                 )
             selection_sets[selection_set.name] = selection_set
 
-        return cls(
+        project = cls(
             name=str(data.get("name", "Untitled")),
             model=StructuralModel.from_dict(data.get("model", {})),
             selection_sets=selection_sets,
@@ -5688,7 +5715,10 @@ class ProjectDatabase:
                 data.get("solution_results", [])
             ),
             active_analysis_tag=(
-                int(data["active_analysis_tag"])
+                _strict_int(
+                    data["active_analysis_tag"],
+                    "Active analysis tag",
+                )
                 if data.get("active_analysis_tag") is not None
                 else None
             ),
@@ -5702,6 +5732,15 @@ class ProjectDatabase:
                 }
             ),
         )
+        if (
+            project.active_analysis_tag is not None
+            and project.active_analysis_tag not in project.analyses
+        ):
+            raise ValueError(
+                "Active analysis tag "
+                f"{project.active_analysis_tag} does not exist."
+            )
+        return project
 
     def save(self, path: str | Path) -> None:
         target = Path(path)
