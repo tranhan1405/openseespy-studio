@@ -582,3 +582,51 @@ def test_modal_mass_coverage_ignores_direction_without_positive_free_mass(qapp):
         panel.close()
         panel.deleteLater()
         qapp.processEvents()
+
+
+def test_dedicated_moment_curvature_result_selects_and_populates_tab(qapp):
+    panel = ResultsPanel()
+    result = {
+        "analysis": {
+            "type": "Static",
+            "integrator": "DisplacementControl",
+        },
+        "moment_curvature": {
+            "kind": "moment-curvature",
+            "element_tag": 1,
+            "section_tag": 1,
+            "control_node": 2,
+            "control_dof": 3,
+            "moment_component": "Mz",
+            "moment_index": 1,
+            "moment_sign": 1.0,
+        },
+        "history": {
+            "time": [1.0, 2.0],
+            "nodes": {},
+            "moment_curvature": {
+                "force": [[-180.0, 10.0], [-180.0, 20.0]],
+                "deformation": [[0.0, 0.001], [0.0, 0.002]],
+            },
+        },
+        "final": {},
+        "convergence": {"steps": []},
+        "modes": {},
+    }
+    try:
+        panel.set_result(result)
+        panel.show_solution_result("MomentCurvature")
+        qapp.processEvents()
+
+        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Moment–Curvature"
+        assert panel.moment_curvature_plot._x == pytest.approx(
+            [0.0, 0.001, 0.002]
+        )
+        assert panel.moment_curvature_plot._y == pytest.approx(
+            [0.0, 10.0, 20.0]
+        )
+        assert "zeroLengthSection element 1" in panel.moment_curvature_info.text()
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
