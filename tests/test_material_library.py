@@ -24,7 +24,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 180
+    assert len(records) == 182
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -222,7 +222,7 @@ def test_moodley_2026_records_encode_model_applicability():
     )
 
 
-def test_verified_library_reaches_one_hundred_eighty_with_expected_source_counts():
+def test_verified_library_reaches_one_hundred_eighty_two_with_expected_source_counts():
     records = load_verified_material_library()
     prefixes = {
         "carreno-2020-": 2,
@@ -246,10 +246,12 @@ def test_verified_library_reaches_one_hundred_eighty_with_expected_source_counts
         "zhou-2021-": 1,
         "teng-2016-": 2,
         "jafari-2023-": 1,
+        "seo-2013-": 1,
+        "cheng-2019-": 1,
     }
 
-    assert len(records) == 180
-    assert len({record.id for record in records}) == 180
+    assert len(records) == 182
+    assert len({record.id for record in records}) == 182
     for prefix, expected in prefixes.items():
         assert sum(
             record.id.startswith(prefix)
@@ -743,6 +745,57 @@ def test_jafari_2023_cfrp_elastic_exports_in_project_units():
     )
 
     assert command == "ops.uniaxialMaterial('Elastic', 95, 240000)"
+
+
+
+def test_steel01_verified_presets_preserve_three_parameter_semantics():
+    bearing = _record("seo-2013-a36-spherical-bearing-steel01")
+    rebar = _record("cheng-2019-hrb400-tower-rebar-steel01")
+
+    assert bearing.model == "Steel01"
+    assert bearing.parameters_si == {
+        "Fy": 250.0e6,
+        "E0": 200.0e9,
+        "b": 0.014,
+        "a1": 0.0,
+        "a2": 55.0,
+        "a3": 0.0,
+        "a4": 55.0,
+    }
+    assert bearing.doi == "10.1155/2013/248575"
+    assert "Figure 6(a)" in str(
+        bearing.parameter_evidence.get("location", "")
+    )
+
+    assert rebar.parameters_si == {
+        "Fy": 400.0e6,
+        "E0": 200.0e9,
+        "b": 0.005,
+        "a1": 0.0,
+        "a2": 55.0,
+        "a3": 0.0,
+        "a4": 55.0,
+    }
+    assert rebar.doi == "10.1088/1755-1315/304/4/042054"
+    assert "Section 2.1" in str(
+        rebar.parameter_evidence.get("location", "")
+    )
+
+
+def test_verified_steel01_exports_exact_opensees_default_hardening():
+    material = material_from_library_record(
+        _record("seo-2013-a36-spherical-bearing-steel01"),
+        tag=96,
+    )
+    command = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+
+    assert command == (
+        "ops.uniaxialMaterial('Steel01', 96, 250, 200000, "
+        "0.014, 0, 55, 0, 55)"
+    )
 
 
 def test_all_pinching4_library_records_have_physical_context_and_full_schema():
