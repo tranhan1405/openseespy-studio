@@ -1,5 +1,11 @@
 # SARE
 
+<p align="center">
+  <img src="src/openseespy_studio/resources/branding/sare_wordmark.svg"
+       alt="SARE — Structural Analysis & Research Environment for OpenSees"
+       width="760">
+</p>
+
 **SARE — Structural Analysis & Research Environment for OpenSees** is a
 research-oriented structural simulation environment built around
 [OpenSees](https://opensees.berkeley.edu/) with OpenSeesPy as its current
