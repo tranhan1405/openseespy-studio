@@ -2443,6 +2443,20 @@ def to_openseespy(
                 f"element {element.tag} -> missing node "
                 + ", ".join(map(str, sorted(set(missing))))
             )
+        else:
+            node_i = model.nodes[int(element.i)]
+            node_j = model.nodes[int(element.j)]
+            length2 = sum(
+                (
+                    float(node_j.xyz[index])
+                    - float(node_i.xyz[index])
+                ) ** 2
+                for index in range(3)
+            )
+            if length2 <= 1.0e-24:
+                geometry_reference_errors.append(
+                    f"element {element.tag} -> zero length"
+                )
 
     for connection in (connections or {}).values():
         missing = [
@@ -2594,6 +2608,35 @@ def to_openseespy(
                 f"element {element.tag} -> missing transformation "
                 f"{element.transf_tag}"
             )
+        elif int(model.ndm) == 3:
+            transformation = transformations[int(element.transf_tag)]
+            node_i = model.nodes[int(element.i)]
+            node_j = model.nodes[int(element.j)]
+            delta = tuple(
+                float(node_j.xyz[index]) - float(node_i.xyz[index])
+                for index in range(3)
+            )
+            vx, vy, vz = (
+                float(value) for value in transformation.vecxz
+            )
+            dx, dy, dz = delta
+            cross = (
+                vy * dz - vz * dy,
+                vz * dx - vx * dz,
+                vx * dy - vy * dx,
+            )
+            vec_norm2 = vx * vx + vy * vy + vz * vz
+            length2 = sum(value * value for value in delta)
+            cross_norm2 = sum(value * value for value in cross)
+            if (
+                length2 > 1.0e-24
+                and cross_norm2
+                <= 1.0e-16 * vec_norm2 * length2
+            ):
+                transformation_reference_errors.append(
+                    f"element {element.tag} -> transformation "
+                    f"{element.transf_tag} vecxz parallel to member axis"
+                )
 
     if transformation_reference_errors:
         raise ValueError(
