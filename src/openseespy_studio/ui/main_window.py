@@ -5447,9 +5447,41 @@ class MainWindow(QMainWindow):
             return None
         return tags
 
+    def _exclude_managed_ground_nodes(
+        self,
+        node_tags: set[int],
+        *,
+        title: str,
+    ) -> set[int]:
+        managed = {
+            int(connection.generated_ground_node)
+            for connection in self.project.connections.values()
+            if connection.generated_ground_node is not None
+        }
+        editable = set(node_tags) - managed
+        skipped = set(node_tags) & managed
+        if skipped:
+            self.status_message.setText(
+                f"{title}: skipped {len(skipped)} managed ground node(s)"
+            )
+        if not editable and skipped:
+            QMessageBox.information(
+                self,
+                title,
+                "Selected node(s) are generated ground nodes managed by "
+                "connections. Edit the structural/source node instead.",
+            )
+        return editable
+
     def _apply_restraint(self) -> None:
         node_tags = self._selected_node_tags("Support / Restraint")
         if node_tags is None:
+            return
+        node_tags = self._exclude_managed_ground_nodes(
+            node_tags,
+            title="Support / Restraint",
+        )
+        if not node_tags:
             return
 
         fixities = {
@@ -5488,6 +5520,15 @@ class MainWindow(QMainWindow):
 
         before = self.project.to_dict()
         updated = self.model.set_fixity_many(node_tags, fixity)
+        try:
+            for node_tag in sorted(updated):
+                self.project.validate_node_state(node_tag)
+        except (TypeError, ValueError, IndexError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Support / Restraint", str(exc))
+            return
         support_type = classify_fixity(fixity)
         self._refresh_all(
             f"Applied {support_type} restraint to {len(updated)} node(s)"
@@ -5500,6 +5541,12 @@ class MainWindow(QMainWindow):
     def _clear_restraint(self) -> None:
         node_tags = self._selected_node_tags("Clear Support")
         if node_tags is None:
+            return
+        node_tags = self._exclude_managed_ground_nodes(
+            node_tags,
+            title="Clear Support",
+        )
+        if not node_tags:
             return
 
         before = self.project.to_dict()
@@ -5515,6 +5562,12 @@ class MainWindow(QMainWindow):
     def _assign_mass(self) -> None:
         node_tags = self._selected_node_tags("Nodal Mass")
         if node_tags is None:
+            return
+        node_tags = self._exclude_managed_ground_nodes(
+            node_tags,
+            title="Nodal Mass",
+        )
+        if not node_tags:
             return
         masses = {
             tuple(self.model.nodes[tag].mass)
