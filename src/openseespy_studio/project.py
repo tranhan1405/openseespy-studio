@@ -253,7 +253,7 @@ MATERIAL_ENGINEERING_DEFAULTS: dict[str, dict[str, float]] = {
 
 MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
     "Elastic": {"E": 2.0e11},
-    "Steel01": {"Fy": 3.55e8, "E0": 2.0e11, "b": 0.01, "a1": 0.0, "a2": 1.0, "a3": 0.0, "a4": 1.0},
+    "Steel01": {"Fy": 3.55e8, "E0": 2.0e11, "b": 0.01, "a1": 0.0, "a2": 55.0, "a3": 0.0, "a4": 55.0},
     "Steel02": {
         "Fy": 3.55e8,
         "E0": 2.0e11,
