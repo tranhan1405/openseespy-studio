@@ -62,6 +62,7 @@ from ..calibration import (
     calibration_grid_size,
     calibration_parameter_payload,
 )
+from ..ai_assistant import compact_for_llm, prepare_project_snapshot
 from ..analysis_templates import (
     GroundMotionComponentSpec,
     build_cyclic_template,
@@ -95,6 +96,7 @@ from ..runtime import (
 )
 from ..validation import ValidationIssue, validate_project
 from ..units import UnitSystem
+from .ai_assistant_panel import AIAssistantPanel
 from .analysis_dialog import AnalysisDialog
 from .analysis_template_dialog import AnalysisTemplateDialog, CyclicProtocolPreview
 from .calibration_dialog import (
@@ -1488,6 +1490,7 @@ class MainWindow(QMainWindow):
         self._jobs: dict[int, JobRecord] = {}
         self._job_counter = 0
         self._current_job_id: int | None = None
+        self._ai_focus_override: tuple[str, object] | None = None
         self._live_convergence_context: dict[str, object] = {
             "step": 0,
             "total": 0,
@@ -1515,6 +1518,7 @@ class MainWindow(QMainWindow):
         self._build_model_tree_dock()
         self._build_properties_dock()
         self._build_create_dock()
+        self._build_ai_assistant_dock()
         self._build_bottom_docks()
         self._build_actions_and_ribbon()
         self._build_status_bar()
@@ -1595,6 +1599,160 @@ class MainWindow(QMainWindow):
 
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
         self.create_dock = dock
+
+    def _build_ai_assistant_dock(self) -> None:
+        dock = QDockWidget("SARE AI Assistant", self)
+        dock.setObjectName("AIAssistantDock")
+        dock.setAllowedAreas(
+            Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea
+        )
+        dock.setMinimumWidth(360)
+
+        self.ai_assistant_panel = AIAssistantPanel(self)
+        self.ai_assistant_panel.send_requested.connect(
+            self._ai_assistant_send_requested
+        )
+        dock.setWidget(self.ai_assistant_panel)
+
+        self.addDockWidget(Qt.RightDockWidgetArea, dock)
+        self.tabifyDockWidget(self.create_dock, dock)
+        self.ai_assistant_dock = dock
+        dock.hide()
+
+    def _current_ai_focus(self) -> tuple[str, object] | None:
+        if self._ai_focus_override is not None:
+            return self._ai_focus_override
+        item = self.tree.currentItem()
+        if item is None:
+            return None
+        payload = item.data(0, Qt.UserRole)
+        if (
+            isinstance(payload, tuple)
+            and len(payload) == 2
+        ):
+            return str(payload[0]), payload[1]
+        return None
+
+    def _show_ai_assistant(self) -> None:
+        self._ai_focus_override = None
+        focus = self._current_ai_focus()
+        if focus is None:
+            self.ai_assistant_panel.set_focus(None)
+        else:
+            self.ai_assistant_panel.set_focus(focus[0], focus[1])
+        self.ai_assistant_dock.show()
+        self.ai_assistant_dock.raise_()
+        self.ai_assistant_panel.input.setFocus()
+
+    def _ask_ai_about_tree_item(
+        self,
+        kind: str,
+        value: object,
+    ) -> None:
+        self._ai_focus_override = (str(kind), value)
+        self.ai_assistant_panel.set_focus(str(kind), value)
+        self.ai_assistant_panel.prefill_question(
+            f"Inspect this {kind} ({value}) and explain any important "
+            "modeling, analysis, or solver issues you can identify."
+        )
+        self.ai_assistant_dock.show()
+        self.ai_assistant_dock.raise_()
+
+    def _ai_assistant_send_requested(
+        self,
+        prompt: str,
+        raw_config: object,
+    ) -> None:
+        config = (
+            dict(raw_config)
+            if isinstance(raw_config, dict)
+            else {}
+        )
+        project_payload = self.project.to_dict()
+        if not bool(config.get("include_analysis", True)):
+            project_payload["analyses"] = []
+            project_payload["active_analysis_tag"] = None
+
+        focus = self._current_ai_focus()
+        snapshot: dict[str, object] = {
+            "project": prepare_project_snapshot(project_payload),
+            "focus": (
+                {
+                    "kind": focus[0],
+                    "value": compact_for_llm(
+                        focus[1],
+                        max_depth=3,
+                        max_items=20,
+                    ),
+                }
+                if focus is not None
+                else None
+            ),
+        }
+
+        if bool(config.get("include_selection", True)):
+            snapshot["selection"] = {
+                "nodes": sorted(self.selection.nodes),
+                "elements": sorted(self.selection.elements),
+            }
+
+        if bool(config.get("include_validation", True)):
+            active = self.project.analyses.get(
+                self.project.active_analysis_tag
+            )
+            issues = self._model_check_issues(active)
+            snapshot["validation"] = [
+                {
+                    "severity": issue.severity,
+                    "category": issue.category,
+                    "message": issue.message,
+                    "entity_kind": issue.entity_kind,
+                    "entity_tag": issue.entity_tag,
+                    "suggestion": issue.suggestion,
+                }
+                for issue in issues
+            ]
+
+        if bool(config.get("include_job", True)):
+            job_payloads: list[dict[str, object]] = []
+            for job_id in sorted(self._jobs)[-5:]:
+                job = self._jobs[job_id]
+                job_payloads.append({
+                    "job_id": job.job_id,
+                    "analysis_tag": job.analysis_tag,
+                    "analysis_name": job.analysis_name,
+                    "analysis_type": job.analysis_type,
+                    "status": job.status,
+                    "exit_code": job.exit_code,
+                    "message": job.message,
+                    "progress_current": job.progress_current,
+                    "progress_total": job.progress_total,
+                    "progress_percent": job.progress_percent,
+                    "current_algorithm": job.current_algorithm,
+                    "iterations": job.iterations,
+                    "results": compact_for_llm(
+                        job.results,
+                        max_depth=6,
+                        max_items=32,
+                        max_string=8000,
+                    ),
+                    "plots": compact_for_llm(
+                        job.plots,
+                        max_depth=4,
+                        max_items=24,
+                    ),
+                })
+            snapshot["jobs"] = job_payloads
+
+        if bool(config.get("include_log", True)):
+            console_text = self.console.toPlainText()
+            snapshot["solver_log"] = console_text[-16000:]
+
+        self.ai_assistant_panel.run_request(
+            str(prompt),
+            config,
+            snapshot,
+        )
 
     def _build_bottom_docks(self) -> None:
         script_dock = QDockWidget("", self)
@@ -1768,6 +1926,14 @@ class MainWindow(QMainWindow):
             "select",
             self.selection.clear,
             "Clear the current node/element selection",
+        )
+
+        self._make_action(
+            "ai_assistant",
+            "AI Assistant",
+            "analysis",
+            self._show_ai_assistant,
+            "Open the read-only SARE engineering AI assistant",
         )
 
         self._make_action("node", "Node", "node", self._create_node, "Create node")
@@ -2261,6 +2427,8 @@ class MainWindow(QMainWindow):
 
         menus["Results"].addAction(self.actions["plot"])
 
+        menus["Tools"].addAction(self.actions["ai_assistant"])
+        menus["Tools"].addSeparator()
         measure_menu = menus["Tools"].addMenu("Measure")
         measure_menu.addAction(self.actions["measure_distance"])
         measure_menu.addAction(self.actions["clear_measurements"])
@@ -2290,6 +2458,7 @@ class MainWindow(QMainWindow):
         menus["Window"].addAction(self.console_dock.toggleViewAction())
         menus["Window"].addAction(self.results_dock.toggleViewAction())
         menus["Window"].addAction(self.create_dock.toggleViewAction())
+        menus["Window"].addAction(self.ai_assistant_dock.toggleViewAction())
         menus["Window"].addSeparator()
         reset_layout = QAction("Reset Dock Layout", self)
         reset_layout.triggered.connect(self._reset_dock_layout)
@@ -2664,6 +2833,7 @@ class MainWindow(QMainWindow):
             analysis_page,
             "Research",
             large=("calibration",),
+            small=("ai_assistant",),
         )
         add_group(
             analysis_page,
@@ -3184,6 +3354,7 @@ class MainWindow(QMainWindow):
         self.script_dock.show()
         self.console_dock.show()
         self.create_dock.show()
+        self.ai_assistant_dock.hide()
         self.results_dock.setVisible(bool(self._jobs))
         self._results_dock_sized_once = False
         self._size_initial_docks()
@@ -11072,6 +11243,13 @@ class MainWindow(QMainWindow):
 
         kind, value = payload
         menu = QMenu(self)
+        ask_ai = menu.addAction("Ask AI about this")
+        ask_ai.setIcon(studio_icon("analysis"))
+        ask_ai.triggered.connect(
+            lambda checked=False, k=str(kind), v=value:
+            self._ask_ai_about_tree_item(k, v)
+        )
+        menu.addSeparator()
 
         if kind == "model_root":
             menu.addAction(self.actions["check_model"])
