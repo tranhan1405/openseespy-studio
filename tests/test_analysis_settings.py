@@ -1143,9 +1143,9 @@ def test_modal_participation_uses_only_translational_dofs_for_2d_model():
         )
     )
 
-    assert "for _studio_dof in (1, 2):" in text
-    assert "    for _studio_dof in (1, 2):" in text
-    assert "for _studio_dof in (1, 2, 3):" not in text
+    assert "_studio_modal_directions = {1: 'MX', 2: 'MY', 3: 'MZ'}" in text
+    assert "if k in (1, 2)" in text
+    assert "if k in (1, 2, 3)" not in text
     compile(text, "<modal-2d-participation>", "exec")
 
 
@@ -1166,7 +1166,8 @@ def test_modal_participation_keeps_three_translational_dofs_for_3d_model():
         )
     )
 
-    assert "for _studio_dof in (1, 2, 3):" in text
+    assert "_studio_modal_directions = {1: 'MX', 2: 'MY', 3: 'MZ'}" in text
+    assert "if k in (1, 2, 3)" in text
     compile(text, "<modal-3d-participation>", "exec")
 
 
