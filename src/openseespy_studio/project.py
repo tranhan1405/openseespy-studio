@@ -2307,6 +2307,61 @@ class ProjectDatabase:
             )
         )
 
+    def _validate_element_geometry(
+        self,
+        element,
+        *,
+        transformation: TransformationData | None = None,
+    ) -> None:
+        node_i = self.model.nodes.get(int(element.i))
+        node_j = self.model.nodes.get(int(element.j))
+        if node_i is None or node_j is None:
+            raise ValueError(
+                f"Element {element.tag} references a missing endpoint node."
+            )
+        delta = tuple(
+            float(node_j.xyz[index]) - float(node_i.xyz[index])
+            for index in range(3)
+        )
+        length2 = sum(value * value for value in delta)
+        if length2 <= 1.0e-24:
+            raise ValueError(
+                f"Element {element.tag} has coincident end nodes and zero length."
+            )
+
+        if (
+            int(self.model.ndm) != 3
+            or element.element_type
+            not in {"elasticBeamColumn", "forceBeamColumn", "dispBeamColumn"}
+        ):
+            return
+
+        active_transformation = transformation
+        if active_transformation is None and element.transf_tag is not None:
+            active_transformation = self.transformations.get(
+                int(element.transf_tag)
+            )
+        if active_transformation is None:
+            return
+
+        vx, vy, vz = (
+            float(value) for value in active_transformation.vecxz
+        )
+        dx, dy, dz = delta
+        cross = (
+            vy * dz - vz * dy,
+            vz * dx - vx * dz,
+            vx * dy - vy * dx,
+        )
+        vec_norm2 = vx * vx + vy * vy + vz * vz
+        cross_norm2 = sum(value * value for value in cross)
+        if cross_norm2 <= 1.0e-16 * vec_norm2 * length2:
+            raise ValueError(
+                f"Transformation {active_transformation.tag} vecxz is "
+                f"parallel to element {element.tag}; choose an orientation "
+                "vector not parallel to the member axis."
+            )
+
     def next_transformation_tag(self) -> int:
         return max(self.transformations, default=0) + 1
 
@@ -2315,6 +2370,12 @@ class ProjectDatabase:
             raise ValueError(
                 f"Transformation tag {transformation.tag} already exists."
             )
+        for element in self.model.elements.values():
+            if element.transf_tag == transformation.tag:
+                self._validate_element_geometry(
+                    element,
+                    transformation=transformation,
+                )
         self.transformations[transformation.tag] = transformation
 
     def update_transformation(
@@ -2334,6 +2395,12 @@ class ProjectDatabase:
             raise ValueError(
                 f"Transformation tag {transformation.tag} already exists."
             )
+        for element in self.model.elements.values():
+            if element.transf_tag == original_tag:
+                self._validate_element_geometry(
+                    element,
+                    transformation=transformation,
+                )
         self.transformations.pop(original_tag)
         self.transformations[transformation.tag] = transformation
         if transformation.tag != original_tag:
@@ -3159,6 +3226,9 @@ class ProjectDatabase:
         element_tag = int(element_tag)
         if element_tag not in self.model.elements:
             raise ValueError(f"Element {element_tag} does not exist.")
+
+        element = self.model.elements[element_tag]
+        self._validate_element_geometry(element)
 
         for load in self.element_loads.values():
             if int(load.element_tag) == element_tag:
