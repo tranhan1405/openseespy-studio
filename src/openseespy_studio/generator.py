@@ -180,6 +180,30 @@ def material_to_openseespy(
             f"{p['R0']:g}, {p['cR1']:g}, {p['cR2']:g})"
         )
 
+    if material.material_type == "Hardening":
+        return (
+            "ops.uniaxialMaterial('Hardening', "
+            f"{material.tag}, {stress(p['E']):g}, "
+            f"{stress(p['sigmaY']):g}, {stress(p['H_iso']):g}, "
+            f"{stress(p['H_kin']):g}, {stress(p['eta']):g})"
+        )
+
+    if material.material_type == "ElasticPP":
+        return (
+            "ops.uniaxialMaterial('ElasticPP', "
+            f"{material.tag}, {stress(p['E']):g}, "
+            f"{p['epsyP']:g}, {p['epsyN']:g}, {p['eps0']:g})"
+        )
+
+    if material.material_type == "ElasticBilin":
+        return (
+            "ops.uniaxialMaterial('ElasticBilin', "
+            f"{material.tag}, {stress(p['EP1']):g}, "
+            f"{stress(p['EP2']):g}, {p['epsP2']:g}, "
+            f"{stress(p['EN1']):g}, {stress(p['EN2']):g}, "
+            f"{p['epsN2']:g})"
+        )
+
     if material.material_type == "ReinforcingSteel":
         return (
             "ops.uniaxialMaterial('ReinforcingSteel', "
@@ -218,6 +242,13 @@ def material_to_openseespy(
             p["pinchX"], p["pinchY"], p["damage1"], p["damage2"], p["beta"],
         ]
         return "ops.uniaxialMaterial('Hysteretic', " + str(material.tag) + ", " + ", ".join(f"{v:g}" for v in args) + ")"
+
+    if material.material_type == "HystereticSmooth":
+        return (
+            "ops.uniaxialMaterial('HystereticSmooth', "
+            f"{material.tag}, {p['ka']:g}, {p['kb']:g}, "
+            f"{p['fbar']:g}, {p['beta']:g})"
+        )
 
     if material.material_type == "Pinching4":
         keys = MATERIAL_PARAMETER_ORDER["Pinching4"][:-1]
