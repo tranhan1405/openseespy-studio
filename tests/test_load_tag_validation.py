@@ -263,3 +263,87 @@ def test_prescribed_displacement_rejects_fractional_dof():
             }
         )
 
+
+def test_prescribed_displacement_rejects_fractional_node_reference():
+    with pytest.raises(
+        ValueError,
+        match=r"Prescribed displacement node tag must be an integer",
+    ):
+        PrescribedDisplacementData(
+            15,
+            "Move",
+            pattern_tag=1,
+            node_tag=2.5,
+            dof=1,
+            value=0.001,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Prescribed displacement node tag must be an integer",
+    ):
+        PrescribedDisplacementData.from_dict(
+            {
+                "tag": 15,
+                "name": "Move",
+                "pattern_tag": 1,
+                "node_tag": 2.5,
+                "dof": 1,
+                "value": 0.001,
+            }
+        )
+
+
+def test_element_load_rejects_fractional_pattern_reference():
+    with pytest.raises(
+        ValueError,
+        match=r"Element load pattern tag must be an integer",
+    ):
+        ElementLoadData(
+            16,
+            "Beam load",
+            pattern_tag=1.5,
+            element_tag=1,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Element load pattern tag must be an integer",
+    ):
+        ElementLoadData.from_dict(
+            {
+                "tag": 16,
+                "name": "Beam load",
+                "pattern_tag": 1.5,
+                "element_tag": 1,
+                "load_type": "Uniform",
+            }
+        )
+
+
+def test_element_load_rejects_fractional_element_reference():
+    with pytest.raises(
+        ValueError,
+        match=r"Element load element tag must be an integer",
+    ):
+        ElementLoadData(
+            17,
+            "Beam load",
+            pattern_tag=1,
+            element_tag=2.5,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Element load element tag must be an integer",
+    ):
+        ElementLoadData.from_dict(
+            {
+                "tag": 17,
+                "name": "Beam load",
+                "pattern_tag": 1,
+                "element_tag": 2.5,
+                "load_type": "Uniform",
+            }
+        )
+
