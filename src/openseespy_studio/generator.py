@@ -2347,6 +2347,20 @@ def to_openseespy(
         if active_analysis is not None
         else []
     )
+    other_analysis_driver_tags: set[int] = set()
+    if analyses and active_analysis is not None:
+        for analysis_tag, analysis in analyses.items():
+            if (
+                active_analysis_tag is not None
+                and int(analysis_tag) == int(active_analysis_tag)
+            ):
+                continue
+            other_analysis_driver_tags.update(
+                int(tag) for tag in analysis.deferred_pattern_tags
+            )
+    scoped_deferred_analysis = bool(
+        active_analysis is not None and deferred_pattern_tags
+    )
     missing_deferred = sorted(
         deferred_pattern_tags - set((load_patterns or {}).keys())
     )
@@ -2692,6 +2706,17 @@ def to_openseespy(
             if tag in deferred_pattern_tags:
                 continue
             pattern = load_patterns[tag]
+            if scoped_deferred_analysis:
+                # Template-driven analyses own their driver/excitation
+                # patterns. Do not leak drivers from other analyses into the
+                # active solve, and only activate background Plain patterns
+                # when gravity/existing-load preload is explicitly enabled.
+                if tag in other_analysis_driver_tags:
+                    continue
+                if pattern.pattern_type != "Plain":
+                    continue
+                if not active_analysis.preload_gravity:
+                    continue
             lines.extend(
                 load_pattern_block_to_openseespy(
                     pattern,
@@ -2728,6 +2753,10 @@ def to_openseespy(
             if (
                 pattern.pattern_type == "Plain"
                 and tag not in deferred_pattern_tags
+                and (
+                    not scoped_deferred_analysis
+                    or tag not in other_analysis_driver_tags
+                )
             )
         )
         if active.preload_gravity and preload_plain_tags:
@@ -2864,7 +2893,17 @@ def to_openseespy(
                 plain_pattern_tags=sorted(
                     tag
                     for tag, pattern in (load_patterns or {}).items()
-                    if pattern.pattern_type == "Plain"
+                    if (
+                        pattern.pattern_type == "Plain"
+                        and (
+                            not scoped_deferred_analysis
+                            or tag in deferred_pattern_tags
+                            or (
+                                active.preload_gravity
+                                and tag not in other_analysis_driver_tags
+                            )
+                        )
+                    )
                 ),
                 monitor_node=monitor_node,
                 fiber_response_specs=fiber_response_specs,
