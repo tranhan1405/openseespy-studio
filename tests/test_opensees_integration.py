@@ -335,7 +335,7 @@ def test_generated_2d_elastic_frame_with_linear_algorithm_runs(
         "ops.element('elasticBeamColumn', 1, 1, 2, "
         "0.02, 2e+11, 8e-05, 1)"
     ) in script
-    assert "ops.algorithm('Linear')" in script
+    assert "_studio_primary_algorithm = 'Linear'" in script
     assert "ops.test(" not in script
 
     script_path = tmp_path / "frame2d-linear.py"
@@ -351,6 +351,69 @@ def test_generated_2d_elastic_frame_with_linear_algorithm_runs(
         3.0 * 200.0e9 * 8.0e-5
     )
     assert displacement == pytest.approx(expected, rel=1.0e-6)
+
+
+def test_modified_newton_initial_runs_in_real_opensees(tmp_path: Path):
+    model, sections, transformations = _elastic_cantilever()
+    series = {
+        1: TimeSeriesData(1, "Load", "Linear", factor=1.0)
+    }
+    patterns = {
+        1: LoadPatternData(1, "Lateral", "Plain", time_series_tag=1)
+    }
+    loads = {
+        1: NodalLoadData(
+            1,
+            "Top load",
+            pattern_tag=1,
+            node_tag=2,
+            values=(1000.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        )
+    }
+    analysis = AnalysisSettingsData(
+        91,
+        "ModifiedNewton initial smoke",
+        analysis_type="Static",
+        constraints_handler="Plain",
+        numberer="Plain",
+        system="BandGeneral",
+        test="NormDispIncr",
+        tolerance=1.0e-10,
+        max_iterations=20,
+        algorithm="ModifiedNewton",
+        algorithm_initial=True,
+        integrator="LoadControl",
+        steps=1,
+        load_increment=1.0,
+        control_node=2,
+        control_dof=1,
+        recovery=False,
+        adaptive_step=False,
+        live_convergence=False,
+    )
+
+    script = to_openseespy(
+        model,
+        sections=sections,
+        transformations=transformations,
+        time_series=series,
+        load_patterns=patterns,
+        nodal_loads=loads,
+        analyses={91: analysis},
+        active_analysis_tag=91,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    assert "ops.algorithm('ModifiedNewton', '-initial')" in script
+
+    script_path = tmp_path / "modified-newton-initial.py"
+    result_path = tmp_path / "modified-newton-initial-result.json"
+    script_path.write_text(script, encoding="utf-8")
+    exit_code = run_script(script_path, result_path)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0, payload.get("error", "")
+    assert payload["status"] == "completed"
+    assert payload["results"]["analysis"]["algorithm_initial"] is True
 
 
 def test_generated_moment_curvature_runs_in_real_opensees(tmp_path: Path):

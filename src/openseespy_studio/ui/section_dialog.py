@@ -1811,7 +1811,7 @@ class SectionDialog(QDialog):
                 else SECTION_DEFAULTS["Elastic"][key]
             )
             display_value = (
-                initial / PA_PER_MPA
+                self.unit_system.engineering_stress_from_pa(initial)
                 if key in {"E", "G"}
                 else initial
             )
@@ -1821,8 +1821,12 @@ class SectionDialog(QDialog):
                 spin.setSingleStep(100.0)
             lu = self.unit_system.length
             labels = {
-                "E": "E [MPa]:",
-                "G": "G [MPa]:",
+                "E": (
+                    f"E [{self.unit_system.engineering_stress_label}]:"
+                ),
+                "G": (
+                    f"G [{self.unit_system.engineering_stress_label}]:"
+                ),
                 "A": f"A [{lu}²]:",
                 "Iy": f"Iy [{lu}⁴]:",
                 "Iz": f"Iz [{lu}⁴]:",
@@ -2834,7 +2838,9 @@ class SectionDialog(QDialog):
         if section_type == "Elastic":
             parameters = {
                 key: (
-                    self.elastic_spins[key].value() * PA_PER_MPA
+                    self.unit_system.engineering_stress_to_pa(
+                        self.elastic_spins[key].value()
+                    )
                     if key in {"E", "G"}
                     else self.elastic_spins[key].value()
                 )

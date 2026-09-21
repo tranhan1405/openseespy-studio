@@ -4828,7 +4828,14 @@ class MainWindow(QMainWindow):
                 elif property_id == "poisson_ratio":
                     data["poisson_ratio"] = float(str(value).strip())
                 elif property_id == "density":
-                    data["density"] = float(str(value).strip())
+                    unit_system = UnitSystem.from_mapping(
+                        self.project.units
+                    )
+                    data["density"] = (
+                        unit_system.engineering_density_to_kg_per_m3(
+                            float(str(value).strip())
+                        )
+                    )
                 elif property_id.startswith("parameter:"):
                     parameter = property_id.split(":", 1)[1]
                     if parameter not in material.parameters:
@@ -4841,7 +4848,9 @@ class MainWindow(QMainWindow):
                         material.material_type, {}
                     ).get(parameter, "raw")
                     if parameter_kind == "stress":
-                        raw_value *= 1.0e6
+                        raw_value = UnitSystem.from_mapping(
+                            self.project.units
+                        ).engineering_stress_to_pa(raw_value)
                     elif parameter_kind == "length":
                         raw_value = UnitSystem.from_mapping(
                             self.project.units
@@ -4873,7 +4882,9 @@ class MainWindow(QMainWindow):
                         )
                     raw_value = float(str(value).strip())
                     if parameter in {"E", "G"}:
-                        raw_value *= 1.0e6
+                        raw_value = UnitSystem.from_mapping(
+                            self.project.units
+                        ).engineering_stress_to_pa(raw_value)
                     parameters = dict(data["parameters"])
                     parameters[parameter] = raw_value
                     data["parameters"] = parameters
@@ -7820,6 +7831,7 @@ class MainWindow(QMainWindow):
             source,
             source_name=Path(path).name,
             units=selected_units,
+            source_path=Path(path),
         )
         report = ImportReportDialog(result, parent=self)
         if report.exec() != QDialog.Accepted:
@@ -8032,6 +8044,12 @@ class MainWindow(QMainWindow):
         if material is None:
             return
 
+        unit_system = UnitSystem.from_mapping(self.project.units)
+        density_display = (
+            unit_system.engineering_density_from_kg_per_m3(
+                material.density
+            )
+        )
         rows = [
             ("Tag", material.tag),
             (
@@ -8050,8 +8068,11 @@ class MainWindow(QMainWindow):
                 },
             ),
             (
-                "Density [kg/m³]",
-                f"{material.density:g}",
+                (
+                    "Density "
+                    f"[{unit_system.engineering_density_label}]"
+                ),
+                f"{density_display:g}",
                 {
                     "id": "density",
                     "editable": True,
@@ -8093,19 +8114,30 @@ class MainWindow(QMainWindow):
             elastic_e = None
             elastic_g = None
         if elastic_e is not None:
+            stress_unit = unit_system.engineering_stress_label
             rows.extend([
-                ("Elastic E [MPa]", f"{elastic_e / 1.0e6:g}"),
-                ("Elastic G [MPa]", f"{elastic_g / 1.0e6:g}"),
+                (
+                    f"Elastic E [{stress_unit}]",
+                    f"{unit_system.engineering_stress_from_pa(elastic_e):g}",
+                ),
+                (
+                    f"Elastic G [{stress_unit}]",
+                    f"{unit_system.engineering_stress_from_pa(elastic_g):g}",
+                ),
             ])
 
         from ..project import MATERIAL_PARAMETER_KINDS
-        unit_system = UnitSystem.from_mapping(self.project.units)
         kinds = MATERIAL_PARAMETER_KINDS.get(material.material_type, {})
         for key, parameter_value in material.parameters.items():
             parameter_kind = kinds.get(key, "raw")
             if parameter_kind == "stress":
-                label = f"{key} [MPa]"
-                display = parameter_value / 1.0e6
+                label = (
+                    f"{key} "
+                    f"[{unit_system.engineering_stress_label}]"
+                )
+                display = unit_system.engineering_stress_from_pa(
+                    parameter_value
+                )
             elif parameter_kind == "length":
                 label = f"{key} [{unit_system.length}]"
                 display = unit_system.length_from_m(parameter_value)
@@ -8340,8 +8372,8 @@ class MainWindow(QMainWindow):
             if section.material_tag is None:
                 rows.extend([
                     (
-                        "E [MPa]",
-                        f"{section.parameters['E'] / 1.0e6:g}",
+                        f"E [{stress_unit}]",
+                        f"{unit_system.engineering_stress_from_pa(section.parameters['E']):g}",
                         {
                             "id": "parameter:E",
                             "editable": True,
@@ -8349,8 +8381,8 @@ class MainWindow(QMainWindow):
                         },
                     ),
                     (
-                        "G [MPa]",
-                        f"{section.parameters['G'] / 1.0e6:g}",
+                        f"G [{stress_unit}]",
+                        f"{unit_system.engineering_stress_from_pa(section.parameters['G']):g}",
                         {
                             "id": "parameter:G",
                             "editable": True,
@@ -8360,12 +8392,24 @@ class MainWindow(QMainWindow):
                 ])
             else:
                 rows.extend([
-                    ("Resolved E [MPa]", f"{resolved['E'] / 1.0e6:g}"),
-                    ("Resolved G [MPa]", f"{resolved['G'] / 1.0e6:g}"),
+                    (
+                        f"Resolved E [{stress_unit}]",
+                        f"{unit_system.engineering_stress_from_pa(resolved['E']):g}",
+                    ),
+                    (
+                        f"Resolved G [{stress_unit}]",
+                        f"{unit_system.engineering_stress_from_pa(resolved['G']):g}",
+                    ),
                 ])
                 material = self.project.materials.get(section.material_tag)
                 if material is not None:
-                    rows.append(("Density [kg/m³]", f"{material.density:g}"))
+                    rows.append((
+                        (
+                            "Density "
+                            f"[{unit_system.engineering_density_label}]"
+                        ),
+                        f"{unit_system.engineering_density_from_kg_per_m3(material.density):g}",
+                    ))
 
             if geometry_driven:
                 shape = str(section.display_geometry.get("shape", ""))

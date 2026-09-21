@@ -1164,6 +1164,7 @@ def analysis_to_openseespy(
         f"        'tolerance': {settings.tolerance:g},",
         f"        'max_iterations': {settings.max_iterations},",
         f"        'algorithm': {settings.algorithm!r},",
+        f"        'algorithm_initial': {settings.algorithm_initial!r},",
         f"        'integrator': {settings.integrator!r},",
         f"        'steps': {settings.steps},",
         f"        'load_increment': {settings.load_increment:g},",
@@ -1475,8 +1476,21 @@ def analysis_to_openseespy(
             f"ops.test('{settings.test}', {settings.tolerance:g}, "
             f"{settings.max_iterations}, {_studio_print_flag})"
         )
-    lines.append(f"ops.algorithm('{settings.algorithm}')")
     lines.append(f"_studio_primary_algorithm = {settings.algorithm!r}")
+    lines.append(
+        f"_studio_primary_algorithm_initial = "
+        f"{settings.algorithm_initial!r}"
+    )
+    lines.extend([
+        "def _studio_apply_primary_algorithm():",
+        "    if (_studio_primary_algorithm == 'ModifiedNewton' "
+        "and _studio_primary_algorithm_initial):",
+        "        ops.algorithm('ModifiedNewton', '-initial')",
+        "    else:",
+        "        ops.algorithm(_studio_primary_algorithm)",
+        "",
+        "_studio_apply_primary_algorithm()",
+    ])
 
     if settings.analysis_type == "Static":
         if settings.integrator == "LoadControl":
@@ -1651,7 +1665,7 @@ def analysis_to_openseespy(
         lines.append(
             "        _studio_active_algorithm = _studio_primary_algorithm"
         )
-        lines.append("        ops.algorithm(_studio_primary_algorithm)")
+        lines.append("        _studio_apply_primary_algorithm()")
 
         if settings.analysis_type == "Static":
             if settings.integrator == "LoadControl":
@@ -1789,7 +1803,7 @@ def analysis_to_openseespy(
             "algorithm=_studio_primary_algorithm)"
         )
         lines.append(
-            "                ops.algorithm(_studio_primary_algorithm)"
+            "                _studio_apply_primary_algorithm()"
         )
         lines.append("                continue")
         lines.append(
@@ -1895,7 +1909,7 @@ def analysis_to_openseespy(
             "algorithm=_studio_primary_algorithm)"
         )
         lines.append("            _studio_easy_streak = 0")
-        lines.append("        ops.algorithm(_studio_primary_algorithm)")
+        lines.append("        _studio_apply_primary_algorithm()")
         lines.append("        if _studio_remaining != 0.0:")
         lines.append(
             "            _studio_emit('adaptive_substep', "
@@ -2035,7 +2049,7 @@ def analysis_to_openseespy(
                 "iterations=_studio_iterations, norm=_studio_norm)"
             )
             lines.append("                break")
-            lines.append("        ops.algorithm(_studio_primary_algorithm)")
+            lines.append("        _studio_apply_primary_algorithm()")
     
         lines.append("    if _studio_ok != 0:")
         lines.append(

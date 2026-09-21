@@ -220,6 +220,11 @@ def material_test_axis_labels(
     """Return semantic axis labels for the material-point response."""
     unit_system = UnitSystem.from_mapping(units)
     material_type = material.material_type
+    stress_label = (
+        unit_system.engineering_stress_label
+        if unit_system.is_us_customary
+        else unit_system.stress_label
+    )
     if material_type in {
         "Elastic",
         "Steel01",
@@ -233,9 +238,12 @@ def material_test_axis_labels(
         "Concrete04",
         "FRPConfinedConcrete02",
     }:
-        return "Strain", f"Stress [{unit_system.stress_label}]"
+        return "Strain", f"Stress [{stress_label}]"
     if material_type == "Bond_SP01":
-        return f"Slip [{unit_system.length}]", f"Bond response [{unit_system.stress_label}]"
+        return (
+            f"Slip [{unit_system.length}]",
+            f"Bond response [{stress_label}]",
+        )
     return "Material deformation", "Material response"
 
 

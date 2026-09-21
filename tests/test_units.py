@@ -88,3 +88,26 @@ def test_in_kip_s_converts_ksi_to_pa_consistently():
         60.0,
         rel_tol=1.0e-12,
     )
+
+
+def test_in_kip_s_uses_ksi_and_lb_per_cubic_inch_for_engineering_display():
+    units = UnitSystem("in", "kip", "s")
+
+    assert units.is_us_customary is True
+    assert units.engineering_stress_label == "ksi"
+    assert units.engineering_density_label == "lb/in³"
+
+    stress_pa = units.engineering_stress_to_pa(60.0)
+    assert math.isclose(
+        units.engineering_stress_from_pa(stress_pa),
+        60.0,
+        rel_tol=1.0e-12,
+    )
+
+    steel_density = units.engineering_density_from_kg_per_m3(7850.0)
+    assert math.isclose(steel_density, 0.283599, rel_tol=2.0e-4)
+    assert math.isclose(
+        units.engineering_density_to_kg_per_m3(steel_density),
+        7850.0,
+        rel_tol=1.0e-12,
+    )

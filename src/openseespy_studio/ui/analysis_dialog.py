@@ -65,6 +65,24 @@ class AnalysisDialog(QDialog):
         self.tol=fs(analysis.tolerance if analysis else 1e-8,1e-16,1e10)
         self.max_iter=QSpinBox(); self.max_iter.setRange(1,100000); self.max_iter.setValue(analysis.max_iterations if analysis else 50)
         self.algorithm=QComboBox(); self.algorithm.addItems(["Linear","Newton","NewtonLineSearch","ModifiedNewton"]); self.algorithm.setCurrentText(analysis.algorithm if analysis else "Newton")
+        self.algorithm_initial=QCheckBox(
+            "Use initial tangent (-initial)"
+        )
+        self.algorithm_initial.setChecked(
+            analysis.algorithm_initial if analysis else False
+        )
+        self.algorithm_initial.setToolTip(
+            "OpenSees ModifiedNewton -initial: form the tangent from the "
+            "initial stiffness instead of the current tangent."
+        )
+        self.algorithm_initial.setEnabled(
+            self.algorithm.currentText() == "ModifiedNewton"
+        )
+        self.algorithm.currentTextChanged.connect(
+            lambda text: self.algorithm_initial.setEnabled(
+                text == "ModifiedNewton"
+            )
+        )
         self.integrator=QComboBox()
         self._initial_integrator=(analysis.integrator if analysis else None)
         self.integrator.setToolTip(
@@ -326,6 +344,11 @@ class AnalysisDialog(QDialog):
             ("tol","Tolerance",self.tol),
             ("max_iter","Max iterations",self.max_iter),
             ("algorithm","Algorithm",self.algorithm),
+            (
+                "algorithm_initial",
+                "Algorithm option",
+                self.algorithm_initial,
+            ),
             ("integrator","Integrator",self.integrator),
             ("steps","Steps",self.steps),
             ("load_inc","Load increment",self.load_inc),
@@ -642,6 +665,10 @@ class AnalysisDialog(QDialog):
             analysis_type=self.kind.currentText(),constraints_handler=self.constraints.currentText(),
             numberer=self.numberer.currentText(),system=self.system.currentText(),test=self.test.currentText(),
             tolerance=self.tol.value(),max_iterations=self.max_iter.value(),algorithm=self.algorithm.currentText(),
+            algorithm_initial=(
+                self.algorithm_initial.isChecked()
+                and self.algorithm.currentText() == "ModifiedNewton"
+            ),
             integrator=self.integrator.currentText(),
             steps=self.steps.value(),load_increment=self.load_inc.value(),control_node=self.control_node.value(),
             control_dof=int(self.control_dof.currentData()),displacement_increment=self.disp_inc.value(),
