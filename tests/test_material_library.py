@@ -237,7 +237,7 @@ def test_verified_library_reaches_one_hundred_fifty_eight_with_expected_source_c
     }
 
     assert len(records) == 158
-    assert len({record.id for record in records}) == 150
+    assert len({record.id for record in records}) == 158
     for prefix, expected in prefixes.items():
         assert sum(
             record.id.startswith(prefix)
