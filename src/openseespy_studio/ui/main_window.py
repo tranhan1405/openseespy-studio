@@ -6627,7 +6627,7 @@ class MainWindow(QMainWindow):
 
         before = self.project.to_dict()
         try:
-            updated = self.model.assign_element_formulation(
+            updated = self.project.assign_element_formulation(
                 element_tags,
                 **dialog.values(),
             )
@@ -6680,7 +6680,14 @@ class MainWindow(QMainWindow):
         section_tag = tags[labels.index(label)]
 
         before = self.project.to_dict()
-        assigned = self.model.assign_section(element_tags, section_tag)
+        try:
+            assigned = self.project.assign_section_to_elements(
+                element_tags,
+                section_tag,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Assign Section", str(exc))
+            return
         self._refresh_project_metadata(
             f"Assigned section {section_tag} to {len(assigned)} element(s)"
         )
@@ -6828,10 +6835,18 @@ class MainWindow(QMainWindow):
         transformation_tag = tags[labels.index(label)]
 
         before = self.project.to_dict()
-        assigned = self.model.assign_transformation(
-            element_tags,
-            transformation_tag,
-        )
+        try:
+            assigned = self.project.assign_transformation_to_elements(
+                element_tags,
+                transformation_tag,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Assign Transformation",
+                str(exc),
+            )
+            return
         self._refresh_project_metadata(
             f"Assigned transformation {transformation_tag} "
             f"to {len(assigned)} element(s)"
@@ -6846,7 +6861,14 @@ class MainWindow(QMainWindow):
         if element_tags is None:
             return
         before = self.project.to_dict()
-        assigned = self.model.assign_section(element_tags, None)
+        try:
+            assigned = self.project.assign_section_to_elements(
+                element_tags,
+                None,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Clear Section", str(exc))
+            return
         self._refresh_project_metadata(
             f"Cleared section on {len(assigned)} element(s)"
         )
@@ -6859,10 +6881,18 @@ class MainWindow(QMainWindow):
         if element_tags is None:
             return
         before = self.project.to_dict()
-        assigned = self.model.assign_transformation(
-            element_tags,
-            None,
-        )
+        try:
+            assigned = self.project.assign_transformation_to_elements(
+                element_tags,
+                None,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Clear Transformation",
+                str(exc),
+            )
+            return
         self._refresh_project_metadata(
             f"Cleared transformation on {len(assigned)} element(s)"
         )
