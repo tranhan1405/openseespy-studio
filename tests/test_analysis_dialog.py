@@ -263,3 +263,41 @@ def test_static_displacement_control_gets_fail_safe_driving_load_controls():
         assert dialog.data().deferred_pattern_tags == [7]
     finally:
         _close(dialog)
+
+
+def test_hidden_gravity_preload_state_is_not_serialized_for_unsupported_analysis():
+    dialog = AnalysisDialog(analysis_type="Transient")
+    try:
+        dialog.preload_gravity.setChecked(True)
+        _APP.processEvents()
+        assert _shown(dialog.preload_gravity)
+        assert dialog.data().preload_gravity is True
+
+        dialog.kind.setCurrentText("Static")
+        _APP.processEvents()
+
+        assert dialog.integrator.currentText() == "LoadControl"
+        assert not _shown(dialog.preload_gravity)
+        assert dialog.preload_gravity.isChecked()
+        assert dialog.data().preload_gravity is False
+    finally:
+        _close(dialog)
+
+
+def test_static_displacement_control_only_serializes_preload_while_supported():
+    dialog = AnalysisDialog(analysis_type="Static")
+    try:
+        dialog.integrator.setCurrentText("DisplacementControl")
+        dialog.preload_gravity.setChecked(True)
+        _APP.processEvents()
+        assert _shown(dialog.preload_gravity)
+        assert dialog.data().preload_gravity is True
+
+        dialog.integrator.setCurrentText("ArcLength")
+        _APP.processEvents()
+
+        assert not _shown(dialog.preload_gravity)
+        assert dialog.preload_gravity.isChecked()
+        assert dialog.data().preload_gravity is False
+    finally:
+        _close(dialog)

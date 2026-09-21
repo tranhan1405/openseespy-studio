@@ -604,6 +604,14 @@ class AnalysisDialog(QDialog):
                 cyclic_targets.append(float(value))
         deferred_pattern_tags=[]
         kind = self.kind.currentText()
+        integrator = self.integrator.currentText()
+        preload_supported = (
+            kind in {"Pushover", "Cyclic", "Transient"}
+            or (kind == "Static" and integrator == "DisplacementControl")
+        )
+        preload_gravity = (
+            preload_supported and self.preload_gravity.isChecked()
+        )
         if kind == "Transient":
             for raw in (
                 self.deferred_patterns.text()
@@ -647,7 +655,7 @@ class AnalysisDialog(QDialog):
             rayleigh_damping_ratio=self.damping_ratio.value(),
             rayleigh_mode_i=self.damping_mode_i.value(),
             rayleigh_mode_j=self.damping_mode_j.value(),
-            preload_gravity=self.preload_gravity.isChecked(),
+            preload_gravity=preload_gravity,
             gravity_steps=self.gravity_steps.value(),
             deferred_pattern_tags=deferred_pattern_tags,
             num_modes=self.modes.value(),
