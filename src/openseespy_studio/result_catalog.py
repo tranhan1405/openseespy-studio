@@ -28,6 +28,8 @@ def convergence_result_label(test: str | None) -> str:
 def result_choices_for_analysis(
     analysis_type: str,
     convergence_test: str | None = None,
+    *,
+    integrator: str | None = None,
 ) -> list[ResultChoice]:
     """Return the shared result catalog for Solution and Job menus."""
     kind = str(analysis_type)
@@ -160,6 +162,17 @@ def result_choices_for_analysis(
             },
         )
     )
+
+    if kind == "Static" and str(integrator or "") == "DisplacementControl":
+        choices.append(
+            ResultChoice(
+                "Charts / History",
+                "Moment–Curvature",
+                "MomentCurvature",
+                "Moment–Curvature",
+                {},
+            )
+        )
 
     if kind == "Pushover":
         choices.append(
