@@ -16262,6 +16262,134 @@
         "parameter_location_identified": true,
         "units_checked": true
       }
+    },
+    {
+      "id": "seo-2013-a36-spherical-bearing-steel01",
+      "family": "Structural Steel / Bearing",
+      "material": "A36 spherical-bearing steel component",
+      "grade": "A36 · spherical bearing model",
+      "standard": "Calibrated spherical-bearing OpenSees component",
+      "model": "Steel01",
+      "preset_name": "Seo et al. (2013) · A36 spherical bearing · Steel01",
+      "parameters_si": {
+        "Fy": 250000000,
+        "E0": 200000000000,
+        "b": 0.014,
+        "a1": 0,
+        "a2": 55,
+        "a3": 0,
+        "a4": 55
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "A36 steel component of spherical bridge bearings",
+        "OpenSees Steel01 bilinear kinematic-hardening component",
+        "Used in parallel with the paper's calibrated Hysteretic bearing component",
+        "Stress-strain representation shown in Figure 6(a)"
+      ],
+      "limitations": [
+        "This is the Steel01 component of a composite spherical-bearing model, not a complete bearing model by itself.",
+        "The paper supplies Fy, E0 and b; a1-a4 are the exact OpenSees 3-parameter Steel01 defaults and are identified separately in provenance.",
+        "Do not treat the calibrated parallel bearing assembly as a generic A36 constitutive model."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Nonlinear Seismic Response Analysis of Curved and Skewed Bridge System with Spherical Bearings",
+        "authors": "Junwon Seo; Daniel G. Linzell; Jong Wan Hu",
+        "journal": "Advances in Civil Engineering",
+        "volume_issue": "2013",
+        "article": "248575",
+        "year": 2013,
+        "doi": "10.1155/2013/248575"
+      },
+      "parameter_evidence": {
+        "type": "journal_figure_and_opensees_source",
+        "title": "Nonlinear Seismic Response Analysis of Curved and Skewed Bridge System with Spherical Bearings",
+        "author": "Junwon Seo; Daniel G. Linzell; Jong Wan Hu",
+        "institution": "Advances in Civil Engineering",
+        "year": 2013,
+        "location": "Figure 6(a) — Steel01 component: Fy=250 MPa, Ke/E0=200 GPa and b=0.014; modelling text identifies A36 steel and Steel01. OpenSees Steel01 source defines the 3-parameter command defaults as a1=0, a2=55, a3=0, a4=55, corresponding to no isotropic hardening.",
+        "url": "https://doi.org/10.1155/2013/248575",
+        "relationship": "The journal paper directly reports the three active Steel01 inputs used for the spherical-bearing steel component. The paper uses the 3-parameter Steel01 form, so SARE expands it with the exact OpenSees source-code defaults a1=0, a2=55, a3=0, a4=55."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "cheng-2019-hrb400-tower-rebar-steel01",
+      "family": "Reinforcing Steel",
+      "material": "Main-tower longitudinal reinforcement",
+      "grade": "HRB400",
+      "standard": "JTG D62-2004 material values used in the bridge model",
+      "model": "Steel01",
+      "preset_name": "Cheng (2019) · HRB400 tower reinforcement · Steel01",
+      "parameters_si": {
+        "Fy": 400000000,
+        "E0": 200000000000,
+        "b": 0.005,
+        "a1": 0,
+        "a2": 55,
+        "a3": 0,
+        "a4": 55
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "HRB400 reinforcement in the main tower of a long-span cable-stayed bridge",
+        "OpenSees Steel01 bilinear reinforcing-steel model",
+        "Fiber-section nonlinear seismic analysis",
+        "3-parameter Steel01 command reported explicitly by the source"
+      ],
+      "limitations": [
+        "The published set follows the study's HRB400/JTG D62-2004 assumptions rather than specimen-specific cyclic coupon calibration.",
+        "The paper supplies Fy, E0 and b; a1-a4 are the exact OpenSees 3-parameter Steel01 defaults and are identified separately in provenance.",
+        "Use only where a simple bilinear kinematic-hardening representation is appropriate."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Nonlinear seismic finite element modeling method for super long span column tower cable-stayed bridge",
+        "authors": "Leike Cheng",
+        "journal": "IOP Conference Series: Earth and Environmental Science",
+        "volume_issue": "304(4)",
+        "article": "042054",
+        "year": 2019,
+        "doi": "10.1088/1755-1315/304/4/042054"
+      },
+      "parameter_evidence": {
+        "type": "journal_section_and_opensees_source",
+        "title": "Nonlinear seismic finite element modeling method for super long span column tower cable-stayed bridge",
+        "author": "Leike Cheng",
+        "institution": "IOP Conference Series: Earth and Environmental Science",
+        "year": 2019,
+        "location": "Section 2.1 Steel model — explicit command \"uniaxialMaterial Steel01 $matTag $Fy $E0 $b\"; HRB400 Fy=400 MPa, E0=200 GPa and b=0.005. OpenSees Steel01 source defines the 3-parameter command defaults as a1=0, a2=55, a3=0, a4=55, corresponding to no isotropic hardening.",
+        "url": "https://doi.org/10.1088/1755-1315/304/4/042054",
+        "relationship": "The paper directly states the Steel01 command and its three numerical material inputs. SARE expands the omitted isotropic-hardening inputs using the exact defaults implemented by OpenSees."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
     }
   ]
 }
