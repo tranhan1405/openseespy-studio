@@ -73,7 +73,7 @@ when it can be traced to a specific source and parameter-evidence location.
 Journal references require a DOI. Unsupported or merely "commonly used"
 values are not silently promoted to verified presets.
 
-The library currently contains **175 verified parameter records**:
+The library currently contains **177 verified parameter records**:
 
 - 2 Steel02 Grade-60 reinforcing-steel records from Carreño et al. (2020),
   DOI `10.1061/(ASCE)ST.1943-541X.0002505`.
@@ -128,8 +128,13 @@ The library currently contains **175 verified parameter records**:
 - 2 slenderness-dependent Fatigue wrapper records for vertical reinforcing
   bars (L/D = 5 and 12.5) from Zhang et al. (2025), DOI
   `10.1007/s10518-025-02131-y`.
+- 2 MinMax reinforcing-steel failure-limit records: the 0.135 tensile
+  fracture-strain limit for the additively manufactured micro-rebar of
+  Del Giudice et al. (2022), DOI `10.1002/eqe.3578`, and the
+  -0.04/+0.12 compression/tension collapse limits used by Zhou et al.
+  (2021), DOI `10.1186/s40069-021-00463-y`.
 
-These are **published/calibrated parameter records**, not 175 unrelated
+These are **published/calibrated parameter records**, not 177 unrelated
 chemical materials. SARE exposes specimen/configuration, modelling
 representation, applicability and limitations so a paper-specific parameter
 set is not mistaken for a universal material-grade default.
