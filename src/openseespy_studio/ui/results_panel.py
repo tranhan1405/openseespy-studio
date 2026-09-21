@@ -64,6 +64,7 @@ from ..postprocess import (
     fiber_state_element_tags,
     fiber_state_sections,
     force_displacement_curve,
+    moment_curvature_curve,
     pushover_capacity_curve,
     time_history_node_tags,
     time_history_series,
@@ -970,6 +971,7 @@ class ResultsPanel(QWidget):
         self._build_fiber_tab()
         self._build_hinge_tab()
         self._build_force_displacement_tab()
+        self._build_moment_curvature_tab()
         self._build_pushover_tab()
         self._build_cyclic_tab()
         self._build_specimen_tab()
@@ -1168,6 +1170,9 @@ class ResultsPanel(QWidget):
 
             self._update_force_displacement_controls()
             self._select_tab("Force–Displacement")
+            return
+        if kind == "MomentCurvature":
+            self._select_tab("Moment–Curvature")
             return
         if kind == "PushoverCurve":
             self._select_tab("Pushover Curve")
@@ -1887,6 +1892,38 @@ class ResultsPanel(QWidget):
         layout.addWidget(self.force_disp_plot, 1)
         self.tabs.addTab(page, "Force–Displacement")
         self._update_force_displacement_controls()
+
+    def _build_moment_curvature_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(5)
+
+        self.moment_curvature_info = QLabel(
+            "Run a recognized zeroLengthSection moment-curvature workflow "
+            "to plot section moment versus curvature."
+        )
+        self.moment_curvature_info.setWordWrap(True)
+        layout.addWidget(self.moment_curvature_info)
+
+        self.moment_curvature_metrics = QLabel(
+            "Points: -   Peak |M|: -   Peak |κ|: -   Final: -"
+        )
+        self.moment_curvature_metrics.setWordWrap(True)
+        layout.addWidget(self.moment_curvature_metrics)
+
+        row = QHBoxLayout()
+        row.addStretch(1)
+        export = QPushButton("Export CSV")
+        export.clicked.connect(self._export_moment_curvature_csv)
+        row.addWidget(export)
+        layout.addLayout(row)
+
+        self.moment_curvature_plot = TimeHistoryPlot(
+            empty_message="No moment-curvature data"
+        )
+        layout.addWidget(self.moment_curvature_plot, 1)
+        self.tabs.addTab(page, "Moment–Curvature")
 
     def _build_pushover_tab(self) -> None:
         page = QWidget()
@@ -3471,6 +3508,14 @@ class ResultsPanel(QWidget):
             "Points: -   Peak |F|: -   Peak |u|: -"
         )
         self.force_disp_plot.set_series([], [])
+        self.moment_curvature_info.setText(
+            "Run a recognized zeroLengthSection moment-curvature workflow "
+            "to plot section moment versus curvature."
+        )
+        self.moment_curvature_metrics.setText(
+            "Points: -   Peak |M|: -   Peak |κ|: -   Final: -"
+        )
+        self.moment_curvature_plot.set_series([], [])
         self.pushover_info.setText(
             "Run a Pushover analysis to plot applied base shear versus "
             "control-node displacement."
@@ -4043,6 +4088,7 @@ class ResultsPanel(QWidget):
         self._populate_history_nodes()
         self._populate_force_displacement_nodes()
         self._update_force_displacement_plot()
+        self._update_moment_curvature_plot()
         self._update_pushover_plot()
         self._update_cyclic_plot()
         self._populate_specimen_response()
@@ -4675,6 +4721,78 @@ class ResultsPanel(QWidget):
             f"A={numeric('area')} · "
             f"stress={numeric('stress')} · "
             f"strain={numeric('strain')}"
+        )
+
+    def _update_moment_curvature_plot(self) -> None:
+        x, y, component, element_tag = moment_curvature_curve(self._result)
+        if not x or not y:
+            spec = self._result.get("moment_curvature", {})
+            if isinstance(spec, dict) and spec.get("kind") == "moment-curvature":
+                self.moment_curvature_info.setText(
+                    "Moment-curvature workflow recognized, but no complete "
+                    "zeroLengthSection force/deformation history is available."
+                )
+            else:
+                self.moment_curvature_info.setText(
+                    "Run a Static + DisplacementControl zeroLengthSection "
+                    "moment-curvature workflow to populate this result."
+                )
+            self.moment_curvature_metrics.setText(
+                "Points: -   Peak |M|: -   Peak |κ|: -   Final: -"
+            )
+            self.moment_curvature_plot.set_series([], [])
+            return
+
+        component_label = component or "M"
+        peak_m = max(abs(value) for value in y)
+        peak_k = max(abs(value) for value in x)
+        self.moment_curvature_info.setText(
+            f"zeroLengthSection element {element_tag if element_tag is not None else '-'} "
+            f"· X = curvature κ · Y = section moment {component_label}"
+        )
+        self.moment_curvature_metrics.setText(
+            f"Points: {len(x)}   "
+            f"Peak |M|: {peak_m:.6g}   "
+            f"Peak |κ|: {peak_k:.6g}   "
+            f"Final: ({x[-1]:.6g}, {y[-1]:.6g})"
+        )
+        self.moment_curvature_plot.set_series(x, y)
+
+    def _export_moment_curvature_csv(self) -> None:
+        x, y, component, element_tag = moment_curvature_curve(self._result)
+        if not x or not y:
+            self.moment_curvature_info.setText(
+                "No moment-curvature data is available to export."
+            )
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Moment–Curvature",
+            "moment_curvature.csv",
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+
+        with open(path, "w", newline="", encoding="utf-8") as stream:
+            writer = csv.writer(stream)
+            writer.writerow([
+                "Curvature",
+                f"Moment {component or 'M'}",
+                "zeroLengthSection element",
+            ])
+            for curvature, moment in zip(x, y):
+                writer.writerow([
+                    curvature,
+                    moment,
+                    element_tag if element_tag is not None else "",
+                ])
+
+        self.moment_curvature_info.setText(
+            f"Exported {len(x)} moment-curvature point(s) to {path}."
         )
 
     def _update_pushover_plot(self) -> None:
