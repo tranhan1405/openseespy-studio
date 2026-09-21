@@ -132,14 +132,15 @@ def test_validation_rejects_ground_motion_direction_beyond_model_ndm():
             values=[0.0, 0.1],
         )
     )
-    project.add_load_pattern(
-        LoadPatternData(
-            1,
-            "EQ Z",
-            "UniformExcitation",
-            time_series_tag=1,
-            direction=3,
-        )
+    # Insert directly to keep final-project validation coverage for
+    # legacy/imported invalid projects. New edits are rejected earlier by
+    # ProjectDatabase.add_load_pattern().
+    project.load_patterns[1] = LoadPatternData(
+        1,
+        "EQ Z",
+        "UniformExcitation",
+        time_series_tag=1,
+        direction=3,
     )
     analysis = AnalysisSettingsData(
         1,
