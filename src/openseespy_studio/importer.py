@@ -1353,6 +1353,82 @@ class _Importer:
         except (IndexError, KeyError, TypeError, ValueError) as exc:
             self.issue("ERROR", node, command, str(exc))
 
+    def _call_custom_function(self, call: ast.Call) -> Any:
+        if not isinstance(call.func, ast.Name):
+            raise _Unresolved("custom call target")
+        name = call.func.id
+        function = self.functions.get(name)
+        if function is None:
+            raise _Unresolved(name)
+        if self._call_depth >= self.MAX_CALL_DEPTH:
+            raise _Unresolved(
+                f"function call depth exceeds {self.MAX_CALL_DEPTH}"
+            )
+
+        arguments = [
+            *function.args.posonlyargs,
+            *function.args.args,
+        ]
+        if (
+            function.args.vararg is not None
+            or function.args.kwarg is not None
+            or function.args.kwonlyargs
+        ):
+            raise _Unresolved(
+                f"function {name} uses unsupported variadic/keyword-only arguments"
+            )
+        if any(keyword.arg is None for keyword in call.keywords):
+            raise _Unresolved("**kwargs")
+
+        positional = [self.eval.eval(arg) for arg in call.args]
+        if len(positional) > len(arguments):
+            raise _Unresolved(f"too many arguments for {name}")
+
+        bindings: dict[str, Any] = {}
+        for argument, value in zip(arguments, positional):
+            bindings[argument.arg] = value
+
+        valid_names = {argument.arg for argument in arguments}
+        for keyword in call.keywords:
+            assert keyword.arg is not None
+            if keyword.arg not in valid_names:
+                raise _Unresolved(
+                    f"unknown argument {keyword.arg!r} for {name}"
+                )
+            if keyword.arg in bindings:
+                raise _Unresolved(
+                    f"multiple values for argument {keyword.arg!r}"
+                )
+            bindings[keyword.arg] = self.eval.eval(keyword.value)
+
+        default_offset = len(arguments) - len(function.args.defaults)
+        for index, argument in enumerate(arguments):
+            if argument.arg in bindings:
+                continue
+            default_index = index - default_offset
+            if default_index < 0:
+                raise _Unresolved(
+                    f"missing argument {argument.arg!r} for {name}"
+                )
+            bindings[argument.arg] = self.eval.eval(
+                function.args.defaults[default_index]
+            )
+
+        saved_env = dict(self.env)
+        self._call_depth += 1
+        self.env.update(bindings)
+        try:
+            try:
+                for child in function.body:
+                    self.statement(child)
+            except _ReturnSignal as signal:
+                return signal.value
+            return None
+        finally:
+            self.env.clear()
+            self.env.update(saved_env)
+            self._call_depth -= 1
+
     def assign(self, target: ast.AST, value: Any) -> None:
         if isinstance(target, ast.Name):
             self.env[target.id] = value
@@ -1361,23 +1437,47 @@ class _Importer:
                 if isinstance(data, dict):
                     self.analysis_metadata = dict(data)
             return
-        if isinstance(target, (ast.Tuple, ast.List)) and isinstance(value, (tuple, list)):
+        if (
+            isinstance(target, (ast.Tuple, ast.List))
+            and isinstance(value, (tuple, list))
+        ):
+            if len(target.elts) != len(value):
+                raise _Unresolved("unpacking target length")
             for child, child_value in zip(target.elts, value):
                 self.assign(child, child_value)
             return
         raise _Unresolved("assignment target")
 
+    def _statement_budget_available(self, stmt: ast.stmt) -> bool:
+        if self._statement_steps >= self.MAX_STATEMENT_STEPS:
+            if self._statement_steps == self.MAX_STATEMENT_STEPS:
+                self.issue(
+                    "UNSUPPORTED",
+                    stmt,
+                    "safe import limit",
+                    "Safe import exceeded the 100,000-statement limit.",
+                )
+            self._statement_steps += 1
+            return False
+        self._statement_steps += 1
+        return True
+
     def statement(self, stmt: ast.stmt) -> None:
+        if not self._statement_budget_available(stmt):
+            return
+
         if isinstance(stmt, ast.Import):
             for alias in stmt.names:
                 if alias.name == "openseespy.opensees":
                     self.ops_aliases.add(alias.asname or "ops")
             return
+
         if isinstance(stmt, ast.ImportFrom):
             if stmt.module == "openseespy.opensees":
                 if any(alias.name == "*" for alias in stmt.names):
                     self.direct_ops = True
             return
+
         if isinstance(stmt, ast.Assign):
             try:
                 value = self.eval.eval(stmt.value)
@@ -1396,72 +1496,206 @@ class _Importer:
                     )
                 ):
                     self.issue(
-                        "WARNING", stmt, "assignment",
+                        "WARNING",
+                        stmt,
+                        "assignment",
                         "Assignment could not be resolved safely.",
                     )
             return
+
+        if isinstance(stmt, ast.AnnAssign):
+            if stmt.value is None:
+                return
+            try:
+                self.assign(stmt.target, self.eval.eval(stmt.value))
+            except _Unresolved:
+                self.issue(
+                    "WARNING",
+                    stmt,
+                    "annotated assignment",
+                    "Annotated assignment could not be resolved safely.",
+                )
+            return
+
+        if isinstance(stmt, ast.AugAssign):
+            if not isinstance(stmt.target, ast.Name):
+                self.issue(
+                    "UNSUPPORTED",
+                    stmt,
+                    "augmented assignment",
+                    "Only simple-name augmented assignments are supported.",
+                )
+                return
+            try:
+                if stmt.target.id not in self.env:
+                    raise _Unresolved(stmt.target.id)
+                value = _SafeEvaluator._binary(
+                    stmt.op,
+                    self.env[stmt.target.id],
+                    self.eval.eval(stmt.value),
+                )
+                self.assign(stmt.target, value)
+            except _Unresolved:
+                self.issue(
+                    "WARNING",
+                    stmt,
+                    "augmented assignment",
+                    "Augmented assignment could not be resolved safely.",
+                )
+            return
+
         if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
             command = self.command_name(stmt.value)
             if command is not None:
                 self.handle_call(command, stmt.value)
-            elif not self._studio_source:
-                self.issue(
-                    "UNSUPPORTED", stmt, "function call",
-                    "Custom Python function calls are not executed during import.",
-                )
-            return
-        if isinstance(stmt, ast.For):
-            if isinstance(stmt.target, ast.Name) and stmt.target.id.startswith("_studio_"):
-                return
-            if not (
-                isinstance(stmt.iter, ast.Call)
-                and isinstance(stmt.iter.func, ast.Name)
-                and stmt.iter.func.id == "range"
-            ):
-                self.issue(
-                    "UNSUPPORTED", stmt, "for loop",
-                    "Only for ... in range(...) loops are expanded safely.",
-                )
                 return
             try:
-                values = list(
-                    range(*(int(self.eval.eval(arg)) for arg in stmt.iter.args))
-                )
-            except Exception:
+                self.eval.eval(stmt.value)
+            except _Unresolved as exc:
+                if not self._studio_source:
+                    self.issue(
+                        "UNSUPPORTED",
+                        stmt,
+                        "function call",
+                        f"Function call could not be resolved safely: {exc}.",
+                    )
+            except (IndexError, KeyError, TypeError, ValueError) as exc:
+                self.issue("ERROR", stmt, "function call", str(exc))
+            return
+
+        if isinstance(stmt, ast.If):
+            # SARE-generated scripts contain runtime-only _studio_* control
+            # flow. Metadata already reconstructs those analyses, so preserve
+            # the existing behavior and do not symbolically execute it.
+            if self._studio_source:
+                return
+            try:
+                condition = bool(self.eval.eval(stmt.test))
+            except _Unresolved as exc:
                 self.issue(
-                    "UNSUPPORTED", stmt, "for range",
-                    "range bounds could not be resolved safely.",
+                    "UNSUPPORTED",
+                    stmt,
+                    "if",
+                    f"If condition could not be resolved safely: {exc}.",
                 )
                 return
-            if len(values) > 20000:
+            branch = stmt.body if condition else stmt.orelse
+            for child in branch:
+                self.statement(child)
+            return
+
+        if isinstance(stmt, ast.For):
+            if (
+                isinstance(stmt.target, ast.Name)
+                and stmt.target.id.startswith("_studio_")
+            ):
+                return
+            try:
+                iterable = self.eval.eval(stmt.iter)
+                iterator = iter(iterable)
+            except (TypeError, _Unresolved) as exc:
+                if not self._studio_source:
+                    self.issue(
+                        "UNSUPPORTED",
+                        stmt,
+                        "for loop",
+                        f"Loop iterable could not be resolved safely: {exc}.",
+                    )
+                return
+
+            values: list[Any] = []
+            try:
+                for index, value in enumerate(iterator):
+                    if index >= self.MAX_LOOP_ITERATIONS:
+                        self.issue(
+                            "UNSUPPORTED",
+                            stmt,
+                            "for loop",
+                            "Loop exceeds the 20,000-iteration safe import limit.",
+                        )
+                        return
+                    values.append(value)
+            except Exception as exc:
                 self.issue(
-                    "UNSUPPORTED", stmt, "for range",
-                    "Loop exceeds the 20,000-iteration safe import limit.",
+                    "UNSUPPORTED",
+                    stmt,
+                    "for loop",
+                    f"Loop iterable failed during safe expansion: {exc}.",
                 )
                 return
+
+            broke = False
             for value in values:
                 try:
                     self.assign(stmt.target, value)
                 except _Unresolved:
                     self.issue(
-                        "UNSUPPORTED", stmt, "for target",
+                        "UNSUPPORTED",
+                        stmt,
+                        "for target",
                         "Loop target is not a simple resolvable variable.",
                     )
                     return
-                for child in stmt.body:
+                try:
+                    for child in stmt.body:
+                        self.statement(child)
+                except _ContinueSignal:
+                    continue
+                except _BreakSignal:
+                    broke = True
+                    break
+            if not broke:
+                for child in stmt.orelse:
                     self.statement(child)
             return
-        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+
+        if isinstance(stmt, ast.FunctionDef):
+            if stmt.name.startswith("_studio_"):
+                return
+            if stmt.decorator_list:
+                self.issue(
+                    "UNSUPPORTED",
+                    stmt,
+                    "function definition",
+                    "Decorated functions are not executed in safe import mode.",
+                )
+                return
+            self.functions[stmt.name] = stmt
+            return
+
+        if isinstance(stmt, ast.Return):
+            value = (
+                self.eval.eval(stmt.value)
+                if stmt.value is not None
+                else None
+            )
+            raise _ReturnSignal(value)
+
+        if isinstance(stmt, ast.Break):
+            raise _BreakSignal()
+
+        if isinstance(stmt, ast.Continue):
+            raise _ContinueSignal()
+
+        if isinstance(stmt, ast.Pass):
+            return
+
+        if isinstance(stmt, (ast.AsyncFunctionDef, ast.ClassDef)):
             if not getattr(stmt, "name", "").startswith("_studio_"):
                 self.issue(
-                    "UNSUPPORTED", stmt, "definition",
-                    "Custom function/class bodies are not executed in safe import mode.",
+                    "UNSUPPORTED",
+                    stmt,
+                    "definition",
+                    "Async functions and classes are not executed in safe import mode.",
                 )
             return
-        if isinstance(stmt, (ast.Try, ast.While, ast.With, ast.If)):
+
+        if isinstance(stmt, (ast.Try, ast.While, ast.With)):
             if not self._studio_source:
                 self.issue(
-                    "UNSUPPORTED", stmt, type(stmt).__name__,
+                    "UNSUPPORTED",
+                    stmt,
+                    type(stmt).__name__,
                     "This control-flow construct is not executed in safe import mode.",
                 )
             return
