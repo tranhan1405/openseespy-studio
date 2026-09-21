@@ -1642,7 +1642,14 @@ class AnalysisSettingsData:
             raise ValueError("Deferred load-pattern tags must be positive.")
         if self.analysis_type == "Modal" and self.num_modes < 1:
             raise ValueError("Number of modes must be at least 1.")
-        if self.eigen_solver not in {
+        uses_eigen_solver = (
+            self.analysis_type == "Modal"
+            or (
+                self.analysis_type == "Transient"
+                and self.rayleigh_damping_ratio > 0.0
+            )
+        )
+        if uses_eigen_solver and self.eigen_solver not in {
             "-genBandArpack",
             "-fullGenLapack",
             "-symmBandLapack",

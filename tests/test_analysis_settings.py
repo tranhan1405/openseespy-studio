@@ -964,3 +964,81 @@ def test_modal_rejects_nonpositive_num_modes(num_modes):
             "Modal",
             num_modes=num_modes,
         )
+
+
+@pytest.mark.parametrize(
+    "analysis_type",
+    ["Static", "Pushover", "Cyclic"],
+)
+def test_non_eigen_analyses_ignore_unused_invalid_eigen_solver(analysis_type):
+    kwargs = {"eigen_solver": "not-an-eigen-solver"}
+
+    if analysis_type == "Pushover":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    elif analysis_type == "Cyclic":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            cyclic_targets=[0.001, -0.001],
+            cyclic_increment=0.0005,
+        )
+
+    analysis = AnalysisSettingsData(
+        74,
+        f"{analysis_type} ignores eigen solver",
+        analysis_type,
+        **kwargs,
+    )
+    assert analysis.eigen_solver == "not-an-eigen-solver"
+
+
+def test_transient_without_rayleigh_ignores_unused_invalid_eigen_solver():
+    analysis = AnalysisSettingsData(
+        75,
+        "Transient without eigen use",
+        "Transient",
+        dt=0.01,
+        rayleigh_damping_ratio=0.0,
+        eigen_solver="not-an-eigen-solver",
+    )
+    assert analysis.eigen_solver == "not-an-eigen-solver"
+
+
+@pytest.mark.parametrize(
+    ("analysis_type", "rayleigh_ratio"),
+    [
+        ("Modal", 0.0),
+        ("Transient", 0.05),
+    ],
+)
+def test_active_eigen_solver_usage_rejects_unsupported_solver(
+    analysis_type,
+    rayleigh_ratio,
+):
+    kwargs = {
+        "eigen_solver": "not-an-eigen-solver",
+        "rayleigh_damping_ratio": rayleigh_ratio,
+    }
+    if analysis_type == "Modal":
+        kwargs["num_modes"] = 1
+    else:
+        kwargs.update(
+            dt=0.01,
+            rayleigh_mode_i=1,
+            rayleigh_mode_j=3,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="Unsupported eigen solver",
+    ):
+        AnalysisSettingsData(
+            76,
+            "Invalid active eigen solver",
+            analysis_type,
+            **kwargs,
+        )
