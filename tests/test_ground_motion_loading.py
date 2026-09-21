@@ -524,3 +524,57 @@ def test_modal_accepts_positive_element_mass_without_nodal_mass():
         and issue.category == "Mass"
         for issue in issues
     )
+
+
+def test_rayleigh_mode_request_above_free_equations_is_blocked():
+    model = StructuralModel("rayleigh-too-many", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.set_fixity(1, (1, 1))
+    model.set_fixity(2, (0, 1))
+    model.nodes[2].mass = (1.0, 0.0)
+
+    project = ProjectDatabase(model=model)
+    analysis = AnalysisSettingsData(
+        1,
+        "Damped transient",
+        "Transient",
+        rayleigh_damping_ratio=0.05,
+        rayleigh_mode_i=1,
+        rayleigh_mode_j=2,
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Eigen analysis"
+        and "requests mode 2" in issue.message
+        for issue in issues
+    )
+
+
+def test_modal_mode_request_above_free_equations_is_blocked():
+    model = StructuralModel("modal-too-many", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.set_fixity(1, (1, 1))
+    model.set_fixity(2, (0, 1))
+    model.nodes[2].mass = (1.0, 0.0)
+
+    project = ProjectDatabase(model=model)
+    analysis = AnalysisSettingsData(
+        1,
+        "Modes",
+        "Modal",
+        num_modes=2,
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Eigen analysis"
+        and "requests mode 2" in issue.message
+        for issue in issues
+    )

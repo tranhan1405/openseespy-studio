@@ -409,3 +409,53 @@ def test_integrator_round_trip_preserves_advanced_parameters():
     restored = ProjectDatabase.from_dict(project.to_dict()).analyses[44]
     assert restored.integrator == "HHT"
     assert restored.hht_alpha == 0.85
+
+
+def test_rayleigh_generator_guards_eigen_count_and_positive_values():
+    analysis = AnalysisSettingsData(
+        40,
+        "Damped NLTH",
+        "Transient",
+        steps=2,
+        dt=0.01,
+        rayleigh_damping_ratio=0.05,
+        rayleigh_mode_i=1,
+        rayleigh_mode_j=2,
+        eigen_solver="-fullGenLapack",
+    )
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            analysis,
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
+
+    assert "Rayleigh damping eigen analysis failed" in text
+    assert "len(_studio_damping_eigs) < 2" in text
+    assert "requires two finite positive eigenvalues" in text
+    assert "_studio_omega_i = math.sqrt(_studio_lambda_i)" in text
+    compile(text, "<rayleigh-guards>", "exec")
+
+
+def test_modal_generator_guards_missing_eigenvalues():
+    analysis = AnalysisSettingsData(
+        41,
+        "Modes",
+        "Modal",
+        num_modes=3,
+        eigen_solver="-fullGenLapack",
+    )
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            analysis,
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
+
+    assert "if len(_studio_eigenvalues) < 3:" in text
+    assert "Modal analysis requested 3 mode(s)" in text
+    compile(text, "<modal-eigen-guards>", "exec")

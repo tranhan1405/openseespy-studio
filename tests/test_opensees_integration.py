@@ -451,6 +451,71 @@ def test_generated_nlth_runs_in_real_opensees(tmp_path: Path):
     assert len(node_history["accel"]) == 3
 
 
+def test_generated_damped_nlth_runs_with_rayleigh_eigen_guard(
+    tmp_path: Path,
+):
+    model, sections, transformations = _elastic_cantilever(mass=1000.0)
+    series = {
+        1: TimeSeriesData(
+            1,
+            "Small ground motion",
+            "Path",
+            factor=1.0,
+            dt=0.01,
+            values=[0.0, 0.02, -0.02, 0.0],
+        )
+    }
+    patterns = {
+        1: LoadPatternData(
+            1,
+            "Ground motion X",
+            "UniformExcitation",
+            time_series_tag=1,
+            direction=1,
+            factor=1.0,
+        )
+    }
+    analysis = AnalysisSettingsData(
+        1,
+        "Damped NLTH smoke",
+        analysis_type="Transient",
+        constraints_handler="Plain",
+        numberer="Plain",
+        system="BandGeneral",
+        test="NormDispIncr",
+        tolerance=1.0e-10,
+        max_iterations=20,
+        algorithm="Newton",
+        steps=3,
+        dt=0.01,
+        control_node=2,
+        control_dof=1,
+        deferred_pattern_tags=[1],
+        rayleigh_damping_ratio=0.02,
+        rayleigh_mode_i=1,
+        rayleigh_mode_j=2,
+        eigen_solver="-fullGenLapack",
+        recovery=False,
+        adaptive_step=False,
+        live_convergence=False,
+    )
+
+    results = _run_real_generated(
+        tmp_path,
+        "damped-nlth",
+        model=model,
+        sections=sections,
+        transformations=transformations,
+        analysis=analysis,
+        time_series=series,
+        load_patterns=patterns,
+    )
+
+    assert results["analysis"]["type"] == "Transient"
+    assert results["analysis"]["rayleigh_damping_ratio"] == pytest.approx(0.02)
+    assert len(results["history"]["time"]) == 3
+
+
 def test_generated_fiber_force_beam_column_and_recorder_run_in_real_opensees(
     tmp_path: Path,
 ):
