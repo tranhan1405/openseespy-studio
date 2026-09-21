@@ -2071,6 +2071,28 @@ class ProjectDatabase:
                     + ", ".join(map(str, elastic_section_users))
                     + " and must continue to expose elastic/shear modulus."
                 ) from exc
+
+            self_weight_users = sorted(
+                load.tag
+                for load in self.element_loads.values()
+                if (
+                    load.load_type == "SelfWeight"
+                    and load.density_override <= 0.0
+                    and (
+                        self.model.elements.get(load.element_tag) is not None
+                        and self.model.elements[load.element_tag].section_tag
+                        in elastic_section_users
+                    )
+                )
+            )
+            if self_weight_users and material.density <= 0.0:
+                raise ValueError(
+                    f"Material {original_tag} supplies density to SelfWeight "
+                    "load(s) "
+                    + ", ".join(map(str, self_weight_users))
+                    + " and must keep a positive density or those loads need "
+                    "a density override."
+                )
         self.materials.pop(original_tag)
         self.materials[material.tag] = material
         if material.tag != original_tag:
@@ -2200,6 +2222,42 @@ class ProjectDatabase:
                 + ", ".join(map(str, elastic_beam_users))
                 + " and must remain an Elastic section."
             )
+
+        self_weight_users = sorted(
+            load.tag
+            for load in self.element_loads.values()
+            if (
+                load.load_type == "SelfWeight"
+                and self.model.elements.get(load.element_tag) is not None
+                and self.model.elements[load.element_tag].section_tag
+                == original_tag
+            )
+        )
+        if self_weight_users:
+            if section.section_type != "Elastic":
+                raise ValueError(
+                    f"Section {original_tag} is used by SelfWeight load(s) "
+                    + ", ".join(map(str, self_weight_users))
+                    + " and must remain an Elastic section."
+                )
+            needs_linked_density = [
+                load_tag
+                for load_tag in self_weight_users
+                if self.element_loads[load_tag].density_override <= 0.0
+            ]
+            if needs_linked_density:
+                material = (
+                    self.materials.get(int(section.material_tag))
+                    if section.material_tag is not None
+                    else None
+                )
+                if material is None or material.density <= 0.0:
+                    raise ValueError(
+                        f"Section {original_tag} supplies SelfWeight load(s) "
+                        + ", ".join(map(str, needs_linked_density))
+                        + " and must stay linked to a material with positive "
+                        "density or those loads need a density override."
+                    )
         self.sections.pop(original_tag)
         self.sections[section.tag] = section
         if section.tag != original_tag:
