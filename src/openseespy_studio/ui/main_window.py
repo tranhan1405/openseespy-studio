@@ -8506,7 +8506,7 @@ class MainWindow(QMainWindow):
             reference = dict(source.get("primary_reference", {}))
             evidence = dict(source.get("parameter_evidence", {}))
             rows.extend([
-                ("Source status", source.get("status", "unknown")),
+                ("Constitutive source status", source.get("status", "unknown")),
                 ("Library record", source.get("record_id", "")),
                 ("Reference", reference.get("title", "")),
                 ("DOI", reference.get("doi", "")),
