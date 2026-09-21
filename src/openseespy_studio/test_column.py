@@ -273,20 +273,8 @@ def _axis_vector(
 
 
 def _clear_model_linked_data(project: ProjectDatabase) -> None:
-    """Clear objects that would otherwise be accidentally rebound by tag."""
-    project.selection_sets.clear()
-    project.constraints.clear()
-    project.connections.clear()
-    project.time_series.clear()
-    project.load_patterns.clear()
-    project.nodal_loads.clear()
-    project.prescribed_displacements.clear()
-    project.element_loads.clear()
-    project.mass_sources.clear()
-    project.analyses.clear()
-    project.recorders.clear()
-    project.solution_results.clear()
-    project.active_analysis_tag = None
+    """Backward-compatible wrapper for replacement-geometry cleanup."""
+    project.clear_model_linked_data()
 
 
 def build_test_column(
