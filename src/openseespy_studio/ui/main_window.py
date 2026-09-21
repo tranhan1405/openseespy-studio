@@ -3221,24 +3221,25 @@ class MainWindow(QMainWindow):
 
     def _generate_frame_grid(self, spec: FrameGridSpec) -> None:
         before = self.project.to_dict()
-        self.selection.clear()
         try:
             created_transformations = prepare_frame_grid(
                 self.project,
                 spec,
             )
-        except ValueError as exc:
+            # Frame Grid is a replacement-geometry command.  Clear every
+            # object whose meaning depends on old node/element tags before
+            # generating the new model so reused IDs cannot silently rebind
+            # old loads, constraints, recorders, or analyses.
+            self.project.clear_model_linked_data()
+            generate_frame_grid(self.model, spec)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
             QMessageBox.warning(self, "Create Frame Grid", str(exc))
             return
 
-        generate_frame_grid(self.model, spec)
-        self._prune_selection_sets()
-        self.project.prune_constraints()
-        self.project.prune_connections()
-        self.project.prune_nodal_loads()
-        self.project.prune_prescribed_displacements()
-        self.project.prune_element_loads()
-        self.project.prune_recorders()
+        self.selection.clear()
 
         if created_transformations:
             names = ", ".join(
