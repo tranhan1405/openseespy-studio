@@ -3282,3 +3282,55 @@ def test_mass_source_rejects_gravity_axis_outside_model_dimension():
                 gravity_axis=3,
             )
         )
+
+
+def test_uniform_excitation_rejects_rotational_dof_in_2d_3dof_model():
+    model = StructuralModel("2d-3dof-excitation", ndm=2, ndf=3)
+    project = ProjectDatabase(name="2D 3DOF excitation", model=model)
+    project.add_time_series(
+        TimeSeriesData(
+            1,
+            "GM",
+            "Path",
+            dt=0.01,
+            values=[0.0, 1.0],
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"direction 3 is not available for ndm=2",
+    ):
+        project.add_load_pattern(
+            LoadPatternData(
+                1,
+                "Bad rotational excitation",
+                "UniformExcitation",
+                time_series_tag=1,
+                direction=3,
+            )
+        )
+
+
+def test_nodal_load_rejects_nonzero_unavailable_dof():
+    model = StructuralModel("2d-load", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    project = ProjectDatabase(name="2D load", model=model)
+    project.add_time_series(TimeSeriesData(1, "Load", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Plain", "Plain", time_series_tag=1)
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"nonzero value on unavailable DOF\(s\): 4",
+    ):
+        project.add_nodal_load(
+            NodalLoadData(
+                1,
+                "Bad FX4",
+                1,
+                1,
+                (1.0, 0.0, 0.0, 5.0, 0.0, 0.0),
+            )
+        )
