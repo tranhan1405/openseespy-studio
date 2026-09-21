@@ -918,8 +918,19 @@ class StructuralModel:
             ndf=data.get("ndf", 6),
         )
 
-        for item in data.get("nodes", []):
+        raw_nodes = data.get("nodes", [])
+        if not isinstance(raw_nodes, list):
+            raise ValueError("Model nodes must be a list.")
+        for index, item in enumerate(raw_nodes):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"Model node item {index} must be an object."
+                )
             xyz = item.get("xyz", (0.0, 0.0, 0.0))
+            if not isinstance(xyz, (list, tuple)) or len(xyz) < 2:
+                raise ValueError(
+                    f"Node {item.get('tag', '?')} coordinates need X and Y."
+                )
             node = model.add_node(
                 item["tag"],
                 float(xyz[0]),
@@ -958,7 +969,14 @@ class StructuralModel:
                 )
             node.mass = mass
 
-        for item in data.get("elements", []):
+        raw_elements = data.get("elements", [])
+        if not isinstance(raw_elements, list):
+            raise ValueError("Model elements must be a list.")
+        for index, item in enumerate(raw_elements):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"Model element item {index} must be an object."
+                )
             model.add_element(
                 item["tag"],
                 item["i"],
