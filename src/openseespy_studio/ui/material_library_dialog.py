@@ -44,6 +44,7 @@ class MaterialLibraryDialog(QDialog):
         *,
         next_tag: int,
         units=None,
+        accept_label: str = "Insert into Project",
         parent=None,
     ):
         super().__init__(parent)
@@ -90,6 +91,9 @@ class MaterialLibraryDialog(QDialog):
             QAbstractItemView.SelectionMode.SingleSelection
         )
         self.tree.currentItemChanged.connect(self._selection_changed)
+        self.tree.itemDoubleClicked.connect(
+            lambda _item, _column: self._accept_selected()
+        )
         splitter.addWidget(self.tree)
 
         right = QWidget()
@@ -184,7 +188,7 @@ class MaterialLibraryDialog(QDialog):
             QDialogButtonBox.StandardButton.Cancel
         )
         self.add_button = buttons.addButton(
-            "Add to Project",
+            accept_label,
             QDialogButtonBox.ButtonRole.AcceptRole,
         )
         self.add_button.setEnabled(False)
@@ -425,6 +429,10 @@ class MaterialLibraryDialog(QDialog):
         url = str(record.parameter_evidence.get("url", "")).strip()
         if url:
             QDesktopServices.openUrl(QUrl(url))
+
+    def _accept_selected(self) -> None:
+        if self._selected_record is not None:
+            self.accept()
 
     def material_data(self) -> MaterialData:
         if self._selected_record is None:
