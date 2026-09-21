@@ -214,15 +214,30 @@ class TestColumnWizard(QDialog):
         boundary.addRow("Nominal base support:", self.base_support)
         boundary.addRow("Top:", self.top_support)
 
+        self.base_interface_family = QComboBox()
+        self.base_interface_family.addItems([
+            "Fixed",
+            "zeroLength",
+            "zeroLengthSection",
+        ])
+        boundary.addRow(
+            "Base interface family:",
+            self.base_interface_family,
+        )
+
+        # Keep the legacy semantic names in one combo for compatibility with
+        # saved workflows/tests, while the family selector filters the modes
+        # shown to the user.
         self.base_interface = QComboBox()
         self.base_interface.addItems([
             "Fixed base",
             "Translational slip spring",
             "Rotational spring",
-            "Bond_SP01 strain penetration",
             "Custom zeroLength",
+            "Section interface",
+            "Bond_SP01 strain penetration",
         ])
-        boundary.addRow("Base Interface Model:", self.base_interface)
+        boundary.addRow("Interface mode:", self.base_interface)
         boundary_layout.addLayout(boundary)
 
         interface_note = QLabel(
@@ -272,6 +287,57 @@ class TestColumnWizard(QDialog):
         interface_dofs_layout.addLayout(material_buttons)
         boundary_layout.addWidget(self.interface_dofs_group)
 
+        self.section_interface_group = QGroupBox(
+            "Section interface · zeroLengthSection"
+        )
+        section_interface_form = QFormLayout(
+            self.section_interface_group
+        )
+        self.interface_section = QComboBox()
+        self._refresh_interface_section_combo()
+        self.interface_section.currentIndexChanged.connect(
+            self._update_preview
+        )
+        section_interface_form.addRow(
+            "Interface section:",
+            self.interface_section,
+        )
+
+        interface_section_buttons = QHBoxLayout()
+        self.new_interface_section = QPushButton("New Section...")
+        self.new_interface_section.clicked.connect(
+            self._create_interface_section
+        )
+        interface_section_buttons.addWidget(
+            self.new_interface_section
+        )
+        interface_section_buttons.addStretch(1)
+        interface_section_holder = QWidget()
+        interface_section_holder.setLayout(
+            interface_section_buttons
+        )
+        section_interface_form.addRow(
+            "",
+            interface_section_holder,
+        )
+
+        self.section_interface_note = QLabel(
+            "Uses the selected Section directly in a zeroLengthSection. "
+            "The interface carries axial/flexural/torsional section response "
+            "as available; transverse shear translations are tied to the "
+            "coincident footing node automatically."
+        )
+        self.section_interface_note.setWordWrap(True)
+        self.section_interface_note.setStyleSheet(
+            "padding: 6px; background: #eef4fb; color: #40566c;"
+        )
+        section_interface_form.addRow(
+            self.section_interface_note
+        )
+        boundary_layout.addWidget(
+            self.section_interface_group
+        )
+
         self.strain_penetration_group = QGroupBox(
             "Bond_SP01 strain penetration · zeroLengthSection"
         )
@@ -313,7 +379,7 @@ class TestColumnWizard(QDialog):
         boundary_layout.addWidget(self.strain_penetration_group)
 
         self.interface_rayleigh = QCheckBox(
-            "Include base zeroLength in Rayleigh damping"
+            "Include base zero-length interface in Rayleigh damping"
         )
         self.interface_rayleigh.setChecked(False)
         self.interface_rayleigh.setToolTip(
@@ -433,6 +499,9 @@ class TestColumnWizard(QDialog):
         self.preset.currentTextChanged.connect(self._apply_preset)
         self.axis.currentIndexChanged.connect(self._axis_changed)
         self.lateral.currentIndexChanged.connect(self._lateral_changed)
+        self.base_interface_family.currentTextChanged.connect(
+            self._interface_family_changed
+        )
         self.base_interface.currentTextChanged.connect(
             self._sync_base_interface
         )
@@ -462,6 +531,7 @@ class TestColumnWizard(QDialog):
         self._apply_preset(self.preset.currentText())
         self._sync_formulation()
         self._sync_optional_controls()
+        self._sync_interface_mode_visibility()
         self._sync_base_interface()
         self._update_preview()
 
@@ -651,6 +721,151 @@ class TestColumnWizard(QDialog):
             for tag in self._pending_materials
         ]
 
+    @staticmethod
+    def _interface_family_for_mode(mode: str) -> str:
+        if mode == "Fixed base":
+            return "Fixed"
+        if mode in {
+            "Translational slip spring",
+            "Rotational spring",
+            "Custom zeroLength",
+        }:
+            return "zeroLength"
+        if mode in {
+            "Section interface",
+            "Bond_SP01 strain penetration",
+        }:
+            return "zeroLengthSection"
+        return "Fixed"
+
+    @staticmethod
+    def _interface_modes_for_family(
+        family: str,
+    ) -> tuple[str, ...]:
+        if family == "zeroLength":
+            return (
+                "Translational slip spring",
+                "Rotational spring",
+                "Custom zeroLength",
+            )
+        if family == "zeroLengthSection":
+            return (
+                "Section interface",
+                "Bond_SP01 strain penetration",
+            )
+        return ("Fixed base",)
+
+    def _sync_interface_mode_visibility(self) -> None:
+        family = self.base_interface_family.currentText()
+        allowed = set(
+            self._interface_modes_for_family(family)
+        )
+        view = self.base_interface.view()
+        for index in range(self.base_interface.count()):
+            view.setRowHidden(
+                index,
+                self.base_interface.itemText(index) not in allowed,
+            )
+
+    def _interface_family_changed(self, family: str) -> None:
+        allowed = self._interface_modes_for_family(family)
+        current = self.base_interface.currentText()
+        self._sync_interface_mode_visibility()
+        if current not in allowed:
+            self.base_interface.setCurrentText(allowed[0])
+        else:
+            self._sync_base_interface()
+
+    def _refresh_interface_section_combo(
+        self,
+        selected_tag: int | None = None,
+    ) -> None:
+        if not hasattr(self, "interface_section"):
+            return
+        current = (
+            selected_tag
+            if selected_tag is not None
+            else self.interface_section.currentData()
+        )
+        combined = dict(self.project.sections)
+        combined.update(self._pending_sections)
+
+        self.interface_section.blockSignals(True)
+        self.interface_section.clear()
+        self.interface_section.addItem(
+            "Select interface section...",
+            None,
+        )
+        for tag in sorted(combined):
+            section = combined[tag]
+            suffix = (
+                " · new"
+                if tag in self._pending_sections
+                else ""
+            )
+            self.interface_section.addItem(
+                f"{tag} - {section.name} "
+                f"({section.section_type}){suffix}",
+                tag,
+            )
+        if current is not None:
+            index = self.interface_section.findData(int(current))
+            if index >= 0:
+                self.interface_section.setCurrentIndex(index)
+        self.interface_section.blockSignals(False)
+
+    def _create_interface_section(self) -> None:
+        dialog = SectionDialog(
+            self._combined_materials(),
+            next_tag=self._next_section_tag(),
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            section = dialog.section_data()
+            if section.tag in self.project.sections:
+                raise ValueError(
+                    f"Section tag {section.tag} already exists in the project."
+                )
+            if section.tag in self._pending_sections:
+                raise ValueError(
+                    f"Section tag {section.tag} is already staged "
+                    "in this wizard."
+                )
+            pending_materials = (
+                dialog.pending_materials()
+                if hasattr(dialog, "pending_materials")
+                else []
+            )
+            for material in pending_materials:
+                if material.tag in self.project.materials:
+                    raise ValueError(
+                        f"Material tag {material.tag} already exists "
+                        "in the project."
+                    )
+                if material.tag in self._pending_materials:
+                    raise ValueError(
+                        f"Material tag {material.tag} is already staged "
+                        "in this wizard."
+                    )
+            for material in pending_materials:
+                self._pending_materials[material.tag] = material
+            self._pending_sections[section.tag] = section
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Section Editor",
+                str(exc),
+            )
+            return
+
+        self._refresh_interface_material_combos()
+        self._refresh_section_combo()
+        self._refresh_interface_section_combo(section.tag)
+        self._update_preview()
+
     def _set_interface_single_dof(
         self,
         dof: int,
@@ -673,39 +888,65 @@ class TestColumnWizard(QDialog):
     ) -> None:
         _check, combo = self.interface_rows[int(dof)]
         combo.setEnabled(
-            self.base_interface.currentText() != "Fixed base"
+            self._interface_family_for_mode(
+                self.base_interface.currentText()
+            ) == "zeroLength"
             and bool(checked)
         )
         self._update_preview()
 
     def _sync_base_interface(self, *_args) -> None:
         interface = self.base_interface.currentText()
+        expected_family = self._interface_family_for_mode(interface)
+        if self.base_interface_family.currentText() != expected_family:
+            self.base_interface_family.blockSignals(True)
+            self.base_interface_family.setCurrentText(expected_family)
+            self.base_interface_family.blockSignals(False)
+            self._sync_interface_mode_visibility()
+
         active = interface != "Fixed base"
+        spring_mode = expected_family == "zeroLength"
+        section_mode = interface == "Section interface"
+        strain_mode = interface == "Bond_SP01 strain penetration"
+
         self.base_support.setEnabled(not active)
         if active:
             self.base_support.setCurrentText("Fixed")
 
-        strain_mode = interface == "Bond_SP01 strain penetration"
-        self.interface_dofs_group.setVisible(active and not strain_mode)
+        self.interface_dofs_group.setVisible(
+            active and spring_mode
+        )
+        self.section_interface_group.setVisible(section_mode)
         self.strain_penetration_group.setVisible(strain_mode)
+        self.new_interface_section.setEnabled(section_mode)
+        self.interface_section.setEnabled(section_mode)
         self.new_bond_material.setEnabled(strain_mode)
         self.test_bond_material.setEnabled(
-            strain_mode and self.strain_bond_material.currentData() is not None
+            strain_mode
+            and self.strain_bond_material.currentData() is not None
         )
 
         for check, combo in self.interface_rows.values():
-            check.setEnabled(active and not strain_mode)
+            check.setEnabled(active and spring_mode)
             combo.setEnabled(
-                active and not strain_mode and check.isChecked()
+                active and spring_mode and check.isChecked()
             )
-        self.new_interface_material.setEnabled(active)
+        self.new_interface_material.setEnabled(
+            active and spring_mode
+        )
         self.interface_rayleigh.setEnabled(active)
         self.interface_warning.setVisible(active)
 
         if interface == "Translational slip spring":
             self._set_interface_single_dof(
                 int(self.lateral.currentData()),
-                ("Pinching4", "Hysteretic", "ElasticPPGap", "Steel02", "Elastic"),
+                (
+                    "Pinching4",
+                    "Hysteretic",
+                    "ElasticPPGap",
+                    "Steel02",
+                    "Elastic",
+                ),
             )
         elif interface == "Rotational spring":
             try:
@@ -719,7 +960,10 @@ class TestColumnWizard(QDialog):
                 dof,
                 ("Pinching4", "Hysteretic", "Steel02"),
             )
-        elif interface == "Bond_SP01 strain penetration":
+        elif interface in {
+            "Section interface",
+            "Bond_SP01 strain penetration",
+        }:
             for check, _combo in self.interface_rows.values():
                 check.blockSignals(True)
                 check.setChecked(False)
@@ -740,7 +984,7 @@ class TestColumnWizard(QDialog):
 
         for check, combo in self.interface_rows.values():
             combo.setEnabled(
-                active and not strain_mode and check.isChecked()
+                active and spring_mode and check.isChecked()
             )
         self._update_preview()
 
@@ -813,6 +1057,7 @@ class TestColumnWizard(QDialog):
             if index >= 0:
                 self.section.setCurrentIndex(index)
         self._refresh_hinge_section_combos()
+        self._refresh_interface_section_combo()
 
     def _next_section_tag(self) -> int:
         used = set(self.project.sections) | set(self._pending_sections)
@@ -881,7 +1126,9 @@ class TestColumnWizard(QDialog):
         self.use_mass.setChecked(False)
         self.base_support.setCurrentText("Fixed")
         self.top_support.setCurrentText("Free")
+        self.base_interface_family.setCurrentText("Fixed")
         self.base_interface.setCurrentText("Fixed base")
+        self._sync_interface_mode_visibility()
         self.interface_rayleigh.setChecked(False)
         self.planar.setChecked(True)
 
@@ -984,6 +1231,21 @@ class TestColumnWizard(QDialog):
         interface = self.base_interface.currentText()
         if interface == "Fixed base":
             interface_note = "fixed base"
+        elif interface == "Section interface":
+            section_tag = self.interface_section.currentData()
+            interface_note = (
+                "zeroLengthSection · section "
+                + (
+                    str(section_tag)
+                    if section_tag is not None
+                    else "not selected"
+                )
+                + (
+                    " · Rayleigh ON"
+                    if self.interface_rayleigh.isChecked()
+                    else " · Rayleigh OFF"
+                )
+            )
         elif interface == "Bond_SP01 strain penetration":
             bond_tag = self.strain_bond_material.currentData()
             interface_note = (
@@ -1079,8 +1341,22 @@ class TestColumnWizard(QDialog):
 
         interface_type = self.base_interface.currentText()
         interface_materials: dict[int, int] = {}
+        interface_section_tag: int | None = None
         strain_bond_tag: int | None = None
-        if interface_type == "Bond_SP01 strain penetration":
+        if interface_type == "Section interface":
+            selected = self.interface_section.currentData()
+            if selected is None:
+                raise ValueError(
+                    "Select a Section for the zeroLengthSection interface."
+                )
+            interface_section_tag = int(selected)
+            combined_sections = dict(self.project.sections)
+            combined_sections.update(self._pending_sections)
+            if interface_section_tag not in combined_sections:
+                raise ValueError(
+                    f"Interface section {interface_section_tag} does not exist."
+                )
+        elif interface_type == "Bond_SP01 strain penetration":
             if self.section.currentData() is None:
                 raise ValueError(
                     "Assign a Fiber column section before enabling "
@@ -1176,6 +1452,7 @@ class TestColumnWizard(QDialog):
             top_support=self.top_support.currentText(),
             base_interface_type=interface_type,
             base_interface_materials=interface_materials,
+            base_interface_section_tag=interface_section_tag,
             base_interface_rayleigh=(
                 self.interface_rayleigh.isChecked()
                 if interface_type != "Fixed base"
