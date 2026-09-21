@@ -65,6 +65,40 @@ Research interface workflows include:
 - base translational/rotational springs
 - RC-column FRP retrofit helpers
 
+#### Verified Material Library
+
+SARE also includes a provenance-first **Material Library** inspired by
+Engineering Data workflows. The official library intentionally stays small:
+an entry is accepted only when the constitutive parameter set can be traced to
+a specific source and parameter-evidence location. Journal references require
+a DOI. Unsupported or merely "commonly used" values are not silently promoted
+to verified presets.
+
+The initial verified records are two OpenSees **Steel02** parameter sets for
+ASTM Grade 60 reinforcing steel:
+
+- ASTM A615 Grade 60
+- ASTM A706 Grade 60
+
+The peer-reviewed source is Carreño, Lotfizadeh, Conte and Restrepo (2020),
+*Material Model Parameters for the Giuffrè-Menegotto-Pinto Uniaxial Steel
+Stress-Strain Model*, *Journal of Structural Engineering*, 146(2), 04019205,
+DOI `10.1061/(ASCE)ST.1943-541X.0002505`. Exact values are linked to the
+corresponding parameter evidence in Carreño's UC San Diego dissertation,
+Chapter 3, Table 3.12.
+
+Library records store the material/grade, constitutive model, full parameter
+set, applicability, limitations, primary citation, DOI and exact evidence
+location. This provenance is copied into the project and written as comments
+when OpenSeesPy source is exported. If a verified constitutive parameter is
+edited, SARE changes the project material status to
+`modified_from_verified` rather than continuing to present it as the unchanged
+published set.
+
+Density, Poisson ratio, or other engineering defaults are not automatically
+claimed as verified by a constitutive-model paper unless the library record
+explicitly sources them.
+
 ### Loads, mass and earthquake input
 
 - Nodal mass assignment.
