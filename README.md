@@ -73,7 +73,7 @@ when it can be traced to a specific source and parameter-evidence location.
 Journal references require a DOI. Unsupported or merely "commonly used"
 values are not silently promoted to verified presets.
 
-The library currently contains **161 verified parameter records**:
+The library currently contains **167 verified parameter records**:
 
 - 2 Steel02 Grade-60 reinforcing-steel records from Carreño et al. (2020),
   DOI `10.1061/(ASCE)ST.1943-541X.0002505`.
@@ -111,8 +111,17 @@ The library currently contains **161 verified parameter records**:
 - 3 OpenSeesPy parameter sets from Caballero-Castro et al. (2025):
   unconfined and confined Concrete01 plus a Steel02 calibration for TADAS
   dampers, DOI `10.1016/j.istruc.2025.108732`.
+- 2 Bond_SP01 strain-penetration records for plain and deformed Ø12
+  longitudinal reinforcement from Melo, Varum and Rossetto (2020), DOI
+  `10.3389/fbuil.2020.586690`.
+- 1 complete ReinforcingSteel input set for pile-deck connecting bars from
+  Sosa and Caiza (2015), DOI `10.2174/1874149501509010236`.
+- 2 Concrete02 records (unconfined and confined shear-wall concrete) from
+  Hung and El-Tawil (2009), DOI `10.1002/eqe.921`.
+- 1 Concrete04 beam-column concrete record from Yigitbas, Grande and
+  Imbimbo (2026), DOI `10.65102/is202545`.
 
-These are **published/calibrated parameter records**, not 161 unrelated
+These are **published/calibrated parameter records**, not 167 unrelated
 chemical materials. SARE exposes specimen/configuration, modelling
 representation, applicability and limitations so a paper-specific parameter
 set is not mistaken for a universal material-grade default.
