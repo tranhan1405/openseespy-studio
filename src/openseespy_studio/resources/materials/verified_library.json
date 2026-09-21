@@ -15,19 +15,28 @@
       "model": "Steel02",
       "preset_name": "Carreño et al. (2020) · A615 Grade 60",
       "parameters_si": {
-        "Fy": 480000000.0,
-        "E0": 202000000000.0,
+        "Fy": 480000000,
+        "E0": 202000000000,
         "b": 0.02,
-        "R0": 20.0,
+        "R0": 20,
         "cR1": 0.9,
         "cR2": 0.08,
         "a1": 0.039,
-        "a2": 1.0,
+        "a2": 1,
         "a3": 0.029,
-        "a4": 1.0
+        "a4": 1
       },
       "verified_parameters": [
-        "Fy", "E0", "b", "R0", "cR1", "cR2", "a1", "a2", "a3", "a4"
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
       ],
       "applicability": [
         "Grade 60 reinforcing steel",
@@ -75,19 +84,28 @@
       "model": "Steel02",
       "preset_name": "Carreño et al. (2020) · A706 Grade 60",
       "parameters_si": {
-        "Fy": 476000000.0,
-        "E0": 202000000000.0,
+        "Fy": 476000000,
+        "E0": 202000000000,
         "b": 0.012,
-        "R0": 20.0,
+        "R0": 20,
         "cR1": 0.9,
         "cR2": 0.08,
         "a1": 0.039,
-        "a2": 1.0,
+        "a2": 1,
         "a3": 0.029,
-        "a4": 1.0
+        "a4": 1
       },
       "verified_parameters": [
-        "Fy", "E0", "b", "R0", "cR1", "cR2", "a1", "a2", "a3", "a4"
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
       ],
       "applicability": [
         "Grade 60 reinforcing steel",
@@ -118,6 +136,3506 @@
         "location": "Chapter 3, Table 3.12 — Proposed Material Model Parameters (Unmachined Reinforcing Bars)",
         "url": "https://escholarship.org/uc/item/0zh283tf",
         "relationship": "Chapter 3 contains the parameter study that was submitted and subsequently published as the peer-reviewed Journal of Structural Engineering article above."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld5-truss-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=5",
+      "parameters_si": {
+        "Fy": 825000000,
+        "E0": 207500000000,
+        "b": 0.01,
+        "R0": 11.72,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.012,
+        "a2": 1,
+        "a3": 0.026,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 5",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-CR · 12 mm, L/D=5, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld8-truss-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=8",
+      "parameters_si": {
+        "Fy": 825000000,
+        "E0": 207500000000,
+        "b": 0.027,
+        "R0": 15.35,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.082,
+        "a2": 1,
+        "a3": -0.071,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 8",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-CR · 12 mm, L/D=8, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld10-truss-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=10",
+      "parameters_si": {
+        "Fy": 825000000,
+        "E0": 207500000000,
+        "b": 0.021,
+        "R0": 13.55,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.101,
+        "a2": 1,
+        "a3": -0.089,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 10",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-CR · 12 mm, L/D=10, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld12-truss-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=12",
+      "parameters_si": {
+        "Fy": 825000000,
+        "E0": 207500000000,
+        "b": 0.019,
+        "R0": 11.07,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.115,
+        "a2": 1,
+        "a3": -0.101,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 12",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-CR · 12 mm, L/D=12, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld15-truss-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=15",
+      "parameters_si": {
+        "Fy": 825000000,
+        "E0": 207500000000,
+        "b": 0.012,
+        "R0": 8.67,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.11,
+        "a2": 1,
+        "a3": -0.107,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 15",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-CR · 12 mm, L/D=15, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld5-beam-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=5",
+      "parameters_si": {
+        "Fy": 825000000,
+        "E0": 207500000000,
+        "b": 0.00326,
+        "R0": 11.53,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.04,
+        "a2": 1,
+        "a3": 0.049,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 5",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-CR · 12 mm, L/D=5, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld8-beam-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=8",
+      "parameters_si": {
+        "Fy": 825000000,
+        "E0": 207500000000,
+        "b": 0.00069,
+        "R0": 11.4,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.01,
+        "a2": 1,
+        "a3": 0.026,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 8",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-CR · 12 mm, L/D=8, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld10-beam-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=10",
+      "parameters_si": {
+        "Fy": 825000000,
+        "E0": 207500000000,
+        "b": 0.00213,
+        "R0": 10.74,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0,
+        "a2": 1,
+        "a3": 0.014,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 10",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-CR · 12 mm, L/D=10, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld12-beam-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=12",
+      "parameters_si": {
+        "Fy": 825000000,
+        "E0": 207500000000,
+        "b": 0.00074,
+        "R0": 10.39,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0,
+        "a2": 1,
+        "a3": 0.012,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 12",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-CR · 12 mm, L/D=12, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-cr-12-ld15-beam-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Cold-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-CR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=15",
+      "parameters_si": {
+        "Fy": 825000000,
+        "E0": 207500000000,
+        "b": 0,
+        "R0": 10.4,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.01,
+        "a2": 1,
+        "a3": 0.017,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-CR · 12 mm",
+        "Rebar slenderness L/D = 15",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-CR · 12 mm, L/D=15, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld5-truss-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=5",
+      "parameters_si": {
+        "Fy": 713000000,
+        "E0": 195000000000,
+        "b": 0.016,
+        "R0": 14.9,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.025,
+        "a2": 1,
+        "a3": 0.016,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 5",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-HR · 12 mm, L/D=5, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld8-truss-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=8",
+      "parameters_si": {
+        "Fy": 713000000,
+        "E0": 195000000000,
+        "b": 0.027,
+        "R0": 17.38,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.054,
+        "a2": 1,
+        "a3": -0.065,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 8",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-HR · 12 mm, L/D=8, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld10-truss-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=10",
+      "parameters_si": {
+        "Fy": 713000000,
+        "E0": 195000000000,
+        "b": 0.02,
+        "R0": 15.82,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.081,
+        "a2": 1,
+        "a3": -0.083,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 10",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-HR · 12 mm, L/D=10, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld12-truss-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=12",
+      "parameters_si": {
+        "Fy": 713000000,
+        "E0": 195000000000,
+        "b": 0.019,
+        "R0": 13.27,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.086,
+        "a2": 1,
+        "a3": -0.092,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 12",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-HR · 12 mm, L/D=12, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld15-truss-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=15",
+      "parameters_si": {
+        "Fy": 713000000,
+        "E0": 195000000000,
+        "b": 0.011,
+        "R0": 10.02,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.095,
+        "a2": 1,
+        "a3": -0.1,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 15",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-HR · 12 mm, L/D=15, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld5-beam-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=5",
+      "parameters_si": {
+        "Fy": 713000000,
+        "E0": 195000000000,
+        "b": 0.00304,
+        "R0": 13.85,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.05,
+        "a2": 1,
+        "a3": 0.047,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 5",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-HR · 12 mm, L/D=5, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld8-beam-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=8",
+      "parameters_si": {
+        "Fy": 713000000,
+        "E0": 195000000000,
+        "b": 0.00073,
+        "R0": 13.72,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.04,
+        "a2": 1,
+        "a3": 0.031,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 8",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-HR · 12 mm, L/D=8, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld10-beam-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=10",
+      "parameters_si": {
+        "Fy": 713000000,
+        "E0": 195000000000,
+        "b": 0,
+        "R0": 13.84,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.03,
+        "a2": 1,
+        "a3": 0.016,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 10",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-HR · 12 mm, L/D=10, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld12-beam-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=12",
+      "parameters_si": {
+        "Fy": 713000000,
+        "E0": 195000000000,
+        "b": 0.00014,
+        "R0": 13.04,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.05,
+        "a2": 1,
+        "a3": 0.027,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 12",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-HR · 12 mm, L/D=12, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14301-hr-12-ld15-beam-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled austenitic stainless steel reinforcing bar",
+      "grade": "EN 1.4301-HR · 12 mm",
+      "standard": "EN 1.4301 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=15",
+      "parameters_si": {
+        "Fy": 713000000,
+        "E0": 195000000000,
+        "b": 0.00004,
+        "R0": 13.05,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.04,
+        "a2": 1,
+        "a3": 0.02,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4301-HR · 12 mm",
+        "Rebar slenderness L/D = 15",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4301-HR · 12 mm, L/D=15, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld5-truss-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=5",
+      "parameters_si": {
+        "Fy": 739000000,
+        "E0": 200000000000,
+        "b": 0.008,
+        "R0": 14.39,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.009,
+        "a2": 1,
+        "a3": 0.008,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 5",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4482-HR · 16 mm, L/D=5, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld8-truss-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=8",
+      "parameters_si": {
+        "Fy": 739000000,
+        "E0": 200000000000,
+        "b": 0.03,
+        "R0": 15.91,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.056,
+        "a2": 1,
+        "a3": -0.066,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 8",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4482-HR · 16 mm, L/D=8, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld10-truss-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=10",
+      "parameters_si": {
+        "Fy": 739000000,
+        "E0": 200000000000,
+        "b": 0.023,
+        "R0": 14.41,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.081,
+        "a2": 1,
+        "a3": -0.086,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 10",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4482-HR · 16 mm, L/D=10, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld12-truss-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=12",
+      "parameters_si": {
+        "Fy": 739000000,
+        "E0": 200000000000,
+        "b": 0.01,
+        "R0": 11.29,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.094,
+        "a2": 1,
+        "a3": -0.093,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 12",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4482-HR · 16 mm, L/D=12, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld15-truss-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=15",
+      "parameters_si": {
+        "Fy": 739000000,
+        "E0": 200000000000,
+        "b": 0.01,
+        "R0": 9.45,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.1,
+        "a2": 1,
+        "a3": -0.1,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 15",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4482-HR · 16 mm, L/D=15, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld5-beam-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=5",
+      "parameters_si": {
+        "Fy": 739000000,
+        "E0": 200000000000,
+        "b": 0.00136,
+        "R0": 12.65,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.04,
+        "a2": 1,
+        "a3": 0.043,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 5",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4482-HR · 16 mm, L/D=5, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld8-beam-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=8",
+      "parameters_si": {
+        "Fy": 739000000,
+        "E0": 200000000000,
+        "b": 0,
+        "R0": 11.51,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.05,
+        "a2": 1,
+        "a3": 0.039,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 8",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4482-HR · 16 mm, L/D=8, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld10-beam-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=10",
+      "parameters_si": {
+        "Fy": 739000000,
+        "E0": 200000000000,
+        "b": 0.00001,
+        "R0": 11.71,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.04,
+        "a2": 1,
+        "a3": 0.026,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 10",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4482-HR · 16 mm, L/D=10, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld12-beam-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=12",
+      "parameters_si": {
+        "Fy": 739000000,
+        "E0": 200000000000,
+        "b": 0.00019,
+        "R0": 11.97,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.02,
+        "a2": 1,
+        "a3": 0.017,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 12",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4482-HR · 16 mm, L/D=12, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-en14482-hr-16-ld15-beam-steel02",
+      "family": "Stainless Reinforcing Steel",
+      "material": "Hot-rolled lean-duplex stainless steel reinforcing bar",
+      "grade": "EN 1.4482-HR · 16 mm",
+      "standard": "EN 1.4482 (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=15",
+      "parameters_si": {
+        "Fy": 739000000,
+        "E0": 200000000000,
+        "b": 0.00015,
+        "R0": 11.3,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.01,
+        "a2": 1,
+        "a3": 0.01,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "EN 1.4482-HR · 16 mm",
+        "Rebar slenderness L/D = 15",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for EN 1.4482-HR · 16 mm, L/D=15, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld5-truss-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=5",
+      "parameters_si": {
+        "Fy": 560000000,
+        "E0": 200000000000,
+        "b": 0.016,
+        "R0": 16.7,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.012,
+        "a2": 1,
+        "a3": -0.012,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 5",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 12 mm, L/D=5, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld8-truss-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=8",
+      "parameters_si": {
+        "Fy": 560000000,
+        "E0": 200000000000,
+        "b": 0.014,
+        "R0": 18.86,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.065,
+        "a2": 1,
+        "a3": -0.063,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 8",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 12 mm, L/D=8, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld10-truss-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=10",
+      "parameters_si": {
+        "Fy": 560000000,
+        "E0": 200000000000,
+        "b": 0.012,
+        "R0": 14.87,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.075,
+        "a2": 1,
+        "a3": -0.072,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 10",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 12 mm, L/D=10, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld12-truss-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=12",
+      "parameters_si": {
+        "Fy": 560000000,
+        "E0": 200000000000,
+        "b": 0.008,
+        "R0": 11.88,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.084,
+        "a2": 1,
+        "a3": -0.078,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 12",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 12 mm, L/D=12, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld15-truss-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=15",
+      "parameters_si": {
+        "Fy": 560000000,
+        "E0": 200000000000,
+        "b": 0.004,
+        "R0": 8.57,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.084,
+        "a2": 1,
+        "a3": -0.08,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 15",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 12 mm, L/D=15, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld5-beam-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=5",
+      "parameters_si": {
+        "Fy": 560000000,
+        "E0": 200000000000,
+        "b": 0.00539,
+        "R0": 15.77,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0,
+        "a2": 1,
+        "a3": 0.011,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 5",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 12 mm, L/D=5, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld8-beam-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=8",
+      "parameters_si": {
+        "Fy": 560000000,
+        "E0": 200000000000,
+        "b": 0.0011,
+        "R0": 13.21,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0,
+        "a2": 1,
+        "a3": 0.003,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 8",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 12 mm, L/D=8, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld10-beam-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=10",
+      "parameters_si": {
+        "Fy": 560000000,
+        "E0": 200000000000,
+        "b": 0.00002,
+        "R0": 12.8,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.001,
+        "a2": 1,
+        "a3": 0.003,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 10",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 12 mm, L/D=10, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld12-beam-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=12",
+      "parameters_si": {
+        "Fy": 560000000,
+        "E0": 200000000000,
+        "b": 0.00001,
+        "R0": 11.55,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0,
+        "a2": 1,
+        "a3": 0.002,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 12",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 12 mm, L/D=12, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-12-ld15-beam-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 12 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=15",
+      "parameters_si": {
+        "Fy": 560000000,
+        "E0": 200000000000,
+        "b": 0.00042,
+        "R0": 10.45,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.003,
+        "a2": 1,
+        "a3": 0,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 12 mm",
+        "Rebar slenderness L/D = 15",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 12 mm, L/D=15, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld5-truss-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=5",
+      "parameters_si": {
+        "Fy": 594000000,
+        "E0": 195500000000,
+        "b": 0.016,
+        "R0": 18.75,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.018,
+        "a2": 1,
+        "a3": -0.019,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 5",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 16 mm, L/D=5, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld8-truss-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=8",
+      "parameters_si": {
+        "Fy": 594000000,
+        "E0": 195500000000,
+        "b": 0.018,
+        "R0": 19.78,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.062,
+        "a2": 1,
+        "a3": -0.077,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 8",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 16 mm, L/D=8, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld10-truss-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=10",
+      "parameters_si": {
+        "Fy": 594000000,
+        "E0": 195500000000,
+        "b": 0.011,
+        "R0": 15.92,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.087,
+        "a2": 1,
+        "a3": -0.084,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 10",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 16 mm, L/D=10, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld12-truss-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=12",
+      "parameters_si": {
+        "Fy": 594000000,
+        "E0": 195500000000,
+        "b": 0.007,
+        "R0": 12.72,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.094,
+        "a2": 1,
+        "a3": -0.095,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 12",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 16 mm, L/D=12, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld15-truss-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Truss/Fibre · L/D=15",
+      "parameters_si": {
+        "Fy": 594000000,
+        "E0": 195500000000,
+        "b": 0.004,
+        "R0": 8.55,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": -0.09,
+        "a2": 1,
+        "a3": -0.091,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 15",
+        "truss / fibre-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with a truss representation; geometric buckling effects are embedded implicitly in the constitutive calibration.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.1: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 16 mm, L/D=15, truss / fibre-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld5-beam-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=5",
+      "parameters_si": {
+        "Fy": 594000000,
+        "E0": 195500000000,
+        "b": 0.00463,
+        "R0": 16.11,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0,
+        "a2": 1,
+        "a3": 0.008,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 5",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 16 mm, L/D=5, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld8-beam-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=8",
+      "parameters_si": {
+        "Fy": 594000000,
+        "E0": 195500000000,
+        "b": 0.0005,
+        "R0": 13.57,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.02,
+        "a2": 1,
+        "a3": 0,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 8",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 16 mm, L/D=8, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld10-beam-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=10",
+      "parameters_si": {
+        "Fy": 594000000,
+        "E0": 195500000000,
+        "b": 0.00003,
+        "R0": 12.41,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.007,
+        "a2": 1,
+        "a3": 0.001,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 10",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 16 mm, L/D=10, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld12-beam-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=12",
+      "parameters_si": {
+        "Fy": 594000000,
+        "E0": 195500000000,
+        "b": 0.00009,
+        "R0": 11.99,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.002,
+        "a2": 1,
+        "a3": 0,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 12",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 16 mm, L/D=12, beam-column rebar / continuum-oriented calibration."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "moodley-2026-b500c-16-ld15-beam-steel02",
+      "family": "Reinforcing Steel",
+      "material": "Carbon steel reinforcing bar",
+      "grade": "B500C · 16 mm",
+      "standard": "B500C (paper designation)",
+      "model": "Steel02",
+      "preset_name": "Moodley et al. (2026) · Beam-column · L/D=15",
+      "parameters_si": {
+        "Fy": 594000000,
+        "E0": 195500000000,
+        "b": 0.00052,
+        "R0": 11.13,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.003,
+        "a2": 1,
+        "a3": 0,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "B500C · 16 mm",
+        "Rebar slenderness L/D = 15",
+        "beam-column rebar / continuum-oriented calibration",
+        "Cyclic stress-strain modelling in OpenSees Steel02"
+      ],
+      "limitations": [
+        "Use only for the tested material grade, diameter and stated L/D unless separately justified.",
+        "This set was calibrated with an explicit beam-column rebar representation; do not substitute it blindly into a fibre/truss model.",
+        "The paper treats cR1, cR2, a2 and a4 as OpenSees recommended constants; the remaining listed Steel02 parameters were calibrated or experimentally fixed as described in the paper."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "authors": "H. Moodley; R. De Risi; S. Afshan",
+        "journal": "Journal of Building Engineering",
+        "volume_issue": "121",
+        "article": "115378",
+        "year": 2026,
+        "doi": "10.1016/j.jobe.2026.115378"
+      },
+      "parameter_evidence": {
+        "type": "journal_appendix",
+        "title": "Modelling non-linear cyclic stress-strain behaviour of stainless steel reinforcing bars",
+        "author": "H. Moodley; R. De Risi; S. Afshan",
+        "institution": "Journal of Building Engineering",
+        "year": 2026,
+        "location": "Appendix B, Table B.4: Fy, b, R0, a1, a3; Table 4: E; Section 4.2.1: cR1=0.925, cR2=0.15, a2=1, a4=1",
+        "url": "https://doi.org/10.1016/j.jobe.2026.115378",
+        "relationship": "Exact published Steel02 parameter set for B500C · 16 mm, L/D=15, beam-column rebar / continuum-oriented calibration."
       },
       "verification": {
         "status": "verified",
