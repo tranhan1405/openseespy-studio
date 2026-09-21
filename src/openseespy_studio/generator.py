@@ -1470,10 +1470,11 @@ def analysis_to_openseespy(
         return lines
 
     _studio_print_flag = 1 if settings.live_convergence else 0
-    lines.append(
-        f"ops.test('{settings.test}', {settings.tolerance:g}, "
-        f"{settings.max_iterations}, {_studio_print_flag})"
-    )
+    if settings.algorithm != "Linear":
+        lines.append(
+            f"ops.test('{settings.test}', {settings.tolerance:g}, "
+            f"{settings.max_iterations}, {_studio_print_flag})"
+        )
     lines.append(f"ops.algorithm('{settings.algorithm}')")
     lines.append(f"_studio_primary_algorithm = {settings.algorithm!r}")
 
@@ -1703,7 +1704,7 @@ def analysis_to_openseespy(
             "increment=_studio_trial_increment)"
         )
 
-        if settings.recovery:
+        if settings.recovery and settings.algorithm != "Linear":
             lines.append(
                 f"            for _studio_alg in {adaptive_fallbacks!r}:"
             )
@@ -1996,7 +1997,7 @@ def analysis_to_openseespy(
             "code=int(_studio_ok))"
         )
     
-        if settings.recovery:
+        if settings.recovery and settings.algorithm != "Linear":
             fallbacks = [
                 algorithm
                 for algorithm in ("NewtonLineSearch", "ModifiedNewton", "Newton")
