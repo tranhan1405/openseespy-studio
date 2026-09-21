@@ -11,6 +11,7 @@ from openseespy_studio.project import (
     LoadPatternData,
     NodalLoadData,
     MaterialData,
+    MassSourceData,
     PrescribedDisplacementData,
     RecorderData,
     SectionData,
@@ -3169,5 +3170,115 @@ def test_modal_solution_result_rejects_mode_above_analysis_count():
                 "Mode 3",
                 "ModeShape",
                 settings={"mode": 3},
+            )
+        )
+
+
+def test_connection_rejects_dof_above_model_ndf():
+    model = StructuralModel("2d-connection", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    project = ProjectDatabase(name="2D connection", model=model)
+    project.add_material(
+        MaterialData(1, "Spring", "Elastic", {"E": 1000.0})
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Connection DOF\(s\) 4 are not available for ndf=3",
+    ):
+        project.add_connection(
+            ConnectionData(
+                1,
+                "Bad DOF",
+                "zeroLength",
+                1,
+                2,
+                materials_by_dof={4: 1},
+            )
+        )
+
+
+def test_uniform_excitation_rejects_direction_above_model_ndf():
+    model = StructuralModel("2d-excitation", ndm=2, ndf=2)
+    project = ProjectDatabase(name="2D excitation", model=model)
+    project.add_time_series(
+        TimeSeriesData(
+            1,
+            "GM",
+            "Path",
+            dt=0.01,
+            values=[0.0, 1.0],
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"UniformExcitation direction 3 is not available for ndf=2",
+    ):
+        project.add_load_pattern(
+            LoadPatternData(
+                1,
+                "Bad direction",
+                "UniformExcitation",
+                time_series_tag=1,
+                direction=3,
+            )
+        )
+
+
+def test_node_recorder_rejects_dof_above_model_ndf():
+    model = StructuralModel("2d-recorder", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    project = ProjectDatabase(name="2D recorder", model=model)
+
+    with pytest.raises(
+        ValueError,
+        match=r"Node recorder DOF\(s\) 4 are not available for ndf=3",
+    ):
+        project.add_recorder(
+            RecorderData(
+                1,
+                "Bad recorder DOF",
+                "Node",
+                target_tags=[1],
+                response="disp",
+                dofs=[4],
+            )
+        )
+
+
+def test_mass_source_rejects_nonexistent_translational_direction_in_2d():
+    model = StructuralModel("2d-mass-source", ndm=2, ndf=3)
+    project = ProjectDatabase(name="2D mass source", model=model)
+
+    with pytest.raises(
+        ValueError,
+        match=r"translational direction\(s\) 3 are not available for ndm=2",
+    ):
+        project.add_mass_source(
+            MassSourceData(
+                1,
+                "Bad direction",
+                directions=(1, 3),
+                gravity_axis=2,
+            )
+        )
+
+
+def test_mass_source_rejects_gravity_axis_outside_model_dimension():
+    model = StructuralModel("2d-gravity-axis", ndm=2, ndf=3)
+    project = ProjectDatabase(name="2D gravity axis", model=model)
+
+    with pytest.raises(
+        ValueError,
+        match=r"gravity axis 3 is not available for ndm=2",
+    ):
+        project.add_mass_source(
+            MassSourceData(
+                1,
+                "Bad gravity axis",
+                directions=(1, 2),
+                gravity_axis=3,
             )
         )
