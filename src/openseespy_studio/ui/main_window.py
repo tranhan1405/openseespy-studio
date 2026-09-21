@@ -3362,6 +3362,7 @@ class MainWindow(QMainWindow):
             len(self.model.elements),
             len(self.project.materials),
             len(self.project.sections),
+            len(self.project.connections),
         )
         self.frame_grid_panel.refresh_assignments(
             self.project.sections,
@@ -3384,7 +3385,9 @@ class MainWindow(QMainWindow):
             self.status_message.setText(message)
 
         self.status_counts.setText(
-            f"Nodes: {len(self.model.nodes)}   Elements: {len(self.model.elements)}"
+            f"Nodes: {len(self.model.nodes)}   "
+            f"Elements: {len(self.model.elements)}   "
+            f"Connections: {len(self.project.connections)}"
         )
         units = self.project.units
         unit_system = UnitSystem.from_mapping(units)
@@ -3666,7 +3669,11 @@ class MainWindow(QMainWindow):
         root.addChild(connections_root)
 
         connection_groups: dict[str, QTreeWidgetItem] = {}
-        for connection_type in ("zeroLength", "twoNodeLink"):
+        for connection_type in (
+            "zeroLength",
+            "zeroLengthSection",
+            "twoNodeLink",
+        ):
             tags = [
                 tag
                 for tag, connection in self.project.connections.items()
