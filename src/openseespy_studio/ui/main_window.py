@@ -1668,85 +1668,99 @@ class MainWindow(QMainWindow):
             if isinstance(raw_config, dict)
             else {}
         )
-        project_payload = self.project.to_dict()
-        if not bool(config.get("include_analysis", True)):
-            project_payload["analyses"] = []
-            project_payload["active_analysis_tag"] = None
+        try:
+            include_analysis = bool(
+                config.get("include_analysis", True)
+            )
+            project_payload = self.project.to_dict()
+            if not include_analysis:
+                project_payload["analyses"] = []
+                project_payload["active_analysis_tag"] = None
 
-        focus = self._current_ai_focus()
-        snapshot: dict[str, object] = {
-            "project": prepare_project_snapshot(project_payload),
-            "focus": (
-                {
-                    "kind": focus[0],
-                    "value": compact_for_llm(
-                        focus[1],
-                        max_depth=3,
-                        max_items=20,
-                    ),
-                }
-                if focus is not None
-                else None
-            ),
-        }
-
-        if bool(config.get("include_selection", True)):
-            snapshot["selection"] = {
-                "nodes": sorted(self.selection.nodes),
-                "elements": sorted(self.selection.elements),
+            focus = self._current_ai_focus()
+            snapshot: dict[str, object] = {
+                "project": prepare_project_snapshot(project_payload),
+                "focus": (
+                    {
+                        "kind": focus[0],
+                        "value": compact_for_llm(
+                            focus[1],
+                            max_depth=3,
+                            max_items=20,
+                        ),
+                    }
+                    if focus is not None
+                    else None
+                ),
             }
 
-        if bool(config.get("include_validation", True)):
-            active = self.project.analyses.get(
-                self.project.active_analysis_tag
-            )
-            issues = self._model_check_issues(active)
-            snapshot["validation"] = [
-                {
-                    "severity": issue.severity,
-                    "category": issue.category,
-                    "message": issue.message,
-                    "entity_kind": issue.entity_kind,
-                    "entity_tag": issue.entity_tag,
-                    "suggestion": issue.suggestion,
+            if bool(config.get("include_selection", True)):
+                snapshot["selection"] = {
+                    "nodes": sorted(self.selection.nodes),
+                    "elements": sorted(self.selection.elements),
                 }
-                for issue in issues
-            ]
 
-        if bool(config.get("include_job", True)):
-            job_payloads: list[dict[str, object]] = []
-            for job_id in sorted(self._jobs)[-5:]:
-                job = self._jobs[job_id]
-                job_payloads.append({
-                    "job_id": job.job_id,
-                    "analysis_tag": job.analysis_tag,
-                    "analysis_name": job.analysis_name,
-                    "analysis_type": job.analysis_type,
-                    "status": job.status,
-                    "exit_code": job.exit_code,
-                    "message": job.message,
-                    "progress_current": job.progress_current,
-                    "progress_total": job.progress_total,
-                    "progress_percent": job.progress_percent,
-                    "current_algorithm": job.current_algorithm,
-                    "iterations": job.iterations,
-                    "results": compact_for_llm(
-                        job.results,
-                        max_depth=6,
-                        max_items=32,
-                        max_string=8000,
-                    ),
-                    "plots": compact_for_llm(
-                        job.plots,
-                        max_depth=4,
-                        max_items=24,
-                    ),
-                })
-            snapshot["jobs"] = job_payloads
+            if bool(config.get("include_validation", True)):
+                active = (
+                    self.project.analyses.get(
+                        self.project.active_analysis_tag
+                    )
+                    if include_analysis
+                    else None
+                )
+                issues = self._model_check_issues(active)
+                snapshot["validation"] = [
+                    {
+                        "severity": issue.severity,
+                        "category": issue.category,
+                        "message": issue.message,
+                        "entity_kind": issue.entity_kind,
+                        "entity_tag": issue.entity_tag,
+                        "suggestion": issue.suggestion,
+                    }
+                    for issue in issues
+                ]
 
-        if bool(config.get("include_log", True)):
-            console_text = self.console.toPlainText()
-            snapshot["solver_log"] = console_text[-16000:]
+            if bool(config.get("include_job", True)):
+                job_payloads: list[dict[str, object]] = []
+                for job_id in sorted(self._jobs)[-5:]:
+                    job = self._jobs[job_id]
+                    job_payloads.append({
+                        "job_id": job.job_id,
+                        "analysis_tag": job.analysis_tag,
+                        "analysis_name": job.analysis_name,
+                        "analysis_type": job.analysis_type,
+                        "status": job.status,
+                        "exit_code": job.exit_code,
+                        "message": job.message,
+                        "progress_current": job.progress_current,
+                        "progress_total": job.progress_total,
+                        "progress_percent": job.progress_percent,
+                        "current_algorithm": job.current_algorithm,
+                        "iterations": job.iterations,
+                        "results": compact_for_llm(
+                            job.results,
+                            max_depth=6,
+                            max_items=32,
+                            max_string=8000,
+                        ),
+                        "plots": compact_for_llm(
+                            job.plots,
+                            max_depth=4,
+                            max_items=24,
+                        ),
+                    })
+                snapshot["jobs"] = job_payloads
+
+            if bool(config.get("include_log", True)):
+                console_text = self.console.toPlainText()
+                snapshot["solver_log"] = console_text[-16000:]
+        except BaseException as exc:
+            self.ai_assistant_panel.fail_request(
+                "Could not prepare SARE context: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            return
 
         self.ai_assistant_panel.run_request(
             str(prompt),
