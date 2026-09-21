@@ -443,3 +443,18 @@ def test_pushover_rejects_zero_increment_even_without_adaptive_step():
             displacement_increment=0.0,
             adaptive_step=False,
         )
+
+
+def test_static_load_control_rejects_zero_increment_even_without_adaptive_step():
+    with pytest.raises(
+        ValueError,
+        match="Static LoadControl needs a nonzero load increment",
+    ):
+        AnalysisSettingsData(
+            52,
+            "Zero load step",
+            "Static",
+            integrator="LoadControl",
+            load_increment=0.0,
+            adaptive_step=False,
+        )
