@@ -3503,3 +3503,122 @@ def test_project_sync_generated_ground_node_clears_accidental_mass():
     project.sync_generated_ground_nodes()
 
     assert project.model.nodes[2].mass == (0.0, 0.0, 0.0)
+
+
+def test_material_rejects_nonfinite_numeric_values():
+    with pytest.raises(
+        ValueError,
+        match=r"Material numeric values must be finite",
+    ):
+        MaterialData(
+            1,
+            "Bad elastic",
+            "Elastic",
+            {"E": float("nan")},
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Material numeric values must be finite",
+    ):
+        MaterialData(
+            2,
+            "Bad density",
+            "Elastic",
+            {"E": 200.0e9},
+            density=float("inf"),
+        )
+
+
+def test_raw_fiber_rejects_invalid_numeric_state():
+    with pytest.raises(
+        ValueError,
+        match=r"Fiber coordinates and area must be finite",
+    ):
+        FiberData(
+            float("nan"),
+            0.0,
+            1.0e-4,
+            1,
+        )
+
+    with pytest.raises(ValueError, match=r"Fiber area must be positive"):
+        FiberData(0.0, 0.0, -1.0e-4, 1)
+
+    with pytest.raises(
+        ValueError,
+        match=r"Fiber material tag must be positive",
+    ):
+        FiberData(0.0, 0.0, 1.0e-4, 0)
+
+
+def test_fiber_component_rejects_nonfinite_parameters():
+    with pytest.raises(
+        ValueError,
+        match=r"Fiber component parameters must be finite",
+    ):
+        FiberComponentData(
+            "RectPatch",
+            "Bad patch",
+            1,
+            {
+                "width_y": float("inf"),
+                "depth_z": 0.4,
+                "n_y": 10,
+                "n_z": 10,
+            },
+        )
+
+
+def test_section_rejects_nonfinite_parameters_and_display_geometry():
+    with pytest.raises(
+        ValueError,
+        match=r"Section parameters must be finite",
+    ):
+        SectionData(
+            1,
+            "Bad elastic",
+            "Elastic",
+            {"E": 200.0e9, "A": float("nan")},
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"display-geometry dimensions must be finite",
+    ):
+        SectionData(
+            2,
+            "Bad display geometry",
+            "Elastic",
+            {},
+            display_geometry={
+                "shape": "Rectangle",
+                "dimensions": {"b": float("inf"), "h": 0.4},
+            },
+        )
+
+
+def test_time_series_rejects_nonfinite_numeric_values():
+    with pytest.raises(
+        ValueError,
+        match=r"Time series numeric values must be finite",
+    ):
+        TimeSeriesData(
+            1,
+            "Bad dt",
+            "Path",
+            dt=float("nan"),
+            values=[0.0, 1.0],
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Time series numeric values must be finite",
+    ):
+        TimeSeriesData(
+            2,
+            "Bad sample",
+            "Path",
+            dt=0.01,
+            values=[0.0, float("inf")],
+        )
