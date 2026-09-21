@@ -4647,7 +4647,7 @@ class MainWindow(QMainWindow):
                 if (
                     managed_by
                     and (
-                        property_id in {"x", "y", "z"}
+                        property_id in {"x", "y", "z", "mass"}
                         or property_id.startswith("fixity_")
                     )
                 ):
@@ -4912,6 +4912,12 @@ class MainWindow(QMainWindow):
                 for element in self.model.elements.values()
                 if element.i == tag or element.j == tag
             ]
+            managed_ground_connections = sorted(
+                connection.tag
+                for connection in self.project.connections.values()
+                if connection.generated_ground_node == tag
+            )
+            node_fields_editable = not managed_ground_connections
             unit_system = UnitSystem.from_mapping(self.project.units)
             dof_labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")[:self.model.ndf]
             rows = [
@@ -4921,13 +4927,13 @@ class MainWindow(QMainWindow):
                     ", ".join(f"{value:g}" for value in node.xyz),
                 ),
                 ("X", f"{node.xyz[0]:g}", {
-                    "id": "x", "editable": True, "kind": "float",
+                    "id": "x", "editable": node_fields_editable, "kind": "float",
                 }),
                 ("Y", f"{node.xyz[1]:g}", {
-                    "id": "y", "editable": True, "kind": "float",
+                    "id": "y", "editable": node_fields_editable, "kind": "float",
                 }),
                 ("Z", f"{node.xyz[2]:g}", {
-                    "id": "z", "editable": True, "kind": "float",
+                    "id": "z", "editable": node_fields_editable, "kind": "float",
                 }),
                 ("Support", classify_fixity(node.fixity)),
                 ("Fixity", node.fixity),
@@ -4938,7 +4944,7 @@ class MainWindow(QMainWindow):
                     "Fixed" if node.fixity[index] else "Free",
                     {
                         "id": f"fixity_{index}",
-                        "editable": True,
+                        "editable": node_fields_editable,
                         "kind": "choice",
                         "current": int(node.fixity[index]),
                         "choices": [("Free", 0), ("Fixed", 1)],
@@ -4950,9 +4956,18 @@ class MainWindow(QMainWindow):
                     ", ".join(f"{value:g}" for value in node.mass),
                     {
                         "id": "mass",
-                        "editable": True,
+                        "editable": node_fields_editable,
                         "kind": "text",
                     },
+                ),
+                (
+                    "Managed ground",
+                    (
+                        "Connection(s) "
+                        + ", ".join(map(str, managed_ground_connections))
+                        if managed_ground_connections
+                        else "No"
+                    ),
                 ),
                 ("Connected", ", ".join(map(str, connected)) or "-"),
             ])
