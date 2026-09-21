@@ -3359,7 +3359,7 @@ class MainWindow(QMainWindow):
         self.viewport.set_model_info(
             self.model.name,
             len(self.model.nodes),
-            len(self.model.elements),
+            len(self.model.elements) + len(self.project.connections),
             len(self.project.materials),
             len(self.project.sections),
             len(self.project.connections),
@@ -3386,7 +3386,7 @@ class MainWindow(QMainWindow):
 
         self.status_counts.setText(
             f"Nodes: {len(self.model.nodes)}   "
-            f"Elements: {len(self.model.elements)}   "
+            f"Elements: {len(self.model.elements) + len(self.project.connections)}   "
             f"Connections: {len(self.project.connections)}"
         )
         units = self.project.units
@@ -3480,7 +3480,9 @@ class MainWindow(QMainWindow):
         frame_grids.setData(0, Qt.UserRole, ("frame_grids_root", None))
         geometry.addChildren([nodes, lines, frame_grids])
 
-        elements = QTreeWidgetItem([f"Elements ({len(self.model.elements)})"])
+        elements = QTreeWidgetItem([
+            f"Elements ({len(self.model.elements) + len(self.project.connections)})"
+        ])
         elements.setIcon(0, studio_icon("element"))
         elements.setData(0, Qt.UserRole, ("elements_root", None))
         elements.setExpanded(True)
@@ -3660,14 +3662,10 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("constraint", tag))
             constraints_root.addChild(item)
 
-        connections_root = QTreeWidgetItem([
-            f"Connections ({len(self.project.connections)})"
-        ])
-        connections_root.setIcon(0, studio_icon("element"))
-        connections_root.setData(0, Qt.UserRole, ("connections_root", None))
-        connections_root.setExpanded(True)
-        root.addChild(connections_root)
-
+        # OpenSees zeroLength/twoNodeLink/zeroLengthSection objects are
+        # elements even though SARE keeps their editor-specific metadata in
+        # ProjectDatabase.connections. Show them under Elements so imported
+        # OpenSees models preserve the source model semantics.
         connection_groups: dict[str, QTreeWidgetItem] = {}
         for connection_type in SUPPORTED_CONNECTION_TYPES:
             tags = [
@@ -3685,13 +3683,13 @@ class MainWindow(QMainWindow):
                 ("connection_group", connection_type),
             )
             group.setExpanded(True)
-            connections_root.addChild(group)
+            elements.addChild(group)
             connection_groups[connection_type] = group
 
         for tag in sorted(self.project.connections):
             connection = self.project.connections[tag]
             item = QTreeWidgetItem([
-                f"{connection.name} [{tag}]"
+                f"Element {tag} · {connection.name}"
             ])
             item.setIcon(0, studio_icon("element"))
             item.setData(0, Qt.UserRole, ("connection", tag))
@@ -10907,9 +10905,13 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "elements_root":
-            create = menu.addAction("New Element...")
+            create = menu.addAction("New Frame / Truss Element...")
             create.triggered.connect(self._create_element)
-            select_all = menu.addAction("Select All Elements")
+            create_connection = menu.addAction(
+                "New ZeroLength / Link Element..."
+            )
+            create_connection.triggered.connect(self._create_connection)
+            select_all = menu.addAction("Select All Frame / Truss Elements")
             select_all.setEnabled(bool(self.model.elements))
             select_all.triggered.connect(
                 lambda: self._select_all_tree_elements()
