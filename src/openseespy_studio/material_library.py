@@ -126,28 +126,45 @@ def _record_from_dict(raw: dict[str, Any]) -> MaterialLibraryRecord:
 
     model = str(raw.get("model", "")).strip()
     expected = tuple(MATERIAL_PARAMETER_ORDER.get(model, ()))
-    if expected:
+    if model == "FRPConfinedConcrete02":
+        common = {"fc0", "Ec", "ec0", "mode", "ft", "Ets"}
+        mode = float(parameters.get("mode", 0.0))
+        if mode < 0.5:
+            expected_keys = common | {"tfrp", "Efrp", "erup", "R"}
+        else:
+            expected_keys = common | {"fcu", "ecu"}
+        missing_model_parameters = [
+            key for key in expected_keys if key not in parameters
+        ]
+        extra_model_parameters = [
+            key for key in parameters if key not in expected_keys
+        ]
+    elif expected:
         missing_model_parameters = [
             key for key in expected if key not in parameters
         ]
         extra_model_parameters = [
             key for key in parameters if key not in expected
         ]
-        if missing_model_parameters or extra_model_parameters:
-            details: list[str] = []
-            if missing_model_parameters:
-                details.append(
-                    "missing " + ", ".join(missing_model_parameters)
-                )
-            if extra_model_parameters:
-                details.append(
-                    "unexpected " + ", ".join(extra_model_parameters)
-                )
-            raise ValueError(
-                f"Official material library record {record_id!r} does "
-                f"not exactly match {model} parameters: "
-                + "; ".join(details)
+    else:
+        missing_model_parameters = []
+        extra_model_parameters = []
+
+    if missing_model_parameters or extra_model_parameters:
+        details: list[str] = []
+        if missing_model_parameters:
+            details.append(
+                "missing " + ", ".join(missing_model_parameters)
             )
+        if extra_model_parameters:
+            details.append(
+                "unexpected " + ", ".join(extra_model_parameters)
+            )
+        raise ValueError(
+            f"Official material library record {record_id!r} does "
+            f"not exactly match {model} active parameters: "
+            + "; ".join(details)
+        )
 
     response_quantity = str(
         raw.get("response_quantity", "")
