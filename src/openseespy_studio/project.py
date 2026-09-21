@@ -2811,11 +2811,15 @@ class ProjectDatabase:
                     connection.generated_constraint_tag = None
         return sorted(removed)
 
-    def next_connection_tag(self) -> int:
+    def next_element_tag(self) -> int:
+        """Return the next OpenSees element tag across frames and connections."""
         return max(
-            set(self.connections) | set(self.model.elements),
+            set(self.model.elements) | set(self.connections),
             default=0,
         ) + 1
+
+    def next_connection_tag(self) -> int:
+        return self.next_element_tag()
 
     def _validate_connection(self, connection: ConnectionData) -> None:
         if connection.tag in self.model.elements:
