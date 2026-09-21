@@ -22,7 +22,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 52
+    assert len(records) == 100
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -212,3 +212,187 @@ def test_moodley_2026_records_encode_model_applicability():
         any("beam-column" in item.lower() for item in record.applicability)
         for record in beam
     )
+
+
+def test_verified_library_reaches_one_hundred_with_expected_source_counts():
+    records = load_verified_material_library()
+    prefixes = {
+        "carreno-2020-": 2,
+        "moodley-2026-": 50,
+        "qiu-2023-": 12,
+        "singh-2024-": 17,
+        "benedetti-2022-": 3,
+        "bhandari-2023-": 4,
+        "benedetti-2025-": 6,
+        "shang-2022-": 6,
+    }
+
+    assert len(records) == 100
+    assert len({record.id for record in records}) == 100
+    for prefix, expected in prefixes.items():
+        assert sum(
+            record.id.startswith(prefix)
+            for record in records
+        ) == expected
+
+
+def test_all_pinching4_library_records_have_physical_context_and_full_schema():
+    records = [
+        record
+        for record in load_verified_material_library()
+        if record.model == "Pinching4"
+    ]
+
+    assert len(records) == 48
+    assert all(
+        record.response_quantity
+        in {"force_displacement", "moment_rotation", "stress_strain"}
+        for record in records
+    )
+    assert all(record.source_units.get("response") for record in records)
+    assert all(record.source_units.get("deformation") for record in records)
+    assert all(len(record.parameters_si) == 39 for record in records)
+    assert all(len(record.verified_parameters) == 39 for record in records)
+
+
+def test_qiu_2023_moment_rotation_parameters_are_stored_in_si():
+    record = _record("qiu-2023-elbow-s1-pinching4")
+
+    assert record.response_quantity == "moment_rotation"
+    assert record.source_units == {
+        "response": "kN·m",
+        "deformation": "rad",
+    }
+    assert record.parameters_si["ePf1"] == 1127.2
+    assert record.parameters_si["ePd1"] == 0.0005
+    assert record.parameters_si["eNf2"] == -2219.6
+    assert record.parameters_si["eNd2"] == -0.0407
+
+
+def test_qiu_generic_dn150_uses_published_symmetric_generic_model():
+    record = _record("qiu-2023-generic-tee-dn150-pinching4")
+
+    assert record.parameters_si["ePf3"] == 6750.0
+    assert record.parameters_si["eNf3"] == -6750.0
+    assert record.parameters_si["uForceP"] == 0.1
+    assert record.parameters_si["uForceN"] == 0.1
+    assert "Table 4" in str(record.parameter_evidence.get("location", ""))
+
+
+def test_singh_2024_cfs02_and_scaled_wall_parameters():
+    base = _record("singh-2024-cfs02-pinching4")
+    west = _record("singh-2024-west-corridor-l1-pinching4")
+
+    assert base.parameters_si["ePf1"] == 43290.0
+    assert base.parameters_si["ePd4"] == 0.05826
+    assert base.parameters_si["gK3"] == 2.0
+    assert base.parameters_si["dmgType"] == 1.0
+
+    assert west.parameters_si["ePf3"] == 275600.0
+    assert west.parameters_si["ePd2"] == 0.02257
+    assert "Appendix Table A.2" in str(
+        west.parameter_evidence.get("location", "")
+    )
+
+
+def test_benedetti_2022_sheathing_parameters():
+    record = _record(
+        "benedetti-2022-sheathing-to-framing-pinching4"
+    )
+
+    assert record.parameters_si["ePf2"] == 1850.0
+    assert record.parameters_si["ePd2"] == 0.0069
+    assert record.parameters_si["rDispP"] == 0.651
+    assert record.parameters_si["gK1"] == 0.0
+    assert record.doi == "10.3390/buildings12070981"
+
+
+def test_bhandari_2023_published_and_symmetry_derived_branches():
+    tension = _record("bhandari-2023-tension-pinching4")
+    inter = _record(
+        "bhandari-2023-inter-horizontal-vertical-pinching4"
+    )
+
+    assert tension.parameters_si["ePf1"] == 4420.0
+    assert tension.parameters_si["eNf1"] == -4420.0
+    assert "symmetry" in str(
+        tension.parameter_evidence.get("relationship", "")
+    ).lower()
+
+    assert inter.parameters_si["ePf3"] == 89800.0
+    assert inter.parameters_si["eNf3"] == -147000.0
+    assert inter.parameters_si["eNd4"] == -0.0316
+
+
+def test_benedetti_2025_preserves_asymmetric_hold_down_fourth_point():
+    record = _record(
+        "benedetti-2025-floors-2-5-hold-down-pinching4"
+    )
+
+    assert record.parameters_si["ePf4"] == 12480.0
+    assert record.parameters_si["eNf4"] == -14460.0
+    assert record.parameters_si["gK1"] == -2.5
+    assert record.parameters_si["gDLim"] == 0.08
+
+
+def test_shang_2022_sway_brace_parameters():
+    record = _record("shang-2022-1000-60-2-pinching4")
+
+    assert record.parameters_si["ePf3"] == 24800.0
+    assert record.parameters_si["ePd3"] == 0.0447
+    assert record.parameters_si["ePf4"] == 5000.0
+    assert record.parameters_si["gKLim"] == -2.0
+    assert record.parameters_si["dmgType"] == 0.0
+
+
+def test_sourced_force_displacement_pinching4_converts_between_project_units():
+    material = material_from_library_record(
+        _record("singh-2024-cfs02-pinching4"),
+        tag=30,
+    )
+
+    n_mm = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+    kn_m = material_to_openseespy(
+        material,
+        {"length": "m", "force": "kN", "time": "s"},
+    )
+
+    assert "'Pinching4', 30, 43290, 1.65" in n_mm
+    assert "'Pinching4', 30, 43.29, 0.00165" in kn_m
+
+
+def test_sourced_moment_rotation_pinching4_converts_moment_only():
+    material = material_from_library_record(
+        _record("qiu-2023-elbow-s1-pinching4"),
+        tag=31,
+    )
+
+    n_mm = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+    kn_m = material_to_openseespy(
+        material,
+        {"length": "m", "force": "kN", "time": "s"},
+    )
+
+    assert "'Pinching4', 31, 1.1272e+06, 0.0005" in n_mm
+    assert "'Pinching4', 31, 1.1272, 0.0005" in kn_m
+
+
+def test_legacy_manual_pinching4_remains_raw_for_backward_compatibility():
+    material = MaterialData(
+        tag=32,
+        name="Legacy raw Pinching4",
+        material_type="Pinching4",
+    )
+
+    command = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+
+    assert "'Pinching4', 32, 1, 0.001" in command
