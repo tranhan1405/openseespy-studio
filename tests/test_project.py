@@ -2962,3 +2962,80 @@ def test_project_rejects_section_edit_that_breaks_self_weight_density():
         )
 
     assert project.sections[1].material_tag == 1
+
+
+def test_project_accepts_force_displacement_solution_result():
+    project = build_project()
+    project.add_analysis(
+        AnalysisSettingsData(1, "Static", "Static")
+    )
+
+    project.add_solution_result(
+        SolutionResultData(
+            1,
+            1,
+            "Force displacement",
+            "ForceDisplacement",
+            node_scope=[2],
+            settings={"force_source": "Base shear"},
+        )
+    )
+
+    assert project.solution_results[1].result_type == "ForceDisplacement"
+
+
+def test_project_rejects_solution_result_type_for_wrong_analysis():
+    project = build_project()
+    project.add_analysis(
+        AnalysisSettingsData(1, "Static", "Static")
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"PushoverCurve is not valid for Static analysis",
+    ):
+        project.add_solution_result(
+            SolutionResultData(
+                1,
+                1,
+                "Capacity",
+                "PushoverCurve",
+            )
+        )
+
+
+def test_project_rejects_analysis_type_change_that_invalidates_solution_results():
+    project = build_project()
+    project.add_analysis(
+        AnalysisSettingsData(
+            1,
+            "Push",
+            "Pushover",
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    )
+    project.add_solution_result(
+        SolutionResultData(
+            1,
+            1,
+            "Capacity",
+            "PushoverCurve",
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"would invalidate Solution Result object\(s\): 1",
+    ):
+        project.update_analysis(
+            1,
+            AnalysisSettingsData(
+                1,
+                "Static",
+                "Static",
+            ),
+        )
+
+    assert project.analyses[1].analysis_type == "Pushover"
