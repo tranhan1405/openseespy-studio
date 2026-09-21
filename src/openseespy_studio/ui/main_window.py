@@ -43,6 +43,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..brand import (
+    BRAND_NAVY,
+    BRAND_RED,
+    PRODUCT_BACKEND,
+    PRODUCT_FULL_NAME,
+    PRODUCT_NAME,
+    PRODUCT_SHORT_DESCRIPTION,
+    PRODUCT_STAGE,
+)
 from ..calibration import (
     CalibrationCase,
     apply_calibration_case,
@@ -349,42 +358,51 @@ QStatusBar {
 
 
 class BrandWidget(QWidget):
+    """Compact SARE wordmark for the application ribbon."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Reserve enough room for the full wordmark.  The old ribbon-level
-        # 185 px cap squeezed this widget and made the leading "O" appear
-        # crowded by the waveform icon.
-        self.setFixedWidth(255)
+        self.setFixedWidth(330)
         self.setMinimumHeight(64)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        pen = QPen(QColor("#c62828"), 2.4)
-        painter.setPen(pen)
-        points = [
-            (7, 31), (15, 31), (19, 17), (24, 45), (30, 9),
-            (35, 39), (40, 22), (46, 34), (52, 34), (56, 26),
-            (61, 36), (67, 31), (72, 31),
-        ]
-        for a, b in zip(points[:-1], points[1:]):
-            painter.drawLine(a[0], a[1], b[0], b[1])
-
-        text_x = 92
-
-        painter.setPen(QColor("#17356d"))
+        # Primary wordmark.
+        painter.setPen(QColor(BRAND_NAVY))
         font = QFont(self.font())
-        font.setPointSize(11)
+        font.setPointSize(18)
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(text_x, 28, "OpenSeesPy Studio")
+        painter.drawText(8, 31, PRODUCT_NAME)
 
-        painter.setPen(QColor("#6f7d8c"))
+        # Minimal deformation/response curve under the SARE wordmark.
+        path = QPainterPath()
+        path.moveTo(8, 43)
+        path.cubicTo(28, 43, 40, 42, 51, 35)
+        path.cubicTo(61, 29, 68, 24, 77, 27)
+        path.cubicTo(86, 30, 91, 40, 101, 43)
+        path.cubicTo(108, 45, 116, 44, 124, 43)
+        response_pen = QPen(QColor(BRAND_RED), 3.0)
+        response_pen.setCapStyle(Qt.RoundCap)
+        response_pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(response_pen)
+        painter.drawPath(path)
+
+        # Descriptor: detailed enough for identity, compact enough for ribbon.
+        painter.setPen(QColor("#556B80"))
         font.setPointSize(7)
         font.setBold(False)
         painter.setFont(font)
-        painter.drawText(text_x, 45, "Visual Platform for OpenSeesPy")
+        painter.drawText(145, 25, "Structural Analysis & Research")
+        painter.drawText(145, 39, "Environment for OpenSees")
+
+        painter.setPen(QColor(BRAND_NAVY))
+        font.setPointSize(6)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(145, 52, "STRUCTURAL SIMULATION · RESEARCH")
 
 
 class RibbonGroup(QWidget):
@@ -1347,7 +1365,7 @@ def _dock_toggle_action(
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("OpenSeesPy Studio (Beta) - [Untitled]")
+        self.setWindowTitle(f"{PRODUCT_NAME} ({PRODUCT_STAGE}) - [Untitled]")
         self.resize(1536, 960)
         self.setMinimumSize(1150, 720)
         self.setStyleSheet(APP_STYLE)
@@ -1647,7 +1665,7 @@ class MainWindow(QMainWindow):
             "Exit",
             "delete",
             self.close,
-            "Exit OpenSeesPy Studio",
+            "Exit SARE",
         )
 
         self.actions["save"].setShortcut(QKeySequence.Save)
@@ -2223,7 +2241,7 @@ class MainWindow(QMainWindow):
         )
         help_system_action = QAction("System Information", self)
         help_system_action.triggered.connect(self._show_system_info)
-        about_action = QAction("About OpenSeesPy Studio", self)
+        about_action = QAction(f"About {PRODUCT_NAME}", self)
         about_action.triggered.connect(self._show_about)
 
         menus["Help"].addActions([
@@ -7555,7 +7573,7 @@ class MainWindow(QMainWindow):
         )
         marker = " *" if self._dirty else ""
         self.setWindowTitle(
-            f"OpenSeesPy Studio (Beta) - [{display_name}]{marker}"
+            f"{PRODUCT_NAME} ({PRODUCT_STAGE}) - [{display_name}]{marker}"
         )
 
     def _record_project_change(self, text: str, before: dict) -> None:
@@ -7699,9 +7717,9 @@ class MainWindow(QMainWindow):
     def _save_project_as(self) -> bool:
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Save OpenSeesPy Studio Project",
+            "Save SARE Project",
             str(self._project_path or Path("Untitled.opsstudio")),
-            "OpenSeesPy Studio Project (*.opsstudio)",
+            "SARE Project (*.opsstudio)",
         )
         if not path:
             return False
@@ -7717,9 +7735,9 @@ class MainWindow(QMainWindow):
             return
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Open OpenSeesPy Studio Project",
+            "Open SARE Project",
             "",
-            "OpenSeesPy Studio Project (*.opsstudio);;All Files (*)",
+            "SARE Project (*.opsstudio);;All Files (*)",
         )
         if not path:
             return
@@ -12903,7 +12921,7 @@ class MainWindow(QMainWindow):
         self._refresh_tree()
 
         self._append_analysis_log(
-            f"OpenSeesPy Studio · Job {job.job_id}\n"
+            f"SARE · Job {job.job_id}\n"
             f"Analysis: {settings.name} ({settings.analysis_type})\n"
             f"Python: {sys.executable}\n"
             + "-" * 72
@@ -12969,7 +12987,7 @@ class MainWindow(QMainWindow):
 
         escaped_path = str(log_path).replace("'", "''")
         command = (
-            f"$host.UI.RawUI.WindowTitle='OpenSeesPy Studio - Job {job_id}'; "
+            f"$host.UI.RawUI.WindowTitle='SARE - Job {job_id}'; "
             f"Get-Content -LiteralPath '{escaped_path}' -Wait"
         )
         try:
@@ -13002,7 +13020,7 @@ class MainWindow(QMainWindow):
         else:
             self.console.appendPlainText(
                 ">> External solver terminal could not be started. "
-                "Live output remains available in the Studio Console."
+                "Live output remains available in the SARE Console."
             )
 
     def _append_analysis_log(self, text: str) -> None:
@@ -13478,7 +13496,7 @@ class MainWindow(QMainWindow):
             message = worker_error.splitlines()[-1] if worker_error else "Worker crashed"
             self.console.appendPlainText(
                 f"\n>> Analysis worker crashed (exit code {exit_code}). "
-                "The Studio GUI remains available."
+                "The SARE application remains available."
             )
             self.status_message.setText("Analysis worker crashed")
         elif exit_code == 0:
@@ -13982,8 +14000,8 @@ class MainWindow(QMainWindow):
         version = QApplication.applicationVersion() or "Development"
         QMessageBox.information(
             self,
-            "OpenSeesPy Studio - System Information",
-            f"OpenSeesPy Studio: {version}\n"
+            f"{PRODUCT_NAME} - System Information",
+            f"{PRODUCT_NAME}: {version}\n"
             f"Python: {sys.version.split()[0]}\n"
             f"Platform: {sys.platform}\n"
             f"Runtime probe: {'OK' if ok else 'FAILED'}\n\n"
@@ -13992,7 +14010,7 @@ class MainWindow(QMainWindow):
 
     def _show_about(self) -> None:
         dialog = QMessageBox(self)
-        dialog.setWindowTitle("About OpenSeesPy Studio")
+        dialog.setWindowTitle(f"About {PRODUCT_NAME}")
         app = QApplication.instance()
         if app is not None:
             dialog.setWindowIcon(app.windowIcon())
@@ -14000,13 +14018,14 @@ class MainWindow(QMainWindow):
 
         version = QApplication.applicationVersion() or "Development"
         dialog.setText(
-            "<b style='font-size:16px'>OpenSeesPy Studio</b><br>"
-            "<span style='color:#6f7d8c'>Visual Platform for OpenSeesPy</span>"
+            f"<b style='font-size:18px'>{PRODUCT_NAME}</b><br>"
+            f"<span style='color:#6f7d8c'>{PRODUCT_FULL_NAME}</span>"
         )
         dialog.setInformativeText(
             f"Version {version}\n\n"
-            "A research-focused visual environment for nonlinear structural "
-            "modelling, analysis, and post-processing with OpenSeesPy.\n\n"
+            f"{PRODUCT_SHORT_DESCRIPTION} for nonlinear structural modelling, "
+            f"analysis, simulation, and post-processing.\n\n"
+            f"Current Python backend: {PRODUCT_BACKEND}.\n\n"
             "Developed by Tran-Van Han.\n"
             "Research software for structural and earthquake engineering.\n"
             "Built with OpenSeesPy, PySide6, and PyVista.\n\n"
