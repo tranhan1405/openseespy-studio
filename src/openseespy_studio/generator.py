@@ -176,8 +176,9 @@ def material_to_openseespy(
     if material.material_type == "Steel02":
         return (
             "ops.uniaxialMaterial('Steel02', "
-            f"{material.tag}, {stress(p['Fy']):g}, {stress(p['E0']):g}, {p['b']:g}, "
-            f"{p['R0']:g}, {p['cR1']:g}, {p['cR2']:g})"
+            f"{material.tag}, {stress(p['Fy']):g}, {stress(p['E0']):g}, "
+            f"{p['b']:g}, {p['R0']:g}, {p['cR1']:g}, {p['cR2']:g}, "
+            f"{p['a1']:g}, {p['a2']:g}, {p['a3']:g}, {p['a4']:g})"
         )
 
     if material.material_type == "Hardening":
