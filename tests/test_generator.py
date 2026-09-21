@@ -18,6 +18,7 @@ from openseespy_studio.project import (
     NodalLoadData,
     MaterialData,
     PrescribedDisplacementData,
+    RecorderData,
     SectionData,
     TimeSeriesData,
     TransformationData,
@@ -2624,4 +2625,29 @@ def test_generator_rejects_zero_length_section_with_missing_section():
             model,
             sections={},
             connections={11: connection},
+        )
+
+
+def test_generator_rejects_fiber_recorder_with_missing_material_reference():
+    model = StructuralModel("orphan-fiber-recorder-material", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    recorder = RecorderData(
+        1,
+        "Fiber",
+        "Fiber",
+        target_tags=[1],
+        response="stressStrain",
+        section_number=1,
+        material_tag=99,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"fiber recorder 1 -> missing material 99",
+    ):
+        to_openseespy(
+            model,
+            materials={},
+            recorders={1: recorder},
         )

@@ -1862,3 +1862,34 @@ def test_project_rejects_removing_section_used_by_element():
         project.remove_section(1)
 
     assert 1 in project.sections
+
+
+def test_project_rejects_fiber_recorder_with_missing_material():
+    model = StructuralModel("fiber-recorder-material", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
+    project = ProjectDatabase(name="Fiber recorder", model=model)
+
+    with pytest.raises(
+        ValueError,
+        match=r"Fiber recorder references missing material tag 99",
+    ):
+        project.add_recorder(
+            RecorderData(
+                1,
+                "Fiber",
+                "Fiber",
+                target_tags=[1],
+                response="stressStrain",
+                section_number=1,
+                material_tag=99,
+            )
+        )

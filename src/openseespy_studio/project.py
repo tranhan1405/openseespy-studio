@@ -2066,7 +2066,10 @@ class ProjectDatabase:
                     in connection.materials_by_dof.items()
                 }
             for recorder in self.recorders.values():
-                if recorder.material_tag == original_tag:
+                if (
+                    recorder.recorder_type == "Fiber"
+                    and recorder.material_tag == original_tag
+                ):
                     recorder.material_tag = material.tag
 
     def remove_material(self, tag: int) -> None:
@@ -2086,7 +2089,10 @@ class ProjectDatabase:
         dependent_recorders = sorted(
             recorder.tag
             for recorder in self.recorders.values()
-            if recorder.material_tag == tag
+            if (
+                recorder.recorder_type == "Fiber"
+                and recorder.material_tag == tag
+            )
         )
         if (
             dependent_materials
@@ -3467,6 +3473,15 @@ class ProjectDatabase:
             raise ValueError(
                 "Recorder references missing element tag(s): "
                 + ", ".join(map(str, missing))
+            )
+        if (
+            recorder.recorder_type == "Fiber"
+            and recorder.material_tag is not None
+            and recorder.material_tag not in self.materials
+        ):
+            raise ValueError(
+                "Fiber recorder references missing material tag "
+                f"{recorder.material_tag}."
             )
         if recorder.recorder_type in {"Section", "Fiber"}:
             incompatible = [

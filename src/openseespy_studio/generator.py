@@ -2485,6 +2485,17 @@ def to_openseespy(
                 + ", ".join(map(str, missing))
             )
 
+    for recorder in (recorders or {}).values():
+        if (
+            recorder.recorder_type == "Fiber"
+            and recorder.material_tag is not None
+            and int(recorder.material_tag) not in (materials or {})
+        ):
+            material_reference_errors.append(
+                f"fiber recorder {recorder.tag} -> missing material "
+                f"{recorder.material_tag}"
+            )
+
     if material_reference_errors:
         raise ValueError(
             "Material reference error(s): "
