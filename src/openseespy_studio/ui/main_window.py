@@ -3039,7 +3039,12 @@ class MainWindow(QMainWindow):
         if kinds & result_kinds:
             self._set_ribbon_tab("Result")
             return
-        if kinds & {"analysis", "analysis_settings", "recorder"}:
+        if kinds & {
+            "analysis",
+            "analysis_settings",
+            "analysis_cyclic_protocol",
+            "recorder",
+        }:
             self._set_ribbon_tab("Analysis")
 
     def _build_status_bar(self) -> None:
@@ -3901,6 +3906,62 @@ class MainWindow(QMainWindow):
             )
             item.addChild(settings_item)
 
+            if settings.analysis_type == "Cyclic":
+                targets = list(settings.cyclic_targets)
+                protocol_item = QTreeWidgetItem([
+                    f"Cyclic Protocol ({len(targets)} targets)"
+                ])
+                protocol_item.setIcon(0, studio_icon("timeseries"))
+                protocol_item.setData(
+                    0,
+                    Qt.UserRole,
+                    ("analysis_cyclic_protocol", tag),
+                )
+                protocol_item.setExpanded(False)
+                item.addChild(protocol_item)
+
+                control_item = QTreeWidgetItem([
+                    f"Control · Node {settings.control_node} · "
+                    f"DOF {settings.control_dof}"
+                ])
+                control_item.setIcon(0, studio_icon("analysis"))
+                protocol_item.addChild(control_item)
+
+                increment_item = QTreeWidgetItem([
+                    f"Max increment · {settings.cyclic_increment:g}"
+                ])
+                increment_item.setIcon(0, studio_icon("analysis"))
+                protocol_item.addChild(increment_item)
+
+                preview_indices = list(range(min(12, len(targets))))
+                if len(targets) > 16:
+                    preview_indices.extend(
+                        range(max(12, len(targets) - 4), len(targets))
+                    )
+                elif len(targets) > 12:
+                    preview_indices.extend(range(12, len(targets)))
+
+                last_index = -1
+                for target_index in preview_indices:
+                    if (
+                        len(targets) > 16
+                        and last_index >= 0
+                        and target_index > last_index + 1
+                    ):
+                        omitted = target_index - last_index - 1
+                        collapsed = QTreeWidgetItem([
+                            f"… {omitted} target(s) hidden in tree"
+                        ])
+                        collapsed.setIcon(0, studio_icon("analysis"))
+                        protocol_item.addChild(collapsed)
+                    target_item = QTreeWidgetItem([
+                        f"Target {target_index + 1} · "
+                        f"{targets[target_index]:g}"
+                    ])
+                    target_item.setIcon(0, studio_icon("timeseries"))
+                    protocol_item.addChild(target_item)
+                    last_index = target_index
+
             solution_results = self.project.solution_results_for_analysis(tag)
             solution = QTreeWidgetItem([
                 f"Result Requests ({len(solution_results)})"
@@ -4078,6 +4139,8 @@ class MainWindow(QMainWindow):
             elif kind == "analysis":
                 analysis_tag = int(tag)
             elif kind == "analysis_settings":
+                analysis_tag = int(tag)
+            elif kind == "analysis_cyclic_protocol":
                 analysis_tag = int(tag)
             elif kind == "recorder":
                 recorder_tag = int(tag)
@@ -10041,9 +10104,36 @@ class MainWindow(QMainWindow):
                 rows.extend([
                     ("Control node", settings.control_node),
                     ("Control DOF", settings.control_dof),
+                    ("Target count", len(settings.cyclic_targets)),
                     (
                         "Targets",
-                        ", ".join(f"{value:g}" for value in settings.cyclic_targets),
+                        (
+                            ", ".join(
+                                f"{value:g}"
+                                for value in settings.cyclic_targets
+                            )
+                            if len(settings.cyclic_targets) <= 24
+                            else (
+                                ", ".join(
+                                    f"{value:g}"
+                                    for value in settings.cyclic_targets[:12]
+                                )
+                                + f", … {len(settings.cyclic_targets) - 16} hidden …, "
+                                + ", ".join(
+                                    f"{value:g}"
+                                    for value in settings.cyclic_targets[-4:]
+                                )
+                            )
+                        ),
+                    ),
+                    (
+                        "Target min / max",
+                        (
+                            f"{min(settings.cyclic_targets):g} / "
+                            f"{max(settings.cyclic_targets):g}"
+                            if settings.cyclic_targets
+                            else "-"
+                        ),
                     ),
                     ("Max increment", f"{settings.cyclic_increment:g}"),
                     ("Expanded steps", len(expanded)),
@@ -11405,7 +11495,11 @@ class MainWindow(QMainWindow):
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
 
-        if kind in {"analysis", "analysis_settings"}:
+        if kind in {
+            "analysis",
+            "analysis_settings",
+            "analysis_cyclic_protocol",
+        }:
             tag = int(value)
             active = menu.addAction("Set Active")
             active.setEnabled(tag != self.project.active_analysis_tag)
