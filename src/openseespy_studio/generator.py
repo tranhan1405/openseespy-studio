@@ -2152,7 +2152,7 @@ def analysis_to_openseespy(
     lines.append("        try:")
     lines.append(
         "            _studio_mc_force = ops.eleResponse("
-        "_studio_mc_element, 'force') or []"
+        "_studio_mc_element, 'section', 'force') or []"
     )
     lines.append(
         "            _studio_mc_force = "
@@ -2163,7 +2163,7 @@ def analysis_to_openseespy(
     lines.append("        try:")
     lines.append(
         "            _studio_mc_def = ops.eleResponse("
-        "_studio_mc_element, 'deformation') or []"
+        "_studio_mc_element, 'section', 'deformation') or []"
     )
     lines.append(
         "            _studio_mc_def = [float(v) for v in _studio_mc_def]"
@@ -2263,7 +2263,7 @@ def analysis_to_openseespy(
     lines.append("            try:")
     lines.append(
         "                _studio_if_force = ops.eleResponse("
-        "_studio_interface_tag, 'force') or []"
+        "_studio_interface_tag, 'section', 'force') or []"
     )
     lines.append(
         "                _studio_interface_force = "
@@ -2274,7 +2274,7 @@ def analysis_to_openseespy(
     lines.append("            try:")
     lines.append(
         "                _studio_if_def = ops.eleResponse("
-        "_studio_interface_tag, 'deformation') or []"
+        "_studio_interface_tag, 'section', 'deformation') or []"
     )
     lines.append(
         "                _studio_interface_def = "
