@@ -1132,7 +1132,7 @@ class TimeSeriesData:
     values: list[float] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        self.tag = int(self.tag)
+        self.tag = _strict_int(self.tag, "Time series tag")
         self.name = str(self.name).strip() or f"Time Series {self.tag}"
         self.series_type = str(self.series_type)
         self.factor = float(self.factor)
@@ -1167,7 +1167,7 @@ class TimeSeriesData:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TimeSeriesData":
         return cls(
-            tag=int(data["tag"]),
+            tag=data["tag"],
             name=str(data.get("name", f"Time Series {data['tag']}")),
             series_type=str(data.get("series_type", "Linear")),
             factor=float(data.get("factor", 1.0)),
@@ -1187,7 +1187,7 @@ class LoadPatternData:
     vel0: float = 0.0
 
     def __post_init__(self) -> None:
-        self.tag = int(self.tag)
+        self.tag = _strict_int(self.tag, "Load pattern tag")
         self.name = str(self.name).strip() or f"Load Pattern {self.tag}"
         self.pattern_type = str(self.pattern_type)
         self.time_series_tag = int(self.time_series_tag)
@@ -1221,7 +1221,7 @@ class LoadPatternData:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LoadPatternData":
         return cls(
-            tag=int(data["tag"]),
+            tag=data["tag"],
             name=str(data.get("name", f"Load Pattern {data['tag']}")),
             pattern_type=str(data.get("pattern_type", "Plain")),
             time_series_tag=int(data["time_series_tag"]),
@@ -1240,7 +1240,7 @@ class NodalLoadData:
     values: tuple[float, float, float, float, float, float]
 
     def __post_init__(self) -> None:
-        self.tag = int(self.tag)
+        self.tag = _strict_int(self.tag, "Nodal load tag")
         self.name = str(self.name).strip() or f"Nodal Load {self.tag}"
         self.pattern_tag = int(self.pattern_tag)
         self.node_tag = int(self.node_tag)
@@ -1267,7 +1267,7 @@ class NodalLoadData:
     def from_dict(cls, data: dict[str, Any]) -> "NodalLoadData":
         values = tuple(float(value) for value in data.get("values", (0.0,) * 6))
         return cls(
-            tag=int(data["tag"]),
+            tag=data["tag"],
             name=str(data.get("name", f"Nodal Load {data['tag']}")),
             pattern_tag=int(data["pattern_tag"]),
             node_tag=int(data["node_tag"]),
@@ -1285,7 +1285,10 @@ class PrescribedDisplacementData:
     value: float
 
     def __post_init__(self) -> None:
-        self.tag = int(self.tag)
+        self.tag = _strict_int(
+            self.tag,
+            "Prescribed displacement tag",
+        )
         self.name = (
             str(self.name).strip()
             or f"Prescribed Displacement {self.tag}"
@@ -1327,7 +1330,7 @@ class PrescribedDisplacementData:
         data: dict[str, Any],
     ) -> "PrescribedDisplacementData":
         return cls(
-            tag=int(data["tag"]),
+            tag=data["tag"],
             name=str(
                 data.get(
                     "name",
@@ -1359,7 +1362,7 @@ class ElementLoadData:
     density_override: float = 0.0
 
     def __post_init__(self) -> None:
-        self.tag = int(self.tag)
+        self.tag = _strict_int(self.tag, "Element load tag")
         self.name = str(self.name).strip() or f"Element Load {self.tag}"
         self.pattern_tag = int(self.pattern_tag)
         self.element_tag = int(self.element_tag)
@@ -1426,7 +1429,7 @@ class ElementLoadData:
     def from_dict(cls, data: dict[str, Any]) -> "ElementLoadData":
         gravity = data.get("gravity", (0.0, 0.0, -9.81))
         return cls(
-            tag=int(data["tag"]),
+            tag=data["tag"],
             name=str(data.get("name", f"Element Load {data['tag']}")),
             pattern_tag=int(data["pattern_tag"]),
             element_tag=int(data["element_tag"]),
