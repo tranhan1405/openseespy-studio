@@ -8,6 +8,23 @@ from pathlib import Path
 from typing import Any
 
 from .model import StructuralModel
+
+
+def _strict_bool(value: object, label: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    raise ValueError(f"{label} must be a boolean.")
 from .result_catalog import result_choices_for_analysis
 from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
@@ -962,7 +979,10 @@ class ConnectionData:
         }
         self.orient_x = tuple(float(v) for v in self.orient_x)
         self.orient_y = tuple(float(v) for v in self.orient_y)
-        self.do_rayleigh = bool(self.do_rayleigh)
+        self.do_rayleigh = _strict_bool(
+            self.do_rayleigh,
+            "Connection Rayleigh flag",
+        )
         self.generated_ground_node = (
             None
             if self.generated_ground_node is None
@@ -1082,7 +1102,7 @@ class ConnectionData:
             orient_y=tuple(
                 float(v) for v in data.get("orient_y", (0.0, 1.0, 0.0))
             ),
-            do_rayleigh=bool(data.get("do_rayleigh", False)),
+            do_rayleigh=data.get("do_rayleigh", False),
             generated_ground_node=data.get("generated_ground_node"),
             section_tag=data.get("section_tag"),
             generated_section_tag=data.get("generated_section_tag"),
@@ -1427,7 +1447,10 @@ class MassSourceData:
     def __post_init__(self) -> None:
         self.tag = int(self.tag)
         self.name = str(self.name).strip() or f"Mass Source {self.tag}"
-        self.include_self_mass = bool(self.include_self_mass)
+        self.include_self_mass = _strict_bool(
+            self.include_self_mass,
+            "Mass source include_self_mass",
+        )
         raw_load_factors = {
             int(tag): float(factor)
             for tag, factor in dict(self.load_factors).items()
@@ -1479,7 +1502,7 @@ class MassSourceData:
         return cls(
             tag=int(data["tag"]),
             name=str(data.get("name", f"Mass Source {data['tag']}")),
-            include_self_mass=bool(data.get("include_self_mass", True)),
+            include_self_mass=data.get("include_self_mass", True),
             load_factors={
                 int(tag): float(factor)
                 for tag, factor in dict(
@@ -1837,7 +1860,10 @@ class RecorderData:
         self.response = str(self.response)
         self.dofs = sorted({int(dof) for dof in self.dofs})
         self.file_name = str(self.file_name).strip()
-        self.include_time = bool(self.include_time)
+        self.include_time = _strict_bool(
+            self.include_time,
+            "Recorder include_time",
+        )
         self.section_number = int(self.section_number)
         self.fiber_y = float(self.fiber_y)
         self.fiber_z = float(self.fiber_z)
@@ -1905,7 +1931,7 @@ class RecorderData:
             response=str(data.get("response", "disp")),
             dofs=[int(dof) for dof in data.get("dofs", [1])],
             file_name=str(data.get("file_name", "")),
-            include_time=bool(data.get("include_time", True)),
+            include_time=data.get("include_time", True),
             section_number=int(data.get("section_number", 1)),
             fiber_y=float(data.get("fiber_y", 0.0)),
             fiber_z=float(data.get("fiber_z", 0.0)),
