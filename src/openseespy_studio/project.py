@@ -3017,6 +3017,17 @@ class ProjectDatabase:
                 "Connection references missing node tag(s): "
                 + ", ".join(map(str, missing_nodes))
             )
+        invalid_dofs = sorted(
+            dof
+            for dof in connection.materials_by_dof
+            if dof > int(self.model.ndf)
+        )
+        if invalid_dofs:
+            raise ValueError(
+                "Connection DOF(s) "
+                + ", ".join(map(str, invalid_dofs))
+                + f" are not available for ndf={self.model.ndf}."
+            )
         missing_materials = sorted({
             material_tag
             for material_tag in connection.materials_by_dof.values()
@@ -3425,6 +3436,14 @@ class ProjectDatabase:
                 f"Load pattern references missing time series "
                 f"{pattern.time_series_tag}."
             )
+        if (
+            pattern.pattern_type == "UniformExcitation"
+            and pattern.direction > int(self.model.ndf)
+        ):
+            raise ValueError(
+                f"UniformExcitation direction {pattern.direction} is not "
+                f"available for ndf={self.model.ndf}."
+            )
 
     def add_load_pattern(self, pattern: LoadPatternData) -> None:
         if pattern.tag in self.load_patterns:
@@ -3558,6 +3577,22 @@ class ProjectDatabase:
         return max(self.mass_sources, default=0) + 1
 
     def _validate_mass_source(self, source: MassSourceData) -> None:
+        invalid_directions = sorted(
+            dof
+            for dof in source.directions
+            if dof > min(int(self.model.ndm), 3)
+        )
+        if invalid_directions:
+            raise ValueError(
+                "Mass source translational direction(s) "
+                + ", ".join(map(str, invalid_directions))
+                + f" are not available for ndm={self.model.ndm}."
+            )
+        if source.gravity_axis > int(self.model.ndm):
+            raise ValueError(
+                f"Mass source gravity axis {source.gravity_axis} is not "
+                f"available for ndm={self.model.ndm}."
+            )
         missing = sorted(
             tag
             for tag in source.load_factors
@@ -4002,11 +4037,26 @@ class ProjectDatabase:
 
     def _validate_recorder(self, recorder: RecorderData) -> None:
         if recorder.recorder_type == "Node":
-            missing = [tag for tag in recorder.target_tags if tag not in self.model.nodes]
+            missing = [
+                tag
+                for tag in recorder.target_tags
+                if tag not in self.model.nodes
+            ]
             if missing:
                 raise ValueError(
                     "Recorder references missing node tag(s): "
                     + ", ".join(map(str, missing))
+                )
+            invalid_dofs = sorted(
+                dof
+                for dof in recorder.dofs
+                if dof > int(self.model.ndf)
+            )
+            if invalid_dofs:
+                raise ValueError(
+                    "Node recorder DOF(s) "
+                    + ", ".join(map(str, invalid_dofs))
+                    + f" are not available for ndf={self.model.ndf}."
                 )
             return
         valid_elements = set(self.model.elements) | set(self.connections)
