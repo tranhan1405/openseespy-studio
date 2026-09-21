@@ -100,8 +100,12 @@ def test_research_material_library_generates_supported_commands():
         "Concrete01",
         "Concrete04",
         "Steel01",
+        "Hardening",
+        "ElasticPP",
+        "ElasticBilin",
         "ReinforcingSteel",
         "Hysteretic",
+        "HystereticSmooth",
         "Pinching4",
         "Bond_SP01",
         "ElasticPPGap",
@@ -2906,3 +2910,59 @@ def test_generator_rejects_frame_connection_duplicate_element_tag():
             model,
             connections={1: connection},
         )
+
+
+def test_hardening_material_uses_engineering_stress_units():
+    material = MaterialData(
+        301,
+        "Combined hardening steel",
+        "Hardening",
+        parameters={
+            "E": 200.0e9,
+            "sigmaY": 355.0e6,
+            "H_iso": 1.0e9,
+            "H_kin": 2.0e9,
+            "eta": 5.0e6,
+        },
+    )
+
+    command = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+
+    assert command == (
+        "ops.uniaxialMaterial('Hardening', 301, 200000, 355, "
+        "1000, 2000, 5)"
+    )
+
+
+@pytest.mark.parametrize(
+    ("material_type", "expected"),
+    [
+        (
+            "ElasticPP",
+            "ops.uniaxialMaterial('ElasticPP'",
+        ),
+        (
+            "ElasticBilin",
+            "ops.uniaxialMaterial('ElasticBilin'",
+        ),
+        (
+            "HystereticSmooth",
+            "ops.uniaxialMaterial('HystereticSmooth'",
+        ),
+    ],
+)
+def test_new_uniaxial_material_commands_generate(material_type, expected):
+    material = MaterialData(
+        302,
+        material_type,
+        material_type,
+        parameters=MATERIAL_DEFAULTS[material_type],
+    )
+
+    assert expected in material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
