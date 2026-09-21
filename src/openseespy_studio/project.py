@@ -1612,11 +1612,21 @@ class AnalysisSettingsData:
     arc_length_alpha: float = 1.0
 
     def __post_init__(self) -> None:
-        self.tag=int(self.tag); self.name=str(self.name).strip() or f"Analysis {self.tag}"
+        self.tag=_strict_int(self.tag, "Analysis tag"); self.name=str(self.name).strip() or f"Analysis {self.tag}"
         self.analysis_type=str(self.analysis_type)
         self.integrator=str(self.integrator or "Auto")
-        self.tolerance=float(self.tolerance); self.max_iterations=int(self.max_iterations)
-        self.steps=int(self.steps); self.load_increment=float(self.load_increment)
+        self.tolerance=float(self.tolerance)
+        self.max_iterations=(
+            _strict_int(self.max_iterations, "Analysis max iterations")
+            if self.analysis_type != "Modal"
+            else int(self.max_iterations)
+        )
+        self.steps=(
+            _strict_int(self.steps, "Analysis steps")
+            if self.analysis_type in {"Static", "Pushover", "Transient"}
+            else int(self.steps)
+        )
+        self.load_increment=float(self.load_increment)
         self.control_node=int(self.control_node); self.control_dof=int(self.control_dof)
         self.displacement_increment=float(self.displacement_increment)
         self.cyclic_targets=[float(value) for value in self.cyclic_targets]
@@ -1634,11 +1644,19 @@ class AnalysisSettingsData:
             self.preload_gravity,
             "Analysis preload_gravity",
         )
-        self.gravity_steps=int(self.gravity_steps)
+        self.gravity_steps=(
+            _strict_int(self.gravity_steps, "Analysis gravity steps")
+            if self.preload_gravity
+            else int(self.gravity_steps)
+        )
         self.deferred_pattern_tags=list(dict.fromkeys(
             int(tag) for tag in self.deferred_pattern_tags
         ))
-        self.num_modes=int(self.num_modes)
+        self.num_modes=(
+            _strict_int(self.num_modes, "Analysis number of modes")
+            if self.analysis_type == "Modal"
+            else int(self.num_modes)
+        )
         self.eigen_solver=str(self.eigen_solver)
         self.recovery=_strict_bool(
             self.recovery,
