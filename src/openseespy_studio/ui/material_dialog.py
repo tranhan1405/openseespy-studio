@@ -631,6 +631,19 @@ class MaterialDialog(QDialog):
         )
         root.addLayout(form)
 
+        manual_note = QLabel(
+            "New Material uses editable initialization values, not a verified "
+            "published parameter set. Use Material Library... when a "
+            "reference-backed baseline is required."
+        )
+        manual_note.setWordWrap(True)
+        manual_note.setStyleSheet(
+            "padding: 7px; background: #fff4df; color: #7a5600;"
+        )
+        if material is not None and material.source:
+            manual_note.hide()
+        root.addWidget(manual_note)
+
         splitter = QSplitter(Qt.Horizontal)
         root.addWidget(splitter, 1)
 
