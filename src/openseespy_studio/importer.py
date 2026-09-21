@@ -658,6 +658,13 @@ class _Importer:
             raise ValueError("element has too few arguments")
         kind = str(args[0])
         tag, ni, nj = map(int, args[1:4])
+        if (
+            kind not in {"zeroLength", "twoNodeLink", "zeroLengthSection"}
+            and tag in self.project.connections
+        ):
+            raise ValueError(
+                f"Element tag {tag} is already used by a connection."
+            )
 
         if kind.lower() == "truss":
             if len(args) < 6:
