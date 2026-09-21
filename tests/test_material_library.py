@@ -22,7 +22,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 158
+    assert len(records) == 161
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -220,7 +220,7 @@ def test_moodley_2026_records_encode_model_applicability():
     )
 
 
-def test_verified_library_reaches_one_hundred_fifty_eight_with_expected_source_counts():
+def test_verified_library_reaches_one_hundred_sixty_one_with_expected_source_counts():
     records = load_verified_material_library()
     prefixes = {
         "carreno-2020-": 2,
@@ -234,10 +234,11 @@ def test_verified_library_reaches_one_hundred_fifty_eight_with_expected_source_c
         "delgiudice-2022-": 3,
         "georgantzia-2024-": 3,
         "doci-2024-": 2,
+        "caballero-castro-2025-": 3,
     }
 
-    assert len(records) == 158
-    assert len({record.id for record in records}) == 158
+    assert len(records) == 161
+    assert len({record.id for record in records}) == 161
     for prefix, expected in prefixes.items():
         assert sum(
             record.id.startswith(prefix)
@@ -329,6 +330,47 @@ def test_doci_2024_brace_steel02_sets_are_exact():
         assert record.parameters_si["a4"] == 0.1
         assert record.doi == "10.3390/met14121388"
         assert "Table 4" in str(
+            record.parameter_evidence.get("location", "")
+        )
+
+
+
+def test_caballero_castro_2025_tadas_and_concrete_sets_are_exact():
+    unconfined = _record(
+        "caballero-castro-2025-unconfined-concrete01"
+    )
+    confined = _record(
+        "caballero-castro-2025-confined-concrete01"
+    )
+    tadas = _record("caballero-castro-2025-tadas-steel02")
+
+    assert unconfined.parameters_si == {
+        "fpc": -28.0e6,
+        "epsc0": -0.0027,
+        "fpcu": -5.6e6,
+        "epsU": -0.0082,
+    }
+    assert confined.parameters_si == {
+        "fpc": -36.4e6,
+        "epsc0": -0.0035,
+        "fpcu": -7.3e6,
+        "epsU": -0.0127,
+    }
+    assert tadas.parameters_si == {
+        "Fy": 240.0e6,
+        "E0": 200.0e9,
+        "b": 0.02,
+        "R0": 30.0,
+        "cR1": 0.959,
+        "cR2": 0.50,
+        "a1": 0.097,
+        "a2": 1.0,
+        "a3": 0.097,
+        "a4": 1.0,
+    }
+    for record in (unconfined, confined, tadas):
+        assert record.doi == "10.1016/j.istruc.2025.108732"
+        assert "Table 2" in str(
             record.parameter_evidence.get("location", "")
         )
 
