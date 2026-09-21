@@ -1013,6 +1013,13 @@ class ConnectionData:
                 raise ValueError("Connection DOFs must be in the range 1..6.")
         if len(self.orient_x) != 3 or len(self.orient_y) != 3:
             raise ValueError("Connection orientation vectors need 3 values.")
+        if any(
+            not math.isfinite(value)
+            for value in (*self.orient_x, *self.orient_y)
+        ):
+            raise ValueError(
+                "Connection orientation vector values must be finite."
+            )
         if sum(v * v for v in self.orient_x) <= 1.0e-24:
             raise ValueError("Connection local X vector cannot be zero.")
         if sum(v * v for v in self.orient_y) <= 1.0e-24:
@@ -1841,6 +1848,8 @@ class RecorderData:
         )
         if self.tag <= 0:
             raise ValueError("Recorder tag must be positive.")
+        if not math.isfinite(self.fiber_y) or not math.isfinite(self.fiber_z):
+            raise ValueError("Recorder fiber coordinates must be finite.")
         if self.recorder_type not in {"Node", "Element", "Section", "Fiber"}:
             raise ValueError(f"Unsupported recorder type: {self.recorder_type}")
         if not self.target_tags:
@@ -4823,12 +4832,37 @@ class ProjectDatabase:
         def setting_int(name: str) -> int | None:
             if name not in result.settings:
                 return None
+            raw = result.settings[name]
             try:
-                return int(result.settings[name])
-            except (TypeError, ValueError) as exc:
+                value = int(raw)
+            except (TypeError, ValueError, OverflowError) as exc:
                 raise ValueError(
                     f"Solution result setting {name} must be an integer."
                 ) from exc
+            if isinstance(raw, float) and (
+                not math.isfinite(raw) or not raw.is_integer()
+            ):
+                raise ValueError(
+                    f"Solution result setting {name} must be an integer."
+                )
+            return value
+
+        if result.result_type in {
+            "DeformedShape",
+            "MemberForce",
+            "ModeShape",
+            "Motion",
+        } and "scale" in result.settings:
+            try:
+                scale = float(result.settings["scale"])
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(
+                    "Solution result scale must be a finite positive number."
+                ) from exc
+            if not math.isfinite(scale) or scale <= 0.0:
+                raise ValueError(
+                    "Solution result scale must be a finite positive number."
+                )
 
         if result.result_type == "TimeHistory":
             node_tag = setting_int("node")
@@ -4856,6 +4890,43 @@ class ProjectDatabase:
                     raise ValueError(
                         f"ForceDisplacement setting {key}={dof} is invalid "
                         f"for ndf={self.model.ndf}."
+                    )
+
+        if result.result_type in {"FiberStress", "FiberStrain"}:
+            section_number = setting_int("section")
+            if section_number is None:
+                section_number = 1
+            if section_number < 1:
+                raise ValueError(
+                    "Fiber result section/IP number must be at least 1."
+                )
+            if result.element_scope:
+                incompatible = [
+                    tag
+                    for tag in result.element_scope
+                    if (
+                        tag not in self.model.elements
+                        or self.model.elements[tag].element_type
+                        not in {"forceBeamColumn", "dispBeamColumn"}
+                    )
+                ]
+                if incompatible:
+                    raise ValueError(
+                        "Fiber results require forceBeamColumn or "
+                        "dispBeamColumn element tag(s): "
+                        + ", ".join(map(str, incompatible))
+                    )
+                too_short = [
+                    tag
+                    for tag in result.element_scope
+                    if self.model.elements[tag].integration_points
+                    < section_number
+                ]
+                if too_short:
+                    raise ValueError(
+                        f"Fiber result section/IP {section_number} exceeds "
+                        "the integration-point count for element tag(s): "
+                        + ", ".join(map(str, too_short))
                     )
 
         if (
