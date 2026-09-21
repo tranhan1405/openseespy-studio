@@ -15123,6 +15123,380 @@
         "parameter_location_identified": true,
         "units_checked": true
       }
+    },
+    {
+      "id": "melo-2020-cpa3-plain-bond-sp01",
+      "family": "Bond / Strain Penetration",
+      "material": "Plain reinforcing-bar bond-slip",
+      "grade": "CPA-3 · Ø12 plain longitudinal bar",
+      "standard": "Full-scale cyclic RC column specimen",
+      "model": "Bond_SP01",
+      "preset_name": "Melo et al. (2020) · CPA-3 plain Ø12 · Bond_SP01",
+      "parameters_si": {
+        "Fy": 405000000,
+        "Sy": 0.00046,
+        "Fu": 470000000,
+        "Su": 0.0184,
+        "b": 0.3,
+        "R": 0.3
+      },
+      "verified_parameters": [
+        "Fy",
+        "Sy",
+        "Fu",
+        "Su",
+        "b",
+        "R"
+      ],
+      "applicability": [
+        "Full-scale RC column specimen CPA-3 with plain reinforcement",
+        "Ø12 longitudinal reinforcing bars",
+        "Zero-length section strain-penetration / bond-slip modelling",
+        "OpenSees Bond_SP01"
+      ],
+      "limitations": [
+        "Specimen-specific bond-slip parameters; do not treat as a universal plain-bar bond law.",
+        "Su is stored as 18.4 mm, obtained exactly from the paper's published Su = 40 Sy relation with Sy = 0.46 mm.",
+        "The paper's alpha tuning parameter is not an input of the OpenSees Bond_SP01 command and is therefore retained only in the provenance, not in parameters_si."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Numerical Modeling of RC Columns and a Modified Steel Model Proposal for Elements With Plain Bars",
+        "authors": "José Melo; Humberto Varum; Tiziana Rossetto",
+        "journal": "Frontiers in Built Environment",
+        "volume_issue": "6",
+        "article": "586690",
+        "year": 2020,
+        "doi": "10.3389/fbuil.2020.586690"
+      },
+      "parameter_evidence": {
+        "type": "journal_tables",
+        "title": "Numerical Modeling of RC Columns and a Modified Steel Model Proposal for Elements With Plain Bars",
+        "author": "José Melo; Humberto Varum; Tiziana Rossetto",
+        "institution": "Frontiers in Built Environment",
+        "year": 2020,
+        "location": "Table 1 — CPA-3 Ø12 longitudinal-bar fy=405 MPa and fu=470 MPa; Table 2 — Bond_SP01 B=0.30, Sy=0.46 mm, Su=40Sy and R=0.30",
+        "url": "https://doi.org/10.3389/fbuil.2020.586690",
+        "relationship": "Exact OpenSees Bond_SP01 inputs are assembled from the paper's measured Ø12 longitudinal-bar strengths in Table 1 and adopted Bond_SP01 parameters in Table 2. The Table 2 symbol B is the stiffness-reduction input b described by the authors; Su is the exact published relation 40Sy."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "melo-2020-cd-deformed-bond-sp01",
+      "family": "Bond / Strain Penetration",
+      "material": "Deformed reinforcing-bar bond-slip",
+      "grade": "CD · Ø12 deformed longitudinal bar",
+      "standard": "Full-scale cyclic RC column specimen",
+      "model": "Bond_SP01",
+      "preset_name": "Melo et al. (2020) · CD deformed Ø12 · Bond_SP01",
+      "parameters_si": {
+        "Fy": 465000000,
+        "Sy": 0.00044,
+        "Fu": 585000000,
+        "Su": 0.0176,
+        "b": 0.4,
+        "R": 0.8
+      },
+      "verified_parameters": [
+        "Fy",
+        "Sy",
+        "Fu",
+        "Su",
+        "b",
+        "R"
+      ],
+      "applicability": [
+        "Full-scale RC column specimen CD with deformed reinforcement",
+        "Ø12 longitudinal reinforcing bars",
+        "Zero-length section strain-penetration / bond-slip modelling",
+        "OpenSees Bond_SP01"
+      ],
+      "limitations": [
+        "Specimen-specific bond-slip parameters; do not treat as a universal deformed-bar bond law.",
+        "Su is stored as 17.6 mm, obtained exactly from the paper's published Su = 40 Sy relation with Sy = 0.44 mm.",
+        "The paper's alpha tuning parameter is not an input of the OpenSees Bond_SP01 command and is therefore retained only in the provenance, not in parameters_si."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Numerical Modeling of RC Columns and a Modified Steel Model Proposal for Elements With Plain Bars",
+        "authors": "José Melo; Humberto Varum; Tiziana Rossetto",
+        "journal": "Frontiers in Built Environment",
+        "volume_issue": "6",
+        "article": "586690",
+        "year": 2020,
+        "doi": "10.3389/fbuil.2020.586690"
+      },
+      "parameter_evidence": {
+        "type": "journal_tables",
+        "title": "Numerical Modeling of RC Columns and a Modified Steel Model Proposal for Elements With Plain Bars",
+        "author": "José Melo; Humberto Varum; Tiziana Rossetto",
+        "institution": "Frontiers in Built Environment",
+        "year": 2020,
+        "location": "Table 1 — CD Ø12 longitudinal-bar fy=465 MPa and fu=585 MPa; Table 2 — Bond_SP01 B=0.40, Sy=0.44 mm, Su=40Sy and R=0.80",
+        "url": "https://doi.org/10.3389/fbuil.2020.586690",
+        "relationship": "Exact OpenSees Bond_SP01 inputs are assembled from the paper's measured Ø12 longitudinal-bar strengths in Table 1 and adopted Bond_SP01 parameters in Table 2. The Table 2 symbol B is the stiffness-reduction input b described by the authors; Su is the exact published relation 40Sy."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "sosa-caiza-2015-e1-connection-reinforcingsteel",
+      "family": "Reinforcing Steel",
+      "material": "Pile-deck connection reinforcing steel",
+      "grade": "E1 connecting bars",
+      "standard": "Study-specific pile-deck connection material",
+      "model": "ReinforcingSteel",
+      "preset_name": "Sosa & Caiza (2015) · E1 connecting bars",
+      "parameters_si": {
+        "fy": 489530000,
+        "fu": 675690000,
+        "Es": 199948000000,
+        "Esh": 4482000000,
+        "eps_sh": 0.0124,
+        "eps_ult": 0.132
+      },
+      "verified_parameters": [
+        "fy",
+        "fu",
+        "Es",
+        "Esh",
+        "eps_sh",
+        "eps_ult"
+      ],
+      "applicability": [
+        "Pile-deck / pile-slab connection model",
+        "E1 connecting reinforcement",
+        "Cyclic OpenSees fibre modelling",
+        "OpenSees ReinforcingSteel"
+      ],
+      "limitations": [
+        "Study-specific reinforcing-steel parameter set; do not treat as a generic reinforcing-bar grade.",
+        "The source reports fsu and esu; these map directly to the OpenSees ReinforcingSteel ultimate strength fu and ultimate strain eps_ult."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Cyclic Nonlinear Behavior of Pile-Deck Connections Using Structural Software Models",
+        "authors": "Diego Sosa; Pablo Caiza",
+        "journal": "The Open Civil Engineering Journal",
+        "volume_issue": "9",
+        "pages": "236–248",
+        "year": 2015,
+        "doi": "10.2174/1874149501509010236"
+      },
+      "parameter_evidence": {
+        "type": "journal_tables",
+        "title": "Cyclic Nonlinear Behavior of Pile-Deck Connections Using Structural Software Models",
+        "author": "Diego Sosa; Pablo Caiza",
+        "institution": "The Open Civil Engineering Journal",
+        "year": 2015,
+        "location": "Table 5 — E1 ReinforcingSteel data; Table 6 — definitions of ReinforcingSteel input parameters",
+        "url": "https://doi.org/10.2174/1874149501509010236",
+        "relationship": "Table 5 reports the complete E1 ReinforcingSteel input set used in OpenSees: fy=489.53 MPa, fsu=675.69 MPa, E=199948 MPa, Esh=4482 MPa, esh=0.0124 and esu=0.132. Table 6 identifies the corresponding OpenSees parameter meanings."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "hung-eltawil-2009-unconfined-concrete02",
+      "family": "Reinforced Concrete",
+      "material": "Unconfined concrete",
+      "grade": "Shear-wall model · Unconfined",
+      "standard": "OpenSees numerical shear-wall example",
+      "model": "Concrete02",
+      "preset_name": "Hung & El-Tawil (2009) · Unconfined Concrete02",
+      "parameters_si": {
+        "fpc": -41368543.759008,
+        "epsc0": -0.002,
+        "fpcu": -2757902.9172672,
+        "epsU": -0.01,
+        "lambda": 0.1,
+        "ft": 4136854.3759008,
+        "Ets": 2068427187.9504
+      },
+      "verified_parameters": [
+        "fpc",
+        "epsc0",
+        "fpcu",
+        "epsU",
+        "lambda",
+        "ft",
+        "Ets"
+      ],
+      "applicability": [
+        "Reinforced-concrete shear-wall numerical model",
+        "Unconfined concrete fibres",
+        "Hybrid-simulation algorithm verification",
+        "OpenSees Concrete02"
+      ],
+      "limitations": [
+        "Numerical-example material set reported in US customary units; not a generic concrete strength class.",
+        "SARE stores the exact Table I values converted from ksi to Pa using 1 ksi = 6.894757293168 MPa."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Full operator algorithm for hybrid simulation",
+        "authors": "Chung-Chan Hung; Sherif El-Tawil",
+        "journal": "Earthquake Engineering & Structural Dynamics",
+        "volume_issue": "38(13)",
+        "pages": "1545–1561",
+        "year": 2009,
+        "doi": "10.1002/eqe.921"
+      },
+      "parameter_evidence": {
+        "type": "journal_table",
+        "title": "Full operator algorithm for hybrid simulation",
+        "author": "Chung-Chan Hung; Sherif El-Tawil",
+        "institution": "Earthquake Engineering & Structural Dynamics",
+        "year": 2009,
+        "location": "Table I — Material parameters of the concrete and steel models; Unconfined concrete row",
+        "url": "https://doi.org/10.1002/eqe.921",
+        "relationship": "Table I directly reports the full Concrete02 set: fpc=-6 ksi, epsc0=-0.002, fpcu=-0.4 ksi, epsU=-0.01, lambda=0.1, ft=0.6 ksi and Ets=300 ksi. Stress quantities are converted exactly to SI storage."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "hung-eltawil-2009-confined-concrete02",
+      "family": "Reinforced Concrete",
+      "material": "Confined concrete",
+      "grade": "Shear-wall model · Confined",
+      "standard": "OpenSees numerical shear-wall example",
+      "model": "Concrete02",
+      "preset_name": "Hung & El-Tawil (2009) · Confined Concrete02",
+      "parameters_si": {
+        "fpc": -49642252.5108096,
+        "epsc0": -0.0045,
+        "fpcu": -16547417.5036032,
+        "epsU": -0.03,
+        "lambda": 0.1,
+        "ft": 4964225.25108096,
+        "Ets": 2482112625.54048
+      },
+      "verified_parameters": [
+        "fpc",
+        "epsc0",
+        "fpcu",
+        "epsU",
+        "lambda",
+        "ft",
+        "Ets"
+      ],
+      "applicability": [
+        "Reinforced-concrete shear-wall numerical model",
+        "Confined concrete fibres",
+        "Hybrid-simulation algorithm verification",
+        "OpenSees Concrete02"
+      ],
+      "limitations": [
+        "Numerical-example material set reported in US customary units; not a generic concrete strength class.",
+        "SARE stores the exact Table I values converted from ksi to Pa using 1 ksi = 6.894757293168 MPa."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Full operator algorithm for hybrid simulation",
+        "authors": "Chung-Chan Hung; Sherif El-Tawil",
+        "journal": "Earthquake Engineering & Structural Dynamics",
+        "volume_issue": "38(13)",
+        "pages": "1545–1561",
+        "year": 2009,
+        "doi": "10.1002/eqe.921"
+      },
+      "parameter_evidence": {
+        "type": "journal_table",
+        "title": "Full operator algorithm for hybrid simulation",
+        "author": "Chung-Chan Hung; Sherif El-Tawil",
+        "institution": "Earthquake Engineering & Structural Dynamics",
+        "year": 2009,
+        "location": "Table I — Material parameters of the concrete and steel models; Confined concrete row",
+        "url": "https://doi.org/10.1002/eqe.921",
+        "relationship": "Table I directly reports the full Concrete02 set: fpc=-7.2 ksi, epsc0=-0.0045, fpcu=-2.4 ksi, epsU=-0.03, lambda=0.1, ft=0.72 ksi and Ets=360 ksi. Stress quantities are converted exactly to SI storage."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "yigitbas-2026-frame-concrete04",
+      "family": "Reinforced Concrete",
+      "material": "Beam-column concrete",
+      "grade": "RC frame · Concrete04",
+      "standard": "Study-specific RC frame material",
+      "model": "Concrete04",
+      "preset_name": "Yigitbas et al. (2026) · RC frame Concrete04",
+      "parameters_si": {
+        "fc": -38590000,
+        "epsc": -0.0022,
+        "epscu": -0.0141,
+        "Ec": 32989000000,
+        "fct": 2050000,
+        "et": 0.00004,
+        "beta": 0.1
+      },
+      "verified_parameters": [
+        "fc",
+        "epsc",
+        "epscu",
+        "Ec",
+        "fct",
+        "et",
+        "beta"
+      ],
+      "applicability": [
+        "Reinforced-concrete moment-resisting frames",
+        "Distributed-plasticity fibre sections",
+        "Sequential seismic and settlement analysis",
+        "OpenSees Concrete04"
+      ],
+      "limitations": [
+        "Study-specific beam-column concrete parameter set; do not treat as a universal concrete strength class.",
+        "Use for comparable concrete and modelling assumptions unless independently recalibrated."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Sequential seismic and settlement analysis of reinforced concrete moment-resisting frames",
+        "authors": "Mehmet Yigitbas; Ernesto Grande; Maura Imbimbo",
+        "journal": "Ingegneria Sismica",
+        "volume_issue": "42(4)",
+        "pages": "88–110",
+        "year": 2026,
+        "doi": "10.65102/is202545"
+      },
+      "parameter_evidence": {
+        "type": "journal_table",
+        "title": "Sequential seismic and settlement analysis of reinforced concrete moment-resisting frames",
+        "author": "Mehmet Yigitbas; Ernesto Grande; Maura Imbimbo",
+        "institution": "Ingegneria Sismica",
+        "year": 2026,
+        "location": "Table 1 — Parameters characterizing the uniaxial material model Concrete04 selected for concrete material",
+        "url": "https://doi.org/10.65102/is202545",
+        "relationship": "Table 1 directly reports the complete Concrete04 input set for beam-column concrete: fc=-38.59 MPa, epsc=-0.0022, epscu=-0.0141, Ec=32989 MPa, fct=2.05 MPa, et=0.00004 and beta=0.1."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
     }
   ]
 }
