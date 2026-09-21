@@ -31,6 +31,7 @@ from openseespy_studio.postprocess import (
     force_displacement_curve,
     local_end_actions,
     member_end_resultants,
+    moment_curvature_curve,
     nodal_result_scalar,
     pushover_capacity_curve,
     section_component_samples,
@@ -1568,3 +1569,34 @@ def test_force_displacement_curve_can_use_nodal_reaction():
     assert source == "Node reaction"
     assert force_node == 5
     assert force_dof == 2
+
+
+def test_dedicated_moment_curvature_curve_uses_zero_length_section_history():
+    result = {
+        "moment_curvature": {
+            "kind": "moment-curvature",
+            "element_tag": 4,
+            "moment_component": "Mz",
+            "moment_index": 1,
+            "moment_sign": 1.0,
+        },
+        "history": {
+            "moment_curvature": {
+                "force": [
+                    [100.0, 12.0],
+                    [100.0, 24.0],
+                ],
+                "deformation": [
+                    [0.0001, 0.002],
+                    [0.0001, 0.004],
+                ],
+            }
+        },
+    }
+
+    curvature, moment, component, element_tag = moment_curvature_curve(result)
+
+    assert curvature == pytest.approx([0.0, 0.002, 0.004])
+    assert moment == pytest.approx([0.0, 12.0, 24.0])
+    assert component == "Mz"
+    assert element_tag == 4
