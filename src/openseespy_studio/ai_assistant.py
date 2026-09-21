@@ -719,9 +719,12 @@ class OpenAIProvider:
         )
 
         for _round in range(max(1, int(self.max_tool_rounds))):
+            response_output = list(
+                getattr(response, "output", []) or []
+            )
             calls = [
                 item
-                for item in getattr(response, "output", []) or []
+                for item in response_output
                 if getattr(item, "type", "") == "function_call"
             ]
             if not calls:
@@ -732,7 +735,11 @@ class OpenAIProvider:
                     )
                 return text
 
-            outputs: list[dict[str, str]] = []
+            # Keep the tool loop stateless. OpenAI's Responses API function-
+            # calling guide recommends carrying response.output forward with
+            # each function_call_output. This remains compatible with
+            # store=False and also preserves reasoning items when present.
+            conversation.extend(response_output)
             for call in calls:
                 raw_arguments = getattr(call, "arguments", "{}") or "{}"
                 try:
@@ -746,7 +753,7 @@ class OpenAIProvider:
                     arguments,
                     snapshot,
                 )
-                outputs.append({
+                conversation.append({
                     "type": "function_call_output",
                     "call_id": str(getattr(call, "call_id", "")),
                     "output": _json_text(result),
@@ -755,8 +762,7 @@ class OpenAIProvider:
             response = client.responses.create(
                 model=self.model,
                 instructions=instructions,
-                previous_response_id=str(getattr(response, "id", "")),
-                input=outputs,
+                input=conversation,
                 tools=OPENAI_READ_ONLY_TOOLS,
                 store=False,
             )
