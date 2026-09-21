@@ -8201,6 +8201,7 @@ class MainWindow(QMainWindow):
             dialog = MaterialLibraryDialog(
                 next_tag=self.project.next_material_tag(),
                 units=self.project.units,
+                materials=self.project.materials,
                 parent=self,
             )
         except (OSError, TypeError, ValueError) as exc:
