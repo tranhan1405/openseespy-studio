@@ -135,12 +135,10 @@ non-dominated case should be adopted.
 
 ### SARE AI Assistant
 
-SARE includes an optional **read-only AI Assistant** dock. The default provider
-is **Ollama (Local · Free)**, so supported open models can run on the user's
-own PC without an API key or per-token API fee. OpenAI remains available as an
-optional API provider. The assistant does not execute generated Python or
-modify the project. Instead, it can inspect a local project snapshot through
-controlled read-only tools for:
+SARE includes an optional **read-only AI Assistant** dock. The first provider
+is OpenAI through the Responses API. The assistant does not execute generated
+Python or modify the project. Instead, it can inspect a local project snapshot
+through controlled read-only tools for:
 
 - model summary and current node/element selection
 - individual nodes, elements, materials, sections and connection objects
@@ -152,22 +150,8 @@ controlled read-only tools for:
 Open the assistant from **Analysis > Research**, **Tools > AI Assistant**, or
 right-click a Model Tree object and choose **Ask AI about this**.
 
-For the free local provider on Windows, install Ollama and pull a tool-capable
-model. SARE defaults to `qwen3.5:4b` because it is relatively lightweight and
-supports tool calling:
-
-```powershell
-irm https://ollama.com/install.ps1 | iex
-ollama pull qwen3.5:4b
-```
-
-Ollama normally exposes its local API at `http://localhost:11434`. SARE's
-free provider intentionally accepts only loopback hosts (localhost,
-127.0.0.1, or ::1), so the project snapshot is not sent to a remote Ollama
-server.
-
-For OpenAI mode, the API key is never written to a SARE project. Either set it
-before launching SARE:
+The API key is never written to a SARE project. Either set it before launching
+SARE:
 
 ```powershell
 $env:OPENAI_API_KEY="..."
