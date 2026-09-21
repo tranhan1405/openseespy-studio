@@ -155,6 +155,37 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
             model.set_fixity(node_at[(i, j, 0)], (1, 1, 1, 1, 1, 1))
 
 
+def material_source_comments(material: MaterialData) -> list[str]:
+    """Return compact provenance comments for exported sourced materials."""
+    source = material.source if isinstance(material.source, dict) else {}
+    if not source:
+        return []
+
+    reference = source.get("primary_reference", {})
+    if not isinstance(reference, dict):
+        reference = {}
+    evidence = source.get("parameter_evidence", {})
+    if not isinstance(evidence, dict):
+        evidence = {}
+
+    comments = [
+        f"# Source status: {source.get('status', 'unknown')}",
+    ]
+    title = str(reference.get("title", "")).strip()
+    if title:
+        comments.append("# Source: " + title)
+    doi = str(reference.get("doi", "")).strip()
+    if doi:
+        comments.append("# DOI: " + doi)
+    location = str(evidence.get("location", "")).strip()
+    if location:
+        comments.append("# Parameter evidence: " + location)
+    record_id = str(source.get("record_id", "")).strip()
+    if record_id:
+        comments.append("# SARE library record: " + record_id)
+    return comments
+
+
 def material_to_openseespy(
     material: MaterialData,
     units: dict[str, str] | None = None,
@@ -3558,7 +3589,9 @@ def to_openseespy(
     if materials:
         lines.extend(["", "# Materials"])
         for tag in ordered_material_tags(materials):
-            lines.append(material_to_openseespy(materials[tag], units))
+            material = materials[tag]
+            lines.extend(material_source_comments(material))
+            lines.append(material_to_openseespy(material, units))
 
     if sections:
         lines.extend(["", "# Sections"])
