@@ -2823,3 +2823,54 @@ def test_generator_rejects_element_recorder_with_missing_target_element():
             model,
             recorders={2: recorder},
         )
+
+
+def test_generator_rejects_zero_length_standard_element():
+    model = StructuralModel("zero-standard-element", ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="truss",
+        truss_area=0.01,
+        truss_material_tag=1,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"element 1 -> zero length",
+    ):
+        to_openseespy(model)
+
+
+def test_generator_rejects_parallel_vecxz_for_3d_member():
+    model = StructuralModel("parallel-vecxz", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0, 3.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="elasticBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
+    section = SectionData(1, "Elastic", "Elastic")
+    transformation = TransformationData(
+        1,
+        "Bad orientation",
+        "Linear",
+        (0.0, 0.0, 1.0),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"vecxz parallel to member axis",
+    ):
+        to_openseespy(
+            model,
+            sections={1: section},
+            transformations={1: transformation},
+        )
