@@ -15497,6 +15497,177 @@
         "parameter_location_identified": true,
         "units_checked": true
       }
+    },
+    {
+      "family": "Prestressing Steel",
+      "material": "Prestressing strand elastic-perfectly-plastic response",
+      "standard": "Study-specific pile model prestressing-strand state",
+      "model": "ElasticPP",
+      "verified_parameters": [
+        "E",
+        "epsyP",
+        "epsyN",
+        "eps0"
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Cyclic Nonlinear Behavior of Pile-Deck Connections Using Structural Software Models",
+        "authors": "Diego Sosa; Pablo Caiza",
+        "journal": "The Open Civil Engineering Journal",
+        "volume_issue": "9",
+        "pages": "236–248",
+        "year": 2015,
+        "doi": "10.2174/1874149501509010236"
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      },
+      "id": "sosa-caiza-2015-strand-e1-e7-elasticpp",
+      "grade": "Prestressing strand · elements E1/E7",
+      "preset_name": "Sosa & Caiza (2015) · Strand E1/E7 · ElasticPP",
+      "parameters_si": {
+        "E": 192295000000,
+        "epsyP": 0.0008,
+        "epsyN": -0.0004,
+        "eps0": -0.0008
+      },
+      "applicability": [
+        "Pile prestressing strands",
+        "Element groups E1 and E7 in the published OpenSees model",
+        "Elastic-perfectly-plastic prestressing-steel representation",
+        "OpenSees ElasticPP"
+      ],
+      "limitations": [
+        "Element-state-specific parameter set; it includes the published initial strain and must not be interpreted as a generic prestressing-strand grade.",
+        "The paper states that steel properties vary along the pile with anchorage/development conditions; use only for the corresponding model state unless independently justified."
+      ],
+      "parameter_evidence": {
+        "type": "journal_tables",
+        "title": "Cyclic Nonlinear Behavior of Pile-Deck Connections Using Structural Software Models",
+        "author": "Diego Sosa; Pablo Caiza",
+        "institution": "The Open Civil Engineering Journal",
+        "year": 2015,
+        "location": "Section 3.2 and Table 5 — prestressing strands use ElasticPerfectlyPlastic; E1/E7 rows: E=192295 MPa, epsP=0.0008, epsN=-0.0004, eps0=-0.0008; Table 7 defines the four inputs",
+        "url": "https://doi.org/10.2174/1874149501509010236",
+        "relationship": "The paper's ElasticPerfectlyPlastic representation maps directly to the OpenSees ElasticPP inputs E, epsyP, epsyN and eps0. E1 and E7 share the same published set."
+      }
+    },
+    {
+      "family": "Prestressing Steel",
+      "material": "Prestressing strand elastic-perfectly-plastic response",
+      "standard": "Study-specific pile model prestressing-strand state",
+      "model": "ElasticPP",
+      "verified_parameters": [
+        "E",
+        "epsyP",
+        "epsyN",
+        "eps0"
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Cyclic Nonlinear Behavior of Pile-Deck Connections Using Structural Software Models",
+        "authors": "Diego Sosa; Pablo Caiza",
+        "journal": "The Open Civil Engineering Journal",
+        "volume_issue": "9",
+        "pages": "236–248",
+        "year": 2015,
+        "doi": "10.2174/1874149501509010236"
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      },
+      "id": "sosa-caiza-2015-strand-e2-e5-e6-elasticpp",
+      "grade": "Prestressing strand · elements E2/E5/E6",
+      "preset_name": "Sosa & Caiza (2015) · Strand E2/E5/E6 · ElasticPP",
+      "parameters_si": {
+        "E": 192295000000,
+        "epsyP": 0.0048,
+        "epsyN": -0.0024,
+        "eps0": -0.0048
+      },
+      "applicability": [
+        "Pile prestressing strands",
+        "Element groups E2, E5 and E6 in the published OpenSees model",
+        "Elastic-perfectly-plastic prestressing-steel representation",
+        "OpenSees ElasticPP"
+      ],
+      "limitations": [
+        "Element-state-specific parameter set; it includes the published initial strain and must not be interpreted as a generic prestressing-strand grade.",
+        "The paper states that steel properties vary along the pile with anchorage/development conditions; use only for the corresponding model state unless independently justified."
+      ],
+      "parameter_evidence": {
+        "type": "journal_tables",
+        "title": "Cyclic Nonlinear Behavior of Pile-Deck Connections Using Structural Software Models",
+        "author": "Diego Sosa; Pablo Caiza",
+        "institution": "The Open Civil Engineering Journal",
+        "year": 2015,
+        "location": "Section 3.2 and Table 5 — prestressing strands use ElasticPerfectlyPlastic; E2/E5/E6 rows: E=192295 MPa, epsP=0.0048, epsN=-0.0024, eps0=-0.0048; Table 7 defines the four inputs",
+        "url": "https://doi.org/10.2174/1874149501509010236",
+        "relationship": "The paper's ElasticPerfectlyPlastic representation maps directly to the OpenSees ElasticPP inputs E, epsyP, epsyN and eps0. E2, E5 and E6 share the same published set."
+      }
+    },
+    {
+      "family": "Prestressing Steel",
+      "material": "Prestressing strand elastic-perfectly-plastic response",
+      "standard": "Study-specific pile model prestressing-strand state",
+      "model": "ElasticPP",
+      "verified_parameters": [
+        "E",
+        "epsyP",
+        "epsyN",
+        "eps0"
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Cyclic Nonlinear Behavior of Pile-Deck Connections Using Structural Software Models",
+        "authors": "Diego Sosa; Pablo Caiza",
+        "journal": "The Open Civil Engineering Journal",
+        "volume_issue": "9",
+        "pages": "236–248",
+        "year": 2015,
+        "doi": "10.2174/1874149501509010236"
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      },
+      "id": "sosa-caiza-2015-strand-e3-e4-elasticpp",
+      "grade": "Prestressing strand · elements E3/E4",
+      "preset_name": "Sosa & Caiza (2015) · Strand E3/E4 · ElasticPP",
+      "parameters_si": {
+        "E": 192295000000,
+        "epsyP": 0.0078,
+        "epsyN": -0.0039,
+        "eps0": -0.0064
+      },
+      "applicability": [
+        "Pile prestressing strands",
+        "Element groups E3 and E4 in the published OpenSees model",
+        "Elastic-perfectly-plastic prestressing-steel representation",
+        "OpenSees ElasticPP"
+      ],
+      "limitations": [
+        "Element-state-specific parameter set; it includes the published initial strain and must not be interpreted as a generic prestressing-strand grade.",
+        "The paper states that steel properties vary along the pile with anchorage/development conditions; use only for the corresponding model state unless independently justified."
+      ],
+      "parameter_evidence": {
+        "type": "journal_tables",
+        "title": "Cyclic Nonlinear Behavior of Pile-Deck Connections Using Structural Software Models",
+        "author": "Diego Sosa; Pablo Caiza",
+        "institution": "The Open Civil Engineering Journal",
+        "year": 2015,
+        "location": "Section 3.2 and Table 5 — prestressing strands use ElasticPerfectlyPlastic; E3/E4 rows: E=192295 MPa, epsP=0.0078, epsN=-0.0039, eps0=-0.0064; Table 7 defines the four inputs",
+        "url": "https://doi.org/10.2174/1874149501509010236",
+        "relationship": "The paper's ElasticPerfectlyPlastic representation maps directly to the OpenSees ElasticPP inputs E, epsyP, epsyN and eps0. E3 and E4 share the same published set."
+      }
     }
   ]
 }
