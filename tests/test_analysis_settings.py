@@ -1447,3 +1447,62 @@ def test_step_driven_analyses_reject_nonpositive_steps(analysis_type):
             analysis_type,
             **kwargs,
         )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("test", "stale-test"),
+        ("algorithm", "stale-algorithm"),
+        ("tolerance", 0.0),
+        ("max_iterations", 0),
+    ],
+)
+def test_modal_ignores_unused_iterative_convergence_settings(field, value):
+    kwargs = {
+        "num_modes": 1,
+        "test": "NormDispIncr",
+        "algorithm": "Newton",
+        "tolerance": 1.0e-8,
+        "max_iterations": 20,
+    }
+    kwargs[field] = value
+
+    analysis = AnalysisSettingsData(
+        90,
+        "Modal ignores iterative convergence",
+        "Modal",
+        **kwargs,
+    )
+    assert getattr(analysis, field) == value
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("test", "bad-test", "Unsupported convergence test"),
+        ("algorithm", "bad-algorithm", "Unsupported algorithm"),
+        ("tolerance", 0.0, "Invalid convergence settings"),
+        ("max_iterations", 0, "Invalid convergence settings"),
+    ],
+)
+def test_iterative_analysis_rejects_invalid_active_convergence_settings(
+    field,
+    value,
+    message,
+):
+    kwargs = {
+        "test": "NormDispIncr",
+        "algorithm": "Newton",
+        "tolerance": 1.0e-8,
+        "max_iterations": 20,
+    }
+    kwargs[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        AnalysisSettingsData(
+            91,
+            "Invalid iterative convergence",
+            "Static",
+            **kwargs,
+        )

@@ -1530,9 +1530,22 @@ class AnalysisSettingsData:
             raise ValueError("Unsupported constraints handler.")
         if self.numberer not in {"RCM","Plain"}: raise ValueError("Unsupported numberer.")
         if self.system not in {"UmfPack","BandGeneral","ProfileSPD"}: raise ValueError("Unsupported system.")
-        if self.test not in {"NormDispIncr","NormUnbalance","EnergyIncr"}: raise ValueError("Unsupported convergence test.")
-        if self.algorithm not in {"Newton","ModifiedNewton","NewtonLineSearch"}: raise ValueError("Unsupported algorithm.")
-        if self.tolerance<=0 or self.max_iterations<1: raise ValueError("Invalid convergence settings.")
+        uses_iterative_convergence = self.analysis_type != "Modal"
+        if (
+            uses_iterative_convergence
+            and self.test not in {"NormDispIncr","NormUnbalance","EnergyIncr"}
+        ):
+            raise ValueError("Unsupported convergence test.")
+        if (
+            uses_iterative_convergence
+            and self.algorithm not in {"Newton","ModifiedNewton","NewtonLineSearch"}
+        ):
+            raise ValueError("Unsupported algorithm.")
+        if (
+            uses_iterative_convergence
+            and (self.tolerance <= 0 or self.max_iterations < 1)
+        ):
+            raise ValueError("Invalid convergence settings.")
         if (
             self.analysis_type in {"Static", "Pushover", "Transient"}
             and self.steps < 1
