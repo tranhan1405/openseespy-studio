@@ -92,3 +92,84 @@ def test_elastic_section_e_and_g_are_edited_in_mpa_and_stored_in_pa(qapp):
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+def test_us_material_editor_uses_ksi_and_lb_per_cubic_inch(qapp):
+    units = {"length": "in", "force": "kip", "time": "s"}
+    kip_in2_to_pa = 4448.2216152605 / (0.0254 ** 2)
+    material = MaterialData(
+        tag=10,
+        name="US Steel",
+        material_type="Steel01",
+        parameters={
+            "Fy": 60.0 * kip_in2_to_pa,
+            "E0": 30000.0 * kip_in2_to_pa,
+            "b": 0.01,
+            "a1": 0.0,
+            "a2": 1.0,
+            "a3": 0.0,
+            "a4": 1.0,
+        },
+        density=7850.0,
+    )
+    dialog = MaterialDialog(material, units=units)
+    try:
+        assert math.isclose(dialog._parameter_spins["Fy"].value(), 60.0)
+        assert math.isclose(dialog._parameter_spins["E0"].value(), 30000.0)
+        assert dialog._parameter_label("Steel01", "Fy") == "Fy [ksi]:"
+        assert math.isclose(
+            dialog.density.value(),
+            0.283599,
+            rel_tol=2.0e-4,
+        )
+
+        dialog._parameter_spins["Fy"].setValue(65.0)
+        dialog.density.setValue(0.284)
+        stored = dialog.material_data()
+        assert math.isclose(
+            stored.parameters["Fy"],
+            65.0 * kip_in2_to_pa,
+            rel_tol=1.0e-12,
+        )
+        assert math.isclose(
+            stored.density,
+            0.284 * 0.45359237 / (0.0254 ** 3),
+            rel_tol=1.0e-12,
+        )
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_us_elastic_section_editor_uses_ksi(qapp):
+    units = {"length": "in", "force": "kip", "time": "s"}
+    kip_in2_to_pa = 4448.2216152605 / (0.0254 ** 2)
+    section = SectionData(
+        tag=10,
+        name="US elastic beam",
+        section_type="Elastic",
+        parameters={
+            "E": 29000.0 * kip_in2_to_pa,
+            "A": 20.0,
+            "Iz": 1000.0,
+            "Iy": 100.0,
+            "G": 11200.0 * kip_in2_to_pa,
+            "J": 10.0,
+        },
+    )
+    dialog = SectionDialog({}, section=section, units=units)
+    try:
+        assert math.isclose(dialog.elastic_spins["E"].value(), 29000.0)
+        assert math.isclose(dialog.elastic_spins["G"].value(), 11200.0)
+        dialog.elastic_spins["E"].setValue(30000.0)
+        stored = dialog.section_data()
+        assert math.isclose(
+            stored.parameters["E"],
+            30000.0 * kip_in2_to_pa,
+            rel_tol=1.0e-12,
+        )
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
