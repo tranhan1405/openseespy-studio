@@ -3770,6 +3770,54 @@ class ProjectDatabase:
                 "Beam element loads require a beam-column element."
             )
 
+        if load.load_type == "SelfWeight":
+            if element.section_tag is None:
+                raise ValueError(
+                    "SelfWeight requires the target element to have a section."
+                )
+            section = self.sections.get(int(element.section_tag))
+            if section is None:
+                raise ValueError(
+                    f"SelfWeight references missing section {element.section_tag}."
+                )
+            if section.section_type != "Elastic":
+                raise ValueError(
+                    "Automatic SelfWeight currently requires an Elastic section."
+                )
+            if element.transf_tag is None:
+                raise ValueError(
+                    "SelfWeight requires a geometric transformation."
+                )
+            transformation = self.transformations.get(
+                int(element.transf_tag)
+            )
+            if transformation is None:
+                raise ValueError(
+                    "SelfWeight references missing geometric transformation "
+                    f"{element.transf_tag}."
+                )
+            self._validate_element_geometry(
+                element,
+                transformation=transformation,
+            )
+            if load.density_override <= 0.0:
+                if section.material_tag is None:
+                    raise ValueError(
+                        "SelfWeight needs a positive density override or an "
+                        "Elastic section linked to a material with density."
+                    )
+                material = self.materials.get(int(section.material_tag))
+                if material is None:
+                    raise ValueError(
+                        f"SelfWeight references missing material "
+                        f"{section.material_tag} through section {section.tag}."
+                    )
+                if material.density <= 0.0:
+                    raise ValueError(
+                        "SelfWeight needs a positive density override or a "
+                        "linked material with positive density."
+                    )
+
     def add_element_load(self, load: ElementLoadData) -> None:
         if load.tag in self.element_loads:
             raise ValueError(
