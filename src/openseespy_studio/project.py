@@ -3268,6 +3268,7 @@ class ProjectDatabase:
                 continue
             ground.xyz = tuple(source.xyz)
             ground.fixity = fixed
+            ground.mass = (0.0,) * int(self.model.ndf)
             updated.append(int(ground_tag))
         return sorted(set(updated))
 
@@ -3320,6 +3321,14 @@ class ProjectDatabase:
         for connection in self.connections.values():
             if node_tag in {connection.node_i, connection.node_j}:
                 self._validate_connection(connection)
+
+        incident_elements = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if node_tag in {int(element.i), int(element.j)}
+        )
+        for element_tag in incident_elements:
+            self.validate_element_state(element_tag)
 
         for constraint_tag, constraint in self.constraints.items():
             if (
