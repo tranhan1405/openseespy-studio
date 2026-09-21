@@ -51,6 +51,8 @@ from ..brand import (
     PRODUCT_NAME,
     PRODUCT_SHORT_DESCRIPTION,
     PRODUCT_STAGE,
+    LEGACY_SETTINGS_APPLICATION,
+    LEGACY_SETTINGS_ORGANIZATION,
 )
 from ..calibration import (
     CalibrationCase,
@@ -3369,7 +3371,7 @@ class MainWindow(QMainWindow):
             generated_script = self._generate_project_script()
         except (KeyError, TypeError, ValueError) as exc:
             generated_script = (
-                "# OpenSeesPy Studio generation error\n"
+                f"# {PRODUCT_NAME} generation error\n"
                 f"# {type(exc).__name__}: {exc}\n"
             )
             self._log(f"Script generation error: {exc}")
@@ -7597,7 +7599,7 @@ class MainWindow(QMainWindow):
         self._refresh_all()
 
     def _recent_project_paths(self) -> list[str]:
-        settings = QSettings("OpenSeesPy Studio", "OpenSeesPy Studio")
+        settings = QSettings(LEGACY_SETTINGS_ORGANIZATION, LEGACY_SETTINGS_APPLICATION)
         raw = settings.value("recentProjects", [])
         if isinstance(raw, str):
             raw = [raw]
@@ -7614,8 +7616,8 @@ class MainWindow(QMainWindow):
         ]
         paths.insert(0, value)
         QSettings(
-            "OpenSeesPy Studio",
-            "OpenSeesPy Studio",
+            LEGACY_SETTINGS_ORGANIZATION,
+            LEGACY_SETTINGS_APPLICATION,
         ).setValue("recentProjects", paths[:10])
         if hasattr(self, "recent_projects_menu"):
             self._refresh_recent_projects_menu()
@@ -7628,8 +7630,8 @@ class MainWindow(QMainWindow):
             if str(Path(item).resolve()) != value
         ]
         QSettings(
-            "OpenSeesPy Studio",
-            "OpenSeesPy Studio",
+            LEGACY_SETTINGS_ORGANIZATION,
+            LEGACY_SETTINGS_APPLICATION,
         ).setValue("recentProjects", paths)
 
     def _refresh_recent_projects_menu(self) -> None:
@@ -7666,8 +7668,8 @@ class MainWindow(QMainWindow):
 
     def _clear_recent_projects(self) -> None:
         QSettings(
-            "OpenSeesPy Studio",
-            "OpenSeesPy Studio",
+            LEGACY_SETTINGS_ORGANIZATION,
+            LEGACY_SETTINGS_APPLICATION,
         ).remove("recentProjects")
         self._refresh_recent_projects_menu()
 
@@ -11981,7 +11983,7 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            compile(source, "<OpenSeesPy Studio export>", "exec")
+            compile(source, "<SARE OpenSeesPy export>", "exec")
         except SyntaxError as exc:
             QMessageBox.critical(
                 self,
