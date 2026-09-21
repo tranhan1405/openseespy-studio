@@ -1008,6 +1008,13 @@ class ConstraintData:
 
 
 @dataclass
+SUPPORTED_CONNECTION_TYPES: tuple[str, ...] = (
+    "zeroLength",
+    "zeroLengthSection",
+    "twoNodeLink",
+)
+
+
 class ConnectionData:
     tag: int
     name: str
@@ -1081,11 +1088,7 @@ class ConnectionData:
 
         if self.tag <= 0:
             raise ValueError("Connection tag must be a positive integer.")
-        if self.connection_type not in {
-            "zeroLength",
-            "twoNodeLink",
-            "zeroLengthSection",
-        }:
+        if self.connection_type not in SUPPORTED_CONNECTION_TYPES:
             raise ValueError(
                 f"Unsupported connection type: {self.connection_type}"
             )
