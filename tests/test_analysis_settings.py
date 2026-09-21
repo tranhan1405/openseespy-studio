@@ -1095,3 +1095,32 @@ def test_modal_generated_script_preserves_zero_eigenvalue_as_rigid_body_mode():
         "_studio_frequency = _studio_omega / (2.0 * math.pi) "
         "if _studio_omega > 0.0 else None"
     ) in text
+
+
+def test_modal_generated_script_checks_requested_mode_count_before_processing():
+    analysis = AnalysisSettingsData(
+        79,
+        "Modal mode-count guard",
+        "Modal",
+        num_modes=4,
+    )
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            analysis,
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
+
+    guard = "if len(_studio_eigenvalues) < 4:"
+    loop = (
+        "for _studio_mode, _studio_lambda in "
+        "enumerate(_studio_eigenvalues, start=1):"
+    )
+
+    assert guard in text
+    assert "Modal analysis requested 4 mode(s)" in text
+    assert "returned only {len(_studio_eigenvalues)} eigenvalue(s)" in text
+    assert text.index(guard) < text.index(loop)
+    compile(text, "<modal-mode-count-guard>", "exec")

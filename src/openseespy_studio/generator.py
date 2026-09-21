@@ -1254,6 +1254,16 @@ def analysis_to_openseespy(
         lines.append("if not isinstance(_studio_eigenvalues, (list, tuple)):")
         lines.append("    _studio_eigenvalues = [_studio_eigenvalues]")
         lines.extend([
+            (
+                f"if len(_studio_eigenvalues) < {settings.num_modes}:"
+            ),
+            (
+                "    raise RuntimeError("
+                f"'Modal analysis requested {settings.num_modes} mode(s), but OpenSees '"
+                "f'returned only {len(_studio_eigenvalues)} eigenvalue(s). '"
+                "'Reduce the requested mode count or check constraints, mass, and stiffness.'"
+                ")"
+            ),
             "_studio_total_lumped_mass = {}",
             "for _studio_dof in (1, 2, 3):",
             "    _studio_mass_total = 0.0",
