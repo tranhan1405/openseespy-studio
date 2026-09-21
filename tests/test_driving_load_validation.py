@@ -75,3 +75,85 @@ def test_pushover_with_nonzero_plain_driver_passes_driving_check():
         and issue.severity == "ERROR"
         for issue in issues
     )
+
+
+def test_displacement_control_missing_control_node_is_blocked():
+    project = _project()
+    analysis = AnalysisSettingsData(
+        1,
+        "Push",
+        "Pushover",
+        control_node=99,
+        control_dof=1,
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Analysis control"
+        and "missing control node 99" in issue.message
+        for issue in issues
+    )
+
+
+def test_displacement_control_fixed_control_dof_is_blocked():
+    project = _project()
+    analysis = AnalysisSettingsData(
+        1,
+        "Static DC",
+        "Static",
+        integrator="DisplacementControl",
+        control_node=1,
+        control_dof=1,
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Analysis control"
+        and "is restrained" in issue.message
+        for issue in issues
+    )
+
+
+def test_displacement_control_unavailable_dof_is_blocked():
+    project = _project()
+    analysis = AnalysisSettingsData(
+        1,
+        "Static DC",
+        "Static",
+        integrator="DisplacementControl",
+        control_node=2,
+        control_dof=4,
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert any(
+        issue.severity == "ERROR"
+        and issue.category == "Analysis control"
+        and "ndf=3" in issue.message
+        for issue in issues
+    )
+
+
+def test_displacement_control_free_control_dof_has_no_control_error():
+    project = _project()
+    analysis = AnalysisSettingsData(
+        1,
+        "Static DC",
+        "Static",
+        integrator="DisplacementControl",
+        control_node=2,
+        control_dof=1,
+    )
+
+    issues = validate_project(project, analysis)
+
+    assert not any(
+        issue.category == "Analysis control"
+        and issue.severity == "ERROR"
+        for issue in issues
+    )
