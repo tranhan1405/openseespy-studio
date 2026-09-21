@@ -7,8 +7,11 @@ from openseespy_studio.generator import (
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
     MATERIAL_DEFAULTS,
+    AnalysisSettingsData,
+    LoadPatternData,
     MaterialData,
     SectionData,
+    TimeSeriesData,
     TransformationData,
 )
 
@@ -181,3 +184,112 @@ def test_bond_sp01_slip_converts_from_si_storage_to_model_length():
     )
     assert ", 1," in command
     assert ", 10," in command
+
+
+def _scoped_nlth_generation_fixture(*, preload_gravity: bool):
+    model = StructuralModel("scoped-nlth", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+
+    time_series = {
+        1: TimeSeriesData(
+            1, "Current EQ", "Path", dt=0.01, values=[0.0, 0.1]
+        ),
+        2: TimeSeriesData(
+            2, "Old EQ", "Path", dt=0.01, values=[0.0, 0.2]
+        ),
+        3: TimeSeriesData(3, "Gravity", "Linear", factor=1.0),
+        4: TimeSeriesData(
+            4, "Unowned EQ", "Path", dt=0.01, values=[0.0, 0.3]
+        ),
+    }
+    load_patterns = {
+        1: LoadPatternData(
+            1,
+            "Current excitation",
+            "UniformExcitation",
+            time_series_tag=1,
+            direction=1,
+        ),
+        2: LoadPatternData(
+            2,
+            "Old excitation",
+            "UniformExcitation",
+            time_series_tag=2,
+            direction=1,
+        ),
+        3: LoadPatternData(
+            3,
+            "Gravity",
+            "Plain",
+            time_series_tag=3,
+        ),
+        4: LoadPatternData(
+            4,
+            "Unowned excitation",
+            "UniformExcitation",
+            time_series_tag=4,
+            direction=1,
+        ),
+    }
+    current = AnalysisSettingsData(
+        1,
+        "Current NLTH",
+        analysis_type="Transient",
+        steps=1,
+        dt=0.01,
+        control_node=1,
+        control_dof=1,
+        preload_gravity=preload_gravity,
+        deferred_pattern_tags=[1],
+    )
+    old = AnalysisSettingsData(
+        2,
+        "Old NLTH",
+        analysis_type="Transient",
+        steps=1,
+        dt=0.01,
+        control_node=1,
+        control_dof=1,
+        deferred_pattern_tags=[2],
+    )
+    return model, time_series, load_patterns, {1: current, 2: old}
+
+
+def test_template_analysis_does_not_leak_other_analysis_patterns():
+    model, series, patterns, analyses = _scoped_nlth_generation_fixture(
+        preload_gravity=False
+    )
+
+    code = to_openseespy(
+        model,
+        time_series=series,
+        load_patterns=patterns,
+        analyses=analyses,
+        active_analysis_tag=1,
+    )
+
+    assert "ops.pattern('UniformExcitation', 1," in code
+    assert "ops.pattern('UniformExcitation', 2," not in code
+    assert "ops.pattern('UniformExcitation', 4," not in code
+    assert "ops.pattern('Plain', 3," not in code
+    assert "ops.loadConst('-time', 0.0)" not in code
+
+
+def test_template_preload_uses_only_background_plain_patterns():
+    model, series, patterns, analyses = _scoped_nlth_generation_fixture(
+        preload_gravity=True
+    )
+
+    code = to_openseespy(
+        model,
+        time_series=series,
+        load_patterns=patterns,
+        analyses=analyses,
+        active_analysis_tag=1,
+    )
+
+    assert "ops.pattern('Plain', 3, 3)" in code
+    assert "ops.loadConst('-time', 0.0)" in code
+    assert "ops.pattern('UniformExcitation', 1," in code
+    assert "ops.pattern('UniformExcitation', 2," not in code
+    assert "ops.pattern('UniformExcitation', 4," not in code
