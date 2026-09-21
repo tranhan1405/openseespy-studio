@@ -18,7 +18,9 @@ issues, convergence histories, or solver messages.
 
 For structural-engineering questions, state the relevant model evidence and
 then explain the likely cause or implication. If more model information is
-needed, call a read-only tool. When numerical results are truncated, say so.
+needed, call a read-only tool. When the context focus names a node, element,
+material, section, connection, or analysis tag, use the matching get_* tool
+before diagnosing that object. When numerical results are truncated, say so.
 """
 
 
@@ -271,11 +273,61 @@ def execute_read_only_tool(
                 model.get("nodes", []) if isinstance(model, dict) else [],
                 tag,
             )
-            result = (
-                {"found": True, "node": item}
-                if item is not None
-                else {"found": False, "tag": tag}
-            )
+            if item is None:
+                result = {"found": False, "tag": tag}
+            else:
+                connected_elements = [
+                    int(element.get("tag"))
+                    for element in model.get("elements", [])
+                    if (
+                        isinstance(element, dict)
+                        and tag in {
+                            int(element.get("i", -1)),
+                            int(element.get("j", -1)),
+                        }
+                    )
+                ]
+                result = {
+                    "found": True,
+                    "node": item,
+                    "connected_elements": connected_elements,
+                    "nodal_loads": [
+                        load
+                        for load in project.get("nodal_loads", [])
+                        if (
+                            isinstance(load, dict)
+                            and int(load.get("node_tag", -1)) == tag
+                        )
+                    ],
+                    "prescribed_displacements": [
+                        load
+                        for load in project.get(
+                            "prescribed_displacements",
+                            [],
+                        )
+                        if (
+                            isinstance(load, dict)
+                            and int(load.get("node_tag", -1)) == tag
+                        )
+                    ],
+                    "constraints": [
+                        constraint
+                        for constraint in project.get("constraints", [])
+                        if (
+                            isinstance(constraint, dict)
+                            and (
+                                int(constraint.get("retained_node", -1)) == tag
+                                or tag in {
+                                    int(value)
+                                    for value in constraint.get(
+                                        "constrained_nodes",
+                                        [],
+                                    )
+                                }
+                            )
+                        )
+                    ],
+                }
 
     elif name == "get_element":
         try:
@@ -304,6 +356,20 @@ def execute_read_only_tool(
                         project.get("materials", []),
                         int(material_tag),
                     )
+                transf_tag = detail.get("transf_tag")
+                if transf_tag is not None:
+                    detail["transformation"] = _tagged(
+                        project.get("transformations", []),
+                        int(transf_tag),
+                    )
+                detail["element_loads"] = [
+                    load
+                    for load in project.get("element_loads", [])
+                    if (
+                        isinstance(load, dict)
+                        and int(load.get("element_tag", -1)) == tag
+                    )
+                ]
                 result = {"found": True, "element": detail}
 
     elif name == "get_connection":
@@ -313,11 +379,27 @@ def execute_read_only_tool(
             result = {"error": "get_connection requires an integer tag."}
         else:
             item = _tagged(project.get("connections", []), tag)
-            result = (
-                {"found": True, "connection": item}
-                if item is not None
-                else {"found": False, "tag": tag}
-            )
+            if item is None:
+                result = {"found": False, "tag": tag}
+            else:
+                detail = dict(item)
+                section_tag = detail.get("section_tag")
+                if section_tag is not None:
+                    detail["section"] = _tagged(
+                        project.get("sections", []),
+                        int(section_tag),
+                    )
+                material_defs: dict[str, Any] = {}
+                for dof, material_tag in dict(
+                    detail.get("materials_by_dof", {})
+                ).items():
+                    material_defs[str(dof)] = _tagged(
+                        project.get("materials", []),
+                        int(material_tag),
+                    )
+                if material_defs:
+                    detail["material_definitions_by_dof"] = material_defs
+                result = {"found": True, "connection": detail}
 
     elif name == "get_material":
         try:
