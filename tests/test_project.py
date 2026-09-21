@@ -2618,3 +2618,86 @@ def test_project_next_element_tag_shares_namespace_with_connections():
 
     assert project.next_element_tag() == 3
     assert project.next_connection_tag() == 3
+
+
+def test_project_rejects_elastic_section_link_to_non_modulus_material():
+    project = ProjectDatabase(name="Bad elastic material")
+    project.add_material(
+        MaterialData(
+            1,
+            "Gap",
+            "ElasticPPGap",
+            {"E": 1000.0, "Fy": 10.0, "gap": 0.0, "eta": 0.0, "damage": 0.0},
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"does not expose a usable elastic/shear modulus",
+    ):
+        project.add_section(
+            SectionData(
+                1,
+                "Elastic section",
+                "Elastic",
+                material_tag=1,
+            )
+        )
+
+
+def test_project_rejects_material_type_change_that_breaks_elastic_section():
+    project = ProjectDatabase(name="Material mutation")
+    project.add_material(
+        MaterialData(1, "Elastic", "Elastic", {"E": 1000.0})
+    )
+    project.add_section(
+        SectionData(
+            1,
+            "Linked elastic",
+            "Elastic",
+            material_tag=1,
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"must continue to expose elastic/shear modulus",
+    ):
+        project.update_material(
+            1,
+            MaterialData(
+                1,
+                "Gap",
+                "ElasticPPGap",
+                {"E": 1000.0, "Fy": 10.0, "gap": 0.0, "eta": 0.0, "damage": 0.0},
+            ),
+        )
+
+    assert project.materials[1].material_type == "Elastic"
+
+
+def test_project_rejects_fiber_section_replacing_elastic_beam_section():
+    model = StructuralModel("section-mutation", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="elasticBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
+    project = ProjectDatabase(name="Section mutation", model=model)
+    project.add_section(SectionData(1, "Elastic", "Elastic"))
+
+    with pytest.raises(
+        ValueError,
+        match=r"must remain an Elastic section",
+    ):
+        project.update_section(
+            1,
+            SectionData(1, "Fiber", "Fiber"),
+        )
+
+    assert project.sections[1].section_type == "Elastic"
