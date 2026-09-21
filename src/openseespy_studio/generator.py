@@ -1014,6 +1014,73 @@ def column_response_spec(
     }
 
 
+def moment_curvature_response_spec(
+    model: StructuralModel,
+    *,
+    connections: dict[int, ConnectionData] | None = None,
+    active_analysis: AnalysisSettingsData | None = None,
+) -> dict[str, object] | None:
+    """Recognize a zeroLengthSection moment-curvature workflow.
+
+    The classic OpenSees MomentCurvature procedure is a Static
+    DisplacementControl analysis that drives a rotational DOF of a coincident
+    node pair connected by zeroLengthSection.  Keep this as a result workflow,
+    rather than inventing a new analysis type.
+    """
+    if (
+        active_analysis is None
+        or active_analysis.analysis_type != "Static"
+        or active_analysis.integrator != "DisplacementControl"
+    ):
+        return None
+
+    control_node = int(active_analysis.control_node)
+    control_dof = int(active_analysis.control_dof)
+    if int(model.ndm) == 2 and int(model.ndf) >= 3:
+        component_by_dof = {3: ("Mz", 1)}
+    elif int(model.ndm) == 3 and int(model.ndf) >= 6:
+        # Current 3D section-resultant order is P, Mz, My, T.
+        component_by_dof = {5: ("My", 2), 6: ("Mz", 1)}
+    else:
+        return None
+    if control_dof not in component_by_dof:
+        return None
+
+    candidates = sorted(
+        (
+            connection
+            for connection in (connections or {}).values()
+            if connection.connection_type == "zeroLengthSection"
+            and connection.section_tag is not None
+            and control_node in {
+                int(connection.node_i),
+                int(connection.node_j),
+            }
+        ),
+        key=lambda connection: (
+            0 if int(connection.node_j) == control_node else 1,
+            int(connection.tag),
+        ),
+    )
+    if not candidates:
+        return None
+
+    connection = candidates[0]
+    moment_component, moment_index = component_by_dof[control_dof]
+    return {
+        "kind": "moment-curvature",
+        "element_tag": int(connection.tag),
+        "section_tag": int(connection.section_tag),
+        "node_i": int(connection.node_i),
+        "node_j": int(connection.node_j),
+        "control_node": control_node,
+        "control_dof": control_dof,
+        "moment_component": moment_component,
+        "moment_index": int(moment_index),
+        "moment_sign": 1.0,
+    }
+
+
 def analysis_to_openseespy(
     settings: AnalysisSettingsData,
     *,
@@ -1027,6 +1094,7 @@ def analysis_to_openseespy(
     monitor_node: int | None = None,
     fiber_response_specs: dict[int, dict[str, object]] | None = None,
     specimen_response_spec: dict[str, object] | None = None,
+    moment_curvature_spec: dict[str, object] | None = None,
 ) -> list[str]:
     ndm = int(ndm)
     translational_dofs = tuple(range(1, max(ndm, 0) + 1))
@@ -1038,6 +1106,7 @@ def analysis_to_openseespy(
     plain_pattern_tags = list(plain_pattern_tags or [])
     fiber_response_specs = dict(fiber_response_specs or {})
     specimen_response_spec = dict(specimen_response_spec or {})
+    moment_curvature_spec = dict(moment_curvature_spec or {})
     cyclic_steps = (
         cyclic_displacement_steps(
             settings.cyclic_targets,
@@ -1126,6 +1195,7 @@ def analysis_to_openseespy(
         f"        'eigen_solver': {settings.eigen_solver!r},"
         "    },",
         "    'specimen': " + repr(specimen_response_spec) + ",",
+        "    'moment_curvature': " + repr(moment_curvature_spec) + ",",
         "    'final': {},",
         "    'convergence': {",
         f"        'test': {settings.test!r},",
@@ -1144,6 +1214,7 @@ def analysis_to_openseespy(
         f"{monitor_node}, 'control_dof': {settings.control_dof}, "
         "'displacement': [], 'base_shear': [], "
         "'base_reactions': [], 'nodes': {}, "
+        "'moment_curvature': {'force': [], 'deformation': []}, "
         "'specimen': {"
         "'section_force': [], 'section_deformation': [], "
         "'base_fibers': [], 'interface_force': [], "
@@ -1165,6 +1236,7 @@ def analysis_to_openseespy(
         f"_studio_plain_pattern_tags = {plain_pattern_tags!r}",
         f"_studio_fiber_response_specs = {fiber_response_specs!r}",
         f"_studio_specimen_response_spec = {specimen_response_spec!r}",
+        f"_studio_moment_curvature_spec = {moment_curvature_spec!r}",
         f"_studio_monitor_node = {monitor_node}",
         f"ops.constraints('{settings.constraints_handler}')",
         f"ops.numberer('{settings.numberer}')",
@@ -2067,6 +2139,42 @@ def analysis_to_openseespy(
     )
     lines.append(
         "    _studio_results['history']['displacement'].append(_studio_disp)"
+    )
+    lines.append("    if _studio_moment_curvature_spec:")
+    lines.append(
+        "        _studio_mc_history = "
+        "_studio_results['history']['moment_curvature']"
+    )
+    lines.append(
+        "        _studio_mc_element = "
+        "int(_studio_moment_curvature_spec.get('element_tag', 0))"
+    )
+    lines.append("        try:")
+    lines.append(
+        "            _studio_mc_force = ops.eleResponse("
+        "_studio_mc_element, 'force') or []"
+    )
+    lines.append(
+        "            _studio_mc_force = "
+        "[float(v) for v in _studio_mc_force]"
+    )
+    lines.append("        except Exception:")
+    lines.append("            _studio_mc_force = []")
+    lines.append("        try:")
+    lines.append(
+        "            _studio_mc_def = ops.eleResponse("
+        "_studio_mc_element, 'deformation') or []"
+    )
+    lines.append(
+        "            _studio_mc_def = [float(v) for v in _studio_mc_def]"
+    )
+    lines.append("        except Exception:")
+    lines.append("            _studio_mc_def = []")
+    lines.append(
+        "        _studio_mc_history['force'].append(_studio_mc_force)"
+    )
+    lines.append(
+        "        _studio_mc_history['deformation'].append(_studio_mc_def)"
     )
     lines.append("    if _studio_specimen_response_spec:")
     lines.append(
@@ -3856,6 +3964,11 @@ def to_openseespy(
             connections=connections,
             active_analysis=active,
         )
+        moment_curvature_spec = moment_curvature_response_spec(
+            model,
+            connections=connections,
+            active_analysis=active,
+        )
 
         lines.extend(
             analysis_to_openseespy(
@@ -3896,6 +4009,7 @@ def to_openseespy(
                 monitor_node=monitor_node,
                 fiber_response_specs=fiber_response_specs,
                 specimen_response_spec=specimen_response_spec,
+                moment_curvature_spec=moment_curvature_spec,
             )
         )
 
