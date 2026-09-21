@@ -264,3 +264,90 @@ def test_mass_source_excludes_managed_ground_nodes():
 
     apply_mass_source(project, source)
     assert project.model.nodes[3].mass == (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+
+def test_project_rejects_mass_source_using_path_time_series():
+    project = build_mass_project()
+    project.add_time_series(
+        TimeSeriesData(3, "Dynamic", "Path", dt=0.01, values=[0.0, 1.0])
+    )
+    project.add_load_pattern(
+        LoadPatternData(3, "Dynamic plain", "Plain", time_series_tag=3)
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"requires Linear/Constant gravity-style time series",
+    ):
+        project.add_mass_source(
+            MassSourceData(
+                3,
+                "Bad source",
+                include_self_mass=False,
+                load_factors={3: 1.0},
+                gravity_axis=3,
+                directions=(1,),
+            )
+        )
+
+
+def test_project_rejects_time_series_change_that_breaks_mass_source():
+    project = build_mass_project()
+    project.add_mass_source(
+        MassSourceData(
+            1,
+            "Dead mass",
+            include_self_mass=False,
+            load_factors={1: 1.0},
+            gravity_axis=3,
+            directions=(1,),
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"must remain Linear or Constant",
+    ):
+        project.update_time_series(
+            1,
+            TimeSeriesData(
+                1,
+                "Dynamic replacement",
+                "Path",
+                dt=0.01,
+                values=[0.0, 1.0],
+            ),
+        )
+
+    assert project.time_series[1].series_type == "Linear"
+
+
+def test_project_rejects_pattern_type_change_that_breaks_mass_source():
+    project = build_mass_project()
+    project.add_mass_source(
+        MassSourceData(
+            1,
+            "Dead mass",
+            include_self_mass=False,
+            load_factors={1: 1.0},
+            gravity_axis=3,
+            directions=(1,),
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"must remain a Plain pattern",
+    ):
+        project.update_load_pattern(
+            1,
+            LoadPatternData(
+                1,
+                "Excitation",
+                "UniformExcitation",
+                time_series_tag=1,
+                direction=1,
+            ),
+        )
+
+    assert project.load_patterns[1].pattern_type == "Plain"
