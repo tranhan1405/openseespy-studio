@@ -182,3 +182,30 @@ def test_frp_confined_concrete_rejects_non_documented_project_units():
         raise AssertionError(
             "FRPConfinedConcrete should reject non-mm/N project units"
         )
+
+
+def test_steel01_three_parameter_defaults_match_opensees_source():
+    material = MaterialData(
+        tag=20,
+        name="Steel01 default hardening",
+        material_type="Steel01",
+        parameters={
+            "Fy": 250.0e6,
+            "E0": 200.0e9,
+            "b": 0.014,
+        },
+    )
+
+    assert material.parameters["a1"] == 0.0
+    assert material.parameters["a2"] == 55.0
+    assert material.parameters["a3"] == 0.0
+    assert material.parameters["a4"] == 55.0
+
+    command = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+    assert command == (
+        "ops.uniaxialMaterial('Steel01', 20, 250, 200000, "
+        "0.014, 0, 55, 0, 55)"
+    )
