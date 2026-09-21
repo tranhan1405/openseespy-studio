@@ -1387,6 +1387,7 @@ class MaterialDialog(QDialog):
             dialog = MaterialLibraryDialog(
                 next_tag=self.tag.value(),
                 units=self.unit_system.as_mapping(),
+                materials=self.materials,
                 accept_label="Load into Editor",
                 parent=self,
             )
