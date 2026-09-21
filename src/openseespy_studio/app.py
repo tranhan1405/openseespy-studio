@@ -10,6 +10,8 @@ import sys
 import tempfile
 from typing import Any
 
+from .brand import PRODUCT_NAME
+
 
 _FALLBACK_VERSION = "0.2.0a1"
 
@@ -278,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
 
     qt_argv = [sys.argv[0], *args]
     app = QApplication(qt_argv)
-    app.setApplicationName("OpenSeesPy Studio")
+    app.setApplicationName(PRODUCT_NAME)
     app.setApplicationVersion(package_version())
     app.setWindowIcon(app_icon())
     app.setStyle("Fusion")
