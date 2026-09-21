@@ -2156,13 +2156,35 @@ class ProjectDatabase:
                 + ", ".join(map(str, sorted(set(missing))))
             )
 
+    def _rigid_diaphragm_dependent_dofs(
+        self,
+        constraint: ConstraintData,
+    ) -> set[int]:
+        if self.model.ndm == 3 and self.model.ndf == 6:
+            return {
+                1: {2, 3, 4},
+                2: {1, 3, 5},
+                3: {1, 2, 6},
+            }.get(int(constraint.perp_dirn), set())
+        if self.model.ndm == 2 and self.model.ndf == 3:
+            return {
+                1: {1},
+                2: {2},
+                3: {1, 2, 3},
+            }.get(int(constraint.perp_dirn), set())
+        return set()
+
     def _validate_constraint_control_conflicts(
         self,
         constraint: ConstraintData,
         *,
         ignore_analysis_tags: set[int] | None = None,
     ) -> None:
-        if constraint.constraint_type not in {"equalDOF", "rigidLink"}:
+        if constraint.constraint_type not in {
+            "equalDOF",
+            "rigidLink",
+            "rigidDiaphragm",
+        }:
             return
         ignored = {
             int(tag) for tag in (ignore_analysis_tags or set())
@@ -2175,6 +2197,11 @@ class ProjectDatabase:
                 return False
             if constraint.constraint_type == "equalDOF":
                 return analysis.control_dof in constraint.dofs
+            if constraint.constraint_type == "rigidDiaphragm":
+                return (
+                    analysis.control_dof
+                    in self._rigid_diaphragm_dependent_dofs(constraint)
+                )
             if constraint.link_type == "beam":
                 return True
             return analysis.control_dof <= min(
@@ -3030,6 +3057,32 @@ class ProjectDatabase:
                 + ". Use the retained node or another independent DOF."
             )
 
+    def _validate_analysis_rigid_diaphragm_control_conflict(
+        self,
+        analysis: AnalysisSettingsData,
+    ) -> None:
+        if not self._analysis_uses_control_node(analysis):
+            return
+        conflicts = sorted(
+            constraint.tag
+            for constraint in self.constraints.values()
+            if (
+                constraint.constraint_type == "rigidDiaphragm"
+                and analysis.control_node in constraint.constrained_nodes
+                and analysis.control_dof
+                in self._rigid_diaphragm_dependent_dofs(constraint)
+            )
+        )
+        if conflicts:
+            raise ValueError(
+                f"{analysis.analysis_type} control node "
+                f"{analysis.control_node} DOF {analysis.control_dof} "
+                "is a constrained/dependent DOF in rigidDiaphragm "
+                "constraint(s): "
+                + ", ".join(map(str, conflicts))
+                + ". Use the retained node or another independent DOF."
+            )
+
     def _validate_analysis_prescribed_control_conflict(
         self,
         analysis: AnalysisSettingsData,
@@ -3082,6 +3135,7 @@ class ProjectDatabase:
                 )
         self._validate_analysis_equal_dof_control_conflict(analysis)
         self._validate_analysis_rigid_link_control_conflict(analysis)
+        self._validate_analysis_rigid_diaphragm_control_conflict(analysis)
         self._validate_analysis_prescribed_control_conflict(analysis)
         self.analyses[analysis.tag]=analysis
         if self.active_analysis_tag is None:
@@ -3110,6 +3164,7 @@ class ProjectDatabase:
                 )
         self._validate_analysis_equal_dof_control_conflict(analysis)
         self._validate_analysis_rigid_link_control_conflict(analysis)
+        self._validate_analysis_rigid_diaphragm_control_conflict(analysis)
         self._validate_analysis_prescribed_control_conflict(
             analysis,
             ignore_analysis_tags={original_tag},

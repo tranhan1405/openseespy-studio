@@ -904,3 +904,164 @@ def test_generator_allows_rigid_link_retained_node_as_control():
     )
 
     assert "ops.integrator('DisplacementControl', 3, 1" in code
+
+
+@pytest.mark.parametrize(
+    ("perp_dirn", "control_dof"),
+    [
+        (1, 2),
+        (1, 3),
+        (1, 4),
+        (2, 1),
+        (2, 3),
+        (2, 5),
+        (3, 1),
+        (3, 2),
+        (3, 6),
+    ],
+)
+def test_generator_rejects_3d_rigid_diaphragm_dependent_control_dofs(
+    perp_dirn,
+    control_dof,
+):
+    model = StructuralModel("rigid-diaphragm-3d", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 1.0, 0.0)
+    model.add_node(3, 0.0, 0.0, 0.0)
+
+    constraint = ConstraintData(
+        8,
+        "Rigid diaphragm",
+        "rigidDiaphragm",
+        retained_node=3,
+        constrained_nodes=[2],
+        perp_dirn=perp_dirn,
+    )
+    analysis = AnalysisSettingsData(
+        31,
+        "Push diaphragm dependent DOF",
+        "Pushover",
+        control_node=2,
+        control_dof=control_dof,
+        displacement_increment=0.001,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"constrained/dependent DOF in rigidDiaphragm",
+    ):
+        to_openseespy(
+            model,
+            constraints={8: constraint},
+            analyses={31: analysis},
+            active_analysis_tag=31,
+        )
+
+
+def test_generator_allows_3d_rigid_diaphragm_unconstrained_control_dof():
+    model = StructuralModel("rigid-diaphragm-free-3d", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 1.0, 0.0)
+    model.add_node(3, 0.0, 0.0, 0.0)
+
+    constraint = ConstraintData(
+        9,
+        "XY diaphragm",
+        "rigidDiaphragm",
+        retained_node=3,
+        constrained_nodes=[2],
+        perp_dirn=3,
+    )
+    analysis = AnalysisSettingsData(
+        32,
+        "Push free UZ",
+        "Pushover",
+        control_node=2,
+        control_dof=3,
+        displacement_increment=0.001,
+    )
+
+    code = to_openseespy(
+        model,
+        constraints={9: constraint},
+        analyses={32: analysis},
+        active_analysis_tag=32,
+    )
+
+    assert "ops.rigidDiaphragm(3, 3, 2)" in code
+    assert "ops.integrator('DisplacementControl', 2, 3" in code
+
+
+@pytest.mark.parametrize(
+    ("perp_dirn", "control_dof"),
+    [(1, 1), (2, 2), (3, 1), (3, 2), (3, 3)],
+)
+def test_generator_rejects_2d_rigid_diaphragm_dependent_control_dofs(
+    perp_dirn,
+    control_dof,
+):
+    model = StructuralModel("rigid-diaphragm-2d", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 0.0, 0.0)
+
+    constraint = ConstraintData(
+        10,
+        "Rigid diaphragm 2D",
+        "rigidDiaphragm",
+        retained_node=3,
+        constrained_nodes=[2],
+        perp_dirn=perp_dirn,
+    )
+    analysis = AnalysisSettingsData(
+        33,
+        "Push dependent 2D DOF",
+        "Pushover",
+        control_node=2,
+        control_dof=control_dof,
+        displacement_increment=0.001,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"constrained/dependent DOF in rigidDiaphragm",
+    ):
+        to_openseespy(
+            model,
+            constraints={10: constraint},
+            analyses={33: analysis},
+            active_analysis_tag=33,
+        )
+
+
+def test_generator_allows_rigid_diaphragm_retained_node_as_control():
+    model = StructuralModel("rigid-diaphragm-master", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 1.0, 0.0)
+    model.add_node(3, 0.0, 0.0, 0.0)
+
+    constraint = ConstraintData(
+        11,
+        "XY diaphragm",
+        "rigidDiaphragm",
+        retained_node=3,
+        constrained_nodes=[2],
+        perp_dirn=3,
+    )
+    analysis = AnalysisSettingsData(
+        34,
+        "Push diaphragm master",
+        "Pushover",
+        control_node=3,
+        control_dof=1,
+        displacement_increment=0.001,
+    )
+
+    code = to_openseespy(
+        model,
+        constraints={11: constraint},
+        analyses={34: analysis},
+        active_analysis_tag=34,
+    )
+
+    assert "ops.integrator('DisplacementControl', 3, 1" in code

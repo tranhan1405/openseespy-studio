@@ -516,3 +516,96 @@ def test_project_rejects_rigid_link_beam_added_after_rotation_control_analysis()
         assert "makes a DisplacementControl DOF dependent" in str(exc)
     else:
         raise AssertionError("Expected analysis/rigidLink conflict")
+
+
+def test_project_rejects_analysis_using_rigid_diaphragm_dependent_dof():
+    project = build_project()
+    project.model.add_node(3, 10.0, 0.0, 0.0)
+    project.add_constraint(
+        ConstraintData(
+            36,
+            "XY diaphragm",
+            "rigidDiaphragm",
+            retained_node=3,
+            constrained_nodes=[2],
+            perp_dirn=3,
+        )
+    )
+
+    try:
+        project.add_analysis(
+            AnalysisSettingsData(
+                36,
+                "Push constrained UX",
+                "Pushover",
+                control_node=2,
+                control_dof=1,
+                displacement_increment=0.001,
+            )
+        )
+    except ValueError as exc:
+        assert "constrained/dependent DOF in rigidDiaphragm" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected rigidDiaphragm/control analysis conflict"
+        )
+
+
+def test_project_rejects_rigid_diaphragm_added_after_control_analysis():
+    project = build_project()
+    project.model.add_node(3, 10.0, 0.0, 0.0)
+    project.add_analysis(
+        AnalysisSettingsData(
+            37,
+            "Push UX",
+            "Pushover",
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    )
+
+    try:
+        project.add_constraint(
+            ConstraintData(
+                37,
+                "XY diaphragm",
+                "rigidDiaphragm",
+                retained_node=3,
+                constrained_nodes=[2],
+                perp_dirn=3,
+            )
+        )
+    except ValueError as exc:
+        assert "makes a DisplacementControl DOF dependent" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected analysis/rigidDiaphragm conflict"
+        )
+
+
+def test_project_allows_rigid_diaphragm_retained_node_as_control():
+    project = build_project()
+    project.model.add_node(3, 10.0, 0.0, 0.0)
+    project.add_constraint(
+        ConstraintData(
+            38,
+            "XY diaphragm",
+            "rigidDiaphragm",
+            retained_node=3,
+            constrained_nodes=[2],
+            perp_dirn=3,
+        )
+    )
+    project.add_analysis(
+        AnalysisSettingsData(
+            38,
+            "Push master UX",
+            "Pushover",
+            control_node=3,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    )
+
+    assert project.analyses[38].control_node == 3

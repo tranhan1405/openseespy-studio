@@ -2525,6 +2525,42 @@ def to_openseespy(
                 + ". Use the retained node or another independent DOF."
             )
 
+        def rigid_diaphragm_dofs(constraint: ConstraintData) -> set[int]:
+            if model.ndm == 3 and model.ndf == 6:
+                return {
+                    1: {2, 3, 4},
+                    2: {1, 3, 5},
+                    3: {1, 2, 6},
+                }.get(int(constraint.perp_dirn), set())
+            if model.ndm == 2 and model.ndf == 3:
+                return {
+                    1: {1},
+                    2: {2},
+                    3: {1, 2, 3},
+                }.get(int(constraint.perp_dirn), set())
+            return set()
+
+        rigid_diaphragm_conflicts = sorted(
+            constraint.tag
+            for constraint in (constraints or {}).values()
+            if (
+                constraint.constraint_type == "rigidDiaphragm"
+                and int(active_analysis.control_node)
+                in {int(tag) for tag in constraint.constrained_nodes}
+                and int(active_analysis.control_dof)
+                in rigid_diaphragm_dofs(constraint)
+            )
+        )
+        if rigid_diaphragm_conflicts:
+            raise ValueError(
+                f"{active_analysis.analysis_type} control node "
+                f"{active_analysis.control_node} DOF "
+                f"{active_analysis.control_dof} is a constrained/dependent "
+                "DOF in rigidDiaphragm constraint(s): "
+                + ", ".join(map(str, rigid_diaphragm_conflicts))
+                + ". Use the retained node or another independent DOF."
+            )
+
     lines: list[str] = [
         "import json",
         "import math",
