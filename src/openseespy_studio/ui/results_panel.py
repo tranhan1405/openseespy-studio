@@ -3531,6 +3531,19 @@ class ResultsPanel(QWidget):
         ordered = sorted(modes, key=lambda value: int(value))
         self.modal_summary_table.setRowCount(len(ordered))
 
+        active_dofs: set[int] = set()
+        for key in ordered:
+            participation = modes.get(key, {}).get("participation", {})
+            if not isinstance(participation, dict):
+                continue
+            for raw_dof in participation:
+                try:
+                    dof = int(raw_dof)
+                except (TypeError, ValueError):
+                    continue
+                if dof in {1, 2, 3}:
+                    active_dofs.add(dof)
+
         cumulative = [0.0, 0.0, 0.0]
         for row, key in enumerate(ordered):
             mode = modes.get(key, {})
@@ -3538,8 +3551,13 @@ class ResultsPanel(QWidget):
             frequency = mode.get("frequency_hz")
             period = mode.get("period_s")
             participation = mode.get("participation", {})
-            ratios: list[float] = []
+            ratio_text: list[str] = []
+            cumulative_text: list[str] = []
             for dof in (1, 2, 3):
+                if dof not in active_dofs:
+                    ratio_text.append("-")
+                    cumulative_text.append("-")
+                    continue
                 item = (
                     participation.get(str(dof), {})
                     if isinstance(participation, dict)
@@ -3548,8 +3566,9 @@ class ResultsPanel(QWidget):
                 ratio = 100.0 * float(
                     item.get("mass_ratio", 0.0) or 0.0
                 )
-                ratios.append(ratio)
                 cumulative[dof - 1] += ratio
+                ratio_text.append(f"{ratio:.3f}")
+                cumulative_text.append(f"{cumulative[dof - 1]:.3f}")
 
             values = [
                 str(key),
@@ -3564,8 +3583,8 @@ class ResultsPanel(QWidget):
                     if period is not None
                     else "-"
                 ),
-                *(f"{value:.3f}" for value in ratios),
-                *(f"{value:.3f}" for value in cumulative),
+                *ratio_text,
+                *cumulative_text,
             ]
             for column, value in enumerate(values):
                 self.modal_summary_table.setItem(
@@ -3594,11 +3613,11 @@ class ResultsPanel(QWidget):
 
         mass_text: list[str] = []
         for dof, label in ((1, "UX"), (2, "UY"), (3, "UZ")):
-            item = (
-                participation.get(str(dof), {})
-                if isinstance(participation, dict)
-                else {}
-            )
+            if not isinstance(participation, dict):
+                continue
+            item = participation.get(str(dof))
+            if not isinstance(item, dict) or "mass_ratio" not in item:
+                continue
             ratio = 100.0 * float(
                 item.get("mass_ratio", 0.0) or 0.0
             )
@@ -3614,10 +3633,15 @@ class ResultsPanel(QWidget):
             if period is not None
             else "-"
         )
+        mass_suffix = (
+            " · " + " · ".join(mass_text)
+            if mass_text
+            else ""
+        )
         self.mode_info.setText(
             f"Mode {int(mode_number)} · λ={eigenvalue:.6g} · "
-            f"f={frequency_text} · T={period_text} · "
-            + " · ".join(mass_text)
+            f"f={frequency_text} · T={period_text}"
+            + mass_suffix
         )
 
     def _emit_mode(self) -> None:

@@ -451,3 +451,51 @@ def test_cyclic_tab_shows_synchronized_column_reversal_and_cycle_metrics(qapp):
         panel.close()
         panel.deleteLater()
         qapp.processEvents()
+
+
+def test_2d_modal_summary_does_not_fake_uz_mass_participation(qapp):
+    panel = ResultsPanel()
+    result = {
+        "analysis": {"type": "Modal"},
+        "final": {},
+        "convergence": {"steps": []},
+        "modes": {
+            "1": {
+                "eigenvalue": 4.0,
+                "frequency_hz": 1.0,
+                "period_s": 1.0,
+                "vectors": {},
+                "participation": {
+                    "1": {"mass_ratio": 0.60},
+                    "2": {"mass_ratio": 0.20},
+                },
+            },
+            "2": {
+                "eigenvalue": 9.0,
+                "frequency_hz": 1.5,
+                "period_s": 2.0 / 3.0,
+                "vectors": {},
+                "participation": {
+                    "1": {"mass_ratio": 0.30},
+                    "2": {"mass_ratio": 0.70},
+                },
+            },
+        },
+    }
+    try:
+        panel.set_result(result)
+        qapp.processEvents()
+
+        assert panel.modal_summary_table.item(0, 4).text() == "60.000"
+        assert panel.modal_summary_table.item(0, 5).text() == "20.000"
+        assert panel.modal_summary_table.item(0, 6).text() == "-"
+        assert panel.modal_summary_table.item(1, 7).text() == "90.000"
+        assert panel.modal_summary_table.item(1, 8).text() == "90.000"
+        assert panel.modal_summary_table.item(1, 9).text() == "-"
+        assert "UX=60.00%" in panel.mode_info.text()
+        assert "UY=20.00%" in panel.mode_info.text()
+        assert "UZ=" not in panel.mode_info.text()
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
