@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -3363,6 +3364,36 @@ class ProjectDatabase:
         element = self.model.elements[element_tag]
         self._validate_element_geometry(element)
 
+        if element.section_tag is not None:
+            section = self.sections.get(int(element.section_tag))
+            if section is None:
+                raise ValueError(
+                    f"Element {element_tag} references missing section "
+                    f"{element.section_tag}."
+                )
+            if (
+                element.element_type == "elasticBeamColumn"
+                and section.section_type != "Elastic"
+            ):
+                raise ValueError(
+                    f"elasticBeamColumn element {element_tag} requires an "
+                    "Elastic section."
+                )
+
+        if element.transf_tag is not None:
+            transformation = self.transformations.get(
+                int(element.transf_tag)
+            )
+            if transformation is None:
+                raise ValueError(
+                    f"Element {element_tag} references missing geometric "
+                    f"transformation {element.transf_tag}."
+                )
+            self._validate_element_geometry(
+                element,
+                transformation=transformation,
+            )
+
         for load in self.element_loads.values():
             if int(load.element_tag) == element_tag:
                 self._validate_element_load(load)
@@ -3373,6 +3404,78 @@ class ProjectDatabase:
                 and element_tag in recorder.target_tags
             ):
                 self._validate_recorder(recorder)
+
+    def _mutate_elements_transactionally(
+        self,
+        element_tags: Iterable[int],
+        mutator,
+    ) -> set[int]:
+        tags = {
+            int(tag)
+            for tag in element_tags
+            if int(tag) in self.model.elements
+        }
+        snapshots = {
+            tag: deepcopy(self.model.elements[tag])
+            for tag in tags
+        }
+        try:
+            updated = {
+                int(tag) for tag in mutator(tags)
+            }
+            for tag in sorted(updated):
+                self.model.elements[tag].__post_init__()
+                self.validate_element_state(tag)
+            return updated
+        except Exception:
+            for tag, element in snapshots.items():
+                self.model.elements[tag] = element
+            raise
+
+    def assign_element_formulation(
+        self,
+        element_tags: Iterable[int],
+        **values,
+    ) -> set[int]:
+        return self._mutate_elements_transactionally(
+            element_tags,
+            lambda tags: self.model.assign_element_formulation(
+                tags,
+                **values,
+            ),
+        )
+
+    def assign_section_to_elements(
+        self,
+        element_tags: Iterable[int],
+        section_tag: int | None,
+    ) -> set[int]:
+        value = None if section_tag is None else int(section_tag)
+        if value is not None and value not in self.sections:
+            raise ValueError(f"Section {value} does not exist.")
+        return self._mutate_elements_transactionally(
+            element_tags,
+            lambda tags: self.model.assign_section(tags, value),
+        )
+
+    def assign_transformation_to_elements(
+        self,
+        element_tags: Iterable[int],
+        transformation_tag: int | None,
+    ) -> set[int]:
+        value = (
+            None
+            if transformation_tag is None
+            else int(transformation_tag)
+        )
+        if value is not None and value not in self.transformations:
+            raise ValueError(
+                f"Transformation {value} does not exist."
+            )
+        return self._mutate_elements_transactionally(
+            element_tags,
+            lambda tags: self.model.assign_transformation(tags, value),
+        )
 
     def delete_entities(
         self,
