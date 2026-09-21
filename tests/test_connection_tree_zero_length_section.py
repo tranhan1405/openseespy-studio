@@ -87,11 +87,20 @@ def test_model_tree_refresh_handles_zero_length_section_connection():
 
     MainWindow._refresh_tree(holder)
 
+    elements_root = _find_payload(
+        holder.tree,
+        ("elements_root", None),
+    )
+    assert elements_root is not None
+    assert elements_root.text(0) == "Elements (1)"
+
     group = _find_payload(
         holder.tree,
         ("connection_group", "zeroLengthSection"),
     )
     assert group is not None
+    assert group.parent() is elements_root
     assert group.text(0) == "zeroLengthSection (1)"
     assert group.childCount() == 1
+    assert group.child(0).text(0).startswith("Element 1")
     assert group.child(0).data(0, Qt.UserRole) == ("connection", 1)
