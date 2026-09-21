@@ -2922,9 +2922,12 @@ class ProjectDatabase:
         if connection is None:
             return
 
-        # Recorders target connection tags like ordinary element tags.  Keep
-        # direct connection deletion from leaving an orphan recorder behind.
+        # Recorders and scoped result requests target connection tags like
+        # ordinary element tags.  Keep direct connection deletion from
+        # leaving orphan references behind even when generated-resource
+        # cleanup is disabled.
         self.prune_recorders()
+        self.prune_solution_results()
 
         if not cleanup_ground:
             return
@@ -2960,11 +2963,6 @@ class ProjectDatabase:
             )
         ):
             self.sections.pop(generated_section, None)
-
-        # A scoped result request must never silently become an "all
-        # entities" request after cleanup.  Narrow surviving scopes and drop
-        # a request when one of its explicit scopes loses every target.
-        self.prune_solution_results()
 
     def create_ground_node(self, source_node_tag: int) -> int:
         source_node_tag = int(source_node_tag)
