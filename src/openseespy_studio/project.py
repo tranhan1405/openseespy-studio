@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 29
+PROJECT_FORMAT_VERSION = 30
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
