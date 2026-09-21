@@ -216,7 +216,7 @@ class AIAssistantPanel(QWidget):
         if self._thread is not None:
             return
         if str(config.get("provider", "openai")) != "openai":
-            self._request_failed("Unsupported LLM provider.")
+            self.fail_request("Unsupported LLM provider.")
             return
 
         thread = QThread(self)
@@ -260,6 +260,12 @@ class AIAssistantPanel(QWidget):
         self._thread = None
         self._worker = None
         self.set_busy(False)
+
+    def fail_request(self, detail: str) -> None:
+        """Report a request/setup failure even if no worker thread was started."""
+        self._request_failed(str(detail))
+        if self._thread is None:
+            self.set_busy(False)
 
     def set_busy(self, busy: bool, message: str | None = None) -> None:
         busy = bool(busy)
