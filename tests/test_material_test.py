@@ -157,7 +157,7 @@ def test_hardening_material_test_uses_stress_strain_axes():
     )
 
     assert x_label == "Strain"
-    assert y_label == "Stress [MPa]"
+    assert y_label == "Stress [N/mm²]"
 
 
 def test_hardening_material_test_script_uses_real_constitutive_command():
