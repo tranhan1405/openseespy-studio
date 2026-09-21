@@ -1,3 +1,5 @@
+import pytest
+
 from openseespy_studio.model import StructuralModel
 
 
@@ -163,3 +165,39 @@ def test_assign_truss_material_only_updates_truss_elements():
 
     assert cleared == {1}
     assert model.elements[1].truss_material_tag is None
+
+
+def test_model_rejects_nonfinite_node_coordinates():
+    model = StructuralModel()
+
+    with pytest.raises(ValueError, match=r"coordinates must be finite"):
+        model.add_node(1, float("nan"), 0.0, 0.0)
+
+    with pytest.raises(ValueError, match=r"coordinates must be finite"):
+        model.add_node(2, 0.0, float("inf"), 0.0)
+
+
+def test_model_rejects_nonfinite_nodal_mass():
+    model = StructuralModel(ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+
+    with pytest.raises(ValueError, match=r"mass values must be finite"):
+        model.set_mass(1, (1.0, float("nan"), 0.0))
+
+    data = model.to_dict()
+    data["nodes"][0]["mass"] = [1.0, float("inf"), 0.0]
+    with pytest.raises(ValueError, match=r"mass values must be finite"):
+        StructuralModel.from_dict(data)
+
+
+def test_model_rejects_nonbinary_fixity_values():
+    model = StructuralModel(ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+
+    with pytest.raises(ValueError, match=r"Fixity values must be 0 or 1"):
+        model.set_fixity(1, (1, 2, 0))
+
+    data = model.to_dict()
+    data["nodes"][0]["fixity"] = [1, -1, 0]
+    with pytest.raises(ValueError, match=r"fixity values must be 0 or 1"):
+        StructuralModel.from_dict(data)
