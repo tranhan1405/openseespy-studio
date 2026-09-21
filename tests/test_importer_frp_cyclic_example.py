@@ -138,6 +138,7 @@ def test_frp_confined_cyclic_history_imports_as_cyclic_analysis():
     assert analysis.analysis_type == "Cyclic"
     assert analysis.preload_gravity is True
     assert analysis.gravity_steps == 10
+    assert analysis.gravity_algorithm == "Newton"
     assert analysis.deferred_pattern_tags == [200]
     assert analysis.control_node == 4
     assert analysis.control_dof == 1
@@ -195,5 +196,6 @@ def test_frp_confined_cyclic_round_trip_preserves_material_and_protocol():
     assert "ops.system('SparseGeneral', '-piv')" in script
     assert "_studio_cyclic_increments =" in script
     assert "ops.integrator('DisplacementControl', 4, 1" in script
+    assert "ops.algorithm('Newton')" in script
     assert "_studio_gravity_ok = ops.analyze(10)" in script
     compile(script, "<frp-cyclic-roundtrip>", "exec")
