@@ -72,7 +72,7 @@ def test_unsupported_units_are_rejected():
 def test_in_kip_s_converts_ksi_to_pa_consistently():
     units = UnitSystem("in", "kip", "s")
 
-    # 60 kip/in^2 = 60 ksi = 413.685456 MPa.
+    # 60 kip/in^2 = 60 ksi = 413.68543759 MPa.
     stress_pa = (
         60.0
         * units.force_to_n
@@ -80,8 +80,8 @@ def test_in_kip_s_converts_ksi_to_pa_consistently():
     )
     assert math.isclose(
         stress_pa,
-        413.685456e6,
-        rel_tol=1.0e-9,
+        413.68543759010166e6,
+        rel_tol=1.0e-12,
     )
     assert math.isclose(
         units.stress_from_pa(stress_pa),
