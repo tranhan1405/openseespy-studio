@@ -73,6 +73,7 @@ MATERIAL_CATEGORIES: dict[str, str] = {
     "Pinching4": "Hysteretic / Connection",
     "Bond_SP01": "Bond / Interface",
     "ElasticPPGap": "Hysteretic / Connection",
+    "FRPConfinedConcrete": "Concrete / FRP",
     "FRPConfinedConcrete02": "Concrete / FRP",
     "MinMax": "Wrapper / Composite",
     "Fatigue": "Wrapper / Composite",
@@ -107,6 +108,11 @@ MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     ),
     "Bond_SP01": ("Fy", "Sy", "Fu", "Su", "b", "R"),
     "ElasticPPGap": ("E", "Fy", "gap", "eta", "damage"),
+    "FRPConfinedConcrete": (
+        "fpc1", "fpc2", "epsc0", "D", "c", "Ej", "Sj", "tj",
+        "eju", "S", "fyl", "fyh", "dlong", "dtrans", "Es",
+        "nu0", "k", "useBuck",
+    ),
     "FRPConfinedConcrete02": (
         "fc0", "Ec", "ec0", "mode", "tfrp", "Efrp", "erup", "R",
         "fcu", "ecu", "ft", "Ets",
@@ -150,6 +156,13 @@ MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
         "Fy": "stress", "Fu": "stress", "Sy": "length", "Su": "length",
     },
     "ElasticPPGap": {},
+    "FRPConfinedConcrete": {
+        "fpc1": "stress", "fpc2": "stress",
+        "D": "length", "c": "length", "Ej": "stress",
+        "Sj": "length", "tj": "length", "S": "length",
+        "fyl": "stress", "fyh": "stress",
+        "dlong": "length", "dtrans": "length", "Es": "stress",
+    },
     "FRPConfinedConcrete02": {
         "fc0": "stress", "Ec": "stress", "tfrp": "length",
         "Efrp": "stress", "R": "length", "fcu": "stress",
@@ -218,6 +231,14 @@ MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
     },
     "Bond_SP01": {"Fy": 5.0e8, "Sy": 0.001, "Fu": 6.5e8, "Su": 0.01, "b": 0.4, "R": 0.8},
     "ElasticPPGap": {"E": 1.0, "Fy": 1.0, "gap": 0.0, "eta": 0.0, "damage": 0.0},
+    "FRPConfinedConcrete": {
+        "fpc1": 27.5e6, "fpc2": 27.5e6, "epsc0": 0.002,
+        "D": 0.400, "c": 0.035, "Ej": 266.0e9,
+        "Sj": 0.0, "tj": 0.000222, "eju": 0.0163,
+        "S": 0.150, "fyl": 374.0e6, "fyh": 363.0e6,
+        "dlong": 0.016, "dtrans": 0.006, "Es": 200.0e9,
+        "nu0": 0.2, "k": 0.8, "useBuck": 1.0,
+    },
     "FRPConfinedConcrete02": {"fc0": -30.0e6, "Ec": 3.0e10, "ec0": -0.002, "mode": 0.0, "tfrp": 0.000334, "Efrp": 7.2e10, "erup": 0.015, "R": 0.2, "fcu": -45.0e6, "ecu": -0.015, "ft": 3.0e6, "Ets": 1.5e9},
     "MinMax": {"min": -1.0e16, "max": 1.0e16},
     "Fatigue": {"E0": 0.191, "m": -0.458, "min": -1.0e16, "max": 1.0e16},
@@ -343,6 +364,8 @@ class MaterialData:
             return abs(2.0 * float(self.parameters["fpc"]) / epsc0)
         if self.material_type == "Concrete04":
             return float(self.parameters["Ec"])
+        if self.material_type == "FRPConfinedConcrete":
+            return float(self.parameters["Ej"])
         if self.material_type == "FRPConfinedConcrete02":
             return float(self.parameters["Ec"])
         raise ValueError(
