@@ -314,6 +314,7 @@ class _Importer:
         self.integrations: dict[int, dict[str, Any]] = {}
         self.analysis_state: dict[str, Any] = {}
         self.analysis_metadata: dict[str, Any] = {}
+        self.analysis_events: list[dict[str, Any]] = []
         self._next_constraint = 1
         self._next_load = 1
         self._next_element_load = 1
@@ -1296,6 +1297,21 @@ class _Importer:
             self.analysis_state["steps"] = int(args[0])
             if len(args) > 1:
                 self.analysis_state["dt"] = float(args[1])
+            self.analysis_events.append({
+                "steps": int(args[0]),
+                "dt": (
+                    float(args[1])
+                    if len(args) > 1
+                    else self.analysis_state.get("dt")
+                ),
+                "integrator": self.analysis_state.get("integrator"),
+                "integrator_args": list(
+                    self.analysis_state.get("integrator_args", [])
+                ),
+                "analysis_kind": self.analysis_state.get("analysis_kind"),
+                "pattern_tags": sorted(self.project.load_patterns),
+                "current_pattern": self.current_pattern,
+            })
         elif command == "eigen" and args:
             self.analysis_state["modal"] = True
             self.analysis_state["num_modes"] = int(args[-1])
@@ -1815,6 +1831,31 @@ class _Importer:
         if not meta and not state:
             return
 
+        staged_displacement = False
+        staged_driver_tags: list[int] = []
+        staged_preload_steps = 1
+        if (
+            not meta
+            and len(self.analysis_events) >= 2
+            and state.get("integrator") == "DisplacementControl"
+        ):
+            final_event = self.analysis_events[-1]
+            prior_event = self.analysis_events[-2]
+            prior_patterns = {
+                int(tag) for tag in prior_event.get("pattern_tags", [])
+            }
+            final_patterns = {
+                int(tag) for tag in final_event.get("pattern_tags", [])
+            }
+            new_patterns = sorted(final_patterns - prior_patterns)
+            if prior_patterns and new_patterns:
+                staged_displacement = True
+                staged_driver_tags = new_patterns
+                staged_preload_steps = max(
+                    1,
+                    int(prior_event.get("steps", 1) or 1),
+                )
+
         analysis_type = str(meta.get("type", ""))
         if not analysis_type:
             if state.get("modal"):
@@ -1822,7 +1863,11 @@ class _Importer:
             elif state.get("analysis_kind") == "Transient":
                 analysis_type = "Transient"
             elif state.get("integrator") == "DisplacementControl":
-                analysis_type = "Pushover"
+                analysis_type = (
+                    "Static"
+                    if staged_displacement
+                    else "Pushover"
+                )
             else:
                 analysis_type = "Static"
 
@@ -1830,6 +1875,12 @@ class _Importer:
             "tag": int(meta.get("tag", 1) or 1),
             "name": str(meta.get("name", "Imported Analysis")),
             "analysis_type": analysis_type,
+            "integrator": str(
+                meta.get(
+                    "integrator",
+                    state.get("integrator", "Auto"),
+                )
+            ),
             "constraints_handler": str(
                 meta.get(
                     "constraints_handler",
@@ -1876,11 +1927,24 @@ class _Importer:
             ),
             "rayleigh_mode_i": int(meta.get("rayleigh_mode_i", 1)),
             "rayleigh_mode_j": int(meta.get("rayleigh_mode_j", 3)),
-            "preload_gravity": bool(meta.get("preload_gravity", False)),
-            "gravity_steps": int(meta.get("gravity_steps", 10)),
+            "preload_gravity": bool(
+                meta.get(
+                    "preload_gravity",
+                    staged_displacement,
+                )
+            ),
+            "gravity_steps": int(
+                meta.get(
+                    "gravity_steps",
+                    staged_preload_steps if staged_displacement else 10,
+                )
+            ),
             "deferred_pattern_tags": [
                 int(value)
-                for value in meta.get("deferred_pattern_tags", [])
+                for value in meta.get(
+                    "deferred_pattern_tags",
+                    staged_driver_tags if staged_displacement else [],
+                )
             ],
             "num_modes": int(meta.get("num_modes", state.get("num_modes", 1))),
             "eigen_solver": str(
@@ -1914,7 +1978,10 @@ class _Importer:
         if analysis_type == "Static" and integrator == "LoadControl" and values:
             if "load_increment" not in meta:
                 kwargs["load_increment"] = float(values[0])
-        elif analysis_type == "Pushover" and integrator == "DisplacementControl":
+        elif (
+            analysis_type in {"Static", "Pushover"}
+            and integrator == "DisplacementControl"
+        ):
             if len(values) >= 3:
                 if "control_node" not in meta:
                     kwargs["control_node"] = int(values[0])
