@@ -617,11 +617,18 @@ class MaterialDialog(QDialog):
         self.density.setDecimals(6)
         self.density.setRange(0.0, 1.0e12)
         self.density.setValue(
-            material.density if material is not None else engineering_defaults["density"]
+            self.unit_system.engineering_density_from_kg_per_m3(
+                material.density
+                if material is not None
+                else engineering_defaults["density"]
+            )
         )
 
         form.addRow("Poisson ratio ν:", self.poisson_ratio)
-        form.addRow("Density ρ [kg/m³]:", self.density)
+        form.addRow(
+            f"Density ρ [{self.unit_system.engineering_density_label}]:",
+            self.density,
+        )
         root.addLayout(form)
 
         splitter = QSplitter(Qt.Horizontal)
@@ -691,7 +698,11 @@ class MaterialDialog(QDialog):
         self._rebuild_parameters(material_type)
         defaults = MATERIAL_ENGINEERING_DEFAULTS[material_type]
         self.poisson_ratio.setValue(defaults["poisson_ratio"])
-        self.density.setValue(defaults["density"])
+        self.density.setValue(
+            self.unit_system.engineering_density_from_kg_per_m3(
+                defaults["density"]
+            )
+        )
 
     def _clear_parameter_form(self) -> None:
         while self.parameter_form.rowCount():
@@ -709,7 +720,7 @@ class MaterialDialog(QDialog):
     def _display_value(self, material_type: str, key: str, stored: float) -> float:
         kind = self._parameter_kind(material_type, key)
         if kind == "stress":
-            return stored / PA_PER_MPA
+            return self.unit_system.engineering_stress_from_pa(stored)
         if kind == "length":
             return self.unit_system.length_from_m(stored)
         return stored
@@ -717,7 +728,7 @@ class MaterialDialog(QDialog):
     def _stored_value(self, material_type: str, key: str, display: float) -> float:
         kind = self._parameter_kind(material_type, key)
         if kind == "stress":
-            return display * PA_PER_MPA
+            return self.unit_system.engineering_stress_to_pa(display)
         if kind == "length":
             return self.unit_system.length_to_m_value(display)
         return display
@@ -730,7 +741,10 @@ class MaterialDialog(QDialog):
             base = "Hardening ratio η"
         kind = self._parameter_kind(material_type, key)
         if kind == "stress":
-            return f"{base} [MPa]:"
+            return (
+                f"{base} "
+                f"[{self.unit_system.engineering_stress_label}]:"
+            )
         if kind == "length":
             return f"{base} [{self.unit_system.length}]:"
         if material_type == "MinMax":
@@ -1229,8 +1243,9 @@ class MaterialDialog(QDialog):
             )
         else:
             self.material_note.setText(
-                "Parameters are stored in research-friendly engineering units. "
-                "Stress/modulus inputs are entered in MPa."
+                "Parameters are stored internally in SI and displayed in "
+                f"{self.unit_system.engineering_stress_label} for stress/modulus "
+                f"and {self.unit_system.engineering_density_label} for density."
             )
             self.material_note.setStyleSheet(
                 "padding: 7px; background: #f2f5f8; color: #526578;"
@@ -1275,7 +1290,9 @@ class MaterialDialog(QDialog):
                 for key in MATERIAL_PARAMETER_ORDER[material_type]
             },
             poisson_ratio=self.poisson_ratio.value(),
-            density=self.density.value(),
+            density=self.unit_system.engineering_density_to_kg_per_m3(
+                self.density.value()
+            ),
             base_material_tag=base_material_tag,
             material_tags=material_tags,
             factors=factors,
