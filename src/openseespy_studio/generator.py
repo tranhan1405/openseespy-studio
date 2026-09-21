@@ -183,6 +183,20 @@ def material_source_comments(material: MaterialData) -> list[str]:
     record_id = str(source.get("record_id", "")).strip()
     if record_id:
         comments.append("# SARE library record: " + record_id)
+    response_quantity = str(
+        source.get("response_quantity", "")
+    ).strip()
+    if response_quantity:
+        comments.append(
+            "# Response quantity: " + response_quantity
+        )
+    source_units = source.get("source_units", {})
+    if isinstance(source_units, dict) and source_units:
+        unit_text = ", ".join(
+            f"{key}={value}"
+            for key, value in source_units.items()
+        )
+        comments.append("# Published units: " + unit_text)
     return comments
 
 
