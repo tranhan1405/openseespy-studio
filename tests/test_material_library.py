@@ -24,7 +24,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 175
+    assert len(records) == 177
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -222,7 +222,7 @@ def test_moodley_2026_records_encode_model_applicability():
     )
 
 
-def test_verified_library_reaches_one_hundred_seventy_five_with_expected_source_counts():
+def test_verified_library_reaches_one_hundred_seventy_seven_with_expected_source_counts():
     records = load_verified_material_library()
     prefixes = {
         "carreno-2020-": 2,
@@ -233,7 +233,7 @@ def test_verified_library_reaches_one_hundred_seventy_five_with_expected_source_
         "bhandari-2023-": 4,
         "benedetti-2025-": 6,
         "shang-2022-": 6,
-        "delgiudice-2022-": 3,
+        "delgiudice-2022-": 4,
         "georgantzia-2024-": 3,
         "doci-2024-": 2,
         "caballero-castro-2025-": 3,
@@ -243,10 +243,11 @@ def test_verified_library_reaches_one_hundred_seventy_five_with_expected_source_
         "yigitbas-2026-": 1,
         "georgantzia-2025-": 3,
         "zhang-2025-": 2,
+        "zhou-2021-": 1,
     }
 
-    assert len(records) == 175
-    assert len({record.id for record in records}) == 175
+    assert len(records) == 177
+    assert len({record.id for record in records}) == 177
     for prefix, expected in prefixes.items():
         assert sum(
             record.id.startswith(prefix)
@@ -614,6 +615,48 @@ def test_verified_fatigue_exports_wrapper_with_selected_base_tag():
     assert "'-m', -0.375" in command
     assert "'-min', -1e+16" in command
     assert "'-max', 1e+16" in command
+
+
+
+def test_verified_minmax_failure_limit_sets_are_exact():
+    micro = _record("delgiudice-2022-am-microrebar-minmax")
+    collapse = _record("zhou-2021-rc-rebar-collapse-minmax")
+
+    assert micro.model == "MinMax"
+    assert micro.parameters_si == {
+        "min": -1.0e16,
+        "max": 0.135,
+    }
+    assert micro.doi == "10.1002/eqe.3578"
+    assert "Table 3" in str(
+        micro.parameter_evidence.get("location", "")
+    )
+
+    assert collapse.parameters_si == {
+        "min": -0.04,
+        "max": 0.12,
+    }
+    assert collapse.doi == "10.1186/s40069-021-00463-y"
+    assert "Fig. 4" in str(
+        collapse.parameter_evidence.get("location", "")
+    )
+
+
+def test_verified_minmax_exports_selected_base_material():
+    material = material_from_library_record(
+        _record("zhou-2021-rc-rebar-collapse-minmax"),
+        tag=81,
+        base_material_tag=80,
+    )
+    command = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+
+    assert command == (
+        "ops.uniaxialMaterial('MinMax', 81, 80, "
+        "'-min', -0.04, '-max', 0.12)"
+    )
 
 
 def test_all_pinching4_library_records_have_physical_context_and_full_schema():
