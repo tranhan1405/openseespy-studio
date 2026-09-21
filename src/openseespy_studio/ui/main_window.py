@@ -7152,6 +7152,30 @@ class MainWindow(QMainWindow):
         """Backward-compatible generic element command: use Frame."""
         self._create_frame()
 
+    def _validate_geometry_edit(
+        self,
+        nodes: set[int],
+        elements: set[int],
+        before: dict[str, object],
+        *,
+        title: str,
+    ) -> bool:
+        self.project.sync_generated_ground_nodes()
+        affected = self.model.entity_node_tags(
+            node_tags=nodes,
+            element_tags=elements,
+        )
+        try:
+            for node_tag in sorted(affected):
+                self.project.validate_node_state(node_tag)
+        except (TypeError, ValueError, IndexError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, title, str(exc))
+            return False
+        return True
+
     def _require_selection(self, title: str) -> tuple[set[int], set[int]] | None:
         nodes, elements = self._selection_sets()
         if not nodes and not elements:
@@ -7182,7 +7206,13 @@ class MainWindow(QMainWindow):
             dy=dy,
             dz=dz,
         )
-        self.project.sync_generated_ground_nodes()
+        if not self._validate_geometry_edit(
+            nodes,
+            elements,
+            before,
+            title="Move Selection",
+        ):
+            return
         self._refresh_all("Moved selected entities")
         self._record_project_change("Move selection", before)
 
@@ -7233,7 +7263,13 @@ class MainWindow(QMainWindow):
             angle_deg=angle,
             pivot=pivot,
         )
-        self.project.sync_generated_ground_nodes()
+        if not self._validate_geometry_edit(
+            nodes,
+            elements,
+            before,
+            title="Rotate Selection",
+        ):
+            return
         self._refresh_all(
             f"Rotated selection {angle:g}° about {axis.upper()}"
         )
@@ -7255,7 +7291,13 @@ class MainWindow(QMainWindow):
             normal_axis=normal_axis,
             coordinate=coordinate,
         )
-        self.project.sync_generated_ground_nodes()
+        if not self._validate_geometry_edit(
+            nodes,
+            elements,
+            before,
+            title="Mirror Selection",
+        ):
+            return
         self._refresh_all(
             f"Mirrored selection about {normal_axis.upper()}={coordinate:g}"
         )
