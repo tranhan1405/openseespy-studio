@@ -8,7 +8,7 @@ import sys
 import tempfile
 
 from PySide6.QtCore import QProcess, QProcessEnvironment, QSettings, QTimer, QUrl, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QCursor, QDesktopServices, QFont, QKeySequence, QPainter, QPen, QShortcut, QTextCursor, QUndoStack
+from PySide6.QtGui import QAction, QColor, QCursor, QDesktopServices, QFont, QKeySequence, QPainter, QPainterPath, QPen, QShortcut, QTextCursor, QUndoStack
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -385,8 +385,8 @@ class BrandWidget(QWidget):
         path.cubicTo(86, 30, 91, 40, 101, 43)
         path.cubicTo(108, 45, 116, 44, 124, 43)
         response_pen = QPen(QColor(BRAND_RED), 3.0)
-        response_pen.setCapStyle(Qt.RoundCap)
-        response_pen.setJoinStyle(Qt.RoundJoin)
+        response_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        response_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.setPen(response_pen)
         painter.drawPath(path)
 
