@@ -1560,9 +1560,13 @@ class AnalysisSettingsData:
                 "Static DisplacementControl needs a nonzero "
                 "displacement increment."
             )
-        if self.arc_length_s <= 0.0:
+        uses_arc_length = (
+            self.analysis_type == "Static"
+            and self.integrator == "ArcLength"
+        )
+        if uses_arc_length and self.arc_length_s <= 0.0:
             raise ValueError("ArcLength s must be positive.")
-        if self.arc_length_alpha <= 0.0:
+        if uses_arc_length and self.arc_length_alpha <= 0.0:
             raise ValueError("ArcLength alpha must be positive.")
         if self.analysis_type == "Pushover" and abs(self.displacement_increment) <= 1.0e-30:
             raise ValueError("Pushover needs a nonzero displacement increment.")

@@ -1197,3 +1197,88 @@ def test_modal_participation_uses_opensees_assembled_mass_matrix():
     assert "float(_studio_ratio_values[_studio_index]) / 100.0" in text
     assert "ops.nodeMass(_studio_node, _studio_dof)" not in text
     compile(text, "<modal-assembled-mass>", "exec")
+
+
+@pytest.mark.parametrize(
+    ("analysis_type", "integrator"),
+    [
+        ("Static", "LoadControl"),
+        ("Static", "DisplacementControl"),
+        ("Pushover", "DisplacementControl"),
+        ("Cyclic", "DisplacementControl"),
+        ("Transient", "Newmark"),
+        ("Modal", "None"),
+    ],
+)
+def test_non_arc_length_analyses_ignore_unused_invalid_arc_length_settings(
+    analysis_type,
+    integrator,
+):
+    kwargs = {
+        "integrator": integrator,
+        "arc_length_s": 0.0,
+        "arc_length_alpha": -1.0,
+    }
+
+    if analysis_type == "Static" and integrator == "DisplacementControl":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    elif analysis_type == "Pushover":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.001,
+        )
+    elif analysis_type == "Cyclic":
+        kwargs.update(
+            control_node=2,
+            control_dof=1,
+            cyclic_targets=[0.001, -0.001],
+            cyclic_increment=0.0005,
+        )
+    elif analysis_type == "Transient":
+        kwargs.update(dt=0.01)
+    elif analysis_type == "Modal":
+        kwargs.update(num_modes=1)
+
+    analysis = AnalysisSettingsData(
+        83,
+        f"{analysis_type} ignores ArcLength settings",
+        analysis_type,
+        **kwargs,
+    )
+    assert analysis.arc_length_s == 0.0
+    assert analysis.arc_length_alpha == -1.0
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("arc_length_s", 0.0, "ArcLength s must be positive"),
+        ("arc_length_s", -0.1, "ArcLength s must be positive"),
+        ("arc_length_alpha", 0.0, "ArcLength alpha must be positive"),
+        ("arc_length_alpha", -1.0, "ArcLength alpha must be positive"),
+    ],
+)
+def test_static_arc_length_rejects_nonpositive_active_parameters(
+    field,
+    value,
+    message,
+):
+    kwargs = {
+        "integrator": "ArcLength",
+        "arc_length_s": 0.01,
+        "arc_length_alpha": 1.0,
+    }
+    kwargs[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        AnalysisSettingsData(
+            84,
+            "Invalid ArcLength",
+            "Static",
+            **kwargs,
+        )
