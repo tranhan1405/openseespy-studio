@@ -1770,12 +1770,13 @@ class _Importer:
             if isinstance(child, ast.Call):
                 command = self.command_name(child)
                 if command == "integrator":
-                    try:
-                        args = self.call_args(child)
-                    except _Unresolved:
-                        args = []
-                    if args and str(args[0]) == "DisplacementControl":
-                        integrator_call = child
+                    if len(child.args) >= 4:
+                        try:
+                            integrator_kind = self.eval.eval(child.args[0])
+                        except _Unresolved:
+                            integrator_kind = None
+                        if str(integrator_kind) == "DisplacementControl":
+                            integrator_call = child
                 elif command == "analyze":
                     analyze_call = child
             elif isinstance(child, ast.Assign) and isinstance(child.value, ast.Call):
@@ -1786,17 +1787,13 @@ class _Importer:
         if integrator_call is None or analyze_call is None:
             return False
         try:
-            integrator_args = self.call_args(integrator_call)
+            control_node = int(self.eval.eval(integrator_call.args[1]))
+            control_dof = int(self.eval.eval(integrator_call.args[2]))
             analyze_args = self.call_args(analyze_call)
-        except _Unresolved:
-            return False
-        if len(integrator_args) < 4:
+        except (_Unresolved, TypeError, ValueError):
             return False
         if not analyze_args or int(analyze_args[0]) != 1:
             return False
-
-        control_node = int(integrator_args[1])
-        control_dof = int(integrator_args[2])
 
         deltas: list[float] = []
         current = 0.0
