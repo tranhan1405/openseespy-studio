@@ -220,11 +220,21 @@ def test_openai_provider_executes_read_only_function_call_round_trip():
     assert first["store"] is False
 
     second = client.responses.calls[1]
-    assert second["previous_response_id"] == "response-1"
+    assert "previous_response_id" not in second
     assert second["store"] is False
-    assert second["input"][0]["type"] == "function_call_output"
-    assert second["input"][0]["call_id"] == "call-1"
-    assert "node_count" in second["input"][0]["output"]
+    tool_outputs = [
+        item
+        for item in second["input"]
+        if isinstance(item, dict)
+        and item.get("type") == "function_call_output"
+    ]
+    assert len(tool_outputs) == 1
+    assert tool_outputs[0]["call_id"] == "call-1"
+    assert "node_count" in tool_outputs[0]["output"]
+    assert any(
+        getattr(item, "type", "") == "function_call"
+        for item in second["input"]
+    )
 
 
 def test_optional_tool_ids_fail_closed_instead_of_raising():
