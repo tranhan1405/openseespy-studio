@@ -58,3 +58,22 @@ def test_mirror_about_yz_plane():
 
     assert model.nodes[1].xyz == (2.0, 0.0, 0.0)
     assert model.nodes[2].xyz == (0.0, 0.0, 0.0)
+
+
+def test_copy_element_skips_reserved_connection_tags():
+    model = make_line_model()
+
+    new_nodes, new_elements = model.copy_entities(
+        element_tags={1},
+        dx=0.0,
+        dy=5.0,
+        dz=0.0,
+        copies=2,
+        reserved_element_tags={2, 4},
+    )
+
+    assert new_elements == {3, 5}
+    assert model.elements[3].i == 3
+    assert model.elements[3].j == 4
+    assert model.elements[5].i == 5
+    assert model.elements[5].j == 6
