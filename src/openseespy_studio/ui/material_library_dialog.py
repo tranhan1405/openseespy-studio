@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -44,6 +45,7 @@ class MaterialLibraryDialog(QDialog):
         *,
         next_tag: int,
         units=None,
+        materials: dict[int, MaterialData] | None = None,
         accept_label: str = "Insert into Project",
         parent=None,
     ):
@@ -52,6 +54,7 @@ class MaterialLibraryDialog(QDialog):
         self.resize(1120, 760)
         self._next_tag = int(next_tag)
         self._units = UnitSystem.from_mapping(units)
+        self._materials = dict(materials or {})
         self._records = load_verified_material_library()
         self._record_by_id = {record.id: record for record in self._records}
         self._selected_record: MaterialLibraryRecord | None = None
@@ -111,6 +114,25 @@ class MaterialLibraryDialog(QDialog):
         self.summary = QLabel()
         self.summary.setWordWrap(True)
         right_layout.addWidget(self.summary)
+
+        self.wrapper_base_host = QWidget()
+        wrapper_base_layout = QHBoxLayout(self.wrapper_base_host)
+        wrapper_base_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_base_layout.addWidget(QLabel("Base material:"))
+        self.wrapper_base_combo = QComboBox()
+        self.wrapper_base_combo.setMinimumWidth(280)
+        for tag in sorted(self._materials):
+            material = self._materials[tag]
+            self.wrapper_base_combo.addItem(
+                f"{tag} · {material.name} · {material.material_type}",
+                int(tag),
+            )
+        self.wrapper_base_combo.currentIndexChanged.connect(
+            self._update_accept_state
+        )
+        wrapper_base_layout.addWidget(self.wrapper_base_combo, 1)
+        right_layout.addWidget(self.wrapper_base_host)
+        self.wrapper_base_host.hide()
 
         self.parameter_table = QTableWidget(0, 4)
         self.parameter_table.setHorizontalHeaderLabels([
@@ -321,7 +343,11 @@ class MaterialLibraryDialog(QDialog):
         )
         record = self._record_by_id.get(record_id)
         self._selected_record = record
-        self.add_button.setEnabled(record is not None)
+        needs_base = bool(
+            record and record.model in {"Fatigue", "MinMax"}
+        )
+        self.wrapper_base_host.setVisible(needs_base)
+        self._update_accept_state()
         self.open_doi.setEnabled(bool(record and record.doi))
         self.open_evidence.setEnabled(
             bool(
@@ -341,11 +367,17 @@ class MaterialLibraryDialog(QDialog):
         key: str,
         value: float,
     ) -> tuple[float, str]:
-        material = material_from_library_record(
-            record,
-            tag=1,
-        )
-        kind = material_parameter_kind(material, key)
+        if record.model in {"Fatigue", "MinMax"}:
+            kind = MATERIAL_PARAMETER_KINDS.get(
+                record.model,
+                {},
+            ).get(key, "raw")
+        else:
+            material = material_from_library_record(
+                record,
+                tag=1,
+            )
+            kind = material_parameter_kind(material, key)
         if kind == "stress":
             return (
                 self._units.engineering_stress_from_pa(value),
@@ -467,14 +499,39 @@ class MaterialLibraryDialog(QDialog):
         if url:
             QDesktopServices.openUrl(QUrl(url))
 
+    def _selected_wrapper_base_tag(self) -> int | None:
+        data = self.wrapper_base_combo.currentData()
+        return None if data is None else int(data)
+
+    def _update_accept_state(self, *_args) -> None:
+        record = self._selected_record
+        if record is None:
+            self.add_button.setEnabled(False)
+            return
+        if record.model in {"Fatigue", "MinMax"}:
+            self.add_button.setEnabled(
+                self._selected_wrapper_base_tag() is not None
+            )
+            return
+        self.add_button.setEnabled(True)
+
     def _accept_selected(self) -> None:
-        if self._selected_record is not None:
+        if (
+            self._selected_record is not None
+            and self.add_button.isEnabled()
+        ):
             self.accept()
 
     def material_data(self) -> MaterialData:
         if self._selected_record is None:
             raise ValueError("Select a verified material parameter set.")
+        base_material_tag = (
+            self._selected_wrapper_base_tag()
+            if self._selected_record.model in {"Fatigue", "MinMax"}
+            else None
+        )
         return material_from_library_record(
             self._selected_record,
             tag=self._next_tag,
+            base_material_tag=base_material_tag,
         )
