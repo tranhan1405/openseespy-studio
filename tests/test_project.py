@@ -2860,3 +2860,105 @@ def test_project_self_weight_rejects_fiber_section():
                 density_override=7850.0,
             )
         )
+
+
+def test_project_rejects_density_change_that_breaks_self_weight():
+    model = StructuralModel("selfweight-material-mutation", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 2.0, 0.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
+    project = ProjectDatabase(name="SelfWeight material mutation", model=model)
+    project.add_material(
+        MaterialData(1, "Dense", "Elastic", {"E": 2.0e11}, density=7850.0)
+    )
+    project.add_section(
+        SectionData(
+            1,
+            "Elastic",
+            "Elastic",
+            {"A": 0.1},
+            material_tag=1,
+        )
+    )
+    project.add_transformation(
+        TransformationData(1, "Linear", "Linear", (0.0, 0.0, 1.0))
+    )
+    project.add_time_series(TimeSeriesData(1, "Dead", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Dead", "Plain", time_series_tag=1)
+    )
+    project.add_element_load(
+        ElementLoadData(1, "SelfWeight", 1, 1, "SelfWeight")
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"must keep a positive density",
+    ):
+        project.update_material(
+            1,
+            MaterialData(1, "No density", "Elastic", {"E": 2.0e11}, density=0.0),
+        )
+
+    assert project.materials[1].density == pytest.approx(7850.0)
+
+
+def test_project_rejects_section_edit_that_breaks_self_weight_density():
+    model = StructuralModel("selfweight-section-mutation", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 2.0, 0.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="forceBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
+    project = ProjectDatabase(name="SelfWeight section mutation", model=model)
+    project.add_material(
+        MaterialData(1, "Dense", "Elastic", {"E": 2.0e11}, density=7850.0)
+    )
+    project.add_section(
+        SectionData(
+            1,
+            "Elastic",
+            "Elastic",
+            {"A": 0.1},
+            material_tag=1,
+        )
+    )
+    project.add_transformation(
+        TransformationData(1, "Linear", "Linear", (0.0, 0.0, 1.0))
+    )
+    project.add_time_series(TimeSeriesData(1, "Dead", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Dead", "Plain", time_series_tag=1)
+    )
+    project.add_element_load(
+        ElementLoadData(1, "SelfWeight", 1, 1, "SelfWeight")
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"must stay linked to a material with positive density",
+    ):
+        project.update_section(
+            1,
+            SectionData(
+                1,
+                "Manual elastic",
+                "Elastic",
+                {"A": 0.1},
+                material_tag=None,
+            ),
+        )
+
+    assert project.sections[1].material_tag == 1
