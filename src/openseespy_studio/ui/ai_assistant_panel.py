@@ -126,7 +126,6 @@ class AIAssistantPanel(QWidget):
         )
         settings.addRow("API key:", self.api_key)
         root.addLayout(settings)
-        self._provider_changed()
 
         self.focus = QLabel("Context: current model")
         self.focus.setWordWrap(True)
@@ -182,6 +181,8 @@ class AIAssistantPanel(QWidget):
         self.status.setObjectName("Muted")
         self.status.setWordWrap(True)
         root.addWidget(self.status)
+
+        self._provider_changed()
 
     def _provider_changed(self) -> None:
         provider = str(self.provider.currentData() or "ollama")
