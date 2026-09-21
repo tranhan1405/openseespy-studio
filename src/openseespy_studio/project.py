@@ -2851,6 +2851,19 @@ class ProjectDatabase:
         self._validate_connection(connection)
         self.connections.pop(original_tag)
         self.connections[connection.tag] = connection
+        if connection.tag != original_tag:
+            for recorder in self.recorders.values():
+                if recorder.recorder_type == "Node":
+                    continue
+                recorder.target_tags = [
+                    connection.tag if int(tag) == original_tag else int(tag)
+                    for tag in recorder.target_tags
+                ]
+            for result in self.solution_results.values():
+                result.element_scope = [
+                    connection.tag if int(tag) == original_tag else int(tag)
+                    for tag in result.element_scope
+                ]
 
     def _ground_node_in_use_elsewhere(
         self,
@@ -2906,7 +2919,14 @@ class ProjectDatabase:
     ) -> None:
         tag = int(tag)
         connection = self.connections.pop(tag, None)
-        if connection is None or not cleanup_ground:
+        if connection is None:
+            return
+
+        # Recorders target connection tags like ordinary element tags.  Keep
+        # direct connection deletion from leaving an orphan recorder behind.
+        self.prune_recorders()
+
+        if not cleanup_ground:
             return
         generated_constraint = connection.generated_constraint_tag
         if generated_constraint is not None:
@@ -2925,7 +2945,13 @@ class ProjectDatabase:
             generated_section is not None
             and generated_section in self.sections
             and not any(
-                element.section_tag == generated_section
+                generated_section
+                in {
+                    element.section_tag,
+                    element.hinge_i_section_tag,
+                    element.hinge_j_section_tag,
+                    element.interior_section_tag,
+                }
                 for element in self.model.elements.values()
             )
             and not any(
