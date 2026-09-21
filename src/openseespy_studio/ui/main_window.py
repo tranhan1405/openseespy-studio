@@ -7301,6 +7301,7 @@ class MainWindow(QMainWindow):
             dy=dy,
             dz=dz,
             copies=copies,
+            reserved_element_tags=self.project.connections,
         )
         self._refresh_all(
             f"Created {copies} copy/copies: "
