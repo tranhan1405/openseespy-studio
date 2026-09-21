@@ -24,7 +24,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 182
+    assert len(records) == 183
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -222,7 +222,7 @@ def test_moodley_2026_records_encode_model_applicability():
     )
 
 
-def test_verified_library_reaches_one_hundred_eighty_two_with_expected_source_counts():
+def test_verified_library_reaches_one_hundred_eighty_three_with_expected_source_counts():
     records = load_verified_material_library()
     prefixes = {
         "carreno-2020-": 2,
@@ -248,10 +248,11 @@ def test_verified_library_reaches_one_hundred_eighty_two_with_expected_source_co
         "jafari-2023-": 1,
         "seo-2013-": 1,
         "cheng-2019-": 1,
+        "megalooikonomou-2012-": 1,
     }
 
-    assert len(records) == 182
-    assert len({record.id for record in records}) == 182
+    assert len(records) == 183
+    assert len({record.id for record in records}) == 183
     for prefix, expected in prefixes.items():
         assert sum(
             record.id.startswith(prefix)
@@ -795,6 +796,58 @@ def test_verified_steel01_exports_exact_opensees_default_hardening():
     assert command == (
         "ops.uniaxialMaterial('Steel01', 96, 250, 200000, "
         "0.014, 0, 55, 0, 55)"
+    )
+
+
+
+def test_megalooikonomou_frpconfinedconcrete_reference_set_is_exact():
+    record = _record(
+        "megalooikonomou-2012-opensees-reference-frpconfinedconcrete"
+    )
+
+    assert record.model == "FRPConfinedConcrete"
+    assert record.parameters_si == {
+        "fpc1": 27.5e6,
+        "fpc2": 27.5e6,
+        "epsc0": 0.002,
+        "D": 0.400,
+        "c": 0.035,
+        "Ej": 266.0e9,
+        "Sj": 0.0,
+        "tj": 0.000222,
+        "eju": 0.0163,
+        "S": 0.150,
+        "fyl": 374.0e6,
+        "fyh": 363.0e6,
+        "dlong": 0.016,
+        "dtrans": 0.006,
+        "Es": 200.0e9,
+        "nu0": 0.2,
+        "k": 0.8,
+        "useBuck": 1.0,
+    }
+    assert record.doi == "10.14359/51683876"
+    assert "official OpenSees" in str(
+        record.parameter_evidence.get("relationship", "")
+    )
+
+
+def test_megalooikonomou_frpconfinedconcrete_exports_reference_command():
+    material = material_from_library_record(
+        _record(
+            "megalooikonomou-2012-opensees-reference-frpconfinedconcrete"
+        ),
+        tag=97,
+    )
+
+    command = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+    assert command == (
+        "ops.uniaxialMaterial('FRPConfinedConcrete', 97, "
+        "27.5, 27.5, 0.002, 400, 35, 266000, 0, 0.222, "
+        "0.0163, 150, 374, 363, 16, 6, 200000, 0.2, 0.8, 1)"
     )
 
 
