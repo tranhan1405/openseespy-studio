@@ -768,9 +768,57 @@ def _dynamic_checks(
                 )
             )
 
-    for pattern in project.load_patterns.values():
+    # Modal analysis does not consume excitation patterns. Stale or incomplete
+    # ground motions elsewhere in the project must not block an eigen solve.
+    if analysis.analysis_type != "Transient":
+        return
+
+    if analysis.deferred_pattern_tags:
+        candidate_tags = [int(tag) for tag in analysis.deferred_pattern_tags]
+        patterns = []
+        for tag in candidate_tags:
+            pattern = project.load_patterns.get(tag)
+            if pattern is None:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Ground motion",
+                        f"Transient analysis references missing excitation "
+                        f"pattern {tag}.",
+                        suggestion=(
+                            "Edit the analysis and assign an existing "
+                            "UniformExcitation ground-motion pattern."
+                        ),
+                    )
+                )
+                continue
+            patterns.append(pattern)
+    else:
+        # Legacy/manual transient analyses without explicit ownership retain
+        # the historical behavior of validating all UniformExcitation loads.
+        patterns = [
+            pattern
+            for pattern in project.load_patterns.values()
+            if pattern.pattern_type == "UniformExcitation"
+        ]
+
+    for pattern in patterns:
         if pattern.pattern_type != "UniformExcitation":
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Ground motion",
+                    f"Transient excitation pattern {pattern.tag} is "
+                    f"{pattern.pattern_type}; NLTH excitation must use "
+                    "UniformExcitation.",
+                    suggestion=(
+                        "Assign a UniformExcitation pattern backed by a "
+                        "Path acceleration time series."
+                    ),
+                )
+            )
             continue
+
         series = project.time_series.get(pattern.time_series_tag)
         if series is None:
             issues.append(
@@ -808,14 +856,18 @@ def _dynamic_checks(
                     suggestion="Provide positive dt and acceleration values.",
                 )
             )
-        if pattern.direction > model.ndf:
+        if pattern.direction < 1 or pattern.direction > model.ndm:
             issues.append(
                 ValidationIssue(
                     "ERROR",
                     "Ground motion",
-                    f"UniformExcitation pattern {pattern.tag} uses DOF "
-                    f"{pattern.direction}, but the model has ndf={model.ndf}.",
-                    suggestion="Choose an excitation direction supported by the model.",
+                    f"UniformExcitation pattern {pattern.tag} uses "
+                    f"translational direction {pattern.direction}, but the "
+                    f"model has ndm={model.ndm}.",
+                    suggestion=(
+                        "Choose a global translational excitation direction "
+                        "supported by the model geometry."
+                    ),
                 )
             )
 
