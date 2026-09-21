@@ -1553,21 +1553,20 @@ class AnalysisSettingsData:
         ):
             raise ValueError("Adaptive static analysis needs a nonzero load increment.")
         if (
-            self.adaptive_step
-            and self.analysis_type == "Static"
+            self.analysis_type == "Static"
             and self.integrator == "DisplacementControl"
             and abs(self.displacement_increment) <= 1.0e-30
         ):
             raise ValueError(
-                "Adaptive static DisplacementControl needs a nonzero "
+                "Static DisplacementControl needs a nonzero "
                 "displacement increment."
             )
         if self.arc_length_s <= 0.0:
             raise ValueError("ArcLength s must be positive.")
         if self.arc_length_alpha <= 0.0:
             raise ValueError("ArcLength alpha must be positive.")
-        if self.adaptive_step and self.analysis_type == "Pushover" and abs(self.displacement_increment) <= 1.0e-30:
-            raise ValueError("Adaptive pushover needs a nonzero displacement increment.")
+        if self.analysis_type == "Pushover" and abs(self.displacement_increment) <= 1.0e-30:
+            raise ValueError("Pushover needs a nonzero displacement increment.")
         if self.analysis_type == "Cyclic":
             if not self.cyclic_targets:
                 raise ValueError("Cyclic analysis needs at least one displacement target.")

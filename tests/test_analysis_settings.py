@@ -1,3 +1,5 @@
+import pytest
+
 from openseespy_studio.generator import analysis_to_openseespy, cyclic_displacement_steps, to_openseespy
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import AnalysisSettingsData, ProjectDatabase
@@ -409,3 +411,35 @@ def test_integrator_round_trip_preserves_advanced_parameters():
     restored = ProjectDatabase.from_dict(project.to_dict()).analyses[44]
     assert restored.integrator == "HHT"
     assert restored.hht_alpha == 0.85
+
+
+def test_static_displacement_control_rejects_zero_increment():
+    with pytest.raises(
+        ValueError,
+        match="Static DisplacementControl needs a nonzero displacement increment",
+    ):
+        AnalysisSettingsData(
+            50,
+            "Zero static displacement step",
+            "Static",
+            integrator="DisplacementControl",
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.0,
+        )
+
+
+def test_pushover_rejects_zero_increment_even_without_adaptive_step():
+    with pytest.raises(
+        ValueError,
+        match="Pushover needs a nonzero displacement increment",
+    ):
+        AnalysisSettingsData(
+            51,
+            "Zero pushover step",
+            "Pushover",
+            control_node=2,
+            control_dof=1,
+            displacement_increment=0.0,
+            adaptive_step=False,
+        )
