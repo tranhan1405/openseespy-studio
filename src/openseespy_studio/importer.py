@@ -556,6 +556,16 @@ class _Importer:
             )
         )
         self.count("Materials")
+        if kind == "FRPConfinedConcrete":
+            self.issue(
+                "WARNING",
+                node,
+                "FRPConfinedConcrete runtime",
+                "Imported faithfully for editing/export. Some stock OpenSeesPy "
+                "builds, including 3.8.0 used by Studio CI, report this legacy "
+                "material as temporarily removed from compiled runtimes; "
+                "execution requires a compatible/custom OpenSees build.",
+            )
 
     def add_section(self, node: ast.Call, args: list[Any]) -> None:
         if len(args) < 2:
