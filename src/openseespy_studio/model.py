@@ -531,6 +531,7 @@ class StructuralModel:
         dy: float = 0.0,
         dz: float = 0.0,
         copies: int = 1,
+        reserved_element_tags: Iterable[int] = (),
     ) -> tuple[set[int], set[int]]:
         copies = int(copies)
         if copies < 1:
@@ -560,6 +561,9 @@ class StructuralModel:
         }
 
         next_node = self.next_node_tag()
+        reserved_elements = {
+            int(tag) for tag in reserved_element_tags
+        } | set(self.elements)
         next_element = self.next_element_tag()
         created_nodes: set[int] = set()
         created_elements: set[int] = set()
@@ -583,7 +587,10 @@ class StructuralModel:
 
             for source_tag in sorted(selected_elements):
                 source = base_elements[source_tag]
+                while next_element in reserved_elements:
+                    next_element += 1
                 new_tag = next_element
+                reserved_elements.add(new_tag)
                 next_element += 1
                 self.add_element(
                     new_tag,
