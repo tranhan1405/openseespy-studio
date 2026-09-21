@@ -3250,10 +3250,10 @@ class ProjectDatabase:
                     displacement.pattern_tag = pattern.tag
             for analysis in self.analyses.values():
                 if original_tag in analysis.deferred_pattern_tags:
-                    analysis.deferred_pattern_tags = sorted(
+                    analysis.deferred_pattern_tags = [
                         pattern.tag if int(tag) == original_tag else int(tag)
                         for tag in analysis.deferred_pattern_tags
-                    )
+                    ]
 
     def remove_load_pattern(self, tag: int) -> None:
         tag = int(tag)
