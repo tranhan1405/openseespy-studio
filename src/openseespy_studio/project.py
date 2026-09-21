@@ -3019,6 +3019,51 @@ class ProjectDatabase:
                 removed.append(tag)
         return sorted(removed)
 
+    def validate_node_state(self, node_tag: int) -> None:
+        """Validate cross-object constraints after an in-place node edit."""
+        node_tag = int(node_tag)
+        node = self.model.nodes.get(node_tag)
+        if node is None:
+            raise ValueError(f"Node {node_tag} does not exist.")
+
+        for connection in self.connections.values():
+            if node_tag in {connection.node_i, connection.node_j}:
+                self._validate_connection(connection)
+
+        for constraint_tag, constraint in self.constraints.items():
+            if (
+                node_tag != constraint.retained_node
+                and node_tag not in constraint.constrained_nodes
+            ):
+                continue
+            self._validate_constraint_model_compatibility(constraint)
+            self._validate_constraint_nodes(constraint)
+            self._validate_constraint_dependency_conflicts(
+                constraint,
+                ignore_constraint_tags={int(constraint_tag)},
+            )
+
+        for displacement_tag, displacement in self.prescribed_displacements.items():
+            if int(displacement.node_tag) != node_tag:
+                continue
+            self._validate_prescribed_displacement(
+                displacement,
+                original_tag=int(displacement_tag),
+            )
+
+        for analysis in self.analyses.values():
+            self._validate_analysis_constraint_handler_compatibility(analysis)
+            if (
+                self._analysis_uses_control_node(analysis)
+                and int(analysis.control_node) == node_tag
+                and analysis.control_dof <= len(node.fixity)
+                and bool(node.fixity[analysis.control_dof - 1])
+            ):
+                raise ValueError(
+                    f"{analysis.analysis_type} control node {node_tag} DOF "
+                    f"{analysis.control_dof} is restrained by a support."
+                )
+
     def delete_entities(
         self,
         *,
