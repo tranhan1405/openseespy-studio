@@ -584,6 +584,58 @@ def _element_load_checks(
                 )
 
 
+def _analysis_control_checks(
+    project: ProjectDatabase,
+    analysis: AnalysisSettingsData,
+    issues: list[ValidationIssue],
+) -> None:
+    if analysis.integrator != "DisplacementControl":
+        return
+
+    node = project.model.nodes.get(int(analysis.control_node))
+    if node is None:
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Analysis control",
+                f"{analysis.analysis_type} DisplacementControl references "
+                f"missing control node {analysis.control_node}.",
+                "node",
+                int(analysis.control_node),
+                "Choose an existing free control node before running.",
+            )
+        )
+        return
+
+    dof = int(analysis.control_dof)
+    if dof < 1 or dof > int(project.model.ndf):
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Analysis control",
+                f"{analysis.analysis_type} DisplacementControl uses control "
+                f"DOF {dof}, but the model has ndf={project.model.ndf}.",
+                "node",
+                node.tag,
+                "Choose a control DOF available in the current model.",
+            )
+        )
+        return
+
+    if bool(node.fixity[dof - 1]):
+        issues.append(
+            ValidationIssue(
+                "ERROR",
+                "Analysis control",
+                f"Control node {node.tag} DOF {dof} is restrained, so "
+                "DisplacementControl cannot advance that degree of freedom.",
+                "node",
+                node.tag,
+                "Use a free control DOF or remove the support restraint.",
+            )
+        )
+
+
 def _driving_load_checks(
     project: ProjectDatabase,
     analysis: AnalysisSettingsData,
@@ -832,6 +884,7 @@ def validate_project(
     _recorder_checks(project, issues)
 
     if analysis is not None:
+        _analysis_control_checks(project, analysis, issues)
         _driving_load_checks(project, analysis, issues)
         _dynamic_checks(project, analysis, issues)
 
