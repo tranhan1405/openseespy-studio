@@ -1883,7 +1883,7 @@ class AnalysisSettingsData:
         if self.constraints_handler not in {"Transformation","Plain"}:
             raise ValueError("Unsupported constraints handler.")
         if self.numberer not in {"RCM","Plain"}: raise ValueError("Unsupported numberer.")
-        if self.system not in {"UmfPack","BandGeneral","ProfileSPD"}: raise ValueError("Unsupported system.")
+        if self.system not in {"UmfPack","BandGeneral","ProfileSPD","SparseGeneral"}: raise ValueError("Unsupported system.")
         uses_iterative_convergence = self.analysis_type != "Modal"
         if (
             uses_iterative_convergence
