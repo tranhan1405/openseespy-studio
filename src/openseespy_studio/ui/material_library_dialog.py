@@ -27,7 +27,7 @@ from ..material_library import (
     load_verified_material_library,
     material_from_library_record,
 )
-from ..project import MATERIAL_PARAMETER_KINDS, MaterialData
+from ..project import MATERIAL_PARAMETER_KINDS, MaterialData, material_parameter_kind
 from ..units import UnitSystem
 from .material_dialog import MaterialEnvelopePreview
 
@@ -332,20 +332,46 @@ class MaterialLibraryDialog(QDialog):
             return
         self._show_record(record)
 
+    def _parameter_numeric_display(
+        self,
+        record: MaterialLibraryRecord,
+        key: str,
+        value: float,
+    ) -> tuple[float, str]:
+        material = material_from_library_record(
+            record,
+            tag=1,
+        )
+        kind = material_parameter_kind(material, key)
+        if kind == "stress":
+            return (
+                self._units.engineering_stress_from_pa(value),
+                self._units.engineering_stress_label,
+            )
+        if kind == "length":
+            return self._units.length_from_m(value), self._units.length
+        if kind == "force":
+            return self._units.force_from_n(value), self._units.force
+        if kind == "moment":
+            return self._units.moment_from_nm(value), self._units.moment_label
+        if kind == "rotation":
+            return float(value), "rad"
+        if kind == "strain":
+            return float(value), "strain"
+        return float(value), "—"
+
     def _parameter_display(
         self,
-        model: str,
+        record: MaterialLibraryRecord,
         key: str,
         value: float,
     ) -> tuple[str, str]:
-        kind = MATERIAL_PARAMETER_KINDS.get(model, {}).get(key, "raw")
-        if kind == "stress":
-            display = self._units.engineering_stress_from_pa(value)
-            return f"{display:g}", self._units.engineering_stress_label
-        if kind == "length":
-            display = self._units.length_from_m(value)
-            return f"{display:g}", self._units.length
-        return f"{value:g}", "—"
+        display, unit = self._parameter_numeric_display(
+            record,
+            key,
+            value,
+        )
+        return f"{display:g}", unit
 
     def _show_record(self, record: MaterialLibraryRecord) -> None:
         self.heading.setText(
@@ -363,7 +389,7 @@ class MaterialLibraryDialog(QDialog):
         )
         for row, (key, value) in enumerate(rows):
             display, unit = self._parameter_display(
-                record.model,
+                record,
                 key,
                 float(value),
             )
@@ -409,9 +435,17 @@ class MaterialLibraryDialog(QDialog):
             + "\n\nLimitations\n"
             + limitations
         )
+        preview_parameters = {
+            key: self._parameter_numeric_display(
+                record,
+                key,
+                float(value),
+            )[0]
+            for key, value in record.parameters_si.items()
+        }
         self.preview.set_material(
             record.model,
-            dict(record.parameters_si),
+            preview_parameters,
         )
 
     def _open_doi(self) -> None:
