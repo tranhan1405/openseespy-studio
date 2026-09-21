@@ -364,8 +364,6 @@ class MaterialData:
             return abs(2.0 * float(self.parameters["fpc"]) / epsc0)
         if self.material_type == "Concrete04":
             return float(self.parameters["Ec"])
-        if self.material_type == "FRPConfinedConcrete":
-            return float(self.parameters["Ej"])
         if self.material_type == "FRPConfinedConcrete02":
             return float(self.parameters["Ec"])
         raise ValueError(
