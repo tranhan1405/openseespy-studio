@@ -260,6 +260,65 @@ def execute_read_only_tool(
     elif name == "get_selection":
         result = _selection_detail(snapshot)
 
+    elif name == "get_node":
+        try:
+            tag = int(arguments["tag"])
+        except (KeyError, TypeError, ValueError):
+            result = {"error": "get_node requires an integer tag."}
+        else:
+            model = project.get("model", {})
+            item = _tagged(
+                model.get("nodes", []) if isinstance(model, dict) else [],
+                tag,
+            )
+            result = (
+                {"found": True, "node": item}
+                if item is not None
+                else {"found": False, "tag": tag}
+            )
+
+    elif name == "get_element":
+        try:
+            tag = int(arguments["tag"])
+        except (KeyError, TypeError, ValueError):
+            result = {"error": "get_element requires an integer tag."}
+        else:
+            model = project.get("model", {})
+            item = _tagged(
+                model.get("elements", []) if isinstance(model, dict) else [],
+                tag,
+            )
+            if item is None:
+                result = {"found": False, "tag": tag}
+            else:
+                detail = dict(item)
+                section_tag = detail.get("section_tag")
+                material_tag = detail.get("truss_material_tag")
+                if section_tag is not None:
+                    detail["section"] = _tagged(
+                        project.get("sections", []),
+                        int(section_tag),
+                    )
+                if material_tag is not None:
+                    detail["material"] = _tagged(
+                        project.get("materials", []),
+                        int(material_tag),
+                    )
+                result = {"found": True, "element": detail}
+
+    elif name == "get_connection":
+        try:
+            tag = int(arguments["tag"])
+        except (KeyError, TypeError, ValueError):
+            result = {"error": "get_connection requires an integer tag."}
+        else:
+            item = _tagged(project.get("connections", []), tag)
+            result = (
+                {"found": True, "connection": item}
+                if item is not None
+                else {"found": False, "tag": tag}
+            )
+
     elif name == "get_material":
         try:
             tag = int(arguments["tag"])
@@ -379,6 +438,7 @@ OPENAI_READ_ONLY_TOOLS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "strict": False,
         "name": "get_selection",
         "description": (
             "Get the currently selected nodes/elements and their model "
@@ -388,6 +448,49 @@ OPENAI_READ_ONLY_TOOLS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "strict": False,
+        "name": "get_node",
+        "description": "Get one SARE structural node by positive integer tag.",
+        "parameters": {
+            "type": "object",
+            "properties": {"tag": {"type": "integer", "minimum": 1}},
+            "required": ["tag"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "strict": False,
+        "name": "get_element",
+        "description": (
+            "Get one SARE frame/truss element by tag, including its referenced "
+            "section or truss material when available."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"tag": {"type": "integer", "minimum": 1}},
+            "required": ["tag"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "strict": False,
+        "name": "get_connection",
+        "description": (
+            "Get one SARE zeroLength, zeroLengthSection, or twoNodeLink "
+            "connection by positive integer tag."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"tag": {"type": "integer", "minimum": 1}},
+            "required": ["tag"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "strict": False,
         "name": "get_material",
         "description": "Get one SARE material definition by positive integer tag.",
         "parameters": {
@@ -399,6 +502,7 @@ OPENAI_READ_ONLY_TOOLS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "strict": False,
         "name": "get_section",
         "description": "Get one SARE section definition by positive integer tag.",
         "parameters": {
@@ -410,6 +514,7 @@ OPENAI_READ_ONLY_TOOLS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "strict": False,
         "name": "get_analysis",
         "description": (
             "Get an analysis definition by tag. Omit tag to inspect the active "
@@ -423,18 +528,21 @@ OPENAI_READ_ONLY_TOOLS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "strict": False,
         "name": "get_validation_issues",
         "description": "Get current SARE model-check errors, warnings, and suggestions.",
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
         "type": "function",
+        "strict": False,
         "name": "get_solver_log",
         "description": "Get the tail of the current/recent SARE solver console output.",
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
         "type": "function",
+        "strict": False,
         "name": "get_job_results",
         "description": (
             "Get a compact completed/running Job record and captured result "
@@ -516,6 +624,7 @@ class OpenAIProvider:
             instructions=instructions,
             input=conversation,
             tools=OPENAI_READ_ONLY_TOOLS,
+            store=False,
         )
 
         for _round in range(max(1, int(self.max_tool_rounds))):
@@ -558,6 +667,7 @@ class OpenAIProvider:
                 previous_response_id=str(getattr(response, "id", "")),
                 input=outputs,
                 tools=OPENAI_READ_ONLY_TOOLS,
+                store=False,
             )
 
         raise RuntimeError(
