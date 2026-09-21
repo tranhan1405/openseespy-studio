@@ -229,6 +229,19 @@ class _SafeEvaluator:
             ):
                 return getattr(math, node.attr)
         if isinstance(node, ast.Call):
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "math"
+                and node.func.attr in {
+                    "acos", "asin", "atan", "cos", "sin", "tan",
+                    "sqrt", "exp", "log", "log10",
+                }
+            ):
+                fn = getattr(math, node.func.attr)
+                if node.keywords:
+                    raise _Unresolved("math keyword arguments")
+                return fn(*(self.eval(arg) for arg in node.args))
             if isinstance(node.func, ast.Name):
                 name = node.func.id
                 if name in self.SAFE_NOOP_CALLS:
@@ -261,6 +274,7 @@ class _Importer:
         "sectionForce",
         "sectionDeformation",
         "getTime",
+        "getLoadFactor",
         "getNodeTags",
         "getEleTags",
     }
@@ -581,6 +595,89 @@ class _Importer:
             )
             self.current_fiber_section = tag
             self.count("Sections")
+            return
+        if kind == "WFSection2d":
+            if len(args) < 9:
+                raise ValueError(
+                    "WFSection2d needs secTag, matTag, d, tw, bf, tf, Nfw, Nff"
+                )
+            mat_tag = int(args[2])
+            d = float(args[3])
+            tw = float(args[4])
+            bf = float(args[5])
+            tf = float(args[6])
+            nfw = int(args[7])
+            nff = int(args[8])
+            if d <= 0.0 or tw <= 0.0 or bf <= 0.0 or tf <= 0.0:
+                raise ValueError("WFSection2d dimensions must be positive")
+            if 2.0 * tf >= d:
+                raise ValueError("WFSection2d needs d > 2*tf")
+            if nfw < 1 or nff < 1:
+                raise ValueError("WFSection2d fiber counts must be positive")
+
+            web_depth = d - 2.0 * tf
+            section = SectionData(
+                tag,
+                f"Imported WFSection2d {tag}",
+                "Fiber",
+                parameters={"GJ": 1.0e6},
+                fiber_components=[
+                    FiberComponentData(
+                        "RectPatch",
+                        "Lower flange",
+                        mat_tag,
+                        {
+                            "n_y": nff,
+                            "n_z": 1,
+                            "y_center": -0.5 * d + 0.5 * tf,
+                            "z_center": 0.0,
+                            "width_y": tf,
+                            "depth_z": bf,
+                        },
+                    ),
+                    FiberComponentData(
+                        "RectPatch",
+                        "Web",
+                        mat_tag,
+                        {
+                            "n_y": nfw,
+                            "n_z": 1,
+                            "y_center": 0.0,
+                            "z_center": 0.0,
+                            "width_y": web_depth,
+                            "depth_z": tw,
+                        },
+                    ),
+                    FiberComponentData(
+                        "RectPatch",
+                        "Upper flange",
+                        mat_tag,
+                        {
+                            "n_y": nff,
+                            "n_z": 1,
+                            "y_center": 0.5 * d - 0.5 * tf,
+                            "z_center": 0.0,
+                            "width_y": tf,
+                            "depth_z": bf,
+                        },
+                    ),
+                ],
+                display_geometry={
+                    "shape": "WideFlange",
+                    "dimensions": {
+                        "d": d,
+                        "tw": tw,
+                        "bf": bf,
+                        "tf": tf,
+                        "Nfw": float(nfw),
+                        "Nff": float(nff),
+                    },
+                },
+            )
+            self.project.add_section(section)
+            self.current_fiber_section = None
+            self.count("Sections")
+            self.count("WF sections")
             return
         self.issue(
             "UNSUPPORTED", node, f"section {kind}",
@@ -1270,14 +1367,20 @@ class _Importer:
 
             if "fiber" in rest:
                 section_index = rest.index("section")
-                fiber_index = rest.index("fiber")
-                material_tag = None
-                cursor = fiber_index + 3
-                if (
-                    cursor < len(rest) - 1
-                    and isinstance(rest[cursor], (int, float))
-                ):
-                    material_tag = int(rest[cursor])
+                fiber_flag = rest.index("fiber")
+                selector = list(rest[fiber_flag + 1:-1])
+                if not selector:
+                    raise ValueError("Fiber recorder needs an index or y-z coordinates")
+
+                recorder_kwargs: dict[str, Any] = {}
+                if len(selector) == 1:
+                    recorder_kwargs["fiber_index"] = int(selector[0])
+                else:
+                    recorder_kwargs["fiber_y"] = float(selector[0])
+                    recorder_kwargs["fiber_z"] = float(selector[1])
+                    if len(selector) >= 3:
+                        recorder_kwargs["material_tag"] = int(selector[2])
+
                 item = RecorderData(
                     self._next_recorder,
                     f"Imported Fiber recorder {self._next_recorder}",
@@ -1287,9 +1390,7 @@ class _Importer:
                     file_name=file_name,
                     include_time=include_time,
                     section_number=int(rest[section_index + 1]),
-                    fiber_y=float(rest[fiber_index + 1]),
-                    fiber_z=float(rest[fiber_index + 2]),
-                    material_tag=material_tag,
+                    **recorder_kwargs,
                 )
             elif "section" in rest:
                 section_index = rest.index("section")
@@ -1327,8 +1428,16 @@ class _Importer:
     def analysis_command(self, command: str, args: list[Any]) -> None:
         if command == "wipeAnalysis":
             self.analysis_state.clear()
-        elif command in {"constraints", "numberer", "system"} and args:
+        elif command in {"constraints", "numberer"} and args:
             self.analysis_state[command] = str(args[0])
+        elif command == "system" and args:
+            system_name = str(args[0])
+            self.analysis_state["system"] = {
+                "BandGEN": "BandGeneral",
+                "BandGen": "BandGeneral",
+                "SparseGEN": "SparseGeneral",
+                "SparseGen": "SparseGeneral",
+            }.get(system_name, system_name)
         elif command == "algorithm" and args:
             self.analysis_state["algorithm"] = str(args[0])
             self.analysis_state["algorithm_initial"] = (
@@ -2064,27 +2173,66 @@ class _Importer:
         staged_displacement = False
         staged_driver_tags: list[int] = []
         staged_preload_steps = 1
-        if (
-            not meta
-            and len(self.analysis_events) >= 2
-            and state.get("integrator") == "DisplacementControl"
-        ):
+        final_stage_steps = max(
+            1,
+            int(state.get("steps", 1) or 1),
+        )
+
+        def _event_signature(event: dict[str, Any]) -> tuple[Any, ...]:
+            return (
+                event.get("analysis_kind"),
+                event.get("integrator"),
+                tuple(event.get("integrator_args", [])),
+                tuple(int(tag) for tag in event.get("pattern_tags", [])),
+            )
+
+        if not meta and self.analysis_events:
             final_event = self.analysis_events[-1]
-            prior_event = self.analysis_events[-2]
-            prior_patterns = {
-                int(tag) for tag in prior_event.get("pattern_tags", [])
-            }
-            final_patterns = {
-                int(tag) for tag in final_event.get("pattern_tags", [])
-            }
-            new_patterns = sorted(final_patterns - prior_patterns)
-            if prior_patterns and new_patterns:
-                staged_displacement = True
-                staged_driver_tags = new_patterns
-                staged_preload_steps = max(
-                    1,
-                    int(prior_event.get("steps", 1) or 1),
-                )
+            final_signature = _event_signature(final_event)
+            final_start = len(self.analysis_events) - 1
+            while (
+                final_start > 0
+                and _event_signature(self.analysis_events[final_start - 1])
+                == final_signature
+            ):
+                final_start -= 1
+            final_stage_steps = sum(
+                max(1, int(event.get("steps", 1) or 1))
+                for event in self.analysis_events[final_start:]
+            )
+
+            if (
+                final_start > 0
+                and state.get("integrator") == "DisplacementControl"
+            ):
+                prior_event = self.analysis_events[final_start - 1]
+                prior_signature = _event_signature(prior_event)
+                prior_start = final_start - 1
+                while (
+                    prior_start > 0
+                    and _event_signature(self.analysis_events[prior_start - 1])
+                    == prior_signature
+                ):
+                    prior_start -= 1
+
+                prior_patterns = {
+                    int(tag)
+                    for tag in prior_event.get("pattern_tags", [])
+                }
+                final_patterns = {
+                    int(tag)
+                    for tag in final_event.get("pattern_tags", [])
+                }
+                new_patterns = sorted(final_patterns - prior_patterns)
+                if prior_patterns and new_patterns:
+                    staged_displacement = True
+                    staged_driver_tags = new_patterns
+                    staged_preload_steps = sum(
+                        max(1, int(event.get("steps", 1) or 1))
+                        for event in self.analysis_events[
+                            prior_start:final_start
+                        ]
+                    )
 
         analysis_type = str(meta.get("type", ""))
         if not analysis_type:
@@ -2142,7 +2290,13 @@ class _Importer:
             ),
             "steps": max(
                 1,
-                int(meta.get("steps", state.get("steps", 1)) or 1),
+                int(
+                    meta.get(
+                        "steps",
+                        final_stage_steps,
+                    )
+                    or 1
+                ),
             ),
             "load_increment": float(meta.get("load_increment", 0.1)),
             "control_node": int(
