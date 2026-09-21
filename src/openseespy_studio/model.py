@@ -26,6 +26,23 @@ def _strict_int(value: object, label: str) -> int:
         raise ValueError(f"{label} must be an integer.")
     return int(numeric)
 
+
+def _strict_bool(value: object, label: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    raise ValueError(f"{label} must be a boolean.")
+
 FIXITY_PRESETS: dict[str, Tuple[int, ...]] = {
     "Fixed": (1, 1, 1, 1, 1, 1),
     "Pinned": (1, 1, 1, 0, 0, 0),
@@ -94,7 +111,10 @@ class Element:
         )
         self.force_tolerance = float(self.force_tolerance)
         self.mass_per_length = float(self.mass_per_length)
-        self.consistent_mass = bool(self.consistent_mass)
+        self.consistent_mass = _strict_bool(
+            self.consistent_mass,
+            "Element consistent_mass",
+        )
         self.hinge_i_section_tag = (
             None if self.hinge_i_section_tag is None else int(self.hinge_i_section_tag)
         )
@@ -112,7 +132,10 @@ class Element:
             if self.truss_material_tag is None
             else int(self.truss_material_tag)
         )
-        self.truss_do_rayleigh = bool(self.truss_do_rayleigh)
+        self.truss_do_rayleigh = _strict_bool(
+            self.truss_do_rayleigh,
+            "Truss Rayleigh flag",
+        )
         self.section_tag = (
             None if self.section_tag is None else int(self.section_tag)
         )
@@ -820,7 +843,7 @@ class StructuralModel:
                 item.get("force_max_iter", 10),
                 float(item.get("force_tolerance", 1.0e-12)),
                 float(item.get("mass_per_length", 0.0)),
-                bool(item.get("consistent_mass", False)),
+                item.get("consistent_mass", False),
                 item.get("hinge_i_section_tag"),
                 item.get("hinge_j_section_tag"),
                 item.get("interior_section_tag"),
@@ -828,7 +851,7 @@ class StructuralModel:
                 float(item.get("hinge_j_length", 0.0)),
                 float(item.get("truss_area", 0.0)),
                 item.get("truss_material_tag"),
-                bool(item.get("truss_do_rayleigh", False)),
+                item.get("truss_do_rayleigh", False),
             )
 
         return model
