@@ -14419,6 +14419,528 @@
         "parameter_location_identified": true,
         "units_checked": true
       }
+    },
+    {
+      "id": "delgiudice-2022-am-microrebar-steel02",
+      "family": "Additively Manufactured Reinforcing Steel",
+      "material": "Additively manufactured steel micro-rebar",
+      "grade": "0.6 mm AM micro-rebar",
+      "standard": "Specimen-specific laboratory material",
+      "model": "Steel02",
+      "preset_name": "Del Giudice et al. (2022) · 0.6 mm AM micro-rebar",
+      "parameters_si": {
+        "Fy": 377800000,
+        "E0": 177000000000,
+        "b": 0.003,
+        "R0": 15,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0,
+        "a2": 1,
+        "a3": 0.02,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "1:40-scale reinforced-concrete physical models",
+        "0.6 mm additively manufactured longitudinal reinforcement",
+        "Cyclic fibre-section modelling with OpenSees Steel02"
+      ],
+      "limitations": [
+        "Specimen-specific micro-rebar calibration; do not treat as a generic full-scale reinforcing-steel grade.",
+        "The source additionally used MinMax with a fracture strain limit; this library record represents only the published Steel02 constitutive parameters."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Physical modelling of reinforced concrete at a 1:40 scale using additively manufactured reinforcement cages",
+        "authors": "Lorenzo Del Giudice; Rafał Wróbel; Antonios A. Katsamakas; Christian Leinenbach; Michalis F. Vassiliou",
+        "journal": "Earthquake Engineering & Structural Dynamics",
+        "volume_issue": "51(3)",
+        "pages": "537–551",
+        "year": 2022,
+        "doi": "10.1002/eqe.3578"
+      },
+      "parameter_evidence": {
+        "type": "journal_table",
+        "title": "Physical modelling of reinforced concrete at a 1:40 scale using additively manufactured reinforcement cages",
+        "author": "Lorenzo Del Giudice et al.",
+        "institution": "Earthquake Engineering & Structural Dynamics",
+        "year": 2022,
+        "location": "Table 3 — Steel02 parameters",
+        "url": "https://doi.org/10.1002/eqe.3578",
+        "relationship": "Exact Steel02 inputs reported for the 0.6 mm additively manufactured reinforcing steel used in the small-scale RC model. Values marked as defaults in the paper are retained exactly as published."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "delgiudice-2022-hh-lh-core-concrete01",
+      "family": "Small-Scale Reinforced Concrete",
+      "material": "Confined micro-concrete core",
+      "grade": "HH/LH confined core",
+      "standard": "Specimen-specific laboratory calibration",
+      "model": "Concrete01",
+      "preset_name": "Del Giudice et al. (2022) · HH/LH confined core",
+      "parameters_si": {
+        "fpc": -43110000,
+        "epsc0": -0.008,
+        "fpcu": -38400000,
+        "epsU": -0.059
+      },
+      "verified_parameters": [
+        "fpc",
+        "epsc0",
+        "fpcu",
+        "epsU"
+      ],
+      "applicability": [
+        "1:40-scale RC physical models",
+        "Confined core concrete for specimens HH and LH",
+        "OpenSees Concrete01 fibre-section modelling"
+      ],
+      "limitations": [
+        "Use only for the confinement configuration represented by specimens HH/LH unless separately justified.",
+        "Published Table 4 reports compression magnitudes as positive; SARE stores compression stress and strain with the OpenSees negative sign convention."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Physical modelling of reinforced concrete at a 1:40 scale using additively manufactured reinforcement cages",
+        "authors": "Lorenzo Del Giudice; Rafał Wróbel; Antonios A. Katsamakas; Christian Leinenbach; Michalis F. Vassiliou",
+        "journal": "Earthquake Engineering & Structural Dynamics",
+        "volume_issue": "51(3)",
+        "pages": "537–551",
+        "year": 2022,
+        "doi": "10.1002/eqe.3578"
+      },
+      "parameter_evidence": {
+        "type": "journal_table",
+        "title": "Physical modelling of reinforced concrete at a 1:40 scale using additively manufactured reinforcement cages",
+        "author": "Lorenzo Del Giudice et al.",
+        "institution": "Earthquake Engineering & Structural Dynamics",
+        "year": 2022,
+        "location": "Table 4 — Concrete01 parameters of cover and core concrete; HH and LH rows",
+        "url": "https://doi.org/10.1002/eqe.3578",
+        "relationship": "Table 4 gives fcc=43.11 MPa, epscc=0.008, fccu=38.40 MPa and epsccu=0.059 for both HH and LH. SARE applies the OpenSees compression-negative sign convention without otherwise changing the published values."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "delgiudice-2022-hl-ll-core-concrete01",
+      "family": "Small-Scale Reinforced Concrete",
+      "material": "Confined micro-concrete core",
+      "grade": "HL/LL confined core",
+      "standard": "Specimen-specific laboratory calibration",
+      "model": "Concrete01",
+      "preset_name": "Del Giudice et al. (2022) · HL/LL confined core",
+      "parameters_si": {
+        "fpc": -38260000,
+        "epsc0": -0.005,
+        "fpcu": -23640000,
+        "epsU": -0.048
+      },
+      "verified_parameters": [
+        "fpc",
+        "epsc0",
+        "fpcu",
+        "epsU"
+      ],
+      "applicability": [
+        "1:40-scale RC physical models",
+        "Confined core concrete for specimens HL and LL",
+        "OpenSees Concrete01 fibre-section modelling"
+      ],
+      "limitations": [
+        "Use only for the confinement configuration represented by specimens HL/LL unless separately justified.",
+        "Published Table 4 reports compression magnitudes as positive; SARE stores compression stress and strain with the OpenSees negative sign convention."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Physical modelling of reinforced concrete at a 1:40 scale using additively manufactured reinforcement cages",
+        "authors": "Lorenzo Del Giudice; Rafał Wróbel; Antonios A. Katsamakas; Christian Leinenbach; Michalis F. Vassiliou",
+        "journal": "Earthquake Engineering & Structural Dynamics",
+        "volume_issue": "51(3)",
+        "pages": "537–551",
+        "year": 2022,
+        "doi": "10.1002/eqe.3578"
+      },
+      "parameter_evidence": {
+        "type": "journal_table",
+        "title": "Physical modelling of reinforced concrete at a 1:40 scale using additively manufactured reinforcement cages",
+        "author": "Lorenzo Del Giudice et al.",
+        "institution": "Earthquake Engineering & Structural Dynamics",
+        "year": 2022,
+        "location": "Table 4 — Concrete01 parameters of cover and core concrete; HL and LL rows",
+        "url": "https://doi.org/10.1002/eqe.3578",
+        "relationship": "Table 4 gives fcc=38.26 MPa, epscc=0.005, fccu=23.64 MPa and epsccu=0.048 for both HL and LL. SARE applies the OpenSees compression-negative sign convention without otherwise changing the published values."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "georgantzia-2024-6082-t6-steel02",
+      "family": "Structural Aluminium",
+      "material": "6000-series aluminium alloy",
+      "grade": "6082-T6",
+      "standard": "Experimental coupon calibration",
+      "model": "Steel02",
+      "preset_name": "Georgantzia et al. (2024) · 6082-T6",
+      "parameters_si": {
+        "Fy": 266000000,
+        "E0": 66634000000,
+        "b": 0.005,
+        "R0": 7.5,
+        "cR1": 0.6,
+        "cR2": 0.15,
+        "a1": 0.051,
+        "a2": 1,
+        "a3": 0.042,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "6082-T6 aluminium coupons",
+        "Monotonic and variable-amplitude cyclic stress-strain response",
+        "OpenSees Steel02 / modified Giuffrè-Menegotto-Pinto modelling"
+      ],
+      "limitations": [
+        "Average calibrated coupon parameters; section/product-specific material tests may justify different values.",
+        "Steel02 is used here as the OpenSees implementation vehicle for aluminium cyclic response; the material is not steel."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modeling Nonlinear Stress–Strain Behavior of 6000 Series Aluminum Alloys under Cyclic Loading",
+        "authors": "Evangelia Georgantzia; Charles Finney; Andrew Robinson; Mohammad M. Kashani",
+        "journal": "Journal of Materials in Civil Engineering",
+        "volume_issue": "36(6)",
+        "article": "04024133",
+        "year": 2024,
+        "doi": "10.1061/JMCEE7.MTENG-17314"
+      },
+      "parameter_evidence": {
+        "type": "journal_tables",
+        "title": "Modeling Nonlinear Stress–Strain Behavior of 6000 Series Aluminum Alloys under Cyclic Loading",
+        "author": "Evangelia Georgantzia et al.",
+        "institution": "Journal of Materials in Civil Engineering",
+        "year": 2024,
+        "location": "Tables 3 and 4 — average calibrated monotonic and GMP cyclic parameters; 6082-T6 row",
+        "url": "https://doi.org/10.1061/JMCEE7.MTENG-17314",
+        "relationship": "The complete Steel02 input is assembled directly from the paper's average calibrated E0, yield stress and b values in Table 3 and R0/cR1/cR2/a1-a4 values in Table 4."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "georgantzia-2024-6063-t6-steel02",
+      "family": "Structural Aluminium",
+      "material": "6000-series aluminium alloy",
+      "grade": "6063-T6",
+      "standard": "Experimental coupon calibration",
+      "model": "Steel02",
+      "preset_name": "Georgantzia et al. (2024) · 6063-T6",
+      "parameters_si": {
+        "Fy": 326000000,
+        "E0": 64176000000,
+        "b": 0.003,
+        "R0": 8.5,
+        "cR1": 0.6,
+        "cR2": 0.15,
+        "a1": 0.035,
+        "a2": 1,
+        "a3": 0.02,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "6063-T6 aluminium coupons",
+        "Monotonic and variable-amplitude cyclic stress-strain response",
+        "OpenSees Steel02 / modified Giuffrè-Menegotto-Pinto modelling"
+      ],
+      "limitations": [
+        "Average calibrated coupon parameters; section/product-specific material tests may justify different values.",
+        "Steel02 is used here as the OpenSees implementation vehicle for aluminium cyclic response; the material is not steel."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modeling Nonlinear Stress–Strain Behavior of 6000 Series Aluminum Alloys under Cyclic Loading",
+        "authors": "Evangelia Georgantzia; Charles Finney; Andrew Robinson; Mohammad M. Kashani",
+        "journal": "Journal of Materials in Civil Engineering",
+        "volume_issue": "36(6)",
+        "article": "04024133",
+        "year": 2024,
+        "doi": "10.1061/JMCEE7.MTENG-17314"
+      },
+      "parameter_evidence": {
+        "type": "journal_tables",
+        "title": "Modeling Nonlinear Stress–Strain Behavior of 6000 Series Aluminum Alloys under Cyclic Loading",
+        "author": "Evangelia Georgantzia et al.",
+        "institution": "Journal of Materials in Civil Engineering",
+        "year": 2024,
+        "location": "Tables 3 and 4 — average calibrated monotonic and GMP cyclic parameters; 6063-T6 row",
+        "url": "https://doi.org/10.1061/JMCEE7.MTENG-17314",
+        "relationship": "The complete Steel02 input is assembled directly from the paper's average calibrated E0, yield stress and b values in Table 3 and R0/cR1/cR2/a1-a4 values in Table 4."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "georgantzia-2024-6060-t5-steel02",
+      "family": "Structural Aluminium",
+      "material": "6000-series aluminium alloy",
+      "grade": "6060-T5",
+      "standard": "Experimental coupon calibration",
+      "model": "Steel02",
+      "preset_name": "Georgantzia et al. (2024) · 6060-T5",
+      "parameters_si": {
+        "Fy": 306000000,
+        "E0": 65797000000,
+        "b": 0.003,
+        "R0": 8.5,
+        "cR1": 0.6,
+        "cR2": 0.15,
+        "a1": 0.046,
+        "a2": 1,
+        "a3": 0.021,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "6060-T5 aluminium coupons",
+        "Monotonic and variable-amplitude cyclic stress-strain response",
+        "OpenSees Steel02 / modified Giuffrè-Menegotto-Pinto modelling"
+      ],
+      "limitations": [
+        "Average calibrated coupon parameters; section/product-specific material tests may justify different values.",
+        "Steel02 is used here as the OpenSees implementation vehicle for aluminium cyclic response; the material is not steel."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modeling Nonlinear Stress–Strain Behavior of 6000 Series Aluminum Alloys under Cyclic Loading",
+        "authors": "Evangelia Georgantzia; Charles Finney; Andrew Robinson; Mohammad M. Kashani",
+        "journal": "Journal of Materials in Civil Engineering",
+        "volume_issue": "36(6)",
+        "article": "04024133",
+        "year": 2024,
+        "doi": "10.1061/JMCEE7.MTENG-17314"
+      },
+      "parameter_evidence": {
+        "type": "journal_tables",
+        "title": "Modeling Nonlinear Stress–Strain Behavior of 6000 Series Aluminum Alloys under Cyclic Loading",
+        "author": "Evangelia Georgantzia et al.",
+        "institution": "Journal of Materials in Civil Engineering",
+        "year": 2024,
+        "location": "Tables 3 and 4 — average calibrated monotonic and GMP cyclic parameters; 6060-T5 row",
+        "url": "https://doi.org/10.1061/JMCEE7.MTENG-17314",
+        "relationship": "The complete Steel02 input is assembled directly from the paper's average calibrated E0, yield stress and b values in Table 3 and R0/cR1/cR2/a1-a4 values in Table 4."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "doci-2024-cbf-test1-hss-steel02",
+      "family": "Structural Steel Brace",
+      "material": "Cyclically tested structural-steel brace",
+      "grade": "Test 1 · HSS 4×4×1/4 · λ=79",
+      "standard": "NEES ULCF experimental specimen",
+      "model": "Steel02",
+      "preset_name": "Doci et al. (2024) · Test 1 HSS brace",
+      "parameters_si": {
+        "Fy": 475000000,
+        "E0": 210000000000,
+        "b": 0.0001,
+        "R0": 20,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.00001,
+        "a2": 0.1,
+        "a3": 0.00001,
+        "a4": 0.1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "Cyclic brace Test 1",
+        "HSS 4×4×1/4 specimen",
+        "Slenderness λ = 79",
+        "OpenSees fibre brace model using Steel02"
+      ],
+      "limitations": [
+        "Test-specific calibration and validation; do not use as a generic steel grade.",
+        "The source notes larger disagreement in compression where local instability cannot be captured fully by the fibre representation."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Validation and Application of a Simplified Approach for Seismic Performance Evaluation of Steel CBFs",
+        "authors": "Leonard Doci; Rosario Montuori; Elide Nastri; Vincenzo Piluso; Paolo Todisco",
+        "journal": "Metals",
+        "volume_issue": "14(12)",
+        "article": "1388",
+        "year": 2024,
+        "doi": "10.3390/met14121388"
+      },
+      "parameter_evidence": {
+        "type": "journal_table",
+        "title": "Validation and Application of a Simplified Approach for Seismic Performance Evaluation of Steel CBFs",
+        "author": "Leonard Doci et al.",
+        "institution": "Metals",
+        "year": 2024,
+        "location": "Table 4 — Parameters for the modelling of Steel02 in OpenSees; Test 1 row; Section 5 identifies HSS 4×4×1/4 and λ=79",
+        "url": "https://doi.org/10.3390/met14121388",
+        "relationship": "Exact Steel02 inputs used in the OpenSees validation model for the first NEES cyclic brace test."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "doci-2024-cbf-test2-pipe-steel02",
+      "family": "Structural Steel Brace",
+      "material": "Cyclically tested structural-steel brace",
+      "grade": "Test 2 · PIPE 3STD · λ=103",
+      "standard": "NEES ULCF experimental specimen",
+      "model": "Steel02",
+      "preset_name": "Doci et al. (2024) · Test 2 PIPE brace",
+      "parameters_si": {
+        "Fy": 408000000,
+        "E0": 210000000000,
+        "b": 0.0001,
+        "R0": 20,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.00001,
+        "a2": 0.1,
+        "a3": 0.00001,
+        "a4": 0.1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "Cyclic brace Test 2",
+        "PIPE 3STD specimen",
+        "Slenderness λ = 103",
+        "OpenSees fibre brace model using Steel02"
+      ],
+      "limitations": [
+        "Test-specific calibration and validation; do not use as a generic steel grade.",
+        "The source identifies the second specimen as less sensitive to local instability than Test 1, but the parameter set remains specimen-specific."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Validation and Application of a Simplified Approach for Seismic Performance Evaluation of Steel CBFs",
+        "authors": "Leonard Doci; Rosario Montuori; Elide Nastri; Vincenzo Piluso; Paolo Todisco",
+        "journal": "Metals",
+        "volume_issue": "14(12)",
+        "article": "1388",
+        "year": 2024,
+        "doi": "10.3390/met14121388"
+      },
+      "parameter_evidence": {
+        "type": "journal_table",
+        "title": "Validation and Application of a Simplified Approach for Seismic Performance Evaluation of Steel CBFs",
+        "author": "Leonard Doci et al.",
+        "institution": "Metals",
+        "year": 2024,
+        "location": "Table 4 — Parameters for the modelling of Steel02 in OpenSees; Test 2 row; Section 5 identifies PIPE 3STD and λ=103",
+        "url": "https://doi.org/10.3390/met14121388",
+        "relationship": "Exact Steel02 inputs used in the OpenSees validation model for the second NEES cyclic brace test."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
     }
   ]
 }
