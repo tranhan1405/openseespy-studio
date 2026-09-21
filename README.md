@@ -73,7 +73,7 @@ when it can be traced to a specific source and parameter-evidence location.
 Journal references require a DOI. Unsupported or merely "commonly used"
 values are not silently promoted to verified presets.
 
-The library currently contains **150 verified parameter records**:
+The library currently contains **158 verified parameter records**:
 
 - 2 Steel02 Grade-60 reinforcing-steel records from Carreño et al. (2020),
   DOI `10.1061/(ASCE)ST.1943-541X.0002505`.
@@ -99,8 +99,17 @@ The library currently contains **150 verified parameter records**:
   (2025), DOI `10.3390/buildings15050727`.
 - 6 Pinching4 seismic sway-brace records from Shang et al. (2022),
   DOI `10.1016/j.jobe.2022.104826`.
+- 3 records from Del Giudice et al. (2022): one Steel02 parameter set for
+  0.6 mm additively manufactured micro-reinforcement and two Concrete01
+  confined-core parameter sets for the tested 1:40-scale RC specimens,
+  DOI `10.1002/eqe.3578`.
+- 3 Steel02 parameter sets for 6082-T6, 6063-T6 and 6060-T5 structural
+  aluminium from Georgantzia et al. (2024), DOI
+  `10.1061/JMCEE7.MTENG-17314`.
+- 2 test-specific Steel02 parameter sets for cyclic structural-steel braces
+  from Doci et al. (2024), DOI `10.3390/met14121388`.
 
-These are **published/calibrated parameter records**, not 150 unrelated
+These are **published/calibrated parameter records**, not 158 unrelated
 chemical materials. SARE exposes specimen/configuration, modelling
 representation, applicability and limitations so a paper-specific parameter
 set is not mistaken for a universal material-grade default.
