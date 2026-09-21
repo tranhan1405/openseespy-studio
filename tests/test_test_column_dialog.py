@@ -392,3 +392,83 @@ def test_test_column_wizard_radau_keeps_integration_points(qapp):
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+
+def test_base_interface_family_filters_zero_length_modes(qapp):
+    dialog = TestColumnWizard(ProjectDatabase())
+    try:
+        dialog.base_interface_family.setCurrentText("zeroLength")
+        qapp.processEvents()
+
+        assert dialog.base_interface.currentText() == (
+            "Translational slip spring"
+        )
+        assert dialog._interface_family_for_mode(
+            dialog.base_interface.currentText()
+        ) == "zeroLength"
+        assert dialog.interface_dofs_group.isHidden() is False
+        assert dialog.section_interface_group.isHidden() is True
+        assert dialog.strain_penetration_group.isHidden() is True
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_section_interface_mode_selects_independent_section(qapp):
+    project = ProjectDatabase()
+    project.add_section(
+        SectionData(1, "Column section", "Elastic")
+    )
+    project.add_section(
+        SectionData(2, "Interface section", "Elastic")
+    )
+    dialog = TestColumnWizard(project)
+    try:
+        dialog.section.setCurrentIndex(
+            dialog.section.findData(1)
+        )
+        dialog.base_interface_family.setCurrentText(
+            "zeroLengthSection"
+        )
+        qapp.processEvents()
+
+        assert dialog.base_interface.currentText() == "Section interface"
+        dialog.interface_section.setCurrentIndex(
+            dialog.interface_section.findData(2)
+        )
+        qapp.processEvents()
+
+        spec = dialog.data()
+        assert spec.section_tag == 1
+        assert spec.base_interface_type == "Section interface"
+        assert spec.base_interface_section_tag == 2
+        assert spec.base_interface_materials == {}
+        assert spec.strain_penetration_bond_material_tag is None
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_legacy_direct_mode_selection_updates_interface_family(qapp):
+    project = ProjectDatabase()
+    project.add_material(
+        MaterialData(
+            7,
+            "Pinching spring",
+            "Pinching4",
+        )
+    )
+    dialog = TestColumnWizard(project)
+    try:
+        dialog.base_interface.setCurrentText("Rotational spring")
+        qapp.processEvents()
+
+        assert dialog.base_interface_family.currentText() == "zeroLength"
+        assert dialog.base_interface.currentText() == "Rotational spring"
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
