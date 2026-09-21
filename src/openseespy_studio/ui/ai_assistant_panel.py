@@ -105,7 +105,7 @@ class AIAssistantPanel(QWidget):
         settings.addRow("Model:", self.model)
 
         self.api_key = QLineEdit()
-        self.api_key.setEchoMode(QLineEdit.Password)
+        self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.api_key.setPlaceholderText("OPENAI_API_KEY or session key")
         self.api_key.setToolTip(
             "Optional session-only API key. If blank, SARE reads "
@@ -124,7 +124,7 @@ class AIAssistantPanel(QWidget):
         self.include_selection = QCheckBox("Selection")
         self.include_analysis = QCheckBox("Analysis")
         self.include_validation = QCheckBox("Validation")
-        self.include_job = QCheckBox("Last Job")
+        self.include_job = QCheckBox("Jobs")
         self.include_log = QCheckBox("Solver Log")
         for checkbox in (
             self.include_selection,
@@ -177,7 +177,7 @@ class AIAssistantPanel(QWidget):
         self.transcript.appendPlainText(f"{label}:")
         self.transcript.appendPlainText(str(text).strip())
         cursor = self.transcript.textCursor()
-        cursor.movePosition(cursor.End)
+        cursor.movePosition(QTextCursor.MoveOperation.End)
         self.transcript.setTextCursor(cursor)
 
     def _emit_send(self) -> None:
