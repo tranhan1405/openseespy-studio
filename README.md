@@ -1,10 +1,16 @@
-# OpenSeesPy Studio
+# SARE
 
-**OpenSeesPy Studio** is a desktop pre/post-processing environment for
-[OpenSeesPy](https://openseespydoc.readthedocs.io/). It combines a
-tree-based engineering workflow inspired by Abaqus/ANSYS with direct,
-readable OpenSeesPy generation and research-oriented nonlinear analysis
-tools.
+**SARE — Structural Analysis & Research Environment for OpenSees** is a
+research-oriented structural simulation environment built around
+[OpenSees](https://opensees.berkeley.edu/) with OpenSeesPy as its current
+Python backend. It combines a tree-based engineering workflow inspired by
+Abaqus/ANSYS with direct, readable OpenSeesPy generation, nonlinear analysis,
+earthquake-engineering workflows, and research-focused post-processing.
+
+SARE is intentionally positioned as an engineering and research environment,
+not merely a GUI wrapper. The visual interface is one layer over a validated
+project/model database, reproducible analysis definitions, solver execution,
+and inspectable result workflows.
 
 > **Status:** research alpha — version **0.2.0a1**. The project is usable for
 > supported workflows, but engineering results should still be independently
@@ -17,7 +23,7 @@ tools.
 - Tree-based project/model navigator with synchronized viewport selection.
 - Interactive PyVista/VTK 3-D viewport.
 - Quick 3-D frame grid generation.
-- Quick planar 2-D frame generation using the Studio 3-D/6-DOF backend with
+- Quick planar 2-D frame generation using the SARE 3-D/6-DOF backend with
   automatic out-of-plane restraints.
 - Quick 1-D column / experimental specimen workflow.
 - Node and frame-element creation plus copy, move, rotate, mirror and delete.
@@ -66,7 +72,7 @@ Research interface workflows include:
 
 ### Analysis
 
-Studio currently supports:
+SARE currently supports:
 
 - Static
 - Modal
@@ -92,7 +98,7 @@ Available post-processing includes:
 - convergence histories and fallback/cutback diagnostics
 - cyclic hysteresis, backbone and reversal/cycle summaries
 
-For Quick 1-D Column specimens, Studio can additionally capture and separate:
+For Quick 1-D Column specimens, SARE can additionally capture and separate:
 
 - base-section moment-curvature response
 - base-interface moment-rotation response
@@ -118,7 +124,7 @@ The calibration subsystem supports:
 7. preview/apply of a selected calibrated case with Undo support
 8. CSV export of scalar, objective and Pareto metadata
 
-Pareto analysis is descriptive: Studio does not automatically decide which
+Pareto analysis is descriptive: SARE does not automatically decide which
 non-dominated case should be adopted.
 
 ## Installation from source
@@ -143,7 +149,7 @@ Verify the complete runtime:
 python -m openseespy_studio --self-check
 ```
 
-Launch Studio:
+Launch SARE:
 
 ```powershell
 python -m openseespy_studio
@@ -205,7 +211,7 @@ packaging/windows_installer.iss
 
 ## Verification strategy
 
-Studio uses several verification layers rather than treating GUI tests as
+SARE uses several verification layers rather than treating GUI tests as
 solver validation.
 
 ### 1. Unit and offscreen GUI tests
@@ -224,8 +230,8 @@ python -m pip install -e . pytest
 python -m pytest -q -m integration tests/test_opensees_integration.py
 ```
 
-This generates a structural model through Studio's code generator, executes
-the generated Python through the Studio solver worker using the real
+This generates a structural model through SARE's code generator, executes
+the generated Python through the SARE solver worker using the real
 OpenSeesPy runtime, and checks displacement, reaction and convergence output.
 
 ### 3. Runtime / packaged self-check
@@ -268,7 +274,7 @@ generated Python source strings directly.
 
 ## Current limitations
 
-- Studio supports a curated subset of OpenSees/OpenSeesPy commands rather
+- SARE supports a curated subset of OpenSees/OpenSeesPy commands rather
   than every possible element, material and analysis option.
 - General arbitrary OpenSeesPy script import/reconstruction is not complete.
 - Advanced research workflows still require engineering judgment about
