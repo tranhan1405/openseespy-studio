@@ -128,6 +128,10 @@ class UnitSystem:
         return f"{self.length}/{self.time}²"
 
     @property
+    def moment_label(self) -> str:
+        return f"{self.force}·{self.length}"
+
+    @property
     def mass_per_length_label(self) -> str:
         return f"{self.mass_label}/{self.length}"
 
@@ -138,6 +142,29 @@ class UnitSystem:
     def length_to_m_value(self, value: float) -> float:
         """Convert a value in the active model length unit to SI metres."""
         return float(value) * self.length_to_m
+
+    def force_from_n(self, value_n: float) -> float:
+        """Convert SI newtons to the active model force unit."""
+        return float(value_n) / self.force_to_n
+
+    def force_to_n_value(self, value: float) -> float:
+        """Convert a value in the active model force unit to SI newtons."""
+        return float(value) * self.force_to_n
+
+    def moment_from_nm(self, value_nm: float) -> float:
+        """Convert SI N·m to active model force·length units."""
+        return (
+            float(value_nm)
+            / (self.force_to_n * self.length_to_m)
+        )
+
+    def moment_to_nm_value(self, value: float) -> float:
+        """Convert active model force·length units to SI N·m."""
+        return (
+            float(value)
+            * self.force_to_n
+            * self.length_to_m
+        )
 
     def stress_from_pa(self, value_pa: float) -> float:
         """Convert Pa=N/m² to model force/length²."""
