@@ -251,6 +251,108 @@ def _run_real_generated(
     return payload["results"]
 
 
+def test_generated_2d_elastic_frame_with_linear_algorithm_runs(
+    tmp_path: Path,
+):
+    model = StructuralModel("real-2d-frame", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 3.0)
+    model.set_fixity(1, (1, 1, 1))
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="elasticBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
+    sections = {
+        1: SectionData(
+            1,
+            "2D elastic section",
+            "Elastic",
+            parameters={
+                "E": 200.0e9,
+                "A": 0.02,
+                "Iz": 8.0e-5,
+                "Iy": 0.0,
+                "G": 0.0,
+                "J": 0.0,
+            },
+        )
+    }
+    transformations = {
+        1: TransformationData(1, "2D Linear", "Linear")
+    }
+    series = {
+        1: TimeSeriesData(1, "Load", "Linear", factor=1.0)
+    }
+    patterns = {
+        1: LoadPatternData(1, "Lateral", "Plain", time_series_tag=1)
+    }
+    loads = {
+        1: NodalLoadData(
+            1,
+            "Top load",
+            pattern_tag=1,
+            node_tag=2,
+            values=(1000.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        )
+    }
+    analysis = AnalysisSettingsData(
+        1,
+        "2D linear static",
+        analysis_type="Static",
+        constraints_handler="Plain",
+        numberer="Plain",
+        system="BandGeneral",
+        algorithm="Linear",
+        integrator="LoadControl",
+        steps=1,
+        load_increment=1.0,
+        control_node=2,
+        control_dof=1,
+        recovery=False,
+        adaptive_step=False,
+        live_convergence=False,
+    )
+
+    script = to_openseespy(
+        model,
+        sections=sections,
+        transformations=transformations,
+        time_series=series,
+        load_patterns=patterns,
+        nodal_loads=loads,
+        analyses={1: analysis},
+        active_analysis_tag=1,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    assert "ops.model('basic', '-ndm', 2, '-ndf', 3)" in script
+    assert "ops.section('Elastic', 1, 2e+11, 0.02, 8e-05)" in script
+    assert "ops.geomTransf('Linear', 1)" in script
+    assert (
+        "ops.element('elasticBeamColumn', 1, 1, 2, "
+        "0.02, 2e+11, 8e-05, 1)"
+    ) in script
+    assert "ops.algorithm('Linear')" in script
+    assert "ops.test(" not in script
+
+    script_path = tmp_path / "frame2d-linear.py"
+    result_path = tmp_path / "frame2d-linear-result.json"
+    script_path.write_text(script, encoding="utf-8")
+    exit_code = run_script(script_path, result_path)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0, payload.get("error", "")
+    assert payload["status"] == "completed"
+    displacement = payload["results"]["final"]["node_displacements"]["2"][0]
+    expected = 1000.0 * 3.0**3 / (
+        3.0 * 200.0e9 * 8.0e-5
+    )
+    assert displacement == pytest.approx(expected, rel=1.0e-6)
+
+
 def test_generated_moment_curvature_runs_in_real_opensees(tmp_path: Path):
     model = StructuralModel("moment-curvature-real", ndm=2, ndf=3)
     model.add_node(1, 0.0, 0.0)
