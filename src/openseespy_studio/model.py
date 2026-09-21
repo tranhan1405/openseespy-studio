@@ -137,6 +137,15 @@ class Element:
                 raise ValueError(
                     "ConcentratedPlasticity requires I-end, J-end, and interior sections."
                 )
+        numeric_values = (
+            self.force_tolerance,
+            self.mass_per_length,
+            self.hinge_i_length,
+            self.hinge_j_length,
+            self.truss_area,
+        )
+        if any(not math.isfinite(value) for value in numeric_values):
+            raise ValueError("Element numeric values must be finite.")
         if self.force_max_iter < 1:
             raise ValueError("Force-based element max iterations must be >= 1.")
         if self.force_tolerance <= 0.0:
@@ -178,6 +187,19 @@ class StructuralModel:
         )
         self.nodes[tag] = node
         return node
+
+    def set_coordinates(
+        self,
+        tag: int,
+        x: float,
+        y: float,
+        z: float = 0.0,
+    ) -> None:
+        node = self.nodes[int(tag)]
+        xyz = (float(x), float(y), float(z))
+        if not all(math.isfinite(value) for value in xyz):
+            raise ValueError("Node coordinates must be finite.")
+        node.xyz = xyz
 
     def add_element(
         self,
