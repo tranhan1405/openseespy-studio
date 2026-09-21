@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .model import StructuralModel
+from .result_catalog import result_choices_for_analysis
 from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
 
 
@@ -1826,6 +1827,7 @@ SOLUTION_RESULT_TYPES = {
     "FiberStress",
     "FiberStrain",
     "HingeState",
+    "ForceDisplacement",
     "PushoverCurve",
     "CyclicHysteresis",
     "TimeHistory",
@@ -4464,6 +4466,23 @@ class ProjectDatabase:
             analysis,
             ignore_analysis_tags={original_tag},
         )
+        allowed_result_types = self._allowed_solution_result_types(analysis)
+        incompatible_results = sorted(
+            result.tag
+            for result in self.solution_results.values()
+            if (
+                result.analysis_tag == original_tag
+                and result.result_type not in allowed_result_types
+            )
+        )
+        if incompatible_results:
+            raise ValueError(
+                f"Changing analysis {original_tag} to "
+                f"{analysis.analysis_type} would invalidate Solution Result "
+                "object(s): "
+                + ", ".join(map(str, incompatible_results))
+                + ". Delete or replace those result requests first."
+            )
         self.analyses.pop(original_tag); self.analyses[analysis.tag]=analysis
         if analysis.tag != original_tag:
             for result in self.solution_results.values():
@@ -4487,11 +4506,30 @@ class ProjectDatabase:
     def next_solution_result_tag(self) -> int:
         return max(self.solution_results, default=0) + 1
 
+    @staticmethod
+    def _allowed_solution_result_types(
+        analysis: AnalysisSettingsData,
+    ) -> set[str]:
+        return {
+            choice.result_type
+            for choice in result_choices_for_analysis(
+                analysis.analysis_type,
+                analysis.test,
+            )
+        }
+
     def _validate_solution_result(self, result: SolutionResultData) -> None:
         if result.analysis_tag not in self.analyses:
             raise ValueError(
                 f"Solution result references missing analysis "
                 f"{result.analysis_tag}."
+            )
+        analysis = self.analyses[result.analysis_tag]
+        allowed = self._allowed_solution_result_types(analysis)
+        if result.result_type not in allowed:
+            raise ValueError(
+                f"Solution result type {result.result_type} is not valid for "
+                f"{analysis.analysis_type} analysis {analysis.tag}."
             )
         missing_nodes = [
             tag for tag in result.node_scope
