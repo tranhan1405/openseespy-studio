@@ -2701,3 +2701,63 @@ def test_project_rejects_fiber_section_replacing_elastic_beam_section():
         )
 
     assert project.sections[1].section_type == "Elastic"
+
+
+def test_project_rejects_parallel_transformation_update_for_used_member():
+    model = StructuralModel("parallel-transform", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0, 3.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="elasticBeamColumn",
+        section_tag=1,
+        transf_tag=1,
+    )
+    project = ProjectDatabase(name="Parallel transform", model=model)
+    project.add_transformation(
+        TransformationData(1, "Good", "Linear", (1.0, 0.0, 0.0))
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"vecxz is parallel to element 1",
+    ):
+        project.update_transformation(
+            1,
+            TransformationData(
+                1,
+                "Bad",
+                "Linear",
+                (0.0, 0.0, 1.0),
+            ),
+        )
+
+    assert project.transformations[1].vecxz == (1.0, 0.0, 0.0)
+
+
+def test_project_validate_element_state_rejects_zero_length_member():
+    model = StructuralModel("zero-member", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="truss",
+        truss_area=0.01,
+        truss_material_tag=1,
+    )
+    project = ProjectDatabase(name="Zero member", model=model)
+    project.add_material(
+        MaterialData(1, "Elastic", "Elastic", {"E": 1000.0})
+    )
+
+    project.model.nodes[2].xyz = project.model.nodes[1].xyz
+
+    with pytest.raises(
+        ValueError,
+        match=r"coincident end nodes and zero length",
+    ):
+        project.validate_element_state(1)
