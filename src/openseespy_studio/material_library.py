@@ -220,15 +220,22 @@ def material_from_library_record(
     *,
     tag: int,
     name: str | None = None,
+    base_material_tag: int | None = None,
 ) -> MaterialData:
     if not record.is_verified:
         raise ValueError(
             "Only verified library records can be added to a project."
+        )
+    if record.model in {"Fatigue", "MinMax"} and base_material_tag is None:
+        raise ValueError(
+            f"{record.model} is a wrapper material and requires an existing "
+            "base material."
         )
     return MaterialData(
         tag=tag,
         name=name or f"{record.grade} · {record.model}",
         material_type=record.model,
         parameters=dict(record.parameters_si),
+        base_material_tag=base_material_tag,
         source=record.source_metadata(),
     )
