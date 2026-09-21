@@ -3249,7 +3249,10 @@ class ProjectDatabase:
         original_tag: int,
         constraint: ConstraintData,
     ) -> None:
-        original_tag = int(original_tag)
+        original_tag = _strict_int(
+            original_tag,
+            "Constraint original tag",
+        )
         if original_tag not in self.constraints:
             raise ValueError(
                 f"Constraint tag {original_tag} does not exist."
@@ -3282,7 +3285,7 @@ class ProjectDatabase:
                     connection.generated_constraint_tag = constraint.tag
 
     def remove_constraint(self, tag: int) -> None:
-        tag = int(tag)
+        tag = _strict_int(tag, "Constraint tag")
         self.constraints.pop(tag, None)
         for connection in self.connections.values():
             if connection.generated_constraint_tag == tag:
@@ -3399,7 +3402,10 @@ class ProjectDatabase:
         original_tag: int,
         connection: ConnectionData,
     ) -> None:
-        original_tag = int(original_tag)
+        original_tag = _strict_int(
+            original_tag,
+            "Connection original tag",
+        )
         if original_tag not in self.connections:
             raise ValueError(
                 f"Connection tag {original_tag} does not exist."
@@ -3480,7 +3486,7 @@ class ProjectDatabase:
         *,
         cleanup_ground: bool = True,
     ) -> None:
-        tag = int(tag)
+        tag = _strict_int(tag, "Connection tag")
         connection = self.connections.pop(tag, None)
         if connection is None:
             return
@@ -3812,7 +3818,10 @@ class ProjectDatabase:
         self.time_series[series.tag] = series
 
     def update_time_series(self, original_tag: int, series: TimeSeriesData) -> None:
-        original_tag = int(original_tag)
+        original_tag = _strict_int(
+            original_tag,
+            "Time series original tag",
+        )
         if original_tag not in self.time_series:
             raise ValueError(f"Time series tag {original_tag} does not exist.")
         if series.tag != original_tag and series.tag in self.time_series:
@@ -3846,7 +3855,7 @@ class ProjectDatabase:
                     pattern.time_series_tag = series.tag
 
     def remove_time_series(self, tag: int) -> None:
-        tag = int(tag)
+        tag = _strict_int(tag, "Time series tag")
         used_by = sorted(
             pattern.tag
             for pattern in self.load_patterns.values()
@@ -3889,7 +3898,10 @@ class ProjectDatabase:
         original_tag: int,
         pattern: LoadPatternData,
     ) -> None:
-        original_tag = int(original_tag)
+        original_tag = _strict_int(
+            original_tag,
+            "Load pattern original tag",
+        )
         if original_tag not in self.load_patterns:
             raise ValueError(f"Load pattern tag {original_tag} does not exist.")
         if pattern.tag != original_tag and pattern.tag in self.load_patterns:
@@ -3966,7 +3978,7 @@ class ProjectDatabase:
                     ]
 
     def remove_load_pattern(self, tag: int) -> None:
-        tag = int(tag)
+        tag = _strict_int(tag, "Load pattern tag")
         driver_users = sorted(
             analysis.tag
             for analysis in self.analyses.values()
@@ -4081,7 +4093,10 @@ class ProjectDatabase:
         original_tag: int,
         source: MassSourceData,
     ) -> None:
-        original_tag = int(original_tag)
+        original_tag = _strict_int(
+            original_tag,
+            "Mass source original tag",
+        )
         if original_tag not in self.mass_sources:
             raise ValueError(
                 f"Mass source tag {original_tag} does not exist."
@@ -4095,7 +4110,8 @@ class ProjectDatabase:
         self.mass_sources[source.tag] = source
 
     def remove_mass_source(self, tag: int) -> None:
-        self.mass_sources.pop(int(tag), None)
+        tag = _strict_int(tag, "Mass source tag")
+        self.mass_sources.pop(tag, None)
 
     def next_nodal_load_tag(self) -> int:
         return max(self.nodal_loads, default=0) + 1
@@ -4134,7 +4150,10 @@ class ProjectDatabase:
         self.nodal_loads[load.tag] = load
 
     def update_nodal_load(self, original_tag: int, load: NodalLoadData) -> None:
-        original_tag = int(original_tag)
+        original_tag = _strict_int(
+            original_tag,
+            "Nodal load original tag",
+        )
         if original_tag not in self.nodal_loads:
             raise ValueError(f"Nodal load tag {original_tag} does not exist.")
         if load.tag != original_tag and load.tag in self.nodal_loads:
@@ -4144,7 +4163,8 @@ class ProjectDatabase:
         self.nodal_loads[load.tag] = load
 
     def remove_nodal_load(self, tag: int) -> None:
-        self.nodal_loads.pop(int(tag), None)
+        tag = _strict_int(tag, "Nodal load tag")
+        self.nodal_loads.pop(tag, None)
 
     def prune_nodal_loads(self) -> list[int]:
         removed: list[int] = []
@@ -4321,7 +4341,10 @@ class ProjectDatabase:
         original_tag: int,
         displacement: PrescribedDisplacementData,
     ) -> None:
-        original_tag = int(original_tag)
+        original_tag = _strict_int(
+            original_tag,
+            "Prescribed displacement original tag",
+        )
         if original_tag not in self.prescribed_displacements:
             raise ValueError(
                 "Prescribed displacement tag "
@@ -4343,7 +4366,8 @@ class ProjectDatabase:
         self.prescribed_displacements[displacement.tag] = displacement
 
     def remove_prescribed_displacement(self, tag: int) -> None:
-        self.prescribed_displacements.pop(int(tag), None)
+        tag = _strict_int(tag, "Prescribed displacement tag")
+        self.prescribed_displacements.pop(tag, None)
 
     def prune_prescribed_displacements(self) -> list[int]:
         removed: list[int] = []
@@ -4448,7 +4472,10 @@ class ProjectDatabase:
         original_tag: int,
         load: ElementLoadData,
     ) -> None:
-        original_tag = int(original_tag)
+        original_tag = _strict_int(
+            original_tag,
+            "Element load original tag",
+        )
         if original_tag not in self.element_loads:
             raise ValueError(
                 f"Element load tag {original_tag} does not exist."
@@ -4462,7 +4489,8 @@ class ProjectDatabase:
         self.element_loads[load.tag] = load
 
     def remove_element_load(self, tag: int) -> None:
-        self.element_loads.pop(int(tag), None)
+        tag = _strict_int(tag, "Element load tag")
+        self.element_loads.pop(tag, None)
 
     def prune_element_loads(self) -> list[int]:
         removed: list[int] = []
@@ -4545,7 +4573,10 @@ class ProjectDatabase:
         self.recorders[recorder.tag] = recorder
 
     def update_recorder(self, original_tag: int, recorder: RecorderData) -> None:
-        original_tag = int(original_tag)
+        original_tag = _strict_int(
+            original_tag,
+            "Recorder original tag",
+        )
         if original_tag not in self.recorders:
             raise ValueError(f"Recorder tag {original_tag} does not exist.")
         if recorder.tag != original_tag and recorder.tag in self.recorders:
@@ -4555,7 +4586,8 @@ class ProjectDatabase:
         self.recorders[recorder.tag] = recorder
 
     def remove_recorder(self, tag: int) -> None:
-        self.recorders.pop(int(tag), None)
+        tag = _strict_int(tag, "Recorder tag")
+        self.recorders.pop(tag, None)
 
     def prune_recorders(self) -> list[int]:
         removed: list[int] = []
@@ -4935,7 +4967,10 @@ class ProjectDatabase:
             self.active_analysis_tag=analysis.tag
 
     def update_analysis(self, original_tag:int, analysis:AnalysisSettingsData) -> None:
-        original_tag=int(original_tag)
+        original_tag = _strict_int(
+            original_tag,
+            "Analysis original tag",
+        )
         if original_tag not in self.analyses: raise ValueError(f"Analysis tag {original_tag} does not exist.")
         if analysis.tag!=original_tag and analysis.tag in self.analyses: raise ValueError(f"Analysis tag {analysis.tag} already exists.")
         self._validate_analysis_constraint_handler_compatibility(analysis)
@@ -5000,7 +5035,8 @@ class ProjectDatabase:
         if self.active_analysis_tag==original_tag: self.active_analysis_tag=analysis.tag
 
     def remove_analysis(self, tag:int) -> None:
-        tag=int(tag); self.analyses.pop(tag,None)
+        tag = _strict_int(tag, "Analysis tag")
+        self.analyses.pop(tag,None)
         for result_tag, result in list(self.solution_results.items()):
             if result.analysis_tag == tag:
                 self.solution_results.pop(result_tag)
