@@ -73,7 +73,7 @@ when it can be traced to a specific source and parameter-evidence location.
 Journal references require a DOI. Unsupported or merely "commonly used"
 values are not silently promoted to verified presets.
 
-The library currently contains **180 verified parameter records**:
+The library currently contains **182 verified parameter records**:
 
 - 2 Steel02 Grade-60 reinforcing-steel records from Carreño et al. (2020),
   DOI `10.1061/(ASCE)ST.1943-541X.0002505`.
@@ -142,8 +142,13 @@ The library currently contains **180 verified parameter records**:
 - 1 Elastic CFRP-sheet record in the fibre direction from Jafari and
   Mahini (2023), using the 240 GPa modulus reported in Table 2 of the
   OpenSees FRP-retrofit study, DOI `10.3390/polym15030618`.
+- 2 Steel01 records using the published three-parameter form and the exact
+  OpenSees no-isotropic-hardening defaults: an A36 spherical-bearing
+  component from Seo, Linzell and Hu (2013), DOI `10.1155/2013/248575`,
+  and HRB400 tower reinforcement from Cheng (2019), DOI
+  `10.1088/1755-1315/304/4/042054`.
 
-These are **published/calibrated parameter records**, not 180 unrelated
+These are **published/calibrated parameter records**, not 182 unrelated
 chemical materials. SARE exposes specimen/configuration, modelling
 representation, applicability and limitations so a paper-specific parameter
 set is not mistaken for a universal material-grade default.
