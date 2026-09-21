@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from openseespy_studio.generator import (
     material_source_comments,
     material_to_openseespy,
@@ -22,7 +24,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 170
+    assert len(records) == 175
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -220,7 +222,7 @@ def test_moodley_2026_records_encode_model_applicability():
     )
 
 
-def test_verified_library_reaches_one_hundred_seventy_with_expected_source_counts():
+def test_verified_library_reaches_one_hundred_seventy_five_with_expected_source_counts():
     records = load_verified_material_library()
     prefixes = {
         "carreno-2020-": 2,
@@ -239,10 +241,12 @@ def test_verified_library_reaches_one_hundred_seventy_with_expected_source_count
         "sosa-caiza-2015-": 4,
         "hung-eltawil-2009-": 2,
         "yigitbas-2026-": 1,
+        "georgantzia-2025-": 3,
+        "zhang-2025-": 2,
     }
 
-    assert len(records) == 170
-    assert len({record.id for record in records}) == 170
+    assert len(records) == 175
+    assert len({record.id for record in records}) == 175
     for prefix, expected in prefixes.items():
         assert sum(
             record.id.startswith(prefix)
@@ -532,6 +536,84 @@ def test_yigitbas_2026_concrete04_set_is_exact():
     assert "Table 1" in str(
         record.parameter_evidence.get("location", "")
     )
+
+
+
+def test_fatigue_library_records_require_and_preserve_base_material():
+    record = _record("georgantzia-2025-6082-t6-fatigue")
+
+    with pytest.raises(ValueError, match="requires an existing base material"):
+        material_from_library_record(record, tag=61)
+
+    material = material_from_library_record(
+        record,
+        tag=61,
+        base_material_tag=60,
+    )
+    assert material.material_type == "Fatigue"
+    assert material.base_material_tag == 60
+    assert material.source["status"] == "verified"
+    assert material.source["record_id"] == record.id
+
+
+def test_georgantzia_2025_aluminium_fatigue_sets_are_exact():
+    expected = {
+        "georgantzia-2025-6082-t6-fatigue": (0.168, -0.375),
+        "georgantzia-2025-6063-t6-fatigue": (0.204, -0.397),
+        "georgantzia-2025-6060-t5-fatigue": (0.112, -0.293),
+    }
+    for record_id, (e0, m) in expected.items():
+        record = _record(record_id)
+        assert record.model == "Fatigue"
+        assert record.parameters_si == {
+            "E0": e0,
+            "m": m,
+            "min": -1.0e16,
+            "max": 1.0e16,
+        }
+        assert record.doi == "10.1007/s10518-025-02097-x"
+        location = str(record.parameter_evidence.get("location", ""))
+        assert "Table 5" in location
+        assert "OpenSees Fatigue" in str(
+            record.parameter_evidence.get("relationship", "")
+        )
+
+
+def test_zhang_2025_rebar_fatigue_sets_are_exact():
+    expected = {
+        "zhang-2025-rebar-ld5-fatigue": (0.138, -0.393),
+        "zhang-2025-rebar-ld12p5-fatigue": (0.257, -0.677),
+    }
+    for record_id, (e0, m) in expected.items():
+        record = _record(record_id)
+        assert record.parameters_si["E0"] == e0
+        assert record.parameters_si["m"] == m
+        assert record.parameters_si["min"] == -1.0e16
+        assert record.parameters_si["max"] == 1.0e16
+        assert record.doi == "10.1007/s10518-025-02131-y"
+        assert "Fig. 15" in str(
+            record.parameter_evidence.get("location", "")
+        )
+
+
+def test_verified_fatigue_exports_wrapper_with_selected_base_tag():
+    material = material_from_library_record(
+        _record("georgantzia-2025-6082-t6-fatigue"),
+        tag=71,
+        base_material_tag=70,
+    )
+    command = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+
+    assert command.startswith(
+        "ops.uniaxialMaterial('Fatigue', 71, 70, "
+    )
+    assert "'-E0', 0.168" in command
+    assert "'-m', -0.375" in command
+    assert "'-min', -1e+16" in command
+    assert "'-max', 1e+16" in command
 
 
 def test_all_pinching4_library_records_have_physical_context_and_full_schema():
