@@ -6,6 +6,7 @@ from openseespy_studio.mass_source import (
 )
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
+    ConnectionData,
     ElementLoadData,
     LoadPatternData,
     MassSourceData,
@@ -218,3 +219,48 @@ def test_mass_source_rejects_dynamic_path_pattern():
 
     with pytest.raises(ValueError, match="Linear/Constant"):
         evaluate_mass_source(project, source)
+
+
+def test_mass_source_excludes_managed_ground_nodes():
+    project = build_mass_project()
+    project.model.add_node(3, 4.0, 0.0, 0.0)
+    project.model.nodes[3].fixity = (1, 1, 1, 1, 1, 1)
+    project.add_material(
+        MaterialData(2, "Ground spring", "Elastic", {"E": 1.0e6})
+    )
+    project.add_connection(
+        ConnectionData(
+            10,
+            "Managed ground",
+            "zeroLength",
+            2,
+            3,
+            materials_by_dof={1: 2},
+            generated_ground_node=3,
+        )
+    )
+    project.add_nodal_load(
+        NodalLoadData(
+            9,
+            "Accidental ground gravity load",
+            2,
+            3,
+            (0.0, 0.0, -100.0, 0.0, 0.0, 0.0),
+        )
+    )
+    project.model.set_mass(3, (9.0, 8.0, 7.0, 6.0, 5.0, 4.0))
+
+    source = MassSourceData(
+        9,
+        "Ground-safe mass",
+        include_self_mass=False,
+        load_factors={2: 1.0},
+        gravity_axis=3,
+        directions=(1, 2),
+    )
+
+    summary = evaluate_mass_source(project, source)
+    assert summary.nodal_mass[3] == 0.0
+
+    apply_mass_source(project, source)
+    assert project.model.nodes[3].mass == (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
