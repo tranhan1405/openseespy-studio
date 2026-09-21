@@ -236,6 +236,17 @@ class AnalysisDialog(QDialog):
         )
         self.gravity_steps=QSpinBox(); self.gravity_steps.setRange(1,100000)
         self.gravity_steps.setValue(analysis.gravity_steps if analysis else 10)
+        self.gravity_algorithm=QComboBox()
+        self.gravity_algorithm.addItems(
+            ["Auto", "Newton", "NewtonLineSearch", "ModifiedNewton", "Linear"]
+        )
+        self.gravity_algorithm.setCurrentText(
+            analysis.gravity_algorithm if analysis else "Auto"
+        )
+        self.gravity_algorithm.setToolTip(
+            "Algorithm used only for gravity preload. Auto reuses the main "
+            "analysis algorithm."
+        )
         self.deferred_patterns=QLineEdit(
             ", ".join(
                 str(tag)
@@ -394,6 +405,7 @@ class AnalysisDialog(QDialog):
             ("eigen_solver","Eigen solver",self.eigen_solver),
             ("preload_gravity","Gravity preload",self.preload_gravity),
             ("gravity_steps","Gravity preload steps",self.gravity_steps),
+            ("gravity_algorithm","Gravity algorithm",self.gravity_algorithm),
             ("driver_mode","Driving load",self.driver_mode),
             ("driver_pattern","Existing Plain pattern",self.driver_pattern),
             ("driver_distribution","Auto load distribution",self.driver_distribution),
@@ -710,6 +722,7 @@ class AnalysisDialog(QDialog):
             rayleigh_mode_j=self.damping_mode_j.value(),
             preload_gravity=preload_gravity,
             gravity_steps=self.gravity_steps.value(),
+            gravity_algorithm=self.gravity_algorithm.currentText(),
             deferred_pattern_tags=deferred_pattern_tags,
             num_modes=self.modes.value(),
             eigen_solver=str(self.eigen_solver.currentData()),
