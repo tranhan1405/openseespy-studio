@@ -55,9 +55,11 @@ def _holder(project: ProjectDatabase):
 
 
 def test_cyclic_protocol_is_visible_in_model_tree():
+    model = StructuralModel("Cyclic tree", ndm=2, ndf=3)
+    model.add_node(4, 0.0, 0.0)
     project = ProjectDatabase(
         name="Cyclic tree",
-        model=StructuralModel("Cyclic tree", ndm=2, ndf=3),
+        model=model,
     )
     project.add_analysis(
         AnalysisSettingsData(
@@ -92,9 +94,11 @@ def test_cyclic_protocol_is_visible_in_model_tree():
 
 
 def test_long_cyclic_protocol_is_collapsed_in_model_tree():
+    model = StructuralModel("Long cyclic tree", ndm=2, ndf=3)
+    model.add_node(4, 0.0, 0.0)
     project = ProjectDatabase(
         name="Long cyclic tree",
-        model=StructuralModel("Long cyclic tree", ndm=2, ndf=3),
+        model=model,
     )
     targets = [float(value) for value in range(100)]
     project.add_analysis(
