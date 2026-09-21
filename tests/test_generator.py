@@ -2044,3 +2044,205 @@ def test_generator_chain_error_reports_relevant_constraint_tags():
     message = str(exc_info.value)
     assert "constraint 46 retains node 2" in message
     assert "constrained by 45" in message
+
+
+def test_generator_rejects_active_prescribed_displacement_on_mpc_dependent_dof():
+    model = StructuralModel("sp-mpc-conflict", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    constraint = ConstraintData(
+        47,
+        "Tie UX",
+        "equalDOF",
+        retained_node=1,
+        constrained_nodes=[2],
+        dofs=(1,),
+    )
+    series = {1: TimeSeriesData(1, "Linear", "Linear")}
+    patterns = {
+        1: LoadPatternData(1, "Imposed UX", "Plain", time_series_tag=1)
+    }
+    prescribed = {
+        41: PrescribedDisplacementData(
+            41,
+            "SP UX",
+            1,
+            2,
+            1,
+            0.0,
+        )
+    }
+    analysis = AnalysisSettingsData(
+        53,
+        "Static",
+        "Static",
+        constraints_handler="Transformation",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Active Prescribed Displacement object\(s\) overlap MPC dependent DOF",
+    ):
+        to_openseespy(
+            model,
+            constraints={47: constraint},
+            time_series=series,
+            load_patterns=patterns,
+            prescribed_displacements=prescribed,
+            analyses={53: analysis},
+            active_analysis_tag=53,
+        )
+
+
+def test_generator_allows_prescribed_displacement_on_nondependent_dof():
+    model = StructuralModel("sp-mpc-other-dof", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    constraint = ConstraintData(
+        48,
+        "Tie UX",
+        "equalDOF",
+        retained_node=1,
+        constrained_nodes=[2],
+        dofs=(1,),
+    )
+    series = {1: TimeSeriesData(1, "Linear", "Linear")}
+    patterns = {
+        1: LoadPatternData(1, "Imposed UY", "Plain", time_series_tag=1)
+    }
+    prescribed = {
+        42: PrescribedDisplacementData(
+            42,
+            "SP UY",
+            1,
+            2,
+            2,
+            0.0,
+        )
+    }
+    analysis = AnalysisSettingsData(
+        54,
+        "Static",
+        "Static",
+        constraints_handler="Transformation",
+    )
+
+    code = to_openseespy(
+        model,
+        constraints={48: constraint},
+        time_series=series,
+        load_patterns=patterns,
+        prescribed_displacements=prescribed,
+        analyses={54: analysis},
+        active_analysis_tag=54,
+    )
+
+    assert "ops.sp(2, 2, 0)" in code
+
+
+def test_generator_allows_prescribed_displacement_on_mpc_retained_node():
+    model = StructuralModel("sp-mpc-retained", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    constraint = ConstraintData(
+        49,
+        "Tie UX",
+        "equalDOF",
+        retained_node=1,
+        constrained_nodes=[2],
+        dofs=(1,),
+    )
+    series = {1: TimeSeriesData(1, "Linear", "Linear")}
+    patterns = {
+        1: LoadPatternData(1, "Master imposed UX", "Plain", time_series_tag=1)
+    }
+    prescribed = {
+        43: PrescribedDisplacementData(
+            43,
+            "Master SP UX",
+            1,
+            1,
+            1,
+            0.0,
+        )
+    }
+    analysis = AnalysisSettingsData(
+        55,
+        "Static",
+        "Static",
+        constraints_handler="Transformation",
+    )
+
+    code = to_openseespy(
+        model,
+        constraints={49: constraint},
+        time_series=series,
+        load_patterns=patterns,
+        prescribed_displacements=prescribed,
+        analyses={55: analysis},
+        active_analysis_tag=55,
+    )
+
+    assert "ops.sp(1, 1, 0)" in code
+
+
+def test_generator_ignores_prescribed_mpc_conflict_in_inactive_other_driver():
+    model = StructuralModel("sp-mpc-inactive", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    constraint = ConstraintData(
+        50,
+        "Tie UX",
+        "equalDOF",
+        retained_node=1,
+        constrained_nodes=[2],
+        dofs=(1,),
+    )
+    series = {
+        1: TimeSeriesData(1, "Current", "Linear"),
+        2: TimeSeriesData(2, "Other", "Linear"),
+    }
+    patterns = {
+        1: LoadPatternData(1, "Current", "Plain", time_series_tag=1),
+        2: LoadPatternData(2, "Other", "Plain", time_series_tag=2),
+    }
+    prescribed = {
+        44: PrescribedDisplacementData(
+            44,
+            "Other SP UX",
+            2,
+            2,
+            1,
+            0.0,
+        )
+    }
+    current = AnalysisSettingsData(
+        56,
+        "Current",
+        "Static",
+        constraints_handler="Transformation",
+        deferred_pattern_tags=[1],
+    )
+    other = AnalysisSettingsData(
+        57,
+        "Other",
+        "Static",
+        constraints_handler="Transformation",
+        deferred_pattern_tags=[2],
+    )
+
+    code = to_openseespy(
+        model,
+        constraints={50: constraint},
+        time_series=series,
+        load_patterns=patterns,
+        prescribed_displacements=prescribed,
+        analyses={56: current, 57: other},
+        active_analysis_tag=56,
+    )
+
+    assert "ops.sp(2, 1, 0)" not in code

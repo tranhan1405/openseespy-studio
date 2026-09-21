@@ -2605,6 +2605,51 @@ def to_openseespy(
             + "."
         )
 
+    def pattern_is_active(pattern_tag: int) -> bool:
+        pattern_tag = int(pattern_tag)
+        if pattern_tag in deferred_pattern_tags:
+            return True
+        if scoped_deferred_analysis:
+            pattern = (load_patterns or {}).get(pattern_tag)
+            return bool(
+                active_analysis is not None
+                and active_analysis.preload_gravity
+                and pattern is not None
+                and pattern.pattern_type == "Plain"
+                and pattern_tag not in other_analysis_driver_tags
+            )
+        return pattern_tag in (load_patterns or {})
+
+    prescribed_mpc_conflicts: list[tuple[int, int, int, list[int]]] = []
+    for displacement in (prescribed_displacements or {}).values():
+        if not pattern_is_active(displacement.pattern_tag):
+            continue
+        key = (int(displacement.node_tag), int(displacement.dof))
+        owners = sorted(set(dependent_owners.get(key, [])))
+        if owners:
+            prescribed_mpc_conflicts.append(
+                (
+                    int(displacement.tag),
+                    key[0],
+                    key[1],
+                    owners,
+                )
+            )
+
+    if prescribed_mpc_conflicts:
+        details = "; ".join(
+            f"SP {sp_tag}: node {node_tag} DOF {dof} -> MPC "
+            + ", ".join(map(str, owners))
+            for sp_tag, node_tag, dof, owners
+            in prescribed_mpc_conflicts
+        )
+        raise ValueError(
+            "Active Prescribed Displacement object(s) overlap MPC "
+            "dependent DOF(s): "
+            + details
+            + "."
+        )
+
     def plain_handler_supports_constraint(
         constraint: ConstraintData,
     ) -> bool:

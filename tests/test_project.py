@@ -1324,3 +1324,132 @@ def test_project_rejects_constraint_that_creates_chain_after_analysis(handler):
         assert "does not follow chained MP constraints" in str(exc)
     else:
         raise AssertionError("Expected late chained-MPC validation")
+
+
+def test_project_rejects_constraint_when_active_sp_owns_dependent_dof():
+    model = StructuralModel("project-sp-mpc", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="SP MPC", model=model)
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Imposed UX", "Plain", time_series_tag=1)
+    )
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(
+            68,
+            "SP UX",
+            1,
+            2,
+            1,
+            0.0,
+        )
+    )
+    project.add_analysis(
+        AnalysisSettingsData(
+            64,
+            "Static",
+            "Static",
+            constraints_handler="Transformation",
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"active Prescribed Displacement",
+    ):
+        project.add_constraint(
+            ConstraintData(
+                68,
+                "Tie UX",
+                "equalDOF",
+                retained_node=1,
+                constrained_nodes=[2],
+                dofs=(1,),
+            )
+        )
+
+
+def test_project_rejects_prescribed_displacement_when_mpc_dependent_dof_active():
+    model = StructuralModel("project-mpc-sp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="MPC SP", model=model)
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Imposed UX", "Plain", time_series_tag=1)
+    )
+    project.add_constraint(
+        ConstraintData(
+            69,
+            "Tie UX",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        )
+    )
+    project.add_analysis(
+        AnalysisSettingsData(
+            65,
+            "Static",
+            "Static",
+            constraints_handler="Transformation",
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"conflicts with dependent DOF in MPC constraint",
+    ):
+        project.add_prescribed_displacement(
+            PrescribedDisplacementData(
+                69,
+                "SP UX",
+                1,
+                2,
+                1,
+                0.0,
+            )
+        )
+
+
+def test_project_allows_prescribed_displacement_on_other_dof_with_mpc():
+    model = StructuralModel("project-mpc-sp-other-dof", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="MPC SP other DOF", model=model)
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Imposed UY", "Plain", time_series_tag=1)
+    )
+    project.add_constraint(
+        ConstraintData(
+            70,
+            "Tie UX",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        )
+    )
+    project.add_analysis(
+        AnalysisSettingsData(
+            66,
+            "Static",
+            "Static",
+            constraints_handler="Transformation",
+        )
+    )
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(
+            70,
+            "SP UY",
+            1,
+            2,
+            2,
+            0.0,
+        )
+    )
+
+    assert project.prescribed_displacements[70].dof == 2

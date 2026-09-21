@@ -2316,6 +2316,47 @@ class ProjectDatabase:
                 + "."
             )
 
+        prescribed_conflicts: list[tuple[int, int, int, int]] = []
+        constrained_nodes = {
+            int(tag) for tag in constraint.constrained_nodes
+        }
+        for displacement in self.prescribed_displacements.values():
+            if (
+                int(displacement.node_tag) not in constrained_nodes
+                or int(displacement.dof) not in dependent_dofs
+            ):
+                continue
+            for analysis_tag, analysis in self.analyses.items():
+                if self._analysis_pattern_is_active(
+                    analysis,
+                    displacement.pattern_tag,
+                    ignore_analysis_tags={int(analysis_tag)},
+                ):
+                    prescribed_conflicts.append(
+                        (
+                            int(displacement.tag),
+                            int(displacement.node_tag),
+                            int(displacement.dof),
+                            int(analysis.tag),
+                        )
+                    )
+                    break
+
+        if prescribed_conflicts:
+            details = ", ".join(
+                f"SP {sp_tag} at node {node_tag} DOF {dof} "
+                f"(analysis {analysis_tag})"
+                for sp_tag, node_tag, dof, analysis_tag
+                in prescribed_conflicts
+            )
+            raise ValueError(
+                f"{constraint.constraint_type} constraint {constraint.tag} "
+                "assigns dependent DOF(s) that also have active Prescribed "
+                "Displacement objects: "
+                + details
+                + "."
+            )
+
     def _plain_handler_supports_constraint(
         self,
         constraint: ConstraintData,
@@ -3032,6 +3073,36 @@ class ProjectDatabase:
                     "Node "
                     f"{displacement.node_tag} DOF {displacement.dof} already "
                     "has a prescribed displacement."
+                )
+
+        mpc_conflicts = sorted(
+            constraint.tag
+            for constraint in self.constraints.values()
+            if (
+                displacement.node_tag in constraint.constrained_nodes
+                and displacement.dof
+                in self._constraint_dependent_dofs(constraint)
+            )
+        )
+        if mpc_conflicts:
+            active_in = sorted(
+                analysis.tag
+                for analysis_tag, analysis in self.analyses.items()
+                if self._analysis_pattern_is_active(
+                    analysis,
+                    displacement.pattern_tag,
+                    ignore_analysis_tags={int(analysis_tag)},
+                )
+            )
+            if active_in:
+                raise ValueError(
+                    "Prescribed displacement at node "
+                    f"{displacement.node_tag} DOF {displacement.dof} "
+                    "conflicts with dependent DOF in MPC constraint(s): "
+                    + ", ".join(map(str, mpc_conflicts))
+                    + "; active analysis tag(s): "
+                    + ", ".join(map(str, active_in))
+                    + "."
                 )
 
         if displacement.value != 0.0:
