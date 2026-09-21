@@ -15668,6 +15668,298 @@
         "url": "https://doi.org/10.2174/1874149501509010236",
         "relationship": "The paper's ElasticPerfectlyPlastic representation maps directly to the OpenSees ElasticPP inputs E, epsyP, epsyN and eps0. E3 and E4 share the same published set."
       }
+    },
+    {
+      "id": "georgantzia-2025-6082-t6-fatigue",
+      "family": "Structural Aluminium / Low-Cycle Fatigue",
+      "material": "6000-series aluminium low-cycle fatigue wrapper",
+      "grade": "6082-T6",
+      "standard": "Experimentally calibrated Koh-Stephens / OpenSees Fatigue model",
+      "model": "Fatigue",
+      "preset_name": "Georgantzia et al. (2025) · 6082-T6 · Fatigue",
+      "parameters_si": {
+        "E0": 0.168,
+        "m": -0.375,
+        "min": -10000000000000000,
+        "max": 10000000000000000
+      },
+      "verified_parameters": [
+        "E0",
+        "m",
+        "min",
+        "max"
+      ],
+      "applicability": [
+        "6082-T6 aluminium alloy",
+        "Low-cycle high-amplitude cyclic loading",
+        "OpenSees Fatigue wrapper around a parent constitutive material",
+        "Designed to pair with the verified 6082-T6 Steel02/GMP calibration in the SARE library"
+      ],
+      "limitations": [
+        "Fatigue is a wrapper and requires an existing base material in the project.",
+        "The calibrated regression used the five higher-amplitude data points; the ±1% tests were not included in the final regression.",
+        "E0 and m are material-specific calibrated values from the journal study; min/max are the official OpenSees no-cutoff defaults rather than additional fitted fracture-strain limits."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling low-cycle fatigue behaviour of structural aluminium alloys",
+        "authors": "Evangelia Georgantzia; Paul J. Vardanega; Mohammad M. Kashani",
+        "journal": "Bulletin of Earthquake Engineering",
+        "volume_issue": "23(4)",
+        "pages": "1737–1758",
+        "year": 2025,
+        "doi": "10.1007/s10518-025-02097-x"
+      },
+      "parameter_evidence": {
+        "type": "journal_table_and_official_documentation",
+        "title": "Modelling low-cycle fatigue behaviour of structural aluminium alloys",
+        "author": "Evangelia Georgantzia; Paul J. Vardanega; Mohammad M. Kashani",
+        "institution": "Bulletin of Earthquake Engineering",
+        "year": 2025,
+        "location": "Table 5 — 6082-T6 Koh-Stephens calibration: εf (mapped to OpenSees Fatigue E0)=0.168, α (mapped to m)=-0.375; Section 5.2 and Section 6 describe wrapping the modified GMP/Steel02 model with OpenSees Fatigue. OpenSees Fatigue documentation: min=-1e16 and max=1e16 are the official default global strain/deformation limits when no independent cutoff is prescribed.",
+        "url": "https://doi.org/10.1007/s10518-025-02097-x",
+        "relationship": "The paper calibrates the strain-life relation and explicitly implements it through OpenSees Fatigue. OpenSees defines E0 as the one-cycle failure strain and m as the Coffin-Manson log-log slope; the paper's εf and α therefore map directly to E0 and m. The unbounded min/max values are exact official OpenSees defaults."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "georgantzia-2025-6063-t6-fatigue",
+      "family": "Structural Aluminium / Low-Cycle Fatigue",
+      "material": "6000-series aluminium low-cycle fatigue wrapper",
+      "grade": "6063-T6",
+      "standard": "Experimentally calibrated Koh-Stephens / OpenSees Fatigue model",
+      "model": "Fatigue",
+      "preset_name": "Georgantzia et al. (2025) · 6063-T6 · Fatigue",
+      "parameters_si": {
+        "E0": 0.204,
+        "m": -0.397,
+        "min": -10000000000000000,
+        "max": 10000000000000000
+      },
+      "verified_parameters": [
+        "E0",
+        "m",
+        "min",
+        "max"
+      ],
+      "applicability": [
+        "6063-T6 aluminium alloy",
+        "Low-cycle high-amplitude cyclic loading",
+        "OpenSees Fatigue wrapper around a parent constitutive material",
+        "Designed to pair with the verified 6063-T6 Steel02/GMP calibration in the SARE library"
+      ],
+      "limitations": [
+        "Fatigue is a wrapper and requires an existing base material in the project.",
+        "The calibrated regression used the five higher-amplitude data points; the ±1% tests were not included in the final regression.",
+        "E0 and m are material-specific calibrated values from the journal study; min/max are the official OpenSees no-cutoff defaults rather than additional fitted fracture-strain limits."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling low-cycle fatigue behaviour of structural aluminium alloys",
+        "authors": "Evangelia Georgantzia; Paul J. Vardanega; Mohammad M. Kashani",
+        "journal": "Bulletin of Earthquake Engineering",
+        "volume_issue": "23(4)",
+        "pages": "1737–1758",
+        "year": 2025,
+        "doi": "10.1007/s10518-025-02097-x"
+      },
+      "parameter_evidence": {
+        "type": "journal_table_and_official_documentation",
+        "title": "Modelling low-cycle fatigue behaviour of structural aluminium alloys",
+        "author": "Evangelia Georgantzia; Paul J. Vardanega; Mohammad M. Kashani",
+        "institution": "Bulletin of Earthquake Engineering",
+        "year": 2025,
+        "location": "Table 5 — 6063-T6 Koh-Stephens calibration: εf (mapped to OpenSees Fatigue E0)=0.204, α (mapped to m)=-0.397; Section 5.2 and Section 6 describe wrapping the modified GMP/Steel02 model with OpenSees Fatigue. OpenSees Fatigue documentation: min=-1e16 and max=1e16 are the official default global strain/deformation limits when no independent cutoff is prescribed.",
+        "url": "https://doi.org/10.1007/s10518-025-02097-x",
+        "relationship": "The paper calibrates the strain-life relation and explicitly implements it through OpenSees Fatigue. OpenSees defines E0 as the one-cycle failure strain and m as the Coffin-Manson log-log slope; the paper's εf and α therefore map directly to E0 and m. The unbounded min/max values are exact official OpenSees defaults."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "georgantzia-2025-6060-t5-fatigue",
+      "family": "Structural Aluminium / Low-Cycle Fatigue",
+      "material": "6000-series aluminium low-cycle fatigue wrapper",
+      "grade": "6060-T5",
+      "standard": "Experimentally calibrated Koh-Stephens / OpenSees Fatigue model",
+      "model": "Fatigue",
+      "preset_name": "Georgantzia et al. (2025) · 6060-T5 · Fatigue",
+      "parameters_si": {
+        "E0": 0.112,
+        "m": -0.293,
+        "min": -10000000000000000,
+        "max": 10000000000000000
+      },
+      "verified_parameters": [
+        "E0",
+        "m",
+        "min",
+        "max"
+      ],
+      "applicability": [
+        "6060-T5 aluminium alloy",
+        "Low-cycle high-amplitude cyclic loading",
+        "OpenSees Fatigue wrapper around a parent constitutive material",
+        "Designed to pair with the verified 6060-T5 Steel02/GMP calibration in the SARE library"
+      ],
+      "limitations": [
+        "Fatigue is a wrapper and requires an existing base material in the project.",
+        "The calibrated regression used the five higher-amplitude data points; the ±1% tests were not included in the final regression.",
+        "E0 and m are material-specific calibrated values from the journal study; min/max are the official OpenSees no-cutoff defaults rather than additional fitted fracture-strain limits."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Modelling low-cycle fatigue behaviour of structural aluminium alloys",
+        "authors": "Evangelia Georgantzia; Paul J. Vardanega; Mohammad M. Kashani",
+        "journal": "Bulletin of Earthquake Engineering",
+        "volume_issue": "23(4)",
+        "pages": "1737–1758",
+        "year": 2025,
+        "doi": "10.1007/s10518-025-02097-x"
+      },
+      "parameter_evidence": {
+        "type": "journal_table_and_official_documentation",
+        "title": "Modelling low-cycle fatigue behaviour of structural aluminium alloys",
+        "author": "Evangelia Georgantzia; Paul J. Vardanega; Mohammad M. Kashani",
+        "institution": "Bulletin of Earthquake Engineering",
+        "year": 2025,
+        "location": "Table 5 — 6060-T5 Koh-Stephens calibration: εf (mapped to OpenSees Fatigue E0)=0.112, α (mapped to m)=-0.293; Section 5.2 and Section 6 describe wrapping the modified GMP/Steel02 model with OpenSees Fatigue. OpenSees Fatigue documentation: min=-1e16 and max=1e16 are the official default global strain/deformation limits when no independent cutoff is prescribed.",
+        "url": "https://doi.org/10.1007/s10518-025-02097-x",
+        "relationship": "The paper calibrates the strain-life relation and explicitly implements it through OpenSees Fatigue. OpenSees defines E0 as the one-cycle failure strain and m as the Coffin-Manson log-log slope; the paper's εf and α therefore map directly to E0 and m. The unbounded min/max values are exact official OpenSees defaults."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "zhang-2025-rebar-ld5-fatigue",
+      "family": "Reinforcing Steel / Low-Cycle Fatigue",
+      "material": "Vertical reinforcing-bar low-cycle fatigue wrapper",
+      "grade": "Vertical rebar · L/D=5",
+      "standard": "Slenderness-dependent OpenSees Fatigue model",
+      "model": "Fatigue",
+      "preset_name": "Zhang et al. (2025) · Rebar L/D=5 · Fatigue",
+      "parameters_si": {
+        "E0": 0.138,
+        "m": -0.393,
+        "min": -10000000000000000,
+        "max": 10000000000000000
+      },
+      "verified_parameters": [
+        "E0",
+        "m",
+        "min",
+        "max"
+      ],
+      "applicability": [
+        "Vertical reinforcement slenderness ratio L/D = 5",
+        "Baseline uncorroded low-cycle-fatigue parameters",
+        "Circular RC bridge-pier nonlinear cyclic modelling",
+        "OpenSees Fatigue wrapper; the source study wrapped a Hysteretic reinforcement model"
+      ],
+      "limitations": [
+        "Fatigue is a wrapper and requires an existing base material in the project.",
+        "This record is the source-study baseline before corrosion-dependent updates to m and segment fracture strain.",
+        "Do not use the baseline min/max for a corroded segment when the paper's corrosion-specific fracture-strain cutoff is required.",
+        "min/max are the official OpenSees no-cutoff defaults, not specimen-calibrated fracture limits."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Numerical investigation of the impact of nonuniform corrosion on dynamic characteristics and nonlinear cyclic behaviour of circular RC bridge piers",
+        "authors": "Ziliang Zhang; Hammed O. Aminulai; William Powrie; Mohammad M. Kashani",
+        "journal": "Bulletin of Earthquake Engineering",
+        "volume_issue": "23(5)",
+        "pages": "2233–2264",
+        "year": 2025,
+        "doi": "10.1007/s10518-025-02131-y"
+      },
+      "parameter_evidence": {
+        "type": "journal_section_and_official_documentation",
+        "title": "Numerical investigation of the impact of nonuniform corrosion on dynamic characteristics and nonlinear cyclic behaviour of circular RC bridge piers",
+        "author": "Ziliang Zhang; Hammed O. Aminulai; William Powrie; Mohammad M. Kashani",
+        "institution": "Bulletin of Earthquake Engineering",
+        "year": 2025,
+        "location": "Reinforcement low-cycle-fatigue modelling section associated with Fig. 15 — L/D=5: E0=0.138, m=-0.393; the paper states these values are assigned to individual rebar segments in the OpenSees Fatigue material. OpenSees Fatigue documentation: min=-1e16 and max=1e16 are the official default global strain/deformation limits when no independent cutoff is prescribed.",
+        "url": "https://doi.org/10.1007/s10518-025-02131-y",
+        "relationship": "The journal article explicitly identifies E0 as the strain at which one cycle causes failure and m as the Coffin-Manson log-log slope used by OpenSees Fatigue. The unbounded min/max values are exact official OpenSees defaults and represent the uncorroded baseline without an independent single-event fracture cutoff."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "zhang-2025-rebar-ld12p5-fatigue",
+      "family": "Reinforcing Steel / Low-Cycle Fatigue",
+      "material": "Vertical reinforcing-bar low-cycle fatigue wrapper",
+      "grade": "Vertical rebar · L/D=12.5",
+      "standard": "Slenderness-dependent OpenSees Fatigue model",
+      "model": "Fatigue",
+      "preset_name": "Zhang et al. (2025) · Rebar L/D=12.5 · Fatigue",
+      "parameters_si": {
+        "E0": 0.257,
+        "m": -0.677,
+        "min": -10000000000000000,
+        "max": 10000000000000000
+      },
+      "verified_parameters": [
+        "E0",
+        "m",
+        "min",
+        "max"
+      ],
+      "applicability": [
+        "Vertical reinforcement slenderness ratio L/D = 12.5",
+        "Baseline uncorroded low-cycle-fatigue parameters",
+        "Circular RC bridge-pier nonlinear cyclic modelling",
+        "OpenSees Fatigue wrapper; the source study wrapped a Hysteretic reinforcement model"
+      ],
+      "limitations": [
+        "Fatigue is a wrapper and requires an existing base material in the project.",
+        "This record is the source-study baseline before corrosion-dependent updates to m and segment fracture strain.",
+        "Do not use the baseline min/max for a corroded segment when the paper's corrosion-specific fracture-strain cutoff is required.",
+        "min/max are the official OpenSees no-cutoff defaults, not specimen-calibrated fracture limits."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Numerical investigation of the impact of nonuniform corrosion on dynamic characteristics and nonlinear cyclic behaviour of circular RC bridge piers",
+        "authors": "Ziliang Zhang; Hammed O. Aminulai; William Powrie; Mohammad M. Kashani",
+        "journal": "Bulletin of Earthquake Engineering",
+        "volume_issue": "23(5)",
+        "pages": "2233–2264",
+        "year": 2025,
+        "doi": "10.1007/s10518-025-02131-y"
+      },
+      "parameter_evidence": {
+        "type": "journal_section_and_official_documentation",
+        "title": "Numerical investigation of the impact of nonuniform corrosion on dynamic characteristics and nonlinear cyclic behaviour of circular RC bridge piers",
+        "author": "Ziliang Zhang; Hammed O. Aminulai; William Powrie; Mohammad M. Kashani",
+        "institution": "Bulletin of Earthquake Engineering",
+        "year": 2025,
+        "location": "Reinforcement low-cycle-fatigue modelling section associated with Fig. 15 — L/D=12.5: E0=0.257, m=-0.677; the paper states these values are assigned to individual rebar segments in the OpenSees Fatigue material. OpenSees Fatigue documentation: min=-1e16 and max=1e16 are the official default global strain/deformation limits when no independent cutoff is prescribed.",
+        "url": "https://doi.org/10.1007/s10518-025-02131-y",
+        "relationship": "The journal article explicitly identifies E0 as the strain at which one cycle causes failure and m as the Coffin-Manson log-log slope used by OpenSees Fatigue. The unbounded min/max values are exact official OpenSees defaults and represent the uncorroded baseline without an independent single-event fracture cutoff."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
     }
   ]
 }
