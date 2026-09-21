@@ -3366,13 +3366,9 @@ class ProjectDatabase:
 
         if element.section_tag is not None:
             section = self.sections.get(int(element.section_tag))
-            if section is None:
-                raise ValueError(
-                    f"Element {element_tag} references missing section "
-                    f"{element.section_tag}."
-                )
             if (
-                element.element_type == "elasticBeamColumn"
+                section is not None
+                and element.element_type == "elasticBeamColumn"
                 and section.section_type != "Elastic"
             ):
                 raise ValueError(
@@ -3384,15 +3380,11 @@ class ProjectDatabase:
             transformation = self.transformations.get(
                 int(element.transf_tag)
             )
-            if transformation is None:
-                raise ValueError(
-                    f"Element {element_tag} references missing geometric "
-                    f"transformation {element.transf_tag}."
+            if transformation is not None:
+                self._validate_element_geometry(
+                    element,
+                    transformation=transformation,
                 )
-            self._validate_element_geometry(
-                element,
-                transformation=transformation,
-            )
 
         for load in self.element_loads.values():
             if int(load.element_tag) == element_tag:
