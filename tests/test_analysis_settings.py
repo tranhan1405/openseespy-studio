@@ -565,3 +565,43 @@ def test_rayleigh_damping_generated_script_checks_eigenvalue_count_before_indexi
     assert text.index(guard) < text.index(first_index)
     assert text.index(guard) < text.index(second_index)
     compile(text, "<rayleigh-guard>", "exec")
+
+
+def test_rayleigh_damping_rejects_nonpositive_or_nonfinite_eigenvalues_before_sqrt():
+    analysis = AnalysisSettingsData(
+        58,
+        "Rayleigh eigenvalue guard",
+        "Transient",
+        steps=2,
+        dt=0.01,
+        rayleigh_damping_ratio=0.05,
+        rayleigh_mode_i=1,
+        rayleigh_mode_j=3,
+    )
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            analysis,
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
+
+    guard_i = (
+        "if (not math.isfinite(_studio_lambda_i)) or "
+        "_studio_lambda_i <= 0.0:"
+    )
+    guard_j = (
+        "if (not math.isfinite(_studio_lambda_j)) or "
+        "_studio_lambda_j <= 0.0:"
+    )
+    sqrt_i = "_studio_omega_i = math.sqrt(_studio_lambda_i)"
+    sqrt_j = "_studio_omega_j = math.sqrt(_studio_lambda_j)"
+
+    assert guard_i in text
+    assert guard_j in text
+    assert "math.sqrt(max(_studio_lambda_i, 0.0))" not in text
+    assert "math.sqrt(max(_studio_lambda_j, 0.0))" not in text
+    assert text.index(guard_i) < text.index(sqrt_i)
+    assert text.index(guard_j) < text.index(sqrt_j)
+    compile(text, "<rayleigh-eigenvalue-guard>", "exec")

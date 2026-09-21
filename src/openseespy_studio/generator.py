@@ -1202,8 +1202,30 @@ def analysis_to_openseespy(
                 f"_studio_lambda_j = float(_studio_damping_eigs["
                 f"{settings.rayleigh_mode_j - 1}])"
             ),
-            "_studio_omega_i = math.sqrt(max(_studio_lambda_i, 0.0))",
-            "_studio_omega_j = math.sqrt(max(_studio_lambda_j, 0.0))",
+            (
+                "if (not math.isfinite(_studio_lambda_i)) or "
+                "_studio_lambda_i <= 0.0:"
+            ),
+            (
+                "    raise RuntimeError("
+                f"'Rayleigh damping mode {settings.rayleigh_mode_i} returned an '"
+                "f'invalid eigenvalue ({_studio_lambda_i!r}); expected a finite, '"
+                "'positive value. Check constraints, mass, and stiffness.'"
+                ")"
+            ),
+            (
+                "if (not math.isfinite(_studio_lambda_j)) or "
+                "_studio_lambda_j <= 0.0:"
+            ),
+            (
+                "    raise RuntimeError("
+                f"'Rayleigh damping mode {settings.rayleigh_mode_j} returned an '"
+                "f'invalid eigenvalue ({_studio_lambda_j!r}); expected a finite, '"
+                "'positive value. Check constraints, mass, and stiffness.'"
+                ")"
+            ),
+            "_studio_omega_i = math.sqrt(_studio_lambda_i)",
+            "_studio_omega_j = math.sqrt(_studio_lambda_j)",
             (
                 f"_studio_zeta = {settings.rayleigh_damping_ratio:g}"
             ),
