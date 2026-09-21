@@ -20,6 +20,7 @@ from openseespy_studio.project import (
     NodalLoadData,
     RecorderData,
     SectionData,
+    SolutionResultData,
     TimeSeriesData,
     TransformationData,
 )
@@ -667,6 +668,14 @@ def test_generated_fiber_force_beam_column_and_recorder_run_in_real_opensees(
         adaptive_step=False,
         live_convergence=False,
     )
+    section_response = SolutionResultData(
+        2,
+        1,
+        "Axial section response",
+        "SectionResponse",
+        element_scope=[1],
+        settings={"section": 1, "component": "P"},
+    )
 
     script = to_openseespy(
         model,
@@ -680,6 +689,7 @@ def test_generated_fiber_force_beam_column_and_recorder_run_in_real_opensees(
         active_analysis_tag=1,
         recorders=recorders,
         units={"length": "m", "force": "N", "time": "s"},
+        solution_results={2: section_response},
     )
     assert "# ERROR:" not in script
     compile(script, "<fiber-export>", "exec")
@@ -693,6 +703,11 @@ def test_generated_fiber_force_beam_column_and_recorder_run_in_real_opensees(
     assert payload["status"] == "completed"
     assert payload["results"]["analysis"]["type"] == "Static"
     assert payload["results"]["final"]["node_displacements"]["2"][2] < 0.0
+    generic = payload["results"]["history"]["section_responses"]["request:2"]
+    assert len(generic["force"]) == 1
+    assert len(generic["deformation"]) == 1
+    assert abs(float(generic["force"][0][0])) > 0.0
+    assert abs(float(generic["deformation"][0][0])) > 0.0
     assert recorder_path.exists()
     assert recorder_path.read_text(encoding="utf-8").strip()
 
