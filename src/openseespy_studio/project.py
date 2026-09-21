@@ -3358,6 +3358,27 @@ class ProjectDatabase:
             raise ValueError(f"Time series tag {original_tag} does not exist.")
         if series.tag != original_tag and series.tag in self.time_series:
             raise ValueError(f"Time series tag {series.tag} already exists.")
+        mass_source_patterns = sorted(
+            pattern.tag
+            for pattern in self.load_patterns.values()
+            if (
+                pattern.time_series_tag == original_tag
+                and any(
+                    pattern.tag in source.load_factors
+                    for source in self.mass_sources.values()
+                )
+            )
+        )
+        if (
+            mass_source_patterns
+            and series.series_type not in {"Linear", "Constant"}
+        ):
+            raise ValueError(
+                f"Time series {original_tag} is used by Mass Source load "
+                "pattern(s) "
+                + ", ".join(map(str, mass_source_patterns))
+                + " and must remain Linear or Constant."
+            )
         self.time_series.pop(original_tag)
         self.time_series[series.tag] = series
         if series.tag != original_tag:
@@ -3406,6 +3427,27 @@ class ProjectDatabase:
         if pattern.tag != original_tag and pattern.tag in self.load_patterns:
             raise ValueError(f"Load pattern tag {pattern.tag} already exists.")
         self._validate_load_pattern(pattern)
+        mass_source_users = sorted(
+            source.tag
+            for source in self.mass_sources.values()
+            if original_tag in source.load_factors
+        )
+        if mass_source_users:
+            if pattern.pattern_type != "Plain":
+                raise ValueError(
+                    f"Load pattern {original_tag} is used by Mass Source "
+                    "object(s) "
+                    + ", ".join(map(str, mass_source_users))
+                    + " and must remain a Plain pattern."
+                )
+            series = self.time_series[pattern.time_series_tag]
+            if series.series_type not in {"Linear", "Constant"}:
+                raise ValueError(
+                    f"Load pattern {original_tag} is used by Mass Source "
+                    "object(s) "
+                    + ", ".join(map(str, mass_source_users))
+                    + " and must use a Linear or Constant time series."
+                )
         if pattern.pattern_type != "Plain":
             dependent_nodal = [
                 load.tag
@@ -3519,6 +3561,27 @@ class ProjectDatabase:
             raise ValueError(
                 "Mass source can only reference Plain load patterns: "
                 + ", ".join(map(str, invalid))
+            )
+
+        invalid_series: list[str] = []
+        for pattern_tag in source.load_factors:
+            pattern = self.load_patterns[pattern_tag]
+            series = self.time_series.get(pattern.time_series_tag)
+            if series is None:
+                invalid_series.append(
+                    f"pattern {pattern_tag} -> missing time series "
+                    f"{pattern.time_series_tag}"
+                )
+            elif series.series_type not in {"Linear", "Constant"}:
+                invalid_series.append(
+                    f"pattern {pattern_tag} -> {series.series_type} "
+                    f"time series {series.tag}"
+                )
+        if invalid_series:
+            raise ValueError(
+                "Mass source requires Linear/Constant gravity-style time "
+                "series: "
+                + "; ".join(invalid_series)
             )
 
     def add_mass_source(self, source: MassSourceData) -> None:
