@@ -32,6 +32,8 @@ class MaterialLibraryRecord:
     primary_reference: dict[str, Any]
     parameter_evidence: dict[str, Any]
     verification: dict[str, Any]
+    response_quantity: str
+    source_units: dict[str, str]
 
     @property
     def doi(self) -> str:
@@ -61,6 +63,8 @@ class MaterialLibraryRecord:
             "applicability": list(self.applicability),
             "limitations": list(self.limitations),
             "verification": deepcopy(self.verification),
+            "response_quantity": self.response_quantity,
+            "source_units": deepcopy(self.source_units),
         }
 
 
@@ -139,6 +143,15 @@ def _record_from_dict(raw: dict[str, Any]) -> MaterialLibraryRecord:
         primary_reference=reference,
         parameter_evidence=evidence,
         verification=verification,
+        response_quantity=str(
+            raw.get("response_quantity", "")
+        ).strip().lower(),
+        source_units={
+            str(key): str(value)
+            for key, value in dict(
+                raw.get("source_units", {})
+            ).items()
+        },
     )
 
 
