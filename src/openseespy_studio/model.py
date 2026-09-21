@@ -72,6 +72,30 @@ class Node:
     fixity: Tuple[int, ...] = (0, 0, 0, 0, 0, 0)
     mass: Tuple[float, ...] = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
+    def __post_init__(self) -> None:
+        self.tag = _strict_int(self.tag, "Node tag")
+        if self.tag <= 0:
+            raise ValueError("Node tag must be a positive integer.")
+
+        self.xyz = tuple(float(value) for value in self.xyz)
+        if len(self.xyz) != 3:
+            raise ValueError("Node coordinates must contain three values.")
+        if any(not math.isfinite(value) for value in self.xyz):
+            raise ValueError("Node coordinates must be finite.")
+
+        self.fixity = tuple(
+            _strict_int(value, "Fixity value")
+            for value in self.fixity
+        )
+        if any(value not in {0, 1} for value in self.fixity):
+            raise ValueError("Fixity values must be 0 or 1.")
+
+        self.mass = tuple(float(value) for value in self.mass)
+        if any(not math.isfinite(value) for value in self.mass):
+            raise ValueError("Nodal mass values must be finite.")
+        if any(value < 0.0 for value in self.mass):
+            raise ValueError("Nodal mass values cannot be negative.")
+
 
 @dataclass(slots=True)
 class Element:
@@ -902,7 +926,10 @@ class StructuralModel:
                 float(xyz[1]),
                 float(xyz[2]) if len(xyz) > 2 else 0.0,
             )
-            fixity = tuple(int(value) for value in item.get("fixity", (0,) * model.ndf))
+            fixity = tuple(
+                _strict_int(value, "Fixity value")
+                for value in item.get("fixity", (0,) * model.ndf)
+            )
             if len(fixity) != model.ndf:
                 raise ValueError(
                     f"Node {node.tag} has {len(fixity)} fixities; expected {model.ndf}."
