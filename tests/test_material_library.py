@@ -22,7 +22,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 2
+    assert len(records) == 52
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -132,3 +132,83 @@ def test_sourced_material_export_comments_are_traceable():
         in comments
     )
     assert any("Table 3.12" in line for line in comments)
+
+
+def test_moodley_2026_adds_fifty_exact_steel02_parameter_sets():
+    records = [
+        record
+        for record in load_verified_material_library()
+        if record.id.startswith("moodley-2026-")
+    ]
+
+    assert len(records) == 50
+    assert all(record.model == "Steel02" for record in records)
+    assert all(
+        record.doi == "10.1016/j.jobe.2026.115378"
+        for record in records
+    )
+
+
+def test_moodley_2026_spot_checks_truss_and_beam_column_sets():
+    truss = _record(
+        "moodley-2026-en14301-cr-12-ld5-truss-steel02"
+    )
+    assert truss.parameters_si == {
+        "Fy": 825.0e6,
+        "E0": 207500.0e6,
+        "b": 0.010,
+        "R0": 11.72,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.012,
+        "a2": 1.0,
+        "a3": 0.026,
+        "a4": 1.0,
+    }
+    assert "Table B.1" in str(
+        truss.parameter_evidence.get("location", "")
+    )
+
+    beam = _record(
+        "moodley-2026-b500c-16-ld15-beam-steel02"
+    )
+    assert beam.parameters_si == {
+        "Fy": 594.0e6,
+        "E0": 195500.0e6,
+        "b": 0.00052,
+        "R0": 11.13,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.003,
+        "a2": 1.0,
+        "a3": 0.000,
+        "a4": 1.0,
+    }
+    assert "Table B.4" in str(
+        beam.parameter_evidence.get("location", "")
+    )
+
+
+def test_moodley_2026_records_encode_model_applicability():
+    records = [
+        record
+        for record in load_verified_material_library()
+        if record.id.startswith("moodley-2026-")
+    ]
+    truss = [record for record in records if "-truss-" in record.id]
+    beam = [record for record in records if "-beam-" in record.id]
+
+    assert len(truss) == 25
+    assert len(beam) == 25
+    assert all(
+        any("L/D =" in item for item in record.applicability)
+        for record in records
+    )
+    assert all(
+        any("truss" in item.lower() for item in record.applicability)
+        for record in truss
+    )
+    assert all(
+        any("beam-column" in item.lower() for item in record.applicability)
+        for record in beam
+    )
