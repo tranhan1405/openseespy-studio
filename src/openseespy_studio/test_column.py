@@ -47,6 +47,7 @@ class TestColumnSpec:
     # The same specimen can therefore be used for Cyclic, Pushover, or NLTH.
     base_interface_type: str = "Fixed base"
     base_interface_materials: dict[int, int] = field(default_factory=dict)
+    base_interface_section_tag: int | None = None
     base_interface_rayleigh: bool = False
     strain_penetration_bond_material_tag: int | None = None
 
@@ -82,6 +83,7 @@ BASE_INTERFACE_TYPES = {
     "Translational slip spring",
     "Bond-slip",  # legacy alias for pre-v0.1 research scripts
     "Rotational spring",
+    "Section interface",
     "Bond_SP01 strain penetration",
     "Custom zeroLength",
 }
@@ -427,7 +429,17 @@ def build_test_column(
                 "the selected interface DOFs are released automatically."
             )
 
-        if interface_type == "Bond_SP01 strain penetration":
+        if interface_type == "Section interface":
+            section_tag = spec.base_interface_section_tag
+            if section_tag is None:
+                raise ValueError(
+                    "Section interface requires a Section assignment."
+                )
+            if int(section_tag) not in project.sections:
+                raise ValueError(
+                    f"Base-interface section {section_tag} does not exist."
+                )
+        elif interface_type == "Bond_SP01 strain penetration":
             if spec.section_tag is None:
                 raise ValueError(
                     "Bond_SP01 strain penetration requires a Fiber column section."
@@ -579,7 +591,10 @@ def build_test_column(
     for tag in node_tags:
         model.set_fixity(tag, plane)
 
-    if interface_type == "Bond_SP01 strain penetration":
+    if interface_type in {
+        "Section interface",
+        "Bond_SP01 strain penetration",
+    }:
         # The interface Section carries P, My/Mz and torsion as available.
         # Keep only the specimen's out-of-plane planar restraints here.
         # Shear translations are coupled to the fixed footing with equalDOF
@@ -618,22 +633,31 @@ def build_test_column(
         ground_node = project.create_ground_node(result.base_node)
         connection_tag = project.next_connection_tag()
 
-        if interface_type == "Bond_SP01 strain penetration":
-            source_section = project.sections[int(spec.section_tag)]
-            penetration_section_tag = project.next_section_tag()
-            penetration = build_bond_sp01_strain_penetration_section(
-                source_section,
-                project.materials,
-                bond_material_tag=int(
-                    spec.strain_penetration_bond_material_tag
-                ),
-                section_tag=penetration_section_tag,
-                name=(
-                    f"{spec.name_prefix} · Bond_SP01 "
-                    "strain-penetration section"
-                ),
-            )
-            project.add_section(penetration.section)
+        if interface_type in {
+            "Section interface",
+            "Bond_SP01 strain penetration",
+        }:
+            generated_section_tag = None
+            if interface_type == "Bond_SP01 strain penetration":
+                source_section = project.sections[int(spec.section_tag)]
+                penetration_section_tag = project.next_section_tag()
+                penetration = build_bond_sp01_strain_penetration_section(
+                    source_section,
+                    project.materials,
+                    bond_material_tag=int(
+                        spec.strain_penetration_bond_material_tag
+                    ),
+                    section_tag=penetration_section_tag,
+                    name=(
+                        f"{spec.name_prefix} · Bond_SP01 "
+                        "strain-penetration section"
+                    ),
+                )
+                project.add_section(penetration.section)
+                interface_section_tag = penetration.section.tag
+                generated_section_tag = penetration.section.tag
+            else:
+                interface_section_tag = int(spec.base_interface_section_tag)
 
             orient_x, orient_y = zero_length_section_orientation(axis)
 
@@ -649,7 +673,7 @@ def build_test_column(
                     ConstraintData(
                         tag=generated_constraint_tag,
                         name=(
-                            f"{spec.name_prefix} · strain-penetration "
+                            f"{spec.name_prefix} · {interface_type} "
                             "shear transfer"
                         ),
                         constraint_type="equalDOF",
@@ -667,8 +691,8 @@ def build_test_column(
                     connection_type="zeroLengthSection",
                     node_i=ground_node,
                     node_j=result.base_node,
-                    section_tag=penetration.section.tag,
-                    generated_section_tag=penetration.section.tag,
+                    section_tag=interface_section_tag,
+                    generated_section_tag=generated_section_tag,
                     generated_constraint_tag=generated_constraint_tag,
                     orient_x=orient_x,
                     orient_y=orient_y,
@@ -676,7 +700,7 @@ def build_test_column(
                     generated_ground_node=ground_node,
                 )
             )
-            result.base_section_tag = penetration.section.tag
+            result.base_section_tag = interface_section_tag
         else:
             project.add_connection(
                 ConnectionData(
