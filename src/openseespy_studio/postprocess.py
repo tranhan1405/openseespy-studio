@@ -1420,6 +1420,69 @@ def column_cyclic_cycle_metrics(
 
 
 
+def moment_curvature_curve(
+    result: dict[str, Any] | None,
+) -> tuple[list[float], list[float], str, int | None]:
+    """Return the dedicated zeroLengthSection moment-curvature history."""
+    if not isinstance(result, dict):
+        return [], [], "", None
+    spec = result.get("moment_curvature", {})
+    history = result.get("history", {})
+    if not isinstance(spec, dict) or not isinstance(history, dict):
+        return [], [], "", None
+    if str(spec.get("kind", "")) != "moment-curvature":
+        return [], [], "", None
+
+    response = history.get("moment_curvature", {})
+    if not isinstance(response, dict):
+        return [], [], str(spec.get("moment_component", "")), None
+    force_rows = response.get("force", [])
+    deformation_rows = response.get("deformation", [])
+    if not isinstance(force_rows, (list, tuple)):
+        force_rows = []
+    if not isinstance(deformation_rows, (list, tuple)):
+        deformation_rows = []
+
+    try:
+        index = int(spec.get("moment_index", 1))
+        sign = float(spec.get("moment_sign", 1.0))
+        element_tag = int(spec.get("element_tag"))
+    except (TypeError, ValueError):
+        return [], [], str(spec.get("moment_component", "")), None
+
+    curvature: list[float] = []
+    moment: list[float] = []
+    for force_row, deformation_row in zip(force_rows, deformation_rows):
+        if (
+            not isinstance(force_row, (list, tuple))
+            or not isinstance(deformation_row, (list, tuple))
+            or len(force_row) <= index
+            or len(deformation_row) <= index
+        ):
+            continue
+        try:
+            m_value = sign * float(force_row[index])
+            k_value = sign * float(deformation_row[index])
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(m_value) and math.isfinite(k_value):
+            curvature.append(k_value)
+            moment.append(m_value)
+
+    if curvature and (
+        abs(curvature[0]) > 1.0e-15 or abs(moment[0]) > 1.0e-15
+    ):
+        curvature.insert(0, 0.0)
+        moment.insert(0, 0.0)
+
+    return (
+        curvature,
+        moment,
+        str(spec.get("moment_component", "")),
+        element_tag,
+    )
+
+
 def column_moment_curvature_curve(
     result: dict[str, Any] | None,
 ) -> tuple[list[float], list[float], str]:
