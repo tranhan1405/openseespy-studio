@@ -1,4 +1,4 @@
-#define AppName "OpenSeesPy Studio"
+#define AppName "SARE"
 #ifndef AppVersion
   #define AppVersion "0.2.0-alpha.1"
 #endif
@@ -11,8 +11,8 @@ AppId={{8E7AC837-C7DB-4CDA-BF51-6D7CB2EAC1C7}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=Tran-Van Han
-DefaultDirName={localappdata}\Programs\OpenSeesPy Studio
-DefaultGroupName=OpenSeesPy Studio
+DefaultDirName={localappdata}\Programs\SARE
+DefaultGroupName=SARE
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
@@ -28,11 +28,11 @@ UninstallDisplayIcon={app}\OpenSeesPyStudio.exe
 Source: "{#RepoRoot}\dist\OpenSeesPyStudio\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\OpenSeesPy Studio"; Filename: "{app}\OpenSeesPyStudio.exe"
-Name: "{autodesktop}\OpenSeesPy Studio"; Filename: "{app}\OpenSeesPyStudio.exe"; Tasks: desktopicon
+Name: "{autoprograms}\SARE"; Filename: "{app}\OpenSeesPyStudio.exe"
+Name: "{autodesktop}\SARE"; Filename: "{app}\OpenSeesPyStudio.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Run]
-Filename: "{app}\OpenSeesPyStudio.exe"; Description: "Launch OpenSeesPy Studio"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\OpenSeesPyStudio.exe"; Description: "Launch SARE"; Flags: nowait postinstall skipifsilent
