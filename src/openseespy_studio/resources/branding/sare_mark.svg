@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="SARE mark">
+  <rect x="12" y="12" width="232" height="232" rx="42" fill="#F7FAFC" stroke="#DCE5EE" stroke-width="2"/>
+  <path d="M190 66
+           C164 48 92 48 68 70
+           C45 91 55 118 82 124
+           C106 129 155 123 180 138
+           C207 154 202 185 178 199
+           C151 216 86 212 61 193"
+        fill="none" stroke="#0B315C" stroke-width="32"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M38 154
+           C69 154 84 151 104 136
+           C119 124 129 111 143 116
+           C156 120 163 143 178 150
+           C190 156 204 155 218 153"
+        fill="none" stroke="#E5252A" stroke-width="9"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
