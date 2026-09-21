@@ -2529,3 +2529,60 @@ def test_project_load_pattern_tag_rename_preserves_driver_order():
     )
 
     assert project.analyses[80].deferred_pattern_tags == [5, 2]
+
+
+def test_project_clear_model_linked_data_preserves_definition_libraries():
+    model = StructuralModel("replace-geometry", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    project = ProjectDatabase(name="Replace geometry", model=model)
+    project.add_material(
+        MaterialData(1, "Elastic", "Elastic", {"E": 1000.0})
+    )
+    project.add_section(
+        SectionData(1, "Elastic section", "Elastic")
+    )
+    project.add_transformation(
+        TransformationData(1, "Linear", "Linear")
+    )
+    project.selection_sets["Old"] = SelectionSetData(
+        "Old", node_tags={1}
+    )
+    project.add_time_series(TimeSeriesData(1, "Old", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Old", "Plain", time_series_tag=1)
+    )
+    project.add_nodal_load(
+        NodalLoadData(
+            1,
+            "Old load",
+            1,
+            1,
+            (1.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        )
+    )
+    project.add_analysis(
+        AnalysisSettingsData(1, "Old static", "Static")
+    )
+    project.add_solution_result(
+        SolutionResultData(
+            1,
+            1,
+            "Old displacement",
+            "NodalDisplacement",
+            node_scope=[1],
+        )
+    )
+
+    project.clear_model_linked_data()
+
+    assert project.selection_sets == {}
+    assert project.time_series == {}
+    assert project.load_patterns == {}
+    assert project.nodal_loads == {}
+    assert project.analyses == {}
+    assert project.solution_results == {}
+    assert project.active_analysis_tag is None
+
+    assert 1 in project.materials
+    assert 1 in project.sections
+    assert 1 in project.transformations
