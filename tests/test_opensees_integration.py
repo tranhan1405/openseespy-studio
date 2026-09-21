@@ -305,6 +305,14 @@ def test_frp_confined_concrete_material_constructs_in_real_opensees(
         check=False,
         timeout=30,
     )
+    if (
+        completed.returncode != 0
+        and "temporarily removed from the compiled versions"
+        in completed.stderr
+    ):
+        pytest.xfail(
+            "Stock OpenSeesPy runtime omits legacy FRPConfinedConcrete."
+        )
     assert completed.returncode == 0, completed.stderr
     assert "FRP_MATERIAL_OK" in completed.stdout
 
