@@ -1178,12 +1178,29 @@ def analysis_to_openseespy(
         )
         lines.extend([
             "# Rayleigh damping from two modal frequencies",
+            "try:",
             (
-                f"_studio_damping_eigs = ops.eigen("
+                f"    _studio_damping_eigs = ops.eigen("
                 f"{settings.eigen_solver!r}, {max_mode})"
+            ),
+            "except Exception as _studio_eigen_exc:",
+            (
+                "    raise RuntimeError("
+                "'Rayleigh damping eigen analysis failed. Run Modal / Model "
+                "Check and verify the requested damping modes and mass.') "
+                "from _studio_eigen_exc"
             ),
             "if not isinstance(_studio_damping_eigs, (list, tuple)):",
             "    _studio_damping_eigs = [_studio_damping_eigs]",
+            (
+                f"if len(_studio_damping_eigs) < {max_mode}:"
+            ),
+            (
+                "    raise RuntimeError("
+                f"'Rayleigh damping requested mode {max_mode}, but OpenSees "
+                "'returned only %d eigenvalue(s).' % len(_studio_damping_eigs)"
+                ")"
+            ),
             (
                 f"_studio_lambda_i = float(_studio_damping_eigs["
                 f"{settings.rayleigh_mode_i - 1}])"
@@ -1192,15 +1209,34 @@ def analysis_to_openseespy(
                 f"_studio_lambda_j = float(_studio_damping_eigs["
                 f"{settings.rayleigh_mode_j - 1}])"
             ),
-            "_studio_omega_i = math.sqrt(max(_studio_lambda_i, 0.0))",
-            "_studio_omega_j = math.sqrt(max(_studio_lambda_j, 0.0))",
+            (
+                "if (not math.isfinite(_studio_lambda_i) "
+                "or _studio_lambda_i <= 0.0 "
+                "or not math.isfinite(_studio_lambda_j) "
+                "or _studio_lambda_j <= 0.0):"
+            ),
+            (
+                "    raise RuntimeError("
+                "'Rayleigh damping requires two finite positive eigenvalues; "
+                "check for rigid-body modes, mechanisms, mass, and supports.')"
+            ),
+            "_studio_omega_i = math.sqrt(_studio_lambda_i)",
+            "_studio_omega_j = math.sqrt(_studio_lambda_j)",
             (
                 f"_studio_zeta = {settings.rayleigh_damping_ratio:g}"
             ),
             (
+                "_studio_omega_sum = "
+                "_studio_omega_i + _studio_omega_j"
+            ),
+            "if not math.isfinite(_studio_omega_sum) or _studio_omega_sum <= 0.0:",
+            (
+                "    raise RuntimeError("
+                "'Rayleigh damping modal frequencies are invalid.')"
+            ),
+            (
                 "_studio_beta_k = "
-                "2.0 * _studio_zeta / "
-                "(_studio_omega_i + _studio_omega_j)"
+                "2.0 * _studio_zeta / _studio_omega_sum"
             ),
             (
                 "_studio_alpha_m = "
@@ -1221,6 +1257,15 @@ def analysis_to_openseespy(
         )
         lines.append("if not isinstance(_studio_eigenvalues, (list, tuple)):")
         lines.append("    _studio_eigenvalues = [_studio_eigenvalues]")
+        lines.append(
+            f"if len(_studio_eigenvalues) < {settings.num_modes}:"
+        )
+        lines.append(
+            "    raise RuntimeError("
+            f"'Modal analysis requested {settings.num_modes} mode(s), but "
+            "OpenSees returned only %d eigenvalue(s).' "
+            "% len(_studio_eigenvalues))"
+        )
         lines.extend([
             "_studio_total_lumped_mass = {}",
             "for _studio_dof in (1, 2, 3):",
