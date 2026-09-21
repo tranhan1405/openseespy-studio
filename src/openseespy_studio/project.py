@@ -203,9 +203,9 @@ MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
     "Concrete04": {"fc": -30.0e6, "epsc": -0.002, "epscu": -0.006, "Ec": 3.0e10, "fct": 3.0e6, "et": 0.0002, "beta": 0.1},
     "Hysteretic": {"s1p": 1.0, "e1p": 0.001, "s2p": 1.2, "e2p": 0.01, "s3p": 1.0, "e3p": 0.03, "s1n": -1.0, "e1n": -0.001, "s2n": -1.2, "e2n": -0.01, "s3n": -1.0, "e3n": -0.03, "pinchX": 0.5, "pinchY": 0.5, "damage1": 0.0, "damage2": 0.0, "beta": 0.0},
     "HystereticSmooth": {
-        "ka": 2.0e11,
-        "kb": 2.0e9,
-        "fbar": 3.55e8,
+        "ka": 1.0,
+        "kb": 0.01,
+        "fbar": 1.0,
         "beta": -1.0,
     },
     "Pinching4": {
