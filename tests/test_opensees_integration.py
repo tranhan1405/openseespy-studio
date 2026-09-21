@@ -114,10 +114,8 @@ def test_generated_static_cantilever_runs_in_real_opensees(tmp_path: Path):
 
     script = to_openseespy(
         model,
-        materials=materials,
         sections=sections,
         transformations=transformations,
-        connections=connections,
         time_series=time_series,
         load_patterns=load_patterns,
         nodal_loads=nodal_loads,
@@ -226,8 +224,10 @@ def _run_real_generated(
 ):
     script = to_openseespy(
         model,
+        materials=materials,
         sections=sections,
         transformations=transformations,
+        connections=connections,
         time_series=time_series,
         load_patterns=load_patterns,
         nodal_loads=nodal_loads,
