@@ -77,6 +77,9 @@ class AnalysisDialog(QDialog):
                 text == "SparseGeneral"
             )
         )
+        self.system.currentTextChanged.connect(
+            lambda _text: self._sync(self.kind.currentText())
+        )
         self.test=QComboBox(); self.test.addItems(["NormDispIncr","NormUnbalance","EnergyIncr"]); self.test.setCurrentText(analysis.test if analysis else "NormDispIncr")
         self.tol=fs(analysis.tolerance if analysis else 1e-8,1e-16,1e10)
         self.max_iter=QSpinBox(); self.max_iter.setRange(1,100000); self.max_iter.setValue(analysis.max_iterations if analysis else 50)
@@ -98,6 +101,9 @@ class AnalysisDialog(QDialog):
             lambda text: self.algorithm_initial.setEnabled(
                 text == "ModifiedNewton"
             )
+        )
+        self.algorithm.currentTextChanged.connect(
+            lambda _text: self._sync(self.kind.currentText())
         )
         self.integrator=QComboBox()
         self._initial_integrator=(analysis.integrator if analysis else None)
@@ -503,7 +509,7 @@ class AnalysisDialog(QDialog):
         # Identity and core solver configuration are common to every analysis.
         common={
             "tag","name","kind","constraints","numberer","system",
-            "integrator","external_console",
+            "system_pivoting","integrator","external_console",
         }
         visible=set(common)
 
@@ -513,6 +519,8 @@ class AnalysisDialog(QDialog):
                 "test","tol","max_iter","algorithm",
                 "recovery","adaptive","live_convergence",
             })
+            if self.algorithm.currentText() == "ModifiedNewton":
+                visible.add("algorithm_initial")
 
         if static:
             visible.add("steps")
@@ -566,7 +574,7 @@ class AnalysisDialog(QDialog):
             elif transient:
                 visible.add("deferred_patterns")
             if self.preload_gravity.isChecked():
-                visible.add("gravity_steps")
+                visible.update({"gravity_steps", "gravity_algorithm"})
 
         if non_modal and self.adaptive.isChecked():
             visible.update({
