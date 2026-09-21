@@ -9,6 +9,7 @@ from openseespy_studio.generator import (
 )
 from openseespy_studio.project import (
     ConnectionData,
+    ConstraintData,
     FiberComponentData,
     MATERIAL_DEFAULTS,
     AnalysisSettingsData,
@@ -475,3 +476,81 @@ def test_full_generator_captures_specimen_histories_for_active_analysis():
     assert "'section', _studio_specimen_section, 'deformation'" in script
     assert "'section', 'fiber'" in script
     assert "'slip':" in script
+
+
+def test_generated_connection_metadata_follows_section_and_constraint_renames():
+    project = ProjectDatabase(
+        units={"length": "mm", "force": "N", "time": "s"}
+    )
+    for material in _materials().values():
+        project.add_material(material)
+    project.add_section(_fiber_section())
+
+    result = build_test_column(
+        project,
+        TestColumnSpec(
+            height=3000.0,
+            section_tag=1,
+            base_interface_type="Bond_SP01 strain penetration",
+            strain_penetration_bond_material_tag=3,
+        ),
+    )
+    connection = project.connections[result.base_connection_tag]
+
+    old_section_tag = result.base_section_tag
+    section_data = project.sections[old_section_tag].to_dict()
+    new_section_tag = project.next_section_tag()
+    section_data["tag"] = new_section_tag
+    project.update_section(
+        old_section_tag,
+        SectionData.from_dict(section_data),
+    )
+
+    assert connection.section_tag == new_section_tag
+    assert connection.generated_section_tag == new_section_tag
+
+    old_constraint_tag = result.base_constraint_tag
+    constraint_data = project.constraints[old_constraint_tag].to_dict()
+    new_constraint_tag = project.next_constraint_tag()
+    constraint_data["tag"] = new_constraint_tag
+    project.update_constraint(
+        old_constraint_tag,
+        ConstraintData.from_dict(constraint_data),
+    )
+
+    assert connection.generated_constraint_tag == new_constraint_tag
+
+    project.remove_constraint(new_constraint_tag)
+    assert connection.generated_constraint_tag is None
+
+
+def test_connection_cleanup_uses_renamed_generated_section_tag():
+    project = ProjectDatabase(
+        units={"length": "mm", "force": "N", "time": "s"}
+    )
+    for material in _materials().values():
+        project.add_material(material)
+    project.add_section(_fiber_section())
+
+    result = build_test_column(
+        project,
+        TestColumnSpec(
+            height=3000.0,
+            section_tag=1,
+            base_interface_type="Bond_SP01 strain penetration",
+            strain_penetration_bond_material_tag=3,
+        ),
+    )
+    old_section_tag = result.base_section_tag
+    section_data = project.sections[old_section_tag].to_dict()
+    new_section_tag = project.next_section_tag()
+    section_data["tag"] = new_section_tag
+    project.update_section(
+        old_section_tag,
+        SectionData.from_dict(section_data),
+    )
+
+    project.remove_connection(result.base_connection_tag)
+
+    assert new_section_tag not in project.sections
+    assert 1 in project.sections
