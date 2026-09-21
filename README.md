@@ -80,6 +80,22 @@ ASTM Grade 60 reinforcing steel:
 - ASTM A615 Grade 60
 - ASTM A706 Grade 60
 
+The library now also includes **50 additional exact Steel02 parameter sets**
+from Moodley, De Risi and Afshan (2026), covering five tested rebar
+material/diameter groups (EN 1.4301 cold-rolled 12 mm, EN 1.4301 hot-rolled
+12 mm, EN 1.4482 hot-rolled 16 mm, B500C 12 mm and B500C 16 mm), five
+rebar slenderness ratios (L/D = 5, 8, 10, 12 and 15), and two OpenSees
+rebar representations (truss/fibre-oriented and beam-column/continuum-
+oriented). Source: *Journal of Building Engineering* 121, 115378,
+DOI `10.1016/j.jobe.2026.115378`. Exact Steel02 calibration values are taken
+from Appendix B Tables B.1 and B.4; E values are from Table 4; cR1, cR2,
+a2 and a4 follow the constants explicitly retained in Section 4.2.1.
+
+These are 50 distinct **published parameter sets**, not 50 unrelated chemical
+materials. SARE exposes their diameter, L/D and modelling representation in
+the preset name/applicability so users do not mistake them for generic grade
+defaults.
+
 The peer-reviewed source is Carreño, Lotfizadeh, Conte and Restrepo (2020),
 *Material Model Parameters for the Giuffrè-Menegotto-Pinto Uniaxial Steel
 Stress-Strain Model*, *Journal of Structural Engineering*, 146(2), 04019205,
