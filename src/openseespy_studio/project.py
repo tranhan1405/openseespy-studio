@@ -1306,7 +1306,10 @@ class PrescribedDisplacementData:
             self.pattern_tag,
             "Prescribed displacement pattern tag",
         )
-        self.node_tag = int(self.node_tag)
+        self.node_tag = _strict_int(
+            self.node_tag,
+            "Prescribed displacement node tag",
+        )
         self.dof = _strict_int(
             self.dof,
             "Prescribed displacement DOF",
@@ -1353,7 +1356,7 @@ class PrescribedDisplacementData:
                 )
             ),
             pattern_tag=data["pattern_tag"],
-            node_tag=int(data["node_tag"]),
+            node_tag=data["node_tag"],
             dof=data.get("dof", 1),
             value=float(data.get("value", 0.0)),
         )
@@ -1379,8 +1382,14 @@ class ElementLoadData:
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Element load tag")
         self.name = str(self.name).strip() or f"Element Load {self.tag}"
-        self.pattern_tag = int(self.pattern_tag)
-        self.element_tag = int(self.element_tag)
+        self.pattern_tag = _strict_int(
+            self.pattern_tag,
+            "Element load pattern tag",
+        )
+        self.element_tag = _strict_int(
+            self.element_tag,
+            "Element load element tag",
+        )
         self.load_type = str(self.load_type)
         self.wx = float(self.wx)
         self.wy = float(self.wy)
@@ -1446,8 +1455,8 @@ class ElementLoadData:
         return cls(
             tag=data["tag"],
             name=str(data.get("name", f"Element Load {data['tag']}")),
-            pattern_tag=int(data["pattern_tag"]),
-            element_tag=int(data["element_tag"]),
+            pattern_tag=data["pattern_tag"],
+            element_tag=data["element_tag"],
             load_type=str(data.get("load_type", "Uniform")),
             wx=float(data.get("wx", 0.0)),
             wy=float(data.get("wy", 0.0)),
@@ -1475,14 +1484,14 @@ class MassSourceData:
     directions: tuple[int, ...] = (1, 2)
 
     def __post_init__(self) -> None:
-        self.tag = int(self.tag)
+        self.tag = _strict_int(self.tag, "Mass source tag")
         self.name = str(self.name).strip() or f"Mass Source {self.tag}"
         self.include_self_mass = _strict_bool(
             self.include_self_mass,
             "Mass source include_self_mass",
         )
         raw_load_factors = {
-            int(tag): float(factor)
+            _strict_int(tag, "Mass source load-pattern tag"): float(factor)
             for tag, factor in dict(self.load_factors).items()
         }
         if any(
@@ -1530,11 +1539,11 @@ class MassSourceData:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MassSourceData":
         return cls(
-            tag=int(data["tag"]),
+            tag=data["tag"],
             name=str(data.get("name", f"Mass Source {data['tag']}")),
             include_self_mass=data.get("include_self_mass", True),
             load_factors={
-                int(tag): float(factor)
+                tag: float(factor)
                 for tag, factor in dict(
                     data.get("load_factors", {})
                 ).items()
