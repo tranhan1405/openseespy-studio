@@ -1235,3 +1235,90 @@ def test_project_update_analysis_rejects_switch_to_plain_with_nonzero_sp():
         assert "cannot enforce non-zero Prescribed Displacement" in str(exc)
     else:
         raise AssertionError("Expected Plain handler switch validation")
+
+
+@pytest.mark.parametrize("handler", ["Transformation", "Plain"])
+def test_project_rejects_analysis_with_chained_mp_constraints(handler):
+    model = StructuralModel("project-chained-mp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+    project = ProjectDatabase(name="Chained MPC", model=model)
+    project.add_constraint(
+        ConstraintData(
+            64,
+            "Upstream",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        )
+    )
+    project.add_constraint(
+        ConstraintData(
+            65,
+            "Downstream",
+            "equalDOF",
+            retained_node=2,
+            constrained_nodes=[3],
+            dofs=(2,),
+        )
+    )
+
+    try:
+        project.add_analysis(
+            AnalysisSettingsData(
+                62,
+                "Static chain",
+                "Static",
+                constraints_handler=handler,
+            )
+        )
+    except ValueError as exc:
+        assert "does not follow chained MP constraints" in str(exc)
+        assert "retains node 2" in str(exc)
+    else:
+        raise AssertionError("Expected chained-MPC handler validation")
+
+
+@pytest.mark.parametrize("handler", ["Transformation", "Plain"])
+def test_project_rejects_constraint_that_creates_chain_after_analysis(handler):
+    model = StructuralModel("project-late-chain", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+    project = ProjectDatabase(name="Late chain", model=model)
+    project.add_analysis(
+        AnalysisSettingsData(
+            63,
+            "Static",
+            "Static",
+            constraints_handler=handler,
+        )
+    )
+    project.add_constraint(
+        ConstraintData(
+            66,
+            "Upstream",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        )
+    )
+
+    try:
+        project.add_constraint(
+            ConstraintData(
+                67,
+                "Downstream",
+                "equalDOF",
+                retained_node=2,
+                constrained_nodes=[3],
+                dofs=(2,),
+            )
+        )
+    except ValueError as exc:
+        assert "does not follow chained MP constraints" in str(exc)
+    else:
+        raise AssertionError("Expected late chained-MPC validation")

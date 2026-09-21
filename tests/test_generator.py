@@ -1912,3 +1912,135 @@ def test_generator_plain_ignores_nonzero_prescribed_displacement_in_other_driver
     )
 
     assert "ops.sp(2, 1, 0.01)" not in code
+
+
+@pytest.mark.parametrize("handler", ["Transformation", "Plain"])
+def test_generator_rejects_chained_mp_constraints(handler):
+    model = StructuralModel("chained-mp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+
+    constraints = {
+        41: ConstraintData(
+            41,
+            "Node 2 follows node 1",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        ),
+        42: ConstraintData(
+            42,
+            "Node 3 follows node 2",
+            "equalDOF",
+            retained_node=2,
+            constrained_nodes=[3],
+            dofs=(1,),
+        ),
+    }
+    analysis = AnalysisSettingsData(
+        50,
+        "Static chain",
+        "Static",
+        constraints_handler=handler,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=rf"{handler} constraint handler does not follow chained MP constraints",
+    ):
+        to_openseespy(
+            model,
+            constraints=constraints,
+            analyses={50: analysis},
+            active_analysis_tag=50,
+        )
+
+
+@pytest.mark.parametrize("handler", ["Transformation", "Plain"])
+def test_generator_allows_nonchained_mp_constraints(handler):
+    model = StructuralModel("nonchained-mp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+    model.add_node(4, 3.0, 0.0)
+
+    constraints = {
+        43: ConstraintData(
+            43,
+            "Pair one",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        ),
+        44: ConstraintData(
+            44,
+            "Pair two",
+            "equalDOF",
+            retained_node=3,
+            constrained_nodes=[4],
+            dofs=(1,),
+        ),
+    }
+    analysis = AnalysisSettingsData(
+        51,
+        "Static nonchain",
+        "Static",
+        constraints_handler=handler,
+    )
+
+    code = to_openseespy(
+        model,
+        constraints=constraints,
+        analyses={51: analysis},
+        active_analysis_tag=51,
+    )
+
+    assert "ops.equalDOF(1, 2, 1)" in code
+    assert "ops.equalDOF(3, 4, 1)" in code
+
+
+def test_generator_chain_error_reports_relevant_constraint_tags():
+    model = StructuralModel("chain-diagnostics", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+
+    constraints = {
+        45: ConstraintData(
+            45,
+            "Upstream",
+            "equalDOF",
+            retained_node=1,
+            constrained_nodes=[2],
+            dofs=(1,),
+        ),
+        46: ConstraintData(
+            46,
+            "Downstream",
+            "equalDOF",
+            retained_node=2,
+            constrained_nodes=[3],
+            dofs=(2,),
+        ),
+    }
+    analysis = AnalysisSettingsData(
+        52,
+        "Transformation chain",
+        "Static",
+        constraints_handler="Transformation",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        to_openseespy(
+            model,
+            constraints=constraints,
+            analyses={52: analysis},
+            active_analysis_tag=52,
+        )
+
+    message = str(exc_info.value)
+    assert "constraint 46 retains node 2" in message
+    assert "constrained by 45" in message

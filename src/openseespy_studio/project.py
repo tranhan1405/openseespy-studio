@@ -2381,6 +2381,45 @@ class ProjectDatabase:
         if not active_constraints:
             return
 
+        constrained_by_node: dict[int, list[int]] = {}
+        for constraint in active_constraints:
+            for node_tag in constraint.constrained_nodes:
+                constrained_by_node.setdefault(
+                    int(node_tag),
+                    [],
+                ).append(int(constraint.tag))
+
+        chain_conflicts: list[tuple[int, int, list[int]]] = []
+        for constraint in active_constraints:
+            retained_node = int(constraint.retained_node)
+            upstream = sorted({
+                int(tag)
+                for tag in constrained_by_node.get(retained_node, [])
+                if int(tag) != int(constraint.tag)
+            })
+            if upstream:
+                chain_conflicts.append(
+                    (int(constraint.tag), retained_node, upstream)
+                )
+
+        if chain_conflicts and analysis.constraints_handler in {
+            "Transformation",
+            "Plain",
+        }:
+            details = "; ".join(
+                f"constraint {tag} retains node {node_tag}, which is "
+                "constrained by "
+                + ", ".join(map(str, upstream))
+                for tag, node_tag, upstream in chain_conflicts
+            )
+            raise ValueError(
+                f"{analysis.constraints_handler} constraint handler does "
+                "not follow chained MP constraints: "
+                + details
+                + ". A retained node must not be constrained in another "
+                "MP constraint."
+            )
+
         if analysis.constraints_handler == "Transformation":
             by_node: dict[int, list[int]] = {}
             for constraint in active_constraints:

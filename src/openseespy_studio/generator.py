@@ -2652,6 +2652,45 @@ def to_openseespy(
         return True
 
     if active_analysis is not None and constraints:
+        constrained_by_node: dict[int, list[int]] = {}
+        for constraint in constraints.values():
+            for node_tag in constraint.constrained_nodes:
+                constrained_by_node.setdefault(
+                    int(node_tag),
+                    [],
+                ).append(int(constraint.tag))
+
+        chain_conflicts: list[tuple[int, int, list[int]]] = []
+        for constraint in constraints.values():
+            retained_node = int(constraint.retained_node)
+            upstream = sorted({
+                int(tag)
+                for tag in constrained_by_node.get(retained_node, [])
+                if int(tag) != int(constraint.tag)
+            })
+            if upstream:
+                chain_conflicts.append(
+                    (int(constraint.tag), retained_node, upstream)
+                )
+
+        if chain_conflicts and active_analysis.constraints_handler in {
+            "Transformation",
+            "Plain",
+        }:
+            details = "; ".join(
+                f"constraint {tag} retains node {node_tag}, which is "
+                "constrained by "
+                + ", ".join(map(str, upstream))
+                for tag, node_tag, upstream in chain_conflicts
+            )
+            raise ValueError(
+                f"{active_analysis.constraints_handler} constraint handler "
+                "does not follow chained MP constraints: "
+                + details
+                + ". A retained node must not be constrained in another "
+                "MP constraint."
+            )
+
         if active_analysis.constraints_handler == "Transformation":
             mpc_objects_by_node: dict[int, list[int]] = {}
             for constraint in constraints.values():
