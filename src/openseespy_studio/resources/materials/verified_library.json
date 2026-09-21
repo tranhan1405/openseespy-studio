@@ -14941,6 +14941,188 @@
         "parameter_location_identified": true,
         "units_checked": true
       }
+    },
+    {
+      "id": "caballero-castro-2025-unconfined-concrete01",
+      "family": "Reinforced Concrete",
+      "material": "Unconfined concrete",
+      "grade": "TADAS-frame model · Unconfined",
+      "standard": "Study-specific calibrated RC model",
+      "model": "Concrete01",
+      "preset_name": "Caballero-Castro et al. (2025) · Unconfined concrete",
+      "parameters_si": {
+        "fpc": -28000000,
+        "epsc0": -0.0027,
+        "fpcu": -5600000,
+        "epsU": -0.0082
+      },
+      "verified_parameters": [
+        "fpc",
+        "epsc0",
+        "fpcu",
+        "epsU"
+      ],
+      "applicability": [
+        "Medium-rise reinforced-concrete frame models in OpenSeesPy",
+        "Unconfined cover concrete",
+        "Concrete01 material used in the TADAS-equipped building study"
+      ],
+      "limitations": [
+        "Study-specific calibrated values; do not treat as a universal concrete strength class.",
+        "Table 2 reports compression magnitudes as positive. SARE stores compression stress and strain using the OpenSees negative sign convention.",
+        "Ultimate strain was regularized in the source study as indicated by the Table 2 footnote."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Seismic loss assessment of medium-rise reinforced concrete frames in Colombia equipped with TADAS dampers",
+        "authors": "Luis F. Caballero-Castro; Dirsa Feliciano; Carlos Montes; Maritzabel Molina; Orlando Arroyo; Jesús D. Villalba-Morales",
+        "journal": "Structures",
+        "volume_issue": "75",
+        "article": "108732",
+        "year": 2025,
+        "doi": "10.1016/j.istruc.2025.108732"
+      },
+      "parameter_evidence": {
+        "type": "journal_table",
+        "title": "Seismic loss assessment of medium-rise reinforced concrete frames in Colombia equipped with TADAS dampers",
+        "author": "Luis F. Caballero-Castro; Dirsa Feliciano; Carlos Montes; Maritzabel Molina; Orlando Arroyo; Jesús D. Villalba-Morales",
+        "institution": "Structures",
+        "year": 2025,
+        "location": "Table 2 — Calibrated input parameters for TADAS modeling in OpenSees; Concrete01 unconfined row",
+        "url": "https://doi.org/10.1016/j.istruc.2025.108732",
+        "relationship": "Exact Concrete01 magnitudes are taken from Table 2. SARE applies only the OpenSees compression-negative sign convention to fpc, epsc0, fpcu and epsU."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "caballero-castro-2025-confined-concrete01",
+      "family": "Reinforced Concrete",
+      "material": "Confined concrete",
+      "grade": "TADAS-frame model · Confined",
+      "standard": "Study-specific calibrated RC model",
+      "model": "Concrete01",
+      "preset_name": "Caballero-Castro et al. (2025) · Confined concrete",
+      "parameters_si": {
+        "fpc": -36400000,
+        "epsc0": -0.0035,
+        "fpcu": -7300000,
+        "epsU": -0.0127
+      },
+      "verified_parameters": [
+        "fpc",
+        "epsc0",
+        "fpcu",
+        "epsU"
+      ],
+      "applicability": [
+        "Medium-rise reinforced-concrete frame models in OpenSeesPy",
+        "Confined core concrete",
+        "Concrete01 material used in the TADAS-equipped building study"
+      ],
+      "limitations": [
+        "Study-specific calibrated values; do not treat as a universal concrete strength class.",
+        "Table 2 reports compression magnitudes as positive. SARE stores compression stress and strain using the OpenSees negative sign convention.",
+        "Ultimate strain was regularized in the source study as indicated by the Table 2 footnote."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Seismic loss assessment of medium-rise reinforced concrete frames in Colombia equipped with TADAS dampers",
+        "authors": "Luis F. Caballero-Castro; Dirsa Feliciano; Carlos Montes; Maritzabel Molina; Orlando Arroyo; Jesús D. Villalba-Morales",
+        "journal": "Structures",
+        "volume_issue": "75",
+        "article": "108732",
+        "year": 2025,
+        "doi": "10.1016/j.istruc.2025.108732"
+      },
+      "parameter_evidence": {
+        "type": "journal_table",
+        "title": "Seismic loss assessment of medium-rise reinforced concrete frames in Colombia equipped with TADAS dampers",
+        "author": "Luis F. Caballero-Castro; Dirsa Feliciano; Carlos Montes; Maritzabel Molina; Orlando Arroyo; Jesús D. Villalba-Morales",
+        "institution": "Structures",
+        "year": 2025,
+        "location": "Table 2 — Calibrated input parameters for TADAS modeling in OpenSees; Concrete01 confined row",
+        "url": "https://doi.org/10.1016/j.istruc.2025.108732",
+        "relationship": "Exact Concrete01 magnitudes are taken from Table 2. SARE applies only the OpenSees compression-negative sign convention to fpc, epsc0, fpcu and epsU."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "caballero-castro-2025-tadas-steel02",
+      "family": "Metallic Energy Dissipation Device",
+      "material": "TADAS damper steel",
+      "grade": "TADAS · calibrated Steel02",
+      "standard": "Study-specific TADAS calibration",
+      "model": "Steel02",
+      "preset_name": "Caballero-Castro et al. (2025) · TADAS Steel02",
+      "parameters_si": {
+        "Fy": 240000000,
+        "E0": 200000000000,
+        "b": 0.02,
+        "R0": 30,
+        "cR1": 0.959,
+        "cR2": 0.5,
+        "a1": 0.097,
+        "a2": 1,
+        "a3": 0.097,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "Triangular Added Damping and Stiffness (TADAS) devices",
+        "OpenSeesPy nonlinear building models",
+        "Steel02 representation of TADAS material response"
+      ],
+      "limitations": [
+        "Device-study calibration; do not treat as a generic structural-steel grade.",
+        "The associated MinMax displacement limits depend on each device geometry and are therefore intentionally not embedded in this Steel02 record."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Seismic loss assessment of medium-rise reinforced concrete frames in Colombia equipped with TADAS dampers",
+        "authors": "Luis F. Caballero-Castro; Dirsa Feliciano; Carlos Montes; Maritzabel Molina; Orlando Arroyo; Jesús D. Villalba-Morales",
+        "journal": "Structures",
+        "volume_issue": "75",
+        "article": "108732",
+        "year": 2025,
+        "doi": "10.1016/j.istruc.2025.108732"
+      },
+      "parameter_evidence": {
+        "type": "journal_table",
+        "title": "Seismic loss assessment of medium-rise reinforced concrete frames in Colombia equipped with TADAS dampers",
+        "author": "Luis F. Caballero-Castro; Dirsa Feliciano; Carlos Montes; Maritzabel Molina; Orlando Arroyo; Jesús D. Villalba-Morales",
+        "institution": "Structures",
+        "year": 2025,
+        "location": "Table 2 — Calibrated input parameters for TADAS modeling in OpenSees; Steel02 (TADAS) row",
+        "url": "https://doi.org/10.1016/j.istruc.2025.108732",
+        "relationship": "Complete Steel02 parameter set is reported directly in Table 2 for the TADAS device model."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
     }
   ]
 }
