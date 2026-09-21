@@ -1086,3 +1086,152 @@ def test_project_plain_analysis_allows_equal_dof():
     )
 
     assert project.analyses[57].constraints_handler == "Plain"
+
+
+def test_project_plain_analysis_rejects_existing_active_nonzero_prescribed_displacement():
+    model = StructuralModel("project-plain-nonzero-sp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Plain nonzero SP", model=model)
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Imposed displacement", "Plain", time_series_tag=1)
+    )
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(
+            60,
+            "Imposed UX",
+            1,
+            2,
+            1,
+            0.01,
+        )
+    )
+
+    try:
+        project.add_analysis(
+            AnalysisSettingsData(
+                58,
+                "Plain static",
+                "Static",
+                constraints_handler="Plain",
+            )
+        )
+    except ValueError as exc:
+        assert "cannot enforce non-zero Prescribed Displacement" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected Plain/non-zero prescribed displacement validation"
+        )
+
+
+def test_project_rejects_nonzero_prescribed_displacement_added_after_plain_analysis():
+    model = StructuralModel("project-late-nonzero-sp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Late nonzero SP", model=model)
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Imposed displacement", "Plain", time_series_tag=1)
+    )
+    project.add_analysis(
+        AnalysisSettingsData(
+            59,
+            "Plain static",
+            "Static",
+            constraints_handler="Plain",
+        )
+    )
+
+    try:
+        project.add_prescribed_displacement(
+            PrescribedDisplacementData(
+                61,
+                "Imposed UX",
+                1,
+                2,
+                1,
+                0.01,
+            )
+        )
+    except ValueError as exc:
+        assert "uses the Plain constraint handler" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected late Plain/non-zero prescribed displacement validation"
+        )
+
+
+def test_project_plain_analysis_allows_zero_prescribed_displacement():
+    model = StructuralModel("project-plain-zero-sp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Plain zero SP", model=model)
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Zero displacement", "Plain", time_series_tag=1)
+    )
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(
+            62,
+            "Zero UX",
+            1,
+            2,
+            1,
+            0.0,
+        )
+    )
+    project.add_analysis(
+        AnalysisSettingsData(
+            60,
+            "Plain static",
+            "Static",
+            constraints_handler="Plain",
+        )
+    )
+
+    assert project.analyses[60].constraints_handler == "Plain"
+
+
+def test_project_update_analysis_rejects_switch_to_plain_with_nonzero_sp():
+    model = StructuralModel("project-switch-plain-sp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Switch Plain SP", model=model)
+    project.add_time_series(TimeSeriesData(1, "Linear", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Imposed displacement", "Plain", time_series_tag=1)
+    )
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(
+            63,
+            "Imposed UX",
+            1,
+            2,
+            1,
+            0.01,
+        )
+    )
+    project.add_analysis(
+        AnalysisSettingsData(
+            61,
+            "Transformation static",
+            "Static",
+            constraints_handler="Transformation",
+        )
+    )
+
+    try:
+        project.update_analysis(
+            61,
+            AnalysisSettingsData(
+                61,
+                "Plain static",
+                "Static",
+                constraints_handler="Plain",
+            ),
+        )
+    except ValueError as exc:
+        assert "cannot enforce non-zero Prescribed Displacement" in str(exc)
+    else:
+        raise AssertionError("Expected Plain handler switch validation")

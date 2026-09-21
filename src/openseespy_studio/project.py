@@ -2995,6 +2995,22 @@ class ProjectDatabase:
                     "has a prescribed displacement."
                 )
 
+        if displacement.value != 0.0:
+            for analysis_tag, analysis in self.analyses.items():
+                if analysis.constraints_handler != "Plain":
+                    continue
+                if self._analysis_pattern_is_active(
+                    analysis,
+                    displacement.pattern_tag,
+                    ignore_analysis_tags={int(analysis_tag)},
+                ):
+                    raise ValueError(
+                        "Non-zero Prescribed Displacement "
+                        f"{displacement.tag} is active in analysis "
+                        f"{analysis.tag}, which uses the Plain constraint "
+                        "handler. Use the Transformation constraint handler."
+                    )
+
         for analysis_tag, analysis in self.analyses.items():
             if (
                 not self._analysis_uses_control_node(analysis)
@@ -3268,6 +3284,34 @@ class ProjectDatabase:
             and pattern.pattern_type == "Plain"
         )
 
+    def _validate_analysis_plain_prescribed_displacement_compatibility(
+        self,
+        analysis: AnalysisSettingsData,
+        *,
+        ignore_analysis_tags: set[int] | None = None,
+    ) -> None:
+        if analysis.constraints_handler != "Plain":
+            return
+        conflicts = sorted(
+            displacement.tag
+            for displacement in self.prescribed_displacements.values()
+            if (
+                displacement.value != 0.0
+                and self._analysis_pattern_is_active(
+                    analysis,
+                    displacement.pattern_tag,
+                    ignore_analysis_tags=ignore_analysis_tags,
+                )
+            )
+        )
+        if conflicts:
+            raise ValueError(
+                "Plain constraint handler cannot enforce non-zero "
+                "Prescribed Displacement object(s): "
+                + ", ".join(map(str, conflicts))
+                + ". Use the Transformation constraint handler."
+            )
+
     def _validate_analysis_equal_dof_control_conflict(
         self,
         analysis: AnalysisSettingsData,
@@ -3382,6 +3426,9 @@ class ProjectDatabase:
         if analysis.tag in self.analyses:
             raise ValueError(f"Analysis tag {analysis.tag} already exists.")
         self._validate_analysis_constraint_handler_compatibility(analysis)
+        self._validate_analysis_plain_prescribed_displacement_compatibility(
+            analysis
+        )
         uses_control_node = self._analysis_uses_control_node(analysis)
         if uses_control_node and analysis.control_node not in self.model.nodes:
             raise ValueError(
@@ -3412,6 +3459,10 @@ class ProjectDatabase:
         if original_tag not in self.analyses: raise ValueError(f"Analysis tag {original_tag} does not exist.")
         if analysis.tag!=original_tag and analysis.tag in self.analyses: raise ValueError(f"Analysis tag {analysis.tag} already exists.")
         self._validate_analysis_constraint_handler_compatibility(analysis)
+        self._validate_analysis_plain_prescribed_displacement_compatibility(
+            analysis,
+            ignore_analysis_tags={original_tag},
+        )
         uses_control_node = self._analysis_uses_control_node(analysis)
         if uses_control_node and analysis.control_node not in self.model.nodes:
             raise ValueError(

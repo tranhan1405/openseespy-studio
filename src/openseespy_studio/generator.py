@@ -3140,6 +3140,38 @@ def to_openseespy(
 
     if (
         active_analysis is not None
+        and active_analysis.constraints_handler == "Plain"
+    ):
+        active_nonzero_prescribed: list[int] = []
+        for displacement in (prescribed_displacements or {}).values():
+            if displacement.value == 0.0:
+                continue
+            pattern_tag = int(displacement.pattern_tag)
+            if pattern_tag in deferred_pattern_tags:
+                is_active = True
+            elif scoped_deferred_analysis:
+                pattern = (load_patterns or {}).get(pattern_tag)
+                is_active = bool(
+                    active_analysis.preload_gravity
+                    and pattern is not None
+                    and pattern.pattern_type == "Plain"
+                    and pattern_tag not in other_analysis_driver_tags
+                )
+            else:
+                is_active = pattern_tag in (load_patterns or {})
+            if is_active:
+                active_nonzero_prescribed.append(int(displacement.tag))
+
+        if active_nonzero_prescribed:
+            raise ValueError(
+                "Plain constraint handler cannot enforce non-zero "
+                "Prescribed Displacement object(s): "
+                + ", ".join(map(str, sorted(active_nonzero_prescribed)))
+                + ". Use the Transformation constraint handler."
+            )
+
+    if (
+        active_analysis is not None
         and (
             active_analysis.analysis_type in {"Pushover", "Cyclic"}
             or (

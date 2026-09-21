@@ -1746,3 +1746,169 @@ def test_generator_plain_rejects_coupled_rigid_diaphragm():
             analyses={44: analysis},
             active_analysis_tag=44,
         )
+
+
+def test_generator_plain_rejects_active_nonzero_prescribed_displacement():
+    model = StructuralModel("plain-nonzero-sp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    series = {1: TimeSeriesData(1, "Linear", "Linear")}
+    patterns = {
+        1: LoadPatternData(1, "Imposed displacement", "Plain", time_series_tag=1)
+    }
+    prescribed = {
+        37: PrescribedDisplacementData(
+            37,
+            "Imposed UX",
+            1,
+            2,
+            1,
+            0.01,
+        )
+    }
+    analysis = AnalysisSettingsData(
+        45,
+        "Plain static",
+        "Static",
+        constraints_handler="Plain",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Plain constraint handler cannot enforce non-zero Prescribed Displacement",
+    ):
+        to_openseespy(
+            model,
+            time_series=series,
+            load_patterns=patterns,
+            prescribed_displacements=prescribed,
+            analyses={45: analysis},
+            active_analysis_tag=45,
+        )
+
+
+def test_generator_plain_allows_zero_prescribed_displacement():
+    model = StructuralModel("plain-zero-sp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    series = {1: TimeSeriesData(1, "Linear", "Linear")}
+    patterns = {
+        1: LoadPatternData(1, "Zero displacement", "Plain", time_series_tag=1)
+    }
+    prescribed = {
+        38: PrescribedDisplacementData(
+            38,
+            "Zero UX",
+            1,
+            2,
+            1,
+            0.0,
+        )
+    }
+    analysis = AnalysisSettingsData(
+        46,
+        "Plain static",
+        "Static",
+        constraints_handler="Plain",
+    )
+
+    code = to_openseespy(
+        model,
+        time_series=series,
+        load_patterns=patterns,
+        prescribed_displacements=prescribed,
+        analyses={46: analysis},
+        active_analysis_tag=46,
+    )
+
+    assert "ops.sp(2, 1, 0)" in code
+
+
+def test_generator_transformation_allows_nonzero_prescribed_displacement():
+    model = StructuralModel("transformation-nonzero-sp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    series = {1: TimeSeriesData(1, "Linear", "Linear")}
+    patterns = {
+        1: LoadPatternData(1, "Imposed displacement", "Plain", time_series_tag=1)
+    }
+    prescribed = {
+        39: PrescribedDisplacementData(
+            39,
+            "Imposed UX",
+            1,
+            2,
+            1,
+            0.01,
+        )
+    }
+    analysis = AnalysisSettingsData(
+        47,
+        "Transformation static",
+        "Static",
+        constraints_handler="Transformation",
+    )
+
+    code = to_openseespy(
+        model,
+        time_series=series,
+        load_patterns=patterns,
+        prescribed_displacements=prescribed,
+        analyses={47: analysis},
+        active_analysis_tag=47,
+    )
+
+    assert "ops.sp(2, 1, 0.01)" in code
+
+
+def test_generator_plain_ignores_nonzero_prescribed_displacement_in_other_driver():
+    model = StructuralModel("plain-inactive-sp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    series = {
+        1: TimeSeriesData(1, "Current", "Linear"),
+        2: TimeSeriesData(2, "Other", "Linear"),
+    }
+    patterns = {
+        1: LoadPatternData(1, "Current driver", "Plain", time_series_tag=1),
+        2: LoadPatternData(2, "Other driver", "Plain", time_series_tag=2),
+    }
+    prescribed = {
+        40: PrescribedDisplacementData(
+            40,
+            "Other imposed UX",
+            2,
+            2,
+            1,
+            0.01,
+        )
+    }
+    current = AnalysisSettingsData(
+        48,
+        "Current static",
+        "Static",
+        constraints_handler="Plain",
+        deferred_pattern_tags=[1],
+    )
+    other = AnalysisSettingsData(
+        49,
+        "Other static",
+        "Static",
+        constraints_handler="Transformation",
+        deferred_pattern_tags=[2],
+    )
+
+    code = to_openseespy(
+        model,
+        time_series=series,
+        load_patterns=patterns,
+        prescribed_displacements=prescribed,
+        analyses={48: current, 49: other},
+        active_analysis_tag=48,
+    )
+
+    assert "ops.sp(2, 1, 0.01)" not in code
