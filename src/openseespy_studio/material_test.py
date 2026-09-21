@@ -87,6 +87,7 @@ def default_material_test_spec(
         "Concrete01",
         "Concrete02",
         "Concrete04",
+        "FRPConfinedConcrete",
         "FRPConfinedConcrete02",
     }:
         strains: list[float] = []
