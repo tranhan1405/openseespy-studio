@@ -1488,6 +1488,7 @@ class _Importer:
                 "analysis_kind": self.analysis_state.get("analysis_kind"),
                 "pattern_tags": sorted(self.project.load_patterns),
                 "current_pattern": self.current_pattern,
+                "algorithm": self.analysis_state.get("algorithm"),
             })
         elif command == "eigen" and args:
             self.analysis_state["modal"] = True
@@ -1858,6 +1859,7 @@ class _Importer:
             ),
             "pattern_tags": sorted(self.project.load_patterns),
             "current_pattern": self.current_pattern,
+            "algorithm": self.analysis_state.get("algorithm"),
             "recognized_cyclic": True,
         })
         self.count("Cyclic drivers")
@@ -1964,6 +1966,7 @@ class _Importer:
             ),
             "pattern_tags": sorted(self.project.load_patterns),
             "current_pattern": self.current_pattern,
+            "algorithm": self.analysis_state.get("algorithm"),
             "recognized_pushover": True,
         })
         self.count("Pushover drivers")
@@ -2299,6 +2302,7 @@ class _Importer:
         staged_displacement = False
         staged_driver_tags: list[int] = []
         staged_preload_steps = 1
+        staged_preload_algorithm = "Auto"
         final_stage_steps = max(
             1,
             int(state.get("steps", 1) or 1),
@@ -2358,6 +2362,9 @@ class _Importer:
                         for event in self.analysis_events[
                             prior_start:final_start
                         ]
+                    )
+                    staged_preload_algorithm = str(
+                        prior_event.get("algorithm") or "Auto"
                     )
 
         analysis_type = str(meta.get("type", ""))
@@ -2493,6 +2500,16 @@ class _Importer:
                 meta.get(
                     "gravity_steps",
                     staged_preload_steps if staged_displacement else 10,
+                )
+            ),
+            "gravity_algorithm": str(
+                meta.get(
+                    "gravity_algorithm",
+                    (
+                        staged_preload_algorithm
+                        if staged_displacement
+                        else "Auto"
+                    ),
                 )
             ),
             "deferred_pattern_tags": [
