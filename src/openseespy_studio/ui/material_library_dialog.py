@@ -58,7 +58,10 @@ class MaterialLibraryDialog(QDialog):
 
         root = QVBoxLayout(self)
 
-        title = QLabel("Engineering Data · Verified Material Library")
+        title = QLabel(
+            "Engineering Data · Verified Material Library · "
+            f"{len(self._records)} records"
+        )
         title.setStyleSheet("font-size: 16px; font-weight: 700;")
         root.addWidget(title)
 
