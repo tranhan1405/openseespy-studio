@@ -2961,6 +2961,11 @@ class ProjectDatabase:
         ):
             self.sections.pop(generated_section, None)
 
+        # A scoped result request must never silently become an "all
+        # entities" request after cleanup.  Narrow surviving scopes and drop
+        # a request when one of its explicit scopes loses every target.
+        self.prune_solution_results()
+
     def create_ground_node(self, source_node_tag: int) -> int:
         source_node_tag = int(source_node_tag)
         source = self.model.nodes.get(source_node_tag)
@@ -3030,6 +3035,7 @@ class ProjectDatabase:
         self.prune_prescribed_displacements()
         self.prune_element_loads()
         self.prune_recorders()
+        self.prune_solution_results()
 
         existing_nodes = set(self.model.nodes)
         existing_elements = set(self.model.elements)
@@ -3646,6 +3652,31 @@ class ProjectDatabase:
             recorder.target_tags = [item for item in recorder.target_tags if item in valid]
             if not recorder.target_tags:
                 self.recorders.pop(tag)
+                removed.append(tag)
+        return sorted(removed)
+
+    def prune_solution_results(self) -> list[int]:
+        removed: list[int] = []
+        valid_nodes = set(self.model.nodes)
+        valid_elements = set(self.model.elements) | set(self.connections)
+        for tag, result in list(self.solution_results.items()):
+            node_scoped = bool(result.node_scope)
+            element_scoped = bool(result.element_scope)
+            if node_scoped:
+                result.node_scope = [
+                    item for item in result.node_scope
+                    if item in valid_nodes
+                ]
+            if element_scoped:
+                result.element_scope = [
+                    item for item in result.element_scope
+                    if item in valid_elements
+                ]
+            if (
+                (node_scoped and not result.node_scope)
+                or (element_scoped and not result.element_scope)
+            ):
+                self.solution_results.pop(tag)
                 removed.append(tag)
         return sorted(removed)
 
