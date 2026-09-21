@@ -241,13 +241,12 @@ class TestColumnWizard(QDialog):
         boundary_layout.addLayout(boundary)
 
         interface_note = QLabel(
-            "The base interface belongs to the specimen, so the same column "
-            "can be used for Cyclic, Pushover, and NLTH. Fixed base is the "
-            "default. Nonlinear interface DOFs are released at the column "
-            "base and connected to a coincident fixed ground node through "
-            "zeroLength. For reinforcement strain penetration, Bond_SP01 "
-            "belongs in a Fiber zeroLengthSection rather than directly in "
-            "a force-deformation zeroLength DOF."
+            "Choose the OpenSees interface family first. zeroLength uses "
+            "independent UniaxialMaterial springs by DOF. "
+            "zeroLengthSection uses one complete Section response; choose "
+            "a general Section interface or the dedicated Bond_SP01 "
+            "strain-penetration workflow. The interface is part of the "
+            "specimen and can be reused for Cyclic, Pushover, and NLTH."
         )
         interface_note.setWordWrap(True)
         interface_note.setObjectName("Muted")
