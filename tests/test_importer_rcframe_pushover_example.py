@@ -119,7 +119,12 @@ def test_rcframe_pushover_resolves_sibling_gravity_and_while_driver(
     assert len(result.project.model.nodes) == 4
     assert len(result.project.model.elements) == 3
     assert len(result.project.materials) == 3
-    assert len(result.project.sections) == 1
+    assert len(result.project.sections) == 2
+    assert result.project.sections[1].section_type == "Fiber"
+    assert any(
+        section.section_type == "Elastic"
+        for section in result.project.sections.values()
+    )
     assert len(result.project.load_patterns) == 2
     assert len(result.project.nodal_loads) == 4
 
