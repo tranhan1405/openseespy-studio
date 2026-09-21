@@ -2246,3 +2246,145 @@ def test_generator_ignores_prescribed_mpc_conflict_in_inactive_other_driver():
     )
 
     assert "ops.sp(2, 1, 0)" not in code
+
+
+def test_generator_rejects_multiple_active_prescribed_displacements_same_dof():
+    model = StructuralModel("duplicate-active-sp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    series = {
+        1: TimeSeriesData(1, "One", "Linear"),
+        2: TimeSeriesData(2, "Two", "Linear"),
+    }
+    patterns = {
+        1: LoadPatternData(1, "Pattern one", "Plain", time_series_tag=1),
+        2: LoadPatternData(2, "Pattern two", "Plain", time_series_tag=2),
+    }
+    prescribed = {
+        45: PrescribedDisplacementData(45, "SP one", 1, 2, 1, 0.01),
+        46: PrescribedDisplacementData(46, "SP two", 2, 2, 1, 0.02),
+    }
+    analysis = AnalysisSettingsData(
+        58,
+        "Static",
+        "Static",
+        constraints_handler="Transformation",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Multiple active Prescribed Displacement objects target the same node/DOF",
+    ):
+        to_openseespy(
+            model,
+            time_series=series,
+            load_patterns=patterns,
+            prescribed_displacements=prescribed,
+            analyses={58: analysis},
+            active_analysis_tag=58,
+        )
+
+
+def test_generator_allows_same_dof_sp_in_inactive_other_driver():
+    model = StructuralModel("scoped-same-dof-sp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+
+    series = {
+        1: TimeSeriesData(1, "One", "Linear"),
+        2: TimeSeriesData(2, "Two", "Linear"),
+    }
+    patterns = {
+        1: LoadPatternData(1, "Pattern one", "Plain", time_series_tag=1),
+        2: LoadPatternData(2, "Pattern two", "Plain", time_series_tag=2),
+    }
+    prescribed = {
+        47: PrescribedDisplacementData(47, "SP one", 1, 2, 1, 0.01),
+        48: PrescribedDisplacementData(48, "SP two", 2, 2, 1, 0.02),
+    }
+    current = AnalysisSettingsData(
+        59,
+        "Current",
+        "Static",
+        constraints_handler="Transformation",
+        deferred_pattern_tags=[1],
+    )
+    other = AnalysisSettingsData(
+        60,
+        "Other",
+        "Static",
+        constraints_handler="Transformation",
+        deferred_pattern_tags=[2],
+    )
+
+    code = to_openseespy(
+        model,
+        time_series=series,
+        load_patterns=patterns,
+        prescribed_displacements=prescribed,
+        analyses={59: current, 60: other},
+        active_analysis_tag=59,
+    )
+
+    assert "ops.sp(2, 1, 0.01)" in code
+    assert "ops.sp(2, 1, 0.02)" not in code
+
+
+def test_generator_allows_retained_master_sp_through_preload_and_load_const():
+    model = StructuralModel("master-sp-preload", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    model.add_node(3, 2.0, 0.0)
+
+    constraint = ConstraintData(
+        51,
+        "Slave follows master",
+        "equalDOF",
+        retained_node=1,
+        constrained_nodes=[2],
+        dofs=(1,),
+    )
+    series = {
+        1: TimeSeriesData(1, "Preload", "Linear"),
+        2: TimeSeriesData(2, "Driver", "Linear"),
+    }
+    patterns = {
+        1: LoadPatternData(1, "Master preload", "Plain", time_series_tag=1),
+        2: LoadPatternData(2, "Driver", "Plain", time_series_tag=2),
+    }
+    prescribed = {
+        49: PrescribedDisplacementData(
+            49,
+            "Master imposed UX",
+            1,
+            1,
+            1,
+            0.01,
+        )
+    }
+    analysis = AnalysisSettingsData(
+        61,
+        "Static with preload",
+        "Static",
+        constraints_handler="Transformation",
+        preload_gravity=True,
+        gravity_steps=10,
+        deferred_pattern_tags=[2],
+    )
+
+    code = to_openseespy(
+        model,
+        constraints={51: constraint},
+        time_series=series,
+        load_patterns=patterns,
+        prescribed_displacements=prescribed,
+        analyses={61: analysis},
+        active_analysis_tag=61,
+    )
+
+    sp_index = code.index("ops.sp(1, 1, 0.01)")
+    const_index = code.index("ops.loadConst('-time', 0.0)")
+    driver_index = code.index("ops.pattern('Plain', 2, 2)")
+    assert sp_index < const_index < driver_index
+    assert "ops.equalDOF(1, 2, 1)" in code

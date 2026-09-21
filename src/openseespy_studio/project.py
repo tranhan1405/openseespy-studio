@@ -3066,13 +3066,41 @@ class ProjectDatabase:
             if original_tag is not None and int(tag) == int(original_tag):
                 continue
             if (
-                existing.node_tag == displacement.node_tag
-                and existing.dof == displacement.dof
+                existing.node_tag != displacement.node_tag
+                or existing.dof != displacement.dof
             ):
+                continue
+            if existing.pattern_tag == displacement.pattern_tag:
                 raise ValueError(
                     "Node "
                     f"{displacement.node_tag} DOF {displacement.dof} already "
-                    "has a prescribed displacement."
+                    "has a prescribed displacement in load pattern "
+                    f"{displacement.pattern_tag}."
+                )
+            simultaneous = sorted(
+                analysis.tag
+                for analysis_tag, analysis in self.analyses.items()
+                if (
+                    self._analysis_pattern_is_active(
+                        analysis,
+                        existing.pattern_tag,
+                        ignore_analysis_tags={int(analysis_tag)},
+                    )
+                    and self._analysis_pattern_is_active(
+                        analysis,
+                        displacement.pattern_tag,
+                        ignore_analysis_tags={int(analysis_tag)},
+                    )
+                )
+            )
+            if simultaneous:
+                raise ValueError(
+                    "Node "
+                    f"{displacement.node_tag} DOF {displacement.dof} would "
+                    "have multiple active Prescribed Displacement objects "
+                    "in analysis tag(s): "
+                    + ", ".join(map(str, simultaneous))
+                    + "."
                 )
 
         mpc_conflicts = sorted(
@@ -3394,6 +3422,46 @@ class ProjectDatabase:
             and pattern.pattern_type == "Plain"
         )
 
+    def _validate_analysis_duplicate_prescribed_dofs(
+        self,
+        analysis: AnalysisSettingsData,
+        *,
+        ignore_analysis_tags: set[int] | None = None,
+    ) -> None:
+        active_by_dof: dict[tuple[int, int], list[int]] = {}
+        for displacement in self.prescribed_displacements.values():
+            if not self._analysis_pattern_is_active(
+                analysis,
+                displacement.pattern_tag,
+                ignore_analysis_tags=ignore_analysis_tags,
+            ):
+                continue
+            key = (
+                int(displacement.node_tag),
+                int(displacement.dof),
+            )
+            active_by_dof.setdefault(key, []).append(
+                int(displacement.tag)
+            )
+
+        conflicts = {
+            key: sorted(tags)
+            for key, tags in active_by_dof.items()
+            if len(tags) > 1
+        }
+        if conflicts:
+            details = "; ".join(
+                f"node {node_tag} DOF {dof}: "
+                + ", ".join(map(str, tags))
+                for (node_tag, dof), tags in sorted(conflicts.items())
+            )
+            raise ValueError(
+                f"Analysis {analysis.tag} activates multiple Prescribed "
+                "Displacement objects on the same DOF: "
+                + details
+                + "."
+            )
+
     def _validate_analysis_prescribed_mpc_conflict(
         self,
         analysis: AnalysisSettingsData,
@@ -3581,6 +3649,7 @@ class ProjectDatabase:
         if analysis.tag in self.analyses:
             raise ValueError(f"Analysis tag {analysis.tag} already exists.")
         self._validate_analysis_constraint_handler_compatibility(analysis)
+        self._validate_analysis_duplicate_prescribed_dofs(analysis)
         self._validate_analysis_prescribed_mpc_conflict(analysis)
         self._validate_analysis_plain_prescribed_displacement_compatibility(
             analysis
@@ -3615,6 +3684,10 @@ class ProjectDatabase:
         if original_tag not in self.analyses: raise ValueError(f"Analysis tag {original_tag} does not exist.")
         if analysis.tag!=original_tag and analysis.tag in self.analyses: raise ValueError(f"Analysis tag {analysis.tag} already exists.")
         self._validate_analysis_constraint_handler_compatibility(analysis)
+        self._validate_analysis_duplicate_prescribed_dofs(
+            analysis,
+            ignore_analysis_tags={original_tag},
+        )
         self._validate_analysis_prescribed_mpc_conflict(
             analysis,
             ignore_analysis_tags={original_tag},

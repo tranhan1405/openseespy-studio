@@ -2620,6 +2620,34 @@ def to_openseespy(
             )
         return pattern_tag in (load_patterns or {})
 
+    active_prescribed_by_dof: dict[tuple[int, int], list[int]] = {}
+    for displacement in (prescribed_displacements or {}).values():
+        if not pattern_is_active(displacement.pattern_tag):
+            continue
+        key = (int(displacement.node_tag), int(displacement.dof))
+        active_prescribed_by_dof.setdefault(key, []).append(
+            int(displacement.tag)
+        )
+
+    duplicate_active_prescribed = {
+        key: sorted(tags)
+        for key, tags in active_prescribed_by_dof.items()
+        if len(tags) > 1
+    }
+    if duplicate_active_prescribed:
+        details = "; ".join(
+            f"node {node_tag} DOF {dof}: "
+            + ", ".join(map(str, tags))
+            for (node_tag, dof), tags
+            in sorted(duplicate_active_prescribed.items())
+        )
+        raise ValueError(
+            "Multiple active Prescribed Displacement objects target the "
+            "same node/DOF: "
+            + details
+            + "."
+        )
+
     prescribed_mpc_conflicts: list[tuple[int, int, int, list[int]]] = []
     for displacement in (prescribed_displacements or {}).values():
         if not pattern_is_active(displacement.pattern_tag):

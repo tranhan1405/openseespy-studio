@@ -1497,3 +1497,100 @@ def test_project_rejects_analysis_that_activates_existing_sp_mpc_conflict():
                 constraints_handler="Transformation",
             )
         )
+
+
+def test_project_allows_same_dof_sp_in_separate_analysis_drivers():
+    model = StructuralModel("project-scoped-sp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Scoped SP", model=model)
+    project.add_time_series(TimeSeriesData(1, "One", "Linear"))
+    project.add_time_series(TimeSeriesData(2, "Two", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Pattern one", "Plain", time_series_tag=1)
+    )
+    project.add_load_pattern(
+        LoadPatternData(2, "Pattern two", "Plain", time_series_tag=2)
+    )
+    project.add_analysis(
+        AnalysisSettingsData(
+            68,
+            "Analysis one",
+            "Static",
+            constraints_handler="Transformation",
+            deferred_pattern_tags=[1],
+        )
+    )
+    project.add_analysis(
+        AnalysisSettingsData(
+            69,
+            "Analysis two",
+            "Static",
+            constraints_handler="Transformation",
+            deferred_pattern_tags=[2],
+        )
+    )
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(72, "SP one", 1, 2, 1, 0.01)
+    )
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(73, "SP two", 2, 2, 1, 0.02)
+    )
+
+    assert set(project.prescribed_displacements) == {72, 73}
+
+
+def test_project_rejects_duplicate_sp_in_same_pattern_same_dof():
+    model = StructuralModel("project-same-pattern-sp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Same pattern SP", model=model)
+    project.add_time_series(TimeSeriesData(1, "One", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Pattern one", "Plain", time_series_tag=1)
+    )
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(74, "SP one", 1, 2, 1, 0.01)
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"already has a prescribed displacement in load pattern 1",
+    ):
+        project.add_prescribed_displacement(
+            PrescribedDisplacementData(75, "SP two", 1, 2, 1, 0.02)
+        )
+
+
+def test_project_rejects_analysis_activating_two_same_dof_sp_patterns():
+    model = StructuralModel("project-active-duplicate-sp", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0)
+    project = ProjectDatabase(name="Active duplicate SP", model=model)
+    project.add_time_series(TimeSeriesData(1, "One", "Linear"))
+    project.add_time_series(TimeSeriesData(2, "Two", "Linear"))
+    project.add_load_pattern(
+        LoadPatternData(1, "Pattern one", "Plain", time_series_tag=1)
+    )
+    project.add_load_pattern(
+        LoadPatternData(2, "Pattern two", "Plain", time_series_tag=2)
+    )
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(76, "SP one", 1, 2, 1, 0.01)
+    )
+    project.add_prescribed_displacement(
+        PrescribedDisplacementData(77, "SP two", 2, 2, 1, 0.02)
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"activates multiple Prescribed Displacement objects on the same DOF",
+    ):
+        project.add_analysis(
+            AnalysisSettingsData(
+                70,
+                "All patterns static",
+                "Static",
+                constraints_handler="Transformation",
+            )
+        )
