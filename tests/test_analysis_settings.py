@@ -1168,3 +1168,31 @@ def test_modal_participation_keeps_three_translational_dofs_for_3d_model():
 
     assert "for _studio_dof in (1, 2, 3):" in text
     compile(text, "<modal-3d-participation>", "exec")
+
+
+def test_modal_participation_uses_opensees_assembled_mass_matrix():
+    analysis = AnalysisSettingsData(
+        82,
+        "Modal assembled mass",
+        "Modal",
+        num_modes=2,
+    )
+
+    text = "\n".join(
+        analysis_to_openseespy(
+            analysis,
+            ndm=2,
+            node_tags=[1, 2],
+            support_node_tags=[1],
+        )
+    )
+
+    assert "ops.modalProperties('-return')" in text
+    assert "_studio_modal_properties.get('totalMass', [])" in text
+    assert "_studio_modal_properties.get('totalFreeMass', [])" in text
+    assert "f'partiFactor{_studio_axis}'" in text
+    assert "f'partiMass{_studio_axis}'" in text
+    assert "f'partiMassRatios{_studio_axis}'" in text
+    assert "float(_studio_ratio_values[_studio_index]) / 100.0" in text
+    assert "ops.nodeMass(_studio_node, _studio_dof)" not in text
+    compile(text, "<modal-assembled-mass>", "exec")
