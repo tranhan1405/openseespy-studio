@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from openseespy_studio.project import (
+    ConnectionData,
     LoadPatternData,
     MaterialData,
     NodalLoadData,
@@ -370,3 +371,37 @@ def test_test_column_radau_allows_subdivided_distributed_plasticity():
         project.model.elements[tag].integration_type == "Radau"
         for tag in result.element_tags
     )
+
+
+def test_appended_test_column_skips_existing_connection_element_tag():
+    project = project_with_section()
+    project.add_material(
+        MaterialData(1, "Spring", "Elastic", {"E": 1000.0})
+    )
+    project.model.add_node(1, 10.0, 0.0, 0.0)
+    project.model.add_node(2, 10.0, 0.0, 0.0)
+    project.add_connection(
+        ConnectionData(
+            1,
+            "Existing spring",
+            "zeroLength",
+            1,
+            2,
+            materials_by_dof={1: 1},
+        )
+    )
+
+    result = build_test_column(
+        project,
+        TestColumnSpec(
+            height=3.0,
+            num_elements=1,
+            section_tag=1,
+            replace_geometry=False,
+        ),
+    )
+
+    assert result.element_tags == [2]
+    assert 1 in project.connections
+    assert 1 not in project.model.elements
+    assert 2 in project.model.elements
