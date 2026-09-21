@@ -2235,8 +2235,21 @@ class _Importer:
                     )
 
         analysis_type = str(meta.get("type", ""))
+        analysis_type_hint = str(
+            state.get(
+                "analysis_type_hint",
+                self.env.get(
+                    "AnalysisType",
+                    self.env.get("analysisType", ""),
+                ),
+            )
+            or ""
+        ).strip()
         if not analysis_type:
-            if state.get("recognized_pushover"):
+            if (
+                state.get("recognized_pushover")
+                or analysis_type_hint.lower() == "pushover"
+            ):
                 analysis_type = "Pushover"
             elif state.get("modal"):
                 analysis_type = "Modal"
