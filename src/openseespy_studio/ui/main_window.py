@@ -1579,6 +1579,7 @@ class MainWindow(QMainWindow):
         self.selection = SelectionManager(self)
         self._tree_node_items: dict[int, QTreeWidgetItem] = {}
         self._tree_element_items: dict[int, QTreeWidgetItem] = {}
+        self._tree_line_items: dict[int, QTreeWidgetItem] = {}
         self._tree_surface_items: dict[int, QTreeWidgetItem] = {}
         self._shortcuts: list[QShortcut] = []
         self._analysis_process: QProcess | None = None
@@ -4024,6 +4025,10 @@ class MainWindow(QMainWindow):
         self.tree.clear()
         self._tree_node_items.clear()
         self._tree_element_items.clear()
+        if not hasattr(self, "_tree_line_items"):
+            self._tree_line_items = {}
+        else:
+            self._tree_line_items.clear()
         if not hasattr(self, "_tree_surface_items"):
             self._tree_surface_items = {}
         else:
@@ -4155,6 +4160,7 @@ class MainWindow(QMainWindow):
             item.setIcon(0, studio_icon("element"))
             item.setData(0, Qt.UserRole, ("line_geometry", tag))
             lines.addChild(item)
+            self._tree_line_items[tag] = item
 
             live_elements = [
                 int(element_tag)
@@ -4903,6 +4909,17 @@ class MainWindow(QMainWindow):
         self.viewport.set_display_domain(
             "geometry" if geometry_mode else "fe"
         )
+        line_geometry_tags = {
+            int(item.data(0, Qt.UserRole)[1])
+            for item in self.tree.selectedItems()
+            if (
+                item.data(0, Qt.UserRole)
+                and item.data(0, Qt.UserRole)[0] == "line_geometry"
+            )
+        }
+        self.viewport.set_geometry_line_selection(
+            line_geometry_tags if geometry_mode else set()
+        )
         self.viewport.set_geometry_surface_selection(
             surface_geometry_tags if geometry_mode else set()
         )
@@ -5416,6 +5433,33 @@ class MainWindow(QMainWindow):
             return
         self.viewport.set_selection_filter(value)
         self.status_message.setText(f"Selection filter: {text}")
+
+    def _select_geometry_line_from_viewport(
+        self,
+        tag: int,
+        mode: str,
+    ) -> None:
+        item = self._tree_line_items.get(int(tag))
+        if item is None:
+            return
+        mode = str(mode)
+        self.tree.blockSignals(True)
+        try:
+            if mode == "replace":
+                self.tree.clearSelection()
+                item.setSelected(True)
+            elif mode == "add":
+                item.setSelected(True)
+            elif mode == "toggle":
+                item.setSelected(not item.isSelected())
+            else:
+                self.tree.clearSelection()
+                item.setSelected(True)
+        finally:
+            self.tree.blockSignals(False)
+        self._tree_selection_changed()
+        if item.isSelected():
+            self.tree.scrollToItem(item)
 
     def _select_geometry_surface_from_viewport(
         self,
@@ -6032,6 +6076,13 @@ class MainWindow(QMainWindow):
             self._handle_geometry_rectangle_sketch_click(payload)
             return
 
+        if kind == "geometry_line" and tag is not None:
+            self._select_geometry_line_from_viewport(
+                int(tag),
+                str(mode),
+            )
+            return
+
         if kind == "geometry_surface" and tag is not None:
             self._select_geometry_surface_from_viewport(
                 int(tag),
@@ -6199,6 +6250,11 @@ class MainWindow(QMainWindow):
             return
         kind = str(payload.get("kind"))
         tag = int(payload.get("tag"))
+        if kind == "geometry_line":
+            self._select_geometry_line_from_viewport(tag, "replace")
+            self._show_line_geometry_properties(tag)
+            self.properties_dock.raise_()
+            return
         if kind == "geometry_surface":
             self._select_geometry_surface_from_viewport(tag, "replace")
             self._show_surface_geometry_properties(tag)
