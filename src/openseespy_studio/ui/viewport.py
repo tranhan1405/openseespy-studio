@@ -2040,12 +2040,16 @@ class ModelViewport(QWidget):
             return None
         return pieces[0] if len(pieces) == 1 else pv.merge(pieces, merge_points=False)
 
-    def _element_highlight_style(self, *, hover: bool = False) -> dict:
+    @classmethod
+    def _element_highlight_style(
+        cls,
+        representation: str,
+        *,
+        hover: bool = False,
+    ) -> dict:
         """Return overlay rendering that stays visible for each representation."""
         centerline = (
-            self._normalized_model_representation(
-                self._model_representation
-            )
+            cls._normalized_model_representation(representation)
             == "centerline"
         )
         if centerline:
@@ -2078,7 +2082,9 @@ class ModelViewport(QWidget):
 
         selected_element_mesh = self._element_overlay_mesh(self._selected_elements)
         if selected_element_mesh is not None:
-            selection_style = self._element_highlight_style()
+            selection_style = self._element_highlight_style(
+                self._model_representation
+            )
             self.plotter.add_mesh(
                 selected_element_mesh,
                 name="selection-elements",
@@ -2118,7 +2124,10 @@ class ModelViewport(QWidget):
             if kind == "element" and tag not in self._selected_elements:
                 mesh = self._element_overlay_mesh({tag})
                 if mesh is not None:
-                    hover_style = self._element_highlight_style(hover=True)
+                    hover_style = self._element_highlight_style(
+                        self._model_representation,
+                        hover=True,
+                    )
                     self.plotter.add_mesh(
                         mesh,
                         name="hover-element",
