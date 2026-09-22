@@ -3920,8 +3920,14 @@ def to_openseespy(
                 f"ops.element('{e.element_type}', {tag}, "
                 f"{e.i}, {e.j}, {e.k}, {e.l}, {e.section_tag}"
             )
-            if e.element_type == "ASDShellQ4" and e.shell_corotational:
-                args += ", '-corotational'"
+            if e.element_type == "ASDShellQ4":
+                if e.shell_corotational:
+                    args += ", '-corotational'"
+                if e.shell_local_x is not None:
+                    x1, x2, x3 = e.shell_local_x
+                    args += (
+                        f", '-local', {x1:g}, {x2:g}, {x3:g}"
+                    )
             args += ")"
             lines.append(args)
             continue
