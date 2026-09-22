@@ -130,10 +130,12 @@ from ..shell_quality import shell_mesh_quality_summary
 from ..line_mesher import (
     audit_line_mesh_integrity,
     audit_line_network_connectivity,
+    conform_line_network,
     copy_line_mesh_recipe,
     delete_line_geometry,
     delete_line_mesh,
     inspect_line_mesh_state,
+    line_geometry_intersections,
     line_mesh_preview_points,
     line_mesh_quality,
     mesh_line_geometry,
@@ -13143,6 +13145,106 @@ class MainWindow(QMainWindow):
             before,
         )
 
+    def _inspect_line_geometry_intersections(self, line_tags) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in line_tags
+            if int(tag) in self.project.lines
+        })
+        if len(tags) < 2:
+            QMessageBox.information(
+                self,
+                "Geometry Line Intersections",
+                "Select at least two Geometry Lines.",
+            )
+            return
+        try:
+            intersections = line_geometry_intersections(
+                self.project,
+                tags,
+            )
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Geometry Line Intersections",
+                str(exc),
+            )
+            return
+        if not intersections:
+            QMessageBox.information(
+                self,
+                "Geometry Line Intersections",
+                f"No Line intersections found across {len(tags)} Line(s).",
+            )
+            return
+        details = [
+            (
+                f"{index}. Lines {item.line_tags[0]} / {item.line_tags[1]} · "
+                f"{item.kind} · "
+                f"({item.point[0]:g}, {item.point[1]:g}, {item.point[2]:g})"
+            )
+            for index, item in enumerate(intersections[:30], start=1)
+        ]
+        if len(intersections) > 30:
+            details.append(
+                f"... and {len(intersections) - 30} more intersection(s)."
+            )
+        QMessageBox.information(
+            self,
+            "Geometry Line Intersections",
+            "\n".join(details),
+        )
+
+    def _conform_line_network_ui(self, line_tags) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in line_tags
+            if int(tag) in self.project.lines
+        })
+        if len(tags) < 2:
+            QMessageBox.information(
+                self,
+                "Conform Line Network",
+                "Select at least two Geometry Lines.",
+            )
+            return
+        before = self.project.to_dict()
+        try:
+            result = conform_line_network(
+                self.project,
+                tags,
+                mesh=True,
+            )
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Conform Line Network",
+                str(exc),
+            )
+            return
+        self.model = self.project.model
+        element_count = sum(
+            len(mesh.element_tags)
+            for mesh in result.mesh_results.values()
+        )
+        self._refresh_all(
+            f"Conformed {len(result.input_line_tags)} Line(s) · "
+            f"{result.intersection_count} intersection(s) · "
+            f"{len(result.created_point_tags)} new Point(s) · "
+            f"{len(result.created_line_tags)} new Line segment(s) · "
+            f"{element_count} Frame/Truss element(s)"
+        )
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
+        self._record_project_change(
+            "Conform Geometry Line network "
+            + ", ".join(map(str, tags)),
+            before,
+        )
+
     def _audit_line_network_connectivity_ui(self, line_tags=None) -> None:
         tags = (
             sorted({
@@ -18466,15 +18568,35 @@ class MainWindow(QMainWindow):
                 lambda checked=False, t=tag:
                 self._audit_line_mesh_integrity(t)
             )
-            network_audit = menu.addAction(
-                "Audit Selected Line Connectivity"
-                if count > 1
-                else "Audit Line Network Connectivity"
-            )
             network_tags = (
                 tuple(line_tags)
                 if count > 1
                 else tuple(sorted(self.project.lines))
+            )
+            inspect_intersections = menu.addAction(
+                "Inspect Selected Line Intersections..."
+                if count > 1
+                else "Inspect Line Network Intersections..."
+            )
+            inspect_intersections.setEnabled(len(network_tags) >= 2)
+            inspect_intersections.triggered.connect(
+                lambda checked=False, tags=network_tags:
+                self._inspect_line_geometry_intersections(tags)
+            )
+            conform_network = menu.addAction(
+                "Conform / Heal Selected Line Network"
+                if count > 1
+                else "Conform / Heal Line Network"
+            )
+            conform_network.setEnabled(len(network_tags) >= 2)
+            conform_network.triggered.connect(
+                lambda checked=False, tags=network_tags:
+                self._conform_line_network_ui(tags)
+            )
+            network_audit = menu.addAction(
+                "Audit Selected Line Connectivity"
+                if count > 1
+                else "Audit Line Network Connectivity"
             )
             network_audit.setEnabled(len(network_tags) >= 2)
             network_audit.triggered.connect(
