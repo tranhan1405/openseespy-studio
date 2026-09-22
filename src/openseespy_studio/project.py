@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 38
+PROJECT_FORMAT_VERSION = 39
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -2679,6 +2679,7 @@ class SolutionResultData:
     result_type: str
     node_scope: list[int] = field(default_factory=list)
     element_scope: list[int] = field(default_factory=list)
+    surface_scope: list[int] = field(default_factory=list)
     settings: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -2696,6 +2697,10 @@ class SolutionResultData:
         self.element_scope = sorted({
             _strict_int(tag, "Solution result element tag")
             for tag in self.element_scope
+        })
+        self.surface_scope = sorted({
+            _strict_int(tag, "Solution result Surface tag")
+            for tag in self.surface_scope
         })
         self.settings = dict(self.settings)
         if self.tag <= 0:
@@ -2715,6 +2720,7 @@ class SolutionResultData:
             "result_type": self.result_type,
             "node_scope": list(self.node_scope),
             "element_scope": list(self.element_scope),
+            "surface_scope": list(self.surface_scope),
             "settings": dict(self.settings),
         }
 
@@ -2727,6 +2733,7 @@ class SolutionResultData:
             result_type=str(data["result_type"]),
             node_scope=list(data.get("node_scope", [])),
             element_scope=list(data.get("element_scope", [])),
+            surface_scope=list(data.get("surface_scope", [])),
             settings=dict(data.get("settings", {})),
         )
 
@@ -4340,6 +4347,12 @@ class ProjectDatabase:
             for surface_recorder in self.surface_recorders.values():
                 if surface_recorder.surface_tag == original_tag:
                     surface_recorder.surface_tag = surface.tag
+            for result in self.solution_results.values():
+                if original_tag in result.surface_scope:
+                    result.surface_scope = [
+                        surface.tag if item == original_tag else item
+                        for item in result.surface_scope
+                    ]
 
     def remove_surface(self, tag: int) -> None:
         tag = _strict_int(tag, "Surface geometry tag")
@@ -4363,11 +4376,17 @@ class ProjectDatabase:
             for recorder in self.surface_recorders.values()
             if recorder.surface_tag == tag
         )
+        managed_result_tags = sorted(
+            result.tag
+            for result in self.solution_results.values()
+            if tag in result.surface_scope
+        )
         if (
             support_tags
             or edge_load_tags
             or pressure_tags
             or surface_recorder_tags
+            or managed_result_tags
         ):
             details: list[str] = []
             if support_tags:
@@ -4389,6 +4408,11 @@ class ProjectDatabase:
                 details.append(
                     "managed Surface recorder(s) "
                     + ", ".join(map(str, surface_recorder_tags))
+                )
+            if managed_result_tags:
+                details.append(
+                    "managed Surface result request(s) "
+                    + ", ".join(map(str, managed_result_tags))
                 )
             raise ValueError(
                 f"Surface geometry {tag} has "
@@ -7397,9 +7421,18 @@ class ProjectDatabase:
                     item for item in result.element_scope
                     if item in valid_elements
                 ]
+            if result.surface_scope:
+                result.element_scope = [
+                    item for item in result.element_scope
+                    if item in valid_elements
+                ]
             if (
                 (node_scoped and not result.node_scope)
-                or (element_scoped and not result.element_scope)
+                or (
+                    element_scoped
+                    and not result.element_scope
+                    and not result.surface_scope
+                )
             ):
                 self.solution_results.pop(tag)
                 removed.append(tag)
@@ -7865,6 +7898,40 @@ class ProjectDatabase:
                 f"Solution result type {result.result_type} is not valid for "
                 f"{analysis.analysis_type} analysis {analysis.tag}."
             )
+        if result.surface_scope:
+            if result.result_type not in {"ShellForce", "ShellDeformation"}:
+                raise ValueError(
+                    "Managed Surface result scope is only supported for "
+                    "ShellForce and ShellDeformation."
+                )
+            missing_surfaces = [
+                tag for tag in result.surface_scope
+                if tag not in self.surfaces
+            ]
+            if missing_surfaces:
+                raise ValueError(
+                    "Solution result references missing Surface tag(s): "
+                    + ", ".join(map(str, missing_surfaces))
+                )
+            expected_scope = sorted({
+                int(element_tag)
+                for surface_tag in result.surface_scope
+                for element_tag in self.surfaces[
+                    surface_tag
+                ].generated_element_tags
+                if (
+                    int(element_tag) in self.model.elements
+                    and self.model.elements[
+                        int(element_tag)
+                    ].element_type in SHELL_ELEMENT_TYPES
+                )
+            })
+            if result.element_scope != expected_scope:
+                raise ValueError(
+                    "Managed Surface result FE scope is stale. "
+                    "Remesh/synchronize the Geometry Surface result scope."
+                )
+
         missing_nodes = [
             tag for tag in result.node_scope
             if tag not in self.model.nodes
@@ -7961,16 +8028,19 @@ class ProjectDatabase:
                     f"Unsupported {result.result_type} component "
                     f"{component!r}."
                 )
-            scope = (
-                list(result.element_scope)
-                if result.element_scope
-                else [
-                    tag
-                    for tag, element in self.model.elements.items()
-                    if element.element_type in SHELL_ELEMENT_TYPES
-                ]
-            )
-            if not scope:
+            if result.surface_scope:
+                scope = list(result.element_scope)
+            else:
+                scope = (
+                    list(result.element_scope)
+                    if result.element_scope
+                    else [
+                        tag
+                        for tag, element in self.model.elements.items()
+                        if element.element_type in SHELL_ELEMENT_TYPES
+                    ]
+                )
+            if not scope and not result.surface_scope:
                 raise ValueError(
                     f"{result.result_type} requires at least one Shell element."
                 )
