@@ -129,12 +129,17 @@ from ..surface_mesher import (
 from ..shell_quality import shell_mesh_quality_summary
 from ..line_mesher import (
     audit_line_mesh_integrity,
+    audit_line_network_connectivity,
+    copy_line_mesh_recipe,
     delete_line_geometry,
     delete_line_mesh,
     inspect_line_mesh_state,
     line_mesh_preview_points,
+    line_mesh_quality,
     mesh_line_geometry,
+    remesh_line_batch,
     remesh_line_geometry,
+    reverse_line_geometry,
 )
 from ..section_response import section_response_sources
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
@@ -7969,6 +7974,25 @@ class MainWindow(QMainWindow):
             + ("shown" if checked else "hidden")
         )
 
+    def _selected_line_geometry_tags(
+        self,
+        fallback_tag: int | None = None,
+    ) -> list[int]:
+        """Return selected Geometry Line tags, preserving right-click intent."""
+        tags: set[int] = set()
+        for item in self.tree.selectedItems():
+            payload = item.data(0, Qt.UserRole)
+            if not payload or payload[0] != "line_geometry":
+                continue
+            tag = int(payload[1])
+            if tag in self.project.lines:
+                tags.add(tag)
+        if fallback_tag is not None:
+            tag = int(fallback_tag)
+            if tag in self.project.lines and tag not in tags:
+                return [tag]
+        return sorted(tags)
+
     def _selected_surface_geometry_tags(
         self,
         fallback_tag: int | None = None,
@@ -12976,6 +13000,200 @@ class MainWindow(QMainWindow):
         self.status_message.setText(
             f"Selected Line {tag} FE mesh · "
             f"{len(nodes)} node(s) · {len(elements)} element(s)"
+        )
+
+    def _show_line_mesh_quality(self, tag: int) -> None:
+        line = self.project.lines.get(int(tag))
+        if line is None:
+            return
+        try:
+            quality = line_mesh_quality(self.project, tag)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "Line Mesh Quality", str(exc))
+            return
+        QMessageBox.information(
+            self,
+            f"Line {tag} Mesh Quality",
+            "\n".join(
+                [
+                    f"Line: {tag} - {line.name}",
+                    f"FE family: {line.element_family}",
+                    f"Elements: {quality.element_count}",
+                    f"Total length: {quality.total_length:g}",
+                    f"Minimum element length: {quality.min_length:g}",
+                    f"Maximum element length: {quality.max_length:g}",
+                    f"Mean element length: {quality.mean_length:g}",
+                    f"Max/min length ratio: {quality.length_ratio:g}",
+                ]
+            ),
+        )
+
+    def _reverse_line_geometry(self, tag: int) -> None:
+        line = self.project.lines.get(int(tag))
+        if line is None:
+            return
+        before = self.project.to_dict()
+        try:
+            result = reverse_line_geometry(self.project, tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Reverse Geometry Line", str(exc))
+            return
+        self.model = self.project.model
+        status = (
+            f"Reversed Line {tag} direction"
+            if result is None
+            else (
+                f"Reversed + remeshed Line {tag} · "
+                f"{len(result.element_tags)} element(s)"
+            )
+        )
+        self._refresh_all(status)
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
+        self._show_line_geometry_properties(tag)
+        self._record_project_change(
+            f"Reverse Geometry Line {tag}",
+            before,
+        )
+
+    def _copy_line_mesh_recipe_to_selected(
+        self,
+        source_tag: int,
+        target_tags,
+    ) -> None:
+        source_tag = int(source_tag)
+        targets = sorted({
+            int(tag)
+            for tag in target_tags
+            if int(tag) in self.project.lines and int(tag) != source_tag
+        })
+        if not targets:
+            QMessageBox.information(
+                self,
+                "Copy Line Mesh / FE Recipe",
+                "Select one or more additional Geometry Lines first. "
+                "The right-clicked Line is used as the source recipe.",
+            )
+            return
+        before = self.project.to_dict()
+        try:
+            results = copy_line_mesh_recipe(
+                self.project,
+                source_tag,
+                targets,
+                remesh_live=True,
+            )
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Copy Line Mesh / FE Recipe",
+                str(exc),
+            )
+            return
+        self.model = self.project.model
+        remeshed = sum(result is not None for result in results.values())
+        self._refresh_all(
+            f"Copied Line {source_tag} mesh / FE recipe to "
+            f"{len(targets)} Line(s) · {remeshed} remeshed"
+        )
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
+        self._record_project_change(
+            f"Copy Geometry Line {source_tag} mesh / FE recipe",
+            before,
+        )
+
+    def _remesh_line_geometries(self, line_tags) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in line_tags
+            if int(tag) in self.project.lines
+        })
+        if not tags:
+            return
+        before = self.project.to_dict()
+        try:
+            results = remesh_line_batch(self.project, tags)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Batch Line Mesh", str(exc))
+            return
+        self.model = self.project.model
+        element_count = sum(
+            len(result.element_tags)
+            for result in results.values()
+        )
+        self._refresh_all(
+            f"Generated / remeshed {len(tags)} Line(s) · "
+            f"{element_count} Frame/Truss element(s)"
+        )
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
+        self._record_project_change(
+            "Batch mesh Geometry Lines "
+            + ", ".join(map(str, tags)),
+            before,
+        )
+
+    def _audit_line_network_connectivity_ui(self, line_tags=None) -> None:
+        tags = (
+            sorted({
+                int(tag)
+                for tag in line_tags
+                if int(tag) in self.project.lines
+            })
+            if line_tags is not None
+            else sorted(self.project.lines)
+        )
+        try:
+            issues = audit_line_network_connectivity(
+                self.project,
+                tags,
+            )
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Audit Line Network Connectivity",
+                str(exc),
+            )
+            return
+        if not issues:
+            QMessageBox.information(
+                self,
+                "Audit Line Network Connectivity",
+                f"No disconnected FE junctions found across "
+                f"{len(tags)} Geometry Line(s).",
+            )
+            return
+        lines = [
+            (
+                f"{index}. Lines {issue.line_tags[0]} / "
+                f"{issue.line_tags[1]} · {issue.kind} · "
+                f"({issue.point[0]:g}, {issue.point[1]:g}, "
+                f"{issue.point[2]:g})"
+            )
+            for index, issue in enumerate(issues[:25], start=1)
+        ]
+        if len(issues) > 25:
+            lines.append(
+                f"... and {len(issues) - 25} additional issue(s)."
+            )
+        QMessageBox.warning(
+            self,
+            "Audit Line Network Connectivity",
+            (
+                f"Found {len(issues)} geometric Line intersection(s) "
+                "without a shared FE node.\n\n"
+                + "\n".join(lines)
+            ),
         )
 
     def _audit_line_mesh_integrity(self, tag: int) -> None:
@@ -18153,19 +18371,55 @@ class MainWindow(QMainWindow):
             line = self.project.lines.get(tag)
             if line is None:
                 return
+            line_tags = self._selected_line_geometry_tags(tag)
+            count = len(line_tags)
             state = inspect_line_mesh_state(self.project, tag)
             live_mesh = bool(state.live_element_tags)
+            any_live_mesh = any(
+                inspect_line_mesh_state(
+                    self.project,
+                    line_tag,
+                ).live_element_tags
+                for line_tag in line_tags
+            )
 
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda checked=False, t=tag:
                 self._show_line_geometry_properties(t)
             )
-            edit = menu.addAction("Edit Line / Mesh Settings...")
-            edit.triggered.connect(
+            quality = menu.addAction("Mesh Quality...")
+            quality.triggered.connect(
                 lambda checked=False, t=tag:
-                self._edit_line_geometry(t)
+                self._show_line_mesh_quality(t)
             )
+
+            if count == 1:
+                edit = menu.addAction("Edit Line / Mesh Settings...")
+                edit.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._edit_line_geometry(t)
+                )
+                reverse = menu.addAction("Reverse Line Direction")
+                reverse.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._reverse_line_geometry(t)
+                )
+
+            if count > 1:
+                copy_recipe = menu.addAction(
+                    f"Copy This Mesh / FE Recipe to "
+                    f"{count - 1} Selected Line(s)"
+                )
+                copy_recipe.triggered.connect(
+                    lambda checked=False, source=tag,
+                    targets=tuple(line_tags):
+                    self._copy_line_mesh_recipe_to_selected(
+                        source,
+                        targets,
+                    )
+                )
+
             preview = menu.addAction("Preview Line Mesh")
             preview.triggered.connect(
                 lambda checked=False, t=tag:
@@ -18177,19 +18431,33 @@ class MainWindow(QMainWindow):
             )
 
             menu.addSeparator()
-            mesh = menu.addAction("Generate Line Mesh...")
-            mesh.setEnabled(not live_mesh)
-            mesh.triggered.connect(
-                lambda checked=False, t=tag:
-                self._mesh_line_geometry(t)
+            if count == 1:
+                mesh = menu.addAction("Generate Line Mesh...")
+                mesh.setEnabled(not live_mesh)
+                mesh.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._mesh_line_geometry(t)
+                )
+                remesh = menu.addAction("Remesh Line")
+                remesh.setEnabled(live_mesh)
+                remesh.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._remesh_line_geometry(t)
+                )
+            else:
+                batch_mesh = menu.addAction(
+                    f"Generate / Remesh {count} Selected Lines"
+                )
+                batch_mesh.triggered.connect(
+                    lambda checked=False, tags=tuple(line_tags):
+                    self._remesh_line_geometries(tags)
+                )
+
+            delete_mesh = menu.addAction(
+                "Delete Generated Line Mesh"
+                if count == 1
+                else "Delete Generated Mesh of Right-clicked Line"
             )
-            remesh = menu.addAction("Remesh Line")
-            remesh.setEnabled(live_mesh)
-            remesh.triggered.connect(
-                lambda checked=False, t=tag:
-                self._remesh_line_geometry(t)
-            )
-            delete_mesh = menu.addAction("Delete Generated Line Mesh")
             delete_mesh.setEnabled(live_mesh)
             delete_mesh.triggered.connect(
                 lambda checked=False, t=tag:
@@ -18205,6 +18473,21 @@ class MainWindow(QMainWindow):
             audit.triggered.connect(
                 lambda checked=False, t=tag:
                 self._audit_line_mesh_integrity(t)
+            )
+            network_audit = menu.addAction(
+                "Audit Selected Line Connectivity"
+                if count > 1
+                else "Audit Line Network Connectivity"
+            )
+            network_tags = (
+                tuple(line_tags)
+                if count > 1
+                else tuple(sorted(self.project.lines))
+            )
+            network_audit.setEnabled(len(network_tags) >= 2)
+            network_audit.triggered.connect(
+                lambda checked=False, tags=network_tags:
+                self._audit_line_network_connectivity_ui(tags)
             )
 
             menu.addSeparator()
