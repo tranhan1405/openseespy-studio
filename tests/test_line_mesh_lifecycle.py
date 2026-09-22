@@ -560,6 +560,12 @@ def test_distinct_coincident_geometry_points_remain_disconnected_when_reuse_disa
     assert issues[0].kind == "endpoint"
     assert issues[0].line_tags == (1, 2)
 
+    result = conform_line_network(project, [1, 2], mesh=True)
+
+    assert result.created_point_tags == []
+    assert project.lines[1].point_j == project.lines[2].point_i
+    assert audit_line_network_connectivity(project) == []
+
 def _crossing_project() -> ProjectDatabase:
     project = _frame_project(length=4.0)
     project.add_point(PointGeometryData(3, "C", (2.0, -2.0, 0.0)))
