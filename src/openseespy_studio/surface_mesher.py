@@ -101,6 +101,9 @@ class SurfaceMeshResult:
     divisions_v: int = 0
     conformed_u: bool = False
     conformed_v: bool = False
+    grid: list[list[int]] = field(default_factory=list)
+    u_coordinates: list[float] = field(default_factory=list)
+    v_coordinates: list[float] = field(default_factory=list)
 
 
 def rectangle_surface_points(
@@ -293,6 +296,9 @@ def mesh_surface_geometry(
         divisions_v=mesh_result.divisions_v,
         conformed_u=mesh_result.conformed_u,
         conformed_v=mesh_result.conformed_v,
+        grid=[list(row) for row in mesh_result.grid],
+        u_coordinates=list(mesh_result.u_coordinates),
+        v_coordinates=list(mesh_result.v_coordinates),
     )
 
 
