@@ -1204,6 +1204,13 @@ class ModelViewport(QWidget):
                 return True
 
         elif event_type == QEvent.MouseButtonDblClick:
+            if (
+                event.button() == Qt.LeftButton
+                and self._interaction_tool == "geometry_sketch"
+            ):
+                self._left_press_pos = None
+                self.geometry_sketch_finished.emit()
+                return True
             if event.button() == Qt.LeftButton:
                 entity = self.pick_entity(*self._vtk_position_from_qt(event))
                 if entity:
@@ -2999,6 +3006,13 @@ class ModelViewport(QWidget):
             )
 
     def _render_model(self, *, reset_camera: bool) -> None:
+        preserved_camera = None
+        if not reset_camera:
+            try:
+                preserved_camera = self.plotter.camera_position
+            except Exception:
+                preserved_camera = None
+
         # A model/visibility rebuild invalidates every cached post-processing
         # mesh because its geometry/scope may no longer match the scene.
         self._result_view_cache.clear()
@@ -3225,10 +3239,13 @@ class ModelViewport(QWidget):
             self._render_surface_edge_preview()
             self._render_surface_edge_load_preview()
             self._render_surface_orientation_overlays()
-            self.set_view(self._current_view, render=False)
-            if reset_camera:
-                self.plotter.reset_camera()
-                self.plotter.camera.zoom(1.18)
+            if preserved_camera is not None:
+                self.plotter.camera_position = preserved_camera
+            else:
+                self.set_view(self._current_view, render=False)
+                if reset_camera:
+                    self.plotter.reset_camera()
+                    self.plotter.camera.zoom(1.18)
             self.plotter.render()
             return
 
@@ -3465,10 +3482,13 @@ class ModelViewport(QWidget):
 
         self._update_highlight_overlays(render=False)
         self._update_display_overlays(render=False)
-        self.set_view(self._current_view, render=False)
-        if reset_camera:
-            self.plotter.reset_camera()
-            self.plotter.camera.zoom(1.28)
+        if preserved_camera is not None:
+            self.plotter.camera_position = preserved_camera
+        else:
+            self.set_view(self._current_view, render=False)
+            if reset_camera:
+                self.plotter.reset_camera()
+                self.plotter.camera.zoom(1.28)
         self.plotter.render()
 
     def pick_entity(self, x: int, y: int) -> tuple[str, int] | None:
