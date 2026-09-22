@@ -4044,7 +4044,12 @@ class MainWindow(QMainWindow):
             refresh=refresh,
         )
 
-    def _refresh_all(self, message: str = "") -> None:
+    def _refresh_all(
+        self,
+        message: str = "",
+        *,
+        reset_camera: bool = True,
+    ) -> None:
         self._sync_viewport_display_data(refresh=False)
         self.viewport.draw_model(
             self.model,
@@ -4052,6 +4057,7 @@ class MainWindow(QMainWindow):
             self.project.surfaces,
             self.project.points,
             self.project.lines,
+            reset_camera=reset_camera,
         )
         self._refresh_project_metadata(
             message,
@@ -6366,7 +6372,7 @@ class MainWindow(QMainWindow):
             except (TypeError, ValueError) as exc:
                 self.project = ProjectDatabase.from_dict(before)
                 self.model = self.project.model
-                self._refresh_all()
+                self._refresh_all(reset_camera=False)
                 self.status_message.setText(str(exc))
                 return
             point = self.project.points[point_tag]
@@ -6377,7 +6383,8 @@ class MainWindow(QMainWindow):
             if changed:
                 self.model = self.project.model
                 self._refresh_all(
-                    f"Sketch anchor Point {point_tag}"
+                    f"Sketch anchor Point {point_tag}",
+                    reset_camera=False,
                 )
                 self._record_project_change(
                     f"Sketch Geometry Point {point_tag}",
@@ -6419,7 +6426,7 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError) as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
-            self._refresh_all()
+            self._refresh_all(reset_camera=False)
             self.status_message.setText(str(exc))
             return
 
@@ -6432,7 +6439,8 @@ class MainWindow(QMainWindow):
                     f"Drawn Geometry Line {line_tag}"
                     if line_created
                     else f"Snapped to existing Line {line_tag}"
-                )
+                ),
+                reset_camera=False,
             )
             self._record_project_change(
                 f"Draw Geometry Line {line_tag}",
@@ -6466,7 +6474,7 @@ class MainWindow(QMainWindow):
             except (TypeError, ValueError) as exc:
                 self.project = ProjectDatabase.from_dict(before)
                 self.model = self.project.model
-                self._refresh_all()
+                self._refresh_all(reset_camera=False)
                 self.status_message.setText(str(exc))
                 return
             point = self.project.points[point_tag]
@@ -6477,7 +6485,8 @@ class MainWindow(QMainWindow):
             if changed:
                 self.model = self.project.model
                 self._refresh_all(
-                    f"Rectangle corner Point {point_tag}"
+                    f"Rectangle corner Point {point_tag}",
+                    reset_camera=False,
                 )
                 self._record_project_change(
                     f"Sketch Geometry Point {point_tag}",
@@ -6553,7 +6562,7 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError) as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
-            self._refresh_all()
+            self._refresh_all(reset_camera=False)
             self.status_message.setText(str(exc))
             return
 
@@ -6561,7 +6570,8 @@ class MainWindow(QMainWindow):
         self._refresh_geometry_sketch_snap_cache()
         self.model = self.project.model
         self._refresh_all(
-            f"Drawn Geometry Surface {surface_tag}"
+            f"Drawn Geometry Surface {surface_tag}",
+            reset_camera=False,
         )
         self._record_project_change(
             f"Draw Geometry Rectangle Surface {surface_tag}",

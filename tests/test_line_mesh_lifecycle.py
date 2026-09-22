@@ -1558,12 +1558,23 @@ def test_geometry_polyline_sketch_is_continuous_and_geometry_only():
     draw = inspect.getsource(
         MainWindow._draw_geometry_line_segment
     )
+    refresh = inspect.getsource(MainWindow._refresh_all)
+    viewport_draw = inspect.getsource(ModelViewport.draw_model)
 
     assert "_geometry_line_point_tags = [point_j]" in click
     assert "click next point" in click
     assert "LineGeometryData" in draw
     assert "mesh_recipe_configured=False" in draw
     assert "_mesh_line_geometry" not in draw
+
+    # Interactive sketch commits must not refit/reset the camera between
+    # P1 -> P2 -> P3. A camera reset after P1 changes the work-plane mapping
+    # and makes later clicks look like preview points without committing Lines.
+    assert "reset_camera=False" in click
+    assert "reset_camera: bool = True" in refresh
+    assert "reset_camera=reset_camera" in refresh
+    assert "reset_camera: bool = True" in viewport_draw
+    assert "_render_model(reset_camera=bool(reset_camera))" in viewport_draw
 
 
 def test_geometry_sketch_snaps_endpoint_midpoint_and_intersection():

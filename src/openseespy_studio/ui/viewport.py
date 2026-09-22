@@ -2201,6 +2201,8 @@ class ModelViewport(QWidget):
         surfaces: dict[int, SurfaceGeometryData] | None = None,
         points: dict[int, PointGeometryData] | None = None,
         lines: dict[int, LineGeometryData] | None = None,
+        *,
+        reset_camera: bool = True,
     ) -> None:
         self._model = model
         self._connections = dict(connections or {})
@@ -2215,7 +2217,7 @@ class ModelViewport(QWidget):
         self._selected_nodes.clear()
         self._selected_elements.clear()
         self._hover_ref = None
-        self._render_model(reset_camera=True)
+        self._render_model(reset_camera=bool(reset_camera))
 
     def set_display_domain(self, domain: str) -> None:
         """Show either preprocessing Geometry or the OpenSees FE model."""
