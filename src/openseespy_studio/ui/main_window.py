@@ -3820,10 +3820,21 @@ class MainWindow(QMainWindow):
         lines = QTreeWidgetItem(["Lines (0)"])
         lines.setIcon(0, studio_icon("element"))
         lines.setData(0, Qt.UserRole, ("lines_root", None))
+
+        shell_count = sum(
+            element.element_type in SHELL_ELEMENT_TYPES
+            for element in self.model.elements.values()
+        )
+        surfaces = QTreeWidgetItem([
+            f"Shell / Surface Bodies ({shell_count})"
+        ])
+        surfaces.setIcon(0, studio_icon("element"))
+        surfaces.setData(0, Qt.UserRole, ("surfaces_root", None))
+
         frame_grids = QTreeWidgetItem(["Frame Grids (1)" if self.model.nodes else "Frame Grids (0)"])
         frame_grids.setIcon(0, studio_icon("grid"))
         frame_grids.setData(0, Qt.UserRole, ("frame_grids_root", None))
-        geometry.addChildren([nodes, lines, frame_grids])
+        geometry.addChildren([nodes, lines, surfaces, frame_grids])
 
         elements = QTreeWidgetItem([
             f"Elements ({len(self.model.elements) + len(self.project.connections)})"
@@ -3843,6 +3854,7 @@ class MainWindow(QMainWindow):
             "forceBeamColumn",
             "dispBeamColumn",
             "truss",
+            *SHELL_ELEMENT_TYPES,
         }
         for element_type in sorted(known_types | set(type_counts)):
             item = QTreeWidgetItem([f"{element_type} ({type_counts.get(element_type, 0)})"])
@@ -5365,7 +5377,7 @@ class MainWindow(QMainWindow):
             connected = [
                 element.tag
                 for element in self.model.elements.values()
-                if element.i == tag or element.j == tag
+                if tag in element.node_tags()
             ]
             managed_ground_connections = sorted(
                 connection.tag
@@ -12903,6 +12915,14 @@ class MainWindow(QMainWindow):
             exec_menu()
             return
 
+        if kind == "surfaces_root":
+            create = menu.addAction("New Shell / Surface...")
+            create.triggered.connect(self._create_shell)
+            section = menu.addAction("New Shell Section...")
+            section.triggered.connect(self._create_shell_section)
+            exec_menu()
+            return
+
         if kind == "frame_grids_root":
             quick_column = menu.addAction(
                 "Quick 1D Column / Test Specimen..."
@@ -12916,13 +12936,17 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "elements_root":
-            create = menu.addAction("New Frame / Truss Element...")
+            create = menu.addAction("New Frame...")
             create.triggered.connect(self._create_element)
+            create_truss = menu.addAction("New Truss...")
+            create_truss.triggered.connect(self._create_truss)
+            create_shell = menu.addAction("New Shell / Surface...")
+            create_shell.triggered.connect(self._create_shell)
             create_connection = menu.addAction(
                 "New ZeroLength / Link Element..."
             )
             create_connection.triggered.connect(self._create_connection)
-            select_all = menu.addAction("Select All Frame / Truss Elements")
+            select_all = menu.addAction("Select All Structural Elements")
             select_all.setEnabled(bool(self.model.elements))
             select_all.triggered.connect(
                 lambda: self._select_all_tree_elements()
@@ -12949,14 +12973,27 @@ class MainWindow(QMainWindow):
             )
             menu.addSeparator()
             is_truss_group = element_type == "truss"
+            is_shell_group = element_type in SHELL_ELEMENT_TYPES
             formulation = menu.addAction("Element Formulation...")
-            formulation.setEnabled(not is_truss_group)
+            formulation.setEnabled(
+                not is_truss_group and not is_shell_group
+            )
             formulation.triggered.connect(
                 lambda checked=False, t=element_type: (
                     self._select_all_tree_elements(t),
                     self._set_element_formulation(),
                 )
             )
+            if is_shell_group:
+                edit_shell = menu.addAction("Edit Shell Definition...")
+                edit_shell.setEnabled(len(tags) == 1)
+                edit_shell.triggered.connect(
+                    lambda checked=False, values=tuple(sorted(tags)): (
+                        self._edit_shell(values[0])
+                        if len(values) == 1
+                        else None
+                    )
+                )
             assign = menu.addMenu("Assign")
             material = assign.addAction("Material (Truss)...")
             material.setEnabled(is_truss_group)
@@ -12966,16 +13003,24 @@ class MainWindow(QMainWindow):
                     self._assign_truss_material_to_selection(),
                 )
             )
-            section = assign.addAction("Section...")
+            section = assign.addAction(
+                "Shell Section..." if is_shell_group else "Section..."
+            )
             section.setEnabled(not is_truss_group)
             section.triggered.connect(
-                lambda checked=False, t=element_type: (
+                lambda checked=False, t=element_type, shell=is_shell_group: (
                     self._select_all_tree_elements(t),
-                    self._assign_section_to_selection(),
+                    (
+                        self._assign_shell_section_to_selection()
+                        if shell
+                        else self._assign_section_to_selection()
+                    ),
                 )
             )
             transformation = assign.addAction("Transformation...")
-            transformation.setEnabled(not is_truss_group)
+            transformation.setEnabled(
+                not is_truss_group and not is_shell_group
+            )
             transformation.triggered.connect(
                 lambda checked=False, t=element_type: (
                     self._select_all_tree_elements(t),
@@ -12991,7 +13036,9 @@ class MainWindow(QMainWindow):
                     )
                 )
             beam_load = menu.addAction("Create Beam Load...")
-            beam_load.setEnabled(not is_truss_group)
+            beam_load.setEnabled(
+                not is_truss_group and not is_shell_group
+            )
             beam_load.triggered.connect(
                 lambda checked=False, t=element_type: (
                     self._select_all_tree_elements(t),
@@ -13172,11 +13219,20 @@ class MainWindow(QMainWindow):
                 for element in selected_elements
             )
             has_frame = any(
-                element.element_type != "truss"
+                element.element_type in FRAME_ELEMENT_TYPES
+                for element in selected_elements
+            )
+            has_shell = any(
+                element.element_type in SHELL_ELEMENT_TYPES
                 for element in selected_elements
             )
 
             menu.addSeparator()
+            if self.model.elements[tag].element_type in SHELL_ELEMENT_TYPES:
+                edit_shell = menu.addAction("Edit Shell Definition...")
+                edit_shell.triggered.connect(
+                    lambda: self._edit_shell(tag)
+                )
             formulation = menu.addAction("Element Formulation...")
             formulation.setEnabled(has_frame)
             formulation.triggered.connect(
@@ -13188,10 +13244,14 @@ class MainWindow(QMainWindow):
             material_action.triggered.connect(
                 self._assign_truss_material_to_selection
             )
-            section_action = assign.addAction("Section...")
-            section_action.setEnabled(has_frame)
+            section_action = assign.addAction(
+                "Shell Section..." if has_shell and not has_frame else "Section..."
+            )
+            section_action.setEnabled(has_frame or has_shell)
             section_action.triggered.connect(
-                self._assign_section_to_selection
+                self._assign_shell_section_to_selection
+                if has_shell and not has_frame
+                else self._assign_section_to_selection
             )
             transformation_action = assign.addAction(
                 "Transformation..."
@@ -13207,7 +13267,7 @@ class MainWindow(QMainWindow):
                 self._clear_truss_material_assignment
             )
             clear_section = assign.addAction("Clear Section")
-            clear_section.setEnabled(has_frame)
+            clear_section.setEnabled(has_frame or has_shell)
             clear_section.triggered.connect(
                 self._clear_section_assignment
             )
@@ -13740,8 +13800,10 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "sections_root":
-            create_action = menu.addAction("New Section...")
+            create_action = menu.addAction("New Beam / Fiber Section...")
             create_action.triggered.connect(self._create_section)
+            shell_action = menu.addAction("New Shell Section...")
+            shell_action.triggered.connect(self._create_shell_section)
             exec_menu()
             return
 
