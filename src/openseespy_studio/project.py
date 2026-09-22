@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 37
+PROJECT_FORMAT_VERSION = 38
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -3524,6 +3524,89 @@ class SurfacePressureData:
 
 
 @dataclass
+class SurfaceRecorderData:
+    tag: int
+    name: str
+    surface_tag: int
+    response: str = "force"
+    section_number: int = 1
+    file_name: str = ""
+    include_time: bool = True
+    generated_recorder_tag: int | None = None
+
+    def __post_init__(self) -> None:
+        self.tag = _strict_int(self.tag, "Surface recorder tag")
+        self.surface_tag = _strict_int(
+            self.surface_tag,
+            "Surface recorder Surface tag",
+        )
+        self.name = str(self.name).strip() or f"Surface Recorder {self.tag}"
+        self.response = str(self.response)
+        self.section_number = _strict_int(
+            self.section_number,
+            "Surface recorder Gauss point",
+        )
+        self.file_name = str(self.file_name).strip()
+        self.include_time = _strict_bool(
+            self.include_time,
+            "Surface recorder include_time",
+        )
+        if self.generated_recorder_tag is not None:
+            self.generated_recorder_tag = _strict_int(
+                self.generated_recorder_tag,
+                "Surface recorder generated recorder tag",
+            )
+
+        if self.tag <= 0 or self.surface_tag <= 0:
+            raise ValueError(
+                "Surface recorder tag and Surface tag must be positive."
+            )
+        if self.response not in {"force", "deformation"}:
+            raise ValueError(
+                "Managed Surface Shell recorder response must be "
+                "'force' or 'deformation'."
+            )
+        if self.section_number not in range(1, 5):
+            raise ValueError(
+                "Managed Surface Shell recorder Gauss point must be in 1..4."
+            )
+        if not self.file_name:
+            self.file_name = f"recorders/surface_recorder_{self.tag}.out"
+        if (
+            self.generated_recorder_tag is not None
+            and self.generated_recorder_tag <= 0
+        ):
+            raise ValueError(
+                "Generated recorder tag must be positive when provided."
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "surface_tag": self.surface_tag,
+            "response": self.response,
+            "section_number": self.section_number,
+            "file_name": self.file_name,
+            "include_time": self.include_time,
+            "generated_recorder_tag": self.generated_recorder_tag,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SurfaceRecorderData":
+        return cls(
+            tag=data["tag"],
+            name=str(data.get("name", "")),
+            surface_tag=data["surface_tag"],
+            response=str(data.get("response", "force")),
+            section_number=data.get("section_number", 1),
+            file_name=str(data.get("file_name", "")),
+            include_time=data.get("include_time", True),
+            generated_recorder_tag=data.get("generated_recorder_tag"),
+        )
+
+
+@dataclass
 class SelectionSetData:
     name: str
     node_tags: set[int] = field(default_factory=set)
@@ -3573,6 +3656,9 @@ class ProjectDatabase:
     surface_pressures: dict[int, SurfacePressureData] = field(
         default_factory=dict
     )
+    surface_recorders: dict[int, SurfaceRecorderData] = field(
+        default_factory=dict
+    )
     materials: dict[int, MaterialData] = field(default_factory=dict)
     nd_materials: dict[int, NDMaterialData] = field(default_factory=dict)
 
@@ -3614,6 +3700,7 @@ class ProjectDatabase:
         self.surface_edge_supports.clear()
         self.surface_edge_loads.clear()
         self.surface_pressures.clear()
+        self.surface_recorders.clear()
         self.constraints.clear()
         self.connections.clear()
         self.time_series.clear()
@@ -4250,6 +4337,9 @@ class ProjectDatabase:
             for surface_pressure in self.surface_pressures.values():
                 if surface_pressure.surface_tag == original_tag:
                     surface_pressure.surface_tag = surface.tag
+            for surface_recorder in self.surface_recorders.values():
+                if surface_recorder.surface_tag == original_tag:
+                    surface_recorder.surface_tag = surface.tag
 
     def remove_surface(self, tag: int) -> None:
         tag = _strict_int(tag, "Surface geometry tag")
@@ -4268,7 +4358,17 @@ class ProjectDatabase:
             for pressure in self.surface_pressures.values()
             if pressure.surface_tag == tag
         )
-        if support_tags or edge_load_tags or pressure_tags:
+        surface_recorder_tags = sorted(
+            recorder.tag
+            for recorder in self.surface_recorders.values()
+            if recorder.surface_tag == tag
+        )
+        if (
+            support_tags
+            or edge_load_tags
+            or pressure_tags
+            or surface_recorder_tags
+        ):
             details: list[str] = []
             if support_tags:
                 details.append(
@@ -4284,6 +4384,11 @@ class ProjectDatabase:
                 details.append(
                     "managed Surface pressure(s) "
                     + ", ".join(map(str, pressure_tags))
+                )
+            if surface_recorder_tags:
+                details.append(
+                    "managed Surface recorder(s) "
+                    + ", ".join(map(str, surface_recorder_tags))
                 )
             raise ValueError(
                 f"Surface geometry {tag} has "
@@ -4543,6 +4648,99 @@ class ProjectDatabase:
     def remove_surface_pressure_definition(self, tag: int) -> None:
         normalized = _strict_int(tag, "Surface pressure tag")
         self.surface_pressures.pop(normalized, None)
+
+    def next_surface_recorder_tag(self) -> int:
+        return max(self.surface_recorders, default=0) + 1
+
+    def _validate_surface_recorder(
+        self,
+        surface_recorder: SurfaceRecorderData,
+        *,
+        replacing_tag: int | None = None,
+    ) -> None:
+        surface = self.surfaces.get(surface_recorder.surface_tag)
+        if surface is None:
+            raise ValueError(
+                "Surface recorder references missing Surface "
+                f"{surface_recorder.surface_tag}."
+            )
+        generated_tag = surface_recorder.generated_recorder_tag
+        if generated_tag is None:
+            return
+        recorder = self.recorders.get(int(generated_tag))
+        if recorder is None:
+            raise ValueError(
+                f"Managed Surface recorder {surface_recorder.tag} references "
+                f"missing generated recorder {generated_tag}."
+            )
+        if recorder.recorder_type != "Shell":
+            raise ValueError(
+                f"Managed Surface recorder {surface_recorder.tag} generated "
+                f"recorder {generated_tag} is not a Shell recorder."
+            )
+        expected_targets = sorted(
+            int(element_tag)
+            for element_tag in surface.generated_element_tags
+            if (
+                int(element_tag) in self.model.elements
+                and self.model.elements[
+                    int(element_tag)
+                ].element_type in SHELL_ELEMENT_TYPES
+            )
+        )
+        if (
+            recorder.target_tags != expected_targets
+            or recorder.response != surface_recorder.response
+            or recorder.section_number != surface_recorder.section_number
+            or recorder.file_name != surface_recorder.file_name
+            or recorder.include_time != surface_recorder.include_time
+        ):
+            raise ValueError(
+                f"Managed Surface recorder {surface_recorder.tag} has stale "
+                "generated recorder provenance."
+            )
+
+    def add_surface_recorder(
+        self,
+        surface_recorder: SurfaceRecorderData,
+    ) -> None:
+        if surface_recorder.tag in self.surface_recorders:
+            raise ValueError(
+                f"Surface recorder tag {surface_recorder.tag} already exists."
+            )
+        self._validate_surface_recorder(surface_recorder)
+        self.surface_recorders[surface_recorder.tag] = surface_recorder
+
+    def update_surface_recorder(
+        self,
+        original_tag: int,
+        surface_recorder: SurfaceRecorderData,
+    ) -> None:
+        original_tag = _strict_int(
+            original_tag,
+            "Surface recorder original tag",
+        )
+        if original_tag not in self.surface_recorders:
+            raise ValueError(
+                f"Surface recorder tag {original_tag} does not exist."
+            )
+        if (
+            surface_recorder.tag != original_tag
+            and surface_recorder.tag in self.surface_recorders
+        ):
+            raise ValueError(
+                f"Surface recorder tag {surface_recorder.tag} already exists."
+            )
+        self._validate_surface_recorder(
+            surface_recorder,
+            replacing_tag=original_tag,
+        )
+        self.surface_recorders.pop(original_tag)
+        self.surface_recorders[surface_recorder.tag] = surface_recorder
+
+    def remove_surface_recorder_definition(self, tag: int) -> None:
+        normalized = _strict_int(tag, "Surface recorder tag")
+        self.surface_recorders.pop(normalized, None)
 
     @staticmethod
     def material_dependencies(material: MaterialData) -> list[int]:
@@ -7945,6 +8143,10 @@ class ProjectDatabase:
                 self.surface_pressures[tag].to_dict()
                 for tag in sorted(self.surface_pressures)
             ],
+            "surface_recorders": [
+                self.surface_recorders[tag].to_dict()
+                for tag in sorted(self.surface_recorders)
+            ],
             "materials": [
                 self.materials[tag].to_dict()
                 for tag in sorted(self.materials)
@@ -8117,6 +8319,28 @@ class ProjectDatabase:
                     f"Duplicate Surface pressure tag {pressure.tag}."
                 )
             result[pressure.tag] = pressure
+        return result
+
+    @staticmethod
+    def _load_surface_recorders(
+        raw: Any,
+    ) -> dict[int, SurfaceRecorderData]:
+        result: dict[int, SurfaceRecorderData] = {}
+        for index, item in enumerate(
+            _require_list(raw, "Surface recorders")
+        ):
+            surface_recorder = SurfaceRecorderData.from_dict(
+                _require_object(
+                    item,
+                    f"Surface recorder item {index}",
+                )
+            )
+            if surface_recorder.tag in result:
+                raise ValueError(
+                    f"Duplicate Surface recorder tag "
+                    f"{surface_recorder.tag}."
+                )
+            result[surface_recorder.tag] = surface_recorder
         return result
 
     @staticmethod
@@ -8496,6 +8720,9 @@ class ProjectDatabase:
             surface_pressures=cls._load_surface_pressures(
                 data.get("surface_pressures", [])
             ),
+            surface_recorders=cls._load_surface_recorders(
+                data.get("surface_recorders", [])
+            ),
             materials=cls._load_materials(data.get("materials", [])),
             nd_materials=cls._load_nd_materials(
                 data.get("nd_materials", [])
@@ -8549,6 +8776,8 @@ class ProjectDatabase:
             project._validate_surface_edge_load(edge_load)
         for surface_pressure in project.surface_pressures.values():
             project._validate_surface_pressure(surface_pressure)
+        for surface_recorder in project.surface_recorders.values():
+            project._validate_surface_recorder(surface_recorder)
 
         if (
             project.active_analysis_tag is not None
