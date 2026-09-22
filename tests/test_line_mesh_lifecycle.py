@@ -1582,12 +1582,21 @@ def test_geometry_sketch_snaps_endpoint_midpoint_and_intersection():
     materialize = inspect.getsource(
         MainWindow._materialize_geometry_sketch_point
     )
+    refresh_tree = inspect.getsource(MainWindow._refresh_tree)
 
     assert '"endpoint"' in snap
     assert '"midpoint"' in snap
     assert '"intersection"' in snap
     assert "16.0 * 16.0" in snap
+    assert "exact_distance2 <= 16.0 * 16.0" in snap
     assert "split_line_geometry_at_point" in materialize
+
+    # Rebuilding the tree during a sketch commit must not emit selection
+    # changes that can switch the viewport from Geometry to FE mode.
+    assert "previous_signal_state = self.tree.blockSignals(True)" in refresh_tree
+    assert "self.tree.blockSignals(previous_signal_state)" in refresh_tree
+    assert "selected_state" in refresh_tree
+    assert "restore_selection" in refresh_tree
 
 
 def test_geometry_rectangle_draw_uses_two_click_geometry_only_surface():
