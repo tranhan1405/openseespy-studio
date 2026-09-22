@@ -104,16 +104,20 @@ from ..surface_mesher import (
     inspect_surface_mesh_state,
     managed_surface_edge_load_nodal_tags,
     managed_surface_pressure_element_load_tags,
+    managed_surface_recorder_tags,
     managed_surface_support_node_tags,
     remove_surface_edge_load,
     remove_surface_edge_support,
     remove_surface_pressure,
+    remove_surface_recorder,
     replace_surface_edge_load,
     replace_surface_edge_support,
     replace_surface_pressure,
+    replace_surface_recorder,
     sync_surface_edge_load,
     sync_surface_edge_support,
     sync_surface_pressure,
+    sync_surface_recorder,
     surface_boundary_edges,
     surface_boundary_node_tags,
     surface_edge_info,
@@ -124,7 +128,7 @@ from ..surface_mesher import (
 from ..shell_quality import shell_mesh_quality_summary
 from ..line_mesher import mesh_line_geometry
 from ..section_response import section_response_sources
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
     build_worker_pythonpath,
     opensees_material_requires_runtime_probe,
@@ -169,6 +173,7 @@ from .shell_dialog import NDMaterialDialog, ShellElementDialog, ShellMeshDialog,
 from .surface_dialog import SurfaceGeometryDialog
 from .surface_edge_load_dialog import SurfaceEdgeLoadDialog
 from .surface_pressure_dialog import SurfacePressureDialog
+from .surface_recorder_dialog import SurfaceRecorderDialog
 from .line_geometry_dialog import LineGeometryDialog, PointGeometryDialog
 from .transformation_dialog import TransformationDialog
 from .test_column_dialog import TestColumnWizard
@@ -9289,6 +9294,233 @@ class MainWindow(QMainWindow):
             before,
         )
 
+    def _manage_surface_shell_recorder(
+        self,
+        surface_tag: int,
+    ) -> None:
+        tag = int(surface_tag)
+        surface = self.project.surfaces.get(tag)
+        if surface is None:
+            return
+        if inspect_surface_mesh_state(self.project, tag).status != "meshed":
+            QMessageBox.information(
+                self,
+                "Managed Surface Shell Recorder",
+                "Mesh the Surface before creating or editing a managed "
+                "Shell recorder.",
+            )
+            return
+
+        existing = sorted(
+            (
+                recorder
+                for recorder in self.project.surface_recorders.values()
+                if recorder.surface_tag == tag
+            ),
+            key=lambda item: item.tag,
+        )
+        choices = ["Create new recorder..."] + [
+            f"Edit Recorder {item.tag} · {item.response} · "
+            f"GP {item.section_number}"
+            for item in existing
+        ]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Managed Surface Shell Recorder",
+            f"Surface {tag}:",
+            choices,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        editing = (
+            None if choice == choices[0]
+            else existing[choices.index(choice) - 1]
+        )
+
+        dialog = SurfaceRecorderDialog(
+            surface_tag=tag,
+            surface_recorder=editing,
+            next_tag=self.project.next_surface_recorder_tag(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        surface_recorder = dialog.data()
+
+        before = self.project.to_dict()
+        try:
+            if editing is None:
+                self.project.add_surface_recorder(surface_recorder)
+                generated_tag = sync_surface_recorder(
+                    self.project,
+                    surface_recorder.tag,
+                )
+            else:
+                surface_recorder.generated_recorder_tag = (
+                    editing.generated_recorder_tag
+                )
+                generated_tag = replace_surface_recorder(
+                    self.project,
+                    surface_recorder,
+                )
+        except (TypeError, ValueError, IndexError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Managed Surface Shell Recorder",
+                str(exc),
+            )
+            return
+
+        self.model = self.project.model
+        self._refresh_all(
+            f"{'Updated' if editing is not None else 'Created'} managed "
+            f"Surface Shell recorder {surface_recorder.tag} · "
+            f"generated recorder {generated_tag} targets "
+            f"{len(self.project.recorders[generated_tag].target_tags)} "
+            "Shell element(s)"
+        )
+        self.viewport.set_display_domain("geometry")
+        self._show_surface_geometry_properties(tag)
+        self._record_project_change(
+            f"Managed Surface Shell recorder {surface_recorder.tag}",
+            before,
+        )
+
+    def _select_managed_surface_recorder_targets(
+        self,
+        surface_tag: int,
+    ) -> None:
+        tag = int(surface_tag)
+        definitions = sorted(
+            (
+                recorder
+                for recorder in self.project.surface_recorders.values()
+                if recorder.surface_tag == tag
+            ),
+            key=lambda item: item.tag,
+        )
+        if not definitions:
+            QMessageBox.information(
+                self,
+                "Managed Surface Shell Recorder",
+                f"Surface {tag} has no managed Shell recorder.",
+            )
+            return
+        labels = [
+            f"Recorder {item.tag} · {item.response} · GP "
+            f"{item.section_number}"
+            for item in definitions
+        ]
+        label, ok = QInputDialog.getItem(
+            self,
+            "Select Recorder FE Targets",
+            f"Surface {tag}:",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        definition = definitions[labels.index(label)]
+        generated_tag = definition.generated_recorder_tag
+        recorder = (
+            self.project.recorders.get(int(generated_tag))
+            if generated_tag is not None
+            else None
+        )
+        if recorder is None:
+            QMessageBox.information(
+                self,
+                "Select Recorder FE Targets",
+                "The managed recorder currently has no live FE realization. "
+                "Mesh/remesh the Surface first.",
+            )
+            return
+
+        self.viewport.set_display_domain("fe")
+        self.selection.set_selection(
+            elements=set(recorder.target_tags),
+        )
+        self.status_message.setText(
+            f"Selected {len(recorder.target_tags)} Shell target(s) for "
+            f"managed Surface recorder {definition.tag}"
+        )
+
+    def _remove_managed_surface_shell_recorder(
+        self,
+        surface_tag: int,
+    ) -> None:
+        tag = int(surface_tag)
+        definitions = sorted(
+            (
+                recorder
+                for recorder in self.project.surface_recorders.values()
+                if recorder.surface_tag == tag
+            ),
+            key=lambda item: item.tag,
+        )
+        if not definitions:
+            QMessageBox.information(
+                self,
+                "Remove Managed Surface Shell Recorder",
+                f"Surface {tag} has no managed Shell recorder.",
+            )
+            return
+        labels = [
+            f"Recorder {item.tag} · {item.response} · GP "
+            f"{item.section_number} · {item.file_name}"
+            for item in definitions
+        ]
+        label, ok = QInputDialog.getItem(
+            self,
+            "Remove Managed Surface Shell Recorder",
+            f"Surface {tag}:",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        definition = definitions[labels.index(label)]
+
+        before = self.project.to_dict()
+        try:
+            generated_tag = remove_surface_recorder(
+                self.project,
+                definition.tag,
+            )
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Remove Managed Surface Shell Recorder",
+                str(exc),
+            )
+            return
+
+        self.model = self.project.model
+        self._refresh_all(
+            f"Removed managed Surface recorder {definition.tag}"
+            + (
+                f" and generated recorder {generated_tag}"
+                if generated_tag is not None
+                else ""
+            )
+        )
+        self.viewport.set_display_domain("geometry")
+        self._show_surface_geometry_properties(tag)
+        self._record_project_change(
+            f"Remove managed Surface recorder {definition.tag}",
+            before,
+        )
+
     def _create_shell_pressure_for_elements(
         self,
         selected,
@@ -12727,6 +12959,23 @@ class MainWindow(QMainWindow):
             )
             if managed_pressures else "None"
         )
+        managed_recorders = sorted(
+            (
+                recorder
+                for recorder in self.project.surface_recorders.values()
+                if recorder.surface_tag == int(tag)
+            ),
+            key=lambda item: item.tag,
+        )
+        managed_recorder_text = (
+            " · ".join(
+                f"R{recorder.tag} {recorder.response} GP"
+                f"{recorder.section_number} -> "
+                f"{recorder.generated_recorder_tag if recorder.generated_recorder_tag is not None else 'pending'}"
+                for recorder in managed_recorders
+            )
+            if managed_recorders else "None"
+        )
 
         rows = [
             ("Tag", surface.tag),
@@ -12734,6 +12983,7 @@ class MainWindow(QMainWindow):
             ("Managed edge supports", managed_support_text),
             ("Managed edge line loads", managed_edge_load_text),
             ("Managed Surface pressures", managed_pressure_text),
+            ("Managed Surface recorders", managed_recorder_text),
             ("Shape", surface.surface_type),
             ("Topology", topology),
             ("Normal", normal_text),
@@ -16054,9 +16304,29 @@ class MainWindow(QMainWindow):
             before,
         )
 
+    def _managed_surface_recorder_for_recorder(
+        self,
+        recorder_tag: int,
+    ) -> SurfaceRecorderData | None:
+        target = int(recorder_tag)
+        for surface_recorder in self.project.surface_recorders.values():
+            if surface_recorder.generated_recorder_tag == target:
+                return surface_recorder
+        return None
+
     def _edit_recorder(self, tag: int) -> None:
         recorder = self.project.recorders.get(tag)
         if recorder is None:
+            return
+        owner = self._managed_surface_recorder_for_recorder(tag)
+        if owner is not None:
+            QMessageBox.information(
+                self,
+                "Managed Surface Shell Recorder",
+                "This recorder is generated by managed Surface Shell Recorder "
+                f"{owner.tag} on Surface {owner.surface_tag}. "
+                "Edit the Geometry Surface recorder instead.",
+            )
             return
         dialog = RecorderDialog(
             recorder=recorder,
@@ -16084,6 +16354,15 @@ class MainWindow(QMainWindow):
         recorder = self.project.recorders.get(tag)
         if recorder is None:
             return
+        owner = self._managed_surface_recorder_for_recorder(tag)
+        if owner is not None:
+            QMessageBox.information(
+                self,
+                "Managed Surface Shell Recorder",
+                "This recorder is generated by managed Surface Shell Recorder "
+                f"{owner.tag}. Remove the Geometry Surface recorder instead.",
+            )
+            return
         answer = QMessageBox.question(
             self,
             "Delete Recorder",
@@ -16105,6 +16384,7 @@ class MainWindow(QMainWindow):
         recorder = self.project.recorders.get(tag)
         if recorder is None:
             return
+        owner = self._managed_surface_recorder_for_recorder(tag)
         rows: list[tuple[str, object]] = [
             ("Tag", recorder.tag),
             ("Name", recorder.name),
@@ -16117,6 +16397,12 @@ class MainWindow(QMainWindow):
             ("File", recorder.file_name),
             ("Include time", "Yes" if recorder.include_time else "No"),
         ]
+        if owner is not None:
+            rows.extend([
+                ("Managed by Surface", owner.surface_tag),
+                ("Managed definition", owner.tag),
+                ("Provenance", "Geometry-owned · remesh-safe"),
+            ])
         if recorder.recorder_type == "Node":
             rows.append(
                 ("DOFs", ", ".join(map(str, recorder.dofs)))
@@ -17491,6 +17777,44 @@ class MainWindow(QMainWindow):
                 lambda checked=False, tags=tuple(surface_tags):
                 self._create_surface_pressure_for_surfaces(tags)
             )
+            if count == 1:
+                managed_shell_recorder = menu.addAction(
+                    "Managed Shell Recorder..."
+                )
+                managed_shell_recorder.setEnabled(live_mesh)
+                managed_shell_recorder.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._manage_surface_shell_recorder(t)
+                )
+                select_recorder_targets = menu.addAction(
+                    "Select Managed Recorder FE Targets..."
+                )
+                select_recorder_targets.setEnabled(
+                    any(
+                        item.surface_tag == tag
+                        and item.generated_recorder_tag is not None
+                        and int(item.generated_recorder_tag)
+                        in self.project.recorders
+                        for item in self.project.surface_recorders.values()
+                    )
+                )
+                select_recorder_targets.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._select_managed_surface_recorder_targets(t)
+                )
+                remove_shell_recorder = menu.addAction(
+                    "Remove Managed Shell Recorder..."
+                )
+                remove_shell_recorder.setEnabled(
+                    any(
+                        item.surface_tag == tag
+                        for item in self.project.surface_recorders.values()
+                    )
+                )
+                remove_shell_recorder.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._remove_managed_surface_shell_recorder(t)
+                )
             clear_pressure_preview = menu.addAction(
                 "Clear Pressure Preview"
             )
