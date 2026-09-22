@@ -158,6 +158,8 @@ class SurfaceGeometryDialog(QDialog):
             index = self.section.findData(surface.section_tag)
             if index >= 0:
                 self.section.setCurrentIndex(index)
+        elif len(self._sections) == 1:
+            self.section.setCurrentIndex(1)
         mesh_form.addRow("Shell section:", self.section)
 
         self.formulation = QComboBox()
@@ -209,9 +211,10 @@ class SurfaceGeometryDialog(QDialog):
         root.addWidget(mesh_group)
 
         note = QLabel(
-            "Geometry is stored independently from FE nodes/elements. "
-            "Meshing later generates mapped quadrilateral Shell elements, "
-            "so the same Surface can eventually be edited and remeshed."
+            "A Surface owns its mapped Shell mesh. Creating a new Surface "
+            "will immediately generate the required FE nodes and Shell "
+            "elements. Use the Surface object as the main preprocessing "
+            "object; the generated FE entities are managed underneath it."
         )
         note.setWordWrap(True)
         root.addWidget(note)
@@ -220,7 +223,7 @@ class SurfaceGeometryDialog(QDialog):
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
         buttons.button(QDialogButtonBox.Ok).setText(
-            "Update Surface" if surface else "Create Surface"
+            "Update Surface" if surface else "Create Surface + Mesh"
         )
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
@@ -268,6 +271,10 @@ class SurfaceGeometryDialog(QDialog):
 
     def data(self) -> SurfaceGeometryData:
         section_tag = self.section.currentData()
+        if section_tag is None:
+            raise ValueError(
+                "Surface requires a Shell Section before it can be created."
+            )
         return SurfaceGeometryData(
             tag=self.tag.value(),
             name=self.name.text().strip(),
