@@ -722,7 +722,7 @@ def test_shell_pressure_ui_and_viewport_routes_exist():
 
     viewport_source = inspect.getsource(ModelViewport._draw_element_loads)
     assert 'load.load_type == "SurfacePressure"' in viewport_source
-    assert "np.cross" in viewport_source
+    assert "shell_surface_geometry" in viewport_source
     assert "+outward / -inward" in viewport_source
 
 
@@ -1143,8 +1143,8 @@ def test_shell_axis_viewport_and_reverse_normal_ui_routes_exist():
     reverse_source = inspect.getsource(
         MainWindow._reverse_selected_shell_normals
     )
-    assert "reverse_shell_orientation" in reverse_source
-    assert "validate_element_state" in reverse_source
+    assert "reverse_shell_orientation_preserving_pressure" in reverse_source
+    assert "pressure_load_tags" in reverse_source
 
     tree_source = inspect.getsource(MainWindow._show_tree_context_menu)
     viewport_source = inspect.getsource(
