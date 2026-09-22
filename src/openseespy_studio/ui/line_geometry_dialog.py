@@ -118,14 +118,21 @@ class LineGeometryDialog(QDialog):
         line: LineGeometryData | None = None,
         initial_point_i: int | None = None,
         initial_point_j: int | None = None,
+        mode: str = "full",
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._line = line
         self._points = dict(points)
-        self.setWindowTitle(
-            "Edit Geometry Line" if line else "New Geometry Line"
-        )
+        self._mode = str(mode).strip().lower()
+        if self._mode not in {"geometry", "mesh", "full"}:
+            raise ValueError("Line dialog mode must be geometry, mesh, or full.")
+        if self._mode == "mesh":
+            self.setWindowTitle("Configure Line Mesh / FE Recipe")
+        else:
+            self.setWindowTitle(
+                "Edit Geometry Line" if line else "New Geometry Line"
+            )
         self.resize(520, 620)
 
         root = QVBoxLayout(self)
@@ -175,6 +182,7 @@ class LineGeometryDialog(QDialog):
         root.addLayout(form)
 
         mesh_group = QGroupBox("1D Mesh")
+        self.mesh_group = mesh_group
         mesh_form = QFormLayout(mesh_group)
         self.mesh_mode = QComboBox()
         self.mesh_mode.addItem("By divisions", "divisions")
@@ -215,6 +223,7 @@ class LineGeometryDialog(QDialog):
         root.addWidget(mesh_group)
 
         recipe = QGroupBox("FE Recipe")
+        self.recipe_group = recipe
         recipe_form = QFormLayout(recipe)
 
         self.family = QComboBox()
@@ -329,9 +338,23 @@ class LineGeometryDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
-        buttons.button(QDialogButtonBox.Ok).setText(
-            "Update Line" if line else "Create Line + Mesh"
-        )
+        if self._mode == "geometry":
+            buttons.button(QDialogButtonBox.Ok).setText(
+                "Update Geometry" if line else "Create Geometry"
+            )
+            self.mesh_group.setVisible(False)
+            self.recipe_group.setVisible(False)
+            self.resize(520, 300)
+        elif self._mode == "mesh":
+            buttons.button(QDialogButtonBox.Ok).setText("Save Mesh Recipe")
+            self.tag.setEnabled(False)
+            self.name.setEnabled(False)
+            self.point_i.setEnabled(False)
+            self.point_j.setEnabled(False)
+        else:
+            buttons.button(QDialogButtonBox.Ok).setText(
+                "Update Line" if line else "Create Line + Mesh"
+            )
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
@@ -367,26 +390,45 @@ class LineGeometryDialog(QDialog):
         if int(point_i) == int(point_j):
             raise ValueError("Start and end Geometry Points must differ.")
 
+        if self._mode == "geometry":
+            if self._line is None:
+                return LineGeometryData(
+                    tag=self.tag.value(),
+                    name=self.name.text().strip(),
+                    point_i=int(point_i),
+                    point_j=int(point_j),
+                    mesh_recipe_configured=False,
+                )
+            data = self._line.to_dict()
+            data.update({
+                "tag": self.tag.value(),
+                "name": self.name.text().strip(),
+                "point_i": int(point_i),
+                "point_j": int(point_j),
+            })
+            return LineGeometryData.from_dict(data)
+
         family = self.family.currentText()
         section_tag = self.section.currentData()
         transformation_tag = self.transformation.currentData()
         material_tag = self.material.currentData()
         if family == "Frame":
             if section_tag is None:
-                raise ValueError("Frame line requires a Section.")
+                raise ValueError("Frame mesh recipe requires a Section.")
             if transformation_tag is None:
                 raise ValueError(
-                    "Frame line requires a Geometric Transformation."
+                    "Frame mesh recipe requires a Geometric Transformation."
                 )
         else:
             if material_tag is None:
-                raise ValueError("Truss line requires a Material.")
+                raise ValueError("Truss mesh recipe requires a Material.")
 
         return LineGeometryData(
             tag=self.tag.value(),
             name=self.name.text().strip(),
             point_i=int(point_i),
             point_j=int(point_j),
+            mesh_recipe_configured=True,
             mesh_mode=str(self.mesh_mode.currentData()),
             divisions=self.divisions.value(),
             target_size=(
