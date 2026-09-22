@@ -5,7 +5,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialogButtonBox
 
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import ProjectDatabase, SectionData
@@ -90,7 +90,7 @@ def test_dialog_opens_with_visible_empty_section_state():
         assert dialog.section.currentData() is None
         assert "No Sections available" in dialog.section.currentText()
         assert (
-            dialog.buttons.button(dialog.buttons.Ok).isEnabled()
+            dialog.buttons.button(QDialogButtonBox.Ok).isEnabled()
             is False
         )
     finally:
