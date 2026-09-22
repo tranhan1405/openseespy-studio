@@ -930,418 +930,54 @@ class ModelViewport(QWidget):
         self.plotter.interactor.installEventFilter(self)
 
     def _qt_vtk_pixel_scales(self) -> tuple[float, float]:
-        """Return render-pixel / Qt-logical-pixel scales for HiDPI picking."""
+        """Return the Qt-to-VTK device pixel ratio used by QVTK itself."""
         widget = self.plotter.interactor
-        widget_width = max(float(widget.width()), 1.0)
-        widget_height = max(float(widget.height()), 1.0)
-        try:
-            render_width, render_height = self.plotter.ren_win.GetSize()
-            render_width = float(render_width)
-            render_height = float(render_height)
-        except Exception:
-            return 1.0, 1.0
-        if (
-            not math.isfinite(render_width)
-            or not math.isfinite(render_height)
-            or render_width <= 0.0
-            or render_height <= 0.0
-        ):
-            return 1.0, 1.0
-        return (
-            render_width / widget_width,
-            render_height / widget_height,
-        )
+        ratio = None
+        getter = getattr(widget, "_getPixelRatio", None)
+        if callable(getter):
+            try:
+                ratio = float(getter())
+            except Exception:
+                ratio = None
+        if ratio is None:
+            getter = getattr(widget, "devicePixelRatioF", None)
+            if callable(getter):
+                try:
+                    ratio = float(getter())
+                except Exception:
+                    ratio = None
+        if ratio is None:
+            getter = getattr(widget, "devicePixelRatio", None)
+            if callable(getter):
+                try:
+                    ratio = float(getter())
+                except Exception:
+                    ratio = None
+        if ratio is None or not math.isfinite(ratio) or ratio <= 0.0:
+            ratio = 1.0
+        return ratio, ratio
 
     def _vtk_position_from_qt(self, event) -> tuple[int, int]:
         pos = event.position()
         scale_x, scale_y = self._qt_vtk_pixel_scales()
         widget_height = float(self.plotter.interactor.height())
         x = int(round(float(pos.x()) * scale_x))
-        y = int(round((widget_height - float(pos.y())) * scale_y))
-        try:
-            render_width, render_height = self.plotter.ren_win.GetSize()
-            x = max(0, min(x, max(int(render_width) - 1, 0)))
-            y = max(0, min(y, max(int(render_height) - 1, 0)))
-        except Exception:
-            pass
-        return x, y
-
-    @staticmethod
-    def _moved(a: tuple[int, int] | None, b: tuple[int, int], tol: int = 5) -> bool:
-        if a is None:
-            return True
-        return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 > tol * tol
-
-    @staticmethod
-    def _actor_key(actor) -> str:
-        if actor is None:
-            return ""
-        try:
-            return actor.GetAddressAsString("")
-        except Exception:
-            return str(id(actor))
-
-    @staticmethod
-    def _selection_mode_from_modifiers(modifiers) -> str:
-        if modifiers & Qt.ControlModifier:
-            return "toggle"
-        if modifiers & Qt.ShiftModifier:
-            return "add"
-        return "replace"
-
-    def _start_navigation(self, modifiers, pos: tuple[float, float]) -> None:
-        # ANSYS-style navigation. During an active 2D sketch, plain MMB pans
-        # instead of rotating the camera away from the locked work plane.
-        ctrl = bool(modifiers & Qt.ControlModifier)
-        shift = bool(modifiers & Qt.ShiftModifier)
-        if ctrl and shift:
-            self._nav_mode = None
-        elif ctrl:
-            self._nav_mode = "pan"
-        elif shift:
-            self._nav_mode = "zoom"
-        elif self._interaction_tool == "geometry_sketch":
-            self._nav_mode = "pan"
-        else:
-            self._nav_mode = "rotate"
-        self._invalidate_geometry_sketch_cursor_preview(render=False)
-        self._nav_last_pos = pos
-        self._hover_ref = None
-        self._hover_pick_timer.stop()
-        self._pending_hover_vtk_pos = None
-        self._id_label_restore_timer.stop()
-        self._set_id_labels_visible(False, render=False)
-        self._remove_overlay("hover-element")
-        self._remove_overlay("hover-node")
-        self._remove_overlay("hover-geometry-line")
-        self._remove_overlay("hover-geometry-surface")
-        self._set_navigation_lod(True, render=True)
-
-    def _navigate(self, pos: tuple[float, float]) -> None:
-        if self._nav_mode is None or self._nav_last_pos is None:
-            return
-
-        dx = pos[0] - self._nav_last_pos[0]
-        dy = pos[1] - self._nav_last_pos[1]
-        self._nav_last_pos = pos
-
-        if abs(dx) < 1e-9 and abs(dy) < 1e-9:
-            return
-
-        camera = self.plotter.camera
-
-        if self._nav_mode == "rotate":
-            camera.Azimuth(-dx * 0.35)
-            camera.Elevation(dy * 0.35)
-            camera.OrthogonalizeViewUp()
-
-        elif self._nav_mode == "pan":
-            position = np.asarray(camera.GetPosition(), dtype=float)
-            focal = np.asarray(camera.GetFocalPoint(), dtype=float)
-            view_up = np.asarray(camera.GetViewUp(), dtype=float)
-            direction = focal - position
-            distance = float(np.linalg.norm(direction))
-            if distance <= 1e-12:
-                return
-            direction /= distance
-            view_up_norm = np.linalg.norm(view_up)
-            if view_up_norm <= 1e-12:
-                return
-            view_up /= view_up_norm
-            right = np.cross(direction, view_up)
-            right_norm = np.linalg.norm(right)
-            if right_norm <= 1e-12:
-                return
-            right /= right_norm
-            up = np.cross(right, direction)
-            up /= max(np.linalg.norm(up), 1e-12)
-
-            height = max(self.plotter.interactor.height(), 1)
-            if camera.GetParallelProjection():
-                world_per_pixel = 2.0 * camera.GetParallelScale() / height
-            else:
-                view_angle = math.radians(camera.GetViewAngle())
-                world_per_pixel = (
-                    2.0 * distance * math.tan(view_angle * 0.5) / height
-                )
-
-            translation = (
-                -dx * world_per_pixel * right
-                + dy * world_per_pixel * up
+        y = int(
+            round(
+                (widget_height - float(pos.y()) - 1.0)
+                * scale_y
             )
-            camera.SetPosition(*(position + translation))
-            camera.SetFocalPoint(*(focal + translation))
-
-        elif self._nav_mode == "zoom":
-            factor = math.exp(-dy * 0.012)
-            factor = max(0.25, min(4.0, factor))
-            camera.Zoom(factor)
-
-        self.plotter.render()
-
-    def _wheel_zoom(self, delta_y: int) -> None:
-        if delta_y == 0:
-            return
-        self._invalidate_geometry_sketch_cursor_preview(render=False)
-        self._set_id_labels_visible(False, render=False)
-        self._set_navigation_lod(True, render=False)
-        steps = delta_y / 120.0
-        factor = math.pow(1.12, steps)
-        self.plotter.camera.Zoom(factor)
-        self.plotter.render()
-        # Restart the debounce on every wheel event so labels are restored
-        # only after the user pauses zooming.
-        self._id_label_restore_timer.start()
-
-    def _hover_pick_interval_ms(self) -> int:
-        if self._model is None:
-            return 45
-        count = len(self._model.elements)
-        if count >= 3000:
-            return 100
-        if count >= 1000:
-            return 70
-        return 40
-
-    def _schedule_hover_from_qt(self, event) -> None:
-        if event.buttons() != Qt.NoButton or self._nav_mode is not None:
-            return
-        vtk_pos = self._vtk_position_from_qt(event)
-        if self._last_hover_pick_pos is not None:
-            dx = vtk_pos[0] - self._last_hover_pick_pos[0]
-            dy = vtk_pos[1] - self._last_hover_pick_pos[1]
-            if dx * dx + dy * dy < 9:
-                return
-        self._pending_hover_vtk_pos = vtk_pos
-        if not self._hover_pick_timer.isActive():
-            self._hover_pick_timer.start(self._hover_pick_interval_ms())
-
-    def _perform_pending_hover_pick(self) -> None:
-        if self._pending_hover_vtk_pos is None or self._nav_mode is not None:
-            return
-        vtk_pos = self._pending_hover_vtk_pos
-        self._pending_hover_vtk_pos = None
-        self._last_hover_pick_pos = vtk_pos
-        entity = self.pick_entity(*vtk_pos)
-        if entity == self._hover_ref:
-            return
-        self._hover_ref = entity
-        self._update_highlight_overlays()
-        self.entity_hovered.emit(
-            {"kind": entity[0], "tag": entity[1]} if entity else None
         )
-
-    def eventFilter(self, obj, event):
-        if obj is not self.plotter.interactor:
-            return super().eventFilter(obj, event)
-
-        event_type = event.type()
-
-        if event_type == QEvent.MouseButtonPress:
-            pos = event.position()
-            qt_pos = (float(pos.x()), float(pos.y()))
-
-            if event.button() == Qt.LeftButton:
-                if self._interaction_tool == "box":
-                    self._box_origin = event.position().toPoint()
-                    if self._rubber_band is None:
-                        return True
-                    self._rubber_band.setGeometry(
-                        QRect(self._box_origin, self._box_origin)
-                    )
-                    self._rubber_band.setStyleSheet(
-                        "border: 1px solid #2f80ed;"
-                        "background-color: rgba(47,128,237,35);"
-                    )
-                    self._rubber_band.show()
-                else:
-                    self._left_press_pos = self._vtk_position_from_qt(event)
-                return True
-
-            if event.button() == Qt.MiddleButton:
-                self._start_navigation(event.modifiers(), qt_pos)
-                return True
-
-            if event.button() == Qt.RightButton:
-                self._right_press_pos = self._vtk_position_from_qt(event)
-                return True
-
-        elif event_type == QEvent.MouseMove:
-            pos = event.position()
-            qt_pos = (float(pos.x()), float(pos.y()))
-
-            if event.buttons() & Qt.MiddleButton:
-                self._navigate(qt_pos)
-                return True
-
-            if (
-                self._interaction_tool == "box"
-                and self._box_origin is not None
-                and event.buttons() & Qt.LeftButton
-            ):
-                current = event.position().toPoint()
-                crossing = current.x() < self._box_origin.x()
-                self._rubber_band.setStyleSheet(
-                    (
-                        "border: 1px solid #1c9b50;"
-                        "background-color: rgba(28,155,80,35);"
-                    )
-                    if crossing
-                    else (
-                        "border: 1px solid #2f80ed;"
-                        "background-color: rgba(47,128,237,35);"
-                    )
-                )
-                self._rubber_band.setGeometry(
-                    QRect(self._box_origin, current).normalized()
-                )
-                return True
-
-            if event.buttons() == Qt.NoButton:
-                if (
-                    self._interaction_tool == "geometry_sketch"
-                    and self._display_domain == "geometry"
-                ):
-                    last = self._last_geometry_sketch_qt_pos
-                    if (
-                        last is None
-                        or (qt_pos[0] - last[0]) ** 2
-                        + (qt_pos[1] - last[1]) ** 2 >= 9.0
-                    ):
-                        self._last_geometry_sketch_qt_pos = qt_pos
-                        vtk_pos = self._vtk_position_from_qt(event)
-                        world = self.geometry_workplane_point(*vtk_pos)
-                        if world is not None:
-                            self.geometry_sketch_moved.emit(
-                                {
-                                    "world": world,
-                                    "screen": qt_pos,
-                                    "plane": self._geometry_sketch_plane,
-                                }
-                            )
-                        else:
-                            self._invalidate_geometry_sketch_cursor_preview(
-                                render=True
-                            )
-                    return False
-                self._schedule_hover_from_qt(event)
-                return False
-
-            # Consume left/right dragging so VTK cannot interpret it as camera motion.
-            if event.buttons() & (Qt.LeftButton | Qt.RightButton):
-                return True
-
-        elif event_type == QEvent.MouseButtonRelease:
-            vtk_pos = self._vtk_position_from_qt(event)
-
-            if event.button() == Qt.MiddleButton:
-                self._nav_mode = None
-                self._nav_last_pos = None
-                self._id_label_restore_timer.stop()
-                self._set_navigation_lod(False, render=False)
-                self._set_id_labels_visible(True, render=True)
-                return True
-
-            if event.button() == Qt.LeftButton:
-                if self._interaction_tool == "box" and self._box_origin is not None:
-                    end = event.position().toPoint()
-                    rect = QRect(self._box_origin, end).normalized()
-                    crossing = end.x() < self._box_origin.x()
-                    self._rubber_band.hide() if self._rubber_band is not None else None
-                    if rect.width() >= 3 and rect.height() >= 3:
-                        nodes, elements = self.entities_in_screen_rect(
-                            rect,
-                            crossing=crossing,
-                        )
-                        self.box_selected.emit(
-                            {
-                                "nodes": nodes,
-                                "elements": elements,
-                                "mode": self._selection_mode_from_modifiers(
-                                    event.modifiers()
-                                ),
-                                "crossing": crossing,
-                            }
-                        )
-                    self._box_origin = None
-                    return True
-
-                if not self._moved(self._left_press_pos, vtk_pos):
-                    entity = self.pick_entity(*vtk_pos)
-                    world = (
-                        self.geometry_workplane_point(*vtk_pos)
-                        if self._display_domain == "geometry"
-                        else None
-                    )
-                    pos = event.position()
-                    self.entity_clicked.emit(
-                        {
-                            "kind": entity[0] if entity else None,
-                            "tag": entity[1] if entity else None,
-                            "mode": self._selection_mode_from_modifiers(
-                                event.modifiers()
-                            ),
-                            "world": world,
-                            "screen": (float(pos.x()), float(pos.y())),
-                            "plane": (
-                                self._geometry_sketch_plane
-                                if self._display_domain == "geometry"
-                                else None
-                            ),
-                        }
-                    )
-                self._left_press_pos = None
-                return True
-
-            if event.button() == Qt.RightButton:
-                if (
-                    self._interaction_tool == "geometry_sketch"
-                    and not self._moved(self._right_press_pos, vtk_pos)
-                ):
-                    self._right_press_pos = None
-                    self.geometry_sketch_finished.emit()
-                    return True
-                if not self._moved(self._right_press_pos, vtk_pos):
-                    entity = self.pick_entity(*vtk_pos)
-                    self.context_requested.emit(
-                        {"kind": entity[0], "tag": entity[1]}
-                        if entity
-                        else None
-                    )
-                self._right_press_pos = None
-                return True
-
-        elif event_type == QEvent.MouseButtonDblClick:
-            if (
-                event.button() == Qt.LeftButton
-                and self._interaction_tool == "geometry_sketch"
-            ):
-                self._left_press_pos = None
-                self.geometry_sketch_finished.emit()
-                return True
-            if event.button() == Qt.LeftButton:
-                entity = self.pick_entity(*self._vtk_position_from_qt(event))
-                if entity:
-                    self.entity_double_clicked.emit(
-                        {"kind": entity[0], "tag": entity[1]}
-                    )
-                return True
-
-        elif event_type == QEvent.Leave:
-            if self._interaction_tool == "geometry_sketch":
-                self._invalidate_geometry_sketch_cursor_preview(render=True)
-            self._pending_hover_vtk_pos = None
-            return False
-
-        elif event_type == QEvent.Wheel:
-            self._wheel_zoom(event.angleDelta().y())
-            return True
-
-        return super().eventFilter(obj, event)
+        return x, y
 
     def _world_to_qt(self, xyz) -> tuple[float, float]:
         renderer = self.plotter.renderer
-        renderer.SetWorldPoint(float(xyz[0]), float(xyz[1]), float(xyz[2]), 1.0)
+        renderer.SetWorldPoint(
+            float(xyz[0]),
+            float(xyz[1]),
+            float(xyz[2]),
+            1.0,
+        )
         renderer.WorldToDisplay()
         display = renderer.GetDisplayPoint()
         scale_x, scale_y = self._qt_vtk_pixel_scales()
@@ -1350,6 +986,7 @@ class ModelViewport(QWidget):
         return (
             float(display[0]) * inv_x,
             float(self.plotter.interactor.height())
+            - 1.0
             - float(display[1]) * inv_y,
         )
 
