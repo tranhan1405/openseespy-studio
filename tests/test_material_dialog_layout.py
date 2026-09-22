@@ -266,3 +266,51 @@ def test_verified_fatigue_preset_disables_insert_without_base_material():
         assert not dialog.add_button.isEnabled()
     finally:
         _close(dialog)
+
+
+def test_reference_only_ramberg_osgood_is_not_offered_for_new_materials():
+    dialog = MaterialDialog(
+        next_tag=1,
+        units={"length": "mm", "force": "N", "time": "s"},
+    )
+    try:
+        assert dialog.material_type.findData("RambergOsgoodSteel") < 0
+    finally:
+        _close(dialog)
+
+
+def test_ramberg_osgood_library_record_is_previewable_but_not_insertable():
+    dialog = MaterialLibraryDialog(
+        next_tag=1,
+        units={"length": "mm", "force": "N", "time": "s"},
+        materials={},
+    )
+    try:
+        target = "yao-2021-600c-natural-ramberg-osgood"
+        root = dialog.tree.invisibleRootItem()
+        stack = [
+            root.child(index)
+            for index in range(root.childCount())
+        ]
+        item = None
+        while stack:
+            current = stack.pop(0)
+            if current.data(0, 256) == target:
+                item = current
+                break
+            stack.extend(
+                current.child(index)
+                for index in range(current.childCount())
+            )
+
+        assert item is not None
+        dialog.tree.setCurrentItem(item)
+        _APP.processEvents()
+
+        assert not dialog.add_button.isEnabled()
+        assert "REFERENCE ONLY" in dialog.summary.text()
+        assert "temporarily removed" in dialog.scope.text()
+        points, _note, _annotations = dialog.preview._curve()
+        assert len(points) > 10
+    finally:
+        _close(dialog)
