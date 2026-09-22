@@ -15,6 +15,7 @@ from openseespy_studio.surface_mesher import (
 )
 from openseespy_studio.ui.main_window import MainWindow
 from openseespy_studio.ui.surface_dialog import SurfaceGeometryDialog
+from openseespy_studio.ui.viewport import ModelViewport
 
 
 def _shell_section() -> SectionData:
