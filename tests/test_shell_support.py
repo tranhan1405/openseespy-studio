@@ -425,6 +425,16 @@ def test_shell_generator_captures_force_and_deformation_gauss_points():
     code = to_openseespy(
         _shell_model(),
         sections={7: _shell_section()},
+        analyses={
+            1: AnalysisSettingsData(
+                1,
+                "Static shell capture",
+                analysis_type="Static",
+                steps=1,
+                load_increment=1.0,
+            )
+        },
+        active_analysis_tag=1,
         units={"length": "m", "force": "N", "time": "s"},
     )
 
@@ -446,7 +456,7 @@ def test_shell_deformation_ui_routes_and_tables_exist():
     assert '{"ShellForce", "ShellDeformation"}' in prepare_source
 
     render_source = inspect.getsource(
-        MainWindow._render_result_choice
+        MainWindow._render_result_data
     )
     assert "show_shell_deformation_contour" in render_source
 
