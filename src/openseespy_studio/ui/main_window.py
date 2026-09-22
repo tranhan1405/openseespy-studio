@@ -18375,14 +18375,6 @@ class MainWindow(QMainWindow):
             count = len(line_tags)
             state = inspect_line_mesh_state(self.project, tag)
             live_mesh = bool(state.live_element_tags)
-            any_live_mesh = any(
-                inspect_line_mesh_state(
-                    self.project,
-                    line_tag,
-                ).live_element_tags
-                for line_tag in line_tags
-            )
-
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda checked=False, t=tag:
