@@ -132,16 +132,20 @@ from ..line_mesher import (
     audit_line_network_connectivity,
     conform_line_network,
     copy_line_mesh_recipe,
+    copy_offset_line_geometry,
     delete_line_geometry,
     delete_line_mesh,
+    divide_line_geometry,
     inspect_line_mesh_state,
     line_geometry_intersections,
     line_mesh_preview_points,
     line_mesh_quality,
+    merge_collinear_lines,
     mesh_line_geometry,
     remesh_line_batch,
     remesh_line_geometry,
     reverse_line_geometry,
+    trim_extend_line_to_line,
 )
 from ..section_response import section_response_sources
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
@@ -13145,6 +13149,301 @@ class MainWindow(QMainWindow):
             before,
         )
 
+    def _trim_extend_geometry_line(
+        self,
+        subject_tag: int,
+        line_tags,
+    ) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in line_tags
+            if int(tag) in self.project.lines
+        })
+        subject_tag = int(subject_tag)
+        if subject_tag not in tags:
+            tags.append(subject_tag)
+            tags.sort()
+        if len(tags) != 2:
+            QMessageBox.information(
+                self,
+                "Trim / Extend Geometry Line",
+                "Select exactly two Geometry Lines, then right-click the "
+                "Line to trim or extend.",
+            )
+            return
+        target_tag = next(tag for tag in tags if tag != subject_tag)
+        choices = ["Nearest endpoint", "Point I", "Point J"]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Trim / Extend Geometry Line",
+            (
+                f"Line {subject_tag} will be trimmed/extended to "
+                f"Line {target_tag}. Choose the endpoint to modify:"
+            ),
+            choices,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        endpoint = {
+            "Nearest endpoint": "nearest",
+            "Point I": "i",
+            "Point J": "j",
+        }[choice]
+        before = self.project.to_dict()
+        try:
+            result = trim_extend_line_to_line(
+                self.project,
+                subject_tag,
+                target_tag,
+                endpoint=endpoint,
+                remesh=True,
+            )
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Trim / Extend Geometry Line",
+                str(exc),
+            )
+            return
+        self.model = self.project.model
+        self.viewport.clear_line_intersection_preview(render=False)
+        self._refresh_all(
+            f"{result.operation.capitalize()} Line {subject_tag} at "
+            f"Point {result.intersection_point_tag} · "
+            f"{len(result.created_line_tags)} target segment(s) created"
+        )
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
+        self._show_line_geometry_properties(subject_tag)
+        self._record_project_change(
+            f"{result.operation.capitalize()} Geometry Line {subject_tag}",
+            before,
+        )
+
+    def _merge_selected_geometry_lines(self, line_tags) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in line_tags
+            if int(tag) in self.project.lines
+        })
+        if len(tags) < 2:
+            QMessageBox.information(
+                self,
+                "Merge Collinear Lines",
+                "Select at least two contiguous collinear Geometry Lines.",
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "Merge Collinear Lines",
+            (
+                f"Merge {len(tags)} selected Geometry Lines into one Line?\n\n"
+                "The Lines must form one collinear chain and use compatible "
+                "uniform mesh / FE recipes. This operation is undoable."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        before = self.project.to_dict()
+        try:
+            result = merge_collinear_lines(
+                self.project,
+                tags,
+                remesh=True,
+            )
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Merge Collinear Lines",
+                str(exc),
+            )
+            return
+        self.model = self.project.model
+        self.viewport.clear_line_intersection_preview(render=False)
+        self._refresh_all(
+            f"Merged {len(result.source_line_tags)} Line(s) into "
+            f"Line {result.keeper_line_tag} · "
+            f"{len(result.removed_line_tags)} Line object(s) removed"
+        )
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
+        self._show_line_geometry_properties(result.keeper_line_tag)
+        self._record_project_change(
+            "Merge collinear Geometry Lines "
+            + ", ".join(map(str, tags)),
+            before,
+        )
+
+    def _divide_geometry_line(self, tag: int) -> None:
+        tag = int(tag)
+        line = self.project.lines.get(tag)
+        if line is None:
+            return
+        modes = [
+            "Equal geometry segments (N)",
+            "Split at distance from Point I",
+        ]
+        mode, ok = QInputDialog.getItem(
+            self,
+            "Divide Geometry Line",
+            f"Divide Line {tag} ({line.name}):",
+            modes,
+            0,
+            False,
+        )
+        if not ok:
+            return
+
+        kwargs: dict[str, object] = {}
+        if mode == modes[0]:
+            count, ok = QInputDialog.getInt(
+                self,
+                "Divide Geometry Line",
+                "Number of Geometry Line segments:",
+                2,
+                2,
+                1000,
+                1,
+            )
+            if not ok:
+                return
+            kwargs["segments"] = count
+        else:
+            point_i = self.project.points.get(line.point_i)
+            point_j = self.project.points.get(line.point_j)
+            if point_i is None or point_j is None:
+                return
+            length = math.sqrt(
+                sum(
+                    (
+                        float(point_j.xyz[index])
+                        - float(point_i.xyz[index])
+                    ) ** 2
+                    for index in range(3)
+                )
+            )
+            distance, ok = QInputDialog.getDouble(
+                self,
+                "Divide Geometry Line",
+                "Distance from Point I:",
+                0.5 * length,
+                1.0e-12,
+                max(length - 1.0e-12, 1.0e-12),
+                8,
+            )
+            if not ok:
+                return
+            kwargs["distance_from_i"] = distance
+
+        before = self.project.to_dict()
+        try:
+            result = divide_line_geometry(
+                self.project,
+                tag,
+                remesh=True,
+                **kwargs,
+            )
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Divide Geometry Line",
+                str(exc),
+            )
+            return
+        self.model = self.project.model
+        self.viewport.clear_line_intersection_preview(render=False)
+        self._refresh_all(
+            f"Divided Line {tag} into {len(result.line_tags)} "
+            f"Geometry Line segment(s) · "
+            f"{len(result.created_point_tags)} new Point(s)"
+        )
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
+        self._record_project_change(
+            f"Divide Geometry Line {tag}",
+            before,
+        )
+
+    def _copy_offset_geometry_lines(self, line_tags) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in line_tags
+            if int(tag) in self.project.lines
+        })
+        if not tags:
+            return
+        dialog = VectorDialog(
+            (
+                "Copy / Offset Geometry Line"
+                if len(tags) == 1
+                else f"Copy / Offset {len(tags)} Geometry Lines"
+            ),
+            self,
+            copies=True,
+        )
+        if not dialog.exec():
+            return
+        dx, dy, dz, copies = dialog.values()
+        if abs(dx) + abs(dy) + abs(dz) <= 1.0e-15:
+            QMessageBox.information(
+                self,
+                "Copy / Offset Geometry Line",
+                "Enter a non-zero offset vector.",
+            )
+            return
+        before = self.project.to_dict()
+        try:
+            result = copy_offset_line_geometry(
+                self.project,
+                tags,
+                dx=dx,
+                dy=dy,
+                dz=dz,
+                copies=copies,
+                mesh=True,
+            )
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Copy / Offset Geometry Line",
+                str(exc),
+            )
+            return
+        self.model = self.project.model
+        self.viewport.clear_line_intersection_preview(render=False)
+        self._refresh_all(
+            f"Copied {len(tags)} Geometry Line(s) × {copies} · "
+            f"{len(result.created_line_tags)} new Line(s) · "
+            f"{len(result.created_point_tags)} new Point(s)"
+        )
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
+        self._record_project_change(
+            "Copy / offset Geometry Lines "
+            + ", ".join(map(str, tags)),
+            before,
+        )
+
+    def _clear_line_intersection_preview(self) -> None:
+        self.viewport.clear_line_intersection_preview()
+        self.status_message.setText("Line intersection preview cleared")
+
     def _inspect_line_geometry_intersections(self, line_tags) -> None:
         tags = sorted({
             int(tag)
@@ -13171,12 +13470,14 @@ class MainWindow(QMainWindow):
             )
             return
         if not intersections:
+            self.viewport.clear_line_intersection_preview(render=False)
             QMessageBox.information(
                 self,
                 "Geometry Line Intersections",
                 f"No Line intersections found across {len(tags)} Line(s).",
             )
             return
+        self.viewport.show_line_intersection_preview(intersections)
         details = [
             (
                 f"{index}. Lines {item.line_tags[0]} / {item.line_tags[1]} · "
@@ -13226,6 +13527,7 @@ class MainWindow(QMainWindow):
             )
             return
         self.model = self.project.model
+        self.viewport.clear_line_intersection_preview(render=False)
         element_count = sum(
             len(mesh.element_tags)
             for mesh in result.mesh_results.values()
@@ -18514,6 +18816,40 @@ class MainWindow(QMainWindow):
                     )
                 )
 
+            menu.addSeparator()
+            copy_geometry = menu.addAction(
+                "Copy / Offset Geometry Line..."
+                if count == 1
+                else f"Copy / Offset {count} Geometry Lines..."
+            )
+            copy_geometry.triggered.connect(
+                lambda checked=False, tags=tuple(line_tags):
+                self._copy_offset_geometry_lines(tags)
+            )
+            if count == 1:
+                divide = menu.addAction("Divide Geometry Line...")
+                divide.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._divide_geometry_line(t)
+                )
+            if count == 2:
+                trim_extend = menu.addAction(
+                    "Trim / Extend This Line to Other Selected Line..."
+                )
+                trim_extend.triggered.connect(
+                    lambda checked=False, t=tag,
+                    tags=tuple(line_tags):
+                    self._trim_extend_geometry_line(t, tags)
+                )
+            if count > 1:
+                merge = menu.addAction(
+                    f"Merge {count} Collinear Lines"
+                )
+                merge.triggered.connect(
+                    lambda checked=False, tags=tuple(line_tags):
+                    self._merge_selected_geometry_lines(tags)
+                )
+
             preview = menu.addAction("Preview Line Mesh")
             preview.triggered.connect(
                 lambda checked=False, t=tag:
@@ -18582,6 +18918,12 @@ class MainWindow(QMainWindow):
             inspect_intersections.triggered.connect(
                 lambda checked=False, tags=network_tags:
                 self._inspect_line_geometry_intersections(tags)
+            )
+            clear_intersections = menu.addAction(
+                "Clear Intersection Preview"
+            )
+            clear_intersections.triggered.connect(
+                self._clear_line_intersection_preview
             )
             conform_network = menu.addAction(
                 "Conform / Heal Selected Line Network"
