@@ -4014,6 +4014,16 @@ class ResultsPanel(QWidget):
         self.element_info.setText(
             "Run a non-modal frame analysis to populate local member forces."
         )
+        for table in getattr(self, "shell_tables", {}).values():
+            table.setRowCount(0)
+        if hasattr(self, "shell_gp_table"):
+            self.shell_gp_table.setRowCount(0)
+        if hasattr(self, "shell_info"):
+            self.shell_info.setText(
+                "Shell section resultants are averaged over available Gauss "
+                "points for contour/table summaries. The Gauss Points sub-tab "
+                "retains each integration-point response."
+            )
         self.fiber_element.clear()
         self.fiber_section.clear()
         self.fiber_plot.set_response({}, "stress")
