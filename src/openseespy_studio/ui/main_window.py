@@ -5095,6 +5095,8 @@ class MainWindow(QMainWindow):
             bool(selected_payload_kinds)
             and selected_payload_kinds <= geometry_tree_kinds
         )
+        if not geometry_mode and self._geometry_sketch_tool_active():
+            self._activate_select_tool()
         self.viewport.set_display_domain(
             "geometry" if geometry_mode else "fe"
         )
