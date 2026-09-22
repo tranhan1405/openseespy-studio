@@ -33,7 +33,12 @@ from ..deformed_geometry import (
     deformed_member_frames,
     section_axis_strength_labels,
 )
-from ..model import (\n    SHELL_ELEMENT_TYPES,\n    StructuralModel,\n    classify_fixity,\n    shell_surface_geometry,\n)
+from ..model import (
+    SHELL_ELEMENT_TYPES,
+    StructuralModel,
+    classify_fixity,
+    shell_surface_geometry,
+)
 from ..postprocess import component_end_resultants, nodal_result_scalar
 from ..project import (
     ConnectionData,
