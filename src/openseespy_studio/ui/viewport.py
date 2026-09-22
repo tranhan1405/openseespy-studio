@@ -127,6 +127,8 @@ class ModelViewport(QWidget):
         self._surface_mesh_preview_tags: set[int] = set()
         self._surface_quality_tags: set[int] = set()
         self._surface_quality_metric: str | None = None
+        self._surface_pressure_preview_tags: set[int] = set()
+        self._surface_pressure_preview_value: float | None = None
         self._element_actor_data: dict[str, tuple[object, np.ndarray]] = {}
         self._annotation_label_actors: dict[str, object] = {}
         self._undeformed_element_actors: list[object] = []
@@ -2020,6 +2022,89 @@ class ModelViewport(QWidget):
             render=False,
         )
 
+    def show_surface_pressure_preview(
+        self,
+        surface_tags,
+        pressure: float,
+    ) -> None:
+        value = float(pressure)
+        if not math.isfinite(value):
+            raise ValueError("Preview pressure must be finite.")
+        self._surface_pressure_preview_tags = {
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self._surfaces
+        }
+        self._surface_pressure_preview_value = value
+        if self._display_domain != "geometry":
+            self.set_display_domain("geometry")
+            return
+        self._render_model(reset_camera=False)
+
+    def clear_surface_pressure_preview(
+        self,
+        *,
+        render: bool = True,
+    ) -> None:
+        self._surface_pressure_preview_tags.clear()
+        self._surface_pressure_preview_value = None
+        self._remove_overlay("surface-pressure-preview")
+        self._remove_overlay("surface-pressure-preview-labels")
+        if render:
+            self.plotter.render()
+
+    def _render_surface_pressure_preview(self) -> None:
+        self._remove_overlay("surface-pressure-preview")
+        self._remove_overlay("surface-pressure-preview-labels")
+        if (
+            self._display_domain != "geometry"
+            or not self._surface_pressure_preview_tags
+            or self._surface_pressure_preview_value is None
+        ):
+            return
+
+        pressure = float(self._surface_pressure_preview_value)
+        sign = 1.0 if pressure >= 0.0 else -1.0
+        records = []
+        label_points = []
+        label_texts = []
+        for tag in sorted(self._surface_pressure_preview_tags):
+            surface = self._surfaces.get(tag)
+            if surface is None:
+                continue
+            axes = self._surface_axes(surface)
+            if axes is None:
+                continue
+            center, _x, _y, normal, scale = axes
+            direction = normal * sign
+            records.append((center, direction, scale * 0.9))
+            label_points.append(
+                center + direction * scale * 1.05
+            )
+            label_texts.append(
+                f"S{tag}: p={pressure:.4g} "
+                + ("(+N)" if pressure >= 0.0 else "(-N)")
+            )
+
+        mesh = self._batched_arrow_mesh(records)
+        if mesh is not None:
+            self.plotter.add_mesh(
+                mesh,
+                name="surface-pressure-preview",
+                color="#b03a2e",
+                pickable=False,
+                render=False,
+            )
+        if label_points:
+            self._add_annotation_labels(
+                label_points,
+                label_texts,
+                name="surface-pressure-preview-labels",
+                text_color="#7a251d",
+                font_size=10,
+                always_visible=True,
+            )
+
     def set_geometry_mesh_overlay_visible(
         self,
         visible: bool,
@@ -2352,6 +2437,7 @@ class ModelViewport(QWidget):
 
             self._update_highlight_overlays(render=False)
             self._render_surface_quality_overlay()
+            self._render_surface_pressure_preview()
             self._render_surface_orientation_overlays()
             self.set_view(self._current_view, render=False)
             if reset_camera:
