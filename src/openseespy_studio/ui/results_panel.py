@@ -3969,6 +3969,25 @@ class ResultsPanel(QWidget):
             "Points: -   Peak |M|: -   Peak |κ|: -   Final: -"
         )
         self.moment_curvature_plot.set_series([], [])
+        self.moment_curvature_plot.clear_overlay()
+
+        # Response-2000 validation belongs to the loaded result context.
+        # Clear every source/selector/table so a new Job cannot inherit a
+        # validation overlay from the previous result.
+        self._response2000_dataset = {}
+        self._response2000_path = ""
+        self._response2000_source_name = ""
+        self.response2000_curvature_column.clear()
+        self.response2000_moment_column.clear()
+        self.response2000_compare_table.setRowCount(0)
+        self.response2000_compare_table.hide()
+        self.response2000_info.setText(
+            "Optional validation overlay: import chart data copied/exported "
+            "from Response-2000 Moment-Curvature."
+        )
+        self.response2000_curvature_factor.setValue(1.0)
+        self.response2000_moment_factor.setValue(1.0)
+
         self.pushover_info.setText(
             "Run a Pushover analysis to plot applied base shear versus "
             "control-node displacement."
@@ -3980,17 +3999,42 @@ class ResultsPanel(QWidget):
         self.cyclic_plot.set_series([], [])
         self.cyclic_plot.clear_overlay()
         self.cyclic_reversal_table.setRowCount(0)
+        self.cyclic_cycle_table.setRowCount(0)
         self.cyclic_compare_table.setRowCount(0)
         self.cyclic_compare_table.hide()
         self._cyclic_experiment_dataset = {}
         self._cyclic_experiment_path = ""
         self.cyclic_exp_x_column.clear()
         self.cyclic_exp_y_column.clear()
+        self.cyclic_exp_x_scale.setValue(1.0)
+        self.cyclic_exp_y_scale.setValue(1.0)
+        self.cyclic_experiment_info.setText(
+            "Optional: import experimental displacement-force CSV for "
+            "overlay and descriptive validation metrics."
+        )
+        self.cyclic_research_info.setText(
+            "1D-column research metrics appear here when specimen "
+            "instrumentation is available."
+        )
+
+        self.specimen_quantity.clear()
         self.specimen_exp_x_column.clear()
         self.specimen_exp_y_column.clear()
         self.specimen_exp_x_column.addItem("(none)", -1)
         self.specimen_exp_y_column.addItem("(none)", -1)
+        self.specimen_exp_x_scale.setValue(1.0)
+        self.specimen_exp_y_scale.setValue(1.0)
+        self.specimen_plot.set_series([], [])
         self.specimen_plot.clear_overlay()
+        self.specimen_research_table.setRowCount(0)
+        self.specimen_fiber_table.setRowCount(0)
+        self.specimen_info.setText(
+            "Quick 1D Column instrumentation is captured automatically when "
+            "a test-column specimen is present."
+        )
+        self.specimen_metrics.setText(
+            "Mmax: -   κmax: -   drift: -   interface rotation: -"
+        )
         self.specimen_experiment_info.setText(
             "Experimental overlay is optional. For M–κ select curvature "
             "as X and moment as Y."
@@ -4030,6 +4074,7 @@ class ResultsPanel(QWidget):
             "Run a non-modal analysis to populate time-history data."
         )
         self.history_plot.set_series([], [])
+        self._refresh_motion_controls()
 
     def _populate_modal_summary(self) -> None:
         modes = (
