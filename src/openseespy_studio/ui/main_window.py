@@ -5918,12 +5918,24 @@ class MainWindow(QMainWindow):
             for element in selected_elements
         )
         has_frame = any(
-            element.element_type != "truss"
+            element.element_type in FRAME_ELEMENT_TYPES
+            for element in selected_elements
+        )
+        has_shell = any(
+            element.element_type in SHELL_ELEMENT_TYPES
             for element in selected_elements
         )
 
         beam_load_action = menu.addAction("Create Beam Load...")
+        beam_load_action.setEnabled(has_frame)
         beam_load_action.triggered.connect(self._create_element_load)
+        shell_pressure_action = menu.addAction(
+            "Create Surface Pressure..."
+        )
+        shell_pressure_action.setEnabled(has_shell)
+        shell_pressure_action.triggered.connect(
+            self._create_shell_pressure
+        )
         formulation_action = menu.addAction(
             "Element Formulation..."
         )
@@ -13394,6 +13406,8 @@ class MainWindow(QMainWindow):
             mesh.triggered.connect(self._create_shell_mesh)
             section = menu.addAction("New Shell Section...")
             section.triggered.connect(self._create_shell_section)
+            pressure = menu.addAction("Create Surface Pressure...")
+            pressure.triggered.connect(self._create_shell_pressure)
             exec_menu()
             return
 
@@ -13519,6 +13533,16 @@ class MainWindow(QMainWindow):
                 lambda checked=False, t=element_type: (
                     self._select_all_tree_elements(t),
                     self._create_element_load(),
+                )
+            )
+            shell_pressure = menu.addAction(
+                "Create Surface Pressure..."
+            )
+            shell_pressure.setEnabled(is_shell_group)
+            shell_pressure.triggered.connect(
+                lambda checked=False, t=element_type: (
+                    self._select_all_tree_elements(t),
+                    self._create_shell_pressure(),
                 )
             )
             menu.addSeparator()
@@ -13757,6 +13781,13 @@ class MainWindow(QMainWindow):
             beam_load = menu.addAction("Create Beam Load...")
             beam_load.setEnabled(has_frame)
             beam_load.triggered.connect(self._create_element_load)
+            shell_pressure = menu.addAction(
+                "Create Surface Pressure..."
+            )
+            shell_pressure.setEnabled(has_shell)
+            shell_pressure.triggered.connect(
+                self._create_shell_pressure
+            )
 
             menu.addSeparator()
             modify = menu.addMenu("Modify")
@@ -14211,6 +14242,12 @@ class MainWindow(QMainWindow):
                 add_element_load = menu.addAction("Add Beam Load...")
                 add_element_load.triggered.connect(
                     self._create_element_load
+                )
+                add_shell_pressure = menu.addAction(
+                    "Add Shell Surface Pressure..."
+                )
+                add_shell_pressure.triggered.connect(
+                    self._create_shell_pressure
                 )
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_load_pattern(tag))
