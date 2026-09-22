@@ -1198,6 +1198,8 @@ class ResultsPanel(QWidget):
             return
         if kind == "MomentCurvature":
             self._select_tab("Moment–Curvature")
+            if hasattr(self, "moment_curvature_detail_tabs"):
+                self.moment_curvature_detail_tabs.setCurrentIndex(0)
             return
         if kind == "PushoverCurve":
             self._select_tab("Pushover Curve")
@@ -1207,6 +1209,8 @@ class ResultsPanel(QWidget):
             return
         if kind == "SpecimenResponse":
             self._select_tab("Specimen Response")
+            if hasattr(self, "specimen_detail_tabs"):
+                self.specimen_detail_tabs.setCurrentIndex(0)
             return
         if kind == "TimeHistory":
             node = options.get("node")
@@ -1285,6 +1289,8 @@ class ResultsPanel(QWidget):
             return
         if kind == "Convergence":
             self._select_tab("Convergence")
+            if hasattr(self, "convergence_detail_tabs"):
+                self.convergence_detail_tabs.setCurrentIndex(0)
             return
 
     def _build_jobs_tab(self) -> None:
@@ -3275,6 +3281,8 @@ class ResultsPanel(QWidget):
 
     def show_calibration(self) -> None:
         self._select_tab("Calibration")
+        if hasattr(self, "calibration_detail_tabs"):
+            self.calibration_detail_tabs.setCurrentIndex(2)
 
     @staticmethod
     def _calibration_metric_text(value: Any) -> str:
@@ -5266,6 +5274,8 @@ class ResultsPanel(QWidget):
             self.response2000_moment_factor.blockSignals(False)
 
         self.response2000_controls.show()
+        if hasattr(self, "moment_curvature_detail_tabs"):
+            self.moment_curvature_detail_tabs.setCurrentIndex(1)
         self._update_moment_curvature_plot()
         return True
 
@@ -5318,7 +5328,11 @@ class ResultsPanel(QWidget):
         self.response2000_moment_column.clear()
         self.response2000_compare_table.setRowCount(0)
         self.response2000_compare_table.hide()
-        self.response2000_controls.hide()
+        self.response2000_controls.show()
+        self.response2000_info.setText(
+            "Optional validation overlay: import chart data copied/exported "
+            "from Response-2000 Moment-Curvature."
+        )
         self.moment_curvature_plot.clear_overlay()
         self._update_moment_curvature_plot()
 
