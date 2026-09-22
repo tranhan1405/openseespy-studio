@@ -373,9 +373,6 @@ class MaterialLibraryDialog(QDialog):
         key: str,
         value: float,
     ) -> tuple[float, str]:
-        if not record.is_runtime_supported:
-            self.add_button.setEnabled(False)
-            return
         if record.model in {"Fatigue", "MinMax"}:
             kind = MATERIAL_PARAMETER_KINDS.get(
                 record.model,
@@ -537,6 +534,9 @@ class MaterialLibraryDialog(QDialog):
     def _update_accept_state(self, *_args) -> None:
         record = self._selected_record
         if record is None:
+            self.add_button.setEnabled(False)
+            return
+        if not record.is_runtime_supported:
             self.add_button.setEnabled(False)
             return
         if record.model in {"Fatigue", "MinMax"}:
