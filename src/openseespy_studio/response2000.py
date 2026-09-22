@@ -175,12 +175,12 @@ def suggest_response2000_units(
     else:
         curvature_unit = "same"
 
-    if "knm" in y:
-        moment_unit = "kn_m"
+    if "knmm" in y:
+        moment_unit = "kn_mm"
     elif "nmm" in y:
         moment_unit = "n_mm"
-    elif "knmm" in y:
-        moment_unit = "kn_mm"
+    elif "knm" in y:
+        moment_unit = "kn_m"
     elif "kipft" in y:
         moment_unit = "kip_ft"
     elif "kipin" in y:
