@@ -130,12 +130,14 @@ from ..shell_quality import shell_mesh_quality_summary
 from ..line_mesher import (
     audit_line_mesh_integrity,
     audit_line_network_connectivity,
+    chamfer_lines,
     conform_line_network,
     copy_line_mesh_recipe,
     copy_offset_line_geometry,
     delete_line_geometry,
     delete_line_mesh,
     divide_line_geometry,
+    fillet_lines,
     inspect_line_mesh_state,
     line_geometry_intersections,
     line_mesh_preview_points,
@@ -146,7 +148,9 @@ from ..line_mesher import (
     remesh_line_geometry,
     reverse_line_geometry,
     split_line_geometry_at_point,
+    split_line_pair_at_intersection,
     trim_extend_line_to_line,
+    trim_extend_lines_to_line,
 )
 from ..section_response import section_response_sources
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LineGeometryData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
@@ -1624,6 +1628,7 @@ class MainWindow(QMainWindow):
         self._geometry_trim_subject_tag: int | None = None
         self._geometry_trim_endpoint = "nearest"
         self._geometry_line_edit_operation = "trim"
+        self._geometry_batch_subject_tags: list[int] = []
         self._job_ui_timer = QTimer(self)
         self._job_ui_timer.setInterval(1000)
         self._job_ui_timer.timeout.connect(self._refresh_running_job_ui)
@@ -2170,6 +2175,43 @@ class MainWindow(QMainWindow):
             "Join selected contiguous collinear Geometry Lines",
         )
         self._make_action(
+            "geometry_split_by_line",
+            "Split by Line",
+            "element",
+            self._split_selected_geometry_lines_at_intersection,
+            "Split two selected Geometry Lines at their finite intersection",
+        )
+        self._make_action(
+            "geometry_fillet",
+            "Fillet...",
+            "rotate",
+            self._fillet_selected_geometry_lines,
+            "Create a tangent segmented fillet between two connected Geometry Lines",
+        )
+        self._make_action(
+            "geometry_chamfer",
+            "Chamfer...",
+            "element",
+            self._chamfer_selected_geometry_lines,
+            "Create a straight chamfer between two connected Geometry Lines",
+        )
+        self._make_action(
+            "geometry_trim_multiple",
+            "Trim Multiple",
+            "delete",
+            self._activate_geometry_batch_trim_tool,
+            "Use selected Geometry Lines as subjects, then click one cutting Line",
+            checkable=True,
+        )
+        self._make_action(
+            "geometry_extend_multiple",
+            "Extend Multiple",
+            "move",
+            self._activate_geometry_batch_extend_tool,
+            "Use selected Geometry Lines as subjects, then click one boundary Line",
+            checkable=True,
+        )
+        self._make_action(
             "geometry_snap",
             "Snap",
             "select",
@@ -2609,6 +2651,11 @@ class MainWindow(QMainWindow):
             self.actions["geometry_extend_pick"],
             self.actions["geometry_split"],
             self.actions["geometry_join"],
+            self.actions["geometry_split_by_line"],
+            self.actions["geometry_fillet"],
+            self.actions["geometry_chamfer"],
+            self.actions["geometry_trim_multiple"],
+            self.actions["geometry_extend_multiple"],
         ])
         modify_menu.addSeparator()
         modify_menu.addActions([
@@ -3127,7 +3174,21 @@ class MainWindow(QMainWindow):
             geometry_page,
             "Modify",
             large=("geometry_trim_pick", "geometry_extend_pick"),
-            small=("geometry_split", "geometry_join"),
+            small=(
+                "geometry_split",
+                "geometry_join",
+                "geometry_split_by_line",
+            ),
+        )
+        add_group(
+            geometry_page,
+            "Corner & Batch",
+            small=(
+                "geometry_fillet",
+                "geometry_chamfer",
+                "geometry_trim_multiple",
+                "geometry_extend_multiple",
+            ),
         )
         add_group(
             geometry_page,
@@ -5332,7 +5393,13 @@ class MainWindow(QMainWindow):
     def _leave_geometry_trim_mode(self) -> None:
         self._geometry_trim_subject_tag = None
         self._geometry_trim_endpoint = "nearest"
-        for key in ("geometry_trim_pick", "geometry_extend_pick"):
+        self._geometry_batch_subject_tags = []
+        for key in (
+            "geometry_trim_pick",
+            "geometry_extend_pick",
+            "geometry_trim_multiple",
+            "geometry_extend_multiple",
+        ):
             action = self.actions.get(key)
             if action is not None:
                 action.setChecked(False)
@@ -5520,6 +5587,131 @@ class MainWindow(QMainWindow):
             f"click another Line to {operation}"
         )
 
+    def _activate_geometry_batch_target_tool(
+        self,
+        operation: str,
+        checked: bool = True,
+    ) -> None:
+        operation = str(operation).strip().lower()
+        if operation not in {"trim", "extend"}:
+            raise ValueError("Batch Geometry operation must be trim or extend.")
+        action_key = (
+            "geometry_trim_multiple"
+            if operation == "trim"
+            else "geometry_extend_multiple"
+        )
+        action = self.actions.get(action_key)
+        if action is not None and not action.isChecked() and not checked:
+            self._activate_select_tool()
+            return
+
+        subject_tags = self._selected_line_geometry_tags()
+        if len(subject_tags) < 2:
+            if action is not None:
+                action.setChecked(False)
+            QMessageBox.information(
+                self,
+                f"{operation.capitalize()} Multiple Lines",
+                (
+                    "Select at least two Geometry Lines first. Then activate "
+                    f"{operation.capitalize()} Multiple and click one target "
+                    "boundary Line."
+                ),
+            )
+            return
+
+        self._leave_measure_mode()
+        self._leave_frame_pick_mode()
+        self._leave_truss_pick_mode()
+        self._leave_geometry_line_pick_mode()
+        self._leave_geometry_surface_pick_mode()
+        self._leave_geometry_trim_mode()
+        self._geometry_line_edit_operation = operation
+        self._geometry_batch_subject_tags = list(subject_tags)
+        self.viewport.set_display_domain("geometry")
+        self.viewport.set_interaction_tool("select")
+        self.actions["select"].setChecked(False)
+        self.actions["box"].setChecked(False)
+        if action is not None:
+            action.setChecked(True)
+        self.status_message.setText(
+            f"{operation.capitalize()} Multiple: "
+            f"{len(subject_tags)} subject Lines selected · "
+            "click the target boundary Line"
+        )
+
+    def _activate_geometry_batch_trim_tool(
+        self,
+        checked: bool = True,
+    ) -> None:
+        self._activate_geometry_batch_target_tool("trim", checked)
+
+    def _activate_geometry_batch_extend_tool(
+        self,
+        checked: bool = True,
+    ) -> None:
+        self._activate_geometry_batch_target_tool("extend", checked)
+
+    def _handle_geometry_batch_target_click(
+        self,
+        payload: object,
+    ) -> None:
+        if not isinstance(payload, dict):
+            return
+        target = payload.get("tag")
+        if target is None:
+            return
+        target_tag = int(target)
+        operation = self._geometry_line_edit_operation
+        label = operation.capitalize()
+        subject_tags = list(self._geometry_batch_subject_tags)
+        if target_tag in subject_tags:
+            self.status_message.setText(
+                f"{label} Multiple: target must not be one of the subject Lines"
+            )
+            return
+
+        before = self.project.to_dict()
+        try:
+            result = trim_extend_lines_to_line(
+                self.project,
+                subject_tags,
+                target_tag,
+                operation=operation,
+                remesh=True,
+            )
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            self._leave_geometry_trim_mode()
+            self.viewport.set_display_domain("geometry")
+            self.viewport.set_interaction_tool("select")
+            self.actions["select"].setChecked(True)
+            self.status_message.setText(
+                f"{label} Multiple: {exc}"
+            )
+            return
+
+        self.model = self.project.model
+        self._leave_geometry_trim_mode()
+        self._refresh_all(
+            f"{label} {len(result.subject_line_tags)} Geometry Lines "
+            f"to Line {target_tag}"
+        )
+        self.viewport.set_display_domain("geometry")
+        self.viewport.set_interaction_tool("select")
+        self.actions["select"].setChecked(True)
+        self._record_project_change(
+            f"{label} Multiple Geometry Lines to Line {target_tag}",
+            before,
+        )
+        self.status_message.setText(
+            f"{label} Multiple complete · "
+            f"{len(result.subject_line_tags)} subject Lines · "
+            f"{len(result.target_line_tags)} boundary segment(s)"
+        )
+
     def _activate_frame_pick_tool(self, checked: bool = True) -> None:
         action = self.actions.get("frame_pick")
         if action is not None and not action.isChecked() and not checked:
@@ -5690,7 +5882,12 @@ class MainWindow(QMainWindow):
         if any(
             self.actions.get(key) is not None
             and self.actions[key].isChecked()
-            for key in ("geometry_trim_pick", "geometry_extend_pick")
+            for key in (
+                "geometry_trim_pick",
+                "geometry_extend_pick",
+                "geometry_trim_multiple",
+                "geometry_extend_multiple",
+            )
         ):
             self._activate_select_tool()
             return
@@ -6424,6 +6621,24 @@ class MainWindow(QMainWindow):
         kind = payload.get("kind")
         tag = payload.get("tag")
         mode = payload.get("mode", "replace")
+
+        batch_trim_action = self.actions.get("geometry_trim_multiple")
+        batch_extend_action = self.actions.get("geometry_extend_multiple")
+        if (
+            batch_trim_action is not None
+            and batch_trim_action.isChecked()
+        ) or (
+            batch_extend_action is not None
+            and batch_extend_action.isChecked()
+        ):
+            if kind == "geometry_line" and tag is not None:
+                self._handle_geometry_batch_target_click(payload)
+            else:
+                self.status_message.setText(
+                    f"{self._geometry_line_edit_operation.capitalize()} "
+                    "Multiple: click a Geometry Line boundary"
+                )
+            return
 
         trim_action = self.actions.get("geometry_trim_pick")
         extend_action = self.actions.get("geometry_extend_pick")
@@ -14314,6 +14529,140 @@ class MainWindow(QMainWindow):
         self._record_project_change(
             "Batch mesh Geometry Lines "
             + ", ".join(map(str, tags)),
+            before,
+        )
+
+    def _split_selected_geometry_lines_at_intersection(self) -> None:
+        tags = self._selected_line_geometry_tags()
+        if len(tags) != 2:
+            QMessageBox.information(
+                self,
+                "Split by Line",
+                "Select exactly two intersecting Geometry Lines.",
+            )
+            return
+        before = self.project.to_dict()
+        try:
+            result = split_line_pair_at_intersection(
+                self.project,
+                tags[0],
+                tags[1],
+                remesh=True,
+            )
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Split by Line", str(exc))
+            return
+        self.model = self.project.model
+        self._refresh_all(
+            f"Split Lines {tags[0]} / {tags[1]} at "
+            f"Point {result.intersection_point_tag} · "
+            f"{len(result.created_line_tags)} new Line segment(s)"
+        )
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
+        self._record_project_change(
+            f"Split Geometry Lines {tags[0]} / {tags[1]} at intersection",
+            before,
+        )
+
+    def _fillet_selected_geometry_lines(self) -> None:
+        tags = self._selected_line_geometry_tags()
+        if len(tags) != 2:
+            QMessageBox.information(
+                self,
+                "Fillet Geometry Lines",
+                "Select exactly two connected Geometry Lines.",
+            )
+            return
+        radius, ok = QInputDialog.getDouble(
+            self,
+            "Fillet Geometry Lines",
+            (
+                "Fillet radius. Current straight-Line kernel represents the "
+                "arc as 8 tangent Line segments:"
+            ),
+            0.1,
+            1.0e-12,
+            1.0e12,
+            8,
+        )
+        if not ok:
+            return
+        before = self.project.to_dict()
+        try:
+            result = fillet_lines(
+                self.project,
+                tags[0],
+                tags[1],
+                radius=radius,
+                segments=8,
+                remesh=True,
+            )
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Fillet Geometry Lines", str(exc))
+            return
+        self.model = self.project.model
+        self._refresh_all(
+            f"Fillet Lines {tags[0]} / {tags[1]} · R={radius:g} · "
+            f"{len(result.connector_line_tags)} tangent segment(s)"
+        )
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
+        self._record_project_change(
+            f"Fillet Geometry Lines {tags[0]} / {tags[1]}",
+            before,
+        )
+
+    def _chamfer_selected_geometry_lines(self) -> None:
+        tags = self._selected_line_geometry_tags()
+        if len(tags) != 2:
+            QMessageBox.information(
+                self,
+                "Chamfer Geometry Lines",
+                "Select exactly two connected Geometry Lines.",
+            )
+            return
+        distance, ok = QInputDialog.getDouble(
+            self,
+            "Chamfer Geometry Lines",
+            "Equal setback distance along both Lines:",
+            0.1,
+            1.0e-12,
+            1.0e12,
+            8,
+        )
+        if not ok:
+            return
+        before = self.project.to_dict()
+        try:
+            result = chamfer_lines(
+                self.project,
+                tags[0],
+                tags[1],
+                distance=distance,
+                remesh=True,
+            )
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Chamfer Geometry Lines", str(exc))
+            return
+        self.model = self.project.model
+        self._refresh_all(
+            f"Chamfer Lines {tags[0]} / {tags[1]} · "
+            f"setback={distance:g}"
+        )
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
+        self._record_project_change(
+            f"Chamfer Geometry Lines {tags[0]} / {tags[1]}",
             before,
         )
 
