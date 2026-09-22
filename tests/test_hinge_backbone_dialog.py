@@ -91,3 +91,24 @@ def test_dialog_converts_active_mm_units_to_si_traceable_hinge_material():
         assert material.parameters["e3n"] == pytest.approx(-0.0036)
     finally:
         _close(dialog)
+
+
+def test_dialog_accepts_prefill_from_sare_moment_curvature_result():
+    dialog = HingeBackboneDialog(
+        next_tag=14,
+        units={"length": "m", "force": "kN", "time": "s"},
+        prefill={
+            "source_kind": "sare_moment_curvature",
+            "source_note": "SARE Moment-Curvature · Section 3 · Mz",
+            "basis": "moment_curvature",
+        },
+    )
+    try:
+        assert dialog.source_kind.currentData() == "sare_moment_curvature"
+        assert dialog.source_note.text() == (
+            "SARE Moment-Curvature · Section 3 · Mz"
+        )
+        assert dialog.basis.currentData() == "moment_curvature"
+        assert dialog.hinge_length.isEnabled() is True
+    finally:
+        _close(dialog)
