@@ -11937,6 +11937,50 @@ class MainWindow(QMainWindow):
             )
             return [tag] if tag is not None else []
 
+        if kind == "Shell":
+            selected = sorted(
+                int(tag)
+                for tag in self.selection.elements
+                if (
+                    tag in self.model.elements
+                    and self.model.elements[tag].element_type
+                    in SHELL_ELEMENT_TYPES
+                )
+            )
+            if selected:
+                return selected
+            existing = sorted(
+                int(tag)
+                for tag, element in self.model.elements.items()
+                if element.element_type in SHELL_ELEMENT_TYPES
+            )
+            if not existing:
+                if not self._ensure_prerequisite(
+                    title="Shell Recorder",
+                    message=(
+                        "Shell Recorder requires a Shell / Surface element. "
+                        "Create one now?"
+                    ),
+                    action_label="Create Shell Now...",
+                    available=lambda: any(
+                        element.element_type in SHELL_ELEMENT_TYPES
+                        for element in self.model.elements.values()
+                    ),
+                    creator=self._create_shell,
+                ):
+                    return []
+                existing = sorted(
+                    int(tag)
+                    for tag, element in self.model.elements.items()
+                    if element.element_type in SHELL_ELEMENT_TYPES
+                )
+            tag = self._choose_existing_prerequisite_tag(
+                title="Shell Recorder",
+                label="Choose a Shell element target:",
+                tags=existing,
+            )
+            return [tag] if tag is not None else []
+
         if kind == "Section":
             tag = self._ensure_nonlinear_beam_target(
                 title="Section Recorder",
@@ -12230,6 +12274,8 @@ class MainWindow(QMainWindow):
             )
         if recorder.recorder_type in {"Section", "Fiber"}:
             rows.append(("Section/IP", recorder.section_number))
+        if recorder.recorder_type == "Shell":
+            rows.append(("Gauss point", recorder.section_number))
         if recorder.recorder_type == "Fiber":
             rows.extend([
                 ("Fiber y", f"{recorder.fiber_y:g}"),
