@@ -1891,22 +1891,28 @@ def trim_extend_line_to_line(
     if endpoint_key == "i":
         if _distance(b, point) <= tolerance:
             raise ValueError("Trim/extend would collapse the subject Line.")
+        if subject_parameter > 1.0 + parameter_tol:
+            raise ValueError(
+                "The intersection lies beyond Point J. Modify Point J or use "
+                "the nearest-endpoint option."
+            )
         operation = (
             "extend"
             if subject_parameter < 0.0
             else "trim"
-            if subject_parameter < 1.0
-            else "extend"
         )
     else:
         if _distance(a, point) <= tolerance:
             raise ValueError("Trim/extend would collapse the subject Line.")
+        if subject_parameter < -parameter_tol:
+            raise ValueError(
+                "The intersection lies beyond Point I. Modify Point I or use "
+                "the nearest-endpoint option."
+            )
         operation = (
             "extend"
             if subject_parameter > 1.0
             else "trim"
-            if subject_parameter > 0.0
-            else "extend"
         )
 
     subject_state = inspect_line_mesh_state(project, subject_tag)
