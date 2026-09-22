@@ -691,3 +691,38 @@ def test_generic_section_response_result_selects_requested_beam_ip(qapp):
         panel.close()
         panel.deleteLater()
         qapp.processEvents()
+
+
+def test_dense_results_use_subtabs(qapp):
+    panel = ResultsPanel()
+    try:
+        assert [
+            panel.convergence_detail_tabs.tabText(index)
+            for index in range(panel.convergence_detail_tabs.count())
+        ] == ["Overview", "Step Details"]
+
+        assert [
+            panel.moment_curvature_detail_tabs.tabText(index)
+            for index in range(panel.moment_curvature_detail_tabs.count())
+        ] == ["Curve", "Response-2000"]
+
+        assert [
+            panel.specimen_detail_tabs.tabText(index)
+            for index in range(panel.specimen_detail_tabs.count())
+        ] == ["Response", "Research Metrics", "Fiber History"]
+
+        assert [
+            panel.calibration_detail_tabs.tabText(index)
+            for index in range(panel.calibration_detail_tabs.count())
+        ] == ["History", "Pareto", "Cases"]
+
+        # Cyclic was already the reference pattern for dense result pages.
+        assert [
+            panel.cyclic_detail_tabs.tabText(index)
+            for index in range(panel.cyclic_detail_tabs.count())
+        ] == ["Curve", "Experiment", "Reversals", "Cycles"]
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
