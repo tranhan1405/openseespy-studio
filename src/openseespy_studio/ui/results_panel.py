@@ -8,6 +8,7 @@ from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -954,6 +955,7 @@ class ResultsPanel(QWidget):
         self._project_units = UnitSystem.from_mapping(None).as_mapping()
         self._response2000_dataset: dict[str, Any] = {}
         self._response2000_path = ""
+        self._response2000_source_name = ""
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 5, 6, 5)
@@ -2161,6 +2163,10 @@ class ResultsPanel(QWidget):
         import_response = QPushButton("Import Response-2000...")
         import_response.clicked.connect(self._import_response2000_data)
         row.addWidget(import_response)
+
+        paste_response = QPushButton("Paste Response-2000")
+        paste_response.clicked.connect(self._paste_response2000_data)
+        row.addWidget(paste_response)
 
         clear_response = QPushButton("Clear Response-2000")
         clear_response.clicked.connect(self._clear_response2000_data)
@@ -5104,29 +5110,13 @@ class ResultsPanel(QWidget):
         if index >= 0:
             combo.setCurrentIndex(index)
 
-    def _import_response2000_data(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Import Response-2000 Moment-Curvature Data",
-            "",
-            (
-                "Response/chart data (*.txt *.csv *.tsv *.dat);;"
-                "All files (*)"
-            ),
-        )
-        if not path:
-            return
-
-        try:
-            with open(path, "r", encoding="utf-8-sig") as stream:
-                dataset = parse_response2000_chart_text(stream.read())
-        except (OSError, UnicodeError) as exc:
-            self.response2000_info.setText(
-                f"Could not read Response-2000 data: {exc}"
-            )
-            self.response2000_controls.show()
-            return
-
+    def _apply_response2000_dataset(
+        self,
+        dataset: dict[str, Any],
+        *,
+        path: str = "",
+        source_name: str = "",
+    ) -> bool:
         headers = dataset.get("headers", [])
         rows = dataset.get("rows", [])
         if (
@@ -5138,14 +5128,22 @@ class ResultsPanel(QWidget):
             self.response2000_info.setText(
                 "No usable two-column numeric chart data was found. "
                 "Use Response-2000 > right-click Moment-Curvature chart > "
-                "Copy Chart Data / View Data, then save or paste the numeric "
-                "table to a text/CSV file."
+                "Copy Chart Data / View Data and import or paste the numeric "
+                "table."
             )
             self.response2000_controls.show()
-            return
+            return False
 
         self._response2000_dataset = dict(dataset)
         self._response2000_path = str(path)
+        self._response2000_source_name = (
+            str(source_name).strip()
+            or (
+                str(path).replace("\\", "/").split("/")[-1]
+                if path
+                else "Response-2000 data"
+            )
+        )
 
         self.response2000_curvature_column.blockSignals(True)
         self.response2000_moment_column.blockSignals(True)
@@ -5193,14 +5191,64 @@ class ResultsPanel(QWidget):
             self.response2000_curvature_unit.blockSignals(False)
             self.response2000_moment_unit.blockSignals(False)
 
-        self.response2000_curvature_factor.setValue(1.0)
-        self.response2000_moment_factor.setValue(1.0)
+        self.response2000_curvature_factor.blockSignals(True)
+        self.response2000_moment_factor.blockSignals(True)
+        try:
+            self.response2000_curvature_factor.setValue(1.0)
+            self.response2000_moment_factor.setValue(1.0)
+        finally:
+            self.response2000_curvature_factor.blockSignals(False)
+            self.response2000_moment_factor.blockSignals(False)
+
         self.response2000_controls.show()
         self._update_moment_curvature_plot()
+        return True
+
+    def _import_response2000_data(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Response-2000 Moment-Curvature Data",
+            "",
+            (
+                "Response/chart data (*.txt *.csv *.tsv *.dat);;"
+                "All files (*)"
+            ),
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8-sig") as stream:
+                dataset = parse_response2000_chart_text(stream.read())
+        except (OSError, UnicodeError) as exc:
+            self.response2000_info.setText(
+                f"Could not read Response-2000 data: {exc}"
+            )
+            self.response2000_controls.show()
+            return
+
+        self._apply_response2000_dataset(dataset, path=path)
+
+    def _paste_response2000_data(self) -> None:
+        clipboard = QApplication.clipboard()
+        text = clipboard.text() if clipboard is not None else ""
+        if not str(text).strip():
+            self.response2000_info.setText(
+                "Clipboard is empty. In Response-2000, right-click the "
+                "Moment-Curvature chart and choose Copy Chart Data first."
+            )
+            self.response2000_controls.show()
+            return
+        dataset = parse_response2000_chart_text(text)
+        self._apply_response2000_dataset(
+            dataset,
+            source_name="Response-2000 clipboard",
+        )
 
     def _clear_response2000_data(self) -> None:
         self._response2000_dataset = {}
         self._response2000_path = ""
+        self._response2000_source_name = ""
         self.response2000_curvature_column.clear()
         self.response2000_moment_column.clear()
         self.response2000_compare_table.setRowCount(0)
@@ -5333,9 +5381,8 @@ class ResultsPanel(QWidget):
                 response_y,
             )
             filename = (
-                self._response2000_path.replace("\\", "/").split("/")[-1]
-                if self._response2000_path
-                else "Response-2000 data"
+                self._response2000_source_name
+                or "Response-2000 data"
             )
             nrmse = comparison.get("moment_nrmse_percent")
             nrmse_text = (
