@@ -64,7 +64,7 @@ def _distance(
     )
 
 
-def _mesh_divisions(
+def resolve_shell_mesh_divisions(
     p1: tuple[float, float, float],
     p2: tuple[float, float, float],
     p3: tuple[float, float, float],
@@ -193,7 +193,7 @@ def build_shell_mesh(
     p3 = project.model.nodes[corners[2]].xyz
     p4 = project.model.nodes[corners[3]].xyz
 
-    nu, nv = _mesh_divisions(
+    nu, nv = resolve_shell_mesh_divisions(
         p1,
         p2,
         p3,
