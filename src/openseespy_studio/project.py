@@ -1672,6 +1672,7 @@ class ElementLoadData:
     x_over_l: float = 0.5
     gravity: tuple[float, float, float] = (0.0, 0.0, -9.81)
     density_override: float = 0.0
+    pressure: float = 0.0
 
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Element load tag")
@@ -1694,6 +1695,7 @@ class ElementLoadData:
         self.x_over_l = float(self.x_over_l)
         self.gravity = tuple(float(value) for value in self.gravity)
         self.density_override = float(self.density_override)
+        self.pressure = float(self.pressure)
 
         if self.tag <= 0:
             raise ValueError("Element load tag must be positive.")
@@ -1701,7 +1703,9 @@ class ElementLoadData:
             raise ValueError(
                 "Element load needs valid pattern and element tags."
             )
-        if self.load_type not in {"Uniform", "Point", "SelfWeight"}:
+        if self.load_type not in {
+            "Uniform", "Point", "SelfWeight", "SurfacePressure"
+        }:
             raise ValueError(
                 f"Unsupported element load type: {self.load_type}"
             )
@@ -1716,6 +1720,7 @@ class ElementLoadData:
             self.pz,
             self.x_over_l,
             self.density_override,
+            self.pressure,
             *self.gravity,
         )
         if any(not math.isfinite(value) for value in numeric_values):
@@ -1741,6 +1746,7 @@ class ElementLoadData:
             "x_over_l": self.x_over_l,
             "gravity": list(self.gravity),
             "density_override": self.density_override,
+            "pressure": self.pressure,
         }
 
     @classmethod
@@ -1765,6 +1771,7 @@ class ElementLoadData:
                 float(gravity[2]),
             ),
             density_override=float(data.get("density_override", 0.0)),
+            pressure=float(data.get("pressure", 0.0)),
         )
 
 
@@ -4789,11 +4796,19 @@ class ProjectDatabase:
             raise ValueError(
                 "Element loads can only be assigned to Plain load patterns."
             )
-        if element.element_type not in {
-            "elasticBeamColumn",
-            "forceBeamColumn",
-            "dispBeamColumn",
-        }:
+        if load.load_type == "SurfacePressure":
+            if element.element_type not in SHELL_ELEMENT_TYPES:
+                raise ValueError(
+                    "SurfacePressure requires a Shell element."
+                )
+            if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
+                raise ValueError(
+                    "Shell SurfacePressure requires ndm=3 and ndf=6."
+                )
+            self._validate_element_geometry(element)
+            return
+
+        if element.element_type not in FRAME_ELEMENT_TYPES:
             raise ValueError(
                 "Beam element loads require a beam-column element."
             )
