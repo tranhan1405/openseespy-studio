@@ -707,6 +707,75 @@ def _element_geometry_checks(
                                 )
                 buckets.setdefault(base, []).append(int(node.tag))
 
+        # Detect shell T-junctions: a node used by one shell lies on the
+        # interior of another shell's edge without being part of that edge.
+        # This is the typical signature of non-conforming adjacent meshes.
+        shell_points = {
+            int(tag): tuple(
+                float(value) for value in model.nodes[tag].xyz
+            )
+            for tag in shell_node_tags
+            if tag in model.nodes
+        }
+        hanging_reported: set[tuple[int, int, int]] = set()
+        for edge, owners in sorted(shell_edge_owners.items()):
+            if edge[0] not in shell_points or edge[1] not in shell_points:
+                continue
+            a = shell_points[edge[0]]
+            b = shell_points[edge[1]]
+            ab = tuple(
+                b[index] - a[index]
+                for index in range(3)
+            )
+            length2 = sum(value * value for value in ab)
+            if length2 <= tolerance2:
+                continue
+            for node_tag, point in shell_points.items():
+                if node_tag in edge:
+                    continue
+                ap = tuple(
+                    point[index] - a[index]
+                    for index in range(3)
+                )
+                t = sum(
+                    ap[index] * ab[index]
+                    for index in range(3)
+                ) / length2
+                if t <= 1.0e-8 or t >= 1.0 - 1.0e-8:
+                    continue
+                closest = tuple(
+                    a[index] + t * ab[index]
+                    for index in range(3)
+                )
+                distance2 = sum(
+                    (
+                        point[index] - closest[index]
+                    ) ** 2
+                    for index in range(3)
+                )
+                if distance2 > tolerance2:
+                    continue
+                key = (edge[0], edge[1], int(node_tag))
+                if key in hanging_reported:
+                    continue
+                hanging_reported.add(key)
+                owner_tags = ", ".join(
+                    str(owner[0]) for owner in owners
+                )
+                issues.append(
+                    ValidationIssue(
+                        "WARNING",
+                        "Shell conformity",
+                        f"Shell node {node_tag} lies on the interior of "
+                        f"edge {edge[0]}-{edge[1]} used by element(s) "
+                        f"{owner_tags}, but is not connected to that edge.",
+                        "node",
+                        int(node_tag),
+                        "Use conforming edge divisions or remesh adjacent "
+                        "patches so both sides share the same edge nodes.",
+                    )
+                )
+
 
 def _support_and_connectivity_checks(
     project: ProjectDatabase,
