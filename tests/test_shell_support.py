@@ -11,13 +11,18 @@ from openseespy_studio.generator import (
     to_openseespy,
 )
 from openseespy_studio.importer import import_openseespy_source
+from openseespy_studio.mass_source import evaluate_mass_source
 from openseespy_studio.model import SHELL_ELEMENT_TYPES, StructuralModel
 from openseespy_studio.project import (
     AnalysisSettingsData,
+    ElementLoadData,
+    LoadPatternData,
+    MassSourceData,
     ProjectDatabase,
     RecorderData,
     SectionData,
     SolutionResultData,
+    TimeSeriesData,
 )
 from openseespy_studio.result_catalog import result_choices_for_analysis
 from openseespy_studio.shell_mesh import ShellMeshSpec, build_shell_mesh
@@ -572,3 +577,145 @@ def test_shell_recorder_rejects_non_shell_targets_and_invalid_gp():
     )
     with pytest.raises(ValueError, match=r"Shell recorders require Shell"):
         project.add_recorder(recorder)
+
+
+def _shell_pressure_project(
+    pressure: float = -1000.0,
+) -> ProjectDatabase:
+    project = ProjectDatabase(
+        name="shell-pressure",
+        model=_shell_model(),
+    )
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_section(_shell_section())
+    project.add_time_series(
+        TimeSeriesData(1, "Linear", "Linear", factor=1.0)
+    )
+    project.add_load_pattern(
+        LoadPatternData(
+            1,
+            "Pressure",
+            "Plain",
+            time_series_tag=1,
+        )
+    )
+    project.add_element_load(
+        ElementLoadData(
+            1,
+            "Pressure",
+            1,
+            10,
+            "SurfacePressure",
+            pressure=pressure,
+        )
+    )
+    return project
+
+
+def test_shell_surface_pressure_round_trip_and_native_generation():
+    project = _shell_pressure_project(-1250.0)
+    restored = ProjectDatabase.from_dict(project.to_dict())
+    load = restored.element_loads[1]
+    assert load.load_type == "SurfacePressure"
+    assert load.pressure == pytest.approx(-1250.0)
+
+    script = to_openseespy(
+        project.model,
+        sections=project.sections,
+        time_series=project.time_series,
+        load_patterns=project.load_patterns,
+        element_loads=project.element_loads,
+        units=project.units,
+    )
+    assert "ops.element('SurfaceLoad', 11, 1, 2, 3, 4, -1250)" in script
+    assert "ops.eleLoad('-ele', 11, '-type', '-surfaceLoad')" in script
+
+    imported = import_openseespy_source(
+        script,
+        source_name="surface-pressure-roundtrip.py",
+        units=project.units,
+    )
+    assert imported.error_count == 0
+    assert len(imported.project.element_loads) == 1
+    imported_load = next(iter(imported.project.element_loads.values()))
+    assert imported_load.load_type == "SurfacePressure"
+    assert imported_load.element_tag == 10
+    assert imported_load.pressure == pytest.approx(-1250.0)
+
+
+def test_shell_surface_pressure_reverses_sign_when_helper_orientation_reverses():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 3, '-ndf', 6)
+ops.node(1, 0, 0, 0)
+ops.node(2, 2, 0, 0)
+ops.node(3, 2, 1, 0)
+ops.node(4, 0, 1, 0)
+ops.section('ElasticMembranePlateSection', 7, 30000000000, 0.2, 0.18, 0)
+ops.element('ASDShellQ4', 10, 1, 2, 3, 4, 7)
+ops.timeSeries('Linear', 1, '-factor', 1)
+ops.pattern('Plain', 1, 1)
+ops.element('SurfaceLoad', 11, 4, 3, 2, 1, -1000)
+ops.eleLoad('-ele', 11, '-type', '-surfaceLoad')
+"""
+    imported = import_openseespy_source(
+        source,
+        source_name="reverse-pressure.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    assert imported.error_count == 0
+    load = next(iter(imported.project.element_loads.values()))
+    assert load.pressure == pytest.approx(1000.0)
+
+
+def test_shell_pressure_and_shell_self_mass_feed_mass_source():
+    project = _shell_pressure_project(-1000.0)
+    project.update_section(
+        7,
+        _shell_section(rho=2500.0),
+    )
+    source = MassSourceData(
+        1,
+        "Shell mass",
+        include_self_mass=True,
+        load_factors={1: 1.0},
+        gravity_axis=3,
+        directions=(1, 2),
+    )
+    summary = evaluate_mass_source(project, source)
+
+    area = 2.0
+    expected_self = 2500.0 * 0.18 * area
+    expected_load = 1000.0 * area / 9.80665
+    assert summary.self_mass == pytest.approx(
+        expected_self,
+        rel=1.0e-10,
+    )
+    assert summary.load_mass == pytest.approx(
+        expected_load,
+        rel=1.0e-10,
+    )
+    assert summary.total_mass == pytest.approx(
+        expected_self + expected_load,
+        rel=1.0e-10,
+    )
+    assert all(
+        value == pytest.approx(summary.total_mass / 4.0)
+        for value in summary.nodal_mass.values()
+    )
+
+
+def test_shell_pressure_ui_and_viewport_routes_exist():
+    source = inspect.getsource(MainWindow._create_shell_pressure)
+    assert 'allowed_load_types={"SurfacePressure"}' in source
+    assert "SHELL_ELEMENT_TYPES" in source
+
+    context_source = inspect.getsource(
+        MainWindow._show_tree_context_menu
+    )
+    assert "Create Surface Pressure..." in context_source
+
+    viewport_source = inspect.getsource(ModelViewport._draw_element_loads)
+    assert 'load.load_type == "SurfacePressure"' in viewport_source
+    assert "np.cross" in viewport_source
+    assert "+outward / -inward" in viewport_source
