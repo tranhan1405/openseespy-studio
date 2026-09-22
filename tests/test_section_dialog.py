@@ -82,3 +82,45 @@ def test_section_dialog_stages_materials_without_mutating_project_mapping():
         assert 2 not in dialog._project_materials
     finally:
         _close(dialog)
+
+
+
+def test_section_editor_can_stage_new_material_without_leaving_dialog(
+    monkeypatch,
+):
+    project_materials = {}
+
+    class _FakeMaterialDialog:
+        def __init__(self, *args, **kwargs):
+            self._material = MaterialData(
+                tag=1,
+                name="Concrete",
+                material_type="Elastic",
+                parameters={"E": 30.0e9},
+            )
+
+        def exec(self):
+            return 1
+
+        def material_data(self):
+            return self._material
+
+    monkeypatch.setattr(
+        "openseespy_studio.ui.section_dialog.MaterialDialog",
+        _FakeMaterialDialog,
+    )
+
+    dialog = SectionDialog(
+        project_materials,
+        next_tag=1,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    try:
+        dialog._create_staged_material()
+
+        assert 1 not in project_materials
+        assert 1 in dialog.materials
+        assert [item.tag for item in dialog.pending_materials()] == [1]
+        assert dialog.elastic_material.currentData() == 1
+    finally:
+        _close(dialog)
