@@ -6163,6 +6163,11 @@ class MainWindow(QMainWindow):
         rotate_action.triggered.connect(self._rotate_selection)
         mirror_action = menu.addAction("Mirror...")
         mirror_action.triggered.connect(self._mirror_selection)
+        reverse_shell_action = menu.addAction("Reverse Shell Normal")
+        reverse_shell_action.setEnabled(has_shell)
+        reverse_shell_action.triggered.connect(
+            self._reverse_selected_shell_normals
+        )
 
         menu.addSeparator()
         copy_tag = menu.addAction("Copy Tag(s)")
@@ -8640,6 +8645,49 @@ class MainWindow(QMainWindow):
         self._refresh_all(f"Updated shell element {tag}")
         self._show_entity_properties("element", tag)
         self._record_project_change(f"Edit shell {tag}", before)
+
+    def _reverse_selected_shell_normals(self) -> None:
+        shell_tags = sorted(
+            int(tag)
+            for tag in self.selection.elements
+            if (
+                tag in self.model.elements
+                and self.model.elements[tag].element_type
+                in SHELL_ELEMENT_TYPES
+            )
+        )
+        if not shell_tags:
+            QMessageBox.information(
+                self,
+                "Reverse Shell Normal",
+                "Select at least one Shell element first.",
+            )
+            return
+
+        before = self.project.to_dict()
+        try:
+            updated = self.model.reverse_shell_orientation(shell_tags)
+            for tag in updated:
+                self.project.validate_element_state(tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Reverse Shell Normal",
+                str(exc),
+            )
+            return
+
+        self._refresh_all(
+            f"Reversed surface normal for {len(updated)} shell element(s)"
+        )
+        self.selection.set_selection(elements=set(updated))
+        self._record_project_change(
+            "Reverse shell normal",
+            before,
+        )
 
     def _assign_shell_section_to_selection(self) -> None:
         element_tags = {
@@ -14128,6 +14176,11 @@ class MainWindow(QMainWindow):
             rotate.triggered.connect(self._rotate_selection)
             mirror = modify.addAction("Mirror...")
             mirror.triggered.connect(self._mirror_selection)
+            reverse_shell = modify.addAction("Reverse Shell Normal")
+            reverse_shell.setEnabled(has_shell)
+            reverse_shell.triggered.connect(
+                self._reverse_selected_shell_normals
+            )
 
             copy_tag = menu.addAction("Copy Tag(s)")
             copy_tag.triggered.connect(self._copy_selected_tags)
