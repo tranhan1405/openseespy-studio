@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from openseespy_studio.response2000 import (
@@ -111,4 +113,11 @@ def test_response2000_comparison_reports_peak_difference():
         if metric["key"] == "peak_moment"
     )
     assert peak["difference_percent"] == pytest.approx(-10.0)
-    assert comparison["moment_nrmse_percent"] == pytest.approx(10.0)
+    expected_nrmse = (
+        math.sqrt((0.0**2 + 10.0**2 + 18.0**2 + 22.0**2) / 4.0)
+        / 220.0
+        * 100.0
+    )
+    assert comparison["moment_nrmse_percent"] == pytest.approx(
+        expected_nrmse
+    )
