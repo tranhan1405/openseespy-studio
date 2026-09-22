@@ -5,7 +5,7 @@ import math
 
 from .beam_loads import resolve_self_weight_local
 from .units import UnitSystem
-from .model import StructuralModel
+from .model import SHELL_ELEMENT_TYPES, StructuralModel
 from .project import MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SectionData, TimeSeriesData, TransformationData, material_parameter_kind
 from .section_response import automatic_moment_curvature_spec, build_section_response_specs
 
@@ -621,6 +621,17 @@ def section_to_openseespy(
         for component in section.fiber_components:
             lines.extend(fiber_component_to_openseespy(component))
         return lines
+
+    if section.section_type == "ElasticMembranePlate":
+        unit_system = UnitSystem.from_mapping(units)
+        elastic_modulus = unit_system.engineering_stress_from_pa(
+            float(p["E"])
+        )
+        return [
+            "ops.section('ElasticMembranePlateSection', "
+            f"{section.tag}, {elastic_modulus:g}, {p['nu']:g}, "
+            f"{p['h']:g}, {p['rho']:g}, {p['EpModifier']:g})"
+        ]
 
     raise ValueError(f"Unsupported section type: {section.section_type}")
 
@@ -2752,16 +2763,43 @@ def to_openseespy(
         )
 
     for element in model.elements.values():
+        element_nodes = tuple(int(tag) for tag in element.node_tags())
         missing = [
-            int(tag)
-            for tag in (element.i, element.j)
-            if int(tag) not in model.nodes
+            tag
+            for tag in element_nodes
+            if tag not in model.nodes
         ]
         if missing:
             geometry_reference_errors.append(
                 f"element {element.tag} -> missing node "
                 + ", ".join(map(str, sorted(set(missing))))
             )
+        elif element.element_type in SHELL_ELEMENT_TYPES:
+            if (int(model.ndm), int(model.ndf)) != (3, 6):
+                geometry_reference_errors.append(
+                    f"shell element {element.tag} -> requires ndm=3, ndf=6"
+                )
+            points = [
+                tuple(float(value) for value in model.nodes[tag].xyz)
+                for tag in element_nodes
+            ]
+
+            def _triangle_area2(a, b, c):
+                ab = tuple(b[i] - a[i] for i in range(3))
+                ac = tuple(c[i] - a[i] for i in range(3))
+                cross = (
+                    ab[1] * ac[2] - ab[2] * ac[1],
+                    ab[2] * ac[0] - ab[0] * ac[2],
+                    ab[0] * ac[1] - ab[1] * ac[0],
+                )
+                return math.sqrt(sum(value * value for value in cross))
+
+            area2 = _triangle_area2(points[0], points[1], points[2])
+            area2 += _triangle_area2(points[0], points[2], points[3])
+            if area2 <= 1.0e-12:
+                geometry_reference_errors.append(
+                    f"shell element {element.tag} -> zero area"
+                )
         else:
             node_i = model.nodes[int(element.i)]
             node_j = model.nodes[int(element.j)]
@@ -3679,6 +3717,44 @@ def to_openseespy(
     ])
     for tag in sorted(model.elements):
         e = model.elements[tag]
+
+        if e.element_type in SHELL_ELEMENT_TYPES:
+            if e.section_tag is None:
+                lines.append(
+                    f"# ERROR: Shell element {tag} has no shell section "
+                    "assigned; element not generated."
+                )
+                continue
+            assigned_section = (
+                sections.get(e.section_tag)
+                if sections is not None
+                else None
+            )
+            if (
+                assigned_section is None
+                or assigned_section.section_type != "ElasticMembranePlate"
+            ):
+                lines.append(
+                    f"# ERROR: Shell element {tag} requires an "
+                    "ElasticMembranePlate section in the current Studio "
+                    "generator; element not generated."
+                )
+                continue
+            if e.k is None or e.l is None:
+                lines.append(
+                    f"# ERROR: Shell element {tag} is missing K/L nodes; "
+                    "element not generated."
+                )
+                continue
+            args = (
+                f"ops.element('{e.element_type}', {tag}, "
+                f"{e.i}, {e.j}, {e.k}, {e.l}, {e.section_tag}"
+            )
+            if e.element_type == "ASDShellQ4" and e.shell_corotational:
+                args += ", '-corotational'"
+            args += ")"
+            lines.append(args)
+            continue
 
         if e.element_type == "truss":
             if e.truss_area <= 0.0:
