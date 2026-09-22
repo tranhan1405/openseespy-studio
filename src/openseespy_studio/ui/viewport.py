@@ -33,7 +33,7 @@ from ..deformed_geometry import (
     deformed_member_frames,
     section_axis_strength_labels,
 )
-from ..model import StructuralModel, classify_fixity
+from ..model import SHELL_ELEMENT_TYPES, StructuralModel, classify_fixity
 from ..postprocess import component_end_resultants, nodal_result_scalar
 from ..project import (
     ConnectionData,
@@ -983,7 +983,11 @@ class ModelViewport(QWidget):
         if mode == "material":
             return "material", self._element_material_tag(element)
         return "uniform", (
-            "column" if element.group == "column" else "beam"
+            "shell"
+            if element.element_type in SHELL_ELEMENT_TYPES
+            else "column"
+            if element.group == "column"
+            else "beam"
         )
 
     def _element_color_label(self, key: tuple[str, object]) -> str:
@@ -998,6 +1002,8 @@ class ModelViewport(QWidget):
             return self._material_label(
                 None if value is None else int(value)
             )
+        if value == "shell":
+            return "Shell / Surface"
         return "Column" if value == "column" else "Beam / Truss"
 
     def _color_map_for_elements(
@@ -1226,7 +1232,7 @@ class ModelViewport(QWidget):
             tags &= self._isolate_nodes
             for element_tag in self._visible_element_tags():
                 element = self._model.elements[element_tag]
-                tags.update((element.i, element.j))
+                tags.update(element.node_tags())
         return tags
 
     def hide_entities(self, nodes: set[int], elements: set[int]) -> None:
@@ -1309,7 +1315,7 @@ class ModelViewport(QWidget):
         cell_tags: list[int] = []
         for tag in tags:
             element = model.elements.get(int(tag))
-            if element is None:
+            if element is None or element.element_type in SHELL_ELEMENT_TYPES:
                 continue
             node_i = model.nodes.get(element.i)
             node_j = model.nodes.get(element.j)
@@ -1330,6 +1336,45 @@ class ModelViewport(QWidget):
         return mesh
 
     @staticmethod
+    def _batched_shell_mesh(
+        model: StructuralModel,
+        tags,
+    ) -> object | None:
+        """Build four-node shell surfaces as one pickable PolyData."""
+        points: list[tuple[float, float, float]] = []
+        faces: list[int] = []
+        cell_tags: list[int] = []
+        for tag in tags:
+            element = model.elements.get(int(tag))
+            if (
+                element is None
+                or element.element_type not in SHELL_ELEMENT_TYPES
+                or element.k is None
+                or element.l is None
+            ):
+                continue
+            node_tags = element.node_tags()
+            nodes = [model.nodes.get(node_tag) for node_tag in node_tags]
+            if any(node is None for node in nodes):
+                continue
+            base = len(points)
+            points.extend(node.xyz for node in nodes if node is not None)
+            faces.extend((4, base, base + 1, base + 2, base + 3))
+            cell_tags.append(int(tag))
+        if not points:
+            return None
+        mesh = pv.PolyData(
+            np.asarray(points, dtype=float),
+            faces=np.asarray(faces, dtype=np.int64),
+            deep=True,
+        )
+        mesh.cell_data["element_tag"] = np.asarray(
+            cell_tags,
+            dtype=np.int64,
+        )
+        return mesh
+
+    @staticmethod
     def _batched_tube_mesh(
         model: StructuralModel,
         tags,
@@ -1342,7 +1387,7 @@ class ModelViewport(QWidget):
 
         for tag in tags:
             element = model.elements.get(int(tag))
-            if element is None:
+            if element is None or element.element_type in SHELL_ELEMENT_TYPES:
                 continue
             node_i = model.nodes.get(element.i)
             node_j = model.nodes.get(element.j)
@@ -1484,16 +1529,31 @@ class ModelViewport(QWidget):
         representation = self._normalized_model_representation(
             self._model_representation
         )
-        beam_tags = [
+        shell_tags = [
             tag
             for tag in visible_tags
+            if self._model.elements[tag].element_type in SHELL_ELEMENT_TYPES
+        ]
+        line_tags = [
+            tag
+            for tag in visible_tags
+            if tag not in set(shell_tags)
+        ]
+        beam_tags = [
+            tag
+            for tag in line_tags
             if self._model.elements[tag].group != "column"
         ]
         column_tags = [
             tag
-            for tag in visible_tags
+            for tag in line_tags
             if self._model.elements[tag].group == "column"
         ]
+
+        shell_mesh = self._batched_shell_mesh(
+            self._model,
+            shell_tags,
+        )
 
         if representation == "centerline":
             combined = {}
@@ -1501,6 +1561,8 @@ class ModelViewport(QWidget):
                 mesh = self._batched_centerline_mesh(self._model, tags)
                 if mesh is not None:
                     combined[name] = mesh
+            if shell_mesh is not None:
+                combined["shell"] = shell_mesh
             return combined
 
         if representation == "tube":
@@ -1521,16 +1583,18 @@ class ModelViewport(QWidget):
                 combined["column"] = column_mesh
             if beam_mesh is not None:
                 combined["beam"] = beam_mesh
+            if shell_mesh is not None:
+                combined["shell"] = shell_mesh
             return combined
 
-        # Actual-section view remains geometry-driven. Members without enough
-        # section/transformation data fall back to a lightweight square tube.
+        # Actual-section view remains geometry-driven for line members.
+        # Shells remain true surface cells for all representation modes.
         groups: dict[str, list[object]] = {"column": [], "beam": []}
         beam_size = max(span * 0.010, 0.08)
         column_size = max(span * 0.0115, 0.09)
         fallback: dict[str, list[int]] = {"column": [], "beam": []}
 
-        for tag in visible_tags:
+        for tag in line_tags:
             element = self._model.elements[tag]
             group = "column" if element.group == "column" else "beam"
             mesh = self._actual_section_member_mesh(element)
@@ -1560,7 +1624,10 @@ class ModelViewport(QWidget):
                     if len(parts) == 1
                     else pv.merge(parts, merge_points=False)
                 )
+        if shell_mesh is not None:
+            combined["shell"] = shell_mesh
         return combined
+
 
     def _fiber_material_points(
         self,
@@ -1754,11 +1821,14 @@ class ModelViewport(QWidget):
                     if has_rgb
                     else "#687d90"
                     if group_name == "column"
+                    else "#8fa3b5"
+                    if group_name == "shell"
                     else "#74889b"
                 ),
                 edge_color="#243b52",
                 show_edges=(
-                    self._model_representation == "tube"
+                    group_name == "shell"
+                    or self._model_representation == "tube"
                 ),
                 line_width=(
                     3 if self._model_representation == "centerline" else 1
@@ -2322,14 +2392,17 @@ class ModelViewport(QWidget):
             element = self._model.elements.get(tag)
             if element is None:
                 continue
-            node_i = self._model.nodes.get(element.i)
-            node_j = self._model.nodes.get(element.j)
-            if node_i is None or node_j is None:
+            nodes = [
+                self._model.nodes.get(node_tag)
+                for node_tag in element.node_tags()
+            ]
+            if not nodes or any(node is None for node in nodes):
                 continue
             points.append(
                 tuple(
-                    (float(a) + float(b)) * 0.5
-                    for a, b in zip(node_i.xyz, node_j.xyz)
+                    sum(float(node.xyz[index]) for node in nodes if node is not None)
+                    / len(nodes)
+                    for index in range(3)
                 )
             )
             labels.append(str(tag))
