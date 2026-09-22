@@ -19512,7 +19512,7 @@ class MainWindow(QMainWindow):
                 ].generated_element_tags
             )
 
-            properties = menu.addAction("Properties / Mesh Quality")
+            properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda checked=False, t=tag:
                 self._show_surface_geometry_properties(t)
@@ -19523,13 +19523,6 @@ class MainWindow(QMainWindow):
                     lambda checked=False, t=tag:
                     self._edit_surface_geometry(t)
                 )
-                configure_mesh = menu.addAction(
-                    "Configure Mesh / Shell Recipe..."
-                )
-                configure_mesh.triggered.connect(
-                    lambda checked=False, t=tag:
-                    self._configure_surface_mesh(t)
-                )
 
             copy_surface = menu.addAction(
                 "Copy / Offset Surface..."
@@ -19539,30 +19532,6 @@ class MainWindow(QMainWindow):
             copy_surface.triggered.connect(
                 lambda checked=False, tags=tuple(surface_tags):
                 self._copy_surface_geometries(tags)
-            )
-
-            assign_section = menu.addAction(
-                "Assign Shell Section..."
-                if count == 1
-                else f"Assign Shell Section to {count} Surfaces..."
-            )
-            assign_section.triggered.connect(
-                lambda checked=False, tags=tuple(surface_tags):
-                self._assign_shell_section_to_surfaces(tags)
-            )
-
-            preview = menu.addAction(
-                "Preview Mesh"
-                if count == 1
-                else f"Preview Mesh ({count} Surfaces)"
-            )
-            preview.triggered.connect(
-                lambda checked=False, tags=tuple(surface_tags):
-                self._preview_surface_meshes(tags)
-            )
-            clear_preview = menu.addAction("Clear Mesh Preview")
-            clear_preview.triggered.connect(
-                self._clear_surface_mesh_preview
             )
 
             if count == 1:
@@ -19662,58 +19631,11 @@ class MainWindow(QMainWindow):
                 self._clear_surface_edge_preview
             )
 
-            integrity = menu.addAction("Audit Mesh Integrity")
-            integrity.triggered.connect(
-                lambda checked=False, tags=tuple(surface_tags):
-                self._audit_surface_mesh_integrity(tags)
-            )
-
-            quality_menu = menu.addMenu("Visualize Mesh Quality")
-            quality_menu.setEnabled(live_mesh)
-            for label, metric in (
-                ("Aspect Ratio", "aspect_ratio"),
-                ("Skew", "skew"),
-                ("Warpage", "warpage"),
-            ):
-                quality_action = quality_menu.addAction(label)
-                quality_action.triggered.connect(
-                    lambda checked=False, m=metric, tags=tuple(surface_tags):
-                    self._show_surface_quality_map(tags, m)
-                )
-            quality_menu.addSeparator()
-            clear_quality = quality_menu.addAction("Clear Quality Map")
-            clear_quality.triggered.connect(
-                self._clear_surface_quality_map
-            )
-
             if count >= 2:
                 audit = menu.addAction("Audit Shared-Edge Conformity")
                 audit.triggered.connect(
                     lambda checked=False, tags=tuple(surface_tags):
                     self._audit_surface_conformity(tags)
-                )
-
-            menu.addSeparator()
-            mesh_label = (
-                "Mesh / Remesh Surface"
-                if count == 1
-                else f"Mesh / Remesh {count} Surfaces"
-            )
-            remesh = menu.addAction(mesh_label)
-            remesh.triggered.connect(
-                lambda checked=False, tags=tuple(surface_tags):
-                self._remesh_surface_geometries(tags)
-            )
-            if live_mesh:
-                delete_label = (
-                    "Delete Generated Mesh"
-                    if count == 1
-                    else f"Delete Generated Meshes ({count} Surfaces)"
-                )
-                delete_mesh = menu.addAction(delete_label)
-                delete_mesh.triggered.connect(
-                    lambda checked=False, tags=tuple(surface_tags):
-                    self._delete_surface_meshes(tags)
                 )
 
             flip_label = (
@@ -19728,16 +19650,6 @@ class MainWindow(QMainWindow):
             )
 
             menu.addSeparator()
-            select_fe = menu.addAction(
-                "Select Generated FE"
-                if count == 1
-                else f"Select Generated FE ({count} Surfaces)"
-            )
-            select_fe.setEnabled(live_mesh)
-            select_fe.triggered.connect(
-                lambda checked=False, tags=tuple(surface_tags):
-                self._select_generated_fe_for_surfaces(tags)
-            )
             create_managed_set = menu.addAction(
                 "Create Managed Named Selection..."
                 if count == 1
