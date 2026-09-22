@@ -2445,6 +2445,23 @@ def test_geometry_rectangle_draw_uses_two_click_geometry_only_surface():
     assert 'plane == "xz"' in corners
 
 
+def test_geometry_sketch_activation_aligns_blank_iso_view_and_shows_grid():
+    prepare = inspect.getsource(MainWindow._prepare_geometry_sketch_view)
+    line = inspect.getsource(MainWindow._activate_geometry_line_pick_tool)
+    surface = inspect.getsource(
+        MainWindow._activate_geometry_surface_pick_tool
+    )
+
+    assert 'current_view().lower() == "iso"' in prepare
+    assert "self.viewport.set_view(normalized, render=False)" in prepare
+    assert "set_geometry_sketch_grid_visible(True)" in prepare
+    assert "grid_action.setChecked(True)" in prepare
+    assert "not self.project.points" in prepare
+    assert "self.viewport.fit_view()" in prepare
+    assert "_prepare_geometry_sketch_view" in line
+    assert "_prepare_geometry_sketch_view" in surface
+
+
 def test_geometry_sketch_has_live_preview_and_right_click_finish():
     wire = inspect.getsource(MainWindow._wire_selection)
     moved = inspect.getsource(
