@@ -8404,10 +8404,15 @@ class MainWindow(QMainWindow):
 
         before = self.project.to_dict()
         try:
+            for dependency in dialog.pending_materials():
+                self.project.add_material(dependency)
             material = dialog.material_data()
             self.project.add_material(material)
         except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
             QMessageBox.warning(self, "Material Library", str(exc))
+            self._refresh_all()
             return
 
         self._refresh_project_metadata(
