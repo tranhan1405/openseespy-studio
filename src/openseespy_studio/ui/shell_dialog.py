@@ -667,6 +667,52 @@ class ShellElementDialog(QDialog):
         )
         form.addRow("", self.corotational)
 
+        self.no_eas = QCheckBox(
+            "Disable enhanced assumed strain (-noeas)"
+        )
+        self.no_eas.setChecked(
+            bool(getattr(element, "shell_no_eas", False))
+            if element is not None
+            else False
+        )
+        form.addRow("", self.no_eas)
+
+        self.use_drilling_stab = QCheckBox(
+            "Override drilling stabilization (-drillingStab)"
+        )
+        existing_drilling_stab = (
+            getattr(element, "shell_drilling_stab", None)
+            if element is not None
+            else None
+        )
+        self.use_drilling_stab.setChecked(
+            existing_drilling_stab is not None
+        )
+        form.addRow("", self.use_drilling_stab)
+
+        self.drilling_stab = _float_spin(
+            (
+                float(existing_drilling_stab)
+                if existing_drilling_stab is not None
+                else 0.01
+            ),
+            low=0.0,
+            high=1.0e12,
+            decimals=8,
+        )
+        form.addRow("Drilling stabilization:", self.drilling_stab)
+        self.use_drilling_stab.toggled.connect(self._sync_formulation)
+
+        self.drilling_nl = QCheckBox(
+            "Nonlinear drilling constraint (-drillingNL)"
+        )
+        self.drilling_nl.setChecked(
+            bool(getattr(element, "shell_drilling_nl", False))
+            if element is not None
+            else False
+        )
+        form.addRow("", self.drilling_nl)
+
         self.use_local_x = QCheckBox("Override ASDShellQ4 local X axis")
         existing_local = (
             getattr(element, "shell_local_x", None)
@@ -718,11 +764,20 @@ class ShellElementDialog(QDialog):
     def _sync_formulation(self, *_args) -> None:
         is_asd = self.formulation.currentText() == "ASDShellQ4"
         self.corotational.setEnabled(is_asd)
+        self.no_eas.setEnabled(is_asd)
+        self.use_drilling_stab.setEnabled(is_asd)
+        self.drilling_stab.setEnabled(
+            is_asd and self.use_drilling_stab.isChecked()
+        )
+        self.drilling_nl.setEnabled(is_asd)
         self.use_local_x.setEnabled(is_asd)
         for spin in self.local_x_spins:
             spin.setEnabled(is_asd and self.use_local_x.isChecked())
         if not is_asd:
             self.corotational.setChecked(False)
+            self.no_eas.setChecked(False)
+            self.use_drilling_stab.setChecked(False)
+            self.drilling_nl.setChecked(False)
             self.use_local_x.setChecked(False)
 
     def values(
@@ -734,6 +789,9 @@ class ShellElementDialog(QDialog):
         int,
         bool,
         tuple[float, float, float] | None,
+        bool,
+        float | None,
+        bool,
     ]:
         node_tags = tuple(
             int(combo.currentData())
@@ -762,6 +820,12 @@ class ShellElementDialog(QDialog):
             )
             if sum(value * value for value in local_x) <= 1.0e-24:
                 raise ValueError("Shell local X vector cannot be zero.")
+        drilling_stab = None
+        if (
+            formulation == "ASDShellQ4"
+            and self.use_drilling_stab.isChecked()
+        ):
+            drilling_stab = float(self.drilling_stab.value())
         return (
             self.tag.value(),
             node_tags,
@@ -769,6 +833,9 @@ class ShellElementDialog(QDialog):
             int(section_tag),
             bool(self.corotational.isChecked()),
             local_x,
+            bool(self.no_eas.isChecked()),
+            drilling_stab,
+            bool(self.drilling_nl.isChecked()),
         )
 
     def _accept(self) -> None:
@@ -868,6 +935,29 @@ class ShellMeshDialog(QDialog):
         )
         form.addRow("", self.corotational)
 
+        self.no_eas = QCheckBox(
+            "Disable enhanced assumed strain for all mesh elements (-noeas)"
+        )
+        form.addRow("", self.no_eas)
+
+        self.use_drilling_stab = QCheckBox(
+            "Override drilling stabilization for all mesh elements"
+        )
+        form.addRow("", self.use_drilling_stab)
+        self.drilling_stab = _float_spin(
+            0.01,
+            low=0.0,
+            high=1.0e12,
+            decimals=8,
+        )
+        form.addRow("Drilling stabilization:", self.drilling_stab)
+        self.use_drilling_stab.toggled.connect(self._sync_formulation)
+
+        self.drilling_nl = QCheckBox(
+            "Nonlinear drilling constraint for all mesh elements"
+        )
+        form.addRow("", self.drilling_nl)
+
         self.use_local_x = QCheckBox(
             "Override ASDShellQ4 local X axis for all mesh elements"
         )
@@ -922,11 +1012,20 @@ class ShellMeshDialog(QDialog):
     def _sync_formulation(self, *_args) -> None:
         enabled = self.formulation.currentText() == "ASDShellQ4"
         self.corotational.setEnabled(enabled)
+        self.no_eas.setEnabled(enabled)
+        self.use_drilling_stab.setEnabled(enabled)
+        self.drilling_stab.setEnabled(
+            enabled and self.use_drilling_stab.isChecked()
+        )
+        self.drilling_nl.setEnabled(enabled)
         self.use_local_x.setEnabled(enabled)
         for spin in self.local_x_spins:
             spin.setEnabled(enabled and self.use_local_x.isChecked())
         if not enabled:
             self.corotational.setChecked(False)
+            self.no_eas.setChecked(False)
+            self.use_drilling_stab.setChecked(False)
+            self.drilling_nl.setChecked(False)
             self.use_local_x.setChecked(False)
 
     def _update_info(self, *_args) -> None:
@@ -973,6 +1072,13 @@ class ShellMeshDialog(QDialog):
             section_tag=int(section_tag),
             corotational=self.corotational.isChecked(),
             local_x=local_x,
+            no_eas=self.no_eas.isChecked(),
+            drilling_stab=(
+                float(self.drilling_stab.value())
+                if self.use_drilling_stab.isChecked()
+                else None
+            ),
+            drilling_nl=self.drilling_nl.isChecked(),
         )
 
     def _accept(self) -> None:
