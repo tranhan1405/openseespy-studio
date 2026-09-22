@@ -12794,6 +12794,7 @@ class MainWindow(QMainWindow):
 
     def _open_hinge_backbone(
         self,
+        checked: bool = False,
         *,
         prefill: dict | None = None,
     ) -> None:
