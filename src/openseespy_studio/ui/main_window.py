@@ -1623,6 +1623,7 @@ class MainWindow(QMainWindow):
         self._frame_first_node_tag: int | None = None
         self._truss_first_node_tag: int | None = None
         self._geometry_line_point_tags: list[int] = []
+        self._geometry_line_anchor_snap: dict[str, object] | None = None
         self._geometry_surface_point_tags: list[int] = []
         self._geometry_sketch_intersections = []
         self._geometry_trim_subject_tag: int | None = None
@@ -5268,6 +5269,7 @@ class MainWindow(QMainWindow):
 
     def _leave_geometry_line_pick_mode(self) -> None:
         self._geometry_line_point_tags = []
+        self._geometry_line_anchor_snap = None
         action = self.actions.get("line_geometry_pick")
         if action is not None:
             action.setChecked(False)
@@ -5355,6 +5357,7 @@ class MainWindow(QMainWindow):
 
     def _reset_active_geometry_sketch_anchor(self) -> None:
         self._geometry_line_point_tags = []
+        self._geometry_line_anchor_snap = None
         self._geometry_surface_point_tags = []
         self.viewport.clear_geometry_pick_preview(render=False)
         self.viewport.clear_geometry_sketch_preview(render=False)
@@ -5410,6 +5413,7 @@ class MainWindow(QMainWindow):
         self._leave_truss_pick_mode()
         self._leave_geometry_surface_pick_mode()
         self._geometry_line_point_tags = []
+        self._geometry_line_anchor_snap = None
         self._refresh_geometry_sketch_snap_cache()
         self.viewport.clear_geometry_pick_preview(render=False)
         self.viewport.clear_geometry_sketch_preview(render=False)
@@ -6106,6 +6110,7 @@ class MainWindow(QMainWindow):
         sx, sy = float(screen[0]), float(screen[1])
         first_anchor = (
             not self._geometry_line_point_tags
+            and self._geometry_line_anchor_snap is None
             and not self._geometry_surface_point_tags
         )
         exact_tag = payload.get("tag")
@@ -6251,19 +6256,28 @@ class MainWindow(QMainWindow):
                 "line_tags": best[5],
             }
 
-        anchor_tag = None
+        anchor_xyz = None
         if self._geometry_line_point_tags:
-            anchor_tag = int(self._geometry_line_point_tags[-1])
+            anchor = self.project.points.get(
+                int(self._geometry_line_point_tags[-1])
+            )
+            if anchor is not None:
+                anchor_xyz = tuple(float(value) for value in anchor.xyz)
+        elif self._geometry_line_anchor_snap is not None:
+            anchor_xyz = tuple(
+                float(value)
+                for value in self._geometry_line_anchor_snap["xyz"]
+            )
         elif self._geometry_surface_point_tags:
-            anchor_tag = int(self._geometry_surface_point_tags[0])
-        anchor = (
-            self.project.points.get(anchor_tag)
-            if anchor_tag is not None
-            else None
-        )
-        if anchor is not None:
+            anchor = self.project.points.get(
+                int(self._geometry_surface_point_tags[0])
+            )
+            if anchor is not None:
+                anchor_xyz = tuple(float(value) for value in anchor.xyz)
+
+        if anchor_xyz is not None:
             plane, offset = self.viewport.geometry_sketch_plane()
-            a = tuple(float(value) for value in anchor.xyz)
+            a = anchor_xyz
             if plane == "xy":
                 inferred = (
                     ("Horizontal", (xyz[0], a[1], offset)),
@@ -6433,11 +6447,44 @@ class MainWindow(QMainWindow):
         if snap is None:
             return
 
-        if not self._geometry_line_point_tags:
+        if (
+            not self._geometry_line_point_tags
+            and self._geometry_line_anchor_snap is None
+        ):
+            anchor_xyz = tuple(float(value) for value in snap["xyz"])
+            self.viewport.set_geometry_sketch_plane_offset_from_point(
+                anchor_xyz
+            )
+            self._geometry_line_anchor_snap = dict(snap)
+            self.viewport.show_geometry_sketch_preview([anchor_xyz])
+            plane, offset = self.viewport.geometry_sketch_plane()
+            self.status_message.setText(
+                f"Polyline anchor · {plane.upper()} @ {offset:g} · "
+                "click next point"
+            )
+            return
+
+        if (
+            not self._geometry_line_point_tags
+            and self._geometry_line_anchor_snap is not None
+        ):
             before = self.project.to_dict()
             try:
-                point_tag, changed = self._materialize_geometry_sketch_point(
-                    snap
+                point_i, _anchor_changed = (
+                    self._materialize_geometry_sketch_point(
+                        self._geometry_line_anchor_snap
+                    )
+                )
+                point_j, _point_changed = (
+                    self._materialize_geometry_sketch_point(snap)
+                )
+                if point_i == point_j:
+                    raise ValueError(
+                        "Polyline segment requires two different points."
+                    )
+                line_tag, line_created = self._draw_geometry_line_segment(
+                    point_i,
+                    point_j,
                 )
             except (TypeError, ValueError) as exc:
                 self.project = ProjectDatabase.from_dict(before)
@@ -6445,28 +6492,32 @@ class MainWindow(QMainWindow):
                 self._refresh_all(reset_camera=False)
                 self.status_message.setText(str(exc))
                 return
-            point = self.project.points[point_tag]
-            self.viewport.set_geometry_sketch_plane_offset_from_point(
-                point.xyz
+
+            self._geometry_line_anchor_snap = None
+            self._geometry_line_point_tags = [point_j]
+            self._refresh_geometry_sketch_snap_cache()
+            self.model = self.project.model
+            self._refresh_all(
+                (
+                    f"Drawn Geometry Line {line_tag}"
+                    if line_created
+                    else f"Snapped to existing Line {line_tag}"
+                ),
+                reset_camera=False,
             )
-            self._geometry_line_point_tags = [point_tag]
-            if changed:
-                self.model = self.project.model
-                self._refresh_all(
-                    f"Sketch anchor Point {point_tag}",
-                    reset_camera=False,
-                )
-                self._record_project_change(
-                    f"Sketch Geometry Point {point_tag}",
-                    before,
-                )
-            self.viewport.show_geometry_sketch_preview(
-                [point.xyz]
+            self._record_project_change(
+                f"Draw Geometry Line {line_tag}",
+                before,
             )
-            plane, offset = self.viewport.geometry_sketch_plane()
+            point = self.project.points[point_j]
+            self.viewport.show_geometry_sketch_preview([point.xyz])
             self.status_message.setText(
-                f"Polyline anchor P{point_tag} · "
-                f"{plane.upper()} @ {offset:g} · click next point"
+                (
+                    f"Created L{line_tag} · P{point_i} → P{point_j} · "
+                    if line_created
+                    else f"Line L{line_tag} already exists · "
+                )
+                + "click next point · right-click to finish"
             )
             return
 
@@ -6679,6 +6730,17 @@ class MainWindow(QMainWindow):
                         snap_label=label,
                     )
                     return
+            if self._geometry_line_anchor_snap is not None:
+                anchor_xyz = tuple(
+                    float(value)
+                    for value in self._geometry_line_anchor_snap["xyz"]
+                )
+                self.viewport.show_geometry_sketch_preview(
+                    [anchor_xyz],
+                    cursor=xyz,
+                    snap_label=label,
+                )
+                return
             self.viewport.show_geometry_sketch_preview(
                 [],
                 cursor=xyz,
@@ -13180,6 +13242,7 @@ class MainWindow(QMainWindow):
 
         if sketch_active:
             self._geometry_line_point_tags = []
+            self._geometry_line_anchor_snap = None
             self._geometry_surface_point_tags = []
             self.viewport.clear_geometry_pick_preview(render=False)
             self.viewport.clear_geometry_sketch_preview(render=False)
