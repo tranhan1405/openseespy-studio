@@ -25,6 +25,7 @@ from .selection import parse_tag_expression
 RECORDER_RESPONSES: dict[str, list[str]] = {
     "Node": ["disp", "vel", "accel", "reaction"],
     "Element": ["globalForce", "localForce"],
+    "Shell": ["force", "deformation"],
     "Section": ["force", "deformation"],
     "Fiber": ["stressStrain", "stress", "strain"],
 }
@@ -66,7 +67,9 @@ class RecorderDialog(QDialog):
         form.addRow("Name:", self.name)
 
         self.recorder_type = QComboBox()
-        self.recorder_type.addItems(["Node", "Element", "Section", "Fiber"])
+        self.recorder_type.addItems(
+            ["Node", "Element", "Shell", "Section", "Fiber"]
+        )
         if recorder is not None:
             self.recorder_type.setCurrentText(recorder.recorder_type)
         elif initial_element_tags and not initial_node_tags:
@@ -165,6 +168,7 @@ class RecorderDialog(QDialog):
 
         note = QLabel(
             "Node: disp/vel/accel/reaction · Element: global/local force · "
+            "Shell: Gauss-point force/deformation (GP 1..4) · "
             "Section: force/deformation · Fiber: stress/strain/stressStrain. "
             "Fiber selection may use an explicit index or nearest y-z coordinates."
         )
@@ -213,9 +217,13 @@ class RecorderDialog(QDialog):
 
         is_node = recorder_type == "Node"
         is_section = recorder_type in {"Section", "Fiber"}
+        is_shell = recorder_type == "Shell"
         is_fiber = recorder_type == "Fiber"
         self.dofs.setEnabled(is_node)
-        self.section_number.setEnabled(is_section)
+        self.section_number.setEnabled(is_section or is_shell)
+        self.section_number.setMaximum(4 if is_shell else 1000)
+        if is_shell and self.section_number.value() > 4:
+            self.section_number.setValue(4)
         self.fiber_y.setEnabled(is_fiber)
         self.fiber_z.setEnabled(is_fiber)
         self.material_tag.setEnabled(is_fiber)
