@@ -1662,6 +1662,78 @@ def test_geometry_free_line_first_click_is_transient_until_segment_exists():
     )
 
 
+def test_geometry_polyline_midpoint_first_click_commits_topology_anchor():
+    project = ProjectDatabase(name="midpoint-first-anchor")
+    project.add_point(PointGeometryData(1, "A", (0.0, 0.0, 0.0)))
+    project.add_point(PointGeometryData(2, "B", (4.0, 0.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Base",
+            1,
+            2,
+            mesh_recipe_configured=False,
+        )
+    )
+
+    class ViewportStub:
+        def __init__(self):
+            self.plane = ("xy", 0.0)
+
+        def geometry_sketch_plane(self):
+            return self.plane
+
+        def set_geometry_sketch_plane_offset_from_point(self, xyz):
+            self.plane = ("xy", float(xyz[2]))
+
+        def show_geometry_sketch_preview(self, *_args, **_kwargs):
+            return None
+
+    class StatusStub:
+        def setText(self, _text):
+            return None
+
+    dummy = SimpleNamespace(
+        project=project,
+        model=project.model,
+        viewport=ViewportStub(),
+        status_message=StatusStub(),
+        _geometry_line_point_tags=[],
+        _geometry_line_anchor_snap=None,
+        _geometry_surface_point_tags=[],
+        _geometry_sketch_intersections=[],
+    )
+    dummy._geometry_sketch_snap = lambda _payload: {
+        "xyz": (2.0, 0.0, 0.0),
+        "kind": "midpoint",
+        "label": "Midpoint L1",
+        "point_tag": None,
+        "line_tags": (1,),
+    }
+    for name in (
+        "_geometry_sketch_tolerance",
+        "_find_geometry_point_near",
+        "_materialize_geometry_sketch_point",
+        "_handle_geometry_line_sketch_click",
+    ):
+        setattr(
+            dummy,
+            name,
+            getattr(MainWindow, name).__get__(dummy, type(dummy)),
+        )
+    dummy._refresh_geometry_sketch_snap_cache = lambda: None
+    dummy._refresh_all = lambda *_args, **_kwargs: None
+    dummy._record_project_change = lambda *_args, **_kwargs: None
+
+    dummy._handle_geometry_line_sketch_click({})
+
+    assert len(project.points) == 3
+    assert len(project.lines) == 2
+    assert dummy._geometry_line_anchor_snap is None
+    assert dummy._geometry_line_point_tags == [3]
+    assert project.points[3].xyz == pytest.approx((2.0, 0.0, 0.0))
+
+
 def test_geometry_free_line_three_clicks_commit_two_lines():
     project = ProjectDatabase(name="three-click-free-line")
 
