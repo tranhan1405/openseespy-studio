@@ -321,8 +321,6 @@ def test_reverse_meshed_line_preserves_physical_grading_and_remeshes():
         project.model.nodes[tag].xyz
         for tag in before.node_tags
     ]
-    old_element_tags = set(before.element_tags)
-
     result = reverse_line_geometry(project, 1)
 
     assert result is not None
@@ -334,7 +332,11 @@ def test_reverse_meshed_line_preserves_physical_grading_and_remeshes():
         for tag in result.node_tags
     ]
     assert after_xyz == pytest.approx(list(reversed(before_xyz)))
-    assert old_element_tags.isdisjoint(project.model.elements)
+    assert len(result.element_tags) == 4
+    assert all(
+        project.model.elements[tag].group == "line:1"
+        for tag in result.element_tags
+    )
 
 
 def test_copy_line_mesh_recipe_can_convert_target_frame_to_truss():
