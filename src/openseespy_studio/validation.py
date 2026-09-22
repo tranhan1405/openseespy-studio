@@ -290,6 +290,70 @@ def _element_geometry_checks(
                     )
                 )
 
+            edge_lengths = [_norm(vector) for vector in edge_vectors]
+            positive_edges = [
+                length for length in edge_lengths
+                if length > 1.0e-12
+            ]
+            if positive_edges:
+                aspect_ratio = max(positive_edges) / min(positive_edges)
+                if aspect_ratio > 10.0:
+                    issues.append(
+                        ValidationIssue(
+                            "WARNING",
+                            "Shell quality",
+                            f"Shell element {tag} has edge aspect ratio "
+                            f"{aspect_ratio:.3g} (> 10).",
+                            "element",
+                            tag,
+                            "Refine or repartition the surface to avoid "
+                            "highly stretched quadrilateral shell elements.",
+                        )
+                    )
+
+            tri_a = _cross(
+                tuple(
+                    points[1][axis] - points[0][axis]
+                    for axis in range(3)
+                ),
+                tuple(
+                    points[2][axis] - points[0][axis]
+                    for axis in range(3)
+                ),
+            )
+            tri_b = _cross(
+                tuple(
+                    points[2][axis] - points[0][axis]
+                    for axis in range(3)
+                ),
+                tuple(
+                    points[3][axis] - points[0][axis]
+                    for axis in range(3)
+                ),
+            )
+            norm_a = _norm(tri_a)
+            norm_b = _norm(tri_b)
+            if norm_a > 1.0e-12 and norm_b > 1.0e-12:
+                cosine = sum(
+                    tri_a[axis] * tri_b[axis]
+                    for axis in range(3)
+                ) / (norm_a * norm_b)
+                cosine = max(-1.0, min(1.0, cosine))
+                warpage_deg = math.degrees(math.acos(cosine))
+                if warpage_deg > 15.0:
+                    issues.append(
+                        ValidationIssue(
+                            "WARNING",
+                            "Shell quality",
+                            f"Shell element {tag} has warpage angle "
+                            f"{warpage_deg:.3g}° (> 15°).",
+                            "element",
+                            tag,
+                            "Refine the mesh or use a flatter quadrilateral "
+                            "patch where practical.",
+                        )
+                    )
+
             if element.section_tag is None:
                 issues.append(
                     ValidationIssue(
