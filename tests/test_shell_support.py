@@ -1586,7 +1586,10 @@ def test_shell_stitch_ui_and_model_check_repair_route_are_exposed():
     viewport_source = inspect.getsource(
         MainWindow._show_viewport_context_menu
     )
-    validation_source = inspect.getsource(validate_project)
+    from openseespy_studio import validation as validation_module
+    validation_source = inspect.getsource(
+        validation_module._element_geometry_checks
+    )
 
     assert "coincident_shell_node_groups" in method_source
     assert "stitch_coincident_shell_nodes" in method_source
