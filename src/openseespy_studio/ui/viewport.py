@@ -903,10 +903,41 @@ class ModelViewport(QWidget):
         # left/right-drag navigation cannot conflict with selection/context menus.
         self.plotter.interactor.installEventFilter(self)
 
+    def _qt_vtk_pixel_scales(self) -> tuple[float, float]:
+        """Return render-pixel / Qt-logical-pixel scales for HiDPI picking."""
+        widget = self.plotter.interactor
+        widget_width = max(float(widget.width()), 1.0)
+        widget_height = max(float(widget.height()), 1.0)
+        try:
+            render_width, render_height = self.plotter.ren_win.GetSize()
+            render_width = float(render_width)
+            render_height = float(render_height)
+        except Exception:
+            return 1.0, 1.0
+        if (
+            not math.isfinite(render_width)
+            or not math.isfinite(render_height)
+            or render_width <= 0.0
+            or render_height <= 0.0
+        ):
+            return 1.0, 1.0
+        return (
+            render_width / widget_width,
+            render_height / widget_height,
+        )
+
     def _vtk_position_from_qt(self, event) -> tuple[int, int]:
         pos = event.position()
-        x = int(pos.x())
-        y = int(self.plotter.interactor.height() - pos.y())
+        scale_x, scale_y = self._qt_vtk_pixel_scales()
+        widget_height = float(self.plotter.interactor.height())
+        x = int(round(float(pos.x()) * scale_x))
+        y = int(round((widget_height - float(pos.y())) * scale_y))
+        try:
+            render_width, render_height = self.plotter.ren_win.GetSize()
+            x = max(0, min(x, max(int(render_width) - 1, 0)))
+            y = max(0, min(y, max(int(render_height) - 1, 0)))
+        except Exception:
+            pass
         return x, y
 
     @staticmethod
@@ -1287,9 +1318,13 @@ class ModelViewport(QWidget):
         renderer.SetWorldPoint(float(xyz[0]), float(xyz[1]), float(xyz[2]), 1.0)
         renderer.WorldToDisplay()
         display = renderer.GetDisplayPoint()
+        scale_x, scale_y = self._qt_vtk_pixel_scales()
+        inv_x = 1.0 / max(scale_x, 1.0e-12)
+        inv_y = 1.0 / max(scale_y, 1.0e-12)
         return (
-            float(display[0]),
-            float(self.plotter.interactor.height() - display[1]),
+            float(display[0]) * inv_x,
+            float(self.plotter.interactor.height())
+            - float(display[1]) * inv_y,
         )
 
     @staticmethod
