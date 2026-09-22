@@ -158,6 +158,7 @@ def _element_geometry_checks(
         tuple[int, int],
         list[tuple[int, int, int]],
     ] = {}
+    shell_node_tags: set[int] = set()
 
     for tag in sorted(model.elements):
         element = model.elements[tag]
@@ -220,6 +221,7 @@ def _element_geometry_checks(
             continue
 
         if element.element_type in SHELL_ELEMENT_TYPES:
+            shell_node_tags.update(node_tags)
             if (int(model.ndm), int(model.ndf)) != (3, 6):
                 issues.append(
                     ValidationIssue(
@@ -622,6 +624,88 @@ def _element_geometry_checks(
                     "traverse their shared edge in opposite directions.",
                 )
             )
+
+
+    if len(shell_node_tags) > 1:
+        shell_nodes = [
+            model.nodes[tag]
+            for tag in sorted(shell_node_tags)
+            if tag in model.nodes
+        ]
+        if shell_nodes:
+            xs = [float(node.xyz[0]) for node in shell_nodes]
+            ys = [float(node.xyz[1]) for node in shell_nodes]
+            zs = [float(node.xyz[2]) for node in shell_nodes]
+            span = max(
+                max(xs) - min(xs),
+                max(ys) - min(ys),
+                max(zs) - min(zs),
+                1.0,
+            )
+            tolerance = 1.0e-9 * span
+            tolerance2 = tolerance * tolerance
+            buckets: dict[
+                tuple[int, int, int],
+                list[int],
+            ] = {}
+            reported_pairs: set[tuple[int, int]] = set()
+
+            def spatial_key(
+                xyz: tuple[float, float, float],
+            ) -> tuple[int, int, int]:
+                return tuple(
+                    int(round(float(value) / tolerance))
+                    for value in xyz
+                )
+
+            for node in shell_nodes:
+                base = spatial_key(node.xyz)
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        for dz in (-1, 0, 1):
+                            for other_tag in buckets.get(
+                                (
+                                    base[0] + dx,
+                                    base[1] + dy,
+                                    base[2] + dz,
+                                ),
+                                (),
+                            ):
+                                if other_tag == node.tag:
+                                    continue
+                                other = model.nodes.get(other_tag)
+                                if other is None:
+                                    continue
+                                distance2 = sum(
+                                    (
+                                        float(node.xyz[index])
+                                        - float(other.xyz[index])
+                                    ) ** 2
+                                    for index in range(3)
+                                )
+                                if distance2 > tolerance2:
+                                    continue
+                                pair = tuple(
+                                    sorted((int(node.tag), int(other_tag)))
+                                )
+                                if pair in reported_pairs:
+                                    continue
+                                reported_pairs.add(pair)
+                                issues.append(
+                                    ValidationIssue(
+                                        "WARNING",
+                                        "Shell connectivity",
+                                        f"Shell nodes {pair[0]} and {pair[1]} "
+                                        "are coincident but use different "
+                                        "node tags.",
+                                        "node",
+                                        pair[0],
+                                        "Merge/reuse coincident nodes when "
+                                        "the shell patches should be "
+                                        "structurally continuous.",
+                                    )
+                                )
+                buckets.setdefault(base, []).append(int(node.tag))
 
 
 def _support_and_connectivity_checks(
