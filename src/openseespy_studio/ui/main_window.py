@@ -8481,10 +8481,23 @@ class MainWindow(QMainWindow):
             return
 
         self.model = self.project.model
+        conformity = []
+        if result.conformed_u:
+            conformity.append("U conformed")
+        if result.conformed_v:
+            conformity.append("V conformed")
+        conformity_text = (
+            " · " + ", ".join(conformity)
+            if conformity
+            else ""
+        )
         self._refresh_all(
             f"Created shell surface mesh · "
+            f"{result.divisions_u}×{result.divisions_v} = "
             f"{len(result.element_tags)} element(s) · "
-            f"{len(result.node_tags)} generated node(s)"
+            f"{len(result.node_tags)} generated node(s) · "
+            f"{len(result.reused_node_tags)} reused node(s)"
+            f"{conformity_text}"
         )
         self.selection.set_selection(
             elements=set(result.element_tags),
