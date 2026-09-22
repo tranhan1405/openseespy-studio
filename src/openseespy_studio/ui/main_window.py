@@ -5561,6 +5561,17 @@ class MainWindow(QMainWindow):
                                 else "Small displacement"
                             ),
                         ),
+                        (
+                            "Local X axis",
+                            (
+                                ", ".join(
+                                    f"{value:g}"
+                                    for value in element.shell_local_x
+                                )
+                                if element.shell_local_x is not None
+                                else "Automatic from node ordering"
+                            ),
+                        ),
                         ("Transformation", "Not used by Shell"),
                         ("Beam integration", "Not used by Shell"),
                         ("Group", element.group),
@@ -8377,6 +8388,7 @@ class MainWindow(QMainWindow):
                 formulation,
                 section_tag,
                 corotational,
+                local_x,
             ) = dialog.values()
         except ValueError as exc:
             QMessageBox.warning(self, "Create Shell", str(exc))
@@ -8398,6 +8410,7 @@ class MainWindow(QMainWindow):
                 k=node_tags[2],
                 l=node_tags[3],
                 shell_corotational=corotational,
+                shell_local_x=local_x,
             )
             self.project.validate_element_state(tag)
         except ValueError as exc:
@@ -8436,6 +8449,7 @@ class MainWindow(QMainWindow):
                 formulation,
                 section_tag,
                 corotational,
+                local_x,
             ) = dialog.values()
         except ValueError as exc:
             QMessageBox.warning(self, "Edit Shell", str(exc))
@@ -8454,6 +8468,7 @@ class MainWindow(QMainWindow):
                 k=node_tags[2],
                 l=node_tags[3],
                 shell_corotational=corotational,
+                shell_local_x=local_x,
             )
             self.model.elements[element.tag] = updated
             self.project.validate_element_state(element.tag)
