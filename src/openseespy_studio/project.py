@@ -3638,6 +3638,14 @@ class ProjectDatabase:
                     "Frame Line requires an existing Section."
                 )
             if (
+                self.sections[line.section_tag].section_type
+                in SHELL_SECTION_TYPES
+            ):
+                raise ValueError(
+                    "Frame Line requires a frame-compatible Section, "
+                    "not a Shell Section."
+                )
+            if (
                 line.transformation_tag is None
                 or line.transformation_tag not in self.transformations
             ):
