@@ -3357,18 +3357,43 @@ class ModelViewport(QWidget):
             visible_elements = {
                 tag
                 for tag in visible_elements
-                if (
-                    self._model.elements[tag].i in node_tags
-                    and self._model.elements[tag].j in node_tags
+                if all(
+                    node_tag in node_tags
+                    for node_tag in self._model.elements[tag].node_tags()
                 )
             }
 
         for tag in sorted(visible_elements):
             element = self._model.elements[tag]
-            if (
-                element.i not in self._model.nodes
-                or element.j not in self._model.nodes
+            element_node_tags = element.node_tags()
+            if any(
+                node_tag not in self._model.nodes
+                for node_tag in element_node_tags
             ):
+                continue
+
+            if element.element_type in SHELL_ELEMENT_TYPES:
+                if len(element_node_tags) != 4:
+                    continue
+                shell_points: list[tuple[float, float, float]] = []
+                shell_magnitudes: list[float] = []
+                for node_tag in element_node_tags:
+                    point, magnitude = displaced(node_tag)
+                    shell_points.append(point)
+                    shell_magnitudes.append(magnitude)
+                surface = pv.PolyData(
+                    np.asarray(shell_points, dtype=float),
+                    faces=np.asarray(
+                        [4, 0, 1, 2, 3],
+                        dtype=np.int64,
+                    ),
+                    deep=True,
+                )
+                surface.point_data["magnitude"] = np.asarray(
+                    shell_magnitudes,
+                    dtype=float,
+                )
+                surface_meshes.append(surface)
                 continue
 
             rendered_surface = False
@@ -3571,7 +3596,7 @@ class ModelViewport(QWidget):
             for tag in element_tags:
                 element = self._model.elements.get(tag)
                 if element is not None:
-                    scoped_nodes.update((element.i, element.j))
+                    scoped_nodes.update(element.node_tags())
             result_node_tags.intersection_update(scoped_nodes)
         result_nodes = sorted(result_node_tags)
         node_points = []
@@ -4869,7 +4894,9 @@ class ModelViewport(QWidget):
             element = self._model.elements.get(tag)
             if element:
                 points.extend(
-                    (self._model.nodes[element.i].xyz, self._model.nodes[element.j].xyz)
+                    self._model.nodes[node_tag].xyz
+                    for node_tag in element.node_tags()
+                    if node_tag in self._model.nodes
                 )
         if not points:
             return
