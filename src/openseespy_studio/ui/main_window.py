@@ -2016,18 +2016,18 @@ class MainWindow(QMainWindow):
             "Create a Truss element by entering nodes, area, and material",
         )
         self._make_action(
-            "shell_input",
-            "Shell...",
-            "element",
-            self._create_shell,
-            "Create a four-node OpenSees shell surface element",
+            "surface_geometry",
+            "Surface...",
+            "grid",
+            self._create_surface_geometry,
+            "Create reusable Rectangle or Quad surface geometry for Shell meshing",
         )
         self._make_action(
-            "shell_mesh",
-            "Mesh Surface...",
-            "grid",
-            self._create_shell_mesh,
-            "Create a structured quadrilateral shell mesh from four corner nodes",
+            "shell_input",
+            "Direct Shell Element...",
+            "element",
+            self._create_shell,
+            "Create one low-level four-node OpenSees Shell element directly",
         )
         self._make_action("grid", "Grid", "grid", self._show_frame_grid, "Create frame grid")
         self._make_action(
@@ -2875,8 +2875,7 @@ class MainWindow(QMainWindow):
                 "column_1d",
                 "grid",
                 "node",
-                "shell_input",
-                "shell_mesh",
+                "surface_geometry",
                 "extrude",
             ),
             widgets=(frame_button, truss_button),
@@ -14280,11 +14279,6 @@ class MainWindow(QMainWindow):
         if kind == "surfaces_root":
             create_geometry = menu.addAction("New Surface Geometry...")
             create_geometry.triggered.connect(self._create_surface_geometry)
-            menu.addSeparator()
-            create = menu.addAction("Legacy: New Direct Shell...")
-            create.triggered.connect(self._create_shell)
-            mesh = menu.addAction("Legacy: Mesh from 4 Model Nodes...")
-            mesh.triggered.connect(self._create_shell_mesh)
             stitch = menu.addAction("Stitch Coincident Shell Nodes...")
             stitch.triggered.connect(self._stitch_coincident_shell_nodes)
             section = menu.addAction("New Shell Section...")
@@ -14348,10 +14342,8 @@ class MainWindow(QMainWindow):
             create.triggered.connect(self._create_element)
             create_truss = menu.addAction("New Truss...")
             create_truss.triggered.connect(self._create_truss)
-            create_shell = menu.addAction("New Shell / Surface...")
+            create_shell = menu.addAction("New Direct Shell Element...")
             create_shell.triggered.connect(self._create_shell)
-            mesh_shell = menu.addAction("Mesh Shell Surface...")
-            mesh_shell.triggered.connect(self._create_shell_mesh)
             create_connection = menu.addAction(
                 "New ZeroLength / Link Element..."
             )
