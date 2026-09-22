@@ -1855,6 +1855,37 @@ class ModelViewport(QWidget):
         if self._display_domain == "geometry":
             self._update_highlight_overlays()
 
+    def show_surface_mesh_definition_preview(
+        self,
+        surface: SurfaceGeometryData,
+    ) -> None:
+        """Preview a transient Surface mesh definition without FE mutation."""
+        if self._display_domain != "geometry":
+            self.set_display_domain("geometry")
+        self._remove_overlay("surface-mesh-preview")
+        _nu, _nv, segments = surface_mesh_preview_segments(surface)
+        if not segments:
+            self.plotter.render()
+            return
+        points: list[tuple[float, float, float]] = []
+        lines: list[int] = []
+        for start, end in segments:
+            base = len(points)
+            points.extend((start, end))
+            lines.extend((2, base, base + 1))
+        mesh = pv.PolyData(np.asarray(points, dtype=float))
+        mesh.lines = np.asarray(lines, dtype=np.int64)
+        self.plotter.add_mesh(
+            mesh,
+            name="surface-mesh-preview",
+            color="#8a2be2",
+            line_width=2.4,
+            render_lines_as_tubes=False,
+            pickable=False,
+            render=False,
+        )
+        self.plotter.render()
+
     def show_surface_mesh_preview(
         self,
         surface_tags,
