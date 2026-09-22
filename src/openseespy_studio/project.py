@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 32
+PROJECT_FORMAT_VERSION = 33
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -2948,6 +2948,12 @@ class SurfaceGeometryData:
     )
     section_tag: int | None = None
     formulation: str = "ASDShellQ4"
+    corner_point_tags: tuple[int, int, int, int] | None = None
+    corotational: bool = False
+    local_x: tuple[float, float, float] | None = None
+    no_eas: bool = False
+    drilling_stab: float | None = None
+    drilling_nl: bool = False
     mesh_mode: str = "divisions"
     divisions_u: int = 4
     divisions_v: int = 4
@@ -3019,6 +3025,65 @@ class SurfaceGeometryData:
                 f"Unsupported shell formulation: {self.formulation}"
             )
 
+        if self.corner_point_tags is not None:
+            if len(self.corner_point_tags) != 4:
+                raise ValueError(
+                    "Surface geometry topology requires four Point tags."
+                )
+            point_tags = tuple(
+                _strict_int(tag, "Surface geometry Point tag")
+                for tag in self.corner_point_tags
+            )
+            if any(tag <= 0 for tag in point_tags):
+                raise ValueError(
+                    "Surface geometry Point tags must be positive."
+                )
+            if len(set(point_tags)) != 4:
+                raise ValueError(
+                    "Surface geometry requires four distinct Point tags."
+                )
+            self.corner_point_tags = point_tags
+
+        self.corotational = _strict_bool(
+            self.corotational,
+            "Surface shell corotational flag",
+        )
+        self.no_eas = _strict_bool(
+            self.no_eas,
+            "Surface shell no-EAS flag",
+        )
+        self.drilling_nl = _strict_bool(
+            self.drilling_nl,
+            "Surface shell nonlinear drilling flag",
+        )
+        if self.local_x is not None:
+            local_x = tuple(float(value) for value in self.local_x)
+            if len(local_x) != 3 or any(
+                not math.isfinite(value) for value in local_x
+            ):
+                raise ValueError(
+                    "Surface shell local X needs three finite values."
+                )
+            if sum(value * value for value in local_x) <= 1.0e-24:
+                raise ValueError("Surface shell local X cannot be zero.")
+            self.local_x = local_x
+        if self.drilling_stab is not None:
+            self.drilling_stab = float(self.drilling_stab)
+            if (
+                not math.isfinite(self.drilling_stab)
+                or self.drilling_stab < 0.0
+            ):
+                raise ValueError(
+                    "Surface drilling stabilization must be finite "
+                    "and non-negative."
+                )
+        if self.formulation != "ASDShellQ4":
+            self.corotational = False
+            self.local_x = None
+            self.no_eas = False
+            self.drilling_stab = None
+            self.drilling_nl = False
+
         self.mesh_mode = str(self.mesh_mode)
         if self.mesh_mode not in {"divisions", "target_size"}:
             raise ValueError(
@@ -3075,6 +3140,18 @@ class SurfaceGeometryData:
             "points": [list(point) for point in self.points],
             "section_tag": self.section_tag,
             "formulation": self.formulation,
+            "corner_point_tags": (
+                None
+                if self.corner_point_tags is None
+                else list(self.corner_point_tags)
+            ),
+            "corotational": self.corotational,
+            "local_x": (
+                None if self.local_x is None else list(self.local_x)
+            ),
+            "no_eas": self.no_eas,
+            "drilling_stab": self.drilling_stab,
+            "drilling_nl": self.drilling_nl,
             "mesh_mode": self.mesh_mode,
             "divisions_u": self.divisions_u,
             "divisions_v": self.divisions_v,
@@ -3098,6 +3175,20 @@ class SurfaceGeometryData:
             points=points,  # type: ignore[arg-type]
             section_tag=data.get("section_tag"),
             formulation=str(data.get("formulation", "ASDShellQ4")),
+            corner_point_tags=(
+                None
+                if data.get("corner_point_tags") is None
+                else tuple(data.get("corner_point_tags"))
+            ),
+            corotational=data.get("corotational", False),
+            local_x=(
+                None
+                if data.get("local_x") is None
+                else tuple(data.get("local_x"))
+            ),
+            no_eas=data.get("no_eas", False),
+            drilling_stab=data.get("drilling_stab"),
+            drilling_nl=data.get("drilling_nl", False),
             mesh_mode=str(data.get("mesh_mode", "divisions")),
             divisions_u=data.get("divisions_u", 4),
             divisions_v=data.get("divisions_v", 4),
@@ -3592,26 +3683,80 @@ class ProjectDatabase:
             raise ValueError(
                 f"Geometry Point tag {point.tag} already exists."
             )
+        old_point = self.points[original_tag]
+        affected_surfaces = [
+            surface
+            for surface in self.surfaces.values()
+            if (
+                surface.corner_point_tags is not None
+                and original_tag in surface.corner_point_tags
+            )
+        ]
+        coordinates_changed = tuple(point.xyz) != tuple(old_point.xyz)
+        if coordinates_changed:
+            meshed = [
+                surface.tag
+                for surface in affected_surfaces
+                if any(
+                    element_tag in self.model.elements
+                    for element_tag in surface.generated_element_tags
+                )
+            ]
+            if meshed:
+                raise ValueError(
+                    "Geometry Point is used by meshed Surface(s): "
+                    + ", ".join(map(str, sorted(meshed)))
+                    + ". Delete/remesh those Surface meshes before moving it."
+                )
+
         if point.tag != original_tag:
             for line in self.lines.values():
                 if line.point_i == original_tag:
                     line.point_i = point.tag
                 if line.point_j == original_tag:
                     line.point_j = point.tag
+            for surface in affected_surfaces:
+                surface.corner_point_tags = tuple(
+                    point.tag if tag == original_tag else tag
+                    for tag in surface.corner_point_tags
+                )
+
         self.points.pop(original_tag)
         self.points[point.tag] = point
+        for surface in affected_surfaces:
+            if surface.corner_point_tags is not None:
+                surface.points = tuple(
+                    self.points[tag].xyz
+                    for tag in surface.corner_point_tags
+                )
 
     def remove_point(self, tag: int) -> None:
         tag = _strict_int(tag, "Geometry Point tag")
-        users = sorted(
+        line_users = sorted(
             line.tag
             for line in self.lines.values()
             if tag in {line.point_i, line.point_j}
         )
+        surface_users = sorted(
+            surface.tag
+            for surface in self.surfaces.values()
+            if (
+                surface.corner_point_tags is not None
+                and tag in surface.corner_point_tags
+            )
+        )
+        users = []
+        if line_users:
+            users.append(
+                "Line(s): " + ", ".join(map(str, line_users))
+            )
+        if surface_users:
+            users.append(
+                "Surface(s): " + ", ".join(map(str, surface_users))
+            )
         if users:
             raise ValueError(
-                f"Geometry Point {tag} is used by Line(s): "
-                + ", ".join(map(str, users))
+                f"Geometry Point {tag} is used by " + "; ".join(users)
             )
         self.points.pop(tag, None)
 
@@ -3695,11 +3840,10 @@ class ProjectDatabase:
     def next_surface_tag(self) -> int:
         return max(self.surfaces, default=0) + 1
 
-    def add_surface(self, surface: SurfaceGeometryData) -> None:
-        if surface.tag in self.surfaces:
-            raise ValueError(
-                f"Surface geometry tag {surface.tag} already exists."
-            )
+    def _validate_surface_geometry(
+        self,
+        surface: SurfaceGeometryData,
+    ) -> None:
         if (
             surface.section_tag is not None
             and surface.section_tag not in self.sections
@@ -3708,6 +3852,36 @@ class ProjectDatabase:
                 f"Surface geometry references missing Section "
                 f"{surface.section_tag}."
             )
+        if (
+            surface.section_tag is not None
+            and self.sections[surface.section_tag].section_type
+            not in SHELL_SECTION_TYPES
+        ):
+            raise ValueError(
+                "Surface geometry requires a shell-compatible Section."
+            )
+        if surface.corner_point_tags is not None:
+            missing = [
+                tag
+                for tag in surface.corner_point_tags
+                if tag not in self.points
+            ]
+            if missing:
+                raise ValueError(
+                    "Surface geometry references missing Point(s): "
+                    + ", ".join(map(str, missing))
+                )
+            surface.points = tuple(
+                self.points[tag].xyz
+                for tag in surface.corner_point_tags
+            )
+
+    def add_surface(self, surface: SurfaceGeometryData) -> None:
+        if surface.tag in self.surfaces:
+            raise ValueError(
+                f"Surface geometry tag {surface.tag} already exists."
+            )
+        self._validate_surface_geometry(surface)
         self.surfaces[surface.tag] = surface
 
     def update_surface(
@@ -3730,14 +3904,7 @@ class ProjectDatabase:
             raise ValueError(
                 f"Surface geometry tag {surface.tag} already exists."
             )
-        if (
-            surface.section_tag is not None
-            and surface.section_tag not in self.sections
-        ):
-            raise ValueError(
-                f"Surface geometry references missing Section "
-                f"{surface.section_tag}."
-            )
+        self._validate_surface_geometry(surface)
         self.surfaces.pop(original_tag)
         self.surfaces[surface.tag] = surface
 
