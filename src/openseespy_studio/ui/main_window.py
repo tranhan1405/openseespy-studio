@@ -12788,17 +12788,8 @@ class MainWindow(QMainWindow):
         line = self.project.lines.get(int(tag))
         if line is None:
             return
-        if any(
-            element_tag in self.model.elements
-            for element_tag in line.generated_element_tags
-        ):
-            QMessageBox.information(
-                self,
-                "Edit Geometry Line",
-                "This Line already has generated FE elements. Delete those "
-                "FE elements before editing the Line geometry or mesh recipe.",
-            )
-            return
+        state = inspect_line_mesh_state(self.project, tag)
+        had_live_mesh = bool(state.live_element_tags)
 
         dialog = LineGeometryDialog(
             next_tag=line.tag,
@@ -12815,10 +12806,30 @@ class MainWindow(QMainWindow):
         try:
             updated = dialog.data()
             self.project.update_line(tag, updated)
+            result = (
+                remesh_line_geometry(self.project, updated.tag)
+                if had_live_mesh
+                else None
+            )
         except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
             QMessageBox.warning(self, "Geometry Line", str(exc))
             return
-        self._refresh_all(f"Updated Geometry Line {updated.tag}")
+
+        self.model = self.project.model
+        if result is None:
+            message = f"Updated Geometry Line {updated.tag}"
+        else:
+            message = (
+                f"Updated + remeshed Line {updated.tag} · "
+                f"{result.divisions} division(s) · "
+                f"{len(result.element_tags)} "
+                f"{updated.element_family} element(s)"
+            )
+        self._refresh_all(message)
+        self.viewport.set_display_domain("geometry")
         self._show_line_geometry_properties(updated.tag)
         self._record_project_change(
             f"Edit Geometry Line {tag}",
