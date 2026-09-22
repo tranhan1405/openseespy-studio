@@ -176,6 +176,33 @@ class MaterialEnvelopePreview(QWidget):
                 (0.62 * emax, dict(pts).get(0.62 * emax, 0.0), "b"),
             ]
 
+        if material_type == "RambergOsgoodSteel":
+            fy = abs(p.get("fy", 0.0))
+            e0 = abs(p.get("E0", 0.0))
+            a = abs(p.get("a", 0.0))
+            n = max(abs(p.get("n", 0.0)), 1.0e-9)
+            if e0 <= 1.0e-15 or fy <= 1.0e-15:
+                return [], (
+                    "fy and E0 must be non-zero to draw RambergOsgoodSteel."
+                ), []
+            smax = 1.5 * fy
+            pts = []
+            for index in range(61):
+                sigma = -smax + 2.0 * smax * index / 60.0
+                ratio = abs(sigma) / fy
+                plastic = a * ratio**n
+                eps = sigma / e0
+                eps += -plastic if sigma < 0.0 else plastic
+                pts.append((eps, sigma))
+            ey = fy / e0 + a
+            return pts, (
+                "Ramberg-Osgood monotonic guide · a is the direct strain "
+                "coefficient used by OpenSees"
+            ), [
+                (ey, fy, "fy"),
+                (-ey, -fy, "-fy"),
+            ]
+
         if material_type == "Hardening":
             e = abs(p.get("E", 0.0))
             fy = abs(p.get("sigmaY", 0.0))
