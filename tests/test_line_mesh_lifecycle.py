@@ -7,16 +7,19 @@ import pytest
 from openseespy_studio.line_mesher import (
     audit_line_mesh_integrity,
     audit_line_network_connectivity,
+    conform_line_network,
     copy_line_mesh_recipe,
     delete_line_geometry,
     delete_line_mesh,
     inspect_line_mesh_state,
+    line_geometry_intersections,
     line_mesh_coordinates,
     line_mesh_quality,
     mesh_line_geometry,
     remesh_line_batch,
     remesh_line_geometry,
     reverse_line_geometry,
+    split_line_geometry_at_point,
 )
 from openseespy_studio.project import (
     LineGeometryData,
@@ -272,6 +275,8 @@ def test_line_mesh_ui_exposes_preview_remesh_delete_audit_and_fe_bridge():
     assert "Copy This Mesh / FE Recipe" in context
     assert "Generate / Remesh" in context
     assert "Audit Line Network Connectivity" in context
+    assert "Inspect Line Network Intersections..." in context
+    assert "Conform / Heal Line Network" in context
     assert "remesh_line_geometry" in edit
     assert "line_mesh_preview_points" in preview
     assert 'set_display_domain("fe")' in select_fe
@@ -288,11 +293,19 @@ def test_line_mesh_ui_exposes_preview_remesh_delete_audit_and_fe_bridge():
     network = inspect.getsource(
         MainWindow._audit_line_network_connectivity_ui
     )
+    intersections = inspect.getsource(
+        MainWindow._inspect_line_geometry_intersections
+    )
+    conform = inspect.getsource(
+        MainWindow._conform_line_network_ui
+    )
     assert "line_mesh_quality" in quality
     assert "reverse_line_geometry" in reverse
     assert "copy_line_mesh_recipe" in copy_recipe
     assert "remesh_line_batch" in batch
     assert "audit_line_network_connectivity" in network
+    assert "line_geometry_intersections" in intersections
+    assert "conform_line_network" in conform
 
 def test_line_mesh_quality_reports_actual_biased_fe_lengths():
     project = _frame_project(length=10.0)
@@ -476,7 +489,7 @@ def test_batch_remesh_rebuilds_shared_endpoint_without_orphan_nodes():
     assert set(project.model.nodes) == used_nodes
 
 
-def test_connectivity_audit_flags_disconnected_geometry_junction():
+def test_shared_geometry_point_is_connected_even_when_coordinate_reuse_disabled():
     project = _frame_project(length=4.0)
     project.add_point(PointGeometryData(3, "C", (4.0, 3.0, 0.0)))
     project.add_line(
@@ -503,6 +516,41 @@ def test_connectivity_audit_flags_disconnected_geometry_junction():
             transformation_tag=1,
         )
     )
+    first = mesh_line_geometry(project, 1)
+    second = mesh_line_geometry(project, 2)
+
+    assert set(first.node_tags) & set(second.node_tags)
+    assert audit_line_network_connectivity(project) == []
+
+
+def test_distinct_coincident_geometry_points_remain_disconnected_when_reuse_disabled():
+    project = _frame_project(length=4.0)
+    project.add_point(PointGeometryData(3, "B duplicate", (4.0, 0.0, 0.0)))
+    project.add_point(PointGeometryData(4, "C", (4.0, 3.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "AB",
+            1,
+            2,
+            divisions=2,
+            reuse_existing_nodes=False,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "B2C",
+            3,
+            4,
+            divisions=2,
+            reuse_existing_nodes=False,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
     mesh_line_geometry(project, 1)
     mesh_line_geometry(project, 2)
 
@@ -511,14 +559,186 @@ def test_connectivity_audit_flags_disconnected_geometry_junction():
     assert len(issues) == 1
     assert issues[0].kind == "endpoint"
     assert issues[0].line_tags == (1, 2)
-    assert issues[0].point == pytest.approx((4.0, 0.0, 0.0))
 
-    remesh_line_batch(project, [1, 2])
-    # reuse_existing_nodes=False remains an explicit disconnected recipe.
-    assert len(audit_line_network_connectivity(project)) == 1
+def _crossing_project() -> ProjectDatabase:
+    project = _frame_project(length=4.0)
+    project.add_point(PointGeometryData(3, "C", (2.0, -2.0, 0.0)))
+    project.add_point(PointGeometryData(4, "D", (2.0, 2.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Horizontal",
+            1,
+            2,
+            divisions=4,
+            reuse_existing_nodes=False,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "Vertical",
+            3,
+            4,
+            divisions=4,
+            reuse_existing_nodes=False,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    return project
 
-    project.lines[1].reuse_existing_nodes = True
-    project.lines[2].reuse_existing_nodes = True
-    remesh_line_batch(project, [1, 2])
+
+def test_crossing_lines_conform_into_shared_geometry_point_and_fe_node():
+    project = _crossing_project()
+
+    intersections = line_geometry_intersections(project, [1, 2])
+    assert len(intersections) == 1
+    assert intersections[0].kind == "crossing"
+    assert intersections[0].point == pytest.approx((2.0, 0.0, 0.0))
+
+    result = conform_line_network(project, [1, 2], mesh=True)
+
+    assert result.intersection_count == 1
+    assert result.split_line_tags == [1, 2]
+    assert len(result.created_point_tags) == 1
+    assert len(result.created_line_tags) == 2
+    assert len(result.output_line_tags) == 4
+    center_point = result.created_point_tags[0]
+
+    center_lines = [
+        line
+        for line in project.lines.values()
+        if center_point in {line.point_i, line.point_j}
+    ]
+    assert len(center_lines) == 4
+
+    center_nodes = set()
+    for line in center_lines:
+        node_tag = (
+            line.generated_node_tags[0]
+            if line.point_i == center_point
+            else line.generated_node_tags[-1]
+        )
+        center_nodes.add(node_tag)
+    assert len(center_nodes) == 1
     assert audit_line_network_connectivity(project) == []
+
+
+def test_t_junction_conform_reuses_existing_endpoint_geometry_point():
+    project = _frame_project(length=4.0)
+    project.add_point(PointGeometryData(3, "T", (2.0, 0.0, 0.0)))
+    project.add_point(PointGeometryData(4, "Stem", (2.0, 2.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Through",
+            1,
+            2,
+            divisions=4,
+            reuse_existing_nodes=False,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "Stem",
+            3,
+            4,
+            divisions=2,
+            reuse_existing_nodes=False,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+
+    result = conform_line_network(project, [1, 2], mesh=True)
+
+    assert result.intersection_count == 1
+    assert result.created_point_tags == []
+    assert result.split_line_tags == [1]
+    assert len(result.created_line_tags) == 1
+    lines_at_t = [
+        line
+        for line in project.lines.values()
+        if 3 in {line.point_i, line.point_j}
+    ]
+    assert len(lines_at_t) == 3
+    shared_nodes = {
+        (
+            line.generated_node_tags[0]
+            if line.point_i == 3
+            else line.generated_node_tags[-1]
+        )
+        for line in lines_at_t
+    }
+    assert len(shared_nodes) == 1
+
+
+def test_manual_line_split_preserves_recipe_and_existing_mesh_state():
+    project = _frame_project(length=10.0)
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Beam",
+            1,
+            2,
+            divisions=5,
+            bias=4.0,
+            reuse_existing_nodes=False,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    mesh_line_geometry(project, 1)
+
+    result = split_line_geometry_at_point(
+        project,
+        1,
+        (4.0, 0.0, 0.0),
+        remesh=True,
+    )
+
+    assert len(result.line_tags) == 2
+    assert len(result.created_line_tags) == 1
+    assert len(result.created_point_tags) == 1
+    first = project.lines[result.line_tags[0]]
+    second = project.lines[result.line_tags[1]]
+    assert first.section_tag == second.section_tag == 1
+    assert first.transformation_tag == second.transformation_tag == 1
+    assert first.element_family == second.element_family == "Frame"
+    assert first.divisions + second.divisions == 5
+    assert first.bias * second.bias == pytest.approx(4.0)
+    assert set(result.mesh_results) == set(result.line_tags)
+    shared = (
+        set(result.mesh_results[first.tag].node_tags)
+        & set(result.mesh_results[second.tag].node_tags)
+    )
+    assert len(shared) == 1
+
+
+def test_moving_point_used_by_meshed_line_is_rejected():
+    project = _frame_project(length=4.0)
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Beam",
+            1,
+            2,
+            divisions=2,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    mesh_line_geometry(project, 1)
+
+    with pytest.raises(ValueError, match="meshed Line"):
+        project.update_point(
+            2,
+            PointGeometryData(2, "B", (5.0, 0.0, 0.0)),
+        )
 
