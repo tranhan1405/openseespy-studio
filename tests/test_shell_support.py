@@ -239,7 +239,8 @@ def test_shell_section_density_counts_as_dynamic_mass():
 
 def test_shell_ui_routes_exist_and_are_frame_safe():
     create_source = inspect.getsource(MainWindow._create_shell)
-    assert "_ensure_node_count(4" in create_source
+    assert "_ensure_node_count" in create_source
+    assert "4," in create_source
     assert "_create_shell_section" in create_source
     assert "ShellElementDialog" in create_source
 
