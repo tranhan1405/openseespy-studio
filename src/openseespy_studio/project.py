@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 33
+PROJECT_FORMAT_VERSION = 34
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -2958,6 +2958,14 @@ class SurfaceGeometryData:
     divisions_u: int = 4
     divisions_v: int = 4
     target_size: float | None = None
+    bias_u: float = 1.0
+    bias_v: float = 1.0
+    edge_divisions: tuple[
+        int | None,
+        int | None,
+        int | None,
+        int | None,
+    ] | None = None
     reuse_existing_nodes: bool = True
     conform_existing_edges: bool = True
     generated_node_tags: list[int] = field(default_factory=list)
@@ -3112,6 +3120,63 @@ class SurfaceGeometryData:
                     "Surface target mesh size must be finite and positive."
                 )
 
+        self.bias_u = float(self.bias_u)
+        self.bias_v = float(self.bias_v)
+        for value, label in (
+            (self.bias_u, "Surface U mesh bias"),
+            (self.bias_v, "Surface V mesh bias"),
+        ):
+            if (
+                not math.isfinite(value)
+                or value < 0.01
+                or value > 100.0
+            ):
+                raise ValueError(
+                    f"{label} must be finite and in 0.01..100."
+                )
+
+        if self.edge_divisions is not None:
+            if len(self.edge_divisions) != 4:
+                raise ValueError(
+                    "Surface edge seeding requires four edge entries."
+                )
+            normalized_edges: list[int | None] = []
+            for index, value in enumerate(
+                self.edge_divisions,
+                start=1,
+            ):
+                if value is None:
+                    normalized_edges.append(None)
+                    continue
+                seed = _strict_int(
+                    value,
+                    f"Surface edge {index} divisions",
+                )
+                if not 1 <= seed <= 500:
+                    raise ValueError(
+                        f"Surface edge {index} divisions must be in 1..500."
+                    )
+                normalized_edges.append(seed)
+            if (
+                normalized_edges[0] is not None
+                and normalized_edges[2] is not None
+                and normalized_edges[0] != normalized_edges[2]
+            ):
+                raise ValueError(
+                    "Mapped quad mesh requires equal divisions on "
+                    "opposite edges 1 and 3."
+                )
+            if (
+                normalized_edges[1] is not None
+                and normalized_edges[3] is not None
+                and normalized_edges[1] != normalized_edges[3]
+            ):
+                raise ValueError(
+                    "Mapped quad mesh requires equal divisions on "
+                    "opposite edges 2 and 4."
+                )
+            self.edge_divisions = tuple(normalized_edges)  # type: ignore[assignment]
+
         self.reuse_existing_nodes = _strict_bool(
             self.reuse_existing_nodes,
             "Surface reuse existing nodes",
@@ -3156,6 +3221,13 @@ class SurfaceGeometryData:
             "divisions_u": self.divisions_u,
             "divisions_v": self.divisions_v,
             "target_size": self.target_size,
+            "bias_u": self.bias_u,
+            "bias_v": self.bias_v,
+            "edge_divisions": (
+                None
+                if self.edge_divisions is None
+                else list(self.edge_divisions)
+            ),
             "reuse_existing_nodes": self.reuse_existing_nodes,
             "conform_existing_edges": self.conform_existing_edges,
             "generated_node_tags": list(self.generated_node_tags),
@@ -3193,6 +3265,13 @@ class SurfaceGeometryData:
             divisions_u=data.get("divisions_u", 4),
             divisions_v=data.get("divisions_v", 4),
             target_size=data.get("target_size"),
+            bias_u=data.get("bias_u", 1.0),
+            bias_v=data.get("bias_v", 1.0),
+            edge_divisions=(
+                None
+                if data.get("edge_divisions") is None
+                else tuple(data.get("edge_divisions"))
+            ),
             reuse_existing_nodes=data.get("reuse_existing_nodes", True),
             conform_existing_edges=data.get("conform_existing_edges", True),
             generated_node_tags=list(data.get("generated_node_tags", [])),
