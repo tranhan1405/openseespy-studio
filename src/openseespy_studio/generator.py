@@ -3923,6 +3923,15 @@ def to_openseespy(
             if e.element_type == "ASDShellQ4":
                 if e.shell_corotational:
                     args += ", '-corotational'"
+                if e.shell_no_eas:
+                    args += ", '-noeas'"
+                if e.shell_drilling_stab is not None:
+                    args += (
+                        f", '-drillingStab', "
+                        f"{e.shell_drilling_stab:g}"
+                    )
+                if e.shell_drilling_nl:
+                    args += ", '-drillingNL'"
                 if e.shell_local_x is not None:
                     x1, x2, x3 = e.shell_local_x
                     args += (
