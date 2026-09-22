@@ -24,7 +24,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 184
+    assert len(records) == 187
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -222,7 +222,7 @@ def test_moodley_2026_records_encode_model_applicability():
     )
 
 
-def test_verified_library_reaches_one_hundred_eighty_four_with_expected_source_counts():
+def test_verified_library_reaches_one_hundred_eighty_seven_with_expected_source_counts():
     records = load_verified_material_library()
     prefixes = {
         "carreno-2020-": 2,
@@ -250,10 +250,11 @@ def test_verified_library_reaches_one_hundred_eighty_four_with_expected_source_c
         "cheng-2019-": 1,
         "megalooikonomou-2012-": 1,
         "vaiana-2018-": 1,
+        "yao-2021-": 3,
     }
 
-    assert len(records) == 184
-    assert len({record.id for record in records}) == 184
+    assert len(records) == 187
+    assert len({record.id for record in records}) == 187
     for prefix, expected in prefixes.items():
         assert sum(
             record.id.startswith(prefix)
@@ -287,6 +288,66 @@ def test_vaiana_2018_hysteretic_smooth_reference_is_exact():
         "ops.uniaxialMaterial('HystereticSmooth', "
         "61, 5, 0.5, 0.45, -1)"
     )
+
+
+
+def test_yao_2021_postfire_ramberg_osgood_sets_are_exact():
+    expected = {
+        "yao-2021-600c-natural-ramberg-osgood": (
+            196.0e9, 631.72e6, 2.35, 9.82, "Table 7"
+        ),
+        "yao-2021-600c-furnace-ramberg-osgood": (
+            210.0e9, 621.05e6, 2.05, 9.65, "Table 8"
+        ),
+        "yao-2021-600c-water-ramberg-osgood": (
+            200.0e9, 632.61e6, 1.82, 10.82, "Table 9"
+        ),
+    }
+    for record_id, values in expected.items():
+        e0, fy, alpha, n, table = values
+        record = _record(record_id)
+        expected_a = alpha * fy / e0
+
+        assert record.model == "RambergOsgoodSteel"
+        assert record.parameters_si["fy"] == fy
+        assert record.parameters_si["E0"] == e0
+        assert record.parameters_si["n"] == n
+        assert record.parameters_si["a"] == pytest.approx(
+            expected_a,
+            rel=1.0e-12,
+        )
+        assert record.doi == "10.3390/ma14020469"
+        assert table in str(
+            record.parameter_evidence.get("location", "")
+        )
+        assert "a=α·fy/E" in str(
+            record.parameter_evidence.get("relationship", "")
+        )
+
+
+def test_yao_2021_ramberg_osgood_exports_with_unit_conversion():
+    record = _record("yao-2021-600c-natural-ramberg-osgood")
+    material = material_from_library_record(record, tag=62)
+
+    n_mm = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+    kn_m = material_to_openseespy(
+        material,
+        {"length": "m", "force": "kN", "time": "s"},
+    )
+
+    assert (
+        "ops.uniaxialMaterial('RambergOsgoodSteel', 62, "
+        "631.72, 196000"
+    ) in n_mm
+    assert (
+        "ops.uniaxialMaterial('RambergOsgoodSteel', 62, "
+        "631720, 1.96e+08"
+    ) in kn_m
+    assert "0.00757419, 9.82" in n_mm
+    assert "0.00757419, 9.82" in kn_m
 
 
 def test_delgiudice_2022_adds_traceable_steel02_and_concrete01_sets():
