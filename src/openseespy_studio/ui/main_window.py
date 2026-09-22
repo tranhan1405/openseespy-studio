@@ -7769,7 +7769,123 @@ class MainWindow(QMainWindow):
             + ("shown" if checked else "hidden")
         )
 
-    def _create_shell_pressure(self) -> None:
+    def _selected_surface_geometry_tags(
+        self,
+        fallback_tag: int | None = None,
+    ) -> list[int]:
+        tags: set[int] = set()
+        for item in self.tree.selectedItems():
+            payload = item.data(0, Qt.UserRole)
+            if not payload or payload[0] != "surface_geometry":
+                continue
+            tag = int(payload[1])
+            if tag in self.project.surfaces:
+                tags.add(tag)
+        if not tags and fallback_tag is not None:
+            tag = int(fallback_tag)
+            if tag in self.project.surfaces:
+                tags.add(tag)
+        return sorted(tags)
+
+    def _select_generated_fe_for_surfaces(
+        self,
+        surface_tags,
+    ) -> None:
+        element_tags: set[int] = set()
+        for surface_tag in surface_tags:
+            surface = self.project.surfaces.get(int(surface_tag))
+            if surface is None:
+                continue
+            for element_tag in surface.generated_element_tags:
+                element = self.model.elements.get(int(element_tag))
+                if (
+                    element is not None
+                    and element.element_type in SHELL_ELEMENT_TYPES
+                ):
+                    element_tags.add(int(element_tag))
+        if not element_tags:
+            QMessageBox.information(
+                self,
+                "Select Generated FE",
+                "The selected Surface geometry has no live generated "
+                "Shell elements.",
+            )
+            return
+        self.viewport.set_display_domain("fe")
+        self.selection.set_selection(elements=element_tags)
+        self.status_message.setText(
+            f"Selected {len(element_tags)} generated Shell FE element(s)"
+        )
+
+    def _create_surface_pressure_for_surfaces(
+        self,
+        surface_tags,
+    ) -> None:
+        surfaces = [
+            self.project.surfaces[int(tag)]
+            for tag in sorted({int(tag) for tag in surface_tags})
+            if int(tag) in self.project.surfaces
+        ]
+        if not surfaces:
+            return
+
+        unmeshed = [
+            surface.tag
+            for surface in surfaces
+            if not any(
+                int(element_tag) in self.model.elements
+                for element_tag in surface.generated_element_tags
+            )
+        ]
+        if unmeshed:
+            QMessageBox.information(
+                self,
+                "Surface Pressure",
+                "Mesh the following Surface geometry first: "
+                + ", ".join(map(str, unmeshed)),
+            )
+            return
+
+        element_tags = sorted({
+            int(element_tag)
+            for surface in surfaces
+            for element_tag in surface.generated_element_tags
+            if (
+                int(element_tag) in self.model.elements
+                and self.model.elements[
+                    int(element_tag)
+                ].element_type in SHELL_ELEMENT_TYPES
+            )
+        })
+        self._create_shell_pressure_for_elements(
+            element_tags,
+            source_label=(
+                "Surface "
+                + ", ".join(
+                    map(str, [surface.tag for surface in surfaces])
+                )
+            ),
+        )
+
+    def _create_shell_pressure_for_elements(
+        self,
+        selected,
+        *,
+        source_label: str | None = None,
+    ) -> None:
+        selected = sorted({
+            int(tag)
+            for tag in selected
+            if (
+                int(tag) in self.model.elements
+                and self.model.elements[
+                    int(tag)
+                ].element_type in SHELL_ELEMENT_TYPES
+            )
+        })
+        if not selected:
+            return
+
         plain = self._plain_load_patterns()
         if not plain:
             if not self._ensure_plain_load_pattern(
@@ -7777,55 +7893,6 @@ class MainWindow(QMainWindow):
             ):
                 return
             plain = self._plain_load_patterns()
-
-        selected = sorted(
-            int(tag)
-            for tag in self.selection.elements
-            if (
-                tag in self.model.elements
-                and self.model.elements[tag].element_type
-                in SHELL_ELEMENT_TYPES
-            )
-        )
-        if not selected:
-            existing = sorted(
-                int(tag)
-                for tag, element in self.model.elements.items()
-                if element.element_type in SHELL_ELEMENT_TYPES
-            )
-            if not existing:
-                if not self._ensure_prerequisite(
-                    title="Shell Surface Pressure",
-                    message=(
-                        "Surface pressure requires meshed Shell elements. "
-                        "Create one now?"
-                    ),
-                    action_label="Create & Mesh Surface Now...",
-                    available=lambda: any(
-                        element.element_type in SHELL_ELEMENT_TYPES
-                        for element in self.model.elements.values()
-                    ),
-                    creator=self._create_surface_geometry_and_mesh,
-                ):
-                    return
-                selected = sorted(
-                    int(tag)
-                    for tag in self.selection.elements
-                    if (
-                        tag in self.model.elements
-                        and self.model.elements[tag].element_type
-                        in SHELL_ELEMENT_TYPES
-                    )
-                )
-            else:
-                QMessageBox.information(
-                    self,
-                    "Shell Surface Pressure",
-                    "Select at least one Shell element first.",
-                )
-                return
-        if not selected:
-            return
 
         dialog = ElementLoadDialog(
             plain,
@@ -7872,13 +7939,65 @@ class MainWindow(QMainWindow):
             self._refresh_all()
             return
 
+        label = f" on {source_label}" if source_label else ""
         self._refresh_project_metadata(
-            f"Created {len(created)} shell surface pressure load(s)"
+            f"Created {len(created)} shell surface pressure load(s){label}"
         )
         self._record_project_change(
             "Create shell surface pressure load(s)",
             before,
         )
+
+    def _create_shell_pressure(self) -> None:
+        selected = sorted(
+            int(tag)
+            for tag in self.selection.elements
+            if (
+                tag in self.model.elements
+                and self.model.elements[tag].element_type
+                in SHELL_ELEMENT_TYPES
+            )
+        )
+        if not selected:
+            existing = sorted(
+                int(tag)
+                for tag, element in self.model.elements.items()
+                if element.element_type in SHELL_ELEMENT_TYPES
+            )
+            if not existing:
+                if not self._ensure_prerequisite(
+                    title="Shell Surface Pressure",
+                    message=(
+                        "Surface pressure requires meshed Shell elements. "
+                        "Create one now?"
+                    ),
+                    action_label="Create & Mesh Surface Now...",
+                    available=lambda: any(
+                        element.element_type in SHELL_ELEMENT_TYPES
+                        for element in self.model.elements.values()
+                    ),
+                    creator=self._create_surface_geometry_and_mesh,
+                ):
+                    return
+                selected = sorted(
+                    int(tag)
+                    for tag in self.selection.elements
+                    if (
+                        tag in self.model.elements
+                        and self.model.elements[tag].element_type
+                        in SHELL_ELEMENT_TYPES
+                    )
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Shell Surface Pressure",
+                    "Select at least one Shell element first, or use "
+                    "Geometry → Surface → Create Pressure on Surface(s).",
+                )
+                return
+        if selected:
+            self._create_shell_pressure_for_elements(selected)
 
     def _create_element_load(self) -> None:
         plain = self._plain_load_patterns()
