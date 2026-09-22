@@ -241,6 +241,12 @@ def mesh_line_geometry(
     if line is None:
         raise ValueError(f"Line geometry {tag} does not exist.")
 
+    if not line.mesh_recipe_configured:
+        raise ValueError(
+            f"Line geometry {tag} has no Mesh recipe yet. "
+            "Configure Line Mesh before generating Frame/Truss FE."
+        )
+
     live = [
         element_tag
         for element_tag in line.generated_element_tags
@@ -948,6 +954,7 @@ def reverse_line_geometry(
 
 
 _LINE_RECIPE_FIELDS = (
+    "mesh_recipe_configured",
     "mesh_mode",
     "divisions",
     "target_size",
