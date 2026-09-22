@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from ..model import SHELL_ELEMENT_TYPES
 from ..project import SECTION_DEFAULTS, SHELL_SECTION_TYPES, SectionData
+from ..shell_mesh import ShellMeshSpec
 from ..units import UnitSystem
 
 
@@ -335,3 +336,172 @@ class ShellElementDialog(QDialog):
             QMessageBox.warning(self, "Shell Element", str(exc))
             return
         self.accept()
+
+
+class ShellMeshDialog(QDialog):
+    """Structured Nu x Nv mesh over four ordered corner nodes."""
+
+    def __init__(
+        self,
+        *,
+        nodes,
+        sections,
+        initial_nodes=(),
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Mesh Shell Surface")
+        self.setModal(True)
+        self.setMinimumWidth(520)
+        self._nodes = dict(nodes or {})
+        self._sections = {
+            int(tag): section
+            for tag, section in dict(sections or {}).items()
+            if section.section_type in SHELL_SECTION_TYPES
+        }
+
+        root = QVBoxLayout(self)
+        form = QFormLayout()
+        root.addLayout(form)
+
+        selected = [
+            int(tag)
+            for tag in initial_nodes
+            if int(tag) in self._nodes
+        ]
+        for tag in sorted(self._nodes):
+            if len(selected) >= 4:
+                break
+            if tag not in selected:
+                selected.append(tag)
+
+        self.corner_combos: list[QComboBox] = []
+        labels = (
+            "Corner 1 · U0,V0:",
+            "Corner 2 · U1,V0:",
+            "Corner 3 · U1,V1:",
+            "Corner 4 · U0,V1:",
+        )
+        for index, label in enumerate(labels):
+            combo = QComboBox()
+            for node_tag in sorted(self._nodes):
+                x, y, z = self._nodes[node_tag].xyz
+                combo.addItem(
+                    f"{node_tag}  ({x:g}, {y:g}, {z:g})",
+                    int(node_tag),
+                )
+            if index < len(selected):
+                wanted = combo.findData(selected[index])
+                if wanted >= 0:
+                    combo.setCurrentIndex(wanted)
+            self.corner_combos.append(combo)
+            form.addRow(label, combo)
+
+        self.divisions_u = QSpinBox()
+        self.divisions_u.setRange(1, 500)
+        self.divisions_u.setValue(4)
+        form.addRow("Divisions U:", self.divisions_u)
+
+        self.divisions_v = QSpinBox()
+        self.divisions_v.setRange(1, 500)
+        self.divisions_v.setValue(4)
+        form.addRow("Divisions V:", self.divisions_v)
+
+        self.formulation = QComboBox()
+        self.formulation.addItems(list(ShellElementDialog.FORMULATIONS))
+        self.formulation.setCurrentText("ASDShellQ4")
+        form.addRow("Formulation:", self.formulation)
+
+        self.section = QComboBox()
+        for section_tag in sorted(self._sections):
+            section = self._sections[section_tag]
+            self.section.addItem(
+                f"{section_tag} - {section.name} ({section.section_type})",
+                section_tag,
+            )
+        form.addRow("Shell section:", self.section)
+
+        self.corotational = QCheckBox(
+            "Corotational kinematics (ASDShellQ4)"
+        )
+        form.addRow("", self.corotational)
+
+        self.formulation.currentTextChanged.connect(
+            self._sync_formulation
+        )
+        self._sync_formulation()
+
+        note = QLabel(
+            "Corners must be ordered around the boundary. SARE uses bilinear "
+            "interpolation between the four corners, so the same tool works "
+            "for flat slabs, walls and moderately warped quadrilateral "
+            "surfaces. Existing corner nodes are reused; intermediate mesh "
+            "nodes are generated automatically."
+        )
+        note.setWordWrap(True)
+        root.addWidget(note)
+
+        self.preview_info = QLabel()
+        self.preview_info.setWordWrap(True)
+        root.addWidget(self.preview_info)
+
+        self.divisions_u.valueChanged.connect(self._update_info)
+        self.divisions_v.valueChanged.connect(self._update_info)
+        self._update_info()
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.button(QDialogButtonBox.Ok).setText("Create Shell Mesh")
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    def _sync_formulation(self, *_args) -> None:
+        enabled = self.formulation.currentText() == "ASDShellQ4"
+        self.corotational.setEnabled(enabled)
+        if not enabled:
+            self.corotational.setChecked(False)
+
+    def _update_info(self, *_args) -> None:
+        nu = self.divisions_u.value()
+        nv = self.divisions_v.value()
+        generated_nodes = (nu + 1) * (nv + 1) - 4
+        self.preview_info.setText(
+            f"Mesh: {nu} × {nv} = {nu * nv} shell elements · "
+            f"up to {generated_nodes} generated nodes "
+            "(four corners are reused)."
+        )
+
+    def spec(self) -> ShellMeshSpec:
+        corners = tuple(
+            int(combo.currentData())
+            for combo in self.corner_combos
+            if combo.currentData() is not None
+        )
+        if len(corners) != 4 or len(set(corners)) != 4:
+            raise ValueError(
+                "Shell mesh requires four distinct corner nodes."
+            )
+        section_tag = self.section.currentData()
+        if section_tag is None:
+            raise ValueError(
+                "Shell mesh requires a shell-compatible Section."
+            )
+        return ShellMeshSpec(
+            corner_nodes=corners,
+            divisions_u=self.divisions_u.value(),
+            divisions_v=self.divisions_v.value(),
+            formulation=self.formulation.currentText(),
+            section_tag=int(section_tag),
+            corotational=self.corotational.isChecked(),
+        )
+
+    def _accept(self) -> None:
+        try:
+            self.spec()
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "Shell Surface Mesh", str(exc))
+            return
+        self.accept()
+
