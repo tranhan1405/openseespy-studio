@@ -89,7 +89,49 @@ def build_moment_curvature_project(
         model=model,
         units=dict(source.units),
     )
-    project.materials = deepcopy(source.materials)
+
+    required_materials: set[int] = set()
+    if section.section_type == "Elastic" and section.material_tag is not None:
+        required_materials.add(int(section.material_tag))
+    elif section.section_type == "Fiber":
+        required_materials.update(
+            int(tag) for tag in section.fiber_material_tags()
+        )
+
+    stack = list(required_materials)
+    while stack:
+        tag = int(stack.pop())
+        material = source.materials.get(tag)
+        if material is None:
+            raise ValueError(
+                f"Section {section_tag} references missing material {tag}."
+            )
+        for dependency in source.material_dependencies(material):
+            dependency = int(dependency)
+            if dependency not in required_materials:
+                required_materials.add(dependency)
+                stack.append(dependency)
+
+    # Preserve dependency order by adding lower-level materials first.
+    pending = set(required_materials)
+    while pending:
+        progressed = False
+        for tag in sorted(pending):
+            material = source.materials[tag]
+            dependencies = {
+                int(value)
+                for value in source.material_dependencies(material)
+            }
+            if dependencies.issubset(project.materials):
+                project.add_material(deepcopy(material))
+                pending.remove(tag)
+                progressed = True
+                break
+        if not progressed:
+            raise ValueError(
+                "Section material dependencies contain an unresolved cycle."
+            )
+
     project.sections = {section_tag: deepcopy(section)}
 
     project.add_connection(
