@@ -108,7 +108,7 @@ from ..surface_mesher import (
 from ..shell_quality import shell_mesh_quality_summary
 from ..line_mesher import mesh_line_geometry
 from ..section_response import section_response_sources
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SectionData, SurfaceGeometryData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
     build_worker_pythonpath,
     opensees_material_requires_runtime_probe,
@@ -7863,6 +7863,238 @@ class MainWindow(QMainWindow):
                 return [tag]
         return sorted(tags)
 
+    def _copy_surface_geometries(self, surface_tags) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self.project.surfaces
+        })
+        if not tags:
+            return
+
+        dialog = VectorDialog(
+            "Copy / Offset Surface Geometry",
+            self,
+            copies=True,
+        )
+        if not dialog.exec():
+            return
+        dx, dy, dz, copies = dialog.values()
+        copies = int(copies)
+        if copies < 1:
+            return
+        if (
+            abs(dx) + abs(dy) + abs(dz) <= 1.0e-15
+            and copies == 1
+        ):
+            QMessageBox.information(
+                self,
+                "Copy Surface Geometry",
+                "Enter a non-zero offset or more than one copy.",
+            )
+            return
+
+        before = self.project.to_dict()
+        created_surfaces: list[int] = []
+        copied_points: dict[tuple[int, int], int] = {}
+        try:
+            for copy_index in range(1, copies + 1):
+                offset = (
+                    dx * copy_index,
+                    dy * copy_index,
+                    dz * copy_index,
+                )
+                for source_tag in tags:
+                    source = self.project.surfaces[source_tag]
+                    corner_tags = None
+                    points = tuple(
+                        tuple(
+                            float(point[axis]) + offset[axis]
+                            for axis in range(3)
+                        )
+                        for point in source.points
+                    )
+
+                    if source.corner_point_tags is not None:
+                        new_corner_tags: list[int] = []
+                        for original_tag in source.corner_point_tags:
+                            key = (copy_index, int(original_tag))
+                            new_tag = copied_points.get(key)
+                            if new_tag is None:
+                                original = self.project.points.get(
+                                    int(original_tag)
+                                )
+                                if original is None:
+                                    raise ValueError(
+                                        f"Surface {source.tag} references "
+                                        f"missing Geometry Point "
+                                        f"{original_tag}."
+                                    )
+                                new_tag = self.project.next_point_tag()
+                                new_point = PointGeometryData(
+                                    tag=new_tag,
+                                    name=(
+                                        f"{original.name} Copy "
+                                        f"{copy_index}"
+                                    ),
+                                    xyz=tuple(
+                                        float(original.xyz[axis])
+                                        + offset[axis]
+                                        for axis in range(3)
+                                    ),
+                                )
+                                self.project.add_point(new_point)
+                                copied_points[key] = new_tag
+                            new_corner_tags.append(new_tag)
+                        corner_tags = tuple(new_corner_tags)
+                        points = tuple(
+                            self.project.points[tag].xyz
+                            for tag in corner_tags
+                        )
+
+                    data = source.to_dict()
+                    new_surface_tag = self.project.next_surface_tag()
+                    data.update({
+                        "tag": new_surface_tag,
+                        "name": (
+                            f"{source.name} Copy {copy_index}"
+                        ),
+                        "points": [list(point) for point in points],
+                        "corner_point_tags": (
+                            None
+                            if corner_tags is None
+                            else list(corner_tags)
+                        ),
+                        "generated_node_tags": [],
+                        "generated_element_tags": [],
+                    })
+                    copied = SurfaceGeometryData.from_dict(data)
+                    self.project.add_surface(copied)
+                    created_surfaces.append(new_surface_tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Copy Surface Geometry",
+                str(exc),
+            )
+            return
+
+        self._refresh_all(
+            f"Created {len(created_surfaces)} offset Surface copy/copies · "
+            "mesh recipe and Shell Section preserved · copies are unmeshed"
+        )
+        self.viewport.set_display_domain("geometry")
+        self.tree.blockSignals(True)
+        try:
+            self.tree.clearSelection()
+            for tag in created_surfaces:
+                item = self._tree_surface_items.get(tag)
+                if item is not None:
+                    item.setSelected(True)
+        finally:
+            self.tree.blockSignals(False)
+        self._tree_selection_changed()
+        self._record_project_change(
+            f"Copy {len(tags)} Surface geometry object(s)",
+            before,
+        )
+
+    def _show_surface_quality_map(
+        self,
+        surface_tags,
+        metric: str,
+    ) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self.project.surfaces
+        })
+        if not tags:
+            return
+        live = any(
+            int(element_tag) in self.model.elements
+            for tag in tags
+            for element_tag in self.project.surfaces[
+                tag
+            ].generated_element_tags
+        )
+        if not live:
+            QMessageBox.information(
+                self,
+                "Shell Mesh Quality",
+                "Mesh the selected Surface geometry before visualizing "
+                "element quality.",
+            )
+            return
+        try:
+            self.viewport.show_surface_mesh_quality(tags, metric)
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Shell Mesh Quality",
+                str(exc),
+            )
+            return
+        labels = {
+            "aspect_ratio": "aspect ratio",
+            "skew": "skew",
+            "warpage": "warpage",
+        }
+        self.status_message.setText(
+            f"Shell mesh quality map: {labels.get(metric, metric)} · "
+            f"{len(tags)} Surface(s)"
+        )
+
+    def _clear_surface_quality_map(self) -> None:
+        self.viewport.clear_surface_mesh_quality()
+        self.status_message.setText("Shell mesh quality map cleared")
+
+    def _preview_surface_pressure(self, surface_tags) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self.project.surfaces
+        })
+        if not tags:
+            return
+        pressure, ok = QInputDialog.getDouble(
+            self,
+            "Preview Surface Pressure",
+            (
+                "Pressure value in current model pressure units. "
+                "Positive follows +Surface normal; negative follows -normal:"
+            ),
+            1.0,
+            -1.0e12,
+            1.0e12,
+            6,
+        )
+        if not ok:
+            return
+        try:
+            self.viewport.show_surface_pressure_preview(
+                tags,
+                pressure,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Preview Surface Pressure",
+                str(exc),
+            )
+            return
+        self.status_message.setText(
+            f"Pressure preview p={pressure:g} on {len(tags)} Surface(s) · "
+            + ("+normal" if pressure >= 0.0 else "-normal")
+        )
+
+    def _clear_surface_pressure_preview(self) -> None:
+        self.viewport.clear_surface_pressure_preview()
+        self.status_message.setText("Surface pressure preview cleared")
+
     def _select_generated_fe_for_surfaces(
         self,
         surface_tags,
@@ -11578,6 +11810,28 @@ class MainWindow(QMainWindow):
                         f"{surface.divisions_u} × "
                         f"{surface.divisions_v} divisions"
                     )
+                ),
+            ),
+            (
+                "Mesh bias U",
+                f"{surface.bias_u:g} (end/start)",
+            ),
+            (
+                "Mesh bias V",
+                f"{surface.bias_v:g} (end/start)",
+            ),
+            (
+                "Edge seeds",
+                (
+                    " · ".join(
+                        f"E{index}={value if value is not None else 'Auto'}"
+                        for index, value in enumerate(
+                            surface.edge_divisions,
+                            start=1,
+                        )
+                    )
+                    if surface.edge_divisions is not None
+                    else "Auto"
                 ),
             ),
             (
