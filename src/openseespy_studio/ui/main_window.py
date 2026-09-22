@@ -3721,6 +3721,8 @@ class MainWindow(QMainWindow):
             self.model,
             self.project.connections,
             self.project.surfaces,
+            self.project.points,
+            self.project.lines,
         )
         self._refresh_project_metadata(
             message,
