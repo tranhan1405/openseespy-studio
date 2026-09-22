@@ -2355,13 +2355,12 @@ def test_geometry_sketch_navigation_invalidates_stale_cursor_preview():
 def test_geometry_workplane_mapping_rejects_nonfinite_and_behind_ray_hits():
     source = inspect.getsource(ModelViewport.geometry_workplane_point)
 
-    assert "np.all(np.isfinite(near))" in source
-    assert "np.all(np.isfinite(far))" in source
+    assert "normalized_world" in source
+    assert "np.all(np.isfinite(point))" in source
     assert "math.isfinite(denominator)" in source
     assert "not math.isfinite(t)" in source
     assert "t < -1.0e-6" in source
     assert "t > 1.0 + 1.0e-6" not in source
-    assert "np.all(np.isfinite(point))" in source
 
 
 def test_geometry_workplane_click_can_land_beyond_current_far_clip():
@@ -2387,6 +2386,7 @@ def test_geometry_workplane_click_can_land_beyond_current_far_clip():
         plotter=SimpleNamespace(renderer=RendererStub()),
         _geometry_sketch_plane="xy",
         _geometry_sketch_plane_offset=0.0,
+        _current_view="iso",
     )
 
     point = ModelViewport.geometry_workplane_point(dummy, 20, 30)
