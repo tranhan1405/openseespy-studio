@@ -11,6 +11,11 @@ import pytest
 from openseespy_studio.generator import material_to_openseespy, to_openseespy
 from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.model import StructuralModel
+from openseespy_studio.moment_curvature import (
+    MomentCurvatureSpec,
+    build_moment_curvature_project,
+)
+from openseespy_studio.postprocess import moment_curvature_curve
 from openseespy_studio.project import (
     MATERIAL_DEFAULTS,
     AnalysisSettingsData,
@@ -19,6 +24,7 @@ from openseespy_studio.project import (
     LoadPatternData,
     MaterialData,
     NodalLoadData,
+    ProjectDatabase,
     RecorderData,
     SectionData,
     SolutionResultData,
@@ -1376,3 +1382,78 @@ def test_generated_2d_2dof_truss_runs_and_reports_axial_force(
     )
     axial = results["final"]["element_axial_forces"]["1"]
     assert abs(float(axial)) == pytest.approx(1000.0, rel=1.0e-8)
+
+
+
+def test_isolated_moment_curvature_workflow_runs_in_real_opensees(
+    tmp_path: Path,
+):
+    source = ProjectDatabase(
+        name="MC integration",
+        model=StructuralModel("MC integration", ndm=2, ndf=3),
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    source.add_section(
+        SectionData(
+            21,
+            "Elastic MC section",
+            "Elastic",
+            parameters={
+                "E": 30.0e9,
+                "A": 0.16,
+                "Iz": 0.002,
+                "Iy": 0.0015,
+                "G": 12.0e9,
+                "J": 0.0004,
+            },
+        )
+    )
+
+    project = build_moment_curvature_project(
+        source,
+        MomentCurvatureSpec(
+            section_tag=21,
+            axis="Mz",
+            axial_load=0.0,
+            max_curvature=0.001,
+            increments=10,
+        ),
+    )
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        time_series=project.time_series,
+        load_patterns=project.load_patterns,
+        nodal_loads=project.nodal_loads,
+        analyses=project.analyses,
+        active_analysis_tag=project.active_analysis_tag,
+        element_loads=project.element_loads,
+        prescribed_displacements=project.prescribed_displacements,
+        recorders=project.recorders,
+        units=project.units,
+        solution_results=project.solution_results,
+    )
+    assert "ops.element('zeroLengthSection', 1, 1, 2, 21" in script
+    assert "'kind': 'moment-curvature'" in script
+
+    script_path = tmp_path / "moment-curvature.py"
+    result_path = tmp_path / "moment-curvature-result.json"
+    script_path.write_text(script, encoding="utf-8")
+    exit_code = run_script(script_path, result_path)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0, payload.get("error", "")
+    assert payload["status"] == "completed"
+
+    curvature, moment, component, element_tag = moment_curvature_curve(
+        payload["results"]
+    )
+    assert component == "Mz"
+    assert element_tag == 1
+    assert curvature[-1] == pytest.approx(0.001, rel=1.0e-8)
+    expected_moment = 30.0e9 * 0.002 * 0.001
+    assert moment[-1] == pytest.approx(expected_moment, rel=1.0e-6)
