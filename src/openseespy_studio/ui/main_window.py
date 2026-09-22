@@ -2017,7 +2017,7 @@ class MainWindow(QMainWindow):
         )
         self._make_action(
             "surface_geometry",
-            "Surface Geometry...",
+            "Surface...",
             "grid",
             self._create_surface_geometry,
             "Create reusable Rectangle or Quad surface geometry for Shell meshing",
@@ -3865,7 +3865,7 @@ class MainWindow(QMainWindow):
             for element in self.model.elements.values()
         )
         surfaces = QTreeWidgetItem([
-            f"Surface Geometry ({len(self.project.surfaces)})"
+            f"Surfaces ({len(self.project.surfaces)})"
         ])
         surfaces.setIcon(0, studio_icon("element"))
         surfaces.setData(0, Qt.UserRole, ("surfaces_root", None))
@@ -10273,7 +10273,7 @@ class MainWindow(QMainWindow):
             )
         answer = QMessageBox.question(
             self,
-            "Delete Surface Geometry",
+            "Delete Surface",
             message,
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
@@ -14364,7 +14364,7 @@ class MainWindow(QMainWindow):
             node_action.triggered.connect(self._create_node)
             element_action = menu.addAction("New Element...")
             element_action.triggered.connect(self._create_element)
-            surface_action = menu.addAction("New Surface Geometry...")
+            surface_action = menu.addAction("New Surface...")
             surface_action.triggered.connect(self._create_surface_geometry)
             menu.addSeparator()
             quick_column = menu.addAction("Quick 1D Column / Test Specimen...")
@@ -14394,7 +14394,7 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "surfaces_root":
-            create_geometry = menu.addAction("New Surface Geometry...")
+            create_geometry = menu.addAction("New Surface...")
             create_geometry.triggered.connect(self._create_surface_geometry)
             stitch = menu.addAction("Stitch Coincident Shell Nodes...")
             stitch.triggered.connect(self._stitch_coincident_shell_nodes)
@@ -14415,7 +14415,7 @@ class MainWindow(QMainWindow):
                 lambda checked=False, t=tag:
                 self._show_surface_geometry_properties(t)
             )
-            edit = menu.addAction("Edit Surface Geometry...")
+            edit = menu.addAction("Edit Surface...")
             edit.setEnabled(not any(
                 element_tag in self.model.elements
                 for element_tag in surface.generated_element_tags
@@ -14424,7 +14424,7 @@ class MainWindow(QMainWindow):
                 lambda checked=False, t=tag:
                 self._edit_surface_geometry(t)
             )
-            mesh = menu.addAction("Mesh Surface Geometry...")
+            mesh = menu.addAction("Generate Surface Mesh...")
             mesh.setEnabled(not any(
                 element_tag in self.model.elements
                 for element_tag in surface.generated_element_tags
@@ -14434,7 +14434,7 @@ class MainWindow(QMainWindow):
                 self._mesh_surface_geometry(t)
             )
             menu.addSeparator()
-            delete = menu.addAction("Delete Surface Geometry")
+            delete = menu.addAction("Delete Surface")
             delete.triggered.connect(
                 lambda checked=False, t=tag:
                 self._delete_surface_geometry(t)
