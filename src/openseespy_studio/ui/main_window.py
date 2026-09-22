@@ -5199,6 +5199,103 @@ class MainWindow(QMainWindow):
         self.selection.set_filter(value)
         measure_action = self.actions.get("measure_distance")
         frame_pick_action = self.actions.get("frame_pick")
+        line_pick_action = self.actions.get(
+            "line_geometry_pick"
+        )
+        if (
+            line_pick_action is not None
+            and line_pick_action.isChecked()
+        ):
+            if kind != "geometry_point" or tag is None:
+                self.status_message.setText(
+                    "Create Geometry Line: click a Geometry Point"
+                )
+                return
+
+            point_tag = int(tag)
+            if point_tag in self._geometry_line_point_tags:
+                self.status_message.setText(
+                    "Create Geometry Line: choose a different second Point"
+                )
+                return
+
+            self._geometry_line_point_tags.append(point_tag)
+            self.viewport.show_geometry_pick_preview(
+                self._geometry_line_point_tags
+            )
+            if len(self._geometry_line_point_tags) < 2:
+                self.status_message.setText(
+                    f"Create Geometry Line: Point {point_tag} selected · "
+                    "click the second Point"
+                )
+                return
+
+            point_i, point_j = self._geometry_line_point_tags
+            self._geometry_line_point_tags = []
+            self.viewport.clear_geometry_pick_preview(render=False)
+            created = self._create_line_geometry_from_points(
+                point_i,
+                point_j,
+            )
+            if line_pick_action.isChecked():
+                self.status_message.setText(
+                    (
+                        f"Created Geometry Line from P{point_i} → P{point_j} · "
+                        if created is not None
+                        else "Line creation cancelled · "
+                    )
+                    + "click another first Point"
+                )
+            return
+
+        surface_pick_action = self.actions.get(
+            "surface_geometry_pick"
+        )
+        if (
+            surface_pick_action is not None
+            and surface_pick_action.isChecked()
+        ):
+            if kind != "geometry_point" or tag is None:
+                self.status_message.setText(
+                    "Create Geometry Surface: click a Geometry Point"
+                )
+                return
+
+            point_tag = int(tag)
+            if point_tag in self._geometry_surface_point_tags:
+                self.status_message.setText(
+                    "Create Geometry Surface: each corner must be different"
+                )
+                return
+
+            self._geometry_surface_point_tags.append(point_tag)
+            count = len(self._geometry_surface_point_tags)
+            self.viewport.show_geometry_pick_preview(
+                self._geometry_surface_point_tags,
+                closed=(count == 4),
+            )
+            if count < 4:
+                self.status_message.setText(
+                    f"Create Geometry Surface: corner {count}/4 = "
+                    f"Point {point_tag} · click corner {count + 1}"
+                )
+                return
+
+            picked = list(self._geometry_surface_point_tags)
+            self._geometry_surface_point_tags = []
+            self.viewport.clear_geometry_pick_preview(render=False)
+            created = self._create_surface_geometry_from_points(picked)
+            if surface_pick_action.isChecked():
+                self.status_message.setText(
+                    (
+                        "Created Geometry Surface · "
+                        if created is not None
+                        else "Surface creation cancelled · "
+                    )
+                    + "click corner 1 of 4"
+                )
+            return
+
         truss_pick_action = self.actions.get("truss_pick")
         if measure_action is not None and measure_action.isChecked():
             self.viewport.set_selection_filter("node")
