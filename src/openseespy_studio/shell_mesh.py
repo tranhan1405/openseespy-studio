@@ -12,6 +12,7 @@ class ShellMeshSpec:
     corner_nodes: tuple[int, int, int, int]
     divisions_u: int = 1
     divisions_v: int = 1
+    target_size: float | None = None
     formulation: str = "ASDShellQ4"
     section_tag: int = 0
     corotational: bool = False
@@ -30,6 +31,8 @@ class ShellMeshBuildResult:
     reused_node_tags: list[int] = field(default_factory=list)
     element_tags: list[int] = field(default_factory=list)
     grid: list[list[int]] = field(default_factory=list)
+    divisions_u: int = 0
+    divisions_v: int = 0
 
 
 def _bilinear_point(
@@ -47,6 +50,51 @@ def _bilinear_point(
         + (1.0 - u) * v * p4[index]
         for index in range(3)
     )
+
+
+def _distance(
+    a: tuple[float, float, float],
+    b: tuple[float, float, float],
+) -> float:
+    return math.sqrt(
+        sum(
+            (float(b[index]) - float(a[index])) ** 2
+            for index in range(3)
+        )
+    )
+
+
+def _mesh_divisions(
+    p1: tuple[float, float, float],
+    p2: tuple[float, float, float],
+    p3: tuple[float, float, float],
+    p4: tuple[float, float, float],
+    *,
+    divisions_u: int,
+    divisions_v: int,
+    target_size: float | None,
+) -> tuple[int, int]:
+    if target_size is not None:
+        size = float(target_size)
+        if not math.isfinite(size) or size <= 0.0:
+            raise ValueError(
+                "Shell mesh target size must be a finite positive value."
+            )
+        u_length = 0.5 * (_distance(p1, p2) + _distance(p4, p3))
+        v_length = 0.5 * (_distance(p1, p4) + _distance(p2, p3))
+        nu = max(1, int(math.ceil(u_length / size)))
+        nv = max(1, int(math.ceil(v_length / size)))
+    else:
+        nu = int(divisions_u)
+        nv = int(divisions_v)
+
+    if nu < 1 or nv < 1:
+        raise ValueError("Shell mesh divisions U and V must be at least 1.")
+    if nu > 500 or nv > 500:
+        raise ValueError(
+            "Shell mesh divisions are limited to 500 per direction."
+        )
+    return nu, nv
 
 
 def _mesh_merge_tolerance(
@@ -140,14 +188,20 @@ def build_shell_mesh(
             + ", ".join(map(str, missing))
         )
 
-    nu = int(spec.divisions_u)
-    nv = int(spec.divisions_v)
-    if nu < 1 or nv < 1:
-        raise ValueError("Shell mesh divisions U and V must be at least 1.")
-    if nu > 500 or nv > 500:
-        raise ValueError(
-            "Shell mesh divisions are limited to 500 per direction."
-        )
+    p1 = project.model.nodes[corners[0]].xyz
+    p2 = project.model.nodes[corners[1]].xyz
+    p3 = project.model.nodes[corners[2]].xyz
+    p4 = project.model.nodes[corners[3]].xyz
+
+    nu, nv = _mesh_divisions(
+        p1,
+        p2,
+        p3,
+        p4,
+        divisions_u=spec.divisions_u,
+        divisions_v=spec.divisions_v,
+        target_size=spec.target_size,
+    )
 
     formulation = str(spec.formulation)
     if formulation not in SHELL_ELEMENT_TYPES:
@@ -164,11 +218,6 @@ def build_shell_mesh(
         raise ValueError(
             "Shell mesh requires an existing shell-compatible Section."
         )
-
-    p1 = project.model.nodes[corners[0]].xyz
-    p2 = project.model.nodes[corners[1]].xyz
-    p3 = project.model.nodes[corners[2]].xyz
-    p4 = project.model.nodes[corners[3]].xyz
 
     corner_lookup = {
         (0, 0): corners[0],
@@ -291,4 +340,6 @@ def build_shell_mesh(
         reused_node_tags=sorted(reused_nodes),
         element_tags=created_elements,
         grid=grid,
+        divisions_u=nu,
+        divisions_v=nv,
     )
