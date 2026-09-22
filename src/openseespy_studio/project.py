@@ -61,6 +61,7 @@ MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
     "Steel01": "Steel",
     "Steel02": "Steel",
+    "RambergOsgoodSteel": "Steel",
     "Hardening": "Steel",
     "ElasticPP": "Steel",
     "ElasticBilin": "Steel",
@@ -88,6 +89,7 @@ MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
         "Fy", "E0", "b", "R0", "cR1", "cR2",
         "a1", "a2", "a3", "a4",
     ),
+    "RambergOsgoodSteel": ("fy", "E0", "a", "n"),
     "Hardening": ("E", "sigmaY", "H_iso", "H_kin", "eta"),
     "ElasticPP": ("E", "epsyP", "epsyN", "eps0"),
     "ElasticBilin": ("EP1", "EP2", "epsP2", "EN1", "EN2", "epsN2"),
@@ -130,6 +132,7 @@ MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
     "Elastic": {"E": "stress"},
     "Steel01": {"Fy": "stress", "E0": "stress"},
     "Steel02": {"Fy": "stress", "E0": "stress"},
+    "RambergOsgoodSteel": {"fy": "stress", "E0": "stress"},
     "Hardening": {
         "E": "stress",
         "sigmaY": "stress",
@@ -244,8 +247,8 @@ MATERIAL_ENGINEERING_DEFAULTS: dict[str, dict[str, float]] = {
     name: {
         "poisson_ratio": 0.2 if "Concrete" in name else 0.3,
         "density": 2400.0 if "Concrete" in name else 7850.0 if name in {
-            "Steel01", "Steel02", "Hardening", "ElasticPP",
-            "ElasticBilin", "ReinforcingSteel",
+            "Steel01", "Steel02", "RambergOsgoodSteel", "Hardening",
+            "ElasticPP", "ElasticBilin", "ReinforcingSteel",
         } else 0.0,
     }
     for name in MATERIAL_PARAMETER_ORDER
@@ -265,6 +268,12 @@ MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
         "a2": 1.0,
         "a3": 0.0,
         "a4": 1.0,
+    },
+    "RambergOsgoodSteel": {
+        "fy": 6.0e8,
+        "E0": 2.0e11,
+        "a": 0.002,
+        "n": 10.0,
     },
     "Hardening": {
         "E": 2.0e11,
@@ -428,7 +437,7 @@ class MaterialData:
     def elastic_modulus(self) -> float:
         if self.material_type == "Elastic":
             return float(self.parameters["E"])
-        if self.material_type in {"Steel01", "Steel02"}:
+        if self.material_type in {"Steel01", "Steel02", "RambergOsgoodSteel"}:
             return float(self.parameters["E0"])
         if self.material_type in {"Hardening", "ElasticPP"}:
             return float(self.parameters["E"])
