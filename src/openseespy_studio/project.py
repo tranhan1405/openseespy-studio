@@ -2817,6 +2817,52 @@ class ProjectDatabase:
         self.solution_results.clear()
         self.active_analysis_tag = None
 
+    def reverse_shell_orientation_preserving_pressure(
+        self,
+        element_tags,
+    ) -> dict[str, list[int]]:
+        """Reverse shell normals while preserving global SurfacePressure vectors."""
+        tags = sorted({
+            _strict_int(tag, "Shell element tag")
+            for tag in element_tags
+        })
+        if not tags:
+            return {
+                "element_tags": [],
+                "pressure_load_tags": [],
+            }
+
+        for tag in tags:
+            element = self.model.elements.get(tag)
+            if element is None:
+                raise ValueError(f"Element {tag} does not exist.")
+            if element.element_type not in SHELL_ELEMENT_TYPES:
+                raise ValueError(
+                    f"Element {tag} is not a Shell element."
+                )
+
+        pressure_load_tags = sorted(
+            int(load.tag)
+            for load in self.element_loads.values()
+            if (
+                load.load_type == "SurfacePressure"
+                and int(load.element_tag) in tags
+            )
+        )
+
+        updated = self.model.reverse_shell_orientation(tags)
+        for load_tag in pressure_load_tags:
+            load = self.element_loads[load_tag]
+            load.pressure = -float(load.pressure)
+            self._validate_element_load(load)
+        for tag in updated:
+            self.validate_element_state(tag)
+
+        return {
+            "element_tags": sorted(int(tag) for tag in updated),
+            "pressure_load_tags": pressure_load_tags,
+        }
+
     def coincident_shell_node_groups(
         self,
         *,
