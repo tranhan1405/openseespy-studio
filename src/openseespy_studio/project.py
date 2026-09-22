@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .model import StructuralModel
+from .model import FRAME_ELEMENT_TYPES, SHELL_ELEMENT_TYPES, StructuralModel
 from .result_catalog import result_choices_for_analysis
 from .section_response import validate_section_response_request
 from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
@@ -517,7 +517,10 @@ class MaterialData:
 SECTION_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E", "A", "Iz", "Iy", "G", "J"),
     "Fiber": ("GJ",),
+    "ElasticMembranePlate": ("E", "nu", "h", "rho", "EpModifier"),
 }
+SHELL_SECTION_TYPES = {"ElasticMembranePlate"}
+
 
 SECTION_DEFAULTS: dict[str, dict[str, float]] = {
     "Elastic": {
@@ -530,6 +533,13 @@ SECTION_DEFAULTS: dict[str, dict[str, float]] = {
     },
     "Fiber": {
         "GJ": 1.0e6,
+    },
+    "ElasticMembranePlate": {
+        "E": 2.0e11,
+        "nu": 0.30,
+        "h": 0.20,
+        "rho": 0.0,
+        "EpModifier": 1.0,
     },
 }
 
@@ -877,6 +887,28 @@ class SectionData:
             for value in self.parameters.values()
         ):
             raise ValueError("Section parameters must be finite.")
+        if self.section_type == "ElasticMembranePlate":
+            if self.parameters["E"] <= 0.0:
+                raise ValueError(
+                    "ElasticMembranePlate elastic modulus E must be positive."
+                )
+            if not -1.0 < self.parameters["nu"] < 0.5:
+                raise ValueError(
+                    "ElasticMembranePlate Poisson ratio must satisfy "
+                    "-1 < nu < 0.5."
+                )
+            if self.parameters["h"] <= 0.0:
+                raise ValueError(
+                    "ElasticMembranePlate thickness h must be positive."
+                )
+            if self.parameters["rho"] < 0.0:
+                raise ValueError(
+                    "ElasticMembranePlate mass density rho cannot be negative."
+                )
+            if self.parameters["EpModifier"] <= 0.0:
+                raise ValueError(
+                    "ElasticMembranePlate EpModifier must be positive."
+                )
         self.fibers = [
             fiber if isinstance(fiber, FiberData) else FiberData.from_dict(fiber)
             for fiber in self.fibers
@@ -2971,12 +3003,45 @@ class ProjectDatabase:
         *,
         transformation: TransformationData | None = None,
     ) -> None:
-        node_i = self.model.nodes.get(int(element.i))
-        node_j = self.model.nodes.get(int(element.j))
-        if node_i is None or node_j is None:
+        node_tags = tuple(int(tag) for tag in element.node_tags())
+        missing = [tag for tag in node_tags if tag not in self.model.nodes]
+        if missing:
             raise ValueError(
-                f"Element {element.tag} references a missing endpoint node."
+                f"Element {element.tag} references missing node tag(s): "
+                + ", ".join(map(str, missing))
             )
+
+        if element.element_type in SHELL_ELEMENT_TYPES:
+            if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
+                raise ValueError(
+                    f"{element.element_type} element {element.tag} requires "
+                    "ndm=3 and ndf=6."
+                )
+            p = [
+                tuple(float(value) for value in self.model.nodes[tag].xyz)
+                for tag in node_tags
+            ]
+
+            def triangle_area2(a, b, c) -> float:
+                ab = tuple(b[i] - a[i] for i in range(3))
+                ac = tuple(c[i] - a[i] for i in range(3))
+                cross = (
+                    ab[1] * ac[2] - ab[2] * ac[1],
+                    ab[2] * ac[0] - ab[0] * ac[2],
+                    ab[0] * ac[1] - ab[1] * ac[0],
+                )
+                return math.sqrt(sum(value * value for value in cross))
+
+            area2 = triangle_area2(p[0], p[1], p[2])
+            area2 += triangle_area2(p[0], p[2], p[3])
+            if area2 <= 1.0e-12:
+                raise ValueError(
+                    f"Shell element {element.tag} has zero or near-zero area."
+                )
+            return
+
+        node_i = self.model.nodes[int(element.i)]
+        node_j = self.model.nodes[int(element.j)]
         delta = tuple(
             float(node_j.xyz[index]) - float(node_i.xyz[index])
             for index in range(3)
@@ -2989,8 +3054,7 @@ class ProjectDatabase:
 
         if (
             int(self.model.ndm) != 3
-            or element.element_type
-            not in {"elasticBeamColumn", "forceBeamColumn", "dispBeamColumn"}
+            or element.element_type not in FRAME_ELEMENT_TYPES
         ):
             return
 
@@ -3948,6 +4012,15 @@ class ProjectDatabase:
                 raise ValueError(
                     f"elasticBeamColumn element {element_tag} requires an "
                     "Elastic section."
+                )
+            if (
+                section is not None
+                and element.element_type in SHELL_ELEMENT_TYPES
+                and section.section_type not in SHELL_SECTION_TYPES
+            ):
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} requires "
+                    "a shell-compatible section."
                 )
 
         if element.transf_tag is not None:
