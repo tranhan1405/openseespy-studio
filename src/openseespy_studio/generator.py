@@ -624,7 +624,7 @@ def section_to_openseespy(
 
     if section.section_type == "ElasticMembranePlate":
         unit_system = UnitSystem.from_mapping(units)
-        elastic_modulus = unit_system.engineering_stress_from_pa(
+        elastic_modulus = unit_system.stress_from_pa(
             float(p["E"])
         )
         return [
