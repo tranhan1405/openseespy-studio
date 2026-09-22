@@ -132,7 +132,7 @@ def test_frp_material_test_requires_safe_n_mm_mpa_project_units():
 
 def test_new_steel_materials_get_cyclic_material_test_defaults():
     for tag, material_type in enumerate(
-        ("Hardening", "ElasticPP", "ElasticBilin", "RambergOsgoodSteel"),
+        ("Hardening", "ElasticPP", "ElasticBilin"),
         start=20,
     ):
         spec = default_material_test_spec(_material(tag, material_type))
@@ -141,12 +141,11 @@ def test_new_steel_materials_get_cyclic_material_test_defaults():
 
 
 
-def test_ramberg_osgood_material_test_uses_stress_strain_axes_and_command():
+def test_ramberg_osgood_material_test_is_blocked():
     from openseespy_studio.material_test import material_test_axis_labels
 
     material = _material(29, "RambergOsgoodSteel")
     spec = default_material_test_spec(material)
-    assert spec.protocol == "symmetric_cyclic"
 
     x_label, y_label = material_test_axis_labels(
         material,
@@ -155,13 +154,19 @@ def test_ramberg_osgood_material_test_uses_stress_strain_axes_and_command():
     assert x_label == "Strain"
     assert y_label == "Stress [N/mm²]"
 
-    script = build_material_test_script(
-        material,
-        {"length": "mm", "force": "N", "time": "s"},
-        spec,
-    )
-    assert "ops.uniaxialMaterial('RambergOsgoodSteel', 29," in script
-    assert "ops.testUniaxialMaterial(29)" in script
+    try:
+        build_material_test_script(
+            material,
+            {"length": "mm", "force": "N", "time": "s"},
+            spec,
+        )
+    except ValueError as exc:
+        assert "temporarily removed" in str(exc)
+        assert "reference" in str(exc).lower()
+    else:
+        raise AssertionError(
+            "Expected RambergOsgoodSteel runtime test to be blocked"
+        )
 
 
 def test_hysteretic_smooth_gets_cyclic_material_test_default():
