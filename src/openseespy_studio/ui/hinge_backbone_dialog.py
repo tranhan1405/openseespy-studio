@@ -11,10 +11,12 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QScrollArea,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from ..hinge_backbone import (
@@ -48,6 +50,20 @@ class HingeBackboneDialog(QDialog):
 
         root = QVBoxLayout(self)
 
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QScrollArea.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(
+            self.scroll.horizontalScrollBarPolicy().ScrollBarAlwaysOff
+        )
+
+        body = QWidget()
+        content = QVBoxLayout(body)
+        content.setContentsMargins(4, 4, 4, 4)
+        content.setSpacing(8)
+        self.scroll.setWidget(body)
+        root.addWidget(self.scroll, 1)
+
         intro = QLabel(
             "Research workflow: 1) obtain a section/member response curve; "
             "2) identify three characteristic points; 3) convert the "
@@ -59,7 +75,7 @@ class HingeBackboneDialog(QDialog):
         intro.setStyleSheet(
             "padding: 8px; background: #eef4fb; color: #40566c;"
         )
-        root.addWidget(intro)
+        content.addWidget(intro)
 
         source_group = QGroupBox("1 · Response source")
         source_form = QFormLayout(source_group)
@@ -97,7 +113,7 @@ class HingeBackboneDialog(QDialog):
         self.basis.currentIndexChanged.connect(self._sync_basis)
         source_form.addRow("Input basis:", self.basis)
 
-        root.addWidget(source_group)
+        content.addWidget(source_group)
 
         points_group = QGroupBox("2 · Characteristic positive-branch points")
         points_layout = QVBoxLayout(points_group)
@@ -142,7 +158,7 @@ class HingeBackboneDialog(QDialog):
         point_note.setStyleSheet("color: #617080;")
         points_layout.addWidget(point_note)
 
-        root.addWidget(points_group)
+        content.addWidget(points_group)
 
         conversion_group = QGroupBox("3 · Deformation conversion")
         conversion_form = QFormLayout(conversion_group)
@@ -160,7 +176,7 @@ class HingeBackboneDialog(QDialog):
         self.conversion_note = QLabel()
         self.conversion_note.setWordWrap(True)
         conversion_form.addRow(self.conversion_note)
-        root.addWidget(conversion_group)
+        content.addWidget(conversion_group)
 
         cyclic_group = QGroupBox("4 · Cyclic rule and output material")
         cyclic_form = QFormLayout(cyclic_group)
@@ -198,7 +214,7 @@ class HingeBackboneDialog(QDialog):
         )
         cyclic_form.addRow(cyclic_note)
 
-        root.addWidget(cyclic_group)
+        content.addWidget(cyclic_group)
 
         next_step = QLabel(
             "Next: Model > ZeroLength / Link... > Rotational hinge RZ > "
@@ -209,7 +225,8 @@ class HingeBackboneDialog(QDialog):
         next_step.setStyleSheet(
             "padding: 7px; background: #f7f7f7; color: #526578;"
         )
-        root.addWidget(next_step)
+        content.addWidget(next_step)
+        content.addStretch(1)
 
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
