@@ -935,6 +935,12 @@ class ShellMeshDialog(QDialog):
         self.reuse_existing_nodes.setChecked(True)
         form.addRow("", self.reuse_existing_nodes)
 
+        self.conform_existing_edges = QCheckBox(
+            "Conform divisions to existing shared-edge shell mesh"
+        )
+        self.conform_existing_edges.setChecked(True)
+        form.addRow("", self.conform_existing_edges)
+
         self.formulation = QComboBox()
         self.formulation.addItems(list(ShellElementDialog.FORMULATIONS))
         self.formulation.setCurrentText("ASDShellQ4")
@@ -1024,7 +1030,15 @@ class ShellMeshDialog(QDialog):
         self.divisions_v.valueChanged.connect(self._update_info)
         self.target_size.valueChanged.connect(self._update_info)
         self.mesh_mode.currentIndexChanged.connect(self._update_info)
+        self.reuse_existing_nodes.toggled.connect(
+            self._sync_conformity_options
+        )
         self.reuse_existing_nodes.toggled.connect(self._update_info)
+        self.conform_existing_edges.toggled.connect(
+            self._sync_conformity_options
+        )
+        self.conform_existing_edges.toggled.connect(self._update_info)
+        self._sync_conformity_options()
         for combo in self.corner_combos:
             combo.currentIndexChanged.connect(self._update_info)
         self._update_info()
@@ -1061,6 +1075,15 @@ class ShellMeshDialog(QDialog):
         self.divisions_u.setEnabled(not target_mode)
         self.divisions_v.setEnabled(not target_mode)
         self.target_size.setEnabled(target_mode)
+
+    def _sync_conformity_options(self, *_args) -> None:
+        if self.conform_existing_edges.isChecked():
+            self.reuse_existing_nodes.setChecked(True)
+        if not self.reuse_existing_nodes.isChecked():
+            self.conform_existing_edges.setChecked(False)
+        self.conform_existing_edges.setEnabled(
+            self.reuse_existing_nodes.isChecked()
+        )
 
     def _update_info(self, *_args) -> None:
         corners = [
@@ -1100,9 +1123,15 @@ class ShellMeshDialog(QDialog):
             if self.reuse_existing_nodes.isChecked()
             else "new intermediate nodes will always be created"
         )
+        conformity_text = (
+            "shared edges may override Nu/Nv to preserve conformity"
+            if self.conform_existing_edges.isChecked()
+            else "shared-edge conformity is disabled"
+        )
         self.preview_info.setText(
-            f"Mesh: {nu} × {nv} = {nu * nv} shell elements · "
-            f"up to {generated_nodes} intermediate nodes · {reuse_text}."
+            f"Requested mesh: {nu} × {nv} = {nu * nv} shell elements · "
+            f"up to {generated_nodes} intermediate nodes · {reuse_text} · "
+            f"{conformity_text}."
         )
 
     def spec(self) -> ShellMeshSpec:
@@ -1152,6 +1181,7 @@ class ShellMeshDialog(QDialog):
             ),
             drilling_nl=self.drilling_nl.isChecked(),
             reuse_existing_nodes=self.reuse_existing_nodes.isChecked(),
+            conform_existing_edges=self.conform_existing_edges.isChecked(),
         )
 
     def _accept(self) -> None:
