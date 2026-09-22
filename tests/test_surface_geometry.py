@@ -250,7 +250,9 @@ def test_unmeshed_surface_geometry_is_rendered_in_viewport():
     assert "surface-geometry-" in render_source
     assert "not self._model.nodes and not self._surfaces" in render_source
     assert "self.project.surfaces" in refresh_source
-    assert 'kind == "surface_geometry"' in tree_selection_source
+    assert '"surface_geometry"' in tree_selection_source
+    assert '"surface_mesh"' in tree_selection_source
+    assert '"surface_shells"' in tree_selection_source
     assert "_show_surface_geometry_properties" in tree_selection_source
 
 
