@@ -1071,9 +1071,10 @@ class SectionData:
             for layer in self.shell_layers
         ]
         if self.section_type == "LayeredShell":
-            if not self.shell_layers:
+            if len(self.shell_layers) < 3:
                 raise ValueError(
-                    "LayeredShell requires at least one material layer."
+                    "LayeredShell requires at least three material layers "
+                    "for the OpenSees LayeredShell section."
                 )
         else:
             self.shell_layers = []
