@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 31
+PROJECT_FORMAT_VERSION = 32
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -2732,6 +2732,210 @@ class SolutionResultData:
 
 
 @dataclass
+class PointGeometryData:
+    tag: int
+    name: str
+    xyz: Vec3 = (0.0, 0.0, 0.0)
+
+    def __post_init__(self) -> None:
+        self.tag = _strict_int(self.tag, "Geometry Point tag")
+        if self.tag <= 0:
+            raise ValueError("Geometry Point tag must be positive.")
+        self.name = str(self.name).strip() or f"Point {self.tag}"
+        if len(self.xyz) != 3:
+            raise ValueError("Geometry Point requires X, Y, Z coordinates.")
+        self.xyz = tuple(float(value) for value in self.xyz)
+        if any(not math.isfinite(value) for value in self.xyz):
+            raise ValueError("Geometry Point coordinates must be finite.")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "xyz": list(self.xyz),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "PointGeometryData":
+        return cls(
+            tag=data["tag"],
+            name=str(data.get("name", "")),
+            xyz=tuple(data.get("xyz", (0.0, 0.0, 0.0))),
+        )
+
+
+@dataclass
+class LineGeometryData:
+    tag: int
+    name: str
+    point_i: int
+    point_j: int
+    mesh_mode: str = "divisions"
+    divisions: int = 1
+    target_size: float | None = None
+    reuse_existing_nodes: bool = True
+    element_family: str = "Frame"
+    element_type: str = "elasticBeamColumn"
+    section_tag: int | None = None
+    transformation_tag: int | None = None
+    material_tag: int | None = None
+    area: float = 1.0
+    integration_type: str = "Lobatto"
+    integration_points: int = 5
+    mass_per_length: float = 0.0
+    consistent_mass: bool = False
+    do_rayleigh: bool = False
+    generated_node_tags: list[int] = field(default_factory=list)
+    generated_element_tags: list[int] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.tag = _strict_int(self.tag, "Geometry Line tag")
+        if self.tag <= 0:
+            raise ValueError("Geometry Line tag must be positive.")
+        self.name = str(self.name).strip() or f"Line {self.tag}"
+        self.point_i = _strict_int(self.point_i, "Geometry Line start Point")
+        self.point_j = _strict_int(self.point_j, "Geometry Line end Point")
+        if self.point_i == self.point_j:
+            raise ValueError("Geometry Line requires two different Points.")
+
+        self.mesh_mode = str(self.mesh_mode)
+        if self.mesh_mode not in {"divisions", "target_size"}:
+            raise ValueError(
+                "Line mesh mode must be 'divisions' or 'target_size'."
+            )
+        self.divisions = _strict_int(self.divisions, "Line mesh divisions")
+        if not 1 <= self.divisions <= 10_000:
+            raise ValueError("Line mesh divisions must be in 1..10000.")
+        if self.target_size is not None:
+            self.target_size = float(self.target_size)
+            if (
+                not math.isfinite(self.target_size)
+                or self.target_size <= 0.0
+            ):
+                raise ValueError(
+                    "Line target element size must be finite and positive."
+                )
+
+        self.reuse_existing_nodes = _strict_bool(
+            self.reuse_existing_nodes,
+            "Line reuse existing nodes",
+        )
+        self.element_family = str(self.element_family)
+        if self.element_family not in {"Frame", "Truss"}:
+            raise ValueError("Line FE family must be Frame or Truss.")
+        self.element_type = str(self.element_type)
+        if self.element_family == "Frame":
+            if self.element_type not in FRAME_ELEMENT_TYPES:
+                raise ValueError(
+                    f"Unsupported Frame formulation: {self.element_type}"
+                )
+        else:
+            self.element_type = "truss"
+
+        for attribute, label in (
+            ("section_tag", "Line Section tag"),
+            ("transformation_tag", "Line Transformation tag"),
+            ("material_tag", "Line Material tag"),
+        ):
+            value = getattr(self, attribute)
+            if value is not None:
+                value = _strict_int(value, label)
+                if value <= 0:
+                    raise ValueError(f"{label} must be positive.")
+                setattr(self, attribute, value)
+
+        self.area = float(self.area)
+        if not math.isfinite(self.area) or self.area <= 0.0:
+            raise ValueError("Line Truss area must be finite and positive.")
+        self.integration_type = str(self.integration_type)
+        self.integration_points = _strict_int(
+            self.integration_points,
+            "Line integration points",
+        )
+        if not 2 <= self.integration_points <= 20:
+            raise ValueError("Line integration points must be in 2..20.")
+        self.mass_per_length = float(self.mass_per_length)
+        if (
+            not math.isfinite(self.mass_per_length)
+            or self.mass_per_length < 0.0
+        ):
+            raise ValueError(
+                "Line mass per length must be finite and nonnegative."
+            )
+        self.consistent_mass = _strict_bool(
+            self.consistent_mass,
+            "Line consistent mass",
+        )
+        self.do_rayleigh = _strict_bool(
+            self.do_rayleigh,
+            "Line Rayleigh flag",
+        )
+        self.generated_node_tags = sorted({
+            _strict_int(tag, "Line generated node tag")
+            for tag in self.generated_node_tags
+        })
+        self.generated_element_tags = sorted({
+            _strict_int(tag, "Line generated element tag")
+            for tag in self.generated_element_tags
+        })
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "point_i": self.point_i,
+            "point_j": self.point_j,
+            "mesh_mode": self.mesh_mode,
+            "divisions": self.divisions,
+            "target_size": self.target_size,
+            "reuse_existing_nodes": self.reuse_existing_nodes,
+            "element_family": self.element_family,
+            "element_type": self.element_type,
+            "section_tag": self.section_tag,
+            "transformation_tag": self.transformation_tag,
+            "material_tag": self.material_tag,
+            "area": self.area,
+            "integration_type": self.integration_type,
+            "integration_points": self.integration_points,
+            "mass_per_length": self.mass_per_length,
+            "consistent_mass": self.consistent_mass,
+            "do_rayleigh": self.do_rayleigh,
+            "generated_node_tags": list(self.generated_node_tags),
+            "generated_element_tags": list(self.generated_element_tags),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LineGeometryData":
+        return cls(
+            tag=data["tag"],
+            name=str(data.get("name", "")),
+            point_i=data["point_i"],
+            point_j=data["point_j"],
+            mesh_mode=str(data.get("mesh_mode", "divisions")),
+            divisions=data.get("divisions", 1),
+            target_size=data.get("target_size"),
+            reuse_existing_nodes=data.get("reuse_existing_nodes", True),
+            element_family=str(data.get("element_family", "Frame")),
+            element_type=str(
+                data.get("element_type", "elasticBeamColumn")
+            ),
+            section_tag=data.get("section_tag"),
+            transformation_tag=data.get("transformation_tag"),
+            material_tag=data.get("material_tag"),
+            area=data.get("area", 1.0),
+            integration_type=str(data.get("integration_type", "Lobatto")),
+            integration_points=data.get("integration_points", 5),
+            mass_per_length=data.get("mass_per_length", 0.0),
+            consistent_mass=data.get("consistent_mass", False),
+            do_rayleigh=data.get("do_rayleigh", False),
+            generated_node_tags=list(data.get("generated_node_tags", [])),
+            generated_element_tags=list(
+                data.get("generated_element_tags", [])
+            ),
+        )
+
+
+@dataclass
 class SurfaceGeometryData:
     tag: int
     name: str
@@ -2945,6 +3149,8 @@ class ProjectDatabase:
     name: str = "Untitled"
     model: StructuralModel = field(default_factory=StructuralModel)
     selection_sets: dict[str, SelectionSetData] = field(default_factory=dict)
+    points: dict[int, PointGeometryData] = field(default_factory=dict)
+    lines: dict[int, LineGeometryData] = field(default_factory=dict)
     surfaces: dict[int, SurfaceGeometryData] = field(default_factory=dict)
     materials: dict[int, MaterialData] = field(default_factory=dict)
     nd_materials: dict[int, NDMaterialData] = field(default_factory=dict)
@@ -2981,6 +3187,8 @@ class ProjectDatabase:
         preserved so a replacement geometry can reuse those definitions.
         """
         self.selection_sets.clear()
+        self.points.clear()
+        self.lines.clear()
         self.surfaces.clear()
         self.constraints.clear()
         self.connections.clear()
@@ -3358,6 +3566,122 @@ class ProjectDatabase:
             "kept_nodes": sorted(set(kept_nodes)),
             "remapped_elements": sorted(remapped_elements),
         }
+
+
+    def next_point_tag(self) -> int:
+        return max(self.points, default=0) + 1
+
+    def add_point(self, point: PointGeometryData) -> None:
+        if point.tag in self.points:
+            raise ValueError(
+                f"Geometry Point tag {point.tag} already exists."
+            )
+        self.points[point.tag] = point
+
+    def update_point(
+        self,
+        original_tag: int,
+        point: PointGeometryData,
+    ) -> None:
+        original_tag = _strict_int(original_tag, "Geometry Point original tag")
+        if original_tag not in self.points:
+            raise ValueError(
+                f"Geometry Point tag {original_tag} does not exist."
+            )
+        if point.tag != original_tag and point.tag in self.points:
+            raise ValueError(
+                f"Geometry Point tag {point.tag} already exists."
+            )
+        if point.tag != original_tag:
+            for line in self.lines.values():
+                if line.point_i == original_tag:
+                    line.point_i = point.tag
+                if line.point_j == original_tag:
+                    line.point_j = point.tag
+        self.points.pop(original_tag)
+        self.points[point.tag] = point
+
+    def remove_point(self, tag: int) -> None:
+        tag = _strict_int(tag, "Geometry Point tag")
+        users = sorted(
+            line.tag
+            for line in self.lines.values()
+            if tag in {line.point_i, line.point_j}
+        )
+        if users:
+            raise ValueError(
+                f"Geometry Point {tag} is used by Line(s): "
+                + ", ".join(map(str, users))
+            )
+        self.points.pop(tag, None)
+
+    def next_line_tag(self) -> int:
+        return max(self.lines, default=0) + 1
+
+    def _validate_line_geometry(self, line: LineGeometryData) -> None:
+        missing = [
+            tag
+            for tag in (line.point_i, line.point_j)
+            if tag not in self.points
+        ]
+        if missing:
+            raise ValueError(
+                "Geometry Line references missing Point(s): "
+                + ", ".join(map(str, missing))
+            )
+        if line.element_family == "Frame":
+            if (
+                line.section_tag is None
+                or line.section_tag not in self.sections
+            ):
+                raise ValueError(
+                    "Frame Line requires an existing Section."
+                )
+            if (
+                line.transformation_tag is None
+                or line.transformation_tag not in self.transformations
+            ):
+                raise ValueError(
+                    "Frame Line requires an existing Geometric Transformation."
+                )
+        else:
+            if (
+                line.material_tag is None
+                or line.material_tag not in self.materials
+            ):
+                raise ValueError(
+                    "Truss Line requires an existing uniaxial Material."
+                )
+
+    def add_line(self, line: LineGeometryData) -> None:
+        if line.tag in self.lines:
+            raise ValueError(
+                f"Geometry Line tag {line.tag} already exists."
+            )
+        self._validate_line_geometry(line)
+        self.lines[line.tag] = line
+
+    def update_line(
+        self,
+        original_tag: int,
+        line: LineGeometryData,
+    ) -> None:
+        original_tag = _strict_int(original_tag, "Geometry Line original tag")
+        if original_tag not in self.lines:
+            raise ValueError(
+                f"Geometry Line tag {original_tag} does not exist."
+            )
+        if line.tag != original_tag and line.tag in self.lines:
+            raise ValueError(
+                f"Geometry Line tag {line.tag} already exists."
+            )
+        self._validate_line_geometry(line)
+        self.lines.pop(original_tag)
+        self.lines[line.tag] = line
+
+    def remove_line(self, tag: int) -> None:
+        tag = _strict_int(tag, "Geometry Line tag")
+        self.lines.pop(tag, None)
 
 
     def next_surface_tag(self) -> int:
@@ -6762,6 +7086,14 @@ class ProjectDatabase:
                 self.selection_sets[name].to_dict()
                 for name in sorted(self.selection_sets)
             ],
+            "points": [
+                self.points[tag].to_dict()
+                for tag in sorted(self.points)
+            ],
+            "lines": [
+                self.lines[tag].to_dict()
+                for tag in sorted(self.lines)
+            ],
             "surfaces": [
                 self.surfaces[tag].to_dict()
                 for tag in sorted(self.surfaces)
@@ -6828,6 +7160,38 @@ class ProjectDatabase:
             ],
             "active_analysis_tag": self.active_analysis_tag,
         }
+
+    @staticmethod
+    def _load_points(raw: Any) -> dict[int, PointGeometryData]:
+        result: dict[int, PointGeometryData] = {}
+        for index, item in enumerate(
+            _require_list(raw, "Geometry Points")
+        ):
+            point = PointGeometryData.from_dict(
+                _require_object(item, f"Geometry Point item {index}")
+            )
+            if point.tag in result:
+                raise ValueError(
+                    f"Duplicate Geometry Point tag {point.tag}."
+                )
+            result[point.tag] = point
+        return result
+
+    @staticmethod
+    def _load_lines(raw: Any) -> dict[int, LineGeometryData]:
+        result: dict[int, LineGeometryData] = {}
+        for index, item in enumerate(
+            _require_list(raw, "Geometry Lines")
+        ):
+            line = LineGeometryData.from_dict(
+                _require_object(item, f"Geometry Line item {index}")
+            )
+            if line.tag in result:
+                raise ValueError(
+                    f"Duplicate Geometry Line tag {line.tag}."
+                )
+            result[line.tag] = line
+        return result
 
     @staticmethod
     def _load_surfaces(raw: Any) -> dict[int, SurfaceGeometryData]:
@@ -7210,6 +7574,8 @@ class ProjectDatabase:
             name=str(data.get("name", "Untitled")),
             model=StructuralModel.from_dict(data.get("model", {})),
             selection_sets=selection_sets,
+            points=cls._load_points(data.get("points", [])),
+            lines=cls._load_lines(data.get("lines", [])),
             surfaces=cls._load_surfaces(data.get("surfaces", [])),
             materials=cls._load_materials(data.get("materials", [])),
             nd_materials=cls._load_nd_materials(
