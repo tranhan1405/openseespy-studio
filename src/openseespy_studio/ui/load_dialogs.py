@@ -682,6 +682,7 @@ class PrescribedDisplacementDialog(QDialog):
         node_tag=1,
         ndf=6,
         units=None,
+        allowed_load_types=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -852,13 +853,19 @@ class ElementLoadDialog(QDialog):
         )
 
         self.kind = QComboBox()
-        self.kind.addItem("Uniform (local axes)", "Uniform")
-        self.kind.addItem("Point (local axes)", "Point")
-        self.kind.addItem("Self Weight (global gravity)", "SelfWeight")
-        self.kind.addItem(
-            "Shell Surface Pressure (normal)",
-            "SurfacePressure",
+        allowed = (
+            set(allowed_load_types)
+            if allowed_load_types is not None
+            else {"Uniform", "Point", "SelfWeight", "SurfacePressure"}
         )
+        for label, value in (
+            ("Uniform (local axes)", "Uniform"),
+            ("Point (local axes)", "Point"),
+            ("Self Weight (global gravity)", "SelfWeight"),
+            ("Shell Surface Pressure (normal)", "SurfacePressure"),
+        ):
+            if value in allowed:
+                self.kind.addItem(label, value)
         if load:
             index = self.kind.findData(load.load_type)
             if index >= 0:
