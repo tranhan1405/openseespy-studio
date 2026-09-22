@@ -2275,7 +2275,7 @@ class MainWindow(QMainWindow):
             "moment_curvature",
             "Moment-Curvature...",
             "analysis",
-            self._run_moment_curvature_workflow,
+            lambda checked=False: self._run_moment_curvature_workflow(),
             (
                 "Run an isolated zeroLengthSection section test and plot "
                 "moment versus curvature without modifying the model"
@@ -12703,7 +12703,10 @@ class MainWindow(QMainWindow):
             return
         self._show_model_check(issues, allow_run=False)
 
-    def _run_moment_curvature_workflow(self) -> None:
+    def _run_moment_curvature_workflow(
+        self,
+        checked: bool = False,
+    ) -> None:
         if (
             self._analysis_process is not None
             and self._analysis_process.state() != QProcess.NotRunning
