@@ -3,8 +3,14 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QTreeWidget, QTreeWidgetItem
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtWidgets import (
+    QApplication,
+    QMenu,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QWidget,
+)
 
 from openseespy_studio.ui.main_window import MainWindow
 
@@ -73,3 +79,63 @@ def test_tree_expansion_state_survives_rebuild_and_count_changes():
     assert rebuilt_root.isExpanded()
     assert not rebuilt_elements.isExpanded()
     assert rebuilt_truss.isExpanded()
+
+
+
+def test_material_tree_menu_prioritizes_new_and_keeps_ai_last(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+
+    item = QTreeWidgetItem(["Materials (0)"])
+    item.setData(0, Qt.UserRole, ("materials_root", None))
+
+    class _Viewport:
+        @staticmethod
+        def mapToGlobal(position):
+            return QPoint(position)
+
+    class _Tree:
+        @staticmethod
+        def itemAt(_position):
+            return item
+
+        @staticmethod
+        def viewport():
+            return _Viewport()
+
+    class _Holder(QWidget):
+        def __init__(self):
+            super().__init__()
+            self.tree = _Tree()
+
+        def _create_material(self):
+            pass
+
+        def _show_material_library(self):
+            pass
+
+        def _ask_ai_about_tree_item(self, _kind, _value):
+            pass
+
+    captured = []
+
+    def _capture_exec(menu, _position):
+        captured.extend(
+            action.text()
+            for action in menu.actions()
+            if not action.isSeparator()
+        )
+
+    monkeypatch.setattr(QMenu, "exec", _capture_exec)
+
+    holder = _Holder()
+    try:
+        MainWindow._show_tree_context_menu(holder, QPoint(0, 0))
+        assert captured == [
+            "New Material...",
+            "Insert from Material Library...",
+            "Ask AI about this",
+        ]
+    finally:
+        holder.close()
+        holder.deleteLater()
+        app.processEvents()
