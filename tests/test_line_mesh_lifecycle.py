@@ -2445,23 +2445,13 @@ def test_geometry_rectangle_draw_uses_two_click_geometry_only_surface():
     assert 'plane == "xz"' in corners
 
 
-def test_geometry_qt_vtk_mapping_handles_hidpi_render_scale():
+def test_geometry_qt_vtk_mapping_uses_qvtk_device_pixel_ratio():
     class WidgetStub:
-        def width(self):
-            return 400
-
-        def height(self):
-            return 300
-
-    class RenderWindowStub:
-        def GetSize(self):
-            return (800, 600)
+        def _getPixelRatio(self):
+            return 2.0
 
     dummy = SimpleNamespace(
-        plotter=SimpleNamespace(
-            interactor=WidgetStub(),
-            ren_win=RenderWindowStub(),
-        )
+        plotter=SimpleNamespace(interactor=WidgetStub())
     )
 
     scales = ModelViewport._qt_vtk_pixel_scales(dummy)
@@ -2482,27 +2472,17 @@ def test_geometry_qt_to_vtk_click_mapping_uses_render_pixel_scale():
             return PositionStub()
 
     class WidgetStub:
-        def width(self):
-            return 400
-
         def height(self):
             return 300
 
-    class RenderWindowStub:
-        def GetSize(self):
-            return (800, 600)
-
     dummy = SimpleNamespace(
-        plotter=SimpleNamespace(
-            interactor=WidgetStub(),
-            ren_win=RenderWindowStub(),
-        )
+        plotter=SimpleNamespace(interactor=WidgetStub())
     )
     dummy._qt_vtk_pixel_scales = lambda: (2.0, 2.0)
 
     point = ModelViewport._vtk_position_from_qt(dummy, EventStub())
 
-    assert point == (200, 500)
+    assert point == (200, 498)
 
 
 def test_geometry_sketch_activation_aligns_blank_iso_view_and_shows_grid():
@@ -2612,7 +2592,7 @@ def test_geometry_iso_sketch_keeps_active_workplane_and_offset():
         assert "current_plane, current_offset" in source
         assert 'current_view().lower() == "iso"' in source
         assert "plane_offset" in source
-        assert "set_geometry_sketch_plane(plane, plane_offset)" in source
+        assert "_prepare_geometry_sketch_view(plane, plane_offset)" in source
 
 
 def test_geometry_trim_side_pick_rejects_nonfinite_screen_and_world():
