@@ -306,10 +306,11 @@ def material_to_openseespy(
         )
 
     if material.material_type == "RambergOsgoodSteel":
-        return (
-            "ops.uniaxialMaterial('RambergOsgoodSteel', "
-            f"{material.tag}, {stress(p['fy']):g}, "
-            f"{stress(p['E0']):g}, {p['a']:g}, {p['n']:g})"
+        raise ValueError(
+            "RambergOsgoodSteel is reference-only in SARE. Stock "
+            "OpenSeesPy 3.8.x reports this material as temporarily removed "
+            "from compiled Tcl/Py builds because of known issues and "
+            "unreliable results."
         )
 
     if material.material_type == "HystereticSmooth":
