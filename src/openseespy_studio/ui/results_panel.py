@@ -1334,7 +1334,7 @@ class ResultsPanel(QWidget):
             ("cutbacks", "Cutback Markers", True),
             ("converged", "Substep Converged", True),
             ("coordinate", "Analysis Coordinate", True),
-            ("details", "Detailed History", False),
+            ("details", "Detailed History", True),
         ):
             action = QAction(label, self)
             action.setCheckable(True)
@@ -1342,6 +1342,10 @@ class ResultsPanel(QWidget):
             action.toggled.connect(
                 self._update_convergence_display_options
             )
+            if key == "details":
+                # Detailed history now has its own sub-tab. Keep this legacy
+                # action internally for compatibility without duplicating UI.
+                action.setVisible(False)
             display_menu.addAction(action)
             self.convergence_display_actions[key] = action
         self.convergence_display_button.setMenu(display_menu)
@@ -1359,6 +1363,15 @@ class ResultsPanel(QWidget):
         self.live_convergence_status.setWordWrap(True)
         layout.addWidget(self.live_convergence_status)
 
+        self.convergence_detail_tabs = CompactResultTabs()
+        self.convergence_detail_tabs.setDocumentMode(True)
+        layout.addWidget(self.convergence_detail_tabs, 1)
+
+        overview_page = QWidget()
+        overview_layout = QVBoxLayout(overview_page)
+        overview_layout.setContentsMargins(3, 3, 3, 3)
+        overview_layout.setSpacing(4)
+
         self.convergence_plot_splitter = QSplitter(Qt.Vertical)
         self.convergence_plot_splitter.setChildrenCollapsible(True)
         self.convergence_plot_splitter.setMinimumSize(0, 0)
@@ -1375,11 +1388,12 @@ class ResultsPanel(QWidget):
         self.convergence_plot_splitter.setStretchFactor(0, 4)
         self.convergence_plot_splitter.setStretchFactor(1, 1)
         self.convergence_plot_splitter.setSizes([240, 70])
-        layout.addWidget(self.convergence_plot_splitter, 1)
+        overview_layout.addWidget(self.convergence_plot_splitter, 1)
+        self.convergence_detail_tabs.addTab(overview_page, "Overview")
 
         self.convergence_details_widget = QWidget()
         details_layout = QVBoxLayout(self.convergence_details_widget)
-        details_layout.setContentsMargins(0, 2, 0, 0)
+        details_layout.setContentsMargins(3, 3, 3, 3)
         details_layout.setSpacing(3)
 
         self.convergence_info = QLabel(
@@ -1436,8 +1450,10 @@ class ResultsPanel(QWidget):
         self.convergence_attempt_info.setWordWrap(True)
         details_layout.addWidget(self.convergence_attempt_info)
 
-        self.convergence_details_widget.hide()
-        layout.addWidget(self.convergence_details_widget, 1)
+        self.convergence_detail_tabs.addTab(
+            self.convergence_details_widget,
+            "Step Details",
+        )
 
         self.tabs.addTab(page, "Convergence")
         self._update_convergence_display_options()
@@ -1455,9 +1471,11 @@ class ResultsPanel(QWidget):
         self.convergence_coordinate_plot.setVisible(
             actions["coordinate"].isChecked()
         )
-        self.convergence_details_widget.setVisible(
-            actions["details"].isChecked()
-        )
+        if hasattr(self, "convergence_detail_tabs"):
+            self.convergence_detail_tabs.setTabEnabled(
+                1,
+                actions["details"].isChecked(),
+            )
 
     def _build_deformation_tab(self) -> None:
         page = QWidget()
@@ -2184,6 +2202,24 @@ class ResultsPanel(QWidget):
         row.addWidget(export)
         layout.addLayout(row)
 
+        self.moment_curvature_detail_tabs = CompactResultTabs()
+        self.moment_curvature_detail_tabs.setDocumentMode(True)
+        layout.addWidget(self.moment_curvature_detail_tabs, 1)
+
+        curve_page = QWidget()
+        curve_layout = QVBoxLayout(curve_page)
+        curve_layout.setContentsMargins(3, 3, 3, 3)
+        self.moment_curvature_plot = TimeHistoryPlot(
+            empty_message="No moment-curvature data"
+        )
+        curve_layout.addWidget(self.moment_curvature_plot, 1)
+        self.moment_curvature_detail_tabs.addTab(curve_page, "Curve")
+
+        validation_page = QWidget()
+        validation_layout = QVBoxLayout(validation_page)
+        validation_layout.setContentsMargins(3, 3, 3, 3)
+        validation_layout.setSpacing(3)
+
         self.response2000_controls = QWidget()
         response_controls_layout = QVBoxLayout(self.response2000_controls)
         response_controls_layout.setContentsMargins(0, 0, 0, 0)
@@ -2285,15 +2321,17 @@ class ResultsPanel(QWidget):
         )
         self.response2000_compare_table.setAlternatingRowColors(True)
         self.response2000_compare_table.hide()
-        response_controls_layout.addWidget(self.response2000_compare_table)
-
-        self.response2000_controls.hide()
-        layout.addWidget(self.response2000_controls)
-
-        self.moment_curvature_plot = TimeHistoryPlot(
-            empty_message="No moment-curvature data"
+        response_controls_layout.addWidget(
+            self.response2000_compare_table,
+            1,
         )
-        layout.addWidget(self.moment_curvature_plot, 1)
+
+        validation_layout.addWidget(self.response2000_controls, 1)
+        self.moment_curvature_detail_tabs.addTab(
+            validation_page,
+            "Response-2000",
+        )
+
         self.tabs.addTab(page, "Moment–Curvature")
 
     def _build_pushover_tab(self) -> None:
@@ -2926,6 +2964,29 @@ class ResultsPanel(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+
+        self.specimen_info = QLabel(
+            "Quick 1D Column instrumentation is captured automatically when "
+            "a test-column specimen is present."
+        )
+        self.specimen_info.setWordWrap(True)
+        layout.addWidget(self.specimen_info)
+
+        self.specimen_metrics = QLabel(
+            "Mmax: -   κmax: -   drift: -   interface rotation: -"
+        )
+        self.specimen_metrics.setWordWrap(True)
+        layout.addWidget(self.specimen_metrics)
+
+        self.specimen_detail_tabs = CompactResultTabs()
+        self.specimen_detail_tabs.setDocumentMode(True)
+        layout.addWidget(self.specimen_detail_tabs, 1)
+
+        response_page = QWidget()
+        response_layout = QVBoxLayout(response_page)
+        response_layout.setContentsMargins(3, 3, 3, 3)
+        response_layout.setSpacing(4)
 
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Response:"))
@@ -2939,7 +3000,7 @@ class ResultsPanel(QWidget):
             self._import_cyclic_experiment_csv
         )
         controls.addWidget(import_specimen_experiment)
-        layout.addLayout(controls)
+        response_layout.addLayout(controls)
 
         experiment_controls = QHBoxLayout()
         experiment_controls.addWidget(QLabel("Exp X:"))
@@ -2973,33 +3034,24 @@ class ResultsPanel(QWidget):
             self._update_specimen_view
         )
         experiment_controls.addWidget(self.specimen_exp_y_scale)
-        layout.addLayout(experiment_controls)
+        response_layout.addLayout(experiment_controls)
 
         self.specimen_experiment_info = QLabel(
             "Experimental overlay is optional. For M–κ select curvature "
             "as X and moment as Y."
         )
         self.specimen_experiment_info.setWordWrap(True)
-        layout.addWidget(self.specimen_experiment_info)
-
-        self.specimen_info = QLabel(
-            "Quick 1D Column instrumentation is captured automatically when "
-            "a test-column specimen is present."
-        )
-        self.specimen_info.setWordWrap(True)
-        layout.addWidget(self.specimen_info)
-
-        self.specimen_metrics = QLabel(
-            "Mmax: -   κmax: -   drift: -   interface rotation: -"
-        )
-        self.specimen_metrics.setWordWrap(True)
-        layout.addWidget(self.specimen_metrics)
+        response_layout.addWidget(self.specimen_experiment_info)
 
         self.specimen_plot = TimeHistoryPlot(
             empty_message="No 1D-column specimen response data"
         )
-        layout.addWidget(self.specimen_plot, 1)
+        response_layout.addWidget(self.specimen_plot, 1)
+        self.specimen_detail_tabs.addTab(response_page, "Response")
 
+        research_page = QWidget()
+        research_layout = QVBoxLayout(research_page)
+        research_layout.setContentsMargins(3, 3, 3, 3)
         self.specimen_research_table = QTableWidget(0, 3)
         self.specimen_research_table.setHorizontalHeaderLabels([
             "Research metric",
@@ -3015,9 +3067,15 @@ class ResultsPanel(QWidget):
         self.specimen_research_table.setEditTriggers(
             QAbstractItemView.NoEditTriggers
         )
-        self.specimen_research_table.setMaximumHeight(185)
-        layout.addWidget(self.specimen_research_table)
+        research_layout.addWidget(self.specimen_research_table, 1)
+        self.specimen_detail_tabs.addTab(
+            research_page,
+            "Research Metrics",
+        )
 
+        fiber_page = QWidget()
+        fiber_layout = QVBoxLayout(fiber_page)
+        fiber_layout.setContentsMargins(3, 3, 3, 3)
         self.specimen_fiber_table = QTableWidget(0, 7)
         self.specimen_fiber_table.setHorizontalHeaderLabels([
             "Source",
@@ -3037,8 +3095,8 @@ class ResultsPanel(QWidget):
         self.specimen_fiber_table.setEditTriggers(
             QAbstractItemView.NoEditTriggers
         )
-        self.specimen_fiber_table.setMaximumHeight(150)
-        layout.addWidget(self.specimen_fiber_table)
+        fiber_layout.addWidget(self.specimen_fiber_table, 1)
+        self.specimen_detail_tabs.addTab(fiber_page, "Fiber History")
 
         self.tabs.addTab(page, "Specimen Response")
 
@@ -3046,6 +3104,7 @@ class ResultsPanel(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
 
         self.calibration_info = QLabel(
             "Run a Calibration / Parameter Study to compare batch cases "
@@ -3071,6 +3130,14 @@ class ResultsPanel(QWidget):
         controls.addWidget(export)
         controls.addStretch(1)
         layout.addLayout(controls)
+
+        self.calibration_detail_tabs = CompactResultTabs()
+        self.calibration_detail_tabs.setDocumentMode(True)
+        layout.addWidget(self.calibration_detail_tabs, 1)
+
+        history_page = QWidget()
+        history_page_layout = QVBoxLayout(history_page)
+        history_page_layout.setContentsMargins(3, 3, 3, 3)
 
         history_splitter = QSplitter(Qt.Horizontal)
 
@@ -3120,18 +3187,12 @@ class ResultsPanel(QWidget):
 
         history_splitter.setStretchFactor(0, 1)
         history_splitter.setStretchFactor(1, 1)
-
-        analytics_tabs = QTabWidget()
-        analytics_tabs.setMaximumHeight(235)
-        history_page = QWidget()
-        history_page_layout = QVBoxLayout(history_page)
-        history_page_layout.setContentsMargins(0, 0, 0, 0)
-        history_page_layout.addWidget(history_splitter)
-        analytics_tabs.addTab(history_page, "History")
+        history_page_layout.addWidget(history_splitter, 1)
+        self.calibration_detail_tabs.addTab(history_page, "History")
 
         pareto_page = QWidget()
         pareto_layout = QVBoxLayout(pareto_page)
-        pareto_layout.setContentsMargins(2, 2, 2, 2)
+        pareto_layout.setContentsMargins(3, 3, 3, 3)
         pareto_controls = QHBoxLayout()
         pareto_controls.addWidget(QLabel("X:"))
         self.calibration_pareto_x = QComboBox()
@@ -3156,8 +3217,11 @@ class ResultsPanel(QWidget):
             self._calibration_pareto_job_selected
         )
         pareto_layout.addWidget(self.calibration_pareto_plot, 1)
-        analytics_tabs.addTab(pareto_page, "Pareto")
-        layout.addWidget(analytics_tabs)
+        self.calibration_detail_tabs.addTab(pareto_page, "Pareto")
+
+        cases_page = QWidget()
+        cases_layout = QVBoxLayout(cases_page)
+        cases_layout.setContentsMargins(3, 3, 3, 3)
 
         self.calibration_table = QTableWidget(0, 11)
         self.calibration_table.setHorizontalHeaderLabels(
@@ -3196,7 +3260,7 @@ class ResultsPanel(QWidget):
         self.calibration_table.itemSelectionChanged.connect(
             self._calibration_selection_changed
         )
-        layout.addWidget(self.calibration_table, 1)
+        cases_layout.addWidget(self.calibration_table, 1)
 
         note = QLabel(
             "Score is the weighted mean of available absolute percentage "
@@ -3204,7 +3268,8 @@ class ResultsPanel(QWidget):
             "pass/fail criterion is implied."
         )
         note.setWordWrap(True)
-        layout.addWidget(note)
+        cases_layout.addWidget(note)
+        self.calibration_detail_tabs.addTab(cases_page, "Cases")
 
         self.tabs.addTab(page, "Calibration")
 
