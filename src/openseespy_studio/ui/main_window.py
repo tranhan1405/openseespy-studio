@@ -104,6 +104,7 @@ from ..surface_mesher import (
     inspect_surface_mesh_state,
     managed_surface_support_node_tags,
     remove_surface_edge_support,
+    replace_surface_edge_support,
     sync_surface_edge_support,
     surface_boundary_edges,
     surface_boundary_node_tags,
@@ -8606,14 +8607,15 @@ class MainWindow(QMainWindow):
                         existing.generated_node_tags
                     ),
                 )
-                self.project.update_surface_edge_support(
-                    existing.tag,
+                node_tags = replace_surface_edge_support(
+                    self.project,
                     support,
                 )
-            node_tags = sync_surface_edge_support(
-                self.project,
-                support.tag,
-            )
+            if existing is None:
+                node_tags = sync_surface_edge_support(
+                    self.project,
+                    support.tag,
+                )
         except (TypeError, ValueError, IndexError) as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model

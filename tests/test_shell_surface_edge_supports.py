@@ -223,3 +223,57 @@ def test_surface_support_ui_and_manual_restraint_guard_are_exposed():
     assert "_exclude_managed_surface_support_nodes" in apply_restraint
     assert "_exclude_managed_surface_support_nodes" in clear_restraint
     assert "Managed edge supports" in properties
+
+
+def test_update_managed_support_releases_old_fixity_dofs():
+    from openseespy_studio.surface_mesher import replace_surface_edge_support
+
+    project = _meshed_project(divisions_u=2, divisions_v=1)
+    original = SurfaceEdgeSupportData(
+        1,
+        "Bottom fixed",
+        1,
+        1,
+        fixity=(1, 1, 1, 1, 1, 1),
+    )
+    project.add_surface_edge_support(original)
+    nodes = sync_surface_edge_support(project, 1)
+    assert all(
+        project.model.nodes[tag].fixity == (1, 1, 1, 1, 1, 1)
+        for tag in nodes
+    )
+
+    updated = SurfaceEdgeSupportData(
+        1,
+        "Bottom UZ",
+        1,
+        1,
+        fixity=(0, 0, 1, 0, 0, 0),
+        generated_node_tags=list(nodes),
+    )
+    rebound = replace_surface_edge_support(project, updated)
+
+    assert rebound == nodes
+    assert all(
+        project.model.nodes[tag].fixity == (0, 0, 1, 0, 0, 0)
+        for tag in nodes
+    )
+
+
+def test_support_round_trip_validation_does_not_treat_itself_as_duplicate():
+    project = _meshed_project()
+    project.add_surface_edge_support(
+        SurfaceEdgeSupportData(
+            11,
+            "Edge support",
+            1,
+            2,
+            fixity=(1, 0, 0, 0, 0, 0),
+        )
+    )
+    sync_surface_edge_support(project, 11)
+
+    restored = ProjectDatabase.from_dict(project.to_dict())
+
+    assert list(restored.surface_edge_supports) == [11]
+    assert restored.surface_edge_supports[11].edge_index == 2

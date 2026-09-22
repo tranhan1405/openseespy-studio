@@ -4095,6 +4095,8 @@ class ProjectDatabase:
                 f"{support.surface_tag}."
             )
         for tag, existing in self.surface_edge_supports.items():
+            if int(tag) == int(support.tag):
+                continue
             if replacing_tag is not None and int(tag) == int(replacing_tag):
                 continue
             if (

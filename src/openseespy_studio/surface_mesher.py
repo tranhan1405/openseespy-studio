@@ -395,6 +395,29 @@ def sync_surface_edge_supports_for_surface(
     return sorted(touched)
 
 
+def replace_surface_edge_support(
+    project: ProjectDatabase,
+    support: SurfaceEdgeSupportData,
+) -> list[int]:
+    """Atomically replace one managed support and rebind its FE ownership."""
+    existing = project.surface_edge_supports.get(int(support.tag))
+    if existing is None:
+        raise ValueError(
+            f"Surface edge support {int(support.tag)} does not exist."
+        )
+    before = project.to_dict()
+    try:
+        detach_surface_edge_support(project, existing.tag)
+        support.generated_node_tags = []
+        project.update_surface_edge_support(existing.tag, support)
+        return sync_surface_edge_support(project, support.tag)
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+
+
 def remove_surface_edge_support(
     project: ProjectDatabase,
     support_tag: int,
