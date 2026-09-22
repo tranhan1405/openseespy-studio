@@ -11396,13 +11396,21 @@ class MainWindow(QMainWindow):
 
         kind, value = payload
         menu = QMenu(self)
-        ask_ai = menu.addAction("Ask AI about this")
-        ask_ai.setIcon(studio_icon("analysis"))
-        ask_ai.triggered.connect(
-            lambda checked=False, k=str(kind), v=value:
-            self._ask_ai_about_tree_item(k, v)
-        )
-        menu.addSeparator()
+
+        def exec_menu() -> None:
+            # Creation/editing commands are the primary tree workflow.
+            # AI help is deliberately appended last so it never displaces
+            # direct modeling commands.
+            actions = menu.actions()
+            if actions and not actions[-1].isSeparator():
+                menu.addSeparator()
+            ask_ai = menu.addAction("Ask AI about this")
+            ask_ai.setIcon(studio_icon("analysis"))
+            ask_ai.triggered.connect(
+                lambda checked=False, k=str(kind), v=value:
+                self._ask_ai_about_tree_item(k, v)
+            )
+            exec_menu()
 
         if kind == "model_root":
             menu.addAction(self.actions["check_model"])
@@ -11410,7 +11418,7 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             show_all = menu.addAction("Show All")
             show_all.triggered.connect(self._show_all)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "geometry_root":
@@ -11425,7 +11433,7 @@ class MainWindow(QMainWindow):
             quick_2d.triggered.connect(self._show_frame_grid_2d)
             grid_action = menu.addAction("Create 3D / Frame Grid...")
             grid_action.triggered.connect(self._show_frame_grid)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "nodes_root":
@@ -11436,13 +11444,13 @@ class MainWindow(QMainWindow):
             select_all.triggered.connect(self._select_all_tree_nodes)
             menu.addSeparator()
             menu.addAction(self.actions["show_node_numbers"])
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "lines_root":
             create = menu.addAction("New Frame...")
             create.triggered.connect(self._create_element)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "frame_grids_root":
@@ -11454,7 +11462,7 @@ class MainWindow(QMainWindow):
             quick_2d.triggered.connect(self._show_frame_grid_2d)
             create = menu.addAction("Create / Edit Frame Grid...")
             create.triggered.connect(self._show_frame_grid)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "elements_root":
@@ -11471,7 +11479,7 @@ class MainWindow(QMainWindow):
             )
             menu.addSeparator()
             menu.addAction(self.actions["show_element_numbers"])
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "element_type_group":
@@ -11550,7 +11558,7 @@ class MainWindow(QMainWindow):
                     self._create_named_selection(),
                 )
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "named_sets_root":
@@ -11559,7 +11567,7 @@ class MainWindow(QMainWindow):
                 bool(self.selection.nodes or self.selection.elements)
             )
             create.triggered.connect(self._create_named_selection)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "boundary_root":
@@ -11586,7 +11594,7 @@ class MainWindow(QMainWindow):
             )
             clear_support.setEnabled(bool(self.selection.nodes))
             clear_support.triggered.connect(self._clear_restraint)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "boundary_group":
@@ -11622,13 +11630,13 @@ class MainWindow(QMainWindow):
                     self._clear_restraint(),
                 )
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "connection_group":
             create = menu.addAction("New ZeroLength / Link...")
             create.triggered.connect(self._create_connection)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "node":
@@ -11688,7 +11696,7 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             delete = menu.addAction("Delete")
             delete.triggered.connect(self._delete_selection)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "element":
@@ -11789,13 +11797,13 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             delete = menu.addAction("Delete")
             delete.triggered.connect(self._delete_selection)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "constraints_root":
             create_action = menu.addAction("New Constraint...")
             create_action.triggered.connect(self._create_constraint)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "constraint":
@@ -11808,13 +11816,13 @@ class MainWindow(QMainWindow):
             delete_action.triggered.connect(
                 lambda: self._delete_constraint(tag)
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "connections_root":
             create_action = menu.addAction("New ZeroLength / Link...")
             create_action.triggered.connect(self._create_connection)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "connection":
@@ -11827,7 +11835,7 @@ class MainWindow(QMainWindow):
             delete_action.triggered.connect(
                 lambda: self._delete_connection(tag)
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "analyses_root":
@@ -11846,7 +11854,7 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             action = menu.addAction("New Analysis...")
             action.triggered.connect(self._create_analysis)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind in {
@@ -11871,7 +11879,7 @@ class MainWindow(QMainWindow):
             edit.triggered.connect(lambda: self._edit_analysis(tag))
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_analysis(tag))
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "solution_root":
@@ -11920,7 +11928,7 @@ class MainWindow(QMainWindow):
             delete_all.triggered.connect(
                 lambda: self._delete_all_solution_results(analysis_tag)
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "solution_result":
@@ -11944,7 +11952,7 @@ class MainWindow(QMainWindow):
             delete.triggered.connect(
                 lambda: self._delete_solution_result(tag)
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "solution_information":
@@ -11968,7 +11976,7 @@ class MainWindow(QMainWindow):
             convergence.triggered.connect(
                 lambda: self._show_solution_convergence(analysis_tag)
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "solution_convergence":
@@ -11981,7 +11989,7 @@ class MainWindow(QMainWindow):
             evaluate.triggered.connect(
                 lambda: self._show_solution_convergence(analysis_tag)
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "solver_output":
@@ -11992,7 +12000,7 @@ class MainWindow(QMainWindow):
                     self.console_dock.raise_(),
                 )
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "jobs_root":
@@ -12010,7 +12018,7 @@ class MainWindow(QMainWindow):
             delete_all_jobs = menu.addAction("Delete All Jobs...")
             delete_all_jobs.setEnabled(bool(self._jobs))
             delete_all_jobs.triggered.connect(self._delete_all_jobs)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "job":
@@ -12059,7 +12067,7 @@ class MainWindow(QMainWindow):
             delete_job.triggered.connect(
                 lambda: self._delete_job(job_id)
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "job_plot":
@@ -12092,13 +12100,13 @@ class MainWindow(QMainWindow):
             delete.triggered.connect(
                 lambda: self._delete_job_plot(job_id, plot_id)
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "recorders_root":
             action = menu.addAction("New Recorder...")
             action.triggered.connect(self._create_recorder)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "recorder":
@@ -12107,13 +12115,13 @@ class MainWindow(QMainWindow):
             edit.triggered.connect(lambda: self._edit_recorder(tag))
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_recorder(tag))
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "mass_sources_root":
             action = menu.addAction("New Mass Source...")
             action.triggered.connect(self._create_mass_source)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "mass_source":
@@ -12135,7 +12143,7 @@ class MainWindow(QMainWindow):
             delete.triggered.connect(
                 lambda: self._delete_mass_source(tag)
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "masses_root":
@@ -12143,13 +12151,13 @@ class MainWindow(QMainWindow):
             assign_action.triggered.connect(self._assign_mass)
             clear_action = menu.addAction("Clear Current Node Selection")
             clear_action.triggered.connect(self._clear_mass)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "time_series_root":
             action = menu.addAction("New Time Series...")
             action.triggered.connect(self._create_time_series)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "time_series":
@@ -12158,7 +12166,7 @@ class MainWindow(QMainWindow):
             edit.triggered.connect(lambda: self._edit_time_series(tag))
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_time_series(tag))
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "loading_root":
@@ -12170,7 +12178,7 @@ class MainWindow(QMainWindow):
             import_motion.triggered.connect(self._import_ground_motion)
             new_series = menu.addAction("New Time Series...")
             new_series.triggered.connect(self._create_time_series)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "ground_motions_root":
@@ -12178,7 +12186,7 @@ class MainWindow(QMainWindow):
             action.triggered.connect(self._create_ground_motion)
             import_action = menu.addAction("Import Ground Motion...")
             import_action.triggered.connect(self._import_ground_motion)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "ground_motion":
@@ -12196,13 +12204,13 @@ class MainWindow(QMainWindow):
             delete.triggered.connect(
                 lambda: self._delete_ground_motion(tag)
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "load_patterns_root":
             action = menu.addAction("New Load Pattern...")
             action.triggered.connect(self._create_load_pattern)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "load_pattern":
@@ -12225,7 +12233,7 @@ class MainWindow(QMainWindow):
                 )
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_load_pattern(tag))
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "nodal_load":
@@ -12234,7 +12242,7 @@ class MainWindow(QMainWindow):
             edit.triggered.connect(lambda: self._edit_nodal_load(tag))
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_nodal_load(tag))
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "prescribed_displacement":
@@ -12247,7 +12255,7 @@ class MainWindow(QMainWindow):
             delete.triggered.connect(
                 lambda: self._delete_prescribed_displacement(tag)
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "element_load":
@@ -12260,17 +12268,17 @@ class MainWindow(QMainWindow):
             delete.triggered.connect(
                 lambda: self._delete_element_load(tag)
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "materials_root":
+            create_action = menu.addAction("New Material...")
+            create_action.triggered.connect(self._create_material)
             library_action = menu.addAction(
                 "Insert from Material Library..."
             )
             library_action.triggered.connect(self._show_material_library)
-            create_action = menu.addAction("New Material...")
-            create_action.triggered.connect(self._create_material)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "material":
@@ -12288,13 +12296,13 @@ class MainWindow(QMainWindow):
             delete_action.triggered.connect(
                 lambda: self._delete_material(tag)
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "sections_root":
             create_action = menu.addAction("New Section...")
             create_action.triggered.connect(self._create_section)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "section":
@@ -12312,13 +12320,13 @@ class MainWindow(QMainWindow):
             delete_action.triggered.connect(
                 lambda: self._delete_section(tag)
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "transformations_root":
             create_action = menu.addAction("New Transformation...")
             create_action.triggered.connect(self._create_transformation)
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind == "transformation":
@@ -12336,7 +12344,7 @@ class MainWindow(QMainWindow):
             delete_action.triggered.connect(
                 lambda: self._delete_transformation(tag)
             )
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            exec_menu()
             return
 
         if kind != "set":
@@ -12363,7 +12371,7 @@ class MainWindow(QMainWindow):
             lambda: self._delete_named_selection(name)
         )
 
-        menu.exec(self.tree.viewport().mapToGlobal(position))
+        exec_menu()
 
     def _tree_item_double_clicked(self, item, column: int) -> None:
         payload = item.data(0, Qt.UserRole)
