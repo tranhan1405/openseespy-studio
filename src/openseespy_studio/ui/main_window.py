@@ -8432,10 +8432,15 @@ class MainWindow(QMainWindow):
 
         before = self.project.to_dict()
         try:
+            for dependency in dialog.pending_materials():
+                self.project.add_material(dependency)
             material = dialog.material_data()
             self.project.add_material(material)
         except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
             QMessageBox.warning(self, "Material Editor", str(exc))
+            self._refresh_all()
             return
 
         self._refresh_project_metadata(
@@ -8463,6 +8468,8 @@ class MainWindow(QMainWindow):
 
         before = self.project.to_dict()
         try:
+            for dependency in dialog.pending_materials():
+                self.project.add_material(dependency)
             updated = dialog.material_data()
             self.project.update_material(tag, updated)
             if updated.tag != tag:
@@ -8495,7 +8502,10 @@ class MainWindow(QMainWindow):
                         for value in wrapper.material_tags
                     ]
         except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
             QMessageBox.warning(self, "Material Editor", str(exc))
+            self._refresh_all()
             return
 
         self._refresh_project_metadata(
