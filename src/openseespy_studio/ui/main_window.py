@@ -8535,7 +8535,7 @@ class MainWindow(QMainWindow):
             self.project.next_element_tag(),
             node_i=node_i,
             node_j=node_j,
-            sections=self.project.sections,
+            sections=self._frame_sections(),
             transformations=self.project.transformations,
             parent=self,
         )
@@ -10713,6 +10713,13 @@ class MainWindow(QMainWindow):
             "Surface Geometry",
             rows,
         )
+
+    def _frame_sections(self) -> dict[int, SectionData]:
+        return {
+            int(tag): section
+            for tag, section in self.project.sections.items()
+            if section.section_type not in SHELL_SECTION_TYPES
+        }
 
     def _shell_sections(self) -> dict[int, SectionData]:
         return {
