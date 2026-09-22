@@ -1539,6 +1539,8 @@ class MainWindow(QMainWindow):
         self._measure_first_node_tag: int | None = None
         self._frame_first_node_tag: int | None = None
         self._truss_first_node_tag: int | None = None
+        self._geometry_line_point_tags: list[int] = []
+        self._geometry_surface_point_tags: list[int] = []
         self._job_ui_timer = QTimer(self)
         self._job_ui_timer.setInterval(1000)
         self._job_ui_timer.timeout.connect(self._refresh_running_job_ui)
@@ -2025,15 +2027,31 @@ class MainWindow(QMainWindow):
             "Create reusable preprocessing Point geometry",
         )
         self._make_action(
+            "line_geometry_pick",
+            "Create by Picking",
+            "element",
+            self._activate_geometry_line_pick_tool,
+            "Click two Geometry Points to create and mesh a Line",
+            checkable=True,
+        )
+        self._make_action(
             "line_geometry",
-            "Line...",
+            "Create by Input...",
             "element",
             self._create_line_geometry,
             "Create reusable Line geometry and mesh it into Frame/Truss elements",
         )
         self._make_action(
+            "surface_geometry_pick",
+            "Create by Picking",
+            "grid",
+            self._activate_geometry_surface_pick_tool,
+            "Click four Geometry Points around the boundary to create and mesh a Surface",
+            checkable=True,
+        )
+        self._make_action(
             "surface_geometry",
-            "Surface...",
+            "Create by Input...",
             "grid",
             self._create_surface_geometry,
             "Create reusable Rectangle or Quad surface geometry for Shell meshing",
@@ -2880,17 +2898,69 @@ class MainWindow(QMainWindow):
         truss_popup.addAction(self.actions["truss_input"])
         truss_button.setMenu(truss_popup)
 
+        geometry_line_button = QToolButton()
+        geometry_line_button.setObjectName("RibbonLargeButton")
+        geometry_line_button.setDefaultAction(
+            self.actions["line_geometry_pick"]
+        )
+        geometry_line_button.setText("Line")
+        geometry_line_button.setIcon(
+            self.actions["line_geometry_pick"].icon()
+        )
+        geometry_line_button.setIconSize(QSize(28, 28))
+        geometry_line_button.setToolButtonStyle(
+            Qt.ToolButtonTextUnderIcon
+        )
+        geometry_line_button.setPopupMode(QToolButton.MenuButtonPopup)
+        geometry_line_button.setAutoRaise(True)
+        geometry_line_popup = QMenu(geometry_line_button)
+        geometry_line_popup.addAction(
+            self.actions["line_geometry_pick"]
+        )
+        geometry_line_popup.addAction(
+            self.actions["line_geometry"]
+        )
+        geometry_line_button.setMenu(geometry_line_popup)
+
+        geometry_surface_button = QToolButton()
+        geometry_surface_button.setObjectName("RibbonLargeButton")
+        geometry_surface_button.setDefaultAction(
+            self.actions["surface_geometry_pick"]
+        )
+        geometry_surface_button.setText("Surface")
+        geometry_surface_button.setIcon(
+            self.actions["surface_geometry_pick"].icon()
+        )
+        geometry_surface_button.setIconSize(QSize(28, 28))
+        geometry_surface_button.setToolButtonStyle(
+            Qt.ToolButtonTextUnderIcon
+        )
+        geometry_surface_button.setPopupMode(
+            QToolButton.MenuButtonPopup
+        )
+        geometry_surface_button.setAutoRaise(True)
+        geometry_surface_popup = QMenu(geometry_surface_button)
+        geometry_surface_popup.addAction(
+            self.actions["surface_geometry_pick"]
+        )
+        geometry_surface_popup.addAction(
+            self.actions["surface_geometry"]
+        )
+        geometry_surface_button.setMenu(geometry_surface_popup)
+
         add_group(
             home,
             "Geometry",
-            large=("line_geometry",),
             small=(
                 "point_geometry",
-                "surface_geometry",
                 "column_1d",
                 "frame_2d",
                 "grid",
                 "extrude",
+            ),
+            widgets=(
+                geometry_line_button,
+                geometry_surface_button,
             ),
         )
         add_group(
