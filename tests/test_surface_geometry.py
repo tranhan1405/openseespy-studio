@@ -192,7 +192,7 @@ def test_surface_ui_treats_surface_as_mesh_owner():
     assert "total_element_count" in tree_source
     assert "surface_owned_elements" not in tree_source
     assert "Shell Elements (" not in tree_source
-    assert "Mesh (" in tree_source
+    assert "Mesh (" not in tree_source
 
     assert "New Surface..." in context_source
     assert "Generate Surface Mesh..." in context_source
@@ -253,7 +253,7 @@ def test_unmeshed_surface_geometry_is_rendered_in_viewport():
     assert "not self._model.nodes and not self._surfaces" in render_source
     assert "self.project.surfaces" in refresh_source
     assert '"surface_geometry"' in tree_selection_source
-    assert '"surface_mesh"' in tree_selection_source
+    assert '"surface_mesh"' not in tree_selection_source
     assert '"surface_shells"' not in tree_selection_source
     assert "_show_surface_geometry_properties" in tree_selection_source
 
