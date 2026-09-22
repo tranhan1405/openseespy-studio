@@ -42,6 +42,43 @@ def _length(project: ProjectDatabase, element_tag: int) -> float:
     )
 
 
+def _shell_area_vector(
+    project: ProjectDatabase,
+    element_tag: int,
+) -> Vec3:
+    """Return oriented quadrilateral area vector in model length²."""
+    element = project.model.elements[int(element_tag)]
+    node_tags = element.node_tags()
+    if len(node_tags) != 4:
+        return (0.0, 0.0, 0.0)
+    p = [
+        project.model.nodes[tag].xyz
+        for tag in node_tags
+    ]
+
+    def subtract(a, b):
+        return tuple(float(a[i]) - float(b[i]) for i in range(3))
+
+    def cross(a, b):
+        return (
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        )
+
+    a1 = cross(subtract(p[1], p[0]), subtract(p[2], p[0]))
+    a2 = cross(subtract(p[2], p[0]), subtract(p[3], p[0]))
+    return tuple(0.5 * (a1[i] + a2[i]) for i in range(3))
+
+
+def _shell_area(
+    project: ProjectDatabase,
+    element_tag: int,
+) -> float:
+    vector = _shell_area_vector(project, element_tag)
+    return math.sqrt(sum(value * value for value in vector))
+
+
 def _section_mass_per_length(
     project: ProjectDatabase,
     section: SectionData,
@@ -180,6 +217,28 @@ def evaluate_mass_source(
             section = project.sections.get(element.section_tag)
             if section is None:
                 continue
+            if (
+                element.element_type in {
+                    "ASDShellQ4",
+                    "ShellMITC4",
+                    "ShellDKGQ",
+                    "ShellNLDKGQ",
+                }
+                and section.section_type == "ElasticMembranePlate"
+            ):
+                density = float(section.parameters.get("rho", 0.0))
+                thickness = float(section.parameters.get("h", 0.0))
+                total = density * thickness * _shell_area(
+                    project,
+                    element.tag,
+                )
+                for node_tag in element.node_tags():
+                    add_node(
+                        node_tag,
+                        0.25 * total,
+                        category="self",
+                    )
+                continue
             mass_per_length = _section_mass_per_length(project, section)
             if mass_per_length <= 0.0:
                 continue
@@ -243,6 +302,24 @@ def evaluate_mass_source(
                 total_mass = line_force * _length(project, element.tag) / g_model
                 add_node(element.i, 0.5 * total_mass, category="load")
                 add_node(element.j, 0.5 * total_mass, category="load")
+                continue
+
+            if load.load_type == "SurfacePressure":
+                area_vector = _shell_area_vector(
+                    project,
+                    element.tag,
+                )
+                force_axis = abs(
+                    float(load.pressure)
+                    * float(area_vector[axis - 1])
+                ) * multiplier
+                total_mass = force_axis / g_model
+                for node_tag in element.node_tags():
+                    add_node(
+                        node_tag,
+                        0.25 * total_mass,
+                        category="load",
+                    )
                 continue
 
             if load.load_type == "Point":
