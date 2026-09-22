@@ -4,7 +4,12 @@ from dataclasses import dataclass, field
 import math
 
 from .project import ProjectDatabase, SurfaceGeometryData
-from .shell_mesh import ShellMeshBuildResult, ShellMeshSpec, build_shell_mesh
+from .shell_mesh import (
+    ShellMeshBuildResult,
+    ShellMeshSpec,
+    build_shell_mesh,
+    resolve_shell_mesh_divisions,
+)
 
 
 @dataclass(slots=True)
@@ -19,6 +24,29 @@ class SurfaceMeshDeleteResult:
 class SurfaceRemeshResult:
     deleted: SurfaceMeshDeleteResult
     mesh: "SurfaceMeshResult"
+
+
+@dataclass(slots=True)
+class SurfaceConformityIssue:
+    surface_a: int
+    surface_b: int
+    edge_a: int
+    edge_b: int
+    divisions_a: int
+    divisions_b: int
+    issue_type: str
+    message: str
+
+
+@dataclass(slots=True)
+class SurfaceConformityReport:
+    surface_count: int
+    shared_edge_count: int
+    issues: list[SurfaceConformityIssue] = field(default_factory=list)
+
+    @property
+    def conforming(self) -> bool:
+        return not self.issues
 
 
 @dataclass(slots=True)
@@ -485,3 +513,284 @@ def flip_surface_orientation(
         project.__dict__.clear()
         project.__dict__.update(restored.__dict__)
         raise
+
+
+def _surface_bilinear_point(
+    surface: SurfaceGeometryData,
+    u: float,
+    v: float,
+) -> tuple[float, float, float]:
+    p1, p2, p3, p4 = surface.points
+    return tuple(
+        (1.0 - u) * (1.0 - v) * p1[index]
+        + u * (1.0 - v) * p2[index]
+        + u * v * p3[index]
+        + (1.0 - u) * v * p4[index]
+        for index in range(3)
+    )
+
+
+def surface_preview_divisions(
+    surface: SurfaceGeometryData,
+) -> tuple[int, int]:
+    """Resolve the Surface's requested mesh sizing without mutating FE state."""
+    return resolve_shell_mesh_divisions(
+        *surface.points,
+        divisions_u=surface.divisions_u,
+        divisions_v=surface.divisions_v,
+        target_size=(
+            surface.target_size
+            if surface.mesh_mode == "target_size"
+            else None
+        ),
+    )
+
+
+def surface_mesh_preview_segments(
+    surface: SurfaceGeometryData,
+) -> tuple[int, int, list[
+    tuple[
+        tuple[float, float, float],
+        tuple[float, float, float],
+    ]
+]]:
+    """Return structured U/V grid segments without creating Nodes/Elements."""
+    nu, nv = surface_preview_divisions(surface)
+    segments: list[
+        tuple[
+            tuple[float, float, float],
+            tuple[float, float, float],
+        ]
+    ] = []
+
+    for i in range(nu + 1):
+        u = i / nu
+        for j in range(nv):
+            v0 = j / nv
+            v1 = (j + 1) / nv
+            segments.append((
+                _surface_bilinear_point(surface, u, v0),
+                _surface_bilinear_point(surface, u, v1),
+            ))
+
+    for j in range(nv + 1):
+        v = j / nv
+        for i in range(nu):
+            u0 = i / nu
+            u1 = (i + 1) / nu
+            segments.append((
+                _surface_bilinear_point(surface, u0, v),
+                _surface_bilinear_point(surface, u1, v),
+            ))
+    return nu, nv, segments
+
+
+def _distance3(a, b) -> float:
+    return math.sqrt(sum(
+        (float(a[index]) - float(b[index])) ** 2
+        for index in range(3)
+    ))
+
+
+def _surface_span(project: ProjectDatabase, surfaces) -> float:
+    coords = [
+        value
+        for surface in surfaces
+        for point in surface.points
+        for value in point
+    ]
+    if not coords:
+        return 1.0
+    points = [point for surface in surfaces for point in surface.points]
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    zs = [point[2] for point in points]
+    return max(
+        max(xs) - min(xs),
+        max(ys) - min(ys),
+        max(zs) - min(zs),
+        1.0,
+    )
+
+
+def _surface_edges(surface: SurfaceGeometryData):
+    p = surface.points
+    nu, nv = surface_preview_divisions(surface)
+    return (
+        (p[0], p[1], nu, 1),
+        (p[1], p[2], nv, 2),
+        (p[2], p[3], nu, 3),
+        (p[3], p[0], nv, 4),
+    )
+
+
+def _same_edge(a0, a1, b0, b1, tolerance: float) -> bool:
+    direct = (
+        _distance3(a0, b0) <= tolerance
+        and _distance3(a1, b1) <= tolerance
+    )
+    reverse = (
+        _distance3(a0, b1) <= tolerance
+        and _distance3(a1, b0) <= tolerance
+    )
+    return direct or reverse
+
+
+def _live_surface_edge_nodes(
+    project: ProjectDatabase,
+    surface: SurfaceGeometryData,
+    start,
+    end,
+    *,
+    tolerance: float,
+) -> list[int] | None:
+    live_elements = [
+        project.model.elements[int(tag)]
+        for tag in surface.generated_element_tags
+        if int(tag) in project.model.elements
+    ]
+    if not live_elements:
+        return None
+
+    a = tuple(float(value) for value in start)
+    b = tuple(float(value) for value in end)
+    ab = tuple(b[i] - a[i] for i in range(3))
+    length2 = sum(value * value for value in ab)
+    if length2 <= tolerance * tolerance:
+        return []
+
+    candidates: list[tuple[float, int]] = []
+    node_tags = {
+        int(node_tag)
+        for element in live_elements
+        for node_tag in element.node_tags()
+    }
+    for node_tag in node_tags:
+        node = project.model.nodes.get(node_tag)
+        if node is None:
+            continue
+        point = tuple(float(value) for value in node.xyz)
+        ap = tuple(point[i] - a[i] for i in range(3))
+        t = sum(ap[i] * ab[i] for i in range(3)) / length2
+        if t < -1.0e-9 or t > 1.0 + 1.0e-9:
+            continue
+        closest = tuple(a[i] + t * ab[i] for i in range(3))
+        if _distance3(point, closest) <= tolerance:
+            candidates.append((max(0.0, min(1.0, t)), node_tag))
+
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    unique: list[tuple[float, int]] = []
+    for t, node_tag in candidates:
+        if unique and abs(t - unique[-1][0]) <= 1.0e-9:
+            continue
+        unique.append((t, node_tag))
+    return [node_tag for _t, node_tag in unique]
+
+
+def audit_surface_conformity(
+    project: ProjectDatabase,
+    surface_tags=None,
+    *,
+    tolerance: float | None = None,
+) -> SurfaceConformityReport:
+    """Audit shared Surface edges for subdivision and FE connectivity mismatch."""
+    tags = sorted(
+        int(tag)
+        for tag in (
+            project.surfaces
+            if surface_tags is None
+            else surface_tags
+        )
+        if int(tag) in project.surfaces
+    )
+    surfaces = [project.surfaces[tag] for tag in tags]
+    tol = (
+        float(tolerance)
+        if tolerance is not None
+        else 1.0e-8 * _surface_span(project, surfaces)
+    )
+    if not math.isfinite(tol) or tol <= 0.0:
+        raise ValueError(
+            "Surface conformity tolerance must be finite and positive."
+        )
+
+    shared_edge_count = 0
+    issues: list[SurfaceConformityIssue] = []
+    for index, surface_a in enumerate(surfaces):
+        for surface_b in surfaces[index + 1:]:
+            for a0, a1, divisions_a, edge_a in _surface_edges(surface_a):
+                for b0, b1, divisions_b, edge_b in _surface_edges(surface_b):
+                    if not _same_edge(a0, a1, b0, b1, tol):
+                        continue
+                    shared_edge_count += 1
+
+                    nodes_a = _live_surface_edge_nodes(
+                        project,
+                        surface_a,
+                        a0,
+                        a1,
+                        tolerance=tol,
+                    )
+                    nodes_b = _live_surface_edge_nodes(
+                        project,
+                        surface_b,
+                        b0,
+                        b1,
+                        tolerance=tol,
+                    )
+                    actual_a = (
+                        len(nodes_a) - 1
+                        if nodes_a is not None and len(nodes_a) >= 2
+                        else divisions_a
+                    )
+                    actual_b = (
+                        len(nodes_b) - 1
+                        if nodes_b is not None and len(nodes_b) >= 2
+                        else divisions_b
+                    )
+
+                    if actual_a != actual_b:
+                        issues.append(SurfaceConformityIssue(
+                            surface_a=surface_a.tag,
+                            surface_b=surface_b.tag,
+                            edge_a=edge_a,
+                            edge_b=edge_b,
+                            divisions_a=actual_a,
+                            divisions_b=actual_b,
+                            issue_type="division_mismatch",
+                            message=(
+                                f"Surface {surface_a.tag} edge {edge_a} has "
+                                f"{actual_a} division(s), Surface "
+                                f"{surface_b.tag} edge {edge_b} has "
+                                f"{actual_b}."
+                            ),
+                        ))
+                        continue
+
+                    if nodes_a is not None and nodes_b is not None:
+                        same_connectivity = (
+                            nodes_a == nodes_b
+                            or nodes_a == list(reversed(nodes_b))
+                        )
+                        if not same_connectivity:
+                            issues.append(SurfaceConformityIssue(
+                                surface_a=surface_a.tag,
+                                surface_b=surface_b.tag,
+                                edge_a=edge_a,
+                                edge_b=edge_b,
+                                divisions_a=actual_a,
+                                divisions_b=actual_b,
+                                issue_type="disconnected_nodes",
+                                message=(
+                                    f"Surface {surface_a.tag} and Surface "
+                                    f"{surface_b.tag} have coincident edge "
+                                    "subdivisions but do not share the same "
+                                    "FE node tags."
+                                ),
+                            ))
+
+    return SurfaceConformityReport(
+        surface_count=len(surfaces),
+        shared_edge_count=shared_edge_count,
+        issues=issues,
+    )
