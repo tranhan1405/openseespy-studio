@@ -5534,8 +5534,8 @@ class MainWindow(QMainWindow):
                 sx, sy = float(screen[0]), float(screen[1])
                 if not math.isfinite(sx) or not math.isfinite(sy):
                     raise ValueError("Non-finite screen position")
-                ix, iy = self.viewport.geometry_world_to_screen(point_i.xyz)
-                jx, jy = self.viewport.geometry_world_to_screen(point_j.xyz)
+                ix, iy = self.viewport._world_to_qt(point_i.xyz)
+                jx, jy = self.viewport._world_to_qt(point_j.xyz)
                 if not all(
                     math.isfinite(value)
                     for value in (ix, iy, jx, jy)
