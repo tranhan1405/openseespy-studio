@@ -1208,3 +1208,82 @@ class StructuralModel:
             return (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)
         xs, ys, zs = zip(*(n.xyz for n in self.nodes.values()))
         return (min(xs), min(ys), min(zs)), (max(xs), max(ys), max(zs))
+
+
+def shell_surface_geometry(
+    model: StructuralModel,
+    element: Element,
+) -> tuple[Vec3, Vec3, float]:
+    """Return shell centroid, ordered surface normal, and triangulated area."""
+    if element.element_type not in SHELL_ELEMENT_TYPES:
+        raise ValueError(
+            f"Element {element.tag} is not a Shell element."
+        )
+    node_tags = element.node_tags()
+    if len(node_tags) != 4:
+        raise ValueError(
+            f"Shell element {element.tag} requires four nodes."
+        )
+    missing = [
+        int(tag)
+        for tag in node_tags
+        if int(tag) not in model.nodes
+    ]
+    if missing:
+        raise ValueError(
+            f"Shell element {element.tag} references missing node tag(s): "
+            + ", ".join(map(str, missing))
+        )
+
+    points = [
+        tuple(float(value) for value in model.nodes[int(tag)].xyz)
+        for tag in node_tags
+    ]
+    center: Vec3 = tuple(
+        sum(point[axis] for point in points) / 4.0
+        for axis in range(3)
+    )
+
+    newell = [0.0, 0.0, 0.0]
+    for index, current in enumerate(points):
+        following = points[(index + 1) % 4]
+        newell[0] += (
+            (current[1] - following[1])
+            * (current[2] + following[2])
+        )
+        newell[1] += (
+            (current[2] - following[2])
+            * (current[0] + following[0])
+        )
+        newell[2] += (
+            (current[0] - following[0])
+            * (current[1] + following[1])
+        )
+    normal_norm = math.sqrt(sum(value * value for value in newell))
+    if normal_norm <= 1.0e-12:
+        raise ValueError(
+            f"Shell element {element.tag} has zero or near-zero area."
+        )
+    normal: Vec3 = tuple(
+        value / normal_norm for value in newell
+    )
+
+    def triangle_area(a: Vec3, b: Vec3, d: Vec3) -> float:
+        ab = tuple(b[i] - a[i] for i in range(3))
+        ad = tuple(d[i] - a[i] for i in range(3))
+        cross = (
+            ab[1] * ad[2] - ab[2] * ad[1],
+            ab[2] * ad[0] - ab[0] * ad[2],
+            ab[0] * ad[1] - ab[1] * ad[0],
+        )
+        return 0.5 * math.sqrt(sum(value * value for value in cross))
+
+    area = (
+        triangle_area(points[0], points[1], points[2])
+        + triangle_area(points[0], points[2], points[3])
+    )
+    if area <= 1.0e-12:
+        raise ValueError(
+            f"Shell element {element.tag} has zero or near-zero area."
+        )
+    return center, normal, area
