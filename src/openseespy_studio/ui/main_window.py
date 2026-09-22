@@ -3856,10 +3856,6 @@ class MainWindow(QMainWindow):
         nodes = QTreeWidgetItem([f"Nodes ({len(self.model.nodes)})"])
         nodes.setIcon(0, studio_icon("node"))
         nodes.setData(0, Qt.UserRole, ("nodes_root", None))
-        lines = QTreeWidgetItem(["Lines (0)"])
-        lines.setIcon(0, studio_icon("element"))
-        lines.setData(0, Qt.UserRole, ("lines_root", None))
-
         shell_count = sum(
             element.element_type in SHELL_ELEMENT_TYPES
             for element in self.model.elements.values()
@@ -3873,7 +3869,7 @@ class MainWindow(QMainWindow):
         frame_grids = QTreeWidgetItem(["Frame Grids (1)" if self.model.nodes else "Frame Grids (0)"])
         frame_grids.setIcon(0, studio_icon("grid"))
         frame_grids.setData(0, Qt.UserRole, ("frame_grids_root", None))
-        geometry.addChildren([nodes, lines, surfaces, frame_grids])
+        geometry.addChildren([nodes, surfaces, frame_grids])
 
         surface_owned_elements = {
             int(element_tag)
@@ -8197,17 +8193,6 @@ class MainWindow(QMainWindow):
         self._refresh_all(f"Created node {tag}")
         self.selection.select("node", tag, "replace")
         self._record_project_change(f"Create node {tag}", before)
-
-    def _create_line(self) -> None:
-        """Compatibility alias: the old Line command is now Frame picking."""
-        selected_nodes = sorted(self.selection.nodes)
-        if len(selected_nodes) != 2:
-            self._activate_frame_pick_tool(True)
-            return
-        self._create_frame_between_nodes(
-            selected_nodes[0],
-            selected_nodes[1],
-        )
 
     def _default_truss_area(self) -> float:
         unit_system = UnitSystem.from_mapping(self.project.units)
@@ -14384,12 +14369,6 @@ class MainWindow(QMainWindow):
             select_all.triggered.connect(self._select_all_tree_nodes)
             menu.addSeparator()
             menu.addAction(self.actions["show_node_numbers"])
-            exec_menu()
-            return
-
-        if kind == "lines_root":
-            create = menu.addAction("New Frame...")
-            create.triggered.connect(self._create_element)
             exec_menu()
             return
 
