@@ -2423,10 +2423,7 @@ class MainWindow(QMainWindow):
         truss_menu.setIcon(studio_icon("element"))
         truss_menu.addAction(self.actions["truss_pick"])
         truss_menu.addAction(self.actions["truss_input"])
-        shell_menu = geometry_menu.addMenu("Shell / Surface")
-        shell_menu.setIcon(studio_icon("element"))
-        shell_menu.addAction(self.actions["shell_input"])
-        shell_menu.addAction(self.actions["shell_mesh"])
+        geometry_menu.addAction(self.actions["surface_geometry"])
         geometry_menu.addSeparator()
         geometry_menu.addActions([
             self.actions["column_1d"],
@@ -6461,7 +6458,7 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         if not dialog.exec():
-            return
+            return None
         before = self.project.to_dict()
         try:
             updated = self.model.set_mass_many(node_tags, dialog.values())
@@ -7347,12 +7344,12 @@ class MainWindow(QMainWindow):
                         "Surface pressure requires a Shell / Surface element. "
                         "Create one now?"
                     ),
-                    action_label="Create Shell Now...",
+                    action_label="Create & Mesh Surface Now...",
                     available=lambda: any(
                         element.element_type in SHELL_ELEMENT_TYPES
                         for element in self.model.elements.values()
                     ),
-                    creator=self._create_shell,
+                    creator=self._create_surface_geometry_and_mesh,
                 ):
                     return
                 selected = sorted(
@@ -8563,18 +8560,21 @@ class MainWindow(QMainWindow):
         if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
             QMessageBox.warning(
                 self,
-                "Create Shell",
+                "Direct Shell Element",
                 "OpenSees shell elements require a 3D/6DOF model "
                 "(ndm=3, ndf=6). SARE intentionally stops at shell "
                 "surfaces and does not add solid/brick elements.",
             )
             return
-        if not self._ensure_node_count(4, title="Create Shell"):
+        if not self._ensure_node_count(
+            4,
+            title="Direct Shell Element",
+        ):
             return
         if not self._ensure_prerequisite(
-            title="Create Shell",
+            title="Direct Shell Element",
             message=(
-                "A Shell element requires a shell-compatible Section. "
+                "A direct Shell element requires a shell-compatible Section. "
                 "Create an ElasticMembranePlate Section now?"
             ),
             action_label="Create Shell Section Now...",
@@ -8610,7 +8610,7 @@ class MainWindow(QMainWindow):
                 drilling_nl,
             ) = dialog.values()
         except ValueError as exc:
-            QMessageBox.warning(self, "Create Shell", str(exc))
+            QMessageBox.warning(self, "Direct Shell Element", str(exc))
             return
 
         before = self.project.to_dict()
@@ -8867,12 +8867,12 @@ class MainWindow(QMainWindow):
                         "This workflow requires a Shell element first. "
                         "Create one now?"
                     ),
-                    action_label="Create Shell Now...",
+                    action_label="Create & Mesh Surface Now...",
                     available=lambda: any(
                         element.element_type in SHELL_ELEMENT_TYPES
                         for element in self.model.elements.values()
                     ),
-                    creator=self._create_shell,
+                    creator=self._create_surface_geometry_and_mesh,
                 ):
                     return
                 element_tags = {
@@ -10018,7 +10018,7 @@ class MainWindow(QMainWindow):
         )
 
 
-    def _create_surface_geometry(self) -> None:
+    def _create_surface_geometry(self) -> int | None:
         dialog = SurfaceGeometryDialog(
             next_tag=self.project.next_surface_tag(),
             sections=self._shell_sections(),
@@ -10032,13 +10032,19 @@ class MainWindow(QMainWindow):
             self.project.add_surface(surface)
         except (TypeError, ValueError) as exc:
             QMessageBox.warning(self, "Surface Geometry", str(exc))
-            return
+            return None
         self._refresh_all(f"Created surface geometry {surface.tag}")
         self._show_surface_geometry_properties(surface.tag)
         self._record_project_change(
             f"Create surface geometry {surface.tag}",
             before,
         )
+        return int(surface.tag)
+
+    def _create_surface_geometry_and_mesh(self) -> None:
+        tag = self._create_surface_geometry()
+        if tag is not None:
+            self._mesh_surface_geometry(tag)
 
     def _edit_surface_geometry(self, tag: int) -> None:
         surface = self.project.surfaces.get(int(tag))
@@ -12991,12 +12997,12 @@ class MainWindow(QMainWindow):
                         "Shell Recorder requires a Shell / Surface element. "
                         "Create one now?"
                     ),
-                    action_label="Create Shell Now...",
+                    action_label="Create & Mesh Surface Now...",
                     available=lambda: any(
                         element.element_type in SHELL_ELEMENT_TYPES
                         for element in self.model.elements.values()
                     ),
-                    creator=self._create_shell,
+                    creator=self._create_surface_geometry_and_mesh,
                 ):
                     return []
                 existing = sorted(
@@ -13046,12 +13052,12 @@ class MainWindow(QMainWindow):
                         "Shell Results require at least one Shell / Surface "
                         "element. Create one now?"
                     ),
-                    action_label="Create Shell Now...",
+                    action_label="Create & Mesh Surface Now...",
                     available=lambda: any(
                         element.element_type in SHELL_ELEMENT_TYPES
                         for element in self.model.elements.values()
                     ),
-                    creator=self._create_shell,
+                    creator=self._create_surface_geometry_and_mesh,
                 ):
                     return None
                 shell_tags = sorted(
