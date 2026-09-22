@@ -93,6 +93,11 @@ def test_model_tree_refresh_handles_zero_length_section_connection():
     )
     assert elements_root is not None
     assert elements_root.text(0) == "Elements (1)"
+    assert elements_root.parent() is not None
+    assert elements_root.parent().data(
+        0, Qt.UserRole
+    ) == ("fe_model_root", None)
+    assert elements_root.parent().text(0) == "FE Model"
 
     group = _find_payload(
         holder.tree,
