@@ -271,6 +271,47 @@ class SurfaceGeometryDialog(QDialog):
         )
         mesh_form.addRow("Target size:", self.target_size)
 
+        self.bias_u = _float_spin(
+            surface.bias_u if surface else 1.0,
+            low=0.01,
+            high=100.0,
+        )
+        self.bias_u.setToolTip(
+            "Last U cell size / first U cell size. 1.0 = uniform."
+        )
+        mesh_form.addRow("Bias U (end/start):", self.bias_u)
+
+        self.bias_v = _float_spin(
+            surface.bias_v if surface else 1.0,
+            low=0.01,
+            high=100.0,
+        )
+        self.bias_v.setToolTip(
+            "Last V cell size / first V cell size. 1.0 = uniform."
+        )
+        mesh_form.addRow("Bias V (end/start):", self.bias_v)
+
+        edge_seed_row = QHBoxLayout()
+        self.edge_seed_spins: list[QSpinBox] = []
+        existing_seeds = (
+            surface.edge_divisions
+            if surface and surface.edge_divisions is not None
+            else (None, None, None, None)
+        )
+        for index, seed in enumerate(existing_seeds, start=1):
+            spin = QSpinBox()
+            spin.setRange(0, 500)
+            spin.setSpecialValueText("Auto")
+            spin.setValue(0 if seed is None else int(seed))
+            spin.setToolTip(
+                f"Edge {index} divisions; 0 uses global sizing. "
+                "Opposite edges 1/3 and 2/4 must match."
+            )
+            self.edge_seed_spins.append(spin)
+            edge_seed_row.addWidget(QLabel(f"E{index}"))
+            edge_seed_row.addWidget(spin)
+        mesh_form.addRow("Edge seeds:", edge_seed_row)
+
         self.reuse_nodes = QCheckBox("Reuse coincident existing nodes")
         self.reuse_nodes.setChecked(
             surface.reuse_existing_nodes if surface else True
@@ -432,6 +473,16 @@ class SurfaceGeometryDialog(QDialog):
             target_size=(
                 self.target_size.value()
                 if self.mesh_mode.currentData() == "target_size"
+                else None
+            ),
+            bias_u=self.bias_u.value(),
+            bias_v=self.bias_v.value(),
+            edge_divisions=(
+                tuple(
+                    None if spin.value() == 0 else spin.value()
+                    for spin in self.edge_seed_spins
+                )
+                if any(spin.value() > 0 for spin in self.edge_seed_spins)
                 else None
             ),
             reuse_existing_nodes=self.reuse_nodes.isChecked(),
