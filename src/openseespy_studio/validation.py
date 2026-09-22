@@ -939,6 +939,37 @@ def _driving_load_checks(
             )
 
 
+def _shell_section_has_mass(
+    project: ProjectDatabase,
+    section,
+) -> bool:
+    if section is None:
+        return False
+    if section.section_type == "ElasticMembranePlate":
+        return float(section.parameters.get("rho", 0.0)) > 0.0
+    if section.section_type == "PlateFiber":
+        if section.nd_material_tag is None:
+            return False
+        material = project.nd_materials.get(int(section.nd_material_tag))
+        return bool(
+            material is not None
+            and float(material.parameters.get("rho", 0.0)) > 0.0
+        )
+    if section.section_type == "LayeredShell":
+        return any(
+            (
+                project.nd_materials.get(int(layer.material_tag)) is not None
+                and float(
+                    project.nd_materials[
+                        int(layer.material_tag)
+                    ].parameters.get("rho", 0.0)
+                ) > 0.0
+            )
+            for layer in section.shell_layers
+        )
+    return False
+
+
 def _node_has_incident_element_mass(
     project: ProjectDatabase,
     node_tag: int,
@@ -958,7 +989,7 @@ def _node_has_incident_element_mass(
             if (
                 section is not None
                 and section.section_type in SHELL_SECTION_TYPES
-                and float(section.parameters.get("rho", 0.0)) > 0.0
+                and _shell_section_has_mass(project, section)
             ):
                 return True
     return False
@@ -992,7 +1023,7 @@ def _has_dynamic_mass_in_direction(
             has_element_mass = has_element_mass or bool(
                 section is not None
                 and section.section_type in SHELL_SECTION_TYPES
-                and float(section.parameters.get("rho", 0.0)) > 0.0
+                and _shell_section_has_mass(project, section)
             )
         if not has_element_mass:
             continue
