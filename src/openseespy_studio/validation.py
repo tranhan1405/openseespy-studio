@@ -756,6 +756,8 @@ def _element_load_has_nonzero_reference(load) -> bool:
         values = (load.px, load.py, load.pz)
     elif load.load_type == "SelfWeight":
         values = load.gravity
+    elif load.load_type == "SurfacePressure":
+        values = (load.pressure,)
     else:
         return False
     return any(abs(float(value)) > tolerance for value in values)
