@@ -93,7 +93,7 @@ from ..result_catalog import (
 )
 from ..shell_mesh import build_shell_mesh
 from ..section_response import section_response_sources
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
     build_worker_pythonpath,
     opensees_material_requires_runtime_probe,
@@ -134,7 +134,7 @@ from .model_check_dialog import ModelCheckDialog
 from .moment_curvature_dialog import MomentCurvatureDialog
 from .recorder_dialog import RecorderDialog
 from .section_dialog import SectionDialog
-from .shell_dialog import ShellElementDialog, ShellMeshDialog, ShellSectionDialog
+from .shell_dialog import NDMaterialDialog, ShellElementDialog, ShellMeshDialog, ShellSectionDialog
 from .transformation_dialog import TransformationDialog
 from .test_column_dialog import TestColumnWizard
 from .icons import studio_icon
@@ -3725,6 +3725,7 @@ class MainWindow(QMainWindow):
             recorders=self.project.recorders,
             units=self.project.units,
             solution_results=self.project.solution_results,
+            nd_materials=self.project.nd_materials,
         )
 
     def _refresh_project_metadata(
@@ -9509,6 +9510,7 @@ class MainWindow(QMainWindow):
     def _create_shell_section(self) -> None:
         dialog = ShellSectionDialog(
             next_tag=self.project.next_section_tag(),
+            nd_materials=self.project.nd_materials,
             units=self.project.units,
             parent=self,
         )
@@ -9516,10 +9518,15 @@ class MainWindow(QMainWindow):
             return
         before = self.project.to_dict()
         try:
+            for material in dialog.staged_nd_materials():
+                self.project.add_nd_material(material)
             section = dialog.section_data()
             self.project.add_section(section)
         except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
             QMessageBox.warning(self, "Shell Section", str(exc))
+            self._refresh_all()
             return
         self._refresh_project_metadata(
             f"Created shell section {section.tag}"
@@ -9536,6 +9543,7 @@ class MainWindow(QMainWindow):
             return
         dialog = ShellSectionDialog(
             section=section,
+            nd_materials=self.project.nd_materials,
             units=self.project.units,
             parent=self,
         )
@@ -9543,6 +9551,8 @@ class MainWindow(QMainWindow):
             return
         before = self.project.to_dict()
         try:
+            for material in dialog.staged_nd_materials():
+                self.project.add_nd_material(material)
             updated = dialog.section_data()
             self.project.update_section(tag, updated)
             if updated.tag != tag:
@@ -9550,7 +9560,10 @@ class MainWindow(QMainWindow):
                     if element.section_tag == tag:
                         element.section_tag = updated.tag
         except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
             QMessageBox.warning(self, "Shell Section", str(exc))
+            self._refresh_all()
             return
         self._refresh_project_metadata(
             f"Updated shell section {updated.tag}"
@@ -14793,6 +14806,7 @@ class MainWindow(QMainWindow):
                 recorders=temporary_project.recorders,
                 units=temporary_project.units,
                 solution_results=temporary_project.solution_results,
+                nd_materials=temporary_project.nd_materials,
             )
         except (KeyError, TypeError, ValueError) as exc:
             QMessageBox.warning(
