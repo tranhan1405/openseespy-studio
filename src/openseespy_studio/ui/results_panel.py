@@ -908,6 +908,7 @@ class ResultsPanel(QWidget):
     element_selected = Signal(int)
     job_selected = Signal(int)
     calibration_case_apply_requested = Signal(object)
+    moment_curvature_hinge_requested = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2141,6 +2142,11 @@ class ResultsPanel(QWidget):
         layout.addWidget(self.moment_curvature_metrics)
 
         row = QHBoxLayout()
+        send_to_hinge = QPushButton("Send to Hinge Backbone...")
+        send_to_hinge.clicked.connect(
+            self._send_moment_curvature_to_hinge
+        )
+        row.addWidget(send_to_hinge)
         row.addStretch(1)
         export = QPushButton("Export CSV")
         export.clicked.connect(self._export_moment_curvature_csv)
@@ -4995,6 +5001,43 @@ class ResultsPanel(QWidget):
             f"Final: ({x[-1]:.6g}, {y[-1]:.6g})"
         )
         self.moment_curvature_plot.set_series(x, y)
+
+    def _send_moment_curvature_to_hinge(self) -> None:
+        x, y, component, element_tag = moment_curvature_curve(self._result)
+        if not x or not y:
+            self.moment_curvature_info.setText(
+                "No moment-curvature data is available to send."
+            )
+            return
+
+        spec = self._result.get("moment_curvature", {})
+        section_tag = (
+            spec.get("section_tag")
+            if isinstance(spec, dict)
+            else None
+        )
+        self.moment_curvature_hinge_requested.emit({
+            "source_kind": "sare_moment_curvature",
+            "source_note": (
+                "SARE Moment-Curvature"
+                + (
+                    f" · Section {section_tag}"
+                    if section_tag is not None
+                    else ""
+                )
+                + (
+                    f" · {component}"
+                    if component
+                    else ""
+                )
+            ),
+            "basis": "moment_curvature",
+            "section_tag": section_tag,
+            "component": component,
+            "element_tag": element_tag,
+            "curvature": list(x),
+            "moment": list(y),
+        })
 
     def _export_moment_curvature_csv(self) -> None:
         x, y, component, element_tag = moment_curvature_curve(self._result)
