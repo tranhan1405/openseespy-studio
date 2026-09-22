@@ -6482,6 +6482,9 @@ class ModelViewport(QWidget):
         self.plotter.renderer.reset_camera(bounds=bounds)
         self.plotter.render()
 
+    def current_view(self) -> str:
+        return str(self._current_view)
+
     def set_view(self, view: str, *, render: bool = True) -> None:
         self._current_view = view
         function = {
