@@ -4559,8 +4559,19 @@ class MainWindow(QMainWindow):
                 if selection_set is not None:
                     nodes.update(selection_set.node_tags)
                     elements.update(selection_set.element_tags)
-            elif kind == "surface_geometry":
+            elif kind in {
+                "surface_geometry",
+                "surface_mesh",
+                "surface_shells",
+            }:
                 surface_geometry_tag = int(tag)
+                surface = self.project.surfaces.get(int(tag))
+                if surface is not None:
+                    elements.update(
+                        int(element_tag)
+                        for element_tag in surface.generated_element_tags
+                        if int(element_tag) in self.model.elements
+                    )
             elif kind == "material":
                 material_tag = int(tag)
             elif kind == "nd_material":
