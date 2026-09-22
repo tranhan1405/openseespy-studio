@@ -403,7 +403,6 @@ def test_series_material_requires_component_and_can_stage_one_inline(
             _FakeDependencyDialog,
         )
         dialog._create_dependency_material()
-        dialog._add_component_row(material_tag=2)
 
         material = dialog.material_data()
         assert material.material_tags == [2]
