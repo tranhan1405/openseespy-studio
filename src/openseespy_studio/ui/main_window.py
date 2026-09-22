@@ -11201,10 +11201,47 @@ class MainWindow(QMainWindow):
                     if element.section_tag is not None
                     else -1
                 )
-                has_element_mass = has_element_mass or bool(
+                shell_has_mass = False
+                if (
                     section is not None
-                    and section.section_type in SHELL_SECTION_TYPES
-                    and float(section.parameters.get("rho", 0.0)) > 0.0
+                    and section.section_type == "ElasticMembranePlate"
+                ):
+                    shell_has_mass = (
+                        float(section.parameters.get("rho", 0.0)) > 0.0
+                    )
+                elif (
+                    section is not None
+                    and section.section_type == "PlateFiber"
+                    and section.nd_material_tag is not None
+                ):
+                    material = self.project.nd_materials.get(
+                        int(section.nd_material_tag)
+                    )
+                    shell_has_mass = bool(
+                        material is not None
+                        and float(
+                            material.parameters.get("rho", 0.0)
+                        ) > 0.0
+                    )
+                elif (
+                    section is not None
+                    and section.section_type == "LayeredShell"
+                ):
+                    shell_has_mass = any(
+                        (
+                            self.project.nd_materials.get(
+                                int(layer.material_tag)
+                            ) is not None
+                            and float(
+                                self.project.nd_materials[
+                                    int(layer.material_tag)
+                                ].parameters.get("rho", 0.0)
+                            ) > 0.0
+                        )
+                        for layer in section.shell_layers
+                    )
+                has_element_mass = (
+                    has_element_mass or shell_has_mass
                 )
             if not has_element_mass:
                 continue
