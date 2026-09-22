@@ -5251,6 +5251,7 @@ class MainWindow(QMainWindow):
         self.viewport.geometry_sketch_finished.connect(
             self._finish_geometry_sketch
         )
+        self.viewport.view_requested.connect(self._set_view_from_ui)
         self.viewport.set_selection_filter(self.selection.filter)
 
     def _install_shortcuts(self) -> None:
