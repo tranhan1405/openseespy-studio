@@ -123,6 +123,10 @@ class ModelViewport(QWidget):
         self._node_tags: list[int] = []
         self._geometry_point_actor = None
         self._geometry_point_tags: list[int] = []
+        self._geometry_line_actor = None
+        self._geometry_line_mesh = None
+        self._geometry_line_tags: list[int] = []
+        self._selected_geometry_lines: set[int] = set()
         self._geometry_surface_actor = None
         self._geometry_surface_mesh = None
         self._geometry_surface_tags: list[int] = []
@@ -786,6 +790,7 @@ class ModelViewport(QWidget):
         self._set_id_labels_visible(False, render=False)
         self._remove_overlay("hover-element")
         self._remove_overlay("hover-node")
+        self._remove_overlay("hover-geometry-line")
         self._remove_overlay("hover-geometry-surface")
         self._set_navigation_lod(True, render=True)
 
@@ -2105,6 +2110,18 @@ class ModelViewport(QWidget):
         self._hover_ref = None
         self._render_model(reset_camera=True)
 
+    def set_geometry_line_selection(
+        self,
+        line_tags,
+    ) -> None:
+        self._selected_geometry_lines = {
+            int(tag)
+            for tag in line_tags
+            if int(tag) in self._lines
+        }
+        if self._display_domain == "geometry":
+            self._update_highlight_overlays()
+
     def set_geometry_surface_selection(
         self,
         surface_tags,
@@ -2874,6 +2891,9 @@ class ModelViewport(QWidget):
         self._node_tags = []
         self._geometry_point_actor = None
         self._geometry_point_tags = []
+        self._geometry_line_actor = None
+        self._geometry_line_mesh = None
+        self._geometry_line_tags = []
         self._geometry_surface_actor = None
         self._geometry_surface_mesh = None
         self._geometry_surface_tags = []
@@ -2925,21 +2945,44 @@ class ModelViewport(QWidget):
                     self._geometry_point_actor
                 )
 
+            line_points: list[tuple[float, float, float]] = []
+            line_cells: list[int] = []
+            self._geometry_line_tags = []
             for line_tag in sorted(self._lines):
                 line = self._lines[line_tag]
                 point_i = self._points.get(line.point_i)
                 point_j = self._points.get(line.point_j)
                 if point_i is None or point_j is None:
                     continue
-                self.plotter.add_mesh(
-                    pv.Line(point_i.xyz, point_j.xyz),
-                    name=f"line-geometry-{line_tag}",
+                base = len(line_points)
+                line_points.extend((point_i.xyz, point_j.xyz))
+                line_cells.extend((2, base, base + 1))
+                self._geometry_line_tags.append(int(line_tag))
+
+            if line_points:
+                self._geometry_line_mesh = pv.PolyData(
+                    np.asarray(line_points, dtype=float)
+                )
+                self._geometry_line_mesh.lines = np.asarray(
+                    line_cells,
+                    dtype=np.int64,
+                )
+                self._geometry_line_mesh.cell_data["line_tag"] = np.asarray(
+                    self._geometry_line_tags,
+                    dtype=np.int64,
+                )
+                self._geometry_line_actor = self.plotter.add_mesh(
+                    self._geometry_line_mesh,
+                    name="line-geometry",
                     color="#d9892b",
-                    line_width=4,
+                    line_width=5,
                     render_lines_as_tubes=True,
                     opacity=0.95,
-                    pickable=False,
+                    pickable=True,
                     render=False,
+                )
+                self._cell_picker.AddPickList(
+                    self._geometry_line_actor
                 )
 
             surface_points: list[tuple[float, float, float]] = []
@@ -3323,6 +3366,19 @@ class ModelViewport(QWidget):
                             "geometry_point",
                             int(self._geometry_point_tags[point_id]),
                         )
+            if self._geometry_line_actor is not None:
+                if self._cell_picker.Pick(x, y, 0, renderer):
+                    actor = self._cell_picker.GetActor()
+                    cell_id = self._cell_picker.GetCellId()
+                    if (
+                        self._actor_key(actor)
+                        == self._actor_key(self._geometry_line_actor)
+                        and 0 <= cell_id < len(self._geometry_line_tags)
+                    ):
+                        return (
+                            "geometry_line",
+                            int(self._geometry_line_tags[cell_id]),
+                        )
             if self._geometry_surface_actor is not None:
                 if self._cell_picker.Pick(x, y, 0, renderer):
                     actor = self._cell_picker.GetActor()
@@ -3434,6 +3490,24 @@ class ModelViewport(QWidget):
         self._set_navigation_lod(False, render=False)
         self._set_id_labels_visible(True, render=True)
 
+    def _geometry_line_overlay_mesh(self, tags: set[int]):
+        if (
+            not tags
+            or self._geometry_line_mesh is None
+            or not self._geometry_line_tags
+        ):
+            return None
+        ids = [
+            index
+            for index, tag in enumerate(self._geometry_line_tags)
+            if int(tag) in tags
+        ]
+        if not ids:
+            return None
+        return self._geometry_line_mesh.extract_cells(
+            np.asarray(ids, dtype=np.int64)
+        )
+
     def _geometry_surface_overlay_mesh(self, tags: set[int]):
         if (
             not tags
@@ -3498,6 +3572,8 @@ class ModelViewport(QWidget):
             "selection-nodes",
             "hover-element",
             "hover-node",
+            "selection-geometry-lines",
+            "hover-geometry-line",
             "selection-geometry-surfaces",
             "hover-geometry-surface",
         ):
@@ -3507,6 +3583,40 @@ class ModelViewport(QWidget):
             return
 
         if self._display_domain == "geometry":
+            selected_line_mesh = self._geometry_line_overlay_mesh(
+                self._selected_geometry_lines
+            )
+            if selected_line_mesh is not None:
+                self.plotter.add_mesh(
+                    selected_line_mesh,
+                    name="selection-geometry-lines",
+                    color="#ff9800",
+                    line_width=8,
+                    render_lines_as_tubes=True,
+                    opacity=1.0,
+                    pickable=False,
+                    render=False,
+                )
+            if (
+                self._hover_ref
+                and self._hover_ref[0] == "geometry_line"
+                and self._hover_ref[1]
+                not in self._selected_geometry_lines
+            ):
+                hover_line = self._geometry_line_overlay_mesh(
+                    {int(self._hover_ref[1])}
+                )
+                if hover_line is not None:
+                    self.plotter.add_mesh(
+                        hover_line,
+                        name="hover-geometry-line",
+                        color="#20c5e8",
+                        line_width=8,
+                        render_lines_as_tubes=True,
+                        opacity=0.92,
+                        pickable=False,
+                        render=False,
+                    )
             selected_surface_mesh = self._geometry_surface_overlay_mesh(
                 self._selected_geometry_surfaces
             )
