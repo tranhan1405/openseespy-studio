@@ -19307,25 +19307,11 @@ class MainWindow(QMainWindow):
                 lambda checked=False, t=tag:
                 self._show_line_geometry_properties(t)
             )
-            quality = menu.addAction("Mesh Quality...")
-            quality.setEnabled(line.mesh_recipe_configured)
-            quality.triggered.connect(
-                lambda checked=False, t=tag:
-                self._show_line_mesh_quality(t)
-            )
-
             if count == 1:
                 edit = menu.addAction("Edit Line Geometry...")
                 edit.triggered.connect(
                     lambda checked=False, t=tag:
                     self._edit_line_geometry(t)
-                )
-                configure_mesh = menu.addAction(
-                    "Configure Mesh / FE Recipe..."
-                )
-                configure_mesh.triggered.connect(
-                    lambda checked=False, t=tag:
-                    self._configure_line_mesh(t)
                 )
                 reverse = menu.addAction("Reverse Line Direction")
                 reverse.triggered.connect(
@@ -19381,60 +19367,6 @@ class MainWindow(QMainWindow):
                     self._merge_selected_geometry_lines(tags)
                 )
 
-            preview = menu.addAction("Preview Line Mesh")
-            preview.triggered.connect(
-                lambda checked=False, t=tag:
-                self._preview_line_mesh(t)
-            )
-            clear_preview = menu.addAction("Clear Line Mesh Preview")
-            clear_preview.triggered.connect(
-                self._clear_line_mesh_preview
-            )
-
-            menu.addSeparator()
-            if count == 1:
-                mesh = menu.addAction("Generate Line Mesh...")
-                mesh.setEnabled(not live_mesh)
-                mesh.triggered.connect(
-                    lambda checked=False, t=tag:
-                    self._mesh_line_geometry(t)
-                )
-                remesh = menu.addAction("Remesh Line")
-                remesh.setEnabled(live_mesh)
-                remesh.triggered.connect(
-                    lambda checked=False, t=tag:
-                    self._remesh_line_geometry(t)
-                )
-            else:
-                batch_mesh = menu.addAction(
-                    f"Generate / Remesh {count} Selected Lines"
-                )
-                batch_mesh.triggered.connect(
-                    lambda checked=False, tags=tuple(line_tags):
-                    self._remesh_line_geometries(tags)
-                )
-
-            delete_mesh = menu.addAction(
-                "Delete Generated Line Mesh"
-                if count == 1
-                else "Delete Generated Mesh of Right-clicked Line"
-            )
-            delete_mesh.setEnabled(live_mesh)
-            delete_mesh.triggered.connect(
-                lambda checked=False, t=tag:
-                self._delete_line_mesh(t)
-            )
-            select_fe = menu.addAction("Select Generated FE")
-            select_fe.setEnabled(live_mesh)
-            select_fe.triggered.connect(
-                lambda checked=False, t=tag:
-                self._select_line_generated_fe(t)
-            )
-            audit = menu.addAction("Audit Line Mesh Integrity")
-            audit.triggered.connect(
-                lambda checked=False, t=tag:
-                self._audit_line_mesh_integrity(t)
-            )
             network_tags = (
                 tuple(line_tags)
                 if count > 1
