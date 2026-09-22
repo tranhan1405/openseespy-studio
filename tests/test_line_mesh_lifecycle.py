@@ -1906,8 +1906,8 @@ def test_geometry_free_line_repeated_second_click_does_not_create_zero_length():
     dummy._handle_geometry_line_sketch_click(first)
     dummy._handle_geometry_line_sketch_click(first)
 
-    assert project.points == {}
-    assert project.lines == {}
+    assert dummy.project.points == {}
+    assert dummy.project.lines == {}
     assert dummy._geometry_line_anchor_snap is not None
 
     dummy._handle_geometry_line_sketch_click(
@@ -1918,8 +1918,8 @@ def test_geometry_free_line_repeated_second_click_does_not_create_zero_length():
             "screen": (300.0, 200.0),
         }
     )
-    assert len(project.points) == 2
-    assert len(project.lines) == 1
+    assert len(dummy.project.points) == 2
+    assert len(dummy.project.lines) == 1
 
 
 def test_geometry_free_line_can_start_from_existing_endpoint_without_duplicate_point():
