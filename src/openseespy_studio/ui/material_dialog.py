@@ -615,8 +615,19 @@ class MaterialDialog(QDialog):
         self.name.setText(material.name if material else f"Material {next_tag}")
 
         self.material_type = QComboBox()
+        reference_only_types = {"RambergOsgoodSteel"}
         ordered_types = sorted(
-            MATERIAL_PARAMETER_ORDER,
+            (
+                name
+                for name in MATERIAL_PARAMETER_ORDER
+                if (
+                    name not in reference_only_types
+                    or (
+                        material is not None
+                        and material.material_type == name
+                    )
+                )
+            ),
             key=lambda name: (MATERIAL_CATEGORIES.get(name, ""), name),
         )
         for name in ordered_types:
