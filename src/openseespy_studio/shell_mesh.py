@@ -15,6 +15,9 @@ class ShellMeshSpec:
     section_tag: int = 0
     corotational: bool = False
     local_x: tuple[float, float, float] | None = None
+    no_eas: bool = False
+    drilling_stab: float | None = None
+    drilling_nl: bool = False
     group: str = "shell"
 
 
@@ -157,6 +160,21 @@ def build_shell_mesh(
                         spec.local_x
                         if formulation == "ASDShellQ4"
                         else None
+                    ),
+                    shell_no_eas=(
+                        bool(spec.no_eas)
+                        if formulation == "ASDShellQ4"
+                        else False
+                    ),
+                    shell_drilling_stab=(
+                        spec.drilling_stab
+                        if formulation == "ASDShellQ4"
+                        else None
+                    ),
+                    shell_drilling_nl=(
+                        bool(spec.drilling_nl)
+                        if formulation == "ASDShellQ4"
+                        else False
                     ),
                 )
                 created_elements.append(next_element)
