@@ -103,6 +103,48 @@ def _find_existing_node(
     return None if best is None else best[1]
 
 
+def _find_topology_endpoint_node(
+    project: ProjectDatabase,
+    line: LineGeometryData,
+    ratio: float,
+) -> int | None:
+    """Reuse the FE node of a shared Geometry Point regardless of merge mode.
+
+    Geometry topology is authoritative: if two Lines reference the same Point,
+    their endpoint FE nodes must be identical. The reuse_existing_nodes flag
+    only controls coordinate-based merging between otherwise unrelated
+    geometry.
+    """
+
+    endpoint_point_tag: int | None = None
+    if abs(float(ratio)) <= 1.0e-12:
+        endpoint_point_tag = int(line.point_i)
+    elif abs(float(ratio) - 1.0) <= 1.0e-12:
+        endpoint_point_tag = int(line.point_j)
+    if endpoint_point_tag is None:
+        return None
+
+    candidates: list[int] = []
+    for other in project.lines.values():
+        if int(other.tag) == int(line.tag):
+            continue
+        if not other.generated_node_tags:
+            continue
+        if int(other.point_i) == endpoint_point_tag:
+            candidates.append(int(other.generated_node_tags[0]))
+        if int(other.point_j) == endpoint_point_tag:
+            candidates.append(int(other.generated_node_tags[-1]))
+
+    live = sorted({
+        tag
+        for tag in candidates
+        if tag in project.model.nodes
+    })
+    if not live:
+        return None
+    return live[0]
+
+
 def _line_points(project: ProjectDatabase, line: LineGeometryData):
     point_i = project.points.get(line.point_i)
     point_j = project.points.get(line.point_j)
@@ -248,11 +290,17 @@ def mesh_line_geometry(
                 a[axis] + ratio * (b[axis] - a[axis])
                 for axis in range(3)
             )
-            existing = (
-                _find_existing_node(project, xyz, tolerance)
-                if line.reuse_existing_nodes
-                else None
+            existing = _find_topology_endpoint_node(
+                project,
+                line,
+                ratio,
             )
+            if existing is None and line.reuse_existing_nodes:
+                existing = _find_existing_node(
+                    project,
+                    xyz,
+                    tolerance,
+                )
             if existing is not None:
                 node_tags.append(existing)
                 reused.append(existing)
