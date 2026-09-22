@@ -4315,6 +4315,11 @@ class ProjectDatabase:
                 f"Geometry Point tag {point.tag} already exists."
             )
         old_point = self.points[original_tag]
+        affected_lines = [
+            line
+            for line in self.lines.values()
+            if original_tag in {line.point_i, line.point_j}
+        ]
         affected_surfaces = [
             surface
             for surface in self.surfaces.values()
@@ -4325,7 +4330,15 @@ class ProjectDatabase:
         ]
         coordinates_changed = tuple(point.xyz) != tuple(old_point.xyz)
         if coordinates_changed:
-            meshed = [
+            meshed_lines = [
+                line.tag
+                for line in affected_lines
+                if any(
+                    element_tag in self.model.elements
+                    for element_tag in line.generated_element_tags
+                )
+            ]
+            meshed_surfaces = [
                 surface.tag
                 for surface in affected_surfaces
                 if any(
@@ -4333,11 +4346,22 @@ class ProjectDatabase:
                     for element_tag in surface.generated_element_tags
                 )
             ]
-            if meshed:
+            blockers: list[str] = []
+            if meshed_lines:
+                blockers.append(
+                    "meshed Line(s): "
+                    + ", ".join(map(str, sorted(meshed_lines)))
+                )
+            if meshed_surfaces:
+                blockers.append(
+                    "meshed Surface(s): "
+                    + ", ".join(map(str, sorted(meshed_surfaces)))
+                )
+            if blockers:
                 raise ValueError(
-                    "Geometry Point is used by meshed Surface(s): "
-                    + ", ".join(map(str, sorted(meshed)))
-                    + ". Delete/remesh those Surface meshes before moving it."
+                    "Geometry Point cannot move while it is used by "
+                    + "; ".join(blockers)
+                    + ". Edit/remesh the owning geometry instead."
                 )
 
         if point.tag != original_tag:
