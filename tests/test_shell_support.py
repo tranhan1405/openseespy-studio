@@ -908,3 +908,93 @@ def test_asd_shell_rejects_invalid_drilling_stabilization():
             l=4,
             shell_drilling_stab=-0.01,
         )
+
+
+def _invalid_shell_project(points) -> ProjectDatabase:
+    model = StructuralModel("invalid-shell-order", ndm=3, ndf=6)
+    for tag, point in enumerate(points, start=1):
+        model.add_node(tag, *point)
+    model.add_element(
+        10,
+        1,
+        2,
+        element_type="ASDShellQ4",
+        section_tag=7,
+        group="shell",
+        k=3,
+        l=4,
+    )
+    project = ProjectDatabase(name="invalid-shell-order", model=model)
+    project.add_section(_shell_section())
+    return project
+
+
+def test_shell_core_rejects_self_intersecting_quadrilateral_order():
+    project = _invalid_shell_project([
+        (0.0, 0.0, 0.0),
+        (2.0, 0.0, 0.0),
+        (0.5, 1.0, 0.0),
+        (2.0, 1.5, 0.0),
+    ])
+
+    with pytest.raises(
+        ValueError,
+        match=r"self-intersecting|crossed or degenerate",
+    ):
+        project.validate_element_state(10)
+
+
+def test_shell_core_rejects_concave_quadrilateral_order():
+    project = _invalid_shell_project([
+        (0.0, 0.0, 0.0),
+        (2.0, 0.0, 0.0),
+        (0.7, 0.4, 0.0),
+        (0.0, 1.5, 0.0),
+    ])
+
+    with pytest.raises(ValueError, match=r"concave"):
+        project.validate_element_state(10)
+
+
+def test_model_check_reports_invalid_shell_boundary_ordering():
+    project = _invalid_shell_project([
+        (0.0, 0.0, 0.0),
+        (2.0, 0.0, 0.0),
+        (0.5, 1.0, 0.0),
+        (2.0, 1.5, 0.0),
+    ])
+
+    issues = validate_project(project)
+    shell_geometry = [
+        issue for issue in issues
+        if issue.category == "Shell geometry"
+    ]
+    assert shell_geometry
+    assert any(
+        "quadrilateral boundary" in issue.message
+        for issue in shell_geometry
+    )
+    assert any(
+        "clockwise or counter-clockwise" in issue.suggestion
+        for issue in shell_geometry
+    )
+
+
+def test_shell_properties_expose_advanced_asd_controls_and_safe_edits():
+    source = inspect.getsource(MainWindow._show_entity_properties)
+    assert '"Enhanced assumed strain"' in source
+    assert '"Drilling stabilization"' in source
+    assert '"Nonlinear drilling"' in source
+    assert '"id": "shell_corotational"' in source
+    assert '"id": "shell_local_x"' in source
+    assert '"id": "shell_no_eas"' in source
+    assert '"id": "shell_drilling_stab"' in source
+    assert '"id": "shell_drilling_nl"' in source
+
+    edit_source = inspect.getsource(MainWindow._apply_direct_property_edit)
+    assert '"shell_corotational"' in edit_source
+    assert '"shell_local_x"' in edit_source
+    assert '"shell_no_eas"' in edit_source
+    assert '"shell_drilling_stab"' in edit_source
+    assert '"shell_drilling_nl"' in edit_source
+    assert "Edit shell topology and formulation" in edit_source
