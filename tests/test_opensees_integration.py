@@ -1919,7 +1919,11 @@ def test_new_empty_project_draw_polyline_with_real_qt_mouse_events():
         QTest.mouseClick(widget, Qt.LeftButton, pos=p2)
         app.processEvents()
 
-        assert len(window.project.points) == 2
+        assert len(window.project.points) == 2, (
+            window.status_message.text(),
+            window._geometry_line_anchor_snap,
+            window._geometry_line_point_tags,
+        )
         assert len(window.project.lines) == 1
         line = next(iter(window.project.lines.values()))
         assert line.point_i != line.point_j
@@ -1928,3 +1932,34 @@ def test_new_empty_project_draw_polyline_with_real_qt_mouse_events():
         app.processEvents()
         if owns_app:
             app.quit()
+
+
+def test_empty_project_polyline_direct_payload_commits_segment():
+    from PySide6.QtWidgets import QApplication
+
+    from openseespy_studio.ui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        window._new_model()
+        window.actions["line_geometry_pick"].trigger()
+        window._handle_geometry_line_sketch_click(
+            {
+                "world": (-1.0, 0.0, 0.0),
+                "screen": (100.0, 100.0),
+                "plane": "xy",
+            }
+        )
+        window._handle_geometry_line_sketch_click(
+            {
+                "world": (1.0, 0.0, 0.0),
+                "screen": (300.0, 100.0),
+                "plane": "xy",
+            }
+        )
+        assert len(window.project.points) == 2, window.status_message.text()
+        assert len(window.project.lines) == 1, window.status_message.text()
+    finally:
+        window.close()
+        app.processEvents()
