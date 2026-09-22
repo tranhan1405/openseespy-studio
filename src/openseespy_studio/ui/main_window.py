@@ -103,13 +103,17 @@ from ..surface_mesher import (
     remesh_surface_geometry,
     inspect_surface_mesh_state,
     managed_surface_edge_load_nodal_tags,
+    managed_surface_pressure_element_load_tags,
     managed_surface_support_node_tags,
     remove_surface_edge_load,
     remove_surface_edge_support,
+    remove_surface_pressure,
     replace_surface_edge_load,
     replace_surface_edge_support,
+    replace_surface_pressure,
     sync_surface_edge_load,
     sync_surface_edge_support,
+    sync_surface_pressure,
     surface_boundary_edges,
     surface_boundary_node_tags,
     surface_edge_info,
@@ -120,7 +124,7 @@ from ..surface_mesher import (
 from ..shell_quality import shell_mesh_quality_summary
 from ..line_mesher import mesh_line_geometry
 from ..section_response import section_response_sources
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
     build_worker_pythonpath,
     opensees_material_requires_runtime_probe,
@@ -164,6 +168,7 @@ from .section_dialog import SectionDialog
 from .shell_dialog import NDMaterialDialog, ShellElementDialog, ShellMeshDialog, ShellSectionDialog
 from .surface_dialog import SurfaceGeometryDialog
 from .surface_edge_load_dialog import SurfaceEdgeLoadDialog
+from .surface_pressure_dialog import SurfacePressureDialog
 from .line_geometry_dialog import LineGeometryDialog, PointGeometryDialog
 from .transformation_dialog import TransformationDialog
 from .test_column_dialog import TestColumnWizard
@@ -9048,39 +9053,240 @@ class MainWindow(QMainWindow):
         unmeshed = [
             surface.tag
             for surface in surfaces
-            if not any(
-                int(element_tag) in self.model.elements
-                for element_tag in surface.generated_element_tags
-            )
+            if inspect_surface_mesh_state(
+                self.project,
+                surface.tag,
+            ).status != "meshed"
         ]
         if unmeshed:
             QMessageBox.information(
                 self,
-                "Surface Pressure",
+                "Managed Surface Pressure",
                 "Mesh the following Surface geometry first: "
                 + ", ".join(map(str, unmeshed)),
             )
             return
 
-        element_tags = sorted({
-            int(element_tag)
-            for surface in surfaces
-            for element_tag in surface.generated_element_tags
-            if (
-                int(element_tag) in self.model.elements
-                and self.model.elements[
-                    int(element_tag)
-                ].element_type in SHELL_ELEMENT_TYPES
+        plain = self._plain_load_patterns()
+        if not plain:
+            if not self._ensure_plain_load_pattern(
+                title="Managed Surface Pressure"
+            ):
+                return
+            plain = self._plain_load_patterns()
+
+        editing = None
+        if len(surfaces) == 1:
+            surface = surfaces[0]
+            existing = sorted(
+                (
+                    pressure
+                    for pressure in self.project.surface_pressures.values()
+                    if pressure.surface_tag == surface.tag
+                ),
+                key=lambda item: (item.pattern_tag, item.tag),
             )
-        })
-        self._create_shell_pressure_for_elements(
-            element_tags,
-            source_label=(
-                "Surface "
-                + ", ".join(
-                    map(str, [surface.tag for surface in surfaces])
+            if existing:
+                choices = ["Create new pressure..."] + [
+                    f"Edit Pressure {item.tag} · Pattern "
+                    f"{item.pattern_tag} · p={item.pressure:g}"
+                    for item in existing
+                ]
+                choice, ok = QInputDialog.getItem(
+                    self,
+                    "Managed Surface Pressure",
+                    f"Surface {surface.tag}:",
+                    choices,
+                    0,
+                    False,
                 )
+                if not ok:
+                    return
+                if choice != choices[0]:
+                    editing = existing[choices.index(choice) - 1]
+
+        dialog = SurfacePressureDialog(
+            plain,
+            surface_tag=surfaces[0].tag,
+            pressure=editing,
+            next_tag=self.project.next_surface_pressure_tag(),
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        template = dialog.data()
+
+        before = self.project.to_dict()
+        generated_count = 0
+        created_tags: list[int] = []
+        try:
+            if editing is not None:
+                template.generated_element_load_tags = list(
+                    editing.generated_element_load_tags
+                )
+                generated = replace_surface_pressure(
+                    self.project,
+                    template,
+                )
+                generated_count = len(generated)
+                created_tags = [template.tag]
+            else:
+                next_tag = template.tag
+                for surface in surfaces:
+                    while next_tag in self.project.surface_pressures:
+                        next_tag += 1
+                    pressure = SurfacePressureData(
+                        tag=next_tag,
+                        name=(
+                            f"{template.name} - Surface {surface.tag}"
+                            if len(surfaces) > 1
+                            else template.name
+                        ),
+                        surface_tag=surface.tag,
+                        pattern_tag=template.pattern_tag,
+                        pressure=template.pressure,
+                    )
+                    self.project.add_surface_pressure(pressure)
+                    generated_count += len(
+                        sync_surface_pressure(
+                            self.project,
+                            pressure.tag,
+                        )
+                    )
+                    created_tags.append(pressure.tag)
+                    next_tag += 1
+        except (TypeError, ValueError, IndexError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Managed Surface Pressure",
+                str(exc),
+            )
+            return
+
+        self.model = self.project.model
+        self._refresh_all(
+            f"{'Updated' if editing is not None else 'Created'} "
+            f"{len(created_tags)} managed Surface pressure definition(s) · "
+            f"{generated_count} generated Shell pressure load(s)"
+        )
+        self.viewport.set_display_domain("geometry")
+        self.viewport.show_surface_pressure_preview(
+            [surface.tag for surface in surfaces],
+            template.pressure,
+        )
+        if len(surfaces) == 1:
+            self._show_surface_geometry_properties(surfaces[0].tag)
+        self._record_project_change(
+            "Managed Surface pressure",
+            before,
+        )
+
+    def _preview_managed_surface_pressure(self, surface_tag: int) -> None:
+        tag = int(surface_tag)
+        pressures = sorted(
+            (
+                pressure
+                for pressure in self.project.surface_pressures.values()
+                if pressure.surface_tag == tag
             ),
+            key=lambda item: (item.pattern_tag, item.tag),
+        )
+        if not pressures:
+            QMessageBox.information(
+                self,
+                "Preview Managed Surface Pressure",
+                f"Surface {tag} has no managed pressure.",
+            )
+            return
+        labels = [
+            f"Pressure {item.tag} · Pattern {item.pattern_tag} · "
+            f"p={item.pressure:g} · {item.name}"
+            for item in pressures
+        ]
+        label, ok = QInputDialog.getItem(
+            self,
+            "Preview Managed Surface Pressure",
+            f"Surface {tag}:",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        pressure = pressures[labels.index(label)]
+        self.viewport.show_surface_pressure_preview(
+            [tag],
+            pressure.pressure,
+        )
+        self.status_message.setText(
+            f"Managed Surface pressure {pressure.tag} preview · "
+            f"p={pressure.pressure:g}"
+        )
+
+    def _remove_managed_surface_pressure(self, surface_tag: int) -> None:
+        tag = int(surface_tag)
+        pressures = sorted(
+            (
+                pressure
+                for pressure in self.project.surface_pressures.values()
+                if pressure.surface_tag == tag
+            ),
+            key=lambda item: (item.pattern_tag, item.tag),
+        )
+        if not pressures:
+            QMessageBox.information(
+                self,
+                "Remove Managed Surface Pressure",
+                f"Surface {tag} has no managed pressure.",
+            )
+            return
+        labels = [
+            f"Pressure {item.tag} · Pattern {item.pattern_tag} · "
+            f"p={item.pressure:g} · {item.name}"
+            for item in pressures
+        ]
+        label, ok = QInputDialog.getItem(
+            self,
+            "Remove Managed Surface Pressure",
+            f"Surface {tag}:",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        pressure = pressures[labels.index(label)]
+        before = self.project.to_dict()
+        try:
+            removed = remove_surface_pressure(
+                self.project,
+                pressure.tag,
+            )
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Remove Managed Surface Pressure",
+                str(exc),
+            )
+            return
+        self.model = self.project.model
+        self.viewport.clear_surface_pressure_preview(render=False)
+        self._refresh_all(
+            f"Removed managed Surface pressure {pressure.tag} · "
+            f"deleted {len(removed)} generated element load(s)"
+        )
+        self.viewport.set_display_domain("geometry")
+        self._show_surface_geometry_properties(tag)
+        self._record_project_change(
+            f"Remove managed Surface pressure {pressure.tag}",
+            before,
         )
 
     def _create_shell_pressure_for_elements(
@@ -9209,7 +9415,7 @@ class MainWindow(QMainWindow):
                     self,
                     "Shell Surface Pressure",
                     "Select at least one Shell element first, or use "
-                    "Geometry → Surface → Create Pressure on Surface(s).",
+                    "Geometry → Surface → Managed Surface Pressure...",
                 )
                 return
         if selected:
@@ -9295,9 +9501,29 @@ class MainWindow(QMainWindow):
             before,
         )
 
+    def _managed_surface_pressure_for_element_load(
+        self,
+        element_load_tag: int,
+    ) -> SurfacePressureData | None:
+        target = int(element_load_tag)
+        for pressure in self.project.surface_pressures.values():
+            if target in pressure.generated_element_load_tags:
+                return pressure
+        return None
+
     def _edit_element_load(self, tag: int) -> None:
         load = self.project.element_loads.get(tag)
         if load is None:
+            return
+        owner = self._managed_surface_pressure_for_element_load(tag)
+        if owner is not None:
+            QMessageBox.information(
+                self,
+                "Managed Surface Pressure",
+                "This element load is generated by managed Surface Pressure "
+                f"{owner.tag} on Surface {owner.surface_tag}. "
+                "Edit the Geometry Surface pressure instead.",
+            )
             return
         plain = {
             key: pattern
@@ -9334,6 +9560,15 @@ class MainWindow(QMainWindow):
 
     def _delete_element_load(self, tag: int) -> None:
         if tag not in self.project.element_loads:
+            return
+        owner = self._managed_surface_pressure_for_element_load(tag)
+        if owner is not None:
+            QMessageBox.information(
+                self,
+                "Managed Surface Pressure",
+                "This element load is generated by managed Surface Pressure "
+                f"{owner.tag}. Remove the Geometry Surface pressure instead.",
+            )
             return
         before = self.project.to_dict()
         self.project.remove_element_load(tag)
@@ -12476,12 +12711,29 @@ class MainWindow(QMainWindow):
             )
             if managed_edge_loads else "None"
         )
+        managed_pressures = sorted(
+            (
+                pressure
+                for pressure in self.project.surface_pressures.values()
+                if pressure.surface_tag == int(tag)
+            ),
+            key=lambda item: (item.pattern_tag, item.tag),
+        )
+        managed_pressure_text = (
+            " · ".join(
+                f"P{pressure.pattern_tag} p={pressure.pressure:.4g} "
+                f"({len(pressure.generated_element_load_tags)} Shell load(s))"
+                for pressure in managed_pressures
+            )
+            if managed_pressures else "None"
+        )
 
         rows = [
             ("Tag", surface.tag),
             ("Name", surface.name),
             ("Managed edge supports", managed_support_text),
             ("Managed edge line loads", managed_edge_load_text),
+            ("Managed Surface pressures", managed_pressure_text),
             ("Shape", surface.surface_type),
             ("Topology", topology),
             ("Normal", normal_text),
@@ -17202,10 +17454,37 @@ class MainWindow(QMainWindow):
                 lambda checked=False, tags=tuple(surface_tags):
                 self._preview_surface_pressure(tags)
             )
+            if count == 1:
+                preview_managed_pressure = menu.addAction(
+                    "Preview Managed Surface Pressure..."
+                )
+                preview_managed_pressure.setEnabled(
+                    any(
+                        item.surface_tag == tag
+                        for item in self.project.surface_pressures.values()
+                    )
+                )
+                preview_managed_pressure.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._preview_managed_surface_pressure(t)
+                )
+                remove_managed_pressure = menu.addAction(
+                    "Remove Managed Surface Pressure..."
+                )
+                remove_managed_pressure.setEnabled(
+                    any(
+                        item.surface_tag == tag
+                        for item in self.project.surface_pressures.values()
+                    )
+                )
+                remove_managed_pressure.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._remove_managed_surface_pressure(t)
+                )
             pressure = menu.addAction(
-                "Create Pressure on Surface..."
+                "Managed Surface Pressure..."
                 if count == 1
-                else f"Create Pressure on {count} Surfaces..."
+                else f"Create Managed Pressure on {count} Surfaces..."
             )
             pressure.setEnabled(live_mesh)
             pressure.triggered.connect(
