@@ -12994,6 +12994,100 @@ class MainWindow(QMainWindow):
         )
         return True
 
+    def _generate_all_configured_line_meshes(self) -> None:
+        tags = sorted(
+            tag
+            for tag, line in self.project.lines.items()
+            if (
+                line.mesh_recipe_configured
+                and not inspect_line_mesh_state(
+                    self.project,
+                    int(tag),
+                ).live_element_tags
+            )
+        )
+        if not tags:
+            QMessageBox.information(
+                self,
+                "Generate Line Meshes",
+                "No configured unmeshed Geometry Lines are ready.",
+            )
+            return
+        before = self.project.to_dict()
+        try:
+            results = remesh_line_batch(self.project, tags)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Generate Line Meshes", str(exc))
+            return
+        self.model = self.project.model
+        count = sum(len(result.element_tags) for result in results.values())
+        self._refresh_all(
+            f"Generated mesh for {len(tags)} Line(s) · "
+            f"{count} Frame/Truss element(s)"
+        )
+        self.viewport.set_display_domain("geometry")
+        self._record_project_change(
+            f"Generate mesh for {len(tags)} configured Lines",
+            before,
+        )
+
+    def _remesh_all_meshed_lines(self) -> None:
+        tags = sorted(
+            tag
+            for tag in self.project.lines
+            if inspect_line_mesh_state(
+                self.project,
+                int(tag),
+            ).live_element_tags
+        )
+        if not tags:
+            QMessageBox.information(
+                self,
+                "Remesh Lines",
+                "No meshed Geometry Lines were found.",
+            )
+            return
+        self._remesh_line_geometries(tags)
+
+    def _delete_all_line_meshes(self) -> None:
+        tags = sorted(
+            tag
+            for tag in self.project.lines
+            if inspect_line_mesh_state(
+                self.project,
+                int(tag),
+            ).live_element_tags
+        )
+        if not tags:
+            QMessageBox.information(
+                self,
+                "Delete Line Meshes",
+                "No generated Line meshes were found.",
+            )
+            return
+        before = self.project.to_dict()
+        try:
+            for tag in tags:
+                delete_line_mesh(self.project, tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Delete Line Meshes", str(exc))
+            return
+        self.model = self.project.model
+        self._refresh_all(
+            f"Deleted generated FE mesh for {len(tags)} Line(s)"
+        )
+        self.viewport.set_display_domain("geometry")
+        self._record_project_change(
+            f"Delete generated mesh for {len(tags)} Lines",
+            before,
+        )
+
     def _mesh_line_geometry(self, tag: int) -> None:
         line = self.project.lines.get(int(tag))
         if line is None:
@@ -14089,6 +14183,63 @@ class MainWindow(QMainWindow):
             before,
         )
         return True
+
+    def _generate_all_configured_surface_meshes(self) -> None:
+        tags = sorted(
+            tag
+            for tag, surface in self.project.surfaces.items()
+            if (
+                surface.mesh_recipe_configured
+                and not inspect_surface_mesh_state(
+                    self.project,
+                    int(tag),
+                ).live_element_tags
+            )
+        )
+        if not tags:
+            QMessageBox.information(
+                self,
+                "Generate Surface Meshes",
+                "No configured unmeshed Surfaces are ready.",
+            )
+            return
+        self._remesh_surface_geometries(tags)
+
+    def _remesh_all_meshed_surfaces(self) -> None:
+        tags = sorted(
+            tag
+            for tag in self.project.surfaces
+            if inspect_surface_mesh_state(
+                self.project,
+                int(tag),
+            ).live_element_tags
+        )
+        if not tags:
+            QMessageBox.information(
+                self,
+                "Remesh Surfaces",
+                "No meshed Geometry Surfaces were found.",
+            )
+            return
+        self._remesh_surface_geometries(tags)
+
+    def _delete_all_surface_meshes(self) -> None:
+        tags = sorted(
+            tag
+            for tag in self.project.surfaces
+            if inspect_surface_mesh_state(
+                self.project,
+                int(tag),
+            ).live_element_tags
+        )
+        if not tags:
+            QMessageBox.information(
+                self,
+                "Delete Surface Meshes",
+                "No generated Surface meshes were found.",
+            )
+            return
+        self._delete_surface_meshes(tags)
 
     def _mesh_surface_geometry(self, tag: int) -> None:
         surface = self.project.surfaces.get(int(tag))
