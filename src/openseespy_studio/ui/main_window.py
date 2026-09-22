@@ -127,7 +127,15 @@ from ..surface_mesher import (
     surface_unit_normal,
 )
 from ..shell_quality import shell_mesh_quality_summary
-from ..line_mesher import mesh_line_geometry
+from ..line_mesher import (
+    audit_line_mesh_integrity,
+    delete_line_geometry,
+    delete_line_mesh,
+    inspect_line_mesh_state,
+    line_mesh_preview_points,
+    mesh_line_geometry,
+    remesh_line_geometry,
+)
 from ..section_response import section_response_sources
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
@@ -12844,20 +12852,167 @@ class MainWindow(QMainWindow):
             before,
         )
 
+    def _remesh_line_geometry(self, tag: int) -> None:
+        line = self.project.lines.get(int(tag))
+        if line is None:
+            return
+        before = self.project.to_dict()
+        try:
+            result = remesh_line_geometry(self.project, tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Remesh Geometry Line", str(exc))
+            return
+        self.model = self.project.model
+        self._refresh_all(
+            f"Remeshed Line {tag} · {result.divisions} division(s) · "
+            f"{len(result.element_tags)} {line.element_family} element(s)"
+        )
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
+        self._show_line_geometry_properties(tag)
+        self._record_project_change(
+            f"Remesh Geometry Line {tag}",
+            before,
+        )
+
+    def _delete_line_mesh(self, tag: int) -> None:
+        line = self.project.lines.get(int(tag))
+        if line is None:
+            return
+        before = self.project.to_dict()
+        try:
+            deleted = delete_line_mesh(self.project, tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Delete Generated Line Mesh",
+                str(exc),
+            )
+            return
+        self.model = self.project.model
+        self._refresh_all(
+            f"Deleted Line {tag} FE mesh · "
+            f"{len(deleted.removed_element_tags)} element(s) · "
+            f"{len(deleted.removed_node_tags)} owned node(s) removed · "
+            f"{len(deleted.kept_node_tags)} shared node(s) kept"
+        )
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
+        self._show_line_geometry_properties(tag)
+        self._record_project_change(
+            f"Delete Geometry Line {tag} mesh",
+            before,
+        )
+
+    def _preview_line_mesh(self, tag: int) -> None:
+        line = self.project.lines.get(int(tag))
+        if line is None:
+            return
+        try:
+            divisions, points = line_mesh_preview_points(
+                self.project,
+                line,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Preview Line Mesh", str(exc))
+            return
+        self.viewport.show_line_mesh_preview(
+            tag,
+            points,
+            family=line.element_family,
+        )
+        self.status_message.setText(
+            f"Preview Line {tag} · {line.element_family} · "
+            f"{divisions} division(s) · bias {line.bias:g}"
+        )
+
+    def _clear_line_mesh_preview(self) -> None:
+        self.viewport.clear_line_mesh_preview()
+        self.status_message.setText("Line mesh preview cleared")
+
+    def _select_line_generated_fe(self, tag: int) -> None:
+        line = self.project.lines.get(int(tag))
+        if line is None:
+            return
+        state = inspect_line_mesh_state(self.project, tag)
+        nodes = {
+            int(node_tag)
+            for node_tag in state.tracked_node_tags
+            if int(node_tag) in self.model.nodes
+        }
+        elements = {
+            int(element_tag)
+            for element_tag in state.live_element_tags
+        }
+        if not nodes and not elements:
+            QMessageBox.information(
+                self,
+                "Select Generated FE",
+                f"Geometry Line {tag} is not meshed.",
+            )
+            return
+        self.viewport.set_display_domain("fe")
+        self.selection.set_selection(
+            nodes=nodes,
+            elements=elements,
+        )
+        self.status_message.setText(
+            f"Selected Line {tag} FE mesh · "
+            f"{len(nodes)} node(s) · {len(elements)} element(s)"
+        )
+
+    def _audit_line_mesh_integrity(self, tag: int) -> None:
+        report = audit_line_mesh_integrity(self.project, [tag])
+        state = report.states[0]
+        details = [
+            f"Status: {state.status}",
+            f"Live elements: {len(state.live_element_tags)}",
+            f"Tracked nodes: {len(state.tracked_node_tags)}",
+            f"Owned nodes: {len(state.owned_node_tags)}",
+            f"Issues: {state.issue_count}",
+        ]
+        if state.foreign_element_tags:
+            details.append(
+                "Tracked elements owned elsewhere: "
+                + ", ".join(map(str, state.foreign_element_tags))
+            )
+        if state.untracked_owned_element_tags:
+            details.append(
+                "Owned but untracked elements: "
+                + ", ".join(map(str, state.untracked_owned_element_tags))
+            )
+        if state.missing_element_tags:
+            details.append(
+                "Missing elements: "
+                + ", ".join(map(str, state.missing_element_tags))
+            )
+        if state.missing_node_tags:
+            details.append(
+                "Missing tracked nodes: "
+                + ", ".join(map(str, state.missing_node_tags))
+            )
+        QMessageBox.information(
+            self,
+            f"Line {tag} Mesh Integrity",
+            "\n".join(details),
+        )
+
     def _delete_line_geometry(self, tag: int) -> None:
         line = self.project.lines.get(int(tag))
         if line is None:
             return
-        live_mesh = [
-            element_tag
-            for element_tag in line.generated_element_tags
-            if element_tag in self.model.elements
-        ]
+        state = inspect_line_mesh_state(self.project, tag)
         message = f"Delete Geometry Line {tag} ({line.name})?"
-        if live_mesh:
+        if state.status != "unmeshed":
             message += (
-                "\n\nGenerated FE elements will be kept as ordinary "
-                "FE elements; only the reusable Line geometry is removed."
+                "\n\nIts owned Frame/Truss FE mesh will also be deleted. "
+                "Shared/reused nodes that belong to other model objects are kept."
             )
         answer = QMessageBox.question(
             self,
@@ -12869,8 +13024,19 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.Yes:
             return
         before = self.project.to_dict()
-        self.project.remove_line(tag)
-        self._refresh_all(f"Deleted Geometry Line {tag}")
+        try:
+            deleted = delete_line_geometry(self.project, tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Delete Geometry Line", str(exc))
+            return
+        self.model = self.project.model
+        self._refresh_all(
+            f"Deleted Geometry Line {tag} · "
+            f"{len(deleted.removed_element_tags)} owned FE element(s) removed"
+        )
         self._record_project_change(
             f"Delete Geometry Line {tag}",
             before,
@@ -12882,11 +13048,8 @@ class MainWindow(QMainWindow):
             return
         point_i = self.project.points.get(line.point_i)
         point_j = self.project.points.get(line.point_j)
-        live_elements = [
-            element_tag
-            for element_tag in line.generated_element_tags
-            if element_tag in self.model.elements
-        ]
+        state = inspect_line_mesh_state(self.project, tag)
+        live_elements = list(state.live_element_tags)
         recipe = line.element_type
         if line.element_family == "Frame":
             recipe += (
@@ -12921,6 +13084,14 @@ class MainWindow(QMainWindow):
                 ("FE family", line.element_family),
                 ("FE recipe", recipe),
                 ("Mesh sizing", sizing),
+                ("Mesh bias", f"{line.bias:g}"),
+                (
+                    "FE nodes",
+                    (
+                        f"{len(state.tracked_node_tags)} tracked · "
+                        f"{len(state.owned_node_tags)} owned"
+                    ),
+                ),
                 (
                     "Reuse coincident nodes",
                     "Yes" if line.reuse_existing_nodes else "No",
@@ -12928,8 +13099,12 @@ class MainWindow(QMainWindow):
                 (
                     "Mesh status",
                     (
-                        f"Meshed · {len(live_elements)} element(s)"
-                        if live_elements else "Unmeshed"
+                        f"{state.status.capitalize()} · "
+                        f"{len(live_elements)} element(s)"
+                        + (
+                            f" · {state.issue_count} issue(s)"
+                            if state.issue_count else ""
+                        )
                     ),
                 ),
             ],
@@ -17967,27 +18142,60 @@ class MainWindow(QMainWindow):
             line = self.project.lines.get(tag)
             if line is None:
                 return
-            live_mesh = any(
-                element_tag in self.model.elements
-                for element_tag in line.generated_element_tags
-            )
+            state = inspect_line_mesh_state(self.project, tag)
+            live_mesh = bool(state.live_element_tags)
+
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda checked=False, t=tag:
                 self._show_line_geometry_properties(t)
             )
-            edit = menu.addAction("Edit Line...")
-            edit.setEnabled(not live_mesh)
+            edit = menu.addAction("Edit Line / Mesh Settings...")
             edit.triggered.connect(
                 lambda checked=False, t=tag:
                 self._edit_line_geometry(t)
             )
+            preview = menu.addAction("Preview Line Mesh")
+            preview.triggered.connect(
+                lambda checked=False, t=tag:
+                self._preview_line_mesh(t)
+            )
+            clear_preview = menu.addAction("Clear Line Mesh Preview")
+            clear_preview.triggered.connect(
+                self._clear_line_mesh_preview
+            )
+
+            menu.addSeparator()
             mesh = menu.addAction("Generate Line Mesh...")
             mesh.setEnabled(not live_mesh)
             mesh.triggered.connect(
                 lambda checked=False, t=tag:
                 self._mesh_line_geometry(t)
             )
+            remesh = menu.addAction("Remesh Line")
+            remesh.setEnabled(live_mesh)
+            remesh.triggered.connect(
+                lambda checked=False, t=tag:
+                self._remesh_line_geometry(t)
+            )
+            delete_mesh = menu.addAction("Delete Generated Line Mesh")
+            delete_mesh.setEnabled(live_mesh)
+            delete_mesh.triggered.connect(
+                lambda checked=False, t=tag:
+                self._delete_line_mesh(t)
+            )
+            select_fe = menu.addAction("Select Generated FE")
+            select_fe.setEnabled(live_mesh)
+            select_fe.triggered.connect(
+                lambda checked=False, t=tag:
+                self._select_line_generated_fe(t)
+            )
+            audit = menu.addAction("Audit Line Mesh Integrity")
+            audit.triggered.connect(
+                lambda checked=False, t=tag:
+                self._audit_line_mesh_integrity(t)
+            )
+
             menu.addSeparator()
             delete = menu.addAction("Delete Line")
             delete.triggered.connect(
