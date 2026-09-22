@@ -1842,8 +1842,9 @@ def test_generated_nonlinear_shell_constructs_in_real_opensees(
             "Layered shell",
             "LayeredShell",
             shell_layers=[
-                ShellLayerData(1, 0.075),
-                ShellLayerData(1, 0.075),
+                ShellLayerData(1, 0.05),
+                ShellLayerData(1, 0.05),
+                ShellLayerData(1, 0.05),
             ],
         )
 
