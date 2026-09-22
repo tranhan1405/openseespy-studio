@@ -87,10 +87,11 @@ def test_surface_pressure_route_expands_surface_to_generated_shell_elements():
     )
     context = inspect.getsource(MainWindow._show_tree_context_menu)
 
-    assert "generated_element_tags" in source
-    assert "_create_shell_pressure_for_elements" in source
+    assert "SurfacePressureData" in source
+    assert "sync_surface_pressure" in source
+    assert "replace_surface_pressure" in source
     assert 'allowed_load_types={"SurfacePressure"}' in helper
-    assert "Create Pressure on Surface..." in context
+    assert "Managed Surface Pressure..." in context
 
 
 def test_multi_surface_lifecycle_operations_are_atomic():
