@@ -4687,13 +4687,14 @@ class MainWindow(QMainWindow):
         if action is not None and not action.isChecked() and not checked:
             self._activate_select_tool()
             return
-        if not self.model.nodes:
+        if len(self.model.nodes) < 2:
             if action is not None:
                 action.setChecked(False)
-            self.status_message.setText(
-                "Measure Distance requires at least two model nodes"
-            )
-            return
+            if not self._ensure_node_count(
+                2,
+                title="Measure Distance",
+            ):
+                return
 
         self._leave_frame_pick_mode()
         self._leave_truss_pick_mode()
@@ -5747,30 +5748,25 @@ class MainWindow(QMainWindow):
 
         menu.addSeparator()
         support_menu = menu.addMenu("Support / Restraint")
-        support_menu.setEnabled(bool(self.selection.nodes))
         apply_support = support_menu.addAction("Apply / Edit...")
         apply_support.triggered.connect(self._apply_restraint)
         clear_support = support_menu.addAction("Clear")
+        clear_support.setEnabled(bool(self.selection.nodes))
         clear_support.triggered.connect(self._clear_restraint)
 
         constraint_action = menu.addAction("Create Constraint...")
-        constraint_action.setEnabled(len(self.selection.nodes) >= 2)
         constraint_action.triggered.connect(self._create_constraint)
 
         connection_action = menu.addAction("Create ZeroLength / Link...")
-        connection_action.setEnabled(1 <= len(self.selection.nodes) <= 2)
         connection_action.triggered.connect(self._create_connection)
 
         mass_action = menu.addAction("Assign Mass...")
-        mass_action.setEnabled(bool(self.selection.nodes))
         mass_action.triggered.connect(self._assign_mass)
         load_action = menu.addAction("Create Nodal Load...")
-        load_action.setEnabled(bool(self.selection.nodes))
         load_action.triggered.connect(self._create_nodal_load)
         displacement_action = menu.addAction(
             "Create Prescribed Displacement..."
         )
-        displacement_action.setEnabled(bool(self.selection.nodes))
         displacement_action.triggered.connect(
             self._create_prescribed_displacement
         )
@@ -5789,29 +5785,23 @@ class MainWindow(QMainWindow):
         )
 
         beam_load_action = menu.addAction("Create Beam Load...")
-        beam_load_action.setEnabled(has_frame and not has_truss)
         beam_load_action.triggered.connect(self._create_element_load)
         formulation_action = menu.addAction(
             "Element Formulation..."
         )
-        formulation_action.setEnabled(has_frame and not has_truss)
         formulation_action.triggered.connect(
             self._set_element_formulation
         )
 
         menu.addSeparator()
         assign_menu = menu.addMenu("Assign")
-        assign_menu.setEnabled(bool(selected_elements))
         assign_material = assign_menu.addAction("Material (Truss)...")
-        assign_material.setEnabled(has_truss)
         assign_material.triggered.connect(
             self._assign_truss_material_to_selection
         )
         assign_section = assign_menu.addAction("Section...")
-        assign_section.setEnabled(has_frame)
         assign_section.triggered.connect(self._assign_section_to_selection)
         assign_transformation = assign_menu.addAction("Transformation...")
-        assign_transformation.setEnabled(has_frame)
         assign_transformation.triggered.connect(
             self._assign_transformation_to_selection
         )
