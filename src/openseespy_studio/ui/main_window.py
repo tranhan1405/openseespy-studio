@@ -12782,6 +12782,7 @@ class MainWindow(QMainWindow):
             materials=self.project.materials,
             initial_point_i=point_i,
             initial_point_j=point_j,
+            mode="geometry",
             parent=self,
         )
         if not dialog.exec():
@@ -12791,7 +12792,6 @@ class MainWindow(QMainWindow):
         try:
             line = dialog.data()
             self.project.add_line(line)
-            result = mesh_line_geometry(self.project, line.tag)
         except (TypeError, ValueError) as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
@@ -12801,9 +12801,7 @@ class MainWindow(QMainWindow):
 
         self.model = self.project.model
         self._refresh_all(
-            f"Created Line {line.tag} · {result.divisions} division(s) · "
-            f"{len(result.element_tags)} {line.element_family} element(s) · "
-            f"{len(result.created_node_tags)} new node(s)"
+            f"Created Geometry Line {line.tag} · Mesh not configured"
         )
         self.selection.clear()
         self.viewport.set_display_domain("geometry")
@@ -12828,6 +12826,7 @@ class MainWindow(QMainWindow):
             transformations=self.project.transformations,
             materials=self.project.materials,
             line=line,
+            mode="geometry",
             parent=self,
         )
         if not dialog.exec():
@@ -12866,9 +12865,69 @@ class MainWindow(QMainWindow):
             before,
         )
 
+    def _configure_line_mesh(
+        self,
+        tag: int,
+        *,
+        generate: bool = False,
+    ) -> bool:
+        line = self.project.lines.get(int(tag))
+        if line is None:
+            return False
+        state = inspect_line_mesh_state(self.project, tag)
+        had_live_mesh = bool(state.live_element_tags)
+
+        dialog = LineGeometryDialog(
+            next_tag=line.tag,
+            points=self.project.points,
+            sections=self._frame_sections(),
+            transformations=self.project.transformations,
+            materials=self.project.materials,
+            line=line,
+            mode="mesh",
+            parent=self,
+        )
+        if not dialog.exec():
+            return False
+
+        before = self.project.to_dict()
+        try:
+            updated = dialog.data()
+            self.project.update_line(tag, updated)
+            result = None
+            if had_live_mesh:
+                result = remesh_line_geometry(self.project, updated.tag)
+            elif generate:
+                result = mesh_line_geometry(self.project, updated.tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Configure Line Mesh", str(exc))
+            return False
+
+        self.model = self.project.model
+        message = f"Configured Mesh recipe for Line {updated.tag}"
+        if result is not None:
+            message += (
+                f" · {result.divisions} division(s) · "
+                f"{len(result.element_tags)} {updated.element_family} element(s)"
+            )
+        self._refresh_all(message)
+        self.viewport.set_display_domain("geometry")
+        self._show_line_geometry_properties(updated.tag)
+        self._record_project_change(
+            f"Configure Line {updated.tag} mesh",
+            before,
+        )
+        return True
+
     def _mesh_line_geometry(self, tag: int) -> None:
         line = self.project.lines.get(int(tag))
         if line is None:
+            return
+        if not line.mesh_recipe_configured:
+            self._configure_line_mesh(tag, generate=True)
             return
         before = self.project.to_dict()
         try:
@@ -13751,18 +13810,6 @@ class MainWindow(QMainWindow):
         self,
         point_tags: list[int] | tuple[int, ...] | None = None,
     ) -> int | None:
-        if not self._ensure_prerequisite(
-            title="New Surface",
-            message=(
-                "A Surface requires a shell-compatible Section. "
-                "Create one now?"
-            ),
-            action_label="Create Shell Section Now...",
-            available=lambda: bool(self._shell_sections()),
-            creator=self._create_shell_section,
-        ):
-            return None
-
         initial_points = None
         if point_tags is not None:
             tags = [int(tag) for tag in point_tags]
@@ -13799,9 +13846,8 @@ class MainWindow(QMainWindow):
                 if point_tags is None
                 else tuple(int(tag) for tag in point_tags)
             ),
-            preview_callback=(
-                self.viewport.show_surface_mesh_definition_preview
-            ),
+            preview_callback=None,
+            mode="geometry",
             parent=self,
         )
         if not dialog.exec():
@@ -13813,10 +13859,6 @@ class MainWindow(QMainWindow):
         try:
             surface = dialog.data()
             self.project.add_surface(surface)
-            result = mesh_surface_geometry(
-                self.project,
-                surface.tag,
-            )
         except (TypeError, ValueError) as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
@@ -13826,10 +13868,7 @@ class MainWindow(QMainWindow):
 
         self.model = self.project.model
         self._refresh_all(
-            f"Created Surface {surface.tag} · "
-            f"{result.divisions_u}×{result.divisions_v} · "
-            f"{len(result.element_tags)} Shell element(s) · "
-            f"{len(result.created_node_tags)} new node(s)"
+            f"Created Geometry Surface {surface.tag} · Mesh not configured"
         )
         self.selection.clear()
         self.viewport.set_display_domain("geometry")
@@ -13841,7 +13880,9 @@ class MainWindow(QMainWindow):
         return int(surface.tag)
 
     def _create_surface_geometry_and_mesh(self) -> None:
-        self._create_surface_geometry()
+        tag = self._create_surface_geometry()
+        if tag is not None:
+            self._configure_surface_mesh(tag, generate=True)
 
     def _edit_surface_geometry(self, tag: int) -> None:
         surface = self.project.surfaces.get(int(tag))
@@ -13855,9 +13896,8 @@ class MainWindow(QMainWindow):
             next_tag=surface.tag,
             sections=self._shell_sections(),
             surface=surface,
-            preview_callback=(
-                self.viewport.show_surface_mesh_definition_preview
-            ),
+            preview_callback=None,
+            mode="geometry",
             parent=self,
         )
         if not dialog.exec():
@@ -13891,26 +13931,84 @@ class MainWindow(QMainWindow):
             before,
         )
 
+    def _configure_surface_mesh(
+        self,
+        tag: int,
+        *,
+        generate: bool = False,
+    ) -> bool:
+        surface = self.project.surfaces.get(int(tag))
+        if surface is None:
+            return False
+        if not self._ensure_prerequisite(
+            title="Configure Surface Mesh",
+            message=(
+                "Surface Mesh requires a shell-compatible Section. "
+                "Create one now?"
+            ),
+            action_label="Create Shell Section Now...",
+            available=lambda: bool(self._shell_sections()),
+            creator=self._create_shell_section,
+        ):
+            return False
+
+        had_mesh = bool(
+            inspect_surface_mesh_state(self.project, int(tag)).live_element_tags
+        )
+        dialog = SurfaceGeometryDialog(
+            next_tag=surface.tag,
+            sections=self._shell_sections(),
+            surface=surface,
+            preview_callback=(
+                self.viewport.show_surface_mesh_definition_preview
+            ),
+            mode="mesh",
+            parent=self,
+        )
+        if not dialog.exec():
+            self.viewport.clear_surface_mesh_preview()
+            return False
+        self.viewport.clear_surface_mesh_preview(render=False)
+
+        before = self.project.to_dict()
+        try:
+            updated = dialog.data()
+            self.project.update_surface(tag, updated)
+            result = None
+            if had_mesh:
+                result = remesh_surface_geometry(self.project, updated.tag)
+            elif generate:
+                result = mesh_surface_geometry(self.project, updated.tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Configure Surface Mesh", str(exc))
+            return False
+
+        self.model = self.project.model
+        message = f"Configured Mesh recipe for Surface {updated.tag}"
+        if result is not None:
+            message += (
+                f" · {result.divisions_u}×{result.divisions_v} · "
+                f"{len(result.element_tags)} Shell element(s)"
+            )
+        self._refresh_all(message)
+        self.viewport.set_display_domain("geometry")
+        self._show_surface_geometry_properties(updated.tag)
+        self._record_project_change(
+            f"Configure Surface {updated.tag} mesh",
+            before,
+        )
+        return True
+
     def _mesh_surface_geometry(self, tag: int) -> None:
         surface = self.project.surfaces.get(int(tag))
         if surface is None:
             return
-        if surface.section_tag is None:
-            if not self._ensure_prerequisite(
-                title="Mesh Surface Geometry",
-                message=(
-                    "This Surface needs a Shell Section before meshing. "
-                    "Create one now?"
-                ),
-                action_label="Create Shell Section Now...",
-                available=lambda: bool(self._shell_sections()),
-                creator=self._create_shell_section,
-            ):
-                return
-            self._edit_surface_geometry(tag)
-            surface = self.project.surfaces.get(int(tag))
-            if surface is None or surface.section_tag is None:
-                return
+        if not surface.mesh_recipe_configured:
+            self._configure_surface_mesh(tag, generate=True)
+            return
 
         before = self.project.to_dict()
         try:
