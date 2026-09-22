@@ -876,6 +876,11 @@ def line_mesh_quality(
     if line is None:
         raise ValueError(f"Line geometry {tag} does not exist.")
 
+    if not line.mesh_recipe_configured:
+        raise ValueError(
+            f"Line geometry {tag} has no Mesh recipe yet."
+        )
+
     state = inspect_line_mesh_state(project, tag)
     lengths: list[float] = []
     if state.live_element_tags:
