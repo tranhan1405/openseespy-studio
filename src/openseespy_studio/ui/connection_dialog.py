@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from ..project import ConnectionData, MaterialData, SectionData
 from .material_chain_dialog import MaterialChainDialog
+from .material_dialog import MaterialDialog
 from .material_test_dialog import MaterialTestDialog
 from .section_dialog import SectionDialog
 
@@ -312,6 +313,7 @@ class ConnectionDialog(QDialog):
         self.material_combos: list[QComboBox] = []
         self.material_type_labels: list[QLabel] = []
         self.test_buttons: list[QPushButton] = []
+        self.new_material_buttons: list[QPushButton] = []
         self.chain_buttons: list[QPushButton] = []
 
         for dof, (label, meaning) in enumerate(self.DOF_LABELS, start=1):
@@ -329,6 +331,11 @@ class ConnectionDialog(QDialog):
             type_label.setStyleSheet("color: #526578;")
             test_button = QPushButton("Test...")
             test_button.setMaximumWidth(72)
+            new_material_button = QPushButton("New...")
+            new_material_button.setMaximumWidth(72)
+            new_material_button.setToolTip(
+                "Create a UniaxialMaterial here and assign it to this DOF."
+            )
             chain_button = QPushButton("Chain...")
             chain_button.setMaximumWidth(76)
             chain_button.setToolTip(
@@ -340,6 +347,7 @@ class ConnectionDialog(QDialog):
             row.addWidget(combo, 1)
             row.addWidget(type_label)
             row.addWidget(test_button)
+            row.addWidget(new_material_button)
             row.addWidget(chain_button)
 
             holder = QWidget()
@@ -353,6 +361,7 @@ class ConnectionDialog(QDialog):
             self.material_combos.append(combo)
             self.material_type_labels.append(type_label)
             self.test_buttons.append(test_button)
+            self.new_material_buttons.append(new_material_button)
             self.chain_buttons.append(chain_button)
 
             check.toggled.connect(
@@ -366,6 +375,10 @@ class ConnectionDialog(QDialog):
             )
             test_button.clicked.connect(
                 lambda _checked=False, index=dof - 1: self._test_dof_material(index)
+            )
+            new_material_button.clicked.connect(
+                lambda _checked=False, index=dof - 1:
+                self._create_dof_material(index)
             )
             chain_button.clicked.connect(
                 lambda _checked=False, index=dof - 1: self._build_dof_chain(index)
@@ -688,6 +701,49 @@ class ConnectionDialog(QDialog):
                 combo.setCurrentIndex(index)
             combo.blockSignals(False)
             self._sync_material_type(row)
+
+    def _create_dof_material(self, index: int) -> None:
+        next_tag = max(self.materials, default=0) + 1
+        dialog = MaterialDialog(
+            next_tag=next_tag,
+            units=self.units,
+            materials=self.materials,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        try:
+            dependencies = dialog.pending_materials()
+            material = dialog.material_data()
+            candidates = list(dependencies) + [material]
+            used = set(self.materials)
+            for candidate in candidates:
+                if candidate.tag in used:
+                    raise ValueError(
+                        f"Material tag {candidate.tag} already exists."
+                    )
+                used.add(candidate.tag)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Connection Material",
+                str(exc),
+            )
+            return
+
+        for candidate in candidates:
+            copied = MaterialData.from_dict(candidate.to_dict())
+            self.materials[copied.tag] = copied
+            self.pending_materials.append(copied)
+
+        self._refresh_material_combos(
+            select_row=index,
+            select_material_tag=material.tag,
+        )
+        self.dof_checks[index].setChecked(True)
+        self.connection_type.setCurrentText("zeroLength")
+        self._sync_material_type(index)
 
     def _build_dof_chain(self, index: int) -> None:
         label = self.DOF_LABELS[index][0]
@@ -1049,10 +1105,15 @@ class ConnectionDialog(QDialog):
             self.connection_type.currentText() != "zeroLengthSection"
             and not self.materials
         ):
-            QMessageBox.warning(
+            self.tabs.setCurrentIndex(self.dof_tab_index)
+            if self.new_material_buttons:
+                self.new_material_buttons[0].setFocus()
+            QMessageBox.information(
                 self,
                 "ZeroLength / Link Builder",
-                "Create at least one UniaxialMaterial first.",
+                "This connection needs a UniaxialMaterial. "
+                "Use New... beside the intended DOF to create and assign "
+                "one without leaving this builder.",
             )
             return
         try:
