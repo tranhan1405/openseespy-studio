@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .model import FRAME_ELEMENT_TYPES, SHELL_ELEMENT_TYPES, StructuralModel
+from .model import FRAME_ELEMENT_TYPES, SHELL_ELEMENT_TYPES, StructuralModel, Vec3
 from .result_catalog import result_choices_for_analysis
 from .section_response import validate_section_response_request
 from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
@@ -2732,6 +2732,182 @@ class SolutionResultData:
 
 
 @dataclass
+class SurfaceGeometryData:
+    tag: int
+    name: str
+    surface_type: str = "Quad"
+    points: tuple[Vec3, Vec3, Vec3, Vec3] = (
+        (0.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+        (1.0, 1.0, 0.0),
+        (0.0, 1.0, 0.0),
+    )
+    section_tag: int | None = None
+    formulation: str = "ASDShellQ4"
+    mesh_mode: str = "divisions"
+    divisions_u: int = 4
+    divisions_v: int = 4
+    target_size: float | None = None
+    reuse_existing_nodes: bool = True
+    conform_existing_edges: bool = True
+    generated_node_tags: list[int] = field(default_factory=list)
+    generated_element_tags: list[int] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.tag = _strict_int(self.tag, "Surface geometry tag")
+        if self.tag <= 0:
+            raise ValueError("Surface geometry tag must be positive.")
+        self.name = str(self.name).strip() or f"Surface {self.tag}"
+        self.surface_type = str(self.surface_type)
+        if self.surface_type not in {"Rectangle", "Quad"}:
+            raise ValueError(
+                f"Unsupported surface geometry type: {self.surface_type}"
+            )
+        if len(self.points) != 4:
+            raise ValueError("Surface geometry requires four corner points.")
+        normalized_points = []
+        for index, point in enumerate(self.points, start=1):
+            if len(point) != 3:
+                raise ValueError(
+                    f"Surface corner {index} requires X, Y, Z."
+                )
+            xyz = tuple(float(value) for value in point)
+            if any(not math.isfinite(value) for value in xyz):
+                raise ValueError(
+                    f"Surface corner {index} coordinates must be finite."
+                )
+            normalized_points.append(xyz)
+        self.points = tuple(normalized_points)  # type: ignore[assignment]
+
+        normal = [0.0, 0.0, 0.0]
+        for index, current in enumerate(self.points):
+            following = self.points[(index + 1) % 4]
+            normal[0] += (
+                (current[1] - following[1])
+                * (current[2] + following[2])
+            )
+            normal[1] += (
+                (current[2] - following[2])
+                * (current[0] + following[0])
+            )
+            normal[2] += (
+                (current[0] - following[0])
+                * (current[1] + following[1])
+            )
+        if math.sqrt(sum(value * value for value in normal)) <= 1.0e-12:
+            raise ValueError(
+                "Surface geometry has zero or near-zero boundary area."
+            )
+
+        if self.section_tag is not None:
+            self.section_tag = _strict_int(
+                self.section_tag,
+                "Surface geometry section tag",
+            )
+            if self.section_tag <= 0:
+                raise ValueError(
+                    "Surface geometry section tag must be positive."
+                )
+
+        self.formulation = str(self.formulation)
+        if self.formulation not in SHELL_ELEMENT_TYPES:
+            raise ValueError(
+                f"Unsupported shell formulation: {self.formulation}"
+            )
+
+        self.mesh_mode = str(self.mesh_mode)
+        if self.mesh_mode not in {"divisions", "target_size"}:
+            raise ValueError(
+                "Surface mesh mode must be 'divisions' or 'target_size'."
+            )
+        self.divisions_u = _strict_int(
+            self.divisions_u,
+            "Surface U divisions",
+        )
+        self.divisions_v = _strict_int(
+            self.divisions_v,
+            "Surface V divisions",
+        )
+        if not 1 <= self.divisions_u <= 500:
+            raise ValueError("Surface U divisions must be in 1..500.")
+        if not 1 <= self.divisions_v <= 500:
+            raise ValueError("Surface V divisions must be in 1..500.")
+
+        if self.target_size is not None:
+            self.target_size = float(self.target_size)
+            if (
+                not math.isfinite(self.target_size)
+                or self.target_size <= 0.0
+            ):
+                raise ValueError(
+                    "Surface target mesh size must be finite and positive."
+                )
+
+        self.reuse_existing_nodes = _strict_bool(
+            self.reuse_existing_nodes,
+            "Surface reuse existing nodes",
+        )
+        self.conform_existing_edges = _strict_bool(
+            self.conform_existing_edges,
+            "Surface conform existing edges",
+        )
+        if self.conform_existing_edges and not self.reuse_existing_nodes:
+            self.reuse_existing_nodes = True
+
+        self.generated_node_tags = sorted({
+            _strict_int(tag, "Surface generated node tag")
+            for tag in self.generated_node_tags
+        })
+        self.generated_element_tags = sorted({
+            _strict_int(tag, "Surface generated element tag")
+            for tag in self.generated_element_tags
+        })
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "surface_type": self.surface_type,
+            "points": [list(point) for point in self.points],
+            "section_tag": self.section_tag,
+            "formulation": self.formulation,
+            "mesh_mode": self.mesh_mode,
+            "divisions_u": self.divisions_u,
+            "divisions_v": self.divisions_v,
+            "target_size": self.target_size,
+            "reuse_existing_nodes": self.reuse_existing_nodes,
+            "conform_existing_edges": self.conform_existing_edges,
+            "generated_node_tags": list(self.generated_node_tags),
+            "generated_element_tags": list(self.generated_element_tags),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SurfaceGeometryData":
+        points = tuple(
+            tuple(float(value) for value in point)
+            for point in data.get("points", [])
+        )
+        return cls(
+            tag=data["tag"],
+            name=str(data.get("name", "")),
+            surface_type=str(data.get("surface_type", "Quad")),
+            points=points,  # type: ignore[arg-type]
+            section_tag=data.get("section_tag"),
+            formulation=str(data.get("formulation", "ASDShellQ4")),
+            mesh_mode=str(data.get("mesh_mode", "divisions")),
+            divisions_u=data.get("divisions_u", 4),
+            divisions_v=data.get("divisions_v", 4),
+            target_size=data.get("target_size"),
+            reuse_existing_nodes=data.get("reuse_existing_nodes", True),
+            conform_existing_edges=data.get("conform_existing_edges", True),
+            generated_node_tags=list(data.get("generated_node_tags", [])),
+            generated_element_tags=list(
+                data.get("generated_element_tags", [])
+            ),
+        )
+
+
+@dataclass
 class SelectionSetData:
     name: str
     node_tags: set[int] = field(default_factory=set)
@@ -2769,6 +2945,7 @@ class ProjectDatabase:
     name: str = "Untitled"
     model: StructuralModel = field(default_factory=StructuralModel)
     selection_sets: dict[str, SelectionSetData] = field(default_factory=dict)
+    surfaces: dict[int, SurfaceGeometryData] = field(default_factory=dict)
     materials: dict[int, MaterialData] = field(default_factory=dict)
     nd_materials: dict[int, NDMaterialData] = field(default_factory=dict)
 
@@ -2804,6 +2981,7 @@ class ProjectDatabase:
         preserved so a replacement geometry can reuse those definitions.
         """
         self.selection_sets.clear()
+        self.surfaces.clear()
         self.constraints.clear()
         self.connections.clear()
         self.time_series.clear()
@@ -3181,6 +3359,59 @@ class ProjectDatabase:
             "remapped_elements": sorted(remapped_elements),
         }
 
+
+    def next_surface_tag(self) -> int:
+        return max(self.surfaces, default=0) + 1
+
+    def add_surface(self, surface: SurfaceGeometryData) -> None:
+        if surface.tag in self.surfaces:
+            raise ValueError(
+                f"Surface geometry tag {surface.tag} already exists."
+            )
+        if (
+            surface.section_tag is not None
+            and surface.section_tag not in self.sections
+        ):
+            raise ValueError(
+                f"Surface geometry references missing Section "
+                f"{surface.section_tag}."
+            )
+        self.surfaces[surface.tag] = surface
+
+    def update_surface(
+        self,
+        original_tag: int,
+        surface: SurfaceGeometryData,
+    ) -> None:
+        original_tag = _strict_int(
+            original_tag,
+            "Surface geometry original tag",
+        )
+        if original_tag not in self.surfaces:
+            raise ValueError(
+                f"Surface geometry tag {original_tag} does not exist."
+            )
+        if (
+            surface.tag != original_tag
+            and surface.tag in self.surfaces
+        ):
+            raise ValueError(
+                f"Surface geometry tag {surface.tag} already exists."
+            )
+        if (
+            surface.section_tag is not None
+            and surface.section_tag not in self.sections
+        ):
+            raise ValueError(
+                f"Surface geometry references missing Section "
+                f"{surface.section_tag}."
+            )
+        self.surfaces.pop(original_tag)
+        self.surfaces[surface.tag] = surface
+
+    def remove_surface(self, tag: int) -> None:
+        tag = _strict_int(tag, "Surface geometry tag")
+        self.surfaces.pop(tag, None)
 
     @staticmethod
     def material_dependencies(material: MaterialData) -> list[int]:
@@ -6531,6 +6762,10 @@ class ProjectDatabase:
                 self.selection_sets[name].to_dict()
                 for name in sorted(self.selection_sets)
             ],
+            "surfaces": [
+                self.surfaces[tag].to_dict()
+                for tag in sorted(self.surfaces)
+            ],
             "materials": [
                 self.materials[tag].to_dict()
                 for tag in sorted(self.materials)
@@ -6593,6 +6828,22 @@ class ProjectDatabase:
             ],
             "active_analysis_tag": self.active_analysis_tag,
         }
+
+    @staticmethod
+    def _load_surfaces(raw: Any) -> dict[int, SurfaceGeometryData]:
+        result: dict[int, SurfaceGeometryData] = {}
+        for index, item in enumerate(
+            _require_list(raw, "Surface geometries")
+        ):
+            surface = SurfaceGeometryData.from_dict(
+                _require_object(item, f"Surface geometry item {index}")
+            )
+            if surface.tag in result:
+                raise ValueError(
+                    f"Duplicate surface geometry tag {surface.tag}."
+                )
+            result[surface.tag] = surface
+        return result
 
     @staticmethod
     def _load_materials(raw: Any) -> dict[int, MaterialData]:
@@ -6959,6 +7210,7 @@ class ProjectDatabase:
             name=str(data.get("name", "Untitled")),
             model=StructuralModel.from_dict(data.get("model", {})),
             selection_sets=selection_sets,
+            surfaces=cls._load_surfaces(data.get("surfaces", [])),
             materials=cls._load_materials(data.get("materials", [])),
             nd_materials=cls._load_nd_materials(
                 data.get("nd_materials", [])
