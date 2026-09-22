@@ -1820,6 +1820,7 @@ class MainWindow(QMainWindow):
         results_dock.setAllowedAreas(Qt.BottomDockWidgetArea)
         results_dock.setMinimumWidth(80)
         self.results_panel = ResultsPanel()
+        self.results_panel.set_units(self.project.units)
         self.results_panel.setMinimumWidth(0)
         self.results_panel.setSizePolicy(
             QSizePolicy.Ignored,
@@ -3703,6 +3704,7 @@ class MainWindow(QMainWindow):
             f"Connections: {len(self.project.connections)}"
         )
         units = self.project.units
+        self.results_panel.set_units(units)
         unit_system = UnitSystem.from_mapping(units)
         self.status_units.setText(
             f"Units: {unit_system.length}, {unit_system.force}, "
