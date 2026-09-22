@@ -15,6 +15,12 @@ _LIBRARY_RESOURCE = (
     "verified_library.json",
 )
 
+_DEFAULT_RUNTIME_SUPPORT = {
+    "stock_openseespy": True,
+    "status": "supported",
+    "note": "",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class MaterialLibraryRecord:
@@ -32,6 +38,7 @@ class MaterialLibraryRecord:
     primary_reference: dict[str, Any]
     parameter_evidence: dict[str, Any]
     verification: dict[str, Any]
+    runtime_support: dict[str, Any]
     response_quantity: str
     source_units: dict[str, str]
 
@@ -46,6 +53,16 @@ class MaterialLibraryRecord:
             and bool(self.verification.get("parameter_location_identified"))
             and bool(self.verification.get("units_checked"))
         )
+
+    @property
+    def is_runtime_supported(self) -> bool:
+        return bool(
+            self.runtime_support.get("stock_openseespy", True)
+        )
+
+    @property
+    def runtime_note(self) -> str:
+        return str(self.runtime_support.get("note", "")).strip()
 
     def source_metadata(self) -> dict[str, Any]:
         return {
@@ -63,6 +80,7 @@ class MaterialLibraryRecord:
             "applicability": list(self.applicability),
             "limitations": list(self.limitations),
             "verification": deepcopy(self.verification),
+            "runtime_support": deepcopy(self.runtime_support),
             "response_quantity": self.response_quantity,
             "source_units": deepcopy(self.source_units),
         }
@@ -97,6 +115,9 @@ def _record_from_dict(raw: dict[str, Any]) -> MaterialLibraryRecord:
     reference = dict(raw.get("primary_reference", {}))
     evidence = dict(raw.get("parameter_evidence", {}))
     verification = dict(raw.get("verification", {}))
+    runtime_support = dict(
+        raw.get("runtime_support", _DEFAULT_RUNTIME_SUPPORT)
+    )
     _validate_reference(reference, record_id)
 
     if str(verification.get("status", "")).lower() != "verified":
@@ -213,6 +234,7 @@ def _record_from_dict(raw: dict[str, Any]) -> MaterialLibraryRecord:
         primary_reference=reference,
         parameter_evidence=evidence,
         verification=verification,
+        runtime_support=runtime_support,
         response_quantity=response_quantity,
         source_units=source_units,
     )
@@ -242,6 +264,15 @@ def material_from_library_record(
     if not record.is_verified:
         raise ValueError(
             "Only verified library records can be added to a project."
+        )
+    if not record.is_runtime_supported:
+        detail = record.runtime_note or (
+            f"{record.model} is not available in the supported stock "
+            "OpenSeesPy runtime."
+        )
+        raise ValueError(
+            f"{record.model} is a reference-only library record and cannot "
+            f"be inserted into an executable project. {detail}"
         )
     if record.model in {"Fatigue", "MinMax"} and base_material_tag is None:
         raise ValueError(
