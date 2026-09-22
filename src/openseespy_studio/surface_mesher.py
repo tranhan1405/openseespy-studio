@@ -4,7 +4,9 @@ from dataclasses import dataclass, field
 import math
 
 from .project import (
+    NodalLoadData,
     ProjectDatabase,
+    SurfaceEdgeLoadData,
     SurfaceEdgeSupportData,
     SurfaceGeometryData,
 )
@@ -437,6 +439,180 @@ def remove_surface_edge_support(
     return changed
 
 
+def managed_surface_edge_load_nodal_tags(
+    project: ProjectDatabase,
+) -> set[int]:
+    return {
+        int(load_tag)
+        for edge_load in project.surface_edge_loads.values()
+        for load_tag in edge_load.generated_nodal_load_tags
+        if int(load_tag) in project.nodal_loads
+    }
+
+
+def detach_surface_edge_load(
+    project: ProjectDatabase,
+    edge_load_tag: int,
+) -> list[int]:
+    tag = int(edge_load_tag)
+    edge_load = project.surface_edge_loads.get(tag)
+    if edge_load is None:
+        raise ValueError(f"Surface edge load {tag} does not exist.")
+    removed: list[int] = []
+    for load_tag in list(edge_load.generated_nodal_load_tags):
+        normalized = int(load_tag)
+        if normalized in project.nodal_loads:
+            project.nodal_loads.pop(normalized)
+            removed.append(normalized)
+    edge_load.generated_nodal_load_tags = []
+    return removed
+
+
+def surface_edge_consistent_nodal_weights(
+    project: ProjectDatabase,
+    surface_tag: int,
+    edge_index: int,
+) -> tuple[list[int], list[float]]:
+    """Return ordered nodes and exact weights for a uniform line resultant."""
+    node_tags = surface_edge_node_tags(
+        project,
+        surface_tag,
+        edge_index,
+    )
+    if len(node_tags) < 2:
+        raise ValueError("Surface edge requires at least two FE nodes.")
+    weights = [0.0 for _ in node_tags]
+    for index in range(len(node_tags) - 1):
+        node_i = project.model.nodes[node_tags[index]]
+        node_j = project.model.nodes[node_tags[index + 1]]
+        length = math.sqrt(sum(
+            (
+                float(node_j.xyz[axis])
+                - float(node_i.xyz[axis])
+            ) ** 2
+            for axis in range(3)
+        ))
+        if not math.isfinite(length) or length <= 1.0e-12:
+            raise ValueError(
+                "Surface edge contains a zero-length FE segment."
+            )
+        contribution = 0.5 * length
+        weights[index] += contribution
+        weights[index + 1] += contribution
+    return list(node_tags), weights
+
+
+def sync_surface_edge_load(
+    project: ProjectDatabase,
+    edge_load_tag: int,
+) -> list[int]:
+    """Regenerate consistent equivalent nodal loads for one edge load."""
+    tag = int(edge_load_tag)
+    edge_load = project.surface_edge_loads.get(tag)
+    if edge_load is None:
+        raise ValueError(f"Surface edge load {tag} does not exist.")
+    if int(project.model.ndf) != 6:
+        raise ValueError(
+            "Managed Surface edge line loads require a 3D shell model "
+            "with ndf=6."
+        )
+    project._validate_surface_edge_load(edge_load)
+
+    before = project.to_dict()
+    try:
+        detach_surface_edge_load(project, tag)
+        node_tags, weights = surface_edge_consistent_nodal_weights(
+            project,
+            edge_load.surface_tag,
+            edge_load.edge_index,
+        )
+        next_tag = project.next_nodal_load_tag()
+        generated: list[int] = []
+        for node_tag, weight in zip(node_tags, weights):
+            while next_tag in project.nodal_loads:
+                next_tag += 1
+            values = tuple(
+                float(value) * float(weight)
+                for value in edge_load.values_per_length
+            )
+            load = NodalLoadData(
+                tag=next_tag,
+                name=(
+                    f"{edge_load.name} [managed S{edge_load.surface_tag}:"
+                    f"E{edge_load.edge_index}] Node {node_tag}"
+                ),
+                pattern_tag=edge_load.pattern_tag,
+                node_tag=node_tag,
+                values=values,
+            )
+            project.add_nodal_load(load)
+            generated.append(next_tag)
+            next_tag += 1
+        edge_load.generated_nodal_load_tags = generated
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+    return list(edge_load.generated_nodal_load_tags)
+
+
+def sync_surface_edge_loads_for_surface(
+    project: ProjectDatabase,
+    surface_tag: int,
+) -> list[int]:
+    load_tags = sorted(
+        edge_load.tag
+        for edge_load in project.surface_edge_loads.values()
+        if edge_load.surface_tag == int(surface_tag)
+    )
+    generated: list[int] = []
+    for load_tag in load_tags:
+        generated.extend(sync_surface_edge_load(project, load_tag))
+    return generated
+
+
+def replace_surface_edge_load(
+    project: ProjectDatabase,
+    edge_load: SurfaceEdgeLoadData,
+) -> list[int]:
+    existing = project.surface_edge_loads.get(int(edge_load.tag))
+    if existing is None:
+        raise ValueError(
+            f"Surface edge load {int(edge_load.tag)} does not exist."
+        )
+    before = project.to_dict()
+    try:
+        detach_surface_edge_load(project, existing.tag)
+        edge_load.generated_nodal_load_tags = []
+        project.update_surface_edge_load(existing.tag, edge_load)
+        return sync_surface_edge_load(project, edge_load.tag)
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+
+
+def remove_surface_edge_load(
+    project: ProjectDatabase,
+    edge_load_tag: int,
+) -> list[int]:
+    tag = int(edge_load_tag)
+    if tag not in project.surface_edge_loads:
+        raise ValueError(f"Surface edge load {tag} does not exist.")
+    before = project.to_dict()
+    try:
+        removed = detach_surface_edge_load(project, tag)
+        project.remove_surface_edge_load_definition(tag)
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+    return removed
+
+
 def mesh_surface_geometry(
     project: ProjectDatabase,
     surface_tag: int,
@@ -502,6 +678,7 @@ def mesh_surface_geometry(
         surface.divisions_u = mesh_result.divisions_u
         surface.divisions_v = mesh_result.divisions_v
         sync_surface_edge_supports_for_surface(project, surface.tag)
+        sync_surface_edge_loads_for_surface(project, surface.tag)
     except Exception:
         restored = ProjectDatabase.from_dict(before)
         project.__dict__.clear()
@@ -795,6 +972,14 @@ def delete_surface_mesh(
 
     before = project.to_dict()
     try:
+        edge_load_tags = sorted(
+            edge_load.tag
+            for edge_load in project.surface_edge_loads.values()
+            if edge_load.surface_tag == tag
+        )
+        for edge_load_tag in edge_load_tags:
+            detach_surface_edge_load(project, edge_load_tag)
+
         support_tags = sorted(
             support.tag
             for support in project.surface_edge_supports.values()
@@ -849,9 +1034,16 @@ def delete_surface_geometry(
             for support in project.surface_edge_supports.values()
             if support.surface_tag == tag
         )
+        edge_load_tags = sorted(
+            edge_load.tag
+            for edge_load in project.surface_edge_loads.values()
+            if edge_load.surface_tag == tag
+        )
         deleted = delete_surface_mesh(project, tag)
         for support_tag in support_tags:
             project.surface_edge_supports.pop(support_tag, None)
+        for edge_load_tag in edge_load_tags:
+            project.surface_edge_loads.pop(edge_load_tag, None)
         project.remove_surface(tag)
     except Exception:
         restored = ProjectDatabase.from_dict(before)
@@ -932,6 +1124,9 @@ def flip_surface_orientation(
         for support in project.surface_edge_supports.values():
             if support.surface_tag == tag:
                 support.edge_index = 5 - int(support.edge_index)
+        for edge_load in project.surface_edge_loads.values():
+            if edge_load.surface_tag == tag:
+                edge_load.edge_index = 5 - int(edge_load.edge_index)
 
         # Reversing winding with P1 fixed exchanges the Surface U/V
         # directions. Preserve the physical mapped-mesh recipe instead of
