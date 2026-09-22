@@ -2277,6 +2277,13 @@ class MainWindow(QMainWindow):
             "Prescr. Disp.",
         )
         self._make_action("beam_load", "Beam Load...", "load", self._create_element_load, "Create uniform, point, or self-weight beam load")
+        self._make_action(
+            "shell_pressure",
+            "Shell Pressure...",
+            "load",
+            self._create_shell_pressure,
+            "Create uniform pressure normal to selected shell surfaces",
+        )
         self._make_action("analysis_setup", "Analysis Setup...", "analysis", self._create_analysis, "Create analysis settings")
         self._make_action(
             "analysis_template",
@@ -2510,6 +2517,7 @@ class MainWindow(QMainWindow):
         loads_menu.addAction(self.actions["nodal_load"])
         loads_menu.addAction(self.actions["prescribed_displacement"])
         loads_menu.addAction(self.actions["beam_load"])
+        loads_menu.addAction(self.actions["shell_pressure"])
 
         template_menu = menus["Analysis"].addMenu("Analysis Wizard")
         template_menu.addAction(self.actions["modal_template"])
@@ -2915,6 +2923,7 @@ class MainWindow(QMainWindow):
                 "nodal_load",
                 "prescribed_displacement",
                 "beam_load",
+                "shell_pressure",
             ),
         )
         model_page.finish()
@@ -6867,6 +6876,11 @@ class MainWindow(QMainWindow):
             plain,
             load=load,
             units=self.project.units,
+            allowed_load_types=(
+                {"SurfacePressure"}
+                if load.load_type == "SurfacePressure"
+                else {"Uniform", "Point", "SelfWeight"}
+            ),
             parent=self,
         )
         if not dialog.exec():
@@ -7073,6 +7087,117 @@ class MainWindow(QMainWindow):
             rows,
         )
 
+    def _create_shell_pressure(self) -> None:
+        plain = self._plain_load_patterns()
+        if not plain:
+            if not self._ensure_plain_load_pattern(
+                title="Shell Surface Pressure"
+            ):
+                return
+            plain = self._plain_load_patterns()
+
+        selected = sorted(
+            int(tag)
+            for tag in self.selection.elements
+            if (
+                tag in self.model.elements
+                and self.model.elements[tag].element_type
+                in SHELL_ELEMENT_TYPES
+            )
+        )
+        if not selected:
+            existing = sorted(
+                int(tag)
+                for tag, element in self.model.elements.items()
+                if element.element_type in SHELL_ELEMENT_TYPES
+            )
+            if not existing:
+                if not self._ensure_prerequisite(
+                    title="Shell Surface Pressure",
+                    message=(
+                        "Surface pressure requires a Shell / Surface element. "
+                        "Create one now?"
+                    ),
+                    action_label="Create Shell Now...",
+                    available=lambda: any(
+                        element.element_type in SHELL_ELEMENT_TYPES
+                        for element in self.model.elements.values()
+                    ),
+                    creator=self._create_shell,
+                ):
+                    return
+                selected = sorted(
+                    int(tag)
+                    for tag in self.selection.elements
+                    if (
+                        tag in self.model.elements
+                        and self.model.elements[tag].element_type
+                        in SHELL_ELEMENT_TYPES
+                    )
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Shell Surface Pressure",
+                    "Select at least one Shell element first.",
+                )
+                return
+        if not selected:
+            return
+
+        dialog = ElementLoadDialog(
+            plain,
+            next_tag=self.project.next_element_load_tag(),
+            element_tag=selected[0],
+            units=self.project.units,
+            allowed_load_types={"SurfacePressure"},
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        template = dialog.data()
+        before = self.project.to_dict()
+        created: list[int] = []
+        next_tag = template.tag
+        try:
+            for element_tag in selected:
+                while next_tag in self.project.element_loads:
+                    next_tag += 1
+                load = ElementLoadData(
+                    tag=next_tag,
+                    name=(
+                        f"{template.name} - Shell {element_tag}"
+                        if len(selected) > 1
+                        else template.name
+                    ),
+                    pattern_tag=template.pattern_tag,
+                    element_tag=element_tag,
+                    load_type="SurfacePressure",
+                    pressure=template.pressure,
+                )
+                self.project.add_element_load(load)
+                created.append(load.tag)
+                next_tag += 1
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "Shell Surface Pressure",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+
+        self._refresh_project_metadata(
+            f"Created {len(created)} shell surface pressure load(s)"
+        )
+        self._record_project_change(
+            "Create shell surface pressure load(s)",
+            before,
+        )
+
     def _create_element_load(self) -> None:
         plain = self._plain_load_patterns()
         if not plain:
@@ -7096,6 +7221,7 @@ class MainWindow(QMainWindow):
             next_tag=self.project.next_element_load_tag(),
             element_tag=selected[0],
             units=self.project.units,
+            allowed_load_types={"Uniform", "Point", "SelfWeight"},
             parent=self,
         )
         if not dialog.exec():
@@ -7128,6 +7254,7 @@ class MainWindow(QMainWindow):
                     x_over_l=template.x_over_l,
                     gravity=template.gravity,
                     density_override=template.density_override,
+                    pressure=template.pressure,
                 )
                 self.project.add_element_load(load)
                 created.append(load.tag)
@@ -7224,6 +7351,22 @@ class MainWindow(QMainWindow):
                 ("Py", f"{load.py:g}"),
                 ("Pz", f"{load.pz:g}"),
                 ("x/L", f"{load.x_over_l:g}"),
+            ])
+        elif load.load_type == "SurfacePressure":
+            unit_system = UnitSystem.from_mapping(self.project.units)
+            rows.extend([
+                (
+                    f"Pressure [{unit_system.stress_label}]",
+                    f"{load.pressure:g}",
+                ),
+                (
+                    "Direction",
+                    "Shell normal: + outward / - inward",
+                ),
+                (
+                    "OpenSees",
+                    "SurfaceLoad + eleLoad -surfaceLoad",
+                ),
             ])
         else:
             rows.extend([
