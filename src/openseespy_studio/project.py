@@ -2855,6 +2855,21 @@ class ProjectDatabase:
                 + " and must remain an Elastic section."
             )
 
+        shell_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type in SHELL_ELEMENT_TYPES
+                and element.section_tag == original_tag
+            )
+        )
+        if shell_users and section.section_type not in SHELL_SECTION_TYPES:
+            raise ValueError(
+                f"Section {original_tag} is used by Shell element(s) "
+                + ", ".join(map(str, shell_users))
+                + " and must remain a shell-compatible section."
+            )
+
         self_weight_users = sorted(
             load.tag
             for load in self.element_loads.values()
