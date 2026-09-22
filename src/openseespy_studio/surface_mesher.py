@@ -50,6 +50,36 @@ class SurfaceConformityReport:
 
 
 @dataclass(slots=True)
+class SurfaceEdgeInfo:
+    surface_tag: int
+    edge_index: int
+    start_point: tuple[float, float, float]
+    end_point: tuple[float, float, float]
+    length: float
+    requested_divisions: int
+    live_node_tags: list[int] = field(default_factory=list)
+    actual_divisions: int = 0
+    neighbor_edges: list[tuple[int, int]] = field(default_factory=list)
+    connected_neighbor_edges: list[tuple[int, int]] = field(default_factory=list)
+
+    @property
+    def is_boundary(self) -> bool:
+        return not self.neighbor_edges
+
+    @property
+    def connectivity_status(self) -> str:
+        if not self.live_node_tags:
+            return "unmeshed"
+        if not self.neighbor_edges:
+            return "boundary"
+        if set(self.connected_neighbor_edges) == set(self.neighbor_edges):
+            return "shared"
+        if self.connected_neighbor_edges:
+            return "partially-shared"
+        return "disconnected"
+
+
+@dataclass(slots=True)
 class SurfaceMeshState:
     surface_tag: int
     status: str
@@ -888,6 +918,164 @@ def _live_surface_edge_nodes(
             continue
         unique.append((t, node_tag))
     return [node_tag for _t, node_tag in unique]
+
+
+def _surface_edge_record(
+    surface: SurfaceGeometryData,
+    edge_index: int,
+):
+    index = int(edge_index)
+    if index not in {1, 2, 3, 4}:
+        raise ValueError("Surface edge index must be 1, 2, 3, or 4.")
+    for start, end, divisions, candidate in _surface_edges(surface):
+        if candidate == index:
+            return start, end, int(divisions)
+    raise ValueError(f"Surface edge {index} does not exist.")
+
+
+def surface_edge_info(
+    project: ProjectDatabase,
+    surface_tag: int,
+    edge_index: int,
+    *,
+    tolerance: float | None = None,
+) -> SurfaceEdgeInfo:
+    """Resolve one geometry edge and its ordered live FE edge nodes."""
+    tag = int(surface_tag)
+    surface = project.surfaces.get(tag)
+    if surface is None:
+        raise ValueError(f"Surface geometry {tag} does not exist.")
+
+    start, end, requested = _surface_edge_record(surface, edge_index)
+    surfaces = list(project.surfaces.values())
+    tol = (
+        float(tolerance)
+        if tolerance is not None
+        else 1.0e-8 * _surface_span(project, surfaces)
+    )
+    if not math.isfinite(tol) or tol <= 0.0:
+        raise ValueError("Surface edge tolerance must be finite and positive.")
+
+    nodes = _live_surface_edge_nodes(
+        project,
+        surface,
+        start,
+        end,
+        tolerance=tol,
+    )
+    live_nodes = list(nodes or [])
+    actual = len(live_nodes) - 1 if len(live_nodes) >= 2 else 0
+
+    neighbors: list[tuple[int, int]] = []
+    connected: list[tuple[int, int]] = []
+    for other_tag, other in sorted(project.surfaces.items()):
+        if int(other_tag) == tag:
+            continue
+        for other_start, other_end, _divisions, other_edge in _surface_edges(
+            other
+        ):
+            if not _same_edge(start, end, other_start, other_end, tol):
+                continue
+            ref = (int(other_tag), int(other_edge))
+            neighbors.append(ref)
+            other_nodes = _live_surface_edge_nodes(
+                project,
+                other,
+                other_start,
+                other_end,
+                tolerance=tol,
+            )
+            if (
+                nodes is not None
+                and other_nodes is not None
+                and (
+                    nodes == other_nodes
+                    or nodes == list(reversed(other_nodes))
+                )
+            ):
+                connected.append(ref)
+
+    return SurfaceEdgeInfo(
+        surface_tag=tag,
+        edge_index=int(edge_index),
+        start_point=tuple(float(value) for value in start),
+        end_point=tuple(float(value) for value in end),
+        length=_distance3(start, end),
+        requested_divisions=requested,
+        live_node_tags=live_nodes,
+        actual_divisions=actual,
+        neighbor_edges=sorted(set(neighbors)),
+        connected_neighbor_edges=sorted(set(connected)),
+    )
+
+
+def surface_edge_node_tags(
+    project: ProjectDatabase,
+    surface_tag: int,
+    edge_index: int,
+) -> list[int]:
+    """Return ordered FE node tags along one meshed Surface edge."""
+    info = surface_edge_info(project, surface_tag, edge_index)
+    if len(info.live_node_tags) < 2:
+        raise ValueError(
+            f"Surface {int(surface_tag)} edge {int(edge_index)} has no "
+            "live FE edge nodes. Mesh the Surface first."
+        )
+    return list(info.live_node_tags)
+
+
+# Task 2: external boundary extraction for one or more selected Surfaces.
+def surface_boundary_edges(
+    project: ProjectDatabase,
+    surface_tags,
+) -> list[SurfaceEdgeInfo]:
+    tags = sorted({
+        int(tag)
+        for tag in surface_tags
+        if int(tag) in project.surfaces
+    })
+    selected = set(tags)
+    boundary: list[SurfaceEdgeInfo] = []
+    for tag in tags:
+        for edge_index in range(1, 5):
+            info = surface_edge_info(project, tag, edge_index)
+            if any(
+                neighbor_tag in selected
+                for neighbor_tag, _neighbor_edge in info.neighbor_edges
+            ):
+                continue
+            boundary.append(info)
+    return boundary
+
+
+def surface_boundary_node_tags(
+    project: ProjectDatabase,
+    surface_tags,
+) -> list[int]:
+    tags = sorted({
+        int(tag)
+        for tag in surface_tags
+        if int(tag) in project.surfaces
+    })
+    bad = [
+        tag
+        for tag in tags
+        if inspect_surface_mesh_state(project, tag).status != "meshed"
+    ]
+    if bad:
+        raise ValueError(
+            "Mesh the following Surface geometry before selecting its "
+            "boundary FE nodes: " + ", ".join(map(str, bad))
+        )
+
+    nodes: set[int] = set()
+    for info in surface_boundary_edges(project, tags):
+        nodes.update(info.live_node_tags)
+    if not nodes and tags:
+        raise ValueError(
+            "No live FE nodes were found on the selected Surface boundary."
+        )
+    return sorted(nodes)
 
 
 def audit_surface_conformity(

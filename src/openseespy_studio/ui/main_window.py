@@ -102,6 +102,10 @@ from ..surface_mesher import (
     mesh_surface_geometry,
     remesh_surface_geometry,
     inspect_surface_mesh_state,
+    surface_boundary_edges,
+    surface_boundary_node_tags,
+    surface_edge_info,
+    surface_edge_node_tags,
     surface_preview_divisions,
     surface_unit_normal,
 )
@@ -8367,6 +8371,174 @@ class MainWindow(QMainWindow):
             f"{len(report.stale_states)} stale"
         )
 
+    def _inspect_surface_edges(self, surface_tag: int) -> None:
+        tag = int(surface_tag)
+        surface = self.project.surfaces.get(tag)
+        if surface is None:
+            return
+
+        infos = [
+            surface_edge_info(self.project, tag, edge_index)
+            for edge_index in range(1, 5)
+        ]
+        unit_system = UnitSystem.from_mapping(self.project.units)
+        rows = [
+            ("Surface", f"{tag} - {surface.name}"),
+            ("Convention", "E1 P1→P2 · E2 P2→P3 · E3 P3→P4 · E4 P4→P1"),
+        ]
+        corner_labels = {
+            1: "P1→P2",
+            2: "P2→P3",
+            3: "P3→P4",
+            4: "P4→P1",
+        }
+        for info in infos:
+            adjacency = (
+                "Boundary"
+                if not info.neighbor_edges
+                else ", ".join(
+                    f"S{other}:E{edge}"
+                    for other, edge in info.neighbor_edges
+                )
+            )
+            nodes = (
+                ", ".join(map(str, info.live_node_tags))
+                if info.live_node_tags
+                else "Unmeshed"
+            )
+            rows.extend([
+                (
+                    f"E{info.edge_index} {corner_labels[info.edge_index]}",
+                    f"L={info.length:g} {unit_system.length} · "
+                    f"requested {info.requested_divisions} div · "
+                    f"live {info.actual_divisions} div · "
+                    f"{info.connectivity_status}",
+                ),
+                (f"E{info.edge_index} adjacency", adjacency),
+                (f"E{info.edge_index} FE nodes", nodes),
+            ])
+
+        self.viewport.show_surface_edge_preview(
+            [(tag, edge_index) for edge_index in range(1, 5)]
+        )
+        self.properties_panel.set_properties("Surface Edges", rows)
+        self.properties_dock.raise_()
+        self.status_message.setText(
+            f"Surface {tag}: inspected 4 geometry/FE edges"
+        )
+
+    def _select_surface_edge_nodes(self, surface_tag: int) -> None:
+        tag = int(surface_tag)
+        surface = self.project.surfaces.get(tag)
+        if surface is None:
+            return
+
+        infos = [
+            surface_edge_info(self.project, tag, edge_index)
+            for edge_index in range(1, 5)
+        ]
+        self.viewport.show_surface_edge_preview(
+            [(tag, edge_index) for edge_index in range(1, 5)]
+        )
+        labels = []
+        for info in infos:
+            shared = (
+                "boundary"
+                if not info.neighbor_edges
+                else "shared with " + ", ".join(
+                    f"S{other}:E{edge}"
+                    for other, edge in info.neighbor_edges
+                )
+            )
+            labels.append(
+                f"Edge {info.edge_index} · {len(info.live_node_tags)} node(s) · "
+                f"{shared}"
+            )
+
+        label, ok = QInputDialog.getItem(
+            self,
+            "Select Surface Edge FE Nodes",
+            f"Surface {tag} edge:",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            self.viewport.clear_surface_edge_preview()
+            return
+        edge_index = labels.index(label) + 1
+        try:
+            node_tags = surface_edge_node_tags(
+                self.project,
+                tag,
+                edge_index,
+            )
+        except ValueError as exc:
+            self.viewport.clear_surface_edge_preview()
+            QMessageBox.warning(
+                self,
+                "Select Surface Edge FE Nodes",
+                str(exc),
+            )
+            return
+
+        self.viewport.clear_surface_edge_preview(render=False)
+        self.viewport.set_display_domain("fe")
+        self.selection.set_selection(nodes=set(node_tags))
+        self.status_message.setText(
+            f"Surface {tag} Edge {edge_index}: selected "
+            f"{len(node_tags)} ordered FE node(s)"
+        )
+
+    def _preview_surface_boundary_edges(self, surface_tags) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self.project.surfaces
+        })
+        if not tags:
+            return
+        edges = surface_boundary_edges(self.project, tags)
+        self.viewport.show_surface_edge_preview([
+            (info.surface_tag, info.edge_index)
+            for info in edges
+        ])
+        self.status_message.setText(
+            f"Previewing {len(edges)} outer boundary edge(s) for "
+            f"{len(tags)} Surface(s)"
+        )
+
+    def _select_surface_boundary_nodes(self, surface_tags) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self.project.surfaces
+        })
+        if not tags:
+            return
+        try:
+            edges = surface_boundary_edges(self.project, tags)
+            node_tags = surface_boundary_node_tags(self.project, tags)
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Select Surface Boundary FE Nodes",
+                str(exc),
+            )
+            return
+
+        self.viewport.clear_surface_edge_preview(render=False)
+        self.viewport.set_display_domain("fe")
+        self.selection.set_selection(nodes=set(node_tags))
+        self.status_message.setText(
+            f"Selected {len(node_tags)} FE node(s) on "
+            f"{len(edges)} outer Surface boundary edge(s)"
+        )
+
+    def _clear_surface_edge_preview(self) -> None:
+        self.viewport.clear_surface_edge_preview()
+        self.status_message.setText("Surface edge preview cleared")
+
     def _create_surface_pressure_for_surfaces(
         self,
         surface_tags,
@@ -16319,6 +16491,45 @@ class MainWindow(QMainWindow):
             clear_preview.triggered.connect(
                 self._clear_surface_mesh_preview
             )
+
+            if count == 1:
+                inspect_edges = menu.addAction(
+                    "Inspect / Preview Surface Edges"
+                )
+                inspect_edges.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._inspect_surface_edges(t)
+                )
+                select_edge_nodes = menu.addAction(
+                    "Select Edge FE Nodes..."
+                )
+                select_edge_nodes.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._select_surface_edge_nodes(t)
+                )
+            preview_boundary = menu.addAction(
+                "Preview Outer Boundary"
+                if count == 1
+                else f"Preview Outer Boundary ({count} Surfaces)"
+            )
+            preview_boundary.triggered.connect(
+                lambda checked=False, tags=tuple(surface_tags):
+                self._preview_surface_boundary_edges(tags)
+            )
+            select_boundary_nodes = menu.addAction(
+                "Select Outer Boundary FE Nodes"
+                if count == 1
+                else f"Select Outer Boundary FE Nodes ({count} Surfaces)"
+            )
+            select_boundary_nodes.triggered.connect(
+                lambda checked=False, tags=tuple(surface_tags):
+                self._select_surface_boundary_nodes(tags)
+            )
+            clear_edge_preview = menu.addAction("Clear Edge Preview")
+            clear_edge_preview.triggered.connect(
+                self._clear_surface_edge_preview
+            )
+
             integrity = menu.addAction("Audit Mesh Integrity")
             integrity.triggered.connect(
                 lambda checked=False, tags=tuple(surface_tags):

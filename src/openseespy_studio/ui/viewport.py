@@ -129,6 +129,7 @@ class ModelViewport(QWidget):
         self._surface_quality_metric: str | None = None
         self._surface_pressure_preview_tags: set[int] = set()
         self._surface_pressure_preview_value: float | None = None
+        self._surface_edge_preview_refs: set[tuple[int, int]] = set()
         self._element_actor_data: dict[str, tuple[object, np.ndarray]] = {}
         self._annotation_label_actors: dict[str, object] = {}
         self._undeformed_element_actors: list[object] = []
@@ -2105,6 +2106,95 @@ class ModelViewport(QWidget):
                 always_visible=True,
             )
 
+    def show_surface_edge_preview(self, edge_refs) -> None:
+        refs: set[tuple[int, int]] = set()
+        for surface_tag, edge_index in edge_refs:
+            tag = int(surface_tag)
+            edge = int(edge_index)
+            if tag not in self._surfaces:
+                continue
+            if edge not in {1, 2, 3, 4}:
+                raise ValueError(
+                    "Surface edge preview index must be 1, 2, 3, or 4."
+                )
+            refs.add((tag, edge))
+        self._surface_edge_preview_refs = refs
+        if self._display_domain != "geometry":
+            self.set_display_domain("geometry")
+            return
+        self._render_model(reset_camera=False)
+
+    def clear_surface_edge_preview(
+        self,
+        *,
+        render: bool = True,
+    ) -> None:
+        self._surface_edge_preview_refs.clear()
+        self._remove_overlay("surface-edge-preview")
+        self._remove_overlay("surface-edge-preview-labels")
+        if render:
+            self.plotter.render()
+
+    def _render_surface_edge_preview(self) -> None:
+        self._remove_overlay("surface-edge-preview")
+        self._remove_overlay("surface-edge-preview-labels")
+        if (
+            self._display_domain != "geometry"
+            or not self._surface_edge_preview_refs
+        ):
+            return
+
+        points: list[tuple[float, float, float]] = []
+        lines: list[int] = []
+        label_points = []
+        label_texts = []
+        for surface_tag, edge_index in sorted(
+            self._surface_edge_preview_refs
+        ):
+            surface = self._surfaces.get(surface_tag)
+            if surface is None:
+                continue
+            p = surface.points
+            edge_points = {
+                1: (p[0], p[1]),
+                2: (p[1], p[2]),
+                3: (p[2], p[3]),
+                4: (p[3], p[0]),
+            }
+            start, end = edge_points[edge_index]
+            base = len(points)
+            points.extend((start, end))
+            lines.extend((2, base, base + 1))
+            label_points.append(
+                tuple(
+                    0.5 * (float(start[i]) + float(end[i]))
+                    for i in range(3)
+                )
+            )
+            label_texts.append(f"S{surface_tag}:E{edge_index}")
+
+        if points:
+            mesh = pv.PolyData(np.asarray(points, dtype=float))
+            mesh.lines = np.asarray(lines, dtype=np.int64)
+            self.plotter.add_mesh(
+                mesh,
+                name="surface-edge-preview",
+                color="#ff7f0e",
+                line_width=5.0,
+                render_lines_as_tubes=False,
+                pickable=False,
+                render=False,
+            )
+        if label_points:
+            self._add_annotation_labels(
+                label_points,
+                label_texts,
+                name="surface-edge-preview-labels",
+                text_color="#9a4d00",
+                font_size=11,
+                always_visible=True,
+            )
+
     def set_geometry_mesh_overlay_visible(
         self,
         visible: bool,
@@ -2438,6 +2528,7 @@ class ModelViewport(QWidget):
             self._update_highlight_overlays(render=False)
             self._render_surface_quality_overlay()
             self._render_surface_pressure_preview()
+            self._render_surface_edge_preview()
             self._render_surface_orientation_overlays()
             self.set_view(self._current_view, render=False)
             if reset_camera:
