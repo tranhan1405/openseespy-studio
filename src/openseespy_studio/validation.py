@@ -66,6 +66,88 @@ def _format_vector(values: tuple[float, float, float]) -> str:
     return "(" + ", ".join(f"{value:g}" for value in values) + ")"
 
 
+def _shell_quad_ordering_issue(
+    points: list[tuple[float, float, float]],
+) -> str | None:
+    """Return a concise shell-boundary issue for an invalid quadrilateral."""
+    normal = [0.0, 0.0, 0.0]
+    for index in range(4):
+        current = points[index]
+        following = points[(index + 1) % 4]
+        normal[0] += (
+            (current[1] - following[1])
+            * (current[2] + following[2])
+        )
+        normal[1] += (
+            (current[2] - following[2])
+            * (current[0] + following[0])
+        )
+        normal[2] += (
+            (current[0] - following[0])
+            * (current[1] + following[1])
+        )
+    if sum(value * value for value in normal) <= 1.0e-24:
+        return "crossed or degenerate quadrilateral boundary"
+
+    drop_axis = max(range(3), key=lambda axis: abs(normal[axis]))
+    projected = [
+        tuple(
+            point[axis]
+            for axis in range(3)
+            if axis != drop_axis
+        )
+        for point in points
+    ]
+
+    def orient2d(a, b, c) -> float:
+        return (
+            (b[0] - a[0]) * (c[1] - a[1])
+            - (b[1] - a[1]) * (c[0] - a[0])
+        )
+
+    def proper_intersection(a, b, c, d) -> bool:
+        o1 = orient2d(a, b, c)
+        o2 = orient2d(a, b, d)
+        o3 = orient2d(c, d, a)
+        o4 = orient2d(c, d, b)
+        scale = max(abs(o1), abs(o2), abs(o3), abs(o4), 1.0)
+        tol = 1.0e-12 * scale
+        return (
+            o1 * o2 < -(tol * tol)
+            and o3 * o4 < -(tol * tol)
+        )
+
+    if (
+        proper_intersection(
+            projected[0], projected[1],
+            projected[2], projected[3],
+        )
+        or proper_intersection(
+            projected[1], projected[2],
+            projected[3], projected[0],
+        )
+    ):
+        return "self-intersecting quadrilateral boundary"
+
+    turns = [
+        orient2d(
+            projected[index],
+            projected[(index + 1) % 4],
+            projected[(index + 2) % 4],
+        )
+        for index in range(4)
+    ]
+    turn_scale = max(max(abs(value) for value in turns), 1.0)
+    meaningful = [
+        value
+        for value in turns
+        if abs(value) > 1.0e-12 * turn_scale
+    ]
+    if meaningful and min(meaningful) < 0.0 < max(meaningful):
+        return "concave quadrilateral boundary"
+    return None
+
+
 def _element_geometry_checks(
     project: ProjectDatabase,
     issues: list[ValidationIssue],
@@ -191,6 +273,20 @@ def _element_geometry_checks(
                         "element",
                         tag,
                         "Reorder or move the four shell nodes.",
+                    )
+                )
+
+            ordering_issue = _shell_quad_ordering_issue(points)
+            if ordering_issue is not None:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Shell geometry",
+                        f"Shell element {tag} has {ordering_issue}.",
+                        "element",
+                        tag,
+                        "Order nodes around a convex shell boundary "
+                        "clockwise or counter-clockwise.",
                     )
                 )
 
