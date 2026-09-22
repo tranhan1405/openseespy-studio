@@ -2777,6 +2777,7 @@ class LineGeometryData:
     name: str
     point_i: int
     point_j: int
+    mesh_recipe_configured: bool = True
     mesh_mode: str = "divisions"
     divisions: int = 1
     target_size: float | None = None
@@ -2807,6 +2808,10 @@ class LineGeometryData:
         if self.point_i == self.point_j:
             raise ValueError("Geometry Line requires two different Points.")
 
+        self.mesh_recipe_configured = _strict_bool(
+            self.mesh_recipe_configured,
+            "Line mesh recipe configured",
+        )
         self.mesh_mode = str(self.mesh_mode)
         if self.mesh_mode not in {"divisions", "target_size"}:
             raise ValueError(
@@ -2912,6 +2917,7 @@ class LineGeometryData:
             "name": self.name,
             "point_i": self.point_i,
             "point_j": self.point_j,
+            "mesh_recipe_configured": self.mesh_recipe_configured,
             "mesh_mode": self.mesh_mode,
             "divisions": self.divisions,
             "target_size": self.target_size,
@@ -2940,6 +2946,7 @@ class LineGeometryData:
             name=str(data.get("name", "")),
             point_i=data["point_i"],
             point_j=data["point_j"],
+            mesh_recipe_configured=data.get("mesh_recipe_configured", True),
             mesh_mode=str(data.get("mesh_mode", "divisions")),
             divisions=data.get("divisions", 1),
             target_size=data.get("target_size"),
@@ -2982,6 +2989,7 @@ class SurfaceGeometryData:
         (1.0, 1.0, 0.0),
         (0.0, 1.0, 0.0),
     )
+    mesh_recipe_configured: bool = True
     section_tag: int | None = None
     formulation: str = "ASDShellQ4"
     corner_point_tags: tuple[int, int, int, int] | None = None
@@ -3032,6 +3040,10 @@ class SurfaceGeometryData:
                 )
             normalized_points.append(xyz)
         self.points = tuple(normalized_points)  # type: ignore[assignment]
+        self.mesh_recipe_configured = _strict_bool(
+            self.mesh_recipe_configured,
+            "Surface mesh recipe configured",
+        )
 
         normal = [0.0, 0.0, 0.0]
         for index, current in enumerate(self.points):
@@ -3239,6 +3251,7 @@ class SurfaceGeometryData:
             "name": self.name,
             "surface_type": self.surface_type,
             "points": [list(point) for point in self.points],
+            "mesh_recipe_configured": self.mesh_recipe_configured,
             "section_tag": self.section_tag,
             "formulation": self.formulation,
             "corner_point_tags": (
@@ -4429,6 +4442,8 @@ class ProjectDatabase:
                 "Geometry Line references missing Point(s): "
                 + ", ".join(map(str, missing))
             )
+        if not line.mesh_recipe_configured:
+            return
         if line.element_family == "Frame":
             if (
                 line.section_tag is None
@@ -4499,22 +4514,21 @@ class ProjectDatabase:
         self,
         surface: SurfaceGeometryData,
     ) -> None:
-        if (
-            surface.section_tag is not None
-            and surface.section_tag not in self.sections
-        ):
-            raise ValueError(
-                f"Surface geometry references missing Section "
-                f"{surface.section_tag}."
-            )
-        if (
-            surface.section_tag is not None
-            and self.sections[surface.section_tag].section_type
-            not in SHELL_SECTION_TYPES
-        ):
-            raise ValueError(
-                "Surface geometry requires a shell-compatible Section."
-            )
+        if surface.mesh_recipe_configured:
+            if (
+                surface.section_tag is None
+                or surface.section_tag not in self.sections
+            ):
+                raise ValueError(
+                    "Meshed Surface recipe requires an existing Shell Section."
+                )
+            if (
+                self.sections[surface.section_tag].section_type
+                not in SHELL_SECTION_TYPES
+            ):
+                raise ValueError(
+                    "Surface geometry requires a shell-compatible Section."
+                )
         if surface.corner_point_tags is not None:
             missing = [
                 tag
