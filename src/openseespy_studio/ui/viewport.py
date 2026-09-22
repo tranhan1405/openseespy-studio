@@ -397,50 +397,76 @@ class ModelViewport(QWidget):
         y: int,
     ) -> tuple[float, float, float] | None:
         renderer = self.plotter.renderer
+        plane = self._geometry_sketch_plane
+        offset = float(self._geometry_sketch_plane_offset)
+        axis = {"xy": 2, "xz": 1, "yz": 0}[plane]
 
-        def display_world(depth: float) -> np.ndarray | None:
-            renderer.SetDisplayPoint(float(x), float(y), float(depth))
-            renderer.DisplayToWorld()
-            value = renderer.GetWorldPoint()
-            if value is None or abs(float(value[3])) <= 1.0e-15:
+        def normalized_world(value) -> np.ndarray | None:
+            if value is None or len(value) < 4:
                 return None
-            return np.asarray(
+            w = float(value[3])
+            if not math.isfinite(w) or abs(w) <= 1.0e-15:
+                return None
+            point = np.asarray(
                 [
-                    float(value[0]) / float(value[3]),
-                    float(value[1]) / float(value[3]),
-                    float(value[2]) / float(value[3]),
+                    float(value[0]) / w,
+                    float(value[1]) / w,
+                    float(value[2]) / w,
                 ],
                 dtype=float,
             )
+            if not np.all(np.isfinite(point)):
+                return None
+            return point
+
+        # In a matching orthographic view, every point on the sketch plane
+        # has the same display depth. Unproject the mouse pixel at that exact
+        # depth instead of relying on the current camera clipping interval.
+        # This is the stable CAD-style path used by Draw Line/Rectangle.
+        if self._current_view == plane:
+            reference = [0.0, 0.0, 0.0]
+            reference[axis] = offset
+            renderer.SetWorldPoint(
+                float(reference[0]),
+                float(reference[1]),
+                float(reference[2]),
+                1.0,
+            )
+            renderer.WorldToDisplay()
+            display = renderer.GetDisplayPoint()
+            if display is not None and len(display) >= 3:
+                depth = float(display[2])
+                if math.isfinite(depth):
+                    renderer.SetDisplayPoint(float(x), float(y), depth)
+                    renderer.DisplayToWorld()
+                    point = normalized_world(renderer.GetWorldPoint())
+                    if point is not None:
+                        point[axis] = offset
+                        return tuple(float(value) for value in point)
+
+        # Perspective/ISO fallback: intersect the camera ray with the active
+        # workplane. The plane may legitimately lie beyond the current far
+        # clip, so only intersections behind the ray origin are rejected.
+        def display_world(depth: float) -> np.ndarray | None:
+            renderer.SetDisplayPoint(float(x), float(y), float(depth))
+            renderer.DisplayToWorld()
+            return normalized_world(renderer.GetWorldPoint())
 
         near = display_world(0.0)
         far = display_world(1.0)
         if near is None or far is None:
             return None
-        if not np.all(np.isfinite(near)) or not np.all(np.isfinite(far)):
-            return None
         direction = far - near
         if not np.all(np.isfinite(direction)):
             return None
-        axis = {"xy": 2, "xz": 1, "yz": 0}[
-            self._geometry_sketch_plane
-        ]
         denominator = float(direction[axis])
         if not math.isfinite(denominator) or abs(denominator) <= 1.0e-14:
             return None
-        t = (
-            float(self._geometry_sketch_plane_offset)
-            - float(near[axis])
-        ) / denominator
-        # Display depth 0..1 only defines two points on the camera ray.
-        # The active sketch plane may legitimately lie beyond the current far
-        # clipping plane (especially in an empty/new Geometry scene), so do
-        # not reject t > 1.  Reject only intersections behind the near-point
-        # ray direction.
+        t = (offset - float(near[axis])) / denominator
         if not math.isfinite(t) or t < -1.0e-6:
             return None
         point = near + t * direction
-        point[axis] = float(self._geometry_sketch_plane_offset)
+        point[axis] = offset
         if not np.all(np.isfinite(point)):
             return None
         return tuple(float(value) for value in point)
