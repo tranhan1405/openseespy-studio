@@ -1426,7 +1426,7 @@ class _Importer:
             marker_indices = [
                 index
                 for index, value in enumerate(rest)
-                if value in {"section", "fiber"} and index >= ele_index
+                if value in {"section", "fiber", "material"} and index >= ele_index
             ]
             target_end = (
                 min(marker_indices)
@@ -1436,7 +1436,44 @@ class _Importer:
             targets = [int(v) for v in rest[ele_index:target_end]]
             response = str(rest[-1])
 
-            if "fiber" in rest:
+            if "material" in rest and "fiber" not in rest:
+                material_index = rest.index("material")
+                gp = int(rest[material_index + 1])
+                shell_targets = [
+                    tag
+                    for tag in targets
+                    if (
+                        tag in self.project.model.elements
+                        and self.project.model.elements[tag].element_type
+                        in {
+                            "ASDShellQ4",
+                            "ShellMITC4",
+                            "ShellDKGQ",
+                            "ShellNLDKGQ",
+                        }
+                    )
+                ]
+                if len(shell_targets) != len(targets):
+                    self.issue(
+                        "UNSUPPORTED",
+                        node,
+                        "Element material recorder",
+                        "Studio currently imports material-point recorders "
+                        "as Shell recorders only when every target is a "
+                        "supported Shell element.",
+                    )
+                    return
+                item = RecorderData(
+                    self._next_recorder,
+                    f"Imported Shell recorder {self._next_recorder}",
+                    "Shell",
+                    target_tags=targets,
+                    response=response,
+                    file_name=file_name,
+                    include_time=include_time,
+                    section_number=gp,
+                )
+            elif "fiber" in rest:
                 section_index = rest.index("section")
                 fiber_flag = rest.index("fiber")
                 selector = list(rest[fiber_flag + 1:-1])
