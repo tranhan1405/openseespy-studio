@@ -53,10 +53,6 @@ class HingeBackboneDialog(QDialog):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QScrollArea.NoFrame)
-        self.scroll.setHorizontalScrollBarPolicy(
-            self.scroll.horizontalScrollBarPolicy().ScrollBarAlwaysOff
-        )
-
         body = QWidget()
         content = QVBoxLayout(body)
         content.setContentsMargins(4, 4, 4, 4)
