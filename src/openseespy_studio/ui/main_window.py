@@ -5348,6 +5348,35 @@ class MainWindow(QMainWindow):
         plane, _offset = self.viewport.geometry_sketch_plane()
         return str(plane).strip().lower()
 
+    def _prepare_geometry_sketch_view(
+        self,
+        plane: str,
+        offset: float,
+    ) -> None:
+        """Make the active workplane visible and directly sketchable."""
+        normalized = str(plane).strip().lower()
+        self.viewport.set_geometry_sketch_plane(normalized, float(offset))
+
+        # A blank ISO viewport is ambiguous for 2D sketching and can leave the
+        # camera clipping range unrelated to the workplane. Enter the matching
+        # orthographic view first; users can switch back to ISO afterwards.
+        if self.viewport.current_view().lower() == "iso":
+            self.viewport.set_view(normalized, render=False)
+
+        grid_action = self.actions.get("geometry_grid")
+        if grid_action is not None:
+            grid_action.setChecked(True)
+        self.viewport.set_geometry_sketch_grid_visible(True)
+
+        # With no geometry yet, fit to the newly-created sketch grid so the
+        # workplane establishes a sane camera/clipping range before click #1.
+        if (
+            not self.project.points
+            and not self.project.lines
+            and not self.project.surfaces
+        ):
+            self.viewport.fit_view()
+
     def _geometry_sketch_tool_active(self) -> bool:
         return bool(
             self.viewport.interaction_tool() == "geometry_sketch"
@@ -5435,7 +5464,7 @@ class MainWindow(QMainWindow):
             and str(current_plane).strip().lower() == plane
             else 0.0
         )
-        self.viewport.set_geometry_sketch_plane(plane, plane_offset)
+        self._prepare_geometry_sketch_view(plane, plane_offset)
         self.viewport.set_interaction_tool("geometry_sketch")
         self.actions["select"].setChecked(False)
         self.actions["box"].setChecked(False)
@@ -5476,7 +5505,7 @@ class MainWindow(QMainWindow):
             and str(current_plane).strip().lower() == plane
             else 0.0
         )
-        self.viewport.set_geometry_sketch_plane(plane, plane_offset)
+        self._prepare_geometry_sketch_view(plane, plane_offset)
         self.viewport.set_interaction_tool("geometry_sketch")
         self.actions["select"].setChecked(False)
         self.actions["box"].setChecked(False)
