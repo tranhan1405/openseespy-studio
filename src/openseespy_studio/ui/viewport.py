@@ -65,6 +65,7 @@ class ModelViewport(QWidget):
     box_selected = Signal(object)
     geometry_sketch_moved = Signal(object)
     geometry_sketch_finished = Signal()
+    view_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -265,7 +266,9 @@ class ModelViewport(QWidget):
             button.setCheckable(True)
             button.setProperty("view_name", view)
             button.setMinimumHeight(27)
-            button.clicked.connect(lambda checked=False, v=view: self.set_view(v))
+            button.clicked.connect(
+                lambda checked=False, v=view: self.view_requested.emit(v)
+            )
             self.view_group.addButton(button)
             views.addWidget(button)
             if view == "iso":
@@ -277,7 +280,7 @@ class ModelViewport(QWidget):
         tools = QHBoxLayout()
         tools.setSpacing(3)
         for icon, tip, callback in (
-            ("iso", "Orientation cube", lambda: self.set_view("iso")),
+            ("iso", "Orientation cube", lambda: self.view_requested.emit("iso")),
             ("box", "Fit selection", self.fit_view),
             ("display", "Display options", self._noop),
             ("fullscreen", "Toggle fullscreen", self._toggle_fullscreen),
