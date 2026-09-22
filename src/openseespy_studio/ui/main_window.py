@@ -15059,9 +15059,17 @@ class MainWindow(QMainWindow):
         if kind == "geometry_root":
             point_action = menu.addAction("New Point...")
             point_action.triggered.connect(self._create_point_geometry)
-            line_action = menu.addAction("New Line...")
+            line_pick = menu.addAction("New Line by Picking...")
+            line_pick.triggered.connect(
+                self._activate_geometry_line_pick_tool
+            )
+            line_action = menu.addAction("New Line by Input...")
             line_action.triggered.connect(self._create_line_geometry)
-            surface_action = menu.addAction("New Surface...")
+            surface_pick = menu.addAction("New Surface by Picking...")
+            surface_pick.triggered.connect(
+                self._activate_geometry_surface_pick_tool
+            )
+            surface_action = menu.addAction("New Surface by Input...")
             surface_action.triggered.connect(self._create_surface_geometry)
             menu.addSeparator()
             quick_column = menu.addAction("Generate 1D Test Specimen...")
@@ -15107,7 +15115,11 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "lines_root":
-            create = menu.addAction("New Line...")
+            create_pick = menu.addAction("New Line by Picking...")
+            create_pick.triggered.connect(
+                self._activate_geometry_line_pick_tool
+            )
+            create = menu.addAction("New Line by Input...")
             create.triggered.connect(self._create_line_geometry)
             exec_menu()
             return
@@ -15169,7 +15181,11 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "surfaces_root":
-            create_geometry = menu.addAction("New Surface...")
+            create_pick = menu.addAction("New Surface by Picking...")
+            create_pick.triggered.connect(
+                self._activate_geometry_surface_pick_tool
+            )
+            create_geometry = menu.addAction("New Surface by Input...")
             create_geometry.triggered.connect(self._create_surface_geometry)
             stitch = menu.addAction("Stitch Coincident Shell Nodes...")
             stitch.triggered.connect(self._stitch_coincident_shell_nodes)
