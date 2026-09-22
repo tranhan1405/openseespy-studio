@@ -94,10 +94,12 @@ from ..result_catalog import (
 )
 from ..shell_mesh import build_shell_mesh
 from ..surface_mesher import (
+    audit_surface_conformity,
     delete_surface_mesh,
     flip_surface_orientation,
     mesh_surface_geometry,
     remesh_surface_geometry,
+    surface_preview_divisions,
     surface_unit_normal,
 )
 from ..shell_quality import shell_mesh_quality_summary
@@ -1509,6 +1511,7 @@ class MainWindow(QMainWindow):
         self.selection = SelectionManager(self)
         self._tree_node_items: dict[int, QTreeWidgetItem] = {}
         self._tree_element_items: dict[int, QTreeWidgetItem] = {}
+        self._tree_surface_items: dict[int, QTreeWidgetItem] = {}
         self._shortcuts: list[QShortcut] = []
         self._analysis_process: QProcess | None = None
         self._calibration_process: QProcess | None = None
@@ -3952,6 +3955,7 @@ class MainWindow(QMainWindow):
         self.tree.clear()
         self._tree_node_items.clear()
         self._tree_element_items.clear()
+        self._tree_surface_items.clear()
 
         root = QTreeWidgetItem(["OpenSees Model"])
         root.setIcon(0, studio_icon("model"))
@@ -4094,6 +4098,7 @@ class MainWindow(QMainWindow):
                 ("surface_geometry", tag),
             )
             surfaces.addChild(item)
+            self._tree_surface_items[tag] = item
 
         for tag in sorted(self.model.elements):
             element = self.model.elements[tag]
@@ -4759,6 +4764,9 @@ class MainWindow(QMainWindow):
         self.viewport.set_display_domain(
             "geometry" if geometry_mode else "fe"
         )
+        self.viewport.set_geometry_surface_selection(
+            surface_geometry_tags if geometry_mode else set()
+        )
         if geometry_mode and surface_geometry_tags:
             self.viewport.show_surface_orientation(
                 surface_geometry_tags
@@ -5225,6 +5233,13 @@ class MainWindow(QMainWindow):
         self.selection.set_filter(value)
         measure_action = self.actions.get("measure_distance")
         frame_pick_action = self.actions.get("frame_pick")
+        if kind == "geometry_surface" and tag is not None:
+            self._select_geometry_surface_from_viewport(
+                int(tag),
+                str(mode),
+            )
+            return
+
         truss_pick_action = self.actions.get("truss_pick")
         if measure_action is not None and measure_action.isChecked():
             self.viewport.set_selection_filter("node")
@@ -5249,6 +5264,33 @@ class MainWindow(QMainWindow):
             return
         self.viewport.set_selection_filter(value)
         self.status_message.setText(f"Selection filter: {text}")
+
+    def _select_geometry_surface_from_viewport(
+        self,
+        tag: int,
+        mode: str,
+    ) -> None:
+        item = self._tree_surface_items.get(int(tag))
+        if item is None:
+            return
+        mode = str(mode)
+        self.tree.blockSignals(True)
+        try:
+            if mode == "replace":
+                self.tree.clearSelection()
+                item.setSelected(True)
+            elif mode == "add":
+                item.setSelected(True)
+            elif mode == "toggle":
+                item.setSelected(not item.isSelected())
+            else:
+                self.tree.clearSelection()
+                item.setSelected(True)
+        finally:
+            self.tree.blockSignals(False)
+        self._tree_selection_changed()
+        if item.isSelected():
+            self.tree.scrollToItem(item)
 
     def _viewport_entity_clicked(self, payload: object) -> None:
         if not isinstance(payload, dict):
@@ -5496,7 +5538,14 @@ class MainWindow(QMainWindow):
 
     def _viewport_entity_hovered(self, payload: object) -> None:
         if isinstance(payload, dict):
-            kind = str(payload.get("kind", "")).title()
+            raw_kind = str(payload.get("kind", ""))
+            kind = (
+                "Surface"
+                if raw_kind == "geometry_surface"
+                else "Geometry Point"
+                if raw_kind == "geometry_point"
+                else raw_kind.title()
+            )
             tag = payload.get("tag")
             self.status_message.setText(f"Hover: {kind} {tag}")
         elif not self.selection.nodes and not self.selection.elements:
@@ -5507,6 +5556,11 @@ class MainWindow(QMainWindow):
             return
         kind = str(payload.get("kind"))
         tag = int(payload.get("tag"))
+        if kind == "geometry_surface":
+            self._select_geometry_surface_from_viewport(tag, "replace")
+            self._show_surface_geometry_properties(tag)
+            self.properties_dock.raise_()
+            return
         self.selection.select(kind, tag, "replace")
         self._show_entity_properties(kind, tag)
         self.properties_dock.raise_()
@@ -7817,6 +7871,184 @@ class MainWindow(QMainWindow):
         self.selection.set_selection(elements=element_tags)
         self.status_message.setText(
             f"Selected {len(element_tags)} generated Shell FE element(s)"
+        )
+
+    def _assign_shell_section_to_surfaces(
+        self,
+        surface_tags,
+    ) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self.project.surfaces
+        })
+        if not tags:
+            return
+        if not self._ensure_prerequisite(
+            title="Assign Shell Section to Surface",
+            message="No Shell Sections exist yet. Create one now?",
+            action_label="Create Shell Section Now...",
+            available=lambda: bool(self._shell_sections()),
+            creator=self._create_shell_section,
+        ):
+            return
+
+        section_tags = sorted(self._shell_sections())
+        labels = [
+            f"{section_tag} - {self.project.sections[section_tag].name}"
+            for section_tag in section_tags
+        ]
+        current = {
+            self.project.surfaces[tag].section_tag
+            for tag in tags
+        }
+        current_index = 0
+        if len(current) == 1:
+            current_tag = next(iter(current))
+            if current_tag in section_tags:
+                current_index = section_tags.index(current_tag)
+
+        label, ok = QInputDialog.getItem(
+            self,
+            "Assign Shell Section to Surface",
+            f"Assign to {len(tags)} Surface geometry object(s):",
+            labels,
+            current_index,
+            False,
+        )
+        if not ok:
+            return
+        section_tag = section_tags[labels.index(label)]
+
+        before = self.project.to_dict()
+        updated_elements = 0
+        try:
+            for tag in tags:
+                surface = self.project.surfaces[tag]
+                surface.section_tag = section_tag
+                for element_tag in surface.generated_element_tags:
+                    element = self.model.elements.get(int(element_tag))
+                    if (
+                        element is not None
+                        and element.element_type in SHELL_ELEMENT_TYPES
+                    ):
+                        element.section_tag = section_tag
+                        updated_elements += 1
+                self.project._validate_surface_geometry(surface)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Assign Shell Section to Surface",
+                str(exc),
+            )
+            return
+
+        self._refresh_all(
+            f"Assigned Shell Section {section_tag} to {len(tags)} "
+            f"Surface(s) · synchronized {updated_elements} generated "
+            "Shell element(s)"
+        )
+        self.viewport.set_display_domain("geometry")
+        self._record_project_change(
+            f"Assign Shell Section {section_tag} to Surface(s)",
+            before,
+        )
+
+    def _preview_surface_meshes(self, surface_tags) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self.project.surfaces
+        })
+        if not tags:
+            return
+        total = 0
+        summaries = []
+        try:
+            for tag in tags:
+                nu, nv = surface_preview_divisions(
+                    self.project.surfaces[tag]
+                )
+                total += nu * nv
+                summaries.append(f"S{tag}: {nu}×{nv}")
+        except ValueError as exc:
+            QMessageBox.warning(self, "Preview Surface Mesh", str(exc))
+            return
+
+        self.viewport.set_display_domain("geometry")
+        self.viewport.show_surface_mesh_preview(tags)
+        self.status_message.setText(
+            f"Mesh preview · {len(tags)} Surface(s) · "
+            f"{total} planned Shell element(s) · "
+            + " · ".join(summaries)
+        )
+
+    def _clear_surface_mesh_preview(self) -> None:
+        self.viewport.clear_surface_mesh_preview()
+        self.status_message.setText("Surface mesh preview cleared")
+
+    def _audit_surface_conformity(
+        self,
+        surface_tags=None,
+    ) -> None:
+        tags = (
+            sorted({
+                int(tag)
+                for tag in surface_tags
+                if int(tag) in self.project.surfaces
+            })
+            if surface_tags is not None
+            else sorted(self.project.surfaces)
+        )
+        if len(tags) < 2:
+            QMessageBox.information(
+                self,
+                "Surface Conformity Audit",
+                "Select at least two Surface geometry objects.",
+            )
+            return
+        try:
+            report = audit_surface_conformity(
+                self.project,
+                tags,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Surface Conformity Audit",
+                str(exc),
+            )
+            return
+
+        rows = [
+            ("Surfaces checked", report.surface_count),
+            ("Shared edges", report.shared_edge_count),
+            ("Issues", len(report.issues)),
+            (
+                "Status",
+                "Conforming"
+                if report.conforming
+                else "Review required",
+            ),
+        ]
+        for index, issue in enumerate(report.issues[:12], start=1):
+            rows.append((f"Issue {index}", issue.message))
+        if len(report.issues) > 12:
+            rows.append((
+                "More",
+                f"{len(report.issues) - 12} additional issue(s)",
+            ))
+        self.properties_panel.set_properties(
+            "Surface Conformity Audit",
+            rows,
+        )
+        self.properties_dock.raise_()
+        self.status_message.setText(
+            f"Surface conformity audit: {report.shared_edge_count} shared "
+            f"edge(s), {len(report.issues)} issue(s)"
         )
 
     def _create_surface_pressure_for_surfaces(
@@ -15631,6 +15863,14 @@ class MainWindow(QMainWindow):
             stitch.triggered.connect(self._stitch_coincident_shell_nodes)
             section = menu.addAction("New Shell Section...")
             section.triggered.connect(self._create_shell_section)
+            audit = menu.addAction("Audit Surface Conformity")
+            audit.setEnabled(len(self.project.surfaces) >= 2)
+            audit.triggered.connect(
+                lambda checked=False:
+                self._audit_surface_conformity(
+                    sorted(self.project.surfaces)
+                )
+            )
             pressure = menu.addAction(
                 "Create Pressure from FE Shell Selection..."
             )
@@ -15663,6 +15903,37 @@ class MainWindow(QMainWindow):
                 edit.triggered.connect(
                     lambda checked=False, t=tag:
                     self._edit_surface_geometry(t)
+                )
+
+            assign_section = menu.addAction(
+                "Assign Shell Section..."
+                if count == 1
+                else f"Assign Shell Section to {count} Surfaces..."
+            )
+            assign_section.triggered.connect(
+                lambda checked=False, tags=tuple(surface_tags):
+                self._assign_shell_section_to_surfaces(tags)
+            )
+
+            preview = menu.addAction(
+                "Preview Mesh"
+                if count == 1
+                else f"Preview Mesh ({count} Surfaces)"
+            )
+            preview.triggered.connect(
+                lambda checked=False, tags=tuple(surface_tags):
+                self._preview_surface_meshes(tags)
+            )
+            clear_preview = menu.addAction("Clear Mesh Preview")
+            clear_preview.triggered.connect(
+                self._clear_surface_mesh_preview
+            )
+
+            if count >= 2:
+                audit = menu.addAction("Audit Shared-Edge Conformity")
+                audit.triggered.connect(
+                    lambda checked=False, tags=tuple(surface_tags):
+                    self._audit_surface_conformity(tags)
                 )
 
             menu.addSeparator()
