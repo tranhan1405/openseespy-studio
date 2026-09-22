@@ -2352,7 +2352,7 @@ def test_geometry_sketch_navigation_invalidates_stale_cursor_preview():
     assert "_last_geometry_sketch_qt_pos = None" in helper
 
 
-def test_geometry_workplane_mapping_rejects_nonfinite_and_out_of_clip_hits():
+def test_geometry_workplane_mapping_rejects_nonfinite_and_behind_ray_hits():
     source = inspect.getsource(ModelViewport.geometry_workplane_point)
 
     assert "np.all(np.isfinite(near))" in source
@@ -2360,8 +2360,38 @@ def test_geometry_workplane_mapping_rejects_nonfinite_and_out_of_clip_hits():
     assert "math.isfinite(denominator)" in source
     assert "not math.isfinite(t)" in source
     assert "t < -1.0e-6" in source
-    assert "t > 1.0 + 1.0e-6" in source
+    assert "t > 1.0 + 1.0e-6" not in source
     assert "np.all(np.isfinite(point))" in source
+
+
+def test_geometry_workplane_click_can_land_beyond_current_far_clip():
+    class RendererStub:
+        def __init__(self):
+            self.depth = 0.0
+            self.x = 0.0
+            self.y = 0.0
+
+        def SetDisplayPoint(self, x, y, depth):
+            self.x = float(x)
+            self.y = float(y)
+            self.depth = float(depth)
+
+        def DisplayToWorld(self):
+            return None
+
+        def GetWorldPoint(self):
+            z = 10.0 if self.depth <= 0.0 else 9.0
+            return (self.x, self.y, z, 1.0)
+
+    dummy = SimpleNamespace(
+        plotter=SimpleNamespace(renderer=RendererStub()),
+        _geometry_sketch_plane="xy",
+        _geometry_sketch_plane_offset=0.0,
+    )
+
+    point = ModelViewport.geometry_workplane_point(dummy, 20, 30)
+
+    assert point == pytest.approx((20.0, 30.0, 0.0))
 
 
 def test_geometry_sketch_plane_rejects_nan_inf_offsets_and_points():
