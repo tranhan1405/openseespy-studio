@@ -3609,6 +3609,152 @@ class ModelViewport(QWidget):
         self._result_overlay_active = True
         self.plotter.render()
 
+    def show_shell_deformation_contour(
+        self,
+        result: dict[str, object],
+        component: str,
+        *,
+        element_tags: set[int] | None = None,
+        cache_key: object | None = None,
+    ) -> None:
+        """Show averaged shell generalized strains/curvatures as contours."""
+        if self._model is None:
+            return
+
+        component = str(component)
+        component_index = {
+            "Exx": 0,
+            "Eyy": 1,
+            "Gxy": 2,
+            "Kxx": 3,
+            "Kyy": 4,
+            "Kxy": 5,
+            "Gxz": 6,
+            "Gyz": 7,
+        }.get(component)
+        if component_index is None:
+            self.clear_result_overlay()
+            return
+
+        final = result.get("final", {}) if isinstance(result, dict) else {}
+        shell_data = (
+            final.get("shell_section_deformations", {})
+            if isinstance(final, dict)
+            else {}
+        )
+        if not isinstance(shell_data, dict) or not shell_data:
+            self.clear_result_overlay()
+            return
+
+        visible = {
+            int(tag)
+            for tag in self._visible_element_tags()
+            if (
+                tag in self._model.elements
+                and self._model.elements[tag].element_type
+                in SHELL_ELEMENT_TYPES
+            )
+        }
+        if element_tags:
+            visible.intersection_update(
+                int(tag) for tag in element_tags
+            )
+
+        tags: list[int] = []
+        values: list[float] = []
+        for tag in sorted(visible):
+            payload = shell_data.get(str(tag), shell_data.get(tag))
+            if not isinstance(payload, dict):
+                continue
+            average = payload.get("average", [])
+            if (
+                not isinstance(average, (list, tuple))
+                or len(average) <= component_index
+            ):
+                continue
+            try:
+                value = float(average[component_index])
+            except (TypeError, ValueError):
+                continue
+            if not np.isfinite(value):
+                continue
+            element = self._model.elements.get(tag)
+            if (
+                element is None
+                or element.k is None
+                or element.l is None
+            ):
+                continue
+            tags.append(tag)
+            values.append(value)
+
+        if not tags:
+            self.clear_result_overlay()
+            return
+
+        view_key = self._result_view_key(
+            cache_key,
+            "shell-deformation",
+            component,
+            self._result_scope_key(set(tags)),
+        )
+        if self._show_cached_result_view(view_key):
+            return
+
+        mesh = self._batched_shell_mesh(self._model, tags)
+        if mesh is None or mesh.n_cells != len(values):
+            self.clear_result_overlay()
+            return
+
+        scalar_name = "shell_deformation"
+        mesh.cell_data[scalar_name] = np.asarray(values, dtype=float)
+
+        max_abs = max(abs(value) for value in values)
+        clim = (
+            (-max_abs, max_abs)
+            if max_abs > 1.0e-15
+            else None
+        )
+        length_unit = str(self._units.get("length", "")).strip()
+        unit_text = (
+            f"1/{length_unit}"
+            if component.startswith("K") and length_unit
+            else "-"
+        )
+        title = (
+            f"{component} [{unit_text}]"
+            if unit_text and unit_text != "-"
+            else component
+        )
+
+        self.clear_result_overlay(render=False)
+        kwargs: dict[str, object] = {
+            "name": "result-shell-deformation-contour",
+            "scalars": scalar_name,
+            "preference": "cell",
+            "cmap": "coolwarm",
+            "show_edges": True,
+            "edge_color": "#263746",
+            "line_width": 1,
+            "opacity": 0.92,
+            "pickable": False,
+            "scalar_bar_args": {"title": title},
+        }
+        if clim is not None:
+            kwargs["clim"] = clim
+
+        self.plotter.add_mesh(
+            mesh,
+            **kwargs,
+            render=False,
+        )
+        self._remember_result_view(
+            view_key,
+            [(mesh, kwargs)],
+        )
+        self._result_overlay_active = True
+        self.plotter.render()
+
     def show_shell_force_contour(
         self,
         result: dict[str, object],
