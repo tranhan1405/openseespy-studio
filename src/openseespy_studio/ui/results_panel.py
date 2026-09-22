@@ -1118,6 +1118,19 @@ class ResultsPanel(QWidget):
             self._select_tab("Shell Results")
             return
 
+        if kind == "ShellDeformation":
+            component = str(options.get("component", "Exx"))
+            tab = (
+                4
+                if component in {"Exx", "Eyy", "Gxy"}
+                else 5
+                if component.startswith("K")
+                else 6
+            )
+            self.shell_detail_tabs.setCurrentIndex(tab)
+            self._select_tab("Shell Results")
+            return
+
         if kind in {"FiberStress", "FiberStrain"}:
             self.fiber_quantity.setCurrentText(
                 "Stress" if kind == "FiberStress" else "Strain"
@@ -1861,7 +1874,53 @@ class ResultsPanel(QWidget):
             QAbstractItemView.SelectRows
         )
         gp_layout.addWidget(self.shell_gp_table, 1)
-        self.shell_detail_tabs.addTab(gp_host, "Gauss Points")
+        self.shell_detail_tabs.addTab(gp_host, "Force Gauss Points")
+
+        add_summary_tab(
+            "Membrane Strain",
+            ("Exx", "Eyy", "Gxy"),
+        )
+        add_summary_tab(
+            "Curvature",
+            ("Kxx", "Kyy", "Kxy"),
+        )
+        add_summary_tab(
+            "Shear Strain",
+            ("Gxz", "Gyz"),
+        )
+
+        def_host = QWidget()
+        def_layout = QVBoxLayout(def_host)
+        def_layout.setContentsMargins(3, 3, 3, 3)
+        self.shell_deformation_gp_table = QTableWidget(0, 10)
+        self.shell_deformation_gp_table.setHorizontalHeaderLabels(
+            [
+                "Element",
+                "GP",
+                "Exx",
+                "Eyy",
+                "Gxy",
+                "Kxx",
+                "Kyy",
+                "Kxy",
+                "Gxz",
+                "Gyz",
+            ]
+        )
+        self.shell_deformation_gp_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.shell_deformation_gp_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.shell_deformation_gp_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.shell_deformation_gp_table.setSelectionBehavior(
+            QAbstractItemView.SelectRows
+        )
+        def_layout.addWidget(self.shell_deformation_gp_table, 1)
+        self.shell_detail_tabs.addTab(def_host, "Deformation Gauss Points")
 
         self.tabs.addTab(page, "Shell Results")
 
@@ -4018,11 +4077,13 @@ class ResultsPanel(QWidget):
             table.setRowCount(0)
         if hasattr(self, "shell_gp_table"):
             self.shell_gp_table.setRowCount(0)
+        if hasattr(self, "shell_deformation_gp_table"):
+            self.shell_deformation_gp_table.setRowCount(0)
         if hasattr(self, "shell_info"):
             self.shell_info.setText(
-                "Shell section resultants are averaged over available Gauss "
-                "points for contour/table summaries. The Gauss Points sub-tab "
-                "retains each integration-point response."
+                "Shell section resultants and generalized deformations are "
+                "averaged over available Gauss points for contour/table "
+                "summaries. Gauss-point sub-tabs retain each response."
             )
         self.fiber_element.clear()
         self.fiber_section.clear()
@@ -5226,71 +5287,80 @@ class ResultsPanel(QWidget):
             if isinstance(self._result, dict)
             else {}
         )
-        data = (
+        force_data = (
             final.get("shell_section_forces", {})
             if isinstance(final, dict)
             else {}
         )
-        if not isinstance(data, dict):
-            data = {}
-
-        component_names = (
-            "Nxx", "Nyy", "Nxy",
-            "Mxx", "Myy", "Mxy",
-            "Qx", "Qy",
+        deformation_data = (
+            final.get("shell_section_deformations", {})
+            if isinstance(final, dict)
+            else {}
         )
-        groups = {
+        if not isinstance(force_data, dict):
+            force_data = {}
+        if not isinstance(deformation_data, dict):
+            deformation_data = {}
+
+        def parsed_rows(data: dict) -> list[
+            tuple[int, list[float], list[list[float]]]
+        ]:
+            rows: list[
+                tuple[int, list[float], list[list[float]]]
+            ] = []
+            for raw_tag, payload in data.items():
+                if not isinstance(payload, dict):
+                    continue
+                try:
+                    tag = int(raw_tag)
+                except (TypeError, ValueError):
+                    continue
+                average_raw = payload.get("average", [])
+                if (
+                    not isinstance(average_raw, (list, tuple))
+                    or len(average_raw) < 8
+                ):
+                    continue
+                try:
+                    average = [
+                        float(average_raw[index])
+                        for index in range(8)
+                    ]
+                except (TypeError, ValueError):
+                    continue
+
+                gp_rows: list[list[float]] = []
+                raw_gp = payload.get("gauss_points", [])
+                if isinstance(raw_gp, list):
+                    for row in raw_gp:
+                        if (
+                            isinstance(row, (list, tuple))
+                            and len(row) >= 8
+                        ):
+                            try:
+                                gp_rows.append(
+                                    [
+                                        float(row[index])
+                                        for index in range(8)
+                                    ]
+                                )
+                            except (TypeError, ValueError):
+                                continue
+                rows.append((tag, average, gp_rows))
+            rows.sort(key=lambda item: item[0])
+            return rows
+
+        force_rows = parsed_rows(force_data)
+        deformation_rows = parsed_rows(deformation_data)
+
+        for title, indices in {
             "Membrane": (0, 1, 2),
             "Bending": (3, 4, 5),
             "Shear": (6, 7),
-        }
-
-        valid_rows: list[
-            tuple[int, list[float], list[list[float]]]
-        ] = []
-        for raw_tag, payload in data.items():
-            if not isinstance(payload, dict):
-                continue
-            try:
-                tag = int(raw_tag)
-            except (TypeError, ValueError):
-                continue
-            average_raw = payload.get("average", [])
-            if (
-                not isinstance(average_raw, (list, tuple))
-                or len(average_raw) < 8
-            ):
-                continue
-            try:
-                average = [
-                    float(average_raw[index])
-                    for index in range(8)
-                ]
-            except (TypeError, ValueError):
-                continue
-
-            gp_rows: list[list[float]] = []
-            raw_gp = payload.get("gauss_points", [])
-            if isinstance(raw_gp, list):
-                for row in raw_gp:
-                    if (
-                        isinstance(row, (list, tuple))
-                        and len(row) >= 8
-                    ):
-                        try:
-                            gp_rows.append(
-                                [float(row[index]) for index in range(8)]
-                            )
-                        except (TypeError, ValueError):
-                            continue
-            valid_rows.append((tag, average, gp_rows))
-
-        valid_rows.sort(key=lambda item: item[0])
-
-        for title, indices in groups.items():
+        }.items():
             table = self.shell_tables[title]
-            table.setRowCount(len(valid_rows))
-            for row_index, (tag, average, _gp) in enumerate(valid_rows):
+            table.setRowCount(len(force_rows))
+            for row_index, (tag, average, _gp) in enumerate(force_rows):
                 table.setItem(
                     row_index,
                     0,
@@ -5308,10 +5378,10 @@ class ResultsPanel(QWidget):
                         ),
                     )
 
-        gp_count = sum(len(item[2]) for item in valid_rows)
-        self.shell_gp_table.setRowCount(gp_count)
+        force_gp_count = sum(len(item[2]) for item in force_rows)
+        self.shell_gp_table.setRowCount(force_gp_count)
         row_index = 0
-        for tag, _average, gp_rows in valid_rows:
+        for tag, _average, gp_rows in force_rows:
             for gp_index, values in enumerate(gp_rows, start=1):
                 self.shell_gp_table.setItem(
                     row_index,
@@ -5331,18 +5401,77 @@ class ResultsPanel(QWidget):
                     )
                 row_index += 1
 
-        if valid_rows:
+        for title, indices in {
+            "Membrane Strain": (0, 1, 2),
+            "Curvature": (3, 4, 5),
+            "Shear Strain": (6, 7),
+        }.items():
+            table = self.shell_tables[title]
+            table.setRowCount(len(deformation_rows))
+            for row_index, (tag, average, _gp) in enumerate(
+                deformation_rows
+            ):
+                table.setItem(
+                    row_index,
+                    0,
+                    QTableWidgetItem(str(tag)),
+                )
+                for column, component_index in enumerate(
+                    indices,
+                    start=1,
+                ):
+                    table.setItem(
+                        row_index,
+                        column,
+                        QTableWidgetItem(
+                            f"{average[component_index]:.6g}"
+                        ),
+                    )
+
+        deformation_gp_count = sum(
+            len(item[2]) for item in deformation_rows
+        )
+        self.shell_deformation_gp_table.setRowCount(
+            deformation_gp_count
+        )
+        row_index = 0
+        for tag, _average, gp_rows in deformation_rows:
+            for gp_index, values in enumerate(gp_rows, start=1):
+                self.shell_deformation_gp_table.setItem(
+                    row_index,
+                    0,
+                    QTableWidgetItem(str(tag)),
+                )
+                self.shell_deformation_gp_table.setItem(
+                    row_index,
+                    1,
+                    QTableWidgetItem(str(gp_index)),
+                )
+                for component_index, value in enumerate(values):
+                    self.shell_deformation_gp_table.setItem(
+                        row_index,
+                        component_index + 2,
+                        QTableWidgetItem(f"{value:.6g}"),
+                    )
+                row_index += 1
+
+        if force_rows or deformation_rows:
+            shell_count = len({
+                row[0] for row in force_rows + deformation_rows
+            })
             self.shell_info.setText(
-                f"{len(valid_rows)} shell element(s) · "
-                f"{gp_count} available Gauss-point row(s) · "
-                "summary values are Gauss-point averages. "
-                "Components follow local shell axes."
+                f"{shell_count} shell element(s) · "
+                f"{force_gp_count} force GP row(s) · "
+                f"{deformation_gp_count} deformation GP row(s) · "
+                "summary values are Gauss-point averages in local shell axes."
             )
         else:
             self.shell_info.setText(
-                "No shell section-force data are available in this result. "
-                "Run a non-modal analysis containing supported shell elements."
+                "No shell section force/deformation data are available in "
+                "this result. Run a non-modal analysis containing supported "
+                "shell elements."
             )
+
 
     def _populate_fiber_elements(self) -> None:
         previous = self.fiber_element.currentData()
