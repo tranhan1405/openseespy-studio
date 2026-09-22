@@ -9,17 +9,21 @@ from openseespy_studio.line_mesher import (
     audit_line_network_connectivity,
     conform_line_network,
     copy_line_mesh_recipe,
+    copy_offset_line_geometry,
     delete_line_geometry,
     delete_line_mesh,
+    divide_line_geometry,
     inspect_line_mesh_state,
     line_geometry_intersections,
     line_mesh_coordinates,
     line_mesh_quality,
+    merge_collinear_lines,
     mesh_line_geometry,
     remesh_line_batch,
     remesh_line_geometry,
     reverse_line_geometry,
     split_line_geometry_at_point,
+    trim_extend_line_to_line,
 )
 from openseespy_studio.project import (
     LineGeometryData,
@@ -747,4 +751,347 @@ def test_moving_point_used_by_meshed_line_is_rejected():
             2,
             PointGeometryData(2, "B", (5.0, 0.0, 0.0)),
         )
+
+def test_trim_extend_splits_target_and_shares_topology():
+    project = _frame_project(length=3.0)
+    project.add_point(PointGeometryData(3, "C", (0.0, 2.0, 0.0)))
+    project.add_point(PointGeometryData(4, "D", (5.0, -2.0, 0.0)))
+    project.add_point(PointGeometryData(5, "E", (5.0, 2.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Subject",
+            1,
+            2,
+            divisions=3,
+            section_tag=1,
+            transformation_tag=1,
+            reuse_existing_nodes=False,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "Target",
+            4,
+            5,
+            divisions=4,
+            section_tag=1,
+            transformation_tag=1,
+            reuse_existing_nodes=False,
+        )
+    )
+    mesh_line_geometry(project, 1)
+    mesh_line_geometry(project, 2)
+
+    result = trim_extend_line_to_line(
+        project,
+        1,
+        2,
+        endpoint="j",
+        remesh=True,
+    )
+
+    assert result.operation == "extend"
+    assert result.endpoint == "j"
+    assert result.intersection == pytest.approx((5.0, 0.0, 0.0))
+    assert len(result.created_point_tags) == 1
+    assert len(result.created_line_tags) == 1
+    junction = result.intersection_point_tag
+    assert project.lines[1].point_j == junction
+    target_segments = [
+        line
+        for line in project.lines.values()
+        if line.tag != 1 and junction in {line.point_i, line.point_j}
+    ]
+    assert len(target_segments) == 2
+
+    junction_nodes = set()
+    for line in [project.lines[1], *target_segments]:
+        junction_nodes.add(
+            line.generated_node_tags[0]
+            if line.point_i == junction
+            else line.generated_node_tags[-1]
+        )
+    assert len(junction_nodes) == 1
+
+
+def test_trim_extend_rejects_wrong_extension_endpoint():
+    project = _frame_project(length=3.0)
+    project.add_point(PointGeometryData(3, "C", (5.0, -2.0, 0.0)))
+    project.add_point(PointGeometryData(4, "D", (5.0, 2.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Subject",
+            1,
+            2,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "Target",
+            3,
+            4,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+
+    with pytest.raises(ValueError, match="beyond Point J"):
+        trim_extend_line_to_line(
+            project,
+            1,
+            2,
+            endpoint="i",
+        )
+
+
+def test_merge_collinear_lines_preserves_total_divisions_and_mesh():
+    project = _frame_project(length=2.0)
+    project.add_point(PointGeometryData(3, "C", (5.0, 0.0, 0.0)))
+    project.add_point(PointGeometryData(4, "D", (9.0, 0.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "A-B",
+            1,
+            2,
+            divisions=2,
+            bias=1.0,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "B-C",
+            2,
+            3,
+            divisions=3,
+            bias=1.0,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            3,
+            "C-D",
+            3,
+            4,
+            divisions=4,
+            bias=1.0,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    remesh_line_batch(project, [1, 2, 3])
+
+    result = merge_collinear_lines(
+        project,
+        [1, 2, 3],
+        remesh=True,
+    )
+
+    assert result.keeper_line_tag == 1
+    assert result.removed_line_tags == [2, 3]
+    assert set(project.lines) == {1}
+    merged = project.lines[1]
+    assert {merged.point_i, merged.point_j} == {1, 4}
+    assert merged.divisions == 9
+    assert merged.bias == pytest.approx(1.0)
+    assert result.mesh_result is not None
+    assert len(result.mesh_result.element_tags) == 9
+
+
+def test_merge_collinear_lines_rejects_biased_recipe():
+    project = _frame_project(length=2.0)
+    project.add_point(PointGeometryData(3, "C", (4.0, 0.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "A-B",
+            1,
+            2,
+            divisions=2,
+            bias=2.0,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "B-C",
+            2,
+            3,
+            divisions=2,
+            bias=2.0,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+
+    with pytest.raises(ValueError, match="bias = 1"):
+        merge_collinear_lines(project, [1, 2])
+
+
+def test_divide_geometry_line_into_equal_segments_is_real_topology_division():
+    project = _frame_project(length=12.0)
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Long beam",
+            1,
+            2,
+            divisions=6,
+            bias=1.0,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    mesh_line_geometry(project, 1)
+
+    result = divide_line_geometry(
+        project,
+        1,
+        segments=3,
+        remesh=True,
+    )
+
+    assert len(result.line_tags) == 3
+    assert len(result.created_line_tags) == 2
+    assert len(result.created_point_tags) == 2
+    assert sum(project.lines[tag].divisions for tag in result.line_tags) == 6
+    assert set(result.mesh_results) == set(result.line_tags)
+    endpoint_sets = [
+        {project.lines[tag].point_i, project.lines[tag].point_j}
+        for tag in result.line_tags
+    ]
+    assert endpoint_sets[0] & endpoint_sets[1]
+    assert endpoint_sets[1] & endpoint_sets[2]
+
+
+def test_divide_geometry_line_at_distance_from_i():
+    project = _frame_project(length=10.0)
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Beam",
+            1,
+            2,
+            divisions=5,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+
+    result = divide_line_geometry(
+        project,
+        1,
+        distance_from_i=3.0,
+        remesh=True,
+    )
+
+    assert len(result.line_tags) == 2
+    split_point = project.points[result.point_tags[0]]
+    assert split_point.xyz == pytest.approx((3.0, 0.0, 0.0))
+
+
+def test_copy_offset_line_network_preserves_shared_geometry_topology():
+    project = _frame_project(length=4.0)
+    project.add_point(PointGeometryData(3, "C", (4.0, 3.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "AB",
+            1,
+            2,
+            divisions=2,
+            reuse_existing_nodes=False,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "BC",
+            2,
+            3,
+            divisions=2,
+            reuse_existing_nodes=False,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    remesh_line_batch(project, [1, 2])
+
+    result = copy_offset_line_geometry(
+        project,
+        [1, 2],
+        dx=10.0,
+        dy=0.0,
+        dz=0.0,
+        copies=2,
+        mesh=True,
+    )
+
+    assert len(result.created_line_tags) == 4
+    assert len(result.created_point_tags) == 6
+    assert len(result.mesh_results) == 4
+
+    first_copy = result.created_line_tags[:2]
+    copy_lines = [project.lines[tag] for tag in first_copy]
+    common_points = (
+        {copy_lines[0].point_i, copy_lines[0].point_j}
+        & {copy_lines[1].point_i, copy_lines[1].point_j}
+    )
+    assert len(common_points) == 1
+    common_point = next(iter(common_points))
+    common_nodes = {
+        (
+            line.generated_node_tags[0]
+            if line.point_i == common_point
+            else line.generated_node_tags[-1]
+        )
+        for line in copy_lines
+    }
+    assert len(common_nodes) == 1
+
+
+def test_line_intersection_preview_and_preprocessor_actions_are_exposed():
+    context = inspect.getsource(MainWindow._show_tree_context_menu)
+    trim = inspect.getsource(MainWindow._trim_extend_geometry_line)
+    merge = inspect.getsource(MainWindow._merge_selected_geometry_lines)
+    divide = inspect.getsource(MainWindow._divide_geometry_line)
+    copy_offset = inspect.getsource(MainWindow._copy_offset_geometry_lines)
+    inspect_intersections = inspect.getsource(
+        MainWindow._inspect_line_geometry_intersections
+    )
+    viewport_show = inspect.getsource(
+        ModelViewport.show_line_intersection_preview
+    )
+    viewport_render = inspect.getsource(
+        ModelViewport._render_line_intersection_preview
+    )
+
+    assert "Trim / Extend This Line to Other Selected Line..." in context
+    assert "Merge" in context and "Collinear Lines" in context
+    assert "Divide Geometry Line..." in context
+    assert "Copy / Offset Geometry Line..." in context
+    assert "Clear Intersection Preview" in context
+    assert "trim_extend_line_to_line" in trim
+    assert "merge_collinear_lines" in merge
+    assert "divide_line_geometry" in divide
+    assert "copy_offset_line_geometry" in copy_offset
+    assert "show_line_intersection_preview" in inspect_intersections
+    assert 'name="line-intersection-preview"' in viewport_render
+    assert "pickable=False" in viewport_render
+    assert "_line_intersection_preview" in viewport_show
 
