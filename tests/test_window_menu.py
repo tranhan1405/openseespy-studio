@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import inspect
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QDockWidget
 
-from openseespy_studio.ui.main_window import _dock_toggle_action
+from openseespy_studio.ui.main_window import MainWindow, _dock_toggle_action
 
 
 _APP = QApplication.instance() or QApplication([])
@@ -38,3 +39,17 @@ def test_named_dock_toggle_action_keeps_existing_title():
         dock.close()
         dock.deleteLater()
         _APP.processEvents()
+
+
+
+def test_moment_curvature_action_callback_accepts_qaction_checked_argument():
+    signature = inspect.signature(
+        MainWindow._run_moment_curvature_workflow
+    )
+    parameters = list(signature.parameters.values())
+
+    assert [parameter.name for parameter in parameters[:2]] == [
+        "self",
+        "checked",
+    ]
+    assert parameters[1].default is False
