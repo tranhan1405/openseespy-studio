@@ -70,12 +70,12 @@ def _angle_deg(a, b) -> float:
     return math.degrees(math.acos(cosine))
 
 
-def shell_element_quality(
-    project: ProjectDatabase,
+def shell_element_quality_from_model(
+    model,
     element_tag: int,
 ) -> ShellElementQuality:
     tag = int(element_tag)
-    element = project.model.elements.get(tag)
+    element = model.elements.get(tag)
     if element is None or element.element_type not in SHELL_ELEMENT_TYPES:
         raise ValueError(f"Element {tag} is not a Shell element.")
 
@@ -83,7 +83,7 @@ def shell_element_quality(
     if len(node_tags) != 4:
         raise ValueError(f"Shell element {tag} requires four nodes.")
     points = [
-        project.model.nodes[node_tag].xyz
+        model.nodes[node_tag].xyz
         for node_tag in node_tags
     ]
     p0, p1, p2, p3 = points
@@ -127,6 +127,16 @@ def shell_element_quality(
         aspect_ratio=aspect,
         max_skew_deg=max_skew,
         warpage_deg=warpage,
+    )
+
+
+def shell_element_quality(
+    project: ProjectDatabase,
+    element_tag: int,
+) -> ShellElementQuality:
+    return shell_element_quality_from_model(
+        project.model,
+        element_tag,
     )
 
 
