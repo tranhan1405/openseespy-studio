@@ -232,3 +232,37 @@ def test_fourth_prerequisite_link_batch():
     assert "_create_analysis" in result_source
     assert "_run_analysis_from_tree" in result_source
 
+
+def test_fifth_prerequisite_link_batch():
+    tree_source = inspect.getsource(MainWindow._show_tree_context_menu)
+
+    # Empty element-type groups must still expose creation-aware workflows.
+    assert "formulation.setEnabled(bool(tags) and not is_truss_group)" not in tree_source
+    assert "material.setEnabled(bool(tags) and is_truss_group)" not in tree_source
+    assert "section.setEnabled(bool(tags) and not is_truss_group)" not in tree_source
+    assert "transformation.setEnabled(bool(tags) and not is_truss_group)" not in tree_source
+    assert "beam_load.setEnabled(bool(tags) and not is_truss_group)" not in tree_source
+    assert "assign.setEnabled(bool(tags))" not in tree_source
+
+    assert "formulation.setEnabled(not is_truss_group)" in tree_source
+    assert "material.setEnabled(is_truss_group)" in tree_source
+    assert "section.setEnabled(not is_truss_group)" in tree_source
+    assert "transformation.setEnabled(not is_truss_group)" in tree_source
+    assert "beam_load.setEnabled(not is_truss_group)" in tree_source
+
+    # Mixed Frame + Truss selections may still operate on the eligible frames.
+    assert "formulation.setEnabled(has_frame and not has_truss)" not in tree_source
+    assert "beam_load.setEnabled(has_frame and not has_truss)" not in tree_source
+    assert "formulation.setEnabled(has_frame)" in tree_source
+    assert "beam_load.setEnabled(has_frame)" in tree_source
+
+    result_methods = {
+        "_show_deformation_result": "Deformed Shape",
+        "_show_node_contour_result": "Nodal Result",
+        "_show_member_force_result": "Member Force Result",
+    }
+    for method_name, title in result_methods.items():
+        source = inspect.getsource(getattr(MainWindow, method_name))
+        assert "_offer_result_analysis_run" in source
+        assert title in source
+
