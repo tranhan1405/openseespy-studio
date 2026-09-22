@@ -713,13 +713,20 @@ def test_shell_pressure_and_shell_self_mass_feed_mass_source():
 
 def test_shell_pressure_ui_and_viewport_routes_exist():
     source = inspect.getsource(MainWindow._create_shell_pressure)
-    assert 'allowed_load_types={"SurfacePressure"}' in source
+    helper_source = inspect.getsource(
+        MainWindow._create_shell_pressure_for_elements
+    )
+    surface_source = inspect.getsource(
+        MainWindow._create_surface_pressure_for_surfaces
+    )
+    assert 'allowed_load_types={"SurfacePressure"}' in helper_source
     assert "SHELL_ELEMENT_TYPES" in source
+    assert "generated_element_tags" in surface_source
 
     context_source = inspect.getsource(
         MainWindow._show_tree_context_menu
     )
-    assert "Create Surface Pressure..." in context_source
+    assert "Create Pressure on Surface..." in context_source
 
     viewport_source = inspect.getsource(ModelViewport._draw_element_loads)
     assert 'load.load_type == "SurfacePressure"' in viewport_source
