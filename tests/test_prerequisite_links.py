@@ -357,3 +357,17 @@ def test_seventh_prerequisite_link_batch():
     tree_source = inspect.getsource(MainWindow._show_tree_context_menu)
     assert "section_response_available=True" in tree_source
 
+
+def test_remaining_prerequisite_dead_ends_are_linked():
+    edit_analysis = inspect.getsource(MainWindow._edit_analysis)
+    assert "_ensure_dynamic_mass" in edit_analysis
+    assert 'updated.analysis_type in {"Modal", "Transient"}' in edit_analysis
+
+    ground_pair = inspect.getsource(MainWindow._ground_motion_pair)
+    assert 'series.series_type != "Path"' in ground_pair
+
+    edit_ground = inspect.getsource(MainWindow._edit_ground_motion)
+    assert "Create / Link Path Series Now..." in edit_ground
+    assert "_ask_create_prerequisite" in edit_ground
+    assert "update_load_pattern" in edit_ground
+
