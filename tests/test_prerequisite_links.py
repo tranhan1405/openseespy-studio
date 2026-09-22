@@ -105,6 +105,7 @@ def test_major_dependent_workflows_use_prerequisite_links():
         "_run_moment_curvature_workflow": "_create_section",
         "_start_analysis": "_create_analysis",
         "_open_calibration": "_create_analysis_template",
+        "_create_analysis_template": "_offer_structural_model_creator",
     }
 
     for method_name, dependency_name in expected.items():
