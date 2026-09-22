@@ -5945,16 +5945,24 @@ class MainWindow(QMainWindow):
     def _selected_node_tags(
         self,
         title: str,
+        *,
+        create_if_missing: bool = False,
     ) -> set[int] | None:
         tags = set(self.selection.nodes)
-        if not tags:
-            QMessageBox.information(
-                self,
-                title,
-                "Select at least one node first.",
-            )
-            return None
-        return tags
+        if tags:
+            return tags
+        if create_if_missing and not self.model.nodes:
+            if not self._ensure_node_count(1, title=title):
+                return None
+            tags = set(self.selection.nodes)
+            if tags:
+                return tags
+        QMessageBox.information(
+            self,
+            title,
+            "Select at least one node first.",
+        )
+        return None
 
     def _exclude_managed_ground_nodes(
         self,
@@ -5983,7 +5991,10 @@ class MainWindow(QMainWindow):
         return editable
 
     def _apply_restraint(self) -> None:
-        node_tags = self._selected_node_tags("Support / Restraint")
+        node_tags = self._selected_node_tags(
+            "Support / Restraint",
+            create_if_missing=True,
+        )
         if node_tags is None:
             return
         node_tags = self._exclude_managed_ground_nodes(
@@ -6069,7 +6080,10 @@ class MainWindow(QMainWindow):
         )
 
     def _assign_mass(self) -> None:
-        node_tags = self._selected_node_tags("Nodal Mass")
+        node_tags = self._selected_node_tags(
+            "Nodal Mass",
+            create_if_missing=True,
+        )
         if node_tags is None:
             return
         node_tags = self._exclude_managed_ground_nodes(
@@ -6874,14 +6888,14 @@ class MainWindow(QMainWindow):
                 return
             plain = self._plain_load_patterns()
 
-        selected = sorted(self.selection.elements)
-        if not selected:
-            QMessageBox.information(
-                self,
-                "Beam / Element Load",
-                "Select at least one beam-column element first.",
-            )
+        selected_tags = self._selected_element_tags(
+            "Beam / Element Load",
+            create_if_missing=True,
+            frame_only=True,
+        )
+        if selected_tags is None:
             return
+        selected = sorted(selected_tags)
 
         dialog = ElementLoadDialog(
             plain,
@@ -7039,20 +7053,74 @@ class MainWindow(QMainWindow):
     def _selected_element_tags(
         self,
         title: str,
+        *,
+        create_if_missing: bool = False,
+        frame_only: bool = False,
     ) -> set[int] | None:
-        tags = set(self.selection.elements)
-        if not tags:
-            QMessageBox.information(
-                self,
-                title,
-                "Select at least one element first.",
-            )
-            return None
-        return tags
+        frame_types = {
+            "elasticBeamColumn",
+            "forceBeamColumn",
+            "dispBeamColumn",
+        }
+
+        def eligible(tag: int) -> bool:
+            element = self.model.elements.get(int(tag))
+            if element is None:
+                return False
+            return not frame_only or element.element_type in frame_types
+
+        tags = {
+            int(tag)
+            for tag in self.selection.elements
+            if eligible(int(tag))
+        }
+        if tags:
+            return tags
+
+        available = {
+            int(tag)
+            for tag in self.model.elements
+            if eligible(int(tag))
+        }
+        if create_if_missing and not available:
+            if not self._ensure_prerequisite(
+                title=title,
+                message=(
+                    "This workflow requires a beam-column element first. "
+                    "Create a Frame member now?"
+                ),
+                action_label="Create Frame Now...",
+                available=lambda: any(
+                    element.element_type in frame_types
+                    for element in self.model.elements.values()
+                ),
+                creator=self._create_frame,
+            ):
+                return None
+            tags = {
+                int(tag)
+                for tag in self.selection.elements
+                if eligible(int(tag))
+            }
+            if tags:
+                return tags
+
+        QMessageBox.information(
+            self,
+            title,
+            (
+                "Select at least one beam-column element first."
+                if frame_only
+                else "Select at least one element first."
+            ),
+        )
+        return None
 
     def _set_element_formulation(self) -> None:
         element_tags = self._selected_element_tags(
-            "Element Formulation"
+            "Element Formulation",
+            create_if_missing=True,
+            frame_only=True,
         )
         if element_tags is None:
             return
@@ -7157,7 +7225,11 @@ class MainWindow(QMainWindow):
         )
 
     def _assign_section_to_selection(self) -> None:
-        element_tags = self._selected_element_tags("Assign Section")
+        element_tags = self._selected_element_tags(
+            "Assign Section",
+            create_if_missing=True,
+            frame_only=True,
+        )
         if element_tags is None:
             return
         if not self._ensure_prerequisite(
@@ -7210,6 +7282,24 @@ class MainWindow(QMainWindow):
         )
 
     def _assign_truss_material_to_selection(self) -> None:
+        if not any(
+            element.element_type == "truss"
+            for element in self.model.elements.values()
+        ):
+            if not self._ensure_prerequisite(
+                title="Assign Truss Material",
+                message=(
+                    "No Truss element exists yet. Create a Truss now, then "
+                    "return directly to material assignment?"
+                ),
+                action_label="Create Truss Now...",
+                available=lambda: any(
+                    element.element_type == "truss"
+                    for element in self.model.elements.values()
+                ),
+                creator=self._create_truss,
+            ):
+                return
         element_tags = self._selected_element_tags(
             "Assign Truss Material"
         )
@@ -7318,7 +7408,9 @@ class MainWindow(QMainWindow):
 
     def _assign_transformation_to_selection(self) -> None:
         element_tags = self._selected_element_tags(
-            "Assign Transformation"
+            "Assign Transformation",
+            create_if_missing=True,
+            frame_only=True,
         )
         if element_tags is None:
             return
@@ -9546,6 +9638,11 @@ class MainWindow(QMainWindow):
         self.properties_panel.set_properties("Connection", rows)
 
     def _create_constraint(self) -> None:
+        if not self._ensure_node_count(
+            2,
+            title="Constraint Editor",
+        ):
+            return
         selected_nodes = sorted(self.selection.nodes)
         if len(selected_nodes) >= 2:
             retained = selected_nodes[0]
@@ -10095,6 +10192,24 @@ class MainWindow(QMainWindow):
         before = self.project.to_dict()
         try:
             settings = dialog.data()
+            uses_control_node = (
+                settings.analysis_type in {"Pushover", "Cyclic"}
+                or (
+                    settings.analysis_type == "Static"
+                    and settings.integrator == "DisplacementControl"
+                )
+            )
+            if (
+                uses_control_node
+                and settings.control_node not in self.model.nodes
+                and not self.model.nodes
+            ):
+                if not self._ensure_node_count(
+                    1,
+                    title="Analysis Settings",
+                ):
+                    return
+                settings.control_node = min(self.model.nodes)
             self._apply_analysis_driving_load(settings, dialog)
             self.project.add_analysis(settings)
         except ValueError as exc:
@@ -10691,6 +10806,16 @@ class MainWindow(QMainWindow):
         self.properties_panel.set_properties("Analysis Settings", rows)
 
     def _create_recorder(self) -> None:
+        if (
+            not self.model.nodes
+            and not self.model.elements
+            and not self.project.connections
+        ):
+            if not self._ensure_node_count(
+                1,
+                title="Recorder",
+            ):
+                return
         initial_nodes = set(self.selection.nodes)
         initial_elements = set(self.selection.elements)
         dialog = RecorderDialog(
