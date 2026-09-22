@@ -153,8 +153,8 @@ def build_shell_mesh(
                         else False
                     ),
                 )
-                project.validate_element_state(next_element)
                 created_elements.append(next_element)
+                project.validate_element_state(next_element)
                 next_element += 1
     except Exception:
         for tag in created_elements:
