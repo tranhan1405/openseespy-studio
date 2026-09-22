@@ -6,7 +6,7 @@ import math
 from .beam_loads import resolve_self_weight_local
 from .units import UnitSystem
 from .model import SHELL_ELEMENT_TYPES, StructuralModel
-from .project import MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SectionData, TimeSeriesData, TransformationData, material_parameter_kind
+from .project import MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind
 from .section_response import automatic_moment_curvature_spec, build_section_response_specs
 
 
@@ -493,6 +493,25 @@ def ordered_material_tags(
     return ordered
 
 
+def nd_material_to_openseespy(
+    material: NDMaterialData,
+    units: dict[str, str] | None = None,
+) -> str:
+    unit_system = UnitSystem.from_mapping(units)
+    p = material.parameters
+    if material.material_type == "ElasticIsotropic":
+        elastic_modulus = unit_system.stress_from_pa(float(p["E"]))
+        density = unit_system.density_from_kg_per_m3(float(p["rho"]))
+        return (
+            "ops.nDMaterial('ElasticIsotropic', "
+            f"{material.tag}, {elastic_modulus:g}, {p['nu']:g}, "
+            f"{density:g})"
+        )
+    raise ValueError(
+        f"Unsupported nDMaterial type: {material.material_type}"
+    )
+
+
 def elastic_section_parameters_in_model_units(
     section: SectionData,
     materials: dict[int, MaterialData] | None = None,
@@ -580,6 +599,7 @@ def section_to_openseespy(
     materials: dict[int, MaterialData] | None = None,
     units: dict[str, str] | None = None,
     ndm: int = 3,
+    nd_materials: dict[int, NDMaterialData] | None = None,
 ) -> list[str]:
     p = (
         elastic_section_parameters_in_model_units(
@@ -631,6 +651,49 @@ def section_to_openseespy(
             "ops.section('ElasticMembranePlateSection', "
             f"{section.tag}, {elastic_modulus:g}, {p['nu']:g}, "
             f"{p['h']:g}, {p['rho']:g}, {p['EpModifier']:g})"
+        ]
+
+    if section.section_type == "PlateFiber":
+        if (
+            section.nd_material_tag is None
+            or nd_materials is None
+            or section.nd_material_tag not in nd_materials
+        ):
+            raise ValueError(
+                f"PlateFiber section {section.tag} references missing "
+                f"nDMaterial {section.nd_material_tag}."
+            )
+        return [
+            "ops.section('PlateFiber', "
+            f"{section.tag}, {section.nd_material_tag}, {p['h']:g})"
+        ]
+
+    if section.section_type == "LayeredShell":
+        if not section.shell_layers:
+            raise ValueError(
+                f"LayeredShell section {section.tag} has no layers."
+            )
+        missing = sorted({
+            int(layer.material_tag)
+            for layer in section.shell_layers
+            if (
+                nd_materials is None
+                or int(layer.material_tag) not in nd_materials
+            )
+        })
+        if missing:
+            raise ValueError(
+                f"LayeredShell section {section.tag} references missing "
+                "nDMaterial tag(s): "
+                + ", ".join(map(str, missing))
+            )
+        layer_args = ", ".join(
+            f"{int(layer.material_tag)}, {float(layer.thickness):g}"
+            for layer in section.shell_layers
+        )
+        return [
+            "ops.section('LayeredShell', "
+            f"{section.tag}, {len(section.shell_layers)}, {layer_args})"
         ]
 
     raise ValueError(f"Unsupported section type: {section.section_type}")
@@ -2820,6 +2883,7 @@ def to_openseespy(
     recorders: dict[int, RecorderData] | None = None,
     units: dict[str, str] | None = None,
     solution_results: dict[int, object] | None = None,
+    nd_materials: dict[int, NDMaterialData] | None = None,
 ) -> str:
     active_analysis = (
         analyses.get(active_analysis_tag)
@@ -3785,6 +3849,16 @@ def to_openseespy(
             lines.extend(material_source_comments(material))
             lines.append(material_to_openseespy(material, units))
 
+    if nd_materials:
+        lines.extend(["", "# nD Materials"])
+        for tag in sorted(nd_materials):
+            lines.append(
+                nd_material_to_openseespy(
+                    nd_materials[tag],
+                    units,
+                )
+            )
+
     if sections:
         lines.extend(["", "# Sections"])
         for tag in sorted(sections):
@@ -3794,6 +3868,7 @@ def to_openseespy(
                     materials,
                     units,
                     model.ndm,
+                    nd_materials,
                 )
             )
 
@@ -3828,12 +3903,11 @@ def to_openseespy(
             )
             if (
                 assigned_section is None
-                or assigned_section.section_type != "ElasticMembranePlate"
+                or assigned_section.section_type not in SHELL_SECTION_TYPES
             ):
                 lines.append(
-                    f"# ERROR: Shell element {tag} requires an "
-                    "ElasticMembranePlate section in the current Studio "
-                    "generator; element not generated."
+                    f"# ERROR: Shell element {tag} requires a "
+                    "shell-compatible section; element not generated."
                 )
                 continue
             if e.k is None or e.l is None:
