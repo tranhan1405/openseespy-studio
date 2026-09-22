@@ -314,3 +314,99 @@ def test_ramberg_osgood_library_record_is_previewable_but_not_insertable():
         assert len(points) > 10
     finally:
         _close(dialog)
+
+
+
+def test_wrapper_material_can_stage_base_material_inline(monkeypatch):
+    dialog = MaterialDialog(
+        next_tag=1,
+        units={"length": "m", "force": "N", "time": "s"},
+        materials={},
+    )
+
+    class _FakeDependencyDialog:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def exec(self):
+            return 1
+
+        def pending_materials(self):
+            return []
+
+        def material_data(self):
+            return MaterialData(
+                tag=2,
+                name="Base Steel",
+                material_type="Steel02",
+            )
+
+    try:
+        _select_material_type(dialog, "MinMax")
+        assert dialog._base_material_combo.currentData() is None
+
+        monkeypatch.setattr(
+            "openseespy_studio.ui.material_dialog.MaterialDialog",
+            _FakeDependencyDialog,
+        )
+        dialog._create_dependency_material()
+
+        assert dialog._base_material_combo.isEnabled()
+        assert dialog._base_material_combo.currentData() == 2
+        assert [item.tag for item in dialog.pending_materials()] == [2]
+
+        material = dialog.material_data()
+        assert material.material_type == "MinMax"
+        assert material.base_material_tag == 2
+    finally:
+        _close(dialog)
+
+
+def test_series_material_requires_component_and_can_stage_one_inline(
+    monkeypatch,
+):
+    dialog = MaterialDialog(
+        next_tag=1,
+        units={"length": "m", "force": "N", "time": "s"},
+        materials={},
+    )
+
+    class _FakeDependencyDialog:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def exec(self):
+            return 1
+
+        def pending_materials(self):
+            return []
+
+        def material_data(self):
+            return MaterialData(
+                tag=2,
+                name="Component",
+                material_type="Elastic",
+                parameters={"E": 200.0e9},
+            )
+
+    try:
+        _select_material_type(dialog, "Series")
+        try:
+            dialog.material_data()
+        except ValueError as exc:
+            assert "requires at least one component material" in str(exc)
+        else:
+            raise AssertionError("Series without a component must be rejected")
+
+        monkeypatch.setattr(
+            "openseespy_studio.ui.material_dialog.MaterialDialog",
+            _FakeDependencyDialog,
+        )
+        dialog._create_dependency_material()
+        dialog._add_component_row(material_tag=2)
+
+        material = dialog.material_data()
+        assert material.material_tags == [2]
+        assert [item.tag for item in dialog.pending_materials()] == [2]
+    finally:
+        _close(dialog)
