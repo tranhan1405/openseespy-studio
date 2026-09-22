@@ -11236,10 +11236,15 @@ class MainWindow(QMainWindow):
                 if point_tags is None
                 else tuple(int(tag) for tag in point_tags)
             ),
+            preview_callback=(
+                self.viewport.show_surface_mesh_definition_preview
+            ),
             parent=self,
         )
         if not dialog.exec():
+            self.viewport.clear_surface_mesh_preview()
             return None
+        self.viewport.clear_surface_mesh_preview(render=False)
 
         before = self.project.to_dict()
         try:
@@ -11287,10 +11292,15 @@ class MainWindow(QMainWindow):
             next_tag=surface.tag,
             sections=self._shell_sections(),
             surface=surface,
+            preview_callback=(
+                self.viewport.show_surface_mesh_definition_preview
+            ),
             parent=self,
         )
         if not dialog.exec():
+            self.viewport.clear_surface_mesh_preview()
             return
+        self.viewport.clear_surface_mesh_preview(render=False)
         before = self.project.to_dict()
         try:
             updated = dialog.data()
