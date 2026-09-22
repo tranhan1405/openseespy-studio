@@ -7781,10 +7781,10 @@ class MainWindow(QMainWindow):
             tag = int(payload[1])
             if tag in self.project.surfaces:
                 tags.add(tag)
-        if not tags and fallback_tag is not None:
+        if fallback_tag is not None:
             tag = int(fallback_tag)
-            if tag in self.project.surfaces:
-                tags.add(tag)
+            if tag in self.project.surfaces and tag not in tags:
+                return [tag]
         return sorted(tags)
 
     def _select_generated_fe_for_surfaces(
@@ -15623,11 +15623,15 @@ class MainWindow(QMainWindow):
             )
             create_geometry = menu.addAction("New Surface by Input...")
             create_geometry.triggered.connect(self._create_surface_geometry)
+            menu.addSeparator()
+            menu.addAction(self.actions["surface_mesh_overlay"])
             stitch = menu.addAction("Stitch Coincident Shell Nodes...")
             stitch.triggered.connect(self._stitch_coincident_shell_nodes)
             section = menu.addAction("New Shell Section...")
             section.triggered.connect(self._create_shell_section)
-            pressure = menu.addAction("Create Surface Pressure...")
+            pressure = menu.addAction(
+                "Create Pressure from FE Shell Selection..."
+            )
             pressure.triggered.connect(self._create_shell_pressure)
             exec_menu()
             return
@@ -15637,44 +15641,88 @@ class MainWindow(QMainWindow):
             surface = self.project.surfaces.get(tag)
             if surface is None:
                 return
+            surface_tags = self._selected_surface_geometry_tags(tag)
+            count = len(surface_tags)
             live_mesh = any(
-                element_tag in self.model.elements
-                for element_tag in surface.generated_element_tags
+                int(element_tag) in self.model.elements
+                for surface_tag in surface_tags
+                for element_tag in self.project.surfaces[
+                    surface_tag
+                ].generated_element_tags
             )
+
             properties = menu.addAction("Properties / Mesh Quality")
             properties.triggered.connect(
                 lambda checked=False, t=tag:
                 self._show_surface_geometry_properties(t)
             )
-            edit = menu.addAction("Edit Surface / Mesh Settings...")
-            edit.triggered.connect(
-                lambda checked=False, t=tag:
-                self._edit_surface_geometry(t)
+            if count == 1:
+                edit = menu.addAction("Edit Surface / Mesh Settings...")
+                edit.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._edit_surface_geometry(t)
+                )
+
+            menu.addSeparator()
+            mesh_label = (
+                "Mesh / Remesh Surface"
+                if count == 1
+                else f"Mesh / Remesh {count} Surfaces"
+            )
+            remesh = menu.addAction(mesh_label)
+            remesh.triggered.connect(
+                lambda checked=False, tags=tuple(surface_tags):
+                self._remesh_surface_geometries(tags)
             )
             if live_mesh:
-                remesh = menu.addAction("Remesh Surface")
-                remesh.triggered.connect(
-                    lambda checked=False, t=tag:
-                    self._remesh_surface_geometry(t)
+                delete_label = (
+                    "Delete Generated Mesh"
+                    if count == 1
+                    else f"Delete Generated Meshes ({count} Surfaces)"
                 )
-                delete_mesh = menu.addAction("Delete Generated Mesh")
+                delete_mesh = menu.addAction(delete_label)
                 delete_mesh.triggered.connect(
-                    lambda checked=False, t=tag:
-                    self._delete_surface_mesh(t)
+                    lambda checked=False, tags=tuple(surface_tags):
+                    self._delete_surface_meshes(tags)
                 )
-            else:
-                mesh = menu.addAction("Generate Surface Mesh...")
-                mesh.triggered.connect(
-                    lambda checked=False, t=tag:
-                    self._mesh_surface_geometry(t)
-                )
-            flip = menu.addAction("Flip Surface Normal")
-            flip.triggered.connect(
-                lambda checked=False, t=tag:
-                self._flip_surface_normal(t)
+
+            flip_label = (
+                "Flip Surface Normal"
+                if count == 1
+                else f"Flip Normals ({count} Surfaces)"
             )
+            flip = menu.addAction(flip_label)
+            flip.triggered.connect(
+                lambda checked=False, tags=tuple(surface_tags):
+                self._flip_surface_normals(tags)
+            )
+
+            menu.addSeparator()
+            select_fe = menu.addAction(
+                "Select Generated FE"
+                if count == 1
+                else f"Select Generated FE ({count} Surfaces)"
+            )
+            select_fe.setEnabled(live_mesh)
+            select_fe.triggered.connect(
+                lambda checked=False, tags=tuple(surface_tags):
+                self._select_generated_fe_for_surfaces(tags)
+            )
+            pressure = menu.addAction(
+                "Create Pressure on Surface..."
+                if count == 1
+                else f"Create Pressure on {count} Surfaces..."
+            )
+            pressure.setEnabled(live_mesh)
+            pressure.triggered.connect(
+                lambda checked=False, tags=tuple(surface_tags):
+                self._create_surface_pressure_for_surfaces(tags)
+            )
+            menu.addAction(self.actions["surface_mesh_overlay"])
+
             menu.addSeparator()
             delete = menu.addAction("Delete Surface")
+            delete.setEnabled(count == 1)
             delete.triggered.connect(
                 lambda checked=False, t=tag:
                 self._delete_surface_geometry(t)
