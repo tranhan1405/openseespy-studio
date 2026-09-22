@@ -13,6 +13,14 @@ class ShellMeshSpec:
     divisions_u: int = 1
     divisions_v: int = 1
     target_size: float | None = None
+    bias_u: float = 1.0
+    bias_v: float = 1.0
+    edge_divisions: tuple[
+        int | None,
+        int | None,
+        int | None,
+        int | None,
+    ] | None = None
     formulation: str = "ASDShellQ4"
     section_tag: int = 0
     corotational: bool = False
@@ -36,6 +44,8 @@ class ShellMeshBuildResult:
     divisions_v: int = 0
     conformed_u: bool = False
     conformed_v: bool = False
+    u_coordinates: list[float] = field(default_factory=list)
+    v_coordinates: list[float] = field(default_factory=list)
 
 
 def _bilinear_point(
@@ -98,6 +108,127 @@ def resolve_shell_mesh_divisions(
             "Shell mesh divisions are limited to 500 per direction."
         )
     return nu, nv
+
+
+def _apply_edge_divisions(
+    nu: int,
+    nv: int,
+    edge_divisions,
+) -> tuple[int, int]:
+    if edge_divisions is None:
+        return int(nu), int(nv)
+    if len(edge_divisions) != 4:
+        raise ValueError(
+            "Shell edge seeding requires four edge division entries."
+        )
+    seeds: list[int | None] = []
+    for index, value in enumerate(edge_divisions, start=1):
+        if value is None:
+            seeds.append(None)
+            continue
+        seed = int(value)
+        if not 1 <= seed <= 500:
+            raise ValueError(
+                f"Shell edge {index} divisions must be in 1..500."
+            )
+        seeds.append(seed)
+
+    u_values = [
+        value for value in (seeds[0], seeds[2])
+        if value is not None
+    ]
+    v_values = [
+        value for value in (seeds[1], seeds[3])
+        if value is not None
+    ]
+    if len(set(u_values)) > 1:
+        raise ValueError(
+            "Mapped Shell mesh requires equal divisions on "
+            "opposite edges 1 and 3."
+        )
+    if len(set(v_values)) > 1:
+        raise ValueError(
+            "Mapped Shell mesh requires equal divisions on "
+            "opposite edges 2 and 4."
+        )
+    if u_values:
+        nu = int(u_values[0])
+    if v_values:
+        nv = int(v_values[0])
+    return int(nu), int(nv)
+
+
+def biased_mesh_coordinates(
+    divisions: int,
+    bias: float = 1.0,
+) -> list[float]:
+    """Return normalized mapped-mesh coordinates with end/start size bias.
+
+    bias = 1 gives uniform spacing. Values >1 create smaller cells near
+    coordinate 0 and larger cells near coordinate 1; values <1 reverse it.
+    """
+    n = int(divisions)
+    if n < 1:
+        raise ValueError("Mesh divisions must be at least 1.")
+    value = float(bias)
+    if (
+        not math.isfinite(value)
+        or value < 0.01
+        or value > 100.0
+    ):
+        raise ValueError(
+            "Mesh bias must be finite and in 0.01..100."
+        )
+    if n == 1 or abs(value - 1.0) <= 1.0e-12:
+        return [index / n for index in range(n + 1)]
+
+    # Let consecutive interval sizes form a geometric progression.
+    # The requested bias is last interval / first interval.
+    ratio = value ** (1.0 / (n - 1))
+    if abs(ratio - 1.0) <= 1.0e-12:
+        return [index / n for index in range(n + 1)]
+    weights = [ratio ** index for index in range(n)]
+    total = sum(weights)
+    result = [0.0]
+    cumulative = 0.0
+    for weight in weights:
+        cumulative += weight
+        result.append(cumulative / total)
+    result[-1] = 1.0
+    return result
+
+
+def resolve_shell_mesh_parameters(
+    p1,
+    p2,
+    p3,
+    p4,
+    *,
+    divisions_u: int,
+    divisions_v: int,
+    target_size: float | None,
+    bias_u: float = 1.0,
+    bias_v: float = 1.0,
+    edge_divisions=None,
+) -> tuple[list[float], list[float]]:
+    nu, nv = resolve_shell_mesh_divisions(
+        p1,
+        p2,
+        p3,
+        p4,
+        divisions_u=divisions_u,
+        divisions_v=divisions_v,
+        target_size=target_size,
+    )
+    nu, nv = _apply_edge_divisions(
+        nu,
+        nv,
+        edge_divisions,
+    )
+    return (
+        biased_mesh_coordinates(nu, bias_u),
+        biased_mesh_coordinates(nv, bias_v),
+    )
 
 
 def _mesh_merge_tolerance(
@@ -356,7 +487,7 @@ def build_shell_mesh(
             "Shell mesh corner surface has zero or near-zero area."
         )
 
-    nu, nv = resolve_shell_mesh_divisions(
+    u_coordinates, v_coordinates = resolve_shell_mesh_parameters(
         p1,
         p2,
         p3,
@@ -364,7 +495,12 @@ def build_shell_mesh(
         divisions_u=spec.divisions_u,
         divisions_v=spec.divisions_v,
         target_size=spec.target_size,
+        bias_u=spec.bias_u,
+        bias_v=spec.bias_v,
+        edge_divisions=spec.edge_divisions,
     )
+    nu = len(u_coordinates) - 1
+    nv = len(v_coordinates) - 1
     merge_tolerance = _mesh_merge_tolerance(
         project,
         spec.merge_tolerance,
@@ -381,6 +517,8 @@ def build_shell_mesh(
                 tolerance=merge_tolerance,
             )
         )
+        u_coordinates = biased_mesh_coordinates(nu, spec.bias_u)
+        v_coordinates = biased_mesh_coordinates(nv, spec.bias_v)
 
     formulation = str(spec.formulation)
     if formulation not in SHELL_ELEMENT_TYPES:
@@ -415,15 +553,13 @@ def build_shell_mesh(
             key = _node_spatial_key(node.xyz, merge_tolerance)
             node_buckets.setdefault(key, []).append(int(tag))
 
-    for j in range(nv + 1):
+    for j, v in enumerate(v_coordinates):
         row: list[int] = []
-        v = j / nv
-        for i in range(nu + 1):
+        for i, u in enumerate(u_coordinates):
             if (i, j) in corner_lookup:
                 row.append(corner_lookup[(i, j)])
                 continue
 
-            u = i / nu
             xyz = _bilinear_point(p1, p2, p3, p4, u, v)
             existing_tag = None
             if spec.reuse_existing_nodes:
@@ -519,4 +655,6 @@ def build_shell_mesh(
         divisions_v=nv,
         conformed_u=conformed_u,
         conformed_v=conformed_v,
+        u_coordinates=list(u_coordinates),
+        v_coordinates=list(v_coordinates),
     )
