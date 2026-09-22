@@ -261,6 +261,14 @@ SARE keeps the research path explicit:
    load patterns and Static DisplacementControl objects are never inserted
    into the user's structural model. The completed Job opens directly in
    **Result > Moment-Curvature**.
+   Response-2000 chart data can then be overlaid for validation either by
+   importing a `.txt/.csv/.tsv/.dat` file or by copying the Response-2000
+   Moment-Curvature chart data to the clipboard and choosing
+   **Paste Response-2000**. SARE can convert common source units such as
+   `rad/km`, `1/m`, `1/mm`, `kN·m`, `N·m`, `N·mm` and
+   `kip·in/ft` into the active project units before comparison. The result
+   page reports peak moment, curvature at peak moment, initial stiffness,
+   common-range area and moment NRMSE as descriptive validation metrics.
 2. **Hinge Backbone** converts researcher-confirmed characteristic points from
    a moment-rotation curve directly, or from moment-curvature using the
    explicit assumption theta = kappa * L_eq, into a symmetric OpenSees
