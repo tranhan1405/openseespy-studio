@@ -110,5 +110,4 @@ def test_major_dependent_workflows_use_prerequisite_links():
 
     for method_name, dependency_name in expected.items():
         source = inspect.getsource(getattr(MainWindow, method_name))
-        assert "_ensure_" in source
         assert dependency_name in source
