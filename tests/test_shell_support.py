@@ -1341,3 +1341,148 @@ def test_shell_mesh_dialog_exposes_sizing_and_reuse_controls():
     assert "resolve_shell_mesh_divisions" in info_source
     assert "target_size" in spec_source
     assert "reuse_existing_nodes" in spec_source
+
+
+def _adjacent_patch_mesh_project() -> ProjectDatabase:
+    model = StructuralModel("adjacent-conformity", ndm=3, ndf=6)
+    coordinates = {
+        1: (0.0, 0.0, 0.0),
+        2: (1.0, 0.0, 0.0),
+        3: (1.0, 1.0, 0.0),
+        4: (0.0, 1.0, 0.0),
+        5: (2.0, 0.0, 0.0),
+        6: (2.0, 1.0, 0.0),
+    }
+    for tag, xyz in coordinates.items():
+        model.add_node(tag, *xyz)
+    project = ProjectDatabase(name="adjacent-conformity", model=model)
+    project.add_section(_shell_section())
+    return project
+
+
+def test_model_check_detects_shell_hanging_node_t_junction():
+    project = _adjacent_patch_mesh_project()
+    build_shell_mesh(
+        project,
+        ShellMeshSpec(
+            corner_nodes=(1, 2, 3, 4),
+            divisions_u=1,
+            divisions_v=2,
+            formulation="ASDShellQ4",
+            section_tag=7,
+        ),
+    )
+    right = build_shell_mesh(
+        project,
+        ShellMeshSpec(
+            corner_nodes=(2, 5, 6, 3),
+            divisions_u=1,
+            divisions_v=3,
+            formulation="ASDShellQ4",
+            section_tag=7,
+            conform_existing_edges=False,
+        ),
+    )
+
+    assert right.divisions_v == 3
+    conformity = [
+        issue for issue in validate_project(project)
+        if issue.category == "Shell conformity"
+    ]
+    assert conformity
+    assert any(
+        "lies on the interior of edge" in issue.message
+        for issue in conformity
+    )
+
+
+def test_shell_mesh_auto_conforms_to_existing_shared_edge_divisions():
+    project = _adjacent_patch_mesh_project()
+    left = build_shell_mesh(
+        project,
+        ShellMeshSpec(
+            corner_nodes=(1, 2, 3, 4),
+            divisions_u=1,
+            divisions_v=2,
+            formulation="ASDShellQ4",
+            section_tag=7,
+        ),
+    )
+    shared_midpoint = left.grid[1][-1]
+
+    right = build_shell_mesh(
+        project,
+        ShellMeshSpec(
+            corner_nodes=(2, 5, 6, 3),
+            divisions_u=1,
+            divisions_v=3,
+            formulation="ASDShellQ4",
+            section_tag=7,
+        ),
+    )
+
+    assert right.divisions_u == 1
+    assert right.divisions_v == 2
+    assert right.conformed_u is False
+    assert right.conformed_v is True
+    assert right.grid[1][0] == shared_midpoint
+    assert shared_midpoint in right.reused_node_tags
+    assert not [
+        issue for issue in validate_project(project)
+        if issue.category == "Shell conformity"
+    ]
+
+
+def test_shell_mesh_conformity_can_be_disabled_explicitly():
+    project = _adjacent_patch_mesh_project()
+    build_shell_mesh(
+        project,
+        ShellMeshSpec(
+            corner_nodes=(1, 2, 3, 4),
+            divisions_u=1,
+            divisions_v=2,
+            formulation="ASDShellQ4",
+            section_tag=7,
+        ),
+    )
+
+    result = build_shell_mesh(
+        project,
+        ShellMeshSpec(
+            corner_nodes=(2, 5, 6, 3),
+            divisions_u=1,
+            divisions_v=3,
+            formulation="ASDShellQ4",
+            section_tag=7,
+            conform_existing_edges=False,
+        ),
+    )
+
+    assert result.divisions_v == 3
+    assert result.conformed_v is False
+
+
+def test_shell_mesh_dialog_exposes_edge_conformity_controls():
+    init_source = inspect.getsource(ShellMeshDialog.__init__)
+    sync_source = inspect.getsource(
+        ShellMeshDialog._sync_conformity_options
+    )
+    spec_source = inspect.getsource(ShellMeshDialog.spec)
+
+    assert "Conform divisions to existing shared-edge shell mesh" in init_source
+    assert "conform_existing_edges" in init_source
+    assert "reuse_existing_nodes.setChecked(True)" in sync_source
+    assert "conform_existing_edges.setChecked(False)" in sync_source
+    assert "conform_existing_edges=" in spec_source
+
+
+def test_shell_mesh_creation_status_reports_actual_conformity_and_reuse():
+    source = inspect.getsource(MainWindow._create_shell_mesh)
+
+    assert "result.divisions_u" in source
+    assert "result.divisions_v" in source
+    assert "result.reused_node_tags" in source
+    assert "result.conformed_u" in source
+    assert "result.conformed_v" in source
+    assert "U conformed" in source
+    assert "V conformed" in source
