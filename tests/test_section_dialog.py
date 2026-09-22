@@ -102,6 +102,9 @@ def test_section_editor_can_stage_new_material_without_leaving_dialog(
         def exec(self):
             return 1
 
+        def pending_materials(self):
+            return []
+
         def material_data(self):
             return self._material
 
