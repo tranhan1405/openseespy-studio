@@ -82,6 +82,7 @@ from ..model import (
     SHELL_ELEMENT_TYPES,
     StructuralModel,
     classify_fixity,
+    shell_surface_geometry,
 )
 from ..mass_source import apply_mass_source, evaluate_mass_source
 from ..moment_curvature import build_moment_curvature_project
@@ -2717,10 +2718,10 @@ class MainWindow(QMainWindow):
             ),
             (
                 "show_element_loads",
-                "Beam Loads",
+                "Element / Surface Loads",
                 "load",
                 "element_loads",
-                "Show applied beam/column load vectors",
+                "Show applied element and shell surface load vectors",
             ),
             (
                 "show_prescribed_displacements",
@@ -7562,6 +7563,25 @@ class MainWindow(QMainWindow):
             ])
         elif load.load_type == "SurfacePressure":
             unit_system = UnitSystem.from_mapping(self.project.units)
+            element = self.model.elements.get(load.element_tag)
+            try:
+                _center, normal, _area = shell_surface_geometry(
+                    self.model,
+                    element,
+                )
+                pressure_vector = tuple(
+                    float(load.pressure) * float(value)
+                    for value in normal
+                )
+                normal_text = "(" + ", ".join(
+                    f"{value:.6g}" for value in normal
+                ) + ")"
+                pressure_vector_text = "(" + ", ".join(
+                    f"{value:.6g}" for value in pressure_vector
+                ) + ")"
+            except (TypeError, ValueError):
+                normal_text = "Unavailable"
+                pressure_vector_text = "Unavailable"
             rows.extend([
                 (
                     f"Pressure [{unit_system.stress_label}]",
@@ -7570,6 +7590,11 @@ class MainWindow(QMainWindow):
                 (
                     "Direction",
                     "Shell normal: + outward / - inward",
+                ),
+                ("Shell normal XYZ", normal_text),
+                (
+                    f"Global pressure vector [{unit_system.stress_label}]",
+                    pressure_vector_text,
                 ),
                 (
                     "OpenSees",
