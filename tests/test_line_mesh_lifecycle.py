@@ -2515,7 +2515,7 @@ def test_geometry_trim_side_pick_rejects_nonfinite_screen_and_world():
 
     assert "math.isfinite(sx)" in source
     assert "math.isfinite(sy)" in source
-    assert "geometry_world_to_screen" in source
+    assert "_world_to_qt" in source
     assert "Non-finite projected endpoint" in source
     assert "len(xyz) != 3" in source
     assert "math.isfinite(value) for value in xyz" in source
