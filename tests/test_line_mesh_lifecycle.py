@@ -32,9 +32,13 @@ from openseespy_studio.project import (
     ProjectDatabase,
     SectionData,
     SelectionSetData,
+    SurfaceGeometryData,
     TransformationData,
 )
+from openseespy_studio.surface_mesher import mesh_surface_geometry
+from openseespy_studio.ui.line_geometry_dialog import LineGeometryDialog
 from openseespy_studio.ui.main_window import MainWindow
+from openseespy_studio.ui.surface_dialog import SurfaceGeometryDialog
 from openseespy_studio.ui.viewport import ModelViewport
 
 
@@ -1096,4 +1100,89 @@ def test_line_intersection_preview_and_preprocessor_actions_are_exposed():
     assert 'name="line-intersection-preview"' in viewport_render
     assert "pickable=False" in viewport_render
     assert "_line_intersection_preview" in viewport_show
+
+def test_geometry_creation_uses_geometry_only_dialog_modes():
+    line_create = inspect.getsource(
+        MainWindow._create_line_geometry_from_points
+    )
+    surface_create = inspect.getsource(
+        MainWindow._create_surface_geometry_from_points
+    )
+
+    assert 'mode="geometry"' in line_create
+    assert 'mode="geometry"' in surface_create
+    assert "_mesh_line_geometry" not in line_create
+    assert "_configure_line_mesh" not in line_create
+    assert "_mesh_surface_geometry" not in surface_create
+    assert "_configure_surface_mesh" not in surface_create
+
+
+def test_geometry_dialogs_hide_mesh_recipe_controls_in_geometry_mode():
+    line_init = inspect.getsource(LineGeometryDialog.__init__)
+    surface_init = inspect.getsource(SurfaceGeometryDialog.__init__)
+
+    assert "self.mesh_group.setVisible(False)" in line_init
+    assert "self.recipe_group.setVisible(False)" in line_init
+    assert '"Create Geometry"' in line_init
+    assert "self.mesh_group.setVisible(False)" in surface_init
+    assert "self.preview_button.setVisible(False)" in surface_init
+    assert '"Create Geometry"' in surface_init
+
+
+def test_surface_mesher_rejects_unconfigured_geometry():
+    project = ProjectDatabase(name="geometry-only-surface")
+    project.add_surface(
+        SurfaceGeometryData(
+            tag=1,
+            name="Geometry only",
+            mesh_recipe_configured=False,
+            section_tag=None,
+        )
+    )
+
+    with pytest.raises(ValueError, match="no Mesh recipe"):
+        mesh_surface_geometry(project, 1)
+
+
+def test_mesh_tree_owns_mesh_lifecycle_commands():
+    context = inspect.getsource(MainWindow._show_tree_context_menu)
+
+    assert 'if kind == "mesh_root":' in context
+    assert 'if kind == "line_meshes_root":' in context
+    assert 'if kind == "surface_meshes_root":' in context
+    assert 'if kind == "line_mesh_recipe":' in context
+    assert 'if kind == "surface_mesh_recipe":' in context
+    assert "Generate All Configured Line Meshes" in context
+    assert "Generate All Configured Surface Meshes" in context
+    assert "Configure Line Mesh / FE Recipe..." in context
+    assert "Configure Surface Mesh / Shell Recipe..." in context
+
+
+def test_geometry_line_context_has_no_mesh_lifecycle_commands():
+    context = inspect.getsource(MainWindow._show_tree_context_menu)
+    start = context.index('if kind == "line_geometry":')
+    end = context.index('if kind == "surfaces_root":', start)
+    line_block = context[start:end]
+
+    assert "Edit Line Geometry..." in line_block
+    assert "Divide Geometry Line..." in line_block
+    assert "Trim / Extend This Line to Other Selected Line..." in line_block
+    assert "Generate Line Mesh..." not in line_block
+    assert "Remesh Line" not in line_block
+    assert "Delete Generated Line Mesh" not in line_block
+    assert "Configure Mesh / FE Recipe..." not in line_block
+    assert "Mesh Quality..." not in line_block
+
+
+def test_geometry_surface_context_has_no_mesh_lifecycle_commands():
+    context = inspect.getsource(MainWindow._show_tree_context_menu)
+    start = context.index('if kind == "surface_geometry":')
+    end = context.index('if kind == "material":', start)
+    surface_block = context[start:end]
+
+    assert "Edit Surface Geometry..." in surface_block
+    assert "Copy / Offset Surface..." in surface_block
+    assert "Configure Mesh / Shell Recipe..." not in surface_block
+    assert "Mesh / Remesh Surface" not in surface_block
+    assert "Visualize Mesh Quality" not in surface_block
 
