@@ -1508,6 +1508,24 @@ def delete_surface_mesh(
         project,
         live_elements,
     )
+    managed_selection_names = managed_surface_selection_names(project)
+    tracked_nodes = set(state.tracked_node_tags)
+    direct_node_selection_names = sorted(
+        selection.name
+        for selection in project.selection_sets.values()
+        if (
+            selection.name not in managed_selection_names
+            and any(
+                int(node_tag) in tracked_nodes
+                for node_tag in selection.node_tags
+            )
+        )
+    )
+    if direct_node_selection_names:
+        blockers.append(
+            "named selection(s) "
+            + ", ".join(direct_node_selection_names)
+        )
     if blockers:
         raise ValueError(
             "Cannot delete/remesh Surface generated FE mesh because it is "
