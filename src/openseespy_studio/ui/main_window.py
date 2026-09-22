@@ -4059,10 +4059,32 @@ class MainWindow(QMainWindow):
         surfaces.setData(0, Qt.UserRole, ("surfaces_root", None))
         geometry.addChild(surfaces)
 
-        # Tree philosophy: preprocessing geometry and solver FE entities have
-        # separate homes.  A Surface may own the recipe/history of a mesh,
-        # but generated nodes/elements are real OpenSees entities and live
-        # only under FE Model.
+        mesh_root = QTreeWidgetItem(["Mesh"])
+        mesh_root.setIcon(0, studio_icon("grid"))
+        mesh_root.setData(0, Qt.UserRole, ("mesh_root", None))
+        mesh_root.setExpanded(True)
+        root.addChild(mesh_root)
+
+        line_meshes = QTreeWidgetItem([
+            f"Line Meshes ({len(self.project.lines)})"
+        ])
+        line_meshes.setIcon(0, studio_icon("element"))
+        line_meshes.setData(0, Qt.UserRole, ("line_meshes_root", None))
+        mesh_root.addChild(line_meshes)
+
+        surface_meshes = QTreeWidgetItem([
+            f"Surface Meshes ({len(self.project.surfaces)})"
+        ])
+        surface_meshes.setIcon(0, studio_icon("grid"))
+        surface_meshes.setData(
+            0,
+            Qt.UserRole,
+            ("surface_meshes_root", None),
+        )
+        mesh_root.addChild(surface_meshes)
+
+        # Geometry defines topology, Mesh stores discretization/FE recipes,
+        # and generated OpenSees entities live only under FE Model.
         fe_model = QTreeWidgetItem(["FE Model"])
         fe_model.setIcon(0, studio_icon("model"))
         fe_model.setData(0, Qt.UserRole, ("fe_model_root", None))
@@ -4125,41 +4147,44 @@ class MainWindow(QMainWindow):
 
         for tag in sorted(self.project.lines):
             line = self.project.lines[tag]
+            item = QTreeWidgetItem([
+                f"Line {tag} · {line.name}"
+            ])
+            item.setIcon(0, studio_icon("element"))
+            item.setData(0, Qt.UserRole, ("line_geometry", tag))
+            lines.addChild(item)
+
             live_elements = [
                 int(element_tag)
                 for element_tag in line.generated_element_tags
                 if int(element_tag) in self.model.elements
             ]
             if live_elements:
-                status = (
-                    f"{line.divisions} div · "
+                mesh_status = (
+                    f"Meshed · {line.divisions} div · "
                     f"{len(live_elements)} {line.element_family} E"
                 )
+            elif line.mesh_recipe_configured:
+                mesh_status = (
+                    f"Ready · {line.divisions} div · {line.element_family}"
+                )
             else:
-                status = "Unmeshed"
-            item = QTreeWidgetItem([
-                f"Line {tag} · {line.name} [{status}]"
+                mesh_status = "Not configured"
+            mesh_item = QTreeWidgetItem([
+                f"Line {tag} · {mesh_status}"
             ])
-            item.setIcon(0, studio_icon("element"))
-            item.setData(0, Qt.UserRole, ("line_geometry", tag))
-            lines.addChild(item)
+            mesh_item.setIcon(0, studio_icon("element"))
+            mesh_item.setData(
+                0,
+                Qt.UserRole,
+                ("line_mesh_recipe", tag),
+            )
+            line_meshes.addChild(mesh_item)
 
         for tag in sorted(self.project.surfaces):
             surface = self.project.surfaces[tag]
-            live_elements = [
-                int(element_tag)
-                for element_tag in surface.generated_element_tags
-                if int(element_tag) in self.model.elements
-            ]
-            if live_elements:
-                status = (
-                    f"{surface.divisions_u}×{surface.divisions_v} · "
-                    f"{len(live_elements)} shells"
-                )
-            else:
-                status = "Unmeshed"
             item = QTreeWidgetItem([
-                f"Surface {tag} · {surface.name} [{status}]"
+                f"Surface {tag} · {surface.name}"
             ])
             item.setIcon(0, studio_icon("grid"))
             item.setData(
@@ -4169,6 +4194,35 @@ class MainWindow(QMainWindow):
             )
             surfaces.addChild(item)
             self._tree_surface_items[tag] = item
+
+            live_elements = [
+                int(element_tag)
+                for element_tag in surface.generated_element_tags
+                if int(element_tag) in self.model.elements
+            ]
+            if live_elements:
+                mesh_status = (
+                    f"Meshed · {surface.divisions_u}×"
+                    f"{surface.divisions_v} · "
+                    f"{len(live_elements)} Shell E"
+                )
+            elif surface.mesh_recipe_configured:
+                mesh_status = (
+                    f"Ready · {surface.divisions_u}×"
+                    f"{surface.divisions_v} · {surface.formulation}"
+                )
+            else:
+                mesh_status = "Not configured"
+            mesh_item = QTreeWidgetItem([
+                f"Surface {tag} · {mesh_status}"
+            ])
+            mesh_item.setIcon(0, studio_icon("grid"))
+            mesh_item.setData(
+                0,
+                Qt.UserRole,
+                ("surface_mesh_recipe", tag),
+            )
+            surface_meshes.addChild(mesh_item)
 
         for tag in sorted(self.model.elements):
             element = self.model.elements[tag]
