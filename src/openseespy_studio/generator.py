@@ -851,6 +851,13 @@ def recorder_to_openseespy(recorder: RecorderData) -> list[str]:
     if recorder.recorder_type == "Element":
         lines.append(prefix + f", {recorder.response!r})")
         return lines
+    if recorder.recorder_type == "Shell":
+        lines.append(
+            prefix
+            + f", 'material', {recorder.section_number}, "
+            + f"{recorder.response!r})"
+        )
+        return lines
     if recorder.recorder_type == "Section":
         lines.append(
             prefix
