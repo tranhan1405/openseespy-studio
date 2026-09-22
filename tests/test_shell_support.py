@@ -328,3 +328,32 @@ def test_shell_mesh_ui_route_is_exposed():
     assert "ShellMeshDialog" in source
     assert "build_shell_mesh" in source
 
+
+def test_shell_mesh_failure_rolls_back_generated_nodes_and_elements():
+    model = StructuralModel("bad-mesh", ndm=3, ndf=6)
+    # Collinear corners force zero-area generated shell elements.
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    model.add_node(3, 2.0, 0.0, 0.0)
+    model.add_node(4, 3.0, 0.0, 0.0)
+    project = ProjectDatabase(name="bad-mesh", model=model)
+    project.add_section(_shell_section())
+
+    before_nodes = set(project.model.nodes)
+    before_elements = set(project.model.elements)
+
+    with pytest.raises(ValueError, match=r"zero or near-zero area"):
+        build_shell_mesh(
+            project,
+            ShellMeshSpec(
+                corner_nodes=(1, 2, 3, 4),
+                divisions_u=2,
+                divisions_v=2,
+                formulation="ASDShellQ4",
+                section_tag=7,
+            ),
+        )
+
+    assert set(project.model.nodes) == before_nodes
+    assert set(project.model.elements) == before_elements
+
