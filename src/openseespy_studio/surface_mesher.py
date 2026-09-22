@@ -3,7 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
-from .project import ProjectDatabase, SurfaceGeometryData
+from .project import (
+    ProjectDatabase,
+    SurfaceEdgeSupportData,
+    SurfaceGeometryData,
+)
 from .shell_mesh import (
     ShellMeshBuildResult,
     ShellMeshSpec,
@@ -245,6 +249,171 @@ def _surface_corner_node_tags(
     return corner_tags, created_tags
 
 
+def managed_surface_support_node_tags(
+    project: ProjectDatabase,
+) -> set[int]:
+    return {
+        int(node_tag)
+        for support in project.surface_edge_supports.values()
+        for node_tag in support.generated_node_tags
+        if int(node_tag) in project.model.nodes
+    }
+
+
+def _other_surface_support_fixity(
+    project: ProjectDatabase,
+    node_tag: int,
+    *,
+    exclude_support_tag: int,
+) -> tuple[int, int, int, int, int, int]:
+    values = [0, 0, 0, 0, 0, 0]
+    target = int(node_tag)
+    for support in project.surface_edge_supports.values():
+        if support.tag == int(exclude_support_tag):
+            continue
+        if target not in support.generated_node_tags:
+            continue
+        for index, fixed in enumerate(support.fixity):
+            if fixed:
+                values[index] = 1
+    return tuple(values)  # type: ignore[return-value]
+
+
+def detach_surface_edge_support(
+    project: ProjectDatabase,
+    support_tag: int,
+) -> list[int]:
+    support = project.surface_edge_supports.get(int(support_tag))
+    if support is None:
+        raise ValueError(
+            f"Surface edge support {int(support_tag)} does not exist."
+        )
+    changed: list[int] = []
+    for node_tag in list(support.generated_node_tags):
+        node = project.model.nodes.get(int(node_tag))
+        if node is None:
+            continue
+        other = _other_surface_support_fixity(
+            project,
+            int(node_tag),
+            exclude_support_tag=support.tag,
+        )
+        current = list(node.fixity)
+        for index, owned in enumerate(support.fixity[:len(current)]):
+            if owned and not other[index]:
+                current[index] = 0
+        project.model.set_fixity(int(node_tag), current)
+        changed.append(int(node_tag))
+    support.generated_node_tags = []
+    return sorted(changed)
+
+
+def sync_surface_edge_support(
+    project: ProjectDatabase,
+    support_tag: int,
+) -> list[int]:
+    tag = int(support_tag)
+    support = project.surface_edge_supports.get(tag)
+    if support is None:
+        raise ValueError(f"Surface edge support {tag} does not exist.")
+    if int(project.model.ndf) != 6:
+        raise ValueError(
+            "Managed Surface edge supports require a 3D shell model "
+            "with ndf=6."
+        )
+
+    before = project.to_dict()
+    try:
+        detach_surface_edge_support(project, tag)
+        node_tags = surface_edge_node_tags(
+            project,
+            support.surface_tag,
+            support.edge_index,
+        )
+        requested = tuple(int(value) for value in support.fixity)
+        conflicts: list[str] = []
+        for node_tag in node_tags:
+            node = project.model.nodes[int(node_tag)]
+            other = _other_surface_support_fixity(
+                project,
+                int(node_tag),
+                exclude_support_tag=tag,
+            )
+            for index, fixed in enumerate(requested):
+                if not fixed:
+                    continue
+                dof = index + 1
+                if any(
+                    displacement.node_tag == int(node_tag)
+                    and displacement.dof == dof
+                    for displacement
+                    in project.prescribed_displacements.values()
+                ):
+                    conflicts.append(
+                        f"Node {node_tag} DOF {dof} has prescribed displacement"
+                    )
+                    continue
+                if bool(node.fixity[index]) and not bool(other[index]):
+                    conflicts.append(
+                        f"Node {node_tag} DOF {dof} has manual restraint"
+                    )
+        if conflicts:
+            raise ValueError(
+                "Managed Surface edge support conflicts with existing "
+                "node state: " + "; ".join(conflicts[:12])
+            )
+
+        for node_tag in node_tags:
+            node = project.model.nodes[int(node_tag)]
+            values = tuple(
+                1 if bool(node.fixity[index]) or bool(requested[index]) else 0
+                for index in range(6)
+            )
+            project.model.set_fixity(int(node_tag), values)
+            project.validate_node_state(int(node_tag))
+        support.generated_node_tags = list(node_tags)
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+    return list(support.generated_node_tags)
+
+
+def sync_surface_edge_supports_for_surface(
+    project: ProjectDatabase,
+    surface_tag: int,
+) -> list[int]:
+    support_tags = sorted(
+        support.tag
+        for support in project.surface_edge_supports.values()
+        if support.surface_tag == int(surface_tag)
+    )
+    touched: set[int] = set()
+    for support_tag in support_tags:
+        touched.update(sync_surface_edge_support(project, support_tag))
+    return sorted(touched)
+
+
+def remove_surface_edge_support(
+    project: ProjectDatabase,
+    support_tag: int,
+) -> list[int]:
+    tag = int(support_tag)
+    if tag not in project.surface_edge_supports:
+        raise ValueError(f"Surface edge support {tag} does not exist.")
+    before = project.to_dict()
+    try:
+        changed = detach_surface_edge_support(project, tag)
+        project.remove_surface_edge_support_definition(tag)
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+    return changed
+
+
 def mesh_surface_geometry(
     project: ProjectDatabase,
     surface_tag: int,
@@ -309,6 +478,7 @@ def mesh_surface_geometry(
         surface.generated_element_tags = list(mesh_result.element_tags)
         surface.divisions_u = mesh_result.divisions_u
         surface.divisions_v = mesh_result.divisions_v
+        sync_surface_edge_supports_for_surface(project, surface.tag)
     except Exception:
         restored = ProjectDatabase.from_dict(before)
         project.__dict__.clear()
@@ -602,6 +772,14 @@ def delete_surface_mesh(
 
     before = project.to_dict()
     try:
+        support_tags = sorted(
+            support.tag
+            for support in project.surface_edge_supports.values()
+            if support.surface_tag == tag
+        )
+        for support_tag in support_tags:
+            detach_surface_edge_support(project, support_tag)
+
         for element_tag in sorted(live_elements):
             project.model.elements.pop(element_tag, None)
 
@@ -643,7 +821,14 @@ def delete_surface_geometry(
 
     before = project.to_dict()
     try:
+        support_tags = sorted(
+            support.tag
+            for support in project.surface_edge_supports.values()
+            if support.surface_tag == tag
+        )
         deleted = delete_surface_mesh(project, tag)
+        for support_tag in support_tags:
+            project.surface_edge_supports.pop(support_tag, None)
         project.remove_surface(tag)
     except Exception:
         restored = ProjectDatabase.from_dict(before)
@@ -720,6 +905,10 @@ def flip_surface_orientation(
                     "to flip its orientation safely."
                 )
             delete_surface_mesh(project, tag)
+
+        for support in project.surface_edge_supports.values():
+            if support.surface_tag == tag:
+                support.edge_index = 5 - int(support.edge_index)
 
         p1, p2, p3, p4 = surface.points
         surface.points = (p1, p4, p3, p2)

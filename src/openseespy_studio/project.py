@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 34
+PROJECT_FORMAT_VERSION = 35
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -3282,6 +3282,76 @@ class SurfaceGeometryData:
 
 
 @dataclass
+class SurfaceEdgeSupportData:
+    tag: int
+    name: str
+    surface_tag: int
+    edge_index: int
+    fixity: tuple[int, int, int, int, int, int] = (1, 1, 1, 1, 1, 1)
+    generated_node_tags: list[int] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.tag = _strict_int(self.tag, "Surface edge support tag")
+        self.surface_tag = _strict_int(
+            self.surface_tag,
+            "Surface edge support Surface tag",
+        )
+        self.edge_index = _strict_int(
+            self.edge_index,
+            "Surface edge support edge index",
+        )
+        self.name = str(self.name).strip() or f"Surface Edge Support {self.tag}"
+        if self.tag <= 0 or self.surface_tag <= 0:
+            raise ValueError(
+                "Surface edge support tag and Surface tag must be positive."
+            )
+        if self.edge_index not in {1, 2, 3, 4}:
+            raise ValueError(
+                "Surface edge support edge index must be 1, 2, 3, or 4."
+            )
+        values = tuple(
+            _strict_int(value, "Surface edge support fixity value")
+            for value in self.fixity
+        )
+        if len(values) != 6 or any(value not in {0, 1} for value in values):
+            raise ValueError(
+                "Surface edge support fixity must contain six 0/1 values."
+            )
+        if not any(values):
+            raise ValueError(
+                "Surface edge support must restrain at least one DOF."
+            )
+        self.fixity = values  # type: ignore[assignment]
+        self.generated_node_tags = sorted({
+            _strict_int(tag, "Surface edge support generated node tag")
+            for tag in self.generated_node_tags
+        })
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "surface_tag": self.surface_tag,
+            "edge_index": self.edge_index,
+            "fixity": list(self.fixity),
+            "generated_node_tags": list(self.generated_node_tags),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SurfaceEdgeSupportData":
+        return cls(
+            tag=data["tag"],
+            name=str(data.get("name", "")),
+            surface_tag=data["surface_tag"],
+            edge_index=data["edge_index"],
+            fixity=tuple(data.get("fixity", (1, 1, 1, 1, 1, 1))),
+            generated_node_tags=list(
+                data.get("generated_node_tags", [])
+            ),
+        )
+
+
+@dataclass
 class SelectionSetData:
     name: str
     node_tags: set[int] = field(default_factory=set)
@@ -3322,6 +3392,9 @@ class ProjectDatabase:
     points: dict[int, PointGeometryData] = field(default_factory=dict)
     lines: dict[int, LineGeometryData] = field(default_factory=dict)
     surfaces: dict[int, SurfaceGeometryData] = field(default_factory=dict)
+    surface_edge_supports: dict[int, SurfaceEdgeSupportData] = field(
+        default_factory=dict
+    )
     materials: dict[int, MaterialData] = field(default_factory=dict)
     nd_materials: dict[int, NDMaterialData] = field(default_factory=dict)
 
@@ -3360,6 +3433,7 @@ class ProjectDatabase:
         self.points.clear()
         self.lines.clear()
         self.surfaces.clear()
+        self.surface_edge_supports.clear()
         self.constraints.clear()
         self.connections.clear()
         self.time_series.clear()
@@ -3986,10 +4060,94 @@ class ProjectDatabase:
         self._validate_surface_geometry(surface)
         self.surfaces.pop(original_tag)
         self.surfaces[surface.tag] = surface
+        if surface.tag != original_tag:
+            for support in self.surface_edge_supports.values():
+                if support.surface_tag == original_tag:
+                    support.surface_tag = surface.tag
 
     def remove_surface(self, tag: int) -> None:
         tag = _strict_int(tag, "Surface geometry tag")
+        support_tags = sorted(
+            support.tag
+            for support in self.surface_edge_supports.values()
+            if support.surface_tag == tag
+        )
+        if support_tags:
+            raise ValueError(
+                f"Surface geometry {tag} has managed edge support(s): "
+                + ", ".join(map(str, support_tags))
+                + ". Remove them through the Surface lifecycle workflow."
+            )
         self.surfaces.pop(tag, None)
+
+    def next_surface_edge_support_tag(self) -> int:
+        return max(self.surface_edge_supports, default=0) + 1
+
+    def _validate_surface_edge_support(
+        self,
+        support: SurfaceEdgeSupportData,
+        *,
+        replacing_tag: int | None = None,
+    ) -> None:
+        if support.surface_tag not in self.surfaces:
+            raise ValueError(
+                "Surface edge support references missing Surface "
+                f"{support.surface_tag}."
+            )
+        for tag, existing in self.surface_edge_supports.items():
+            if replacing_tag is not None and int(tag) == int(replacing_tag):
+                continue
+            if (
+                existing.surface_tag == support.surface_tag
+                and existing.edge_index == support.edge_index
+            ):
+                raise ValueError(
+                    f"Surface {support.surface_tag} edge "
+                    f"{support.edge_index} already has managed support "
+                    f"{existing.tag}."
+                )
+
+    def add_surface_edge_support(
+        self,
+        support: SurfaceEdgeSupportData,
+    ) -> None:
+        if support.tag in self.surface_edge_supports:
+            raise ValueError(
+                f"Surface edge support tag {support.tag} already exists."
+            )
+        self._validate_surface_edge_support(support)
+        self.surface_edge_supports[support.tag] = support
+
+    def update_surface_edge_support(
+        self,
+        original_tag: int,
+        support: SurfaceEdgeSupportData,
+    ) -> None:
+        original_tag = _strict_int(
+            original_tag,
+            "Surface edge support original tag",
+        )
+        if original_tag not in self.surface_edge_supports:
+            raise ValueError(
+                f"Surface edge support tag {original_tag} does not exist."
+            )
+        if (
+            support.tag != original_tag
+            and support.tag in self.surface_edge_supports
+        ):
+            raise ValueError(
+                f"Surface edge support tag {support.tag} already exists."
+            )
+        self._validate_surface_edge_support(
+            support,
+            replacing_tag=original_tag,
+        )
+        self.surface_edge_supports.pop(original_tag)
+        self.surface_edge_supports[support.tag] = support
+
+    def remove_surface_edge_support_definition(self, tag: int) -> None:
+        normalized = _strict_int(tag, "Surface edge support tag")
+        self.surface_edge_supports.pop(normalized, None)
 
     @staticmethod
     def material_dependencies(material: MaterialData) -> list[int]:
@@ -7352,6 +7510,10 @@ class ProjectDatabase:
                 self.surfaces[tag].to_dict()
                 for tag in sorted(self.surfaces)
             ],
+            "surface_edge_supports": [
+                self.surface_edge_supports[tag].to_dict()
+                for tag in sorted(self.surface_edge_supports)
+            ],
             "materials": [
                 self.materials[tag].to_dict()
                 for tag in sorted(self.materials)
@@ -7461,6 +7623,27 @@ class ProjectDatabase:
                     f"Duplicate surface geometry tag {surface.tag}."
                 )
             result[surface.tag] = surface
+        return result
+
+    @staticmethod
+    def _load_surface_edge_supports(
+        raw: Any,
+    ) -> dict[int, SurfaceEdgeSupportData]:
+        result: dict[int, SurfaceEdgeSupportData] = {}
+        for index, item in enumerate(
+            _require_list(raw, "Surface edge supports")
+        ):
+            support = SurfaceEdgeSupportData.from_dict(
+                _require_object(
+                    item,
+                    f"Surface edge support item {index}",
+                )
+            )
+            if support.tag in result:
+                raise ValueError(
+                    f"Duplicate Surface edge support tag {support.tag}."
+                )
+            result[support.tag] = support
         return result
 
     @staticmethod
@@ -7831,6 +8014,9 @@ class ProjectDatabase:
             points=cls._load_points(data.get("points", [])),
             lines=cls._load_lines(data.get("lines", [])),
             surfaces=cls._load_surfaces(data.get("surfaces", [])),
+            surface_edge_supports=cls._load_surface_edge_supports(
+                data.get("surface_edge_supports", [])
+            ),
             materials=cls._load_materials(data.get("materials", [])),
             nd_materials=cls._load_nd_materials(
                 data.get("nd_materials", [])
@@ -7878,6 +8064,8 @@ class ProjectDatabase:
             project._validate_line_geometry(line)
         for surface in project.surfaces.values():
             project._validate_surface_geometry(surface)
+        for support in project.surface_edge_supports.values():
+            project._validate_surface_edge_support(support)
 
         if (
             project.active_analysis_tag is not None

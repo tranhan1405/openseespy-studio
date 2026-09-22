@@ -102,6 +102,9 @@ from ..surface_mesher import (
     mesh_surface_geometry,
     remesh_surface_geometry,
     inspect_surface_mesh_state,
+    managed_surface_support_node_tags,
+    remove_surface_edge_support,
+    sync_surface_edge_support,
     surface_boundary_edges,
     surface_boundary_node_tags,
     surface_edge_info,
@@ -112,7 +115,7 @@ from ..surface_mesher import (
 from ..shell_quality import shell_mesh_quality_summary
 from ..line_mesher import mesh_line_geometry
 from ..section_response import section_response_sources
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SectionData, SurfaceGeometryData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SectionData, SurfaceEdgeSupportData, SurfaceGeometryData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
     build_worker_pythonpath,
     opensees_material_requires_runtime_probe,
@@ -6869,6 +6872,30 @@ class MainWindow(QMainWindow):
             )
         return editable
 
+    def _exclude_managed_surface_support_nodes(
+        self,
+        node_tags: set[int],
+        *,
+        title: str,
+    ) -> set[int]:
+        managed = managed_surface_support_node_tags(self.project)
+        editable = set(node_tags) - managed
+        skipped = set(node_tags) & managed
+        if skipped:
+            self.status_message.setText(
+                f"{title}: skipped {len(skipped)} node(s) managed by "
+                "Surface Edge Support"
+            )
+        if not editable and skipped:
+            QMessageBox.information(
+                self,
+                title,
+                "Selected node(s) are managed by Geometry Surface Edge "
+                "Support. Edit or remove the managed support from the "
+                "Surface context menu instead.",
+            )
+        return editable
+
     def _apply_restraint(self) -> None:
         node_tags = self._selected_node_tags(
             "Support / Restraint",
@@ -6877,6 +6904,10 @@ class MainWindow(QMainWindow):
         if node_tags is None:
             return
         node_tags = self._exclude_managed_ground_nodes(
+            node_tags,
+            title="Support / Restraint",
+        )
+        node_tags = self._exclude_managed_surface_support_nodes(
             node_tags,
             title="Support / Restraint",
         )
@@ -6942,6 +6973,10 @@ class MainWindow(QMainWindow):
         if node_tags is None:
             return
         node_tags = self._exclude_managed_ground_nodes(
+            node_tags,
+            title="Clear Support",
+        )
+        node_tags = self._exclude_managed_surface_support_nodes(
             node_tags,
             title="Clear Support",
         )
@@ -8488,6 +8523,183 @@ class MainWindow(QMainWindow):
         self.status_message.setText(
             f"Surface {tag} Edge {edge_index}: selected "
             f"{len(node_tags)} ordered FE node(s)"
+        )
+
+    def _manage_surface_edge_support(self, surface_tag: int) -> None:
+        tag = int(surface_tag)
+        surface = self.project.surfaces.get(tag)
+        if surface is None:
+            return
+        try:
+            infos = [
+                surface_edge_info(self.project, tag, edge_index)
+                for edge_index in range(1, 5)
+            ]
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Managed Surface Edge Support",
+                str(exc),
+            )
+            return
+
+        existing_by_edge = {
+            support.edge_index: support
+            for support in self.project.surface_edge_supports.values()
+            if support.surface_tag == tag
+        }
+        labels = []
+        for info in infos:
+            existing = existing_by_edge.get(info.edge_index)
+            suffix = (
+                f" · current {classify_fixity(existing.fixity)}"
+                if existing is not None else ""
+            )
+            labels.append(
+                f"Edge {info.edge_index} · {len(info.live_node_tags)} FE node(s)"
+                + suffix
+            )
+        label, ok = QInputDialog.getItem(
+            self,
+            "Managed Surface Edge Support",
+            f"Surface {tag} edge:",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        edge_index = labels.index(label) + 1
+        existing = existing_by_edge.get(edge_index)
+        initial = existing.fixity if existing is not None else None
+        dialog = RestraintDialog(initial=initial, parent=self)
+        if not dialog.exec():
+            return
+        fixity = tuple(int(value) for value in dialog.fixity())
+        if not any(fixity):
+            QMessageBox.warning(
+                self,
+                "Managed Surface Edge Support",
+                "Choose at least one restrained DOF.",
+            )
+            return
+
+        before = self.project.to_dict()
+        try:
+            if existing is None:
+                support = SurfaceEdgeSupportData(
+                    tag=self.project.next_surface_edge_support_tag(),
+                    name=f"S{tag} E{edge_index} Support",
+                    surface_tag=tag,
+                    edge_index=edge_index,
+                    fixity=fixity,
+                )
+                self.project.add_surface_edge_support(support)
+            else:
+                support = SurfaceEdgeSupportData(
+                    tag=existing.tag,
+                    name=existing.name,
+                    surface_tag=tag,
+                    edge_index=edge_index,
+                    fixity=fixity,
+                    generated_node_tags=list(
+                        existing.generated_node_tags
+                    ),
+                )
+                self.project.update_surface_edge_support(
+                    existing.tag,
+                    support,
+                )
+            node_tags = sync_surface_edge_support(
+                self.project,
+                support.tag,
+            )
+        except (TypeError, ValueError, IndexError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Managed Surface Edge Support",
+                str(exc),
+            )
+            return
+
+        self.model = self.project.model
+        self._refresh_all(
+            f"{'Updated' if existing is not None else 'Created'} managed "
+            f"{classify_fixity(support.fixity)} support on "
+            f"Surface {tag} Edge {edge_index} · {len(node_tags)} node(s)"
+        )
+        self.viewport.set_display_domain("geometry")
+        self.viewport.show_surface_edge_preview([(tag, edge_index)])
+        self._show_surface_geometry_properties(tag)
+        self._record_project_change(
+            f"Managed support Surface {tag} Edge {edge_index}",
+            before,
+        )
+
+    def _remove_surface_edge_support(self, surface_tag: int) -> None:
+        tag = int(surface_tag)
+        supports = sorted(
+            (
+                support
+                for support in self.project.surface_edge_supports.values()
+                if support.surface_tag == tag
+            ),
+            key=lambda item: item.edge_index,
+        )
+        if not supports:
+            QMessageBox.information(
+                self,
+                "Remove Managed Surface Edge Support",
+                f"Surface {tag} has no managed edge supports.",
+            )
+            return
+        labels = [
+            f"Edge {support.edge_index} · "
+            f"{classify_fixity(support.fixity)} · Support {support.tag}"
+            for support in supports
+        ]
+        label, ok = QInputDialog.getItem(
+            self,
+            "Remove Managed Surface Edge Support",
+            f"Surface {tag} support:",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        support = supports[labels.index(label)]
+
+        before = self.project.to_dict()
+        try:
+            changed = remove_surface_edge_support(
+                self.project,
+                support.tag,
+            )
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Remove Managed Surface Edge Support",
+                str(exc),
+            )
+            return
+
+        self.model = self.project.model
+        self._refresh_all(
+            f"Removed managed support {support.tag} from Surface {tag} "
+            f"Edge {support.edge_index} · released {len(changed)} node(s)"
+        )
+        self.viewport.set_display_domain("geometry")
+        self._show_surface_geometry_properties(tag)
+        self._record_project_change(
+            f"Remove managed Surface edge support {support.tag}",
+            before,
         )
 
     def _preview_surface_boundary_edges(self, surface_tags) -> None:
@@ -11949,9 +12161,27 @@ class MainWindow(QMainWindow):
             else "Coordinate-defined"
         )
 
+        managed_supports = sorted(
+            (
+                support
+                for support in self.project.surface_edge_supports.values()
+                if support.surface_tag == int(tag)
+            ),
+            key=lambda item: item.edge_index,
+        )
+        managed_support_text = (
+            " · ".join(
+                f"E{support.edge_index} {classify_fixity(support.fixity)} "
+                f"({len(support.generated_node_tags)} node(s))"
+                for support in managed_supports
+            )
+            if managed_supports else "None"
+        )
+
         rows = [
             ("Tag", surface.tag),
             ("Name", surface.name),
+            ("Managed edge supports", managed_support_text),
             ("Shape", surface.surface_type),
             ("Topology", topology),
             ("Normal", normal_text),
@@ -16506,6 +16736,28 @@ class MainWindow(QMainWindow):
                 select_edge_nodes.triggered.connect(
                     lambda checked=False, t=tag:
                     self._select_surface_edge_nodes(t)
+                )
+                managed_support = menu.addAction(
+                    "Managed Edge Support..."
+                )
+                managed_support.setEnabled(live_mesh)
+                managed_support.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._manage_surface_edge_support(t)
+                )
+                remove_support = menu.addAction(
+                    "Remove Managed Edge Support..."
+                )
+                remove_support.setEnabled(
+                    any(
+                        support.surface_tag == tag
+                        for support
+                        in self.project.surface_edge_supports.values()
+                    )
+                )
+                remove_support.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._remove_surface_edge_support(t)
                 )
             preview_boundary = menu.addAction(
                 "Preview Outer Boundary"
