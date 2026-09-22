@@ -16478,6 +16478,64 @@
         "parameter_location_identified": true,
         "units_checked": true
       }
+    },
+    {
+      "id": "vaiana-2018-hysteretic-smooth-reference-d",
+      "family": "Phenomenological Hysteresis",
+      "material": "Normalized smooth hysteretic reference response",
+      "grade": "Reference case (d)",
+      "standard": "OpenSees HystereticSmooth official reference",
+      "model": "HystereticSmooth",
+      "preset_name": "Vaiana et al. (2018) · Reference case (d)",
+      "parameters_si": {
+        "ka": 5,
+        "kb": 0.5,
+        "fbar": 0.45,
+        "beta": -1
+      },
+      "verified_parameters": [
+        "ka",
+        "kb",
+        "fbar",
+        "beta"
+      ],
+      "applicability": [
+        "OpenSees HystereticSmooth material verification",
+        "Smooth hardening/softening hysteretic response",
+        "Normalized phenomenological reference case",
+        "Sensitivity studies and constitutive-model benchmarking"
+      ],
+      "limitations": [
+        "This is an official normalized/reference example, not a dimensional material grade or device calibration.",
+        "HystereticSmooth can represent either force-displacement or stress-strain response; dimensional use requires a consistent user-defined scaling.",
+        "Use as a verified reference shape or starting point rather than as a universal physical-material preset."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "A class of uniaxial phenomenological models for simulating hysteretic phenomena in rate-independent mechanical systems and materials",
+        "authors": "N. Vaiana; S. Sessa; F. Marmo; L. Rosati",
+        "journal": "Nonlinear Dynamics",
+        "volume_issue": "93(3)",
+        "pages": "1647–1669",
+        "year": 2018,
+        "doi": "10.1007/s11071-018-4282-2"
+      },
+      "parameter_evidence": {
+        "type": "official_opensees_documentation",
+        "title": "HystereticSmooth Material (Smooth hysteretic material)",
+        "author": "OpenSees documentation; material implementation by Salvatore Sessa",
+        "institution": "OpenSees",
+        "year": 2026,
+        "location": "Official HystereticSmooth documentation, Example corresponding to line (d): ka=5.0, kb=0.5, fbar=0.45, beta=-1.0",
+        "url": "https://opensees.github.io/OpenSeesDocumentation/user/manual/material/uniaxialMaterials/HystereticSmooth.html",
+        "relationship": "The official OpenSees documentation reproduces the complete reference-case input and cites Vaiana et al. (2018) as the underlying peer-reviewed formulation."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
     }
   ]
 }
