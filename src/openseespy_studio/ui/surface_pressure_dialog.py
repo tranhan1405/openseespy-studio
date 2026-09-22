@@ -47,6 +47,7 @@ class SurfacePressureDialog(QDialog):
         self.tag = QSpinBox()
         self.tag.setRange(1, 2147483647)
         self.tag.setValue(pressure.tag if pressure else int(next_tag))
+        self.tag.setEnabled(pressure is None)
         self.name = QLineEdit(
             pressure.name
             if pressure
