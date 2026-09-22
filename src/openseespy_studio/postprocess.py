@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from .beam_loads import resolve_self_weight_local
-from .model import StructuralModel
+from .model import SHELL_ELEMENT_TYPES, StructuralModel
 from .project import (
     ElementLoadData,
     MaterialData,
@@ -3579,6 +3579,10 @@ def enrich_member_force_results(
 
     for tag in sorted(model.elements):
         element = model.elements[tag]
+        if element.element_type in SHELL_ELEMENT_TYPES:
+            # Shell force/stress contours use a dedicated surface-result
+            # pipeline; do not reinterpret 24-DOF shell forces as beam ends.
+            continue
 
         node_i = model.nodes.get(element.i)
         node_j = model.nodes.get(element.j)
