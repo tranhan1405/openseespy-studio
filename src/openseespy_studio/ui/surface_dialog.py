@@ -309,6 +309,6 @@ class SurfaceGeometryDialog(QDialog):
             self.data()
         except (TypeError, ValueError) as exc:
             from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Surface Geometry", str(exc))
+            QMessageBox.warning(self, "Surface", str(exc))
             return
         self.accept()
