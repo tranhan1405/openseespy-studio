@@ -10447,6 +10447,13 @@ class MainWindow(QMainWindow):
         )
 
     def _create_line_geometry(self) -> int | None:
+        return self._create_line_geometry_from_points()
+
+    def _create_line_geometry_from_points(
+        self,
+        point_i: int | None = None,
+        point_j: int | None = None,
+    ) -> int | None:
         if len(self.project.points) < 2:
             QMessageBox.information(
                 self,
@@ -10458,9 +10465,11 @@ class MainWindow(QMainWindow):
         dialog = LineGeometryDialog(
             next_tag=self.project.next_line_tag(),
             points=self.project.points,
-            sections=self.project.sections,
+            sections=self._frame_sections(),
             transformations=self.project.transformations,
             materials=self.project.materials,
+            initial_point_i=point_i,
+            initial_point_j=point_j,
             parent=self,
         )
         if not dialog.exec():
@@ -10484,7 +10493,8 @@ class MainWindow(QMainWindow):
             f"{len(result.element_tags)} {line.element_family} element(s) · "
             f"{len(result.created_node_tags)} new node(s)"
         )
-        self.selection.set_selection(elements=set(result.element_tags))
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
         self._show_line_geometry_properties(line.tag)
         self._record_project_change(
             f"Create Geometry Line {line.tag}",
@@ -10511,7 +10521,7 @@ class MainWindow(QMainWindow):
         dialog = LineGeometryDialog(
             next_tag=line.tag,
             points=self.project.points,
-            sections=self.project.sections,
+            sections=self._frame_sections(),
             transformations=self.project.transformations,
             materials=self.project.materials,
             line=line,
@@ -10553,7 +10563,8 @@ class MainWindow(QMainWindow):
             f"{len(result.created_node_tags)} new node(s) · "
             f"{len(result.reused_node_tags)} reused node(s)"
         )
-        self.selection.set_selection(elements=set(result.element_tags))
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
         self._record_project_change(
             f"Mesh Geometry Line {tag}",
             before,
@@ -10651,6 +10662,12 @@ class MainWindow(QMainWindow):
         )
 
     def _create_surface_geometry(self) -> int | None:
+        return self._create_surface_geometry_from_points()
+
+    def _create_surface_geometry_from_points(
+        self,
+        point_tags: list[int] | tuple[int, ...] | None = None,
+    ) -> int | None:
         if not self._ensure_prerequisite(
             title="New Surface",
             message=(
@@ -10663,9 +10680,37 @@ class MainWindow(QMainWindow):
         ):
             return None
 
+        initial_points = None
+        if point_tags is not None:
+            tags = [int(tag) for tag in point_tags]
+            if len(tags) != 4 or len(set(tags)) != 4:
+                QMessageBox.warning(
+                    self,
+                    "Create Surface",
+                    "Pick four different Geometry Points.",
+                )
+                return None
+            missing = [
+                tag for tag in tags
+                if tag not in self.project.points
+            ]
+            if missing:
+                QMessageBox.warning(
+                    self,
+                    "Create Surface",
+                    "Missing Geometry Point(s): "
+                    + ", ".join(map(str, missing)),
+                )
+                return None
+            initial_points = tuple(
+                self.project.points[tag].xyz
+                for tag in tags
+            )
+
         dialog = SurfaceGeometryDialog(
             next_tag=self.project.next_surface_tag(),
             sections=self._shell_sections(),
+            initial_points=initial_points,
             parent=self,
         )
         if not dialog.exec():
@@ -10693,9 +10738,8 @@ class MainWindow(QMainWindow):
             f"{len(result.element_tags)} Shell element(s) · "
             f"{len(result.created_node_tags)} new node(s)"
         )
-        self.selection.set_selection(
-            elements=set(result.element_tags),
-        )
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
         self._show_surface_geometry_properties(surface.tag)
         self._record_project_change(
             f"Create Surface {surface.tag}",
@@ -10798,9 +10842,8 @@ class MainWindow(QMainWindow):
             f"{len(result.reused_node_tags)} reused node(s)"
             f"{suffix}"
         )
-        self.selection.set_selection(
-            elements=set(result.element_tags)
-        )
+        self.selection.clear()
+        self.viewport.set_display_domain("geometry")
         self._record_project_change(
             f"Mesh surface geometry {tag}",
             before,
