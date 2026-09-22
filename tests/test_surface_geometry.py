@@ -66,7 +66,11 @@ def test_surface_geometry_round_trip_is_independent_of_fe_mesh():
     restored_surface = restored.surfaces[1]
     assert restored_surface.name == "Slab A"
     assert restored_surface.surface_type == "Rectangle"
-    assert restored_surface.points == pytest.approx(surface.points)
+    for restored_point, source_point in zip(
+        restored_surface.points,
+        surface.points,
+    ):
+        assert restored_point == pytest.approx(source_point)
     assert restored_surface.section_tag == 7
     assert restored_surface.mesh_mode == "target_size"
     assert restored_surface.target_size == pytest.approx(0.5)
