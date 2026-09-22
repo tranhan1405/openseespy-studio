@@ -3887,7 +3887,7 @@ class MainWindow(QMainWindow):
             + len(self.project.connections)
         )
         elements = QTreeWidgetItem([
-            f"Direct FE Elements ({direct_element_count})"
+            f"Elements ({direct_element_count})"
         ])
         elements.setIcon(0, studio_icon("element"))
         elements.setData(0, Qt.UserRole, ("elements_root", None))
