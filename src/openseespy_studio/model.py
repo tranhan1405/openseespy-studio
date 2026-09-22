@@ -673,7 +673,7 @@ class StructuralModel:
         for tag in element_tags:
             normalized_tag = _strict_int(tag, "Element tag")
             element = self.elements.get(normalized_tag)
-            if element is None:
+            if element is None or element.element_type not in FRAME_ELEMENT_TYPES:
                 continue
             candidate = Element(
                 tag=element.tag,
@@ -716,7 +716,7 @@ class StructuralModel:
         for tag in element_tags:
             normalized_tag = _strict_int(tag, "Element tag")
             element = self.elements.get(normalized_tag)
-            if element is None or element.element_type == "truss":
+            if element is None or element.element_type not in FRAME_ELEMENT_TYPES:
                 continue
             element.transf_tag = value
             assigned.add(element.tag)
