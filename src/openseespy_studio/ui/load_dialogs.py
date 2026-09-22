@@ -855,6 +855,10 @@ class ElementLoadDialog(QDialog):
         self.kind.addItem("Uniform (local axes)", "Uniform")
         self.kind.addItem("Point (local axes)", "Point")
         self.kind.addItem("Self Weight (global gravity)", "SelfWeight")
+        self.kind.addItem(
+            "Shell Surface Pressure (normal)",
+            "SurfacePressure",
+        )
         if load:
             index = self.kind.findData(load.load_type)
             if index >= 0:
@@ -902,12 +906,22 @@ class ElementLoadDialog(QDialog):
         form.addRow("Gravity GZ [m/s²]:", self.gz)
         form.addRow("Density override [kg/m³]:", self.density)
 
+        self.pressure = _spin(
+            load.pressure if load else 0.0,
+        )
+        form.addRow(
+            f"Surface pressure [{self.unit_system.stress_label}]:",
+            self.pressure,
+        )
+
         root.addLayout(form)
         note = QLabel(
             "Self Weight: density override = 0 uses the linked material "
             "density. Density [kg/m³] and gravity [m/s²] are physical SI "
             "inputs; Studio converts them automatically and generates "
-            f"self-weight in [{self.unit_system.line_load_label}]."
+            f"self-weight in [{self.unit_system.line_load_label}]. "
+            "Shell Surface Pressure uses the shell node ordering: positive "
+            "acts outward along the element normal, negative inward."
         )
         note.setWordWrap(True)
         root.addWidget(note)
@@ -927,6 +941,7 @@ class ElementLoadDialog(QDialog):
         uniform = kind == "Uniform"
         point = kind == "Point"
         self_weight = kind == "SelfWeight"
+        surface_pressure = kind == "SurfacePressure"
 
         for widget in (self.wx, self.wy, self.wz):
             widget.setEnabled(uniform)
@@ -934,6 +949,7 @@ class ElementLoadDialog(QDialog):
             widget.setEnabled(point)
         for widget in (self.gx, self.gy, self.gz, self.density):
             widget.setEnabled(self_weight)
+        self.pressure.setEnabled(surface_pressure)
 
     def data(self):
         if self.pattern.currentData() is None:
@@ -958,6 +974,7 @@ class ElementLoadDialog(QDialog):
                 self.gz.value(),
             ),
             density_override=self.density.value(),
+            pressure=self.pressure.value(),
         )
 
     def _accept(self):
