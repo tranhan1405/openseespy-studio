@@ -156,10 +156,15 @@ The library currently contains **187 verified parameter records**:
 - 1 normalized HystereticSmooth official-reference case based on Vaiana et
   al. (2018), DOI `10.1007/s11071-018-4282-2`; the complete ka/kb/fbar/beta
   tuple is reproduced from the official OpenSees documentation.
-- 3 RambergOsgoodSteel post-fire reinforcing-steel records at 600 °C from
-  Yao et al. (2021), covering natural, furnace and water cooling, DOI
-  `10.3390/ma14020469`. The published normalized coefficient α is mapped
-  exactly to the OpenSees direct strain coefficient as a = α·fy/E.
+- 3 **reference-only** RambergOsgoodSteel post-fire reinforcing-steel
+  records at 600 °C from Yao et al. (2021), covering natural, furnace and
+  water cooling, DOI `10.3390/ma14020469`. The published normalized
+  coefficient α is mapped exactly to the source-code coefficient
+  a = α·fy/E. Stock OpenSeesPy 3.8.x reports RambergOsgoodSteel as
+  temporarily removed from compiled Tcl/Py builds because of known issues
+  and unreliable results, so SARE keeps these records for traceable
+  reference/preview but disables project insertion, export and runtime
+  material testing.
 
 These are **published/calibrated parameter records**, not 187 unrelated
 chemical materials. SARE exposes specimen/configuration, modelling
