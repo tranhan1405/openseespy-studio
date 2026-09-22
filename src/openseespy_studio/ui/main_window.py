@@ -3953,6 +3953,27 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("material", tag))
             materials_root.addChild(item)
 
+        nd_materials_root = QTreeWidgetItem([
+            f"nD Materials ({len(self.project.nd_materials)})"
+        ])
+        nd_materials_root.setIcon(0, studio_icon("material"))
+        nd_materials_root.setData(
+            0,
+            Qt.UserRole,
+            ("nd_materials_root", None),
+        )
+        nd_materials_root.setExpanded(True)
+        root.addChild(nd_materials_root)
+
+        for tag in sorted(self.project.nd_materials):
+            material = self.project.nd_materials[tag]
+            item = QTreeWidgetItem([
+                f"{material.material_type} [{tag}]  {material.name}"
+            ])
+            item.setIcon(0, studio_icon("material"))
+            item.setData(0, Qt.UserRole, ("nd_material", tag))
+            nd_materials_root.addChild(item)
+
         sections_root = QTreeWidgetItem([
             f"Sections ({len(self.project.sections)})"
         ])
@@ -4413,6 +4434,7 @@ class MainWindow(QMainWindow):
         nodes: set[int] = set()
         elements: set[int] = set()
         material_tag: int | None = None
+        nd_material_tag: int | None = None
         section_tag: int | None = None
         transformation_tag: int | None = None
         constraint_tag: int | None = None
@@ -4453,6 +4475,8 @@ class MainWindow(QMainWindow):
                     elements.update(selection_set.element_tags)
             elif kind == "material":
                 material_tag = int(tag)
+            elif kind == "nd_material":
+                nd_material_tag = int(tag)
             elif kind == "section":
                 section_tag = int(tag)
             elif kind == "transformation":
@@ -4527,6 +4551,8 @@ class MainWindow(QMainWindow):
 
         if material_tag is not None:
             self._show_material_properties(material_tag)
+        elif nd_material_tag is not None:
+            self._show_nd_material_properties(nd_material_tag)
         elif section_tag is not None:
             self._show_section_properties(section_tag)
         elif transformation_tag is not None:
@@ -9165,6 +9191,121 @@ class MainWindow(QMainWindow):
             f"Add verified material {material.tag}",
             before,
         )
+
+    def _create_nd_material(self) -> None:
+        dialog = NDMaterialDialog(
+            next_tag=self.project.next_nd_material_tag(),
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            material = dialog.material_data()
+            self.project.add_nd_material(material)
+        except ValueError as exc:
+            QMessageBox.warning(self, "nD Material", str(exc))
+            return
+        self._refresh_project_metadata(
+            f"Created {material.material_type} nDMaterial {material.tag}"
+        )
+        self._show_nd_material_properties(material.tag)
+        self._record_project_change(
+            f"Create nD material {material.tag}",
+            before,
+        )
+
+    def _edit_nd_material(self, tag: int) -> None:
+        material = self.project.nd_materials.get(int(tag))
+        if material is None:
+            return
+        dialog = NDMaterialDialog(
+            next_tag=material.tag,
+            material=material,
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated = dialog.material_data()
+            self.project.update_nd_material(tag, updated)
+        except ValueError as exc:
+            QMessageBox.warning(self, "nD Material", str(exc))
+            return
+        self._refresh_project_metadata(
+            f"Updated nDMaterial {updated.tag}"
+        )
+        self._show_nd_material_properties(updated.tag)
+        self._record_project_change(
+            f"Edit nD material {tag}",
+            before,
+        )
+
+    def _delete_nd_material(self, tag: int) -> None:
+        material = self.project.nd_materials.get(int(tag))
+        if material is None:
+            return
+        users = self.project.sections_using_nd_material(tag)
+        if users:
+            QMessageBox.warning(
+                self,
+                "Delete nD Material",
+                f"nDMaterial {tag} is still referenced by Shell section(s): "
+                + ", ".join(map(str, users))
+                + ". Reassign those references first.",
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete nD Material",
+            f"Delete nDMaterial {tag} ({material.name})?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        before = self.project.to_dict()
+        self.project.remove_nd_material(tag)
+        self._refresh_project_metadata(f"Deleted nDMaterial {tag}")
+        self._record_project_change(
+            f"Delete nD material {tag}",
+            before,
+        )
+
+    def _show_nd_material_properties(self, tag: int) -> None:
+        material = self.project.nd_materials.get(int(tag))
+        if material is None:
+            return
+        unit_system = UnitSystem.from_mapping(self.project.units)
+        p = material.parameters
+        rows = [
+            ("Tag", material.tag),
+            ("Name", material.name),
+            ("Type", material.material_type),
+            (
+                f"E [{unit_system.engineering_stress_label}]",
+                f"{unit_system.engineering_stress_from_pa(p['E']):g}",
+            ),
+            ("Poisson ratio ν", f"{p['nu']:g}"),
+            (
+                f"Density ρ [{unit_system.engineering_density_label}]",
+                f"{unit_system.engineering_density_from_kg_per_m3(p['rho']):g}",
+            ),
+            (
+                "Used by Shell sections",
+                ", ".join(
+                    map(
+                        str,
+                        self.project.sections_using_nd_material(tag),
+                    )
+                )
+                or "-",
+            ),
+        ]
+        self.properties_panel.set_properties("nD Material", rows)
 
     def _create_material(self) -> None:
         dialog = MaterialDialog(
@@ -14307,6 +14448,25 @@ class MainWindow(QMainWindow):
             exec_menu()
             return
 
+        if kind == "nd_materials_root":
+            create_action = menu.addAction("New nD Material...")
+            create_action.triggered.connect(self._create_nd_material)
+            exec_menu()
+            return
+
+        if kind == "nd_material":
+            tag = int(value)
+            edit_action = menu.addAction("Edit...")
+            edit_action.triggered.connect(
+                lambda: self._edit_nd_material(tag)
+            )
+            delete_action = menu.addAction("Delete")
+            delete_action.triggered.connect(
+                lambda: self._delete_nd_material(tag)
+            )
+            exec_menu()
+            return
+
         if kind == "material":
             tag = int(value)
             edit_action = menu.addAction("Edit...")
@@ -14408,6 +14568,8 @@ class MainWindow(QMainWindow):
         kind, value = payload
         if kind == "material":
             self._edit_material(int(value))
+        elif kind == "nd_material":
+            self._edit_nd_material(int(value))
         elif kind == "section":
             self._edit_section(int(value))
         elif kind == "transformation":
