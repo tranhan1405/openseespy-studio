@@ -1625,6 +1625,7 @@ class MainWindow(QMainWindow):
         self._geometry_line_point_tags: list[int] = []
         self._geometry_line_anchor_snap: dict[str, object] | None = None
         self._geometry_surface_point_tags: list[int] = []
+        self._geometry_surface_anchor_snap: dict[str, object] | None = None
         self._geometry_sketch_intersections = []
         self._geometry_trim_subject_tag: int | None = None
         self._geometry_trim_endpoint = "nearest"
@@ -5281,6 +5282,7 @@ class MainWindow(QMainWindow):
 
     def _leave_geometry_surface_pick_mode(self) -> None:
         self._geometry_surface_point_tags = []
+        self._geometry_surface_anchor_snap = None
         action = self.actions.get("surface_geometry_pick")
         if action is not None:
             action.setChecked(False)
@@ -5341,7 +5343,10 @@ class MainWindow(QMainWindow):
 
     def _active_geometry_sketch_plane(self) -> str:
         view = self.viewport.current_view().lower()
-        return view if view in {"xy", "xz", "yz"} else "xy"
+        if view in {"xy", "xz", "yz"}:
+            return view
+        plane, _offset = self.viewport.geometry_sketch_plane()
+        return str(plane).strip().lower()
 
     def _geometry_sketch_tool_active(self) -> bool:
         return bool(
@@ -5362,6 +5367,7 @@ class MainWindow(QMainWindow):
         self._geometry_line_point_tags = []
         self._geometry_line_anchor_snap = None
         self._geometry_surface_point_tags = []
+        self._geometry_surface_anchor_snap = None
         self.viewport.clear_geometry_pick_preview(render=False)
         self.viewport.clear_geometry_sketch_preview(render=False)
         self._refresh_geometry_sketch_snap_cache()
@@ -5422,7 +5428,14 @@ class MainWindow(QMainWindow):
         self.viewport.clear_geometry_sketch_preview(render=False)
         self.viewport.set_display_domain("geometry")
         plane = self._active_geometry_sketch_plane()
-        self.viewport.set_geometry_sketch_plane(plane, 0.0)
+        current_plane, current_offset = self.viewport.geometry_sketch_plane()
+        plane_offset = (
+            float(current_offset)
+            if self.viewport.current_view().lower() == "iso"
+            and str(current_plane).strip().lower() == plane
+            else 0.0
+        )
+        self.viewport.set_geometry_sketch_plane(plane, plane_offset)
         self.viewport.set_interaction_tool("geometry_sketch")
         self.actions["select"].setChecked(False)
         self.actions["box"].setChecked(False)
@@ -5450,12 +5463,20 @@ class MainWindow(QMainWindow):
         self._leave_truss_pick_mode()
         self._leave_geometry_line_pick_mode()
         self._geometry_surface_point_tags = []
+        self._geometry_surface_anchor_snap = None
         self._refresh_geometry_sketch_snap_cache()
         self.viewport.clear_geometry_pick_preview(render=False)
         self.viewport.clear_geometry_sketch_preview(render=False)
         self.viewport.set_display_domain("geometry")
         plane = self._active_geometry_sketch_plane()
-        self.viewport.set_geometry_sketch_plane(plane, 0.0)
+        current_plane, current_offset = self.viewport.geometry_sketch_plane()
+        plane_offset = (
+            float(current_offset)
+            if self.viewport.current_view().lower() == "iso"
+            and str(current_plane).strip().lower() == plane
+            else 0.0
+        )
+        self.viewport.set_geometry_sketch_plane(plane, plane_offset)
         self.viewport.set_interaction_tool("geometry_sketch")
         self.actions["select"].setChecked(False)
         self.actions["box"].setChecked(False)
@@ -5511,8 +5532,15 @@ class MainWindow(QMainWindow):
         if screen is not None:
             try:
                 sx, sy = float(screen[0]), float(screen[1])
-                ix, iy = self.viewport._world_to_qt(point_i.xyz)
-                jx, jy = self.viewport._world_to_qt(point_j.xyz)
+                if not math.isfinite(sx) or not math.isfinite(sy):
+                    raise ValueError("Non-finite screen position")
+                ix, iy = self.viewport.geometry_world_to_screen(point_i.xyz)
+                jx, jy = self.viewport.geometry_world_to_screen(point_j.xyz)
+                if not all(
+                    math.isfinite(value)
+                    for value in (ix, iy, jx, jy)
+                ):
+                    raise ValueError("Non-finite projected endpoint")
                 distance_i = (sx - ix) ** 2 + (sy - iy) ** 2
                 distance_j = (sx - jx) ** 2 + (sy - jy) ** 2
                 return "i" if distance_i <= distance_j else "j"
@@ -5523,6 +5551,10 @@ class MainWindow(QMainWindow):
         if world is not None:
             try:
                 xyz = tuple(float(value) for value in world)
+                if len(xyz) != 3 or not all(
+                    math.isfinite(value) for value in xyz
+                ):
+                    raise ValueError("Invalid world position")
                 distance_i = sum(
                     (xyz[index] - float(point_i.xyz[index])) ** 2
                     for index in range(3)
@@ -5650,7 +5682,7 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError) as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
-            self._refresh_all()
+            self._refresh_all(reset_camera=False)
             self._geometry_trim_subject_tag = None
             self._geometry_trim_endpoint = "nearest"
             self.viewport.set_display_domain("geometry")
@@ -5663,7 +5695,8 @@ class MainWindow(QMainWindow):
         self._geometry_trim_subject_tag = None
         self._geometry_trim_endpoint = "nearest"
         self._refresh_all(
-            f"{label} Line {subject} to Line {tag}"
+            f"{label} Line {subject} to Line {tag}",
+            reset_camera=False,
         )
         self.viewport.set_display_domain("geometry")
         self._record_project_change(
@@ -5771,7 +5804,7 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError) as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
-            self._refresh_all()
+            self._refresh_all(reset_camera=False)
             self._leave_geometry_trim_mode()
             self.viewport.set_display_domain("geometry")
             self.viewport.set_interaction_tool("select")
@@ -5785,7 +5818,8 @@ class MainWindow(QMainWindow):
         self._leave_geometry_trim_mode()
         self._refresh_all(
             f"{label} {len(result.subject_line_tags)} Geometry Lines "
-            f"to Line {target_tag}"
+            f"to Line {target_tag}",
+            reset_camera=False,
         )
         self.viewport.set_display_domain("geometry")
         self.viewport.set_interaction_tool("select")
@@ -6129,6 +6163,7 @@ class MainWindow(QMainWindow):
             not self._geometry_line_point_tags
             and self._geometry_line_anchor_snap is None
             and not self._geometry_surface_point_tags
+            and getattr(self, "_geometry_surface_anchor_snap", None) is None
         )
         snap_action = self.actions.get("geometry_snap")
         snap_enabled = (
@@ -6263,6 +6298,11 @@ class MainWindow(QMainWindow):
             anchor_xyz = tuple(
                 float(value)
                 for value in self._geometry_line_anchor_snap["xyz"]
+            )
+        elif getattr(self, "_geometry_surface_anchor_snap", None) is not None:
+            anchor_xyz = tuple(
+                float(value)
+                for value in self._geometry_surface_anchor_snap["xyz"]
             )
         elif self._geometry_surface_point_tags:
             anchor = self.project.points.get(
@@ -6622,6 +6662,26 @@ class MainWindow(QMainWindow):
             + "click next point · right-click to finish"
         )
 
+    def _existing_geometry_surface_from_corners(
+        self,
+        corner_tags,
+    ) -> int | None:
+        tags = tuple(int(tag) for tag in corner_tags)
+        if len(tags) != 4:
+            return None
+        variants: set[tuple[int, int, int, int]] = set()
+        for base in (tags, tuple(reversed(tags))):
+            for shift in range(4):
+                variants.add(base[shift:] + base[:shift])
+        for tag, surface in self.project.surfaces.items():
+            existing = tuple(
+                int(point_tag)
+                for point_tag in (surface.corner_point_tags or ())
+            )
+            if len(existing) == 4 and existing in variants:
+                return int(tag)
+        return None
+
     def _handle_geometry_rectangle_sketch_click(
         self,
         payload: dict[str, object],
@@ -6630,50 +6690,42 @@ class MainWindow(QMainWindow):
         if snap is None:
             return
 
-        if not self._geometry_surface_point_tags:
-            before = self.project.to_dict()
-            try:
-                point_tag, changed = self._materialize_geometry_sketch_point(
-                    snap
-                )
-            except (TypeError, ValueError) as exc:
-                self.project = ProjectDatabase.from_dict(before)
-                self.model = self.project.model
-                self._refresh_all(reset_camera=False)
-                self.status_message.setText(str(exc))
-                return
-            point = self.project.points[point_tag]
+        if (
+            not self._geometry_surface_point_tags
+            and self._geometry_surface_anchor_snap is None
+        ):
+            anchor_xyz = tuple(float(value) for value in snap["xyz"])
             self.viewport.set_geometry_sketch_plane_offset_from_point(
-                point.xyz
+                anchor_xyz
             )
-            self._geometry_surface_point_tags = [point_tag]
-            if changed:
-                self.model = self.project.model
-                self._refresh_all(
-                    f"Rectangle corner Point {point_tag}",
-                    reset_camera=False,
-                )
-                self._record_project_change(
-                    f"Sketch Geometry Point {point_tag}",
-                    before,
-                )
-            self.viewport.show_geometry_sketch_preview([point.xyz])
+            self._geometry_surface_anchor_snap = dict(snap)
+            self.viewport.show_geometry_sketch_preview([anchor_xyz])
             self.status_message.setText(
-                f"Rectangle first corner P{point_tag} · "
-                "click opposite corner"
+                "Rectangle first corner set · click opposite corner"
             )
             return
 
-        first_tag = int(self._geometry_surface_point_tags[0])
+        anchor_snap = self._geometry_surface_anchor_snap
+        if anchor_snap is None:
+            self._geometry_surface_point_tags = []
+            self.status_message.setText(
+                "Rectangle state reset · click first corner"
+            )
+            return
+
         before = self.project.to_dict()
         try:
-            opposite_tag, changed = (
+            first_tag, first_changed = (
+                self._materialize_geometry_sketch_point(anchor_snap)
+            )
+            opposite_tag, opposite_changed = (
                 self._materialize_geometry_sketch_point(snap)
             )
             if opposite_tag == first_tag:
                 raise ValueError(
                     "Rectangle diagonal corners must be different."
                 )
+
             first = self.project.points[first_tag].xyz
             opposite = self.project.points[opposite_tag].xyz
             corners = self._rectangle_corners_from_diagonal(
@@ -6694,58 +6746,85 @@ class MainWindow(QMainWindow):
                     "Rectangle requires non-zero width and height."
                 )
 
-            corner_tags = [first_tag]
-            for xyz in corners[1:]:
-                tag = self._find_geometry_point_near(xyz)
-                if tag is None:
-                    tag = self.project.next_point_tag()
-                    self.project.add_point(
-                        PointGeometryData(
-                            tag,
-                            f"Point {tag}",
-                            xyz,
+            changed = bool(first_changed or opposite_changed)
+            corner_tags = [int(first_tag)]
+            for index, xyz in enumerate(corners[1:], start=1):
+                if index == 2:
+                    tag = int(opposite_tag)
+                else:
+                    near = self._find_geometry_point_near(xyz)
+                    tag, corner_changed = (
+                        self._materialize_geometry_sketch_point(
+                            {
+                                "xyz": xyz,
+                                "point_tag": near,
+                            }
                         )
                     )
-                    changed = True
+                    changed = changed or bool(corner_changed)
                 corner_tags.append(int(tag))
 
-            surface_tag = self.project.next_surface_tag()
-            self.project.add_surface(
-                SurfaceGeometryData(
-                    tag=surface_tag,
-                    name=f"Surface {surface_tag}",
-                    surface_type="Rectangle",
-                    points=tuple(
-                        self.project.points[tag].xyz
-                        for tag in corner_tags
-                    ),
-                    mesh_recipe_configured=False,
-                    section_tag=None,
-                    corner_point_tags=tuple(corner_tags),
-                )
+            existing_surface = (
+                self._existing_geometry_surface_from_corners(corner_tags)
             )
+            surface_created = existing_surface is None
+            if surface_created:
+                surface_tag = self.project.next_surface_tag()
+                self.project.add_surface(
+                    SurfaceGeometryData(
+                        tag=surface_tag,
+                        name=f"Surface {surface_tag}",
+                        surface_type="Rectangle",
+                        points=tuple(
+                            self.project.points[tag].xyz
+                            for tag in corner_tags
+                        ),
+                        mesh_recipe_configured=False,
+                        section_tag=None,
+                        corner_point_tags=tuple(corner_tags),
+                    )
+                )
+                changed = True
+            else:
+                surface_tag = int(existing_surface)
         except (TypeError, ValueError) as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
             self._refresh_all(reset_camera=False)
-            self.status_message.setText(str(exc))
+            self.status_message.setText(
+                f"Rectangle: {exc} · click another opposite corner"
+            )
             return
 
         self._geometry_surface_point_tags = []
+        self._geometry_surface_anchor_snap = None
         self._refresh_geometry_sketch_snap_cache()
         self.model = self.project.model
-        self._refresh_all(
-            f"Drawn Geometry Surface {surface_tag}",
-            reset_camera=False,
-        )
-        self._record_project_change(
-            f"Draw Geometry Rectangle Surface {surface_tag}",
-            before,
-        )
+        if changed:
+            self._refresh_all(
+                (
+                    f"Drawn Geometry Surface {surface_tag}"
+                    if surface_created
+                    else f"Conformed Geometry Surface {surface_tag}"
+                ),
+                reset_camera=False,
+            )
+            self._record_project_change(
+                (
+                    f"Draw Geometry Rectangle Surface {surface_tag}"
+                    if surface_created
+                    else f"Conform Geometry Rectangle Surface {surface_tag}"
+                ),
+                before,
+            )
         self.viewport.clear_geometry_sketch_preview(render=False)
         self.status_message.setText(
-            f"Created Surface {surface_tag} · "
-            "click first corner for another rectangle · "
+            (
+                f"Created Surface {surface_tag} · "
+                if surface_created
+                else f"Surface {surface_tag} already exists · "
+            )
+            + "click first corner for another rectangle · "
             "right-click to finish"
         )
 
@@ -6794,20 +6873,21 @@ class MainWindow(QMainWindow):
 
         surface_action = self.actions.get("surface_geometry_pick")
         if surface_action is not None and surface_action.isChecked():
-            if self._geometry_surface_point_tags:
-                first = self.project.points.get(
-                    int(self._geometry_surface_point_tags[0])
+            if self._geometry_surface_anchor_snap is not None:
+                first_xyz = tuple(
+                    float(value)
+                    for value in self._geometry_surface_anchor_snap["xyz"]
                 )
-                if first is not None:
-                    corners = self._rectangle_corners_from_diagonal(
-                        first.xyz,
-                        xyz,
-                    )
-                    self.viewport.show_geometry_sketch_preview(
-                        corners,
-                        closed=True,
-                    )
-                    return
+                corners = self._rectangle_corners_from_diagonal(
+                    first_xyz,
+                    xyz,
+                )
+                self.viewport.show_geometry_sketch_preview(
+                    corners,
+                    closed=True,
+                    snap_label=label,
+                )
+                return
             self.viewport.show_geometry_sketch_preview(
                 [],
                 cursor=xyz,
