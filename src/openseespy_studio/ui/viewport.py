@@ -40,6 +40,7 @@ from ..model import (
     shell_surface_geometry,
 )
 from ..postprocess import component_end_resultants, nodal_result_scalar
+from ..shell_quality import shell_element_quality
 from ..surface_mesher import surface_mesh_preview_segments
 from ..project import (
     ConnectionData,
@@ -124,6 +125,8 @@ class ModelViewport(QWidget):
         self._geometry_surface_mesh = None
         self._geometry_surface_tags: list[int] = []
         self._surface_mesh_preview_tags: set[int] = set()
+        self._surface_quality_tags: set[int] = set()
+        self._surface_quality_metric: str | None = None
         self._element_actor_data: dict[str, tuple[object, np.ndarray]] = {}
         self._annotation_label_actors: dict[str, object] = {}
         self._undeformed_element_actors: list[object] = []
@@ -1911,6 +1914,112 @@ class ModelViewport(QWidget):
         if render:
             self.plotter.render()
 
+    def show_surface_mesh_quality(
+        self,
+        surface_tags,
+        metric: str,
+    ) -> None:
+        metric_key = str(metric).strip().lower()
+        if metric_key not in {"aspect_ratio", "skew", "warpage"}:
+            raise ValueError(
+                "Surface quality metric must be aspect_ratio, skew, or warpage."
+            )
+        self._surface_quality_tags = {
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self._surfaces
+        }
+        self._surface_quality_metric = metric_key
+        if self._display_domain != "geometry":
+            self.set_display_domain("geometry")
+            return
+        self._render_model(reset_camera=False)
+
+    def clear_surface_mesh_quality(
+        self,
+        *,
+        render: bool = True,
+    ) -> None:
+        self._surface_quality_tags.clear()
+        self._surface_quality_metric = None
+        self._remove_overlay("surface-quality-overlay")
+        if render:
+            self.plotter.render()
+
+    def _render_surface_quality_overlay(self) -> None:
+        self._remove_overlay("surface-quality-overlay")
+        if (
+            self._model is None
+            or self._display_domain != "geometry"
+            or not self._surface_quality_tags
+            or self._surface_quality_metric is None
+        ):
+            return
+
+        element_tags = sorted({
+            int(element_tag)
+            for surface_tag in self._surface_quality_tags
+            for element_tag in self._surfaces[
+                surface_tag
+            ].generated_element_tags
+            if (
+                surface_tag in self._surfaces
+                and int(element_tag) in self._model.elements
+                and self._model.elements[
+                    int(element_tag)
+                ].element_type in SHELL_ELEMENT_TYPES
+            )
+        })
+        if not element_tags:
+            return
+        mesh = self._batched_shell_mesh(
+            self._model,
+            element_tags,
+        )
+        if mesh is None:
+            return
+
+        values: dict[int, float] = {}
+        for tag in element_tags:
+            quality = shell_element_quality(
+                type("_QualityProject", (), {"model": self._model})(),
+                tag,
+            )
+            if self._surface_quality_metric == "aspect_ratio":
+                values[tag] = float(quality.aspect_ratio)
+            elif self._surface_quality_metric == "skew":
+                values[tag] = float(quality.max_skew_deg)
+            else:
+                values[tag] = float(quality.warpage_deg)
+
+        cell_tags = np.asarray(
+            mesh.cell_data["element_tag"],
+            dtype=np.int64,
+        )
+        scalars = np.asarray(
+            [values.get(int(tag), float("nan")) for tag in cell_tags],
+            dtype=float,
+        )
+        mesh.cell_data["surface_quality"] = scalars
+        title = {
+            "aspect_ratio": "Aspect ratio",
+            "skew": "Skew [deg]",
+            "warpage": "Warpage [deg]",
+        }[self._surface_quality_metric]
+        self.plotter.add_mesh(
+            mesh,
+            name="surface-quality-overlay",
+            scalars="surface_quality",
+            cmap="viridis",
+            show_edges=True,
+            edge_color="#243b52",
+            line_width=1,
+            opacity=0.9,
+            pickable=False,
+            scalar_bar_args={"title": title},
+            render=False,
+        )
+
     def set_geometry_mesh_overlay_visible(
         self,
         visible: bool,
@@ -2242,6 +2351,7 @@ class ModelViewport(QWidget):
                     )
 
             self._update_highlight_overlays(render=False)
+            self._render_surface_quality_overlay()
             self._render_surface_orientation_overlays()
             self.set_view(self._current_view, render=False)
             if reset_camera:
