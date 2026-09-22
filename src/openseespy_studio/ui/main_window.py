@@ -9761,16 +9761,48 @@ class MainWindow(QMainWindow):
             )
         return weights
 
+    def _offer_structural_model_creator(self) -> bool:
+        if self.model.nodes:
+            return True
+
+        box = QMessageBox(self)
+        box.setWindowTitle("Structural Model Required")
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText(
+            "This workflow needs a structural model first. "
+            "Choose a model-creation workflow to open now."
+        )
+        column_button = box.addButton(
+            "1D Column...",
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        frame_button = box.addButton(
+            "2D Frame...",
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        node_button = box.addButton(
+            "Create Node...",
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked is column_button:
+            self._show_test_column_wizard()
+        elif clicked is frame_button:
+            self._show_frame_grid_2d()
+        elif clicked is node_button:
+            self._create_node()
+        else:
+            return False
+        return bool(self.model.nodes)
+
     def _create_analysis_template(
         self,
         initial_template: str = "Pushover",
     ) -> None:
-        if not self.model.nodes:
-            QMessageBox.information(
-                self,
-                "Analysis Template",
-                "Create the structural model before creating an analysis template.",
-            )
+        if not self._offer_structural_model_creator():
             return
 
         default_node = default_control_node(self.project)
