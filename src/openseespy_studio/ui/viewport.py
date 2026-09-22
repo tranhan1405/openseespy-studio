@@ -130,6 +130,11 @@ class ModelViewport(QWidget):
         self._surface_pressure_preview_tags: set[int] = set()
         self._surface_pressure_preview_value: float | None = None
         self._surface_edge_preview_refs: set[tuple[int, int]] = set()
+        self._surface_edge_load_preview: tuple[
+            int,
+            int,
+            tuple[float, float, float, float, float, float],
+        ] | None = None
         self._element_actor_data: dict[str, tuple[object, np.ndarray]] = {}
         self._annotation_label_actors: dict[str, object] = {}
         self._undeformed_element_actors: list[object] = []
@@ -2195,6 +2200,114 @@ class ModelViewport(QWidget):
                 always_visible=True,
             )
 
+    def show_surface_edge_load_preview(
+        self,
+        surface_tag: int,
+        edge_index: int,
+        values_per_length,
+    ) -> None:
+        tag = int(surface_tag)
+        edge = int(edge_index)
+        if tag not in self._surfaces:
+            raise ValueError(f"Surface {tag} does not exist.")
+        if edge not in {1, 2, 3, 4}:
+            raise ValueError(
+                "Surface edge load preview index must be 1, 2, 3, or 4."
+            )
+        values = tuple(float(value) for value in values_per_length)
+        if len(values) != 6 or any(
+            not math.isfinite(value) for value in values
+        ):
+            raise ValueError(
+                "Surface edge load preview needs six finite components."
+            )
+        self._surface_edge_load_preview = (
+            tag,
+            edge,
+            values,  # type: ignore[arg-type]
+        )
+        self._surface_edge_preview_refs = {(tag, edge)}
+        if self._display_domain != "geometry":
+            self.set_display_domain("geometry")
+            return
+        self._render_model(reset_camera=False)
+
+    def clear_surface_edge_load_preview(
+        self,
+        *,
+        render: bool = True,
+    ) -> None:
+        self._surface_edge_load_preview = None
+        self._remove_overlay("surface-edge-load-preview")
+        self._remove_overlay("surface-edge-load-preview-labels")
+        if render:
+            self.plotter.render()
+
+    def _render_surface_edge_load_preview(self) -> None:
+        self._remove_overlay("surface-edge-load-preview")
+        self._remove_overlay("surface-edge-load-preview-labels")
+        if (
+            self._display_domain != "geometry"
+            or self._surface_edge_load_preview is None
+        ):
+            return
+
+        surface_tag, edge_index, values = self._surface_edge_load_preview
+        surface = self._surfaces.get(surface_tag)
+        if surface is None:
+            return
+        p = surface.points
+        start, end = {
+            1: (p[0], p[1]),
+            2: (p[1], p[2]),
+            3: (p[2], p[3]),
+            4: (p[3], p[0]),
+        }[edge_index]
+        a = np.asarray(start, dtype=float)
+        b = np.asarray(end, dtype=float)
+        edge_vector = b - a
+        edge_length = float(np.linalg.norm(edge_vector))
+        if edge_length <= 1.0e-12:
+            return
+
+        q = np.asarray(values[:3], dtype=float)
+        q_norm = float(np.linalg.norm(q))
+        records = []
+        direction = None
+        if q_norm > 1.0e-15:
+            direction = q / q_norm
+            arrow_length = max(edge_length * 0.12, 1.0e-9)
+            for t in np.linspace(0.1, 0.9, 5):
+                point = a + float(t) * edge_vector
+                records.append((point, direction, arrow_length))
+
+        mesh = self._batched_arrow_mesh(records)
+        if mesh is not None:
+            self.plotter.add_mesh(
+                mesh,
+                name="surface-edge-load-preview",
+                color="#b03a2e",
+                pickable=False,
+                render=False,
+            )
+
+        midpoint = 0.5 * (a + b)
+        label_point = midpoint
+        if direction is not None:
+            label_point = midpoint + direction * edge_length * 0.16
+        self._add_annotation_labels(
+            [label_point],
+            [
+                f"S{surface_tag}:E{edge_index} "
+                f"q=({values[0]:.4g}, {values[1]:.4g}, {values[2]:.4g}) "
+                f"m=({values[3]:.4g}, {values[4]:.4g}, {values[5]:.4g})"
+            ],
+            name="surface-edge-load-preview-labels",
+            text_color="#7a251d",
+            font_size=10,
+            always_visible=True,
+        )
+
     def set_geometry_mesh_overlay_visible(
         self,
         visible: bool,
@@ -2529,6 +2642,7 @@ class ModelViewport(QWidget):
             self._render_surface_quality_overlay()
             self._render_surface_pressure_preview()
             self._render_surface_edge_preview()
+            self._render_surface_edge_load_preview()
             self._render_surface_orientation_overlays()
             self.set_view(self._current_view, render=False)
             if reset_camera:
