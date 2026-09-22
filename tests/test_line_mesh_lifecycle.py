@@ -2087,6 +2087,48 @@ def test_geometry_free_line_three_clicks_with_snap_on_still_draw_freely():
     assert dummy._geometry_line_anchor_snap is None
 
 
+def test_geometry_snap_off_ignores_even_exact_existing_point_hit():
+    project = ProjectDatabase(name="snap-off-exact-hit")
+    project.add_point(PointGeometryData(1, "Existing", (0.0, 0.0, 0.0)))
+
+    class SnapAction:
+        def isChecked(self):
+            return False
+
+    class ViewportStub:
+        def geometry_world_to_screen(self, _xyz):
+            return (100.0, 100.0)
+
+        def geometry_sketch_plane(self):
+            return ("xy", 0.0)
+
+    dummy = SimpleNamespace(
+        project=project,
+        viewport=ViewportStub(),
+        actions={"geometry_snap": SnapAction()},
+        _geometry_line_point_tags=[],
+        _geometry_line_anchor_snap=None,
+        _geometry_surface_point_tags=[],
+        _geometry_sketch_intersections=[],
+        _geometry_point_on_active_sketch_plane=lambda _xyz: True,
+    )
+
+    snap = MainWindow._geometry_sketch_snap(
+        dummy,
+        {
+            "kind": "geometry_point",
+            "tag": 1,
+            "world": (0.03, 0.02, 0.0),
+            "screen": (100.0, 100.0),
+        },
+    )
+
+    assert snap is not None
+    assert snap["kind"] == "free"
+    assert snap["point_tag"] is None
+    assert snap["xyz"] == pytest.approx((0.03, 0.02, 0.0))
+
+
 def test_geometry_free_line_ignores_stale_far_point_picker_hit():
     project = ProjectDatabase(name="free-line-snap")
     project.add_point(PointGeometryData(1, "Anchor", (0.0, 0.0, 0.0)))
