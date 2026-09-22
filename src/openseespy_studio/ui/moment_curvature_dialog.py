@@ -59,6 +59,8 @@ class MomentCurvatureDialog(QDialog):
         form = QFormLayout(setup_group)
 
         self.section = QComboBox()
+        if not project.sections:
+            self.section.addItem("No Sections available · create one first", None)
         for tag in sorted(project.sections):
             item = project.sections[tag]
             self.section.addItem(
@@ -130,6 +132,9 @@ class MomentCurvatureDialog(QDialog):
         )
         self.buttons.button(QDialogButtonBox.Ok).setText(
             "Run Moment-Curvature"
+        )
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(
+            bool(project.sections)
         )
         self.buttons.accepted.connect(self._validate_and_accept)
         self.buttons.rejected.connect(self.reject)
