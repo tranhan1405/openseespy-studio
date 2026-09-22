@@ -245,11 +245,11 @@ def test_fifth_prerequisite_link_batch():
     assert "beam_load.setEnabled(bool(tags) and not is_truss_group)" not in tree_source
     assert "assign.setEnabled(bool(tags))" not in tree_source
 
-    assert "formulation.setEnabled(not is_truss_group)" in tree_source
+    assert "not is_truss_group and not is_shell_group" in tree_source
     assert "material.setEnabled(is_truss_group)" in tree_source
     assert "section.setEnabled(not is_truss_group)" in tree_source
-    assert "transformation.setEnabled(not is_truss_group)" in tree_source
-    assert "beam_load.setEnabled(not is_truss_group)" in tree_source
+    assert "self._assign_shell_section_to_selection()" in tree_source
+    assert "is_shell_group" in tree_source
 
     # Mixed Frame + Truss selections may still operate on the eligible frames.
     assert "formulation.setEnabled(has_frame and not has_truss)" not in tree_source
