@@ -11120,6 +11120,102 @@ class MainWindow(QMainWindow):
             self.selection.set_selection(elements={tag})
         return tag
 
+    def _element_uses_fiber_section(self, tag: int) -> bool:
+        element = self.model.elements.get(int(tag))
+        if element is None:
+            return False
+        section_tags = {
+            value
+            for value in (
+                element.section_tag,
+                element.hinge_i_section_tag,
+                element.hinge_j_section_tag,
+                element.interior_section_tag,
+            )
+            if value is not None
+        }
+        return any(
+            section_tag in self.project.sections
+            and self.project.sections[section_tag].section_type == "Fiber"
+            for section_tag in section_tags
+        )
+
+    def _fiber_beam_tags(self) -> list[int]:
+        return sorted(
+            tag
+            for tag in self._nonlinear_beam_tags()
+            if self._element_uses_fiber_section(tag)
+        )
+
+    def _create_fiber_beam_prerequisite(self) -> None:
+        if not any(
+            section.section_type == "Fiber"
+            for section in self.project.sections.values()
+        ):
+            if not self._ensure_prerequisite(
+                title="Fiber Response Target",
+                message=(
+                    "Fiber response requires a Fiber Section. "
+                    "Create one now?"
+                ),
+                action_label="Create Fiber Section Now...",
+                available=lambda: any(
+                    section.section_type == "Fiber"
+                    for section in self.project.sections.values()
+                ),
+                creator=self._create_section,
+            ):
+                return
+        self._create_nonlinear_beam_prerequisite()
+
+    def _ensure_fiber_beam_target(
+        self,
+        *,
+        title: str,
+    ) -> int | None:
+        existing = self._fiber_beam_tags()
+        selected = [
+            int(tag)
+            for tag in sorted(self.selection.elements)
+            if tag in existing
+        ]
+        if selected:
+            return selected[0]
+
+        if existing:
+            tag = self._choose_existing_prerequisite_tag(
+                title=title,
+                label="Choose an existing Fiber-section beam-column element:",
+                tags=existing,
+            )
+            if tag is not None:
+                self.selection.set_selection(elements={tag})
+            return tag
+
+        if not self._ensure_prerequisite(
+            title=title,
+            message=(
+                f"{title} requires a forceBeamColumn or dispBeamColumn "
+                "element backed by a Fiber Section. Create that target now?"
+            ),
+            action_label="Create Fiber Beam Now...",
+            available=lambda: bool(self._fiber_beam_tags()),
+            creator=self._create_fiber_beam_prerequisite,
+        ):
+            return None
+
+        existing = self._fiber_beam_tags()
+        if not existing:
+            return None
+        tag = self._choose_existing_prerequisite_tag(
+            title=title,
+            label="Choose the Fiber-section beam-column target:",
+            tags=existing,
+        )
+        if tag is not None:
+            self.selection.set_selection(elements={tag})
+        return tag
+
     def _recorder_target_creator(
         self,
         recorder_type: str,
@@ -11184,9 +11280,15 @@ class MainWindow(QMainWindow):
             )
             return [tag] if tag is not None else []
 
-        if kind in {"Section", "Fiber"}:
+        if kind == "Section":
             tag = self._ensure_nonlinear_beam_target(
-                title=f"{kind} Recorder",
+                title="Section Recorder",
+            )
+            return [tag] if tag is not None else []
+
+        if kind == "Fiber":
+            tag = self._ensure_fiber_beam_target(
+                title="Fiber Recorder",
             )
             return [tag] if tag is not None else []
 
@@ -11286,7 +11388,7 @@ class MainWindow(QMainWindow):
             elements = {selected[0]}
 
         elif kind in {"FiberStress", "FiberStrain", "HingeState"}:
-            tag = self._ensure_nonlinear_beam_target(
+            tag = self._ensure_fiber_beam_target(
                 title={
                     "FiberStress": "Fiber Stress Result",
                     "FiberStrain": "Fiber Strain Result",
