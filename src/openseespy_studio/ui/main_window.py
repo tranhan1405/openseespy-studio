@@ -8430,6 +8430,19 @@ class MainWindow(QMainWindow):
         })
         if not tags:
             return
+        unconfigured = [
+            tag
+            for tag in tags
+            if not self.project.surfaces[tag].mesh_recipe_configured
+        ]
+        if unconfigured:
+            QMessageBox.information(
+                self,
+                "Preview Surface Mesh",
+                "Configure Surface Mesh first for: "
+                + ", ".join(map(str, unconfigured)),
+            )
+            return
         total = 0
         summaries = []
         try:
@@ -13072,6 +13085,13 @@ class MainWindow(QMainWindow):
     def _preview_line_mesh(self, tag: int) -> None:
         line = self.project.lines.get(int(tag))
         if line is None:
+            return
+        if not line.mesh_recipe_configured:
+            QMessageBox.information(
+                self,
+                "Preview Line Mesh",
+                "Configure the Line Mesh / FE recipe before previewing.",
+            )
             return
         try:
             divisions, points = line_mesh_preview_points(
@@ -19016,6 +19036,7 @@ class MainWindow(QMainWindow):
                 self._show_line_geometry_properties(t)
             )
             quality = menu.addAction("Mesh Quality...")
+            quality.setEnabled(line.mesh_recipe_configured)
             quality.triggered.connect(
                 lambda checked=False, t=tag:
                 self._show_line_mesh_quality(t)
