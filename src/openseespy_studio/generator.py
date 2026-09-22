@@ -1212,6 +1212,7 @@ def analysis_to_openseespy(
     element_tags: list[int] | None = None,
     frame_element_tags: list[int] | None = None,
     truss_element_tags: list[int] | None = None,
+    shell_element_tags: list[int] | None = None,
     support_node_tags: list[int] | None = None,
     plain_pattern_tags: list[int] | None = None,
     monitor_node: int | None = None,
@@ -1226,6 +1227,7 @@ def analysis_to_openseespy(
     element_tags = list(element_tags or [])
     frame_element_tags = list(frame_element_tags or [])
     truss_element_tags = list(truss_element_tags or [])
+    shell_element_tags = list(shell_element_tags or [])
     support_node_tags = list(support_node_tags or [])
     plain_pattern_tags = list(plain_pattern_tags or [])
     fiber_response_specs = dict(fiber_response_specs or {})
@@ -1377,6 +1379,7 @@ def analysis_to_openseespy(
         f"_studio_element_tags = {element_tags!r}",
         f"_studio_frame_element_tags = {frame_element_tags!r}",
         f"_studio_truss_element_tags = {truss_element_tags!r}",
+        f"_studio_shell_element_tags = {shell_element_tags!r}",
         f"_studio_support_node_tags = {support_node_tags!r}",
         f"_studio_plain_pattern_tags = {plain_pattern_tags!r}",
         f"_studio_fiber_response_specs = {fiber_response_specs!r}",
@@ -2613,6 +2616,35 @@ def analysis_to_openseespy(
         "            }",
         "    except Exception:",
         "        pass",
+        "_studio_shell_section_forces = {}",
+        "for _studio_element in _studio_shell_element_tags:",
+        "    _studio_gp_forces = []",
+        "    for _studio_gp in range(1, 5):",
+        "        try:",
+        "            _studio_force = ops.eleResponse(",
+        "                _studio_element, 'material', _studio_gp, 'force'",
+        "            ) or []",
+        "            _studio_force = [float(v) for v in _studio_force]",
+        "        except Exception:",
+        "            _studio_force = []",
+        "        _studio_gp_forces.append(_studio_force)",
+        "    _studio_valid_gp = [",
+        "        row for row in _studio_gp_forces if len(row) >= 8",
+        "    ]",
+        "    _studio_average = []",
+        "    if _studio_valid_gp:",
+        "        _studio_average = [",
+        "            sum(row[index] for row in _studio_valid_gp)",
+        "            / len(_studio_valid_gp)",
+        "            for index in range(8)",
+        "        ]",
+        "    _studio_shell_section_forces[str(_studio_element)] = {",
+        "        'gauss_points': _studio_gp_forces,",
+        "        'average': _studio_average,",
+        "        'components': [",
+        "            'Nxx', 'Nyy', 'Nxy', 'Mxx', 'Myy', 'Mxy', 'Qx', 'Qy'",
+        "        ],",
+        "    }",
         "_studio_element_fiber_responses = {}",
         "for _studio_element_raw, _studio_spec in "
         "_studio_fiber_response_specs.items():",
@@ -2683,6 +2715,7 @@ def analysis_to_openseespy(
         "    'element_axial_forces': _studio_element_axial_forces,",
         "    'element_local_forces': _studio_element_local_forces,",
         "    'element_section_forces': _studio_element_section_forces,",
+        "    'shell_section_forces': _studio_shell_section_forces,",
         "    'element_fiber_responses': _studio_element_fiber_responses,",
         "    'load_factors': _studio_load_factors,",
         "}",
@@ -4296,6 +4329,11 @@ def to_openseespy(
                     tag
                     for tag, element in model.elements.items()
                     if element.element_type == "truss"
+                ),
+                shell_element_tags=sorted(
+                    tag
+                    for tag, element in model.elements.items()
+                    if element.element_type in SHELL_ELEMENT_TYPES
                 ),
                 support_node_tags=support_node_tags,
                 plain_pattern_tags=sorted(
