@@ -2025,7 +2025,7 @@ def test_new_empty_project_point_dialog_creates_visible_geometry():
     from PySide6.QtWidgets import QApplication
 
     from openseespy_studio.project import PointGeometryData
-    from openseespy_studio.ui.dialogs import PointGeometryDialog
+    from openseespy_studio.ui.line_geometry_dialog import PointGeometryDialog
     from openseespy_studio.ui.main_window import MainWindow
 
     app = QApplication.instance() or QApplication([])
