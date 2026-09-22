@@ -175,7 +175,7 @@ def test_adjacent_geometry_surfaces_reuse_conforming_shared_edge_nodes():
     assert len(shared_midpoints) == 1
 
 
-def test_surface_ui_treats_surface_as_mesh_owner():
+def test_surface_ui_separates_geometry_mesh_and_fe_model():
     dialog_source = inspect.getsource(SurfaceGeometryDialog)
     tree_source = inspect.getsource(MainWindow._refresh_tree)
     context_source = inspect.getsource(MainWindow._show_tree_context_menu)
@@ -185,23 +185,26 @@ def test_surface_ui_treats_surface_as_mesh_owner():
 
     assert "Rectangle" in dialog_source
     assert "Quad" in dialog_source
-    assert "A Surface stores the reusable geometry and mesh definition" in dialog_source
-    assert "Create Surface + Mesh" in dialog_source
-    assert "Surface requires a Shell Section" in dialog_source
+    assert "Geometry and Mesh are separate" in dialog_source
+    assert "Create Geometry" in dialog_source
+    assert "Save Mesh Recipe" in dialog_source
+    assert "Surface mesh recipe requires a Shell Section" in dialog_source
 
     assert "surface_geometry" in tree_source
+    assert 'QTreeWidgetItem(["Mesh"])' in tree_source
+    assert '"surface_mesh_recipe"' in tree_source
     assert "FE Model" in tree_source
     assert "total_element_count" in tree_source
     assert "surface_owned_elements" not in tree_source
     assert "Shell Elements (" not in tree_source
-    assert "Mesh (" not in tree_source
 
     assert "New Surface by Picking..." in context_source
     assert "New Surface by Input..." in context_source
-    assert "Mesh / Remesh Surface" in context_source
+    assert "Configure Surface Mesh / Shell Recipe..." in context_source
     assert "Delete Generated Mesh" in context_source
     assert "add_surface" in create_source
-    assert "mesh_surface_geometry" in create_source
+    assert "mesh_surface_geometry" not in create_source
+    assert 'mode="geometry"' in create_source
     assert "ProjectDatabase.from_dict(before)" in create_source
 
 
@@ -263,20 +266,26 @@ def test_unmeshed_surface_geometry_is_rendered_in_viewport():
     assert "and not self._surfaces" in render_source
     assert "self.project.surfaces" in refresh_source
     assert '"surface_geometry"' in tree_selection_source
-    assert '"surface_mesh"' not in tree_selection_source
+    assert '"surface_mesh_recipe"' in tree_selection_source
     assert '"surface_shells"' not in tree_selection_source
     assert "_show_surface_geometry_properties" in tree_selection_source
 
 
-def test_new_surface_creation_is_atomic_create_and_mesh_workflow():
+def test_new_surface_creation_is_geometry_only_until_mesh_is_configured():
     create_source = inspect.getsource(
         MainWindow._create_surface_geometry_from_points
     )
+    configure_source = inspect.getsource(
+        MainWindow._configure_surface_mesh
+    )
 
-    assert "_ensure_prerequisite" in create_source
-    assert "Create Shell Section Now..." in create_source
+    assert "_ensure_prerequisite" not in create_source
     assert "self.project.add_surface(surface)" in create_source
-    assert "mesh_surface_geometry(" in create_source
-    assert "ProjectDatabase.from_dict(before)" in create_source
-    assert "result.element_tags" in create_source
-    assert "result.created_node_tags" in create_source
+    assert "mesh_surface_geometry(" not in create_source
+    assert 'mode="geometry"' in create_source
+    assert "Mesh not configured" in create_source
+
+    assert "_ensure_prerequisite" in configure_source
+    assert "Create Shell Section Now..." in configure_source
+    assert 'mode="mesh"' in configure_source
+    assert "mesh_surface_geometry" in configure_source
