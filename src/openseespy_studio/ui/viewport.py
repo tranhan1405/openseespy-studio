@@ -2040,6 +2040,26 @@ class ModelViewport(QWidget):
             return None
         return pieces[0] if len(pieces) == 1 else pv.merge(pieces, merge_points=False)
 
+    def _element_highlight_style(self, *, hover: bool = False) -> dict:
+        """Return overlay rendering that stays visible for each representation."""
+        centerline = (
+            self._normalized_model_representation(
+                self._model_representation
+            )
+            == "centerline"
+        )
+        if centerline:
+            return {
+                "show_edges": False,
+                "line_width": 6 if hover else 8,
+                "render_lines_as_tubes": True,
+            }
+        return {
+            "show_edges": True,
+            "line_width": 2,
+            "render_lines_as_tubes": False,
+        }
+
     def _update_highlight_overlays(
         self,
         *,
@@ -2058,13 +2078,17 @@ class ModelViewport(QWidget):
 
         selected_element_mesh = self._element_overlay_mesh(self._selected_elements)
         if selected_element_mesh is not None:
+            selection_style = self._element_highlight_style()
             self.plotter.add_mesh(
                 selected_element_mesh,
                 name="selection-elements",
                 color="#ff9800",
                 edge_color="#d46500",
-                show_edges=True,
-                line_width=2,
+                show_edges=selection_style["show_edges"],
+                line_width=selection_style["line_width"],
+                render_lines_as_tubes=(
+                    selection_style["render_lines_as_tubes"]
+                ),
                 opacity=1.0,
                 pickable=False,
                 render=False,
@@ -2094,13 +2118,17 @@ class ModelViewport(QWidget):
             if kind == "element" and tag not in self._selected_elements:
                 mesh = self._element_overlay_mesh({tag})
                 if mesh is not None:
+                    hover_style = self._element_highlight_style(hover=True)
                     self.plotter.add_mesh(
                         mesh,
                         name="hover-element",
                         color="#20c5e8",
                         edge_color="#087a94",
-                        show_edges=True,
-                        line_width=2,
+                        show_edges=hover_style["show_edges"],
+                        line_width=hover_style["line_width"],
+                        render_lines_as_tubes=(
+                            hover_style["render_lines_as_tubes"]
+                        ),
                         opacity=0.78,
                         pickable=False,
                         render=False,
