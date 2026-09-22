@@ -1795,6 +1795,39 @@ class LineCopyResult:
     mesh_results: dict[int, LineMeshResult] = field(default_factory=dict)
 
 
+@dataclass(slots=True)
+class LinePairSplitResult:
+    source_line_tags: tuple[int, int]
+    intersection_point_tag: int
+    intersection: tuple[float, float, float]
+    output_line_tags: dict[int, list[int]] = field(default_factory=dict)
+    created_point_tags: list[int] = field(default_factory=list)
+    created_line_tags: list[int] = field(default_factory=list)
+    mesh_results: dict[int, LineMeshResult] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class LineBatchTrimExtendResult:
+    subject_line_tags: list[int]
+    target_line_tag: int
+    operation: str
+    target_line_tags: list[int] = field(default_factory=list)
+    intersection_point_tags: dict[int, int] = field(default_factory=dict)
+    created_point_tags: list[int] = field(default_factory=list)
+    created_line_tags: list[int] = field(default_factory=list)
+    mesh_results: dict[int, LineMeshResult] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class LineCornerEditResult:
+    operation: str
+    source_line_tags: tuple[int, int]
+    connector_line_tags: list[int] = field(default_factory=list)
+    created_point_tags: list[int] = field(default_factory=list)
+    created_line_tags: list[int] = field(default_factory=list)
+    mesh_results: dict[int, LineMeshResult] = field(default_factory=dict)
+
+
 def _infinite_line_intersection(
     a: tuple[float, float, float],
     b: tuple[float, float, float],
@@ -2057,6 +2090,877 @@ def trim_extend_line_to_line(
             created_point_tags=created_point_tags,
             created_line_tags=sorted(set(created_line_tags)),
             affected_line_tags=affected,
+            mesh_results=mesh_results,
+        )
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+
+
+def _line_shared_corner(
+    project: ProjectDatabase,
+    left_tag: int,
+    right_tag: int,
+) -> tuple[
+    LineGeometryData,
+    LineGeometryData,
+    int,
+    int,
+    int,
+    tuple[float, float, float],
+    tuple[float, float, float],
+    tuple[float, float, float],
+]:
+    left = project.lines.get(int(left_tag))
+    right = project.lines.get(int(right_tag))
+    if left is None or right is None:
+        raise ValueError("Corner edit references a missing Geometry Line.")
+    if int(left_tag) == int(right_tag):
+        raise ValueError("Corner edit requires two different Geometry Lines.")
+
+    shared = (
+        {int(left.point_i), int(left.point_j)}
+        & {int(right.point_i), int(right.point_j)}
+    )
+    if len(shared) != 1:
+        raise ValueError(
+            "Fillet/Chamfer requires two Geometry Lines sharing exactly "
+            "one Geometry Point."
+        )
+    corner_tag = next(iter(shared))
+    left_other = (
+        int(left.point_j)
+        if int(left.point_i) == corner_tag
+        else int(left.point_i)
+    )
+    right_other = (
+        int(right.point_j)
+        if int(right.point_i) == corner_tag
+        else int(right.point_i)
+    )
+    corner = project.points[corner_tag].xyz
+    left_xyz = project.points[left_other].xyz
+    right_xyz = project.points[right_other].xyz
+    return (
+        left,
+        right,
+        corner_tag,
+        left_other,
+        right_other,
+        corner,
+        left_xyz,
+        right_xyz,
+    )
+
+
+def _unit_direction(
+    origin: tuple[float, float, float],
+    target: tuple[float, float, float],
+) -> tuple[tuple[float, float, float], float]:
+    vector = tuple(
+        float(target[index]) - float(origin[index])
+        for index in range(3)
+    )
+    length = math.sqrt(sum(value * value for value in vector))
+    if length <= 1.0e-12:
+        raise ValueError("Corner edit cannot use a zero-length Geometry Line.")
+    return tuple(value / length for value in vector), length
+
+
+def _corner_recipe_is_compatible(
+    left: LineGeometryData,
+    right: LineGeometryData,
+) -> bool:
+    if bool(left.mesh_recipe_configured) != bool(
+        right.mesh_recipe_configured
+    ):
+        return False
+    if not left.mesh_recipe_configured:
+        return True
+    return _line_recipe_merge_signature(left) == _line_recipe_merge_signature(
+        right
+    )
+
+
+def _new_line_from_recipe(
+    project: ProjectDatabase,
+    source: LineGeometryData,
+    point_i: int,
+    point_j: int,
+    name: str,
+) -> LineGeometryData:
+    data = source.to_dict()
+    data.update({
+        "tag": project.next_line_tag(),
+        "name": str(name),
+        "point_i": int(point_i),
+        "point_j": int(point_j),
+        "divisions": 1,
+        "bias": 1.0,
+        "generated_node_tags": [],
+        "owned_node_tags": [],
+        "generated_element_tags": [],
+    })
+    return LineGeometryData.from_dict(data)
+
+
+def _set_line_corner_endpoint(
+    project: ProjectDatabase,
+    line: LineGeometryData,
+    corner_tag: int,
+    replacement_tag: int,
+) -> None:
+    if int(line.point_i) == int(corner_tag):
+        line.point_i = int(replacement_tag)
+    elif int(line.point_j) == int(corner_tag):
+        line.point_j = int(replacement_tag)
+    else:
+        raise ValueError(
+            f"Geometry Line {line.tag} no longer contains corner "
+            f"Point {corner_tag}."
+        )
+    project._validate_line_geometry(line)
+
+
+def split_line_pair_at_intersection(
+    project: ProjectDatabase,
+    left_line_tag: int,
+    right_line_tag: int,
+    *,
+    remesh: bool = True,
+) -> LinePairSplitResult:
+    """Split two finite Geometry Lines at their common geometric intersection."""
+
+    left_tag = int(left_line_tag)
+    right_tag = int(right_line_tag)
+    if left_tag == right_tag:
+        raise ValueError("Split by Line requires two different Geometry Lines.")
+    left = project.lines.get(left_tag)
+    right = project.lines.get(right_tag)
+    if left is None or right is None:
+        raise ValueError("Split by Line references a missing Geometry Line.")
+
+    a, b, _ = _line_points(project, left)
+    c, d, _ = _line_points(project, right)
+    tolerance = _merge_tolerance(project, (a, b, c, d))
+    hit = _segment_intersection(a, b, c, d, tolerance)
+    if hit is None:
+        raise ValueError(
+            "The selected Geometry Lines do not intersect as finite segments."
+        )
+    point, left_parameter, right_parameter = hit
+    endpoint_tol = 1.0e-8
+    if (
+        (left_parameter <= endpoint_tol or left_parameter >= 1.0 - endpoint_tol)
+        and (
+            right_parameter <= endpoint_tol
+            or right_parameter >= 1.0 - endpoint_tol
+        )
+    ):
+        raise ValueError(
+            "The selected Lines already meet endpoint-to-endpoint; there is "
+            "nothing to split."
+        )
+
+    states = {
+        left_tag: inspect_line_mesh_state(project, left_tag),
+        right_tag: inspect_line_mesh_state(project, right_tag),
+    }
+    if any(not state.healthy for state in states.values()):
+        raise ValueError(
+            "Split by Line requires healthy Line mesh ownership. Run the "
+            "Line mesh integrity audit first."
+        )
+    had_mesh = {
+        tag: bool(state.live_element_tags)
+        for tag, state in states.items()
+    }
+    candidate_owned_nodes = {
+        int(node_tag)
+        for state in states.values()
+        for node_tag in state.owned_node_tags
+    }
+    before = project.to_dict()
+    created_point_tags: list[int] = []
+    created_line_tags: list[int] = []
+    output_line_tags: dict[int, list[int]] = {}
+    mesh_results: dict[int, LineMeshResult] = {}
+
+    try:
+        for tag, state in states.items():
+            if state.live_element_tags:
+                delete_line_mesh(project, tag)
+
+        endpoint_candidates: list[int] = []
+        for line, parameter in (
+            (project.lines[left_tag], left_parameter),
+            (project.lines[right_tag], right_parameter),
+        ):
+            if parameter <= endpoint_tol:
+                endpoint_candidates.append(int(line.point_i))
+            elif parameter >= 1.0 - endpoint_tol:
+                endpoint_candidates.append(int(line.point_j))
+
+        point_tag = (
+            min(endpoint_candidates)
+            if endpoint_candidates
+            else _find_geometry_point_at(project, point, tolerance)
+        )
+        if point_tag is None:
+            point_tag = project.next_point_tag()
+            project.add_point(
+                PointGeometryData(
+                    point_tag,
+                    f"Line split intersection {point_tag}",
+                    point,
+                )
+            )
+            created_point_tags.append(point_tag)
+
+        for tag, parameter in (
+            (left_tag, left_parameter),
+            (right_tag, right_parameter),
+        ):
+            line = project.lines[tag]
+            if endpoint_tol < parameter < 1.0 - endpoint_tol:
+                split = _split_unmeshed_line(
+                    project,
+                    tag,
+                    [(parameter, point_tag)],
+                )
+                output_line_tags[tag] = list(split.line_tags)
+                created_line_tags.extend(split.created_line_tags)
+            else:
+                if parameter <= endpoint_tol:
+                    line.point_i = point_tag
+                else:
+                    line.point_j = point_tag
+                project._validate_line_geometry(line)
+                output_line_tags[tag] = [tag]
+
+        _remove_orphan_fe_nodes(project, candidate_owned_nodes)
+
+        if remesh:
+            for source_tag in (left_tag, right_tag):
+                if not had_mesh[source_tag]:
+                    continue
+                for child_tag in output_line_tags[source_tag]:
+                    mesh_results[child_tag] = mesh_line_geometry(
+                        project,
+                        child_tag,
+                    )
+
+        return LinePairSplitResult(
+            source_line_tags=(left_tag, right_tag),
+            intersection_point_tag=point_tag,
+            intersection=tuple(float(value) for value in point),
+            output_line_tags=output_line_tags,
+            created_point_tags=created_point_tags,
+            created_line_tags=sorted(set(created_line_tags)),
+            mesh_results=mesh_results,
+        )
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+
+
+def trim_extend_lines_to_line(
+    project: ProjectDatabase,
+    line_tags,
+    target_line_tag: int,
+    *,
+    operation: str,
+    remesh: bool = True,
+) -> LineBatchTrimExtendResult:
+    """Trim or extend multiple subject Lines to one finite target Line."""
+
+    subject_tags = sorted({int(tag) for tag in line_tags})
+    target_tag = int(target_line_tag)
+    requested_operation = str(operation).strip().lower()
+    if requested_operation not in {"trim", "extend"}:
+        raise ValueError("Batch Line edit operation must be trim or extend.")
+    if not subject_tags:
+        raise ValueError("Select at least one subject Geometry Line.")
+    if target_tag in subject_tags:
+        raise ValueError("The target boundary cannot also be a subject Line.")
+
+    target = project.lines.get(target_tag)
+    if target is None:
+        raise ValueError(f"Target Geometry Line {target_tag} does not exist.")
+    missing = [tag for tag in subject_tags if tag not in project.lines]
+    if missing:
+        raise ValueError(
+            "Geometry Line tag(s) do not exist: "
+            + ", ".join(map(str, missing))
+        )
+
+    c, d, _ = _line_points(project, target)
+    plans: dict[
+        int,
+        tuple[
+            str,
+            tuple[float, float, float],
+            float,
+        ],
+    ] = {}
+    all_coords = [c, d]
+    for subject_tag in subject_tags:
+        subject = project.lines[subject_tag]
+        a, b, subject_length = _line_points(project, subject)
+        all_coords.extend((a, b))
+        tolerance = _merge_tolerance(project, (a, b, c, d))
+        hit = _infinite_line_intersection(a, b, c, d, tolerance)
+        if hit is None:
+            raise ValueError(
+                f"Line {subject_tag} is parallel, collinear, or skew to "
+                f"target Line {target_tag}."
+            )
+        point, subject_parameter, target_parameter = hit
+        parameter_tol = max(
+            1.0e-8,
+            tolerance / max(subject_length, 1.0e-12),
+        )
+        if not -parameter_tol <= target_parameter <= 1.0 + parameter_tol:
+            raise ValueError(
+                f"Line {subject_tag} meets only the infinite extension of "
+                f"target Line {target_tag}."
+            )
+
+        endpoint = (
+            "i"
+            if _distance(a, point) <= _distance(b, point)
+            else "j"
+        )
+        if endpoint == "i":
+            if _distance(a, point) <= tolerance:
+                raise ValueError(
+                    f"Line {subject_tag} Point I already lies on the target."
+                )
+            if _distance(b, point) <= tolerance:
+                raise ValueError(
+                    f"Editing Line {subject_tag} would collapse the Line."
+                )
+            resolved = (
+                "extend"
+                if subject_parameter < 0.0
+                else "trim"
+            )
+        else:
+            if _distance(b, point) <= tolerance:
+                raise ValueError(
+                    f"Line {subject_tag} Point J already lies on the target."
+                )
+            if _distance(a, point) <= tolerance:
+                raise ValueError(
+                    f"Editing Line {subject_tag} would collapse the Line."
+                )
+            resolved = (
+                "extend"
+                if subject_parameter > 1.0
+                else "trim"
+            )
+
+        if resolved != requested_operation:
+            raise ValueError(
+                f"Line {subject_tag} would {resolved.upper()}, not "
+                f"{requested_operation.upper()}. Use the matching batch tool."
+            )
+        plans[subject_tag] = (
+            endpoint,
+            tuple(float(value) for value in point),
+            float(target_parameter),
+        )
+
+    involved_tags = [*subject_tags, target_tag]
+    states = {
+        tag: inspect_line_mesh_state(project, tag)
+        for tag in involved_tags
+    }
+    if any(not state.healthy for state in states.values()):
+        raise ValueError(
+            "Batch Trim/Extend requires healthy Line mesh ownership. Run the "
+            "Line mesh integrity audit first."
+        )
+    had_mesh = {
+        tag: bool(state.live_element_tags)
+        for tag, state in states.items()
+    }
+    candidate_owned_nodes = {
+        int(node_tag)
+        for state in states.values()
+        for node_tag in state.owned_node_tags
+    }
+    tolerance = _merge_tolerance(project, all_coords)
+    endpoint_tol = 1.0e-8
+    before = project.to_dict()
+    created_point_tags: list[int] = []
+    intersection_point_tags: dict[int, int] = {}
+    mesh_results: dict[int, LineMeshResult] = {}
+
+    try:
+        for tag, state in states.items():
+            if state.live_element_tags:
+                delete_line_mesh(project, tag)
+
+        target = project.lines[target_tag]
+        split_definitions: list[tuple[float, int]] = []
+        for subject_tag in subject_tags:
+            endpoint, point, target_parameter = plans[subject_tag]
+            if target_parameter <= endpoint_tol:
+                point_tag = int(target.point_i)
+            elif target_parameter >= 1.0 - endpoint_tol:
+                point_tag = int(target.point_j)
+            else:
+                point_tag = _find_geometry_point_at(
+                    project,
+                    point,
+                    tolerance,
+                )
+                if point_tag is None:
+                    point_tag = project.next_point_tag()
+                    project.add_point(
+                        PointGeometryData(
+                            point_tag,
+                            f"Batch {requested_operation} intersection "
+                            f"{point_tag}",
+                            point,
+                        )
+                    )
+                    created_point_tags.append(point_tag)
+                split_definitions.append(
+                    (target_parameter, point_tag)
+                )
+
+            subject = project.lines[subject_tag]
+            if endpoint == "i":
+                subject.point_i = point_tag
+            else:
+                subject.point_j = point_tag
+            project._validate_line_geometry(subject)
+            intersection_point_tags[subject_tag] = point_tag
+
+        target_split = _split_unmeshed_line(
+            project,
+            target_tag,
+            split_definitions,
+        )
+        target_children = list(target_split.line_tags)
+        created_line_tags = list(target_split.created_line_tags)
+
+        _remove_orphan_fe_nodes(project, candidate_owned_nodes)
+
+        if remesh:
+            for subject_tag in subject_tags:
+                if had_mesh[subject_tag]:
+                    mesh_results[subject_tag] = mesh_line_geometry(
+                        project,
+                        subject_tag,
+                    )
+            if had_mesh[target_tag]:
+                for child_tag in target_children:
+                    mesh_results[child_tag] = mesh_line_geometry(
+                        project,
+                        child_tag,
+                    )
+
+        return LineBatchTrimExtendResult(
+            subject_line_tags=subject_tags,
+            target_line_tag=target_tag,
+            operation=requested_operation,
+            target_line_tags=target_children,
+            intersection_point_tags=intersection_point_tags,
+            created_point_tags=created_point_tags,
+            created_line_tags=created_line_tags,
+            mesh_results=mesh_results,
+        )
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+
+
+def chamfer_lines(
+    project: ProjectDatabase,
+    left_line_tag: int,
+    right_line_tag: int,
+    *,
+    distance: float,
+    remesh: bool = True,
+) -> LineCornerEditResult:
+    """Replace one shared Line corner by a straight chamfer segment."""
+
+    (
+        left,
+        right,
+        corner_tag,
+        _left_other,
+        _right_other,
+        corner,
+        left_xyz,
+        right_xyz,
+    ) = _line_shared_corner(project, left_line_tag, right_line_tag)
+    if not _corner_recipe_is_compatible(left, right):
+        raise ValueError(
+            "Chamfer requires matching mesh / FE recipes on the two Lines. "
+            "Use Copy Mesh / FE Recipe first."
+        )
+
+    left_direction, left_length = _unit_direction(corner, left_xyz)
+    right_direction, right_length = _unit_direction(corner, right_xyz)
+    dot = sum(
+        left_direction[index] * right_direction[index]
+        for index in range(3)
+    )
+    if abs(abs(dot) - 1.0) <= 1.0e-10:
+        raise ValueError(
+            "Chamfer requires two non-collinear Geometry Lines."
+        )
+
+    setback = float(distance)
+    if not math.isfinite(setback) or setback <= 0.0:
+        raise ValueError("Chamfer distance must be finite and positive.")
+    tolerance = _merge_tolerance(
+        project,
+        (corner, left_xyz, right_xyz),
+    )
+    if setback >= min(left_length, right_length) - tolerance:
+        raise ValueError(
+            "Chamfer distance must be shorter than both connected Lines."
+        )
+
+    states = {
+        int(left.tag): inspect_line_mesh_state(project, int(left.tag)),
+        int(right.tag): inspect_line_mesh_state(project, int(right.tag)),
+    }
+    if any(not state.healthy for state in states.values()):
+        raise ValueError(
+            "Chamfer requires healthy Line mesh ownership."
+        )
+    mesh_flags = {
+        bool(state.live_element_tags)
+        for state in states.values()
+    }
+    if len(mesh_flags) != 1:
+        raise ValueError(
+            "Chamfer requires both source Lines to be either meshed or "
+            "unmeshed before the corner edit."
+        )
+    had_mesh = next(iter(mesh_flags))
+    candidate_owned_nodes = {
+        int(node_tag)
+        for state in states.values()
+        for node_tag in state.owned_node_tags
+    }
+    before = project.to_dict()
+    created_point_tags: list[int] = []
+    mesh_results: dict[int, LineMeshResult] = {}
+
+    try:
+        for tag, state in states.items():
+            if state.live_element_tags:
+                delete_line_mesh(project, tag)
+
+        tangent_tags: list[int] = []
+        for label, direction in (
+            ("A", left_direction),
+            ("B", right_direction),
+        ):
+            xyz = tuple(
+                float(corner[index]) + setback * direction[index]
+                for index in range(3)
+            )
+            point_tag = _find_geometry_point_at(
+                project,
+                xyz,
+                tolerance,
+            )
+            if point_tag is None:
+                point_tag = project.next_point_tag()
+                project.add_point(
+                    PointGeometryData(
+                        point_tag,
+                        f"Chamfer tangent {label} {point_tag}",
+                        xyz,
+                    )
+                )
+                created_point_tags.append(point_tag)
+            tangent_tags.append(point_tag)
+
+        _set_line_corner_endpoint(
+            project,
+            project.lines[int(left.tag)],
+            corner_tag,
+            tangent_tags[0],
+        )
+        _set_line_corner_endpoint(
+            project,
+            project.lines[int(right.tag)],
+            corner_tag,
+            tangent_tags[1],
+        )
+
+        connector = _new_line_from_recipe(
+            project,
+            project.lines[int(left.tag)],
+            tangent_tags[0],
+            tangent_tags[1],
+            f"Chamfer {left.tag}-{right.tag}",
+        )
+        project.add_line(connector)
+        _remove_orphan_fe_nodes(project, candidate_owned_nodes)
+
+        if remesh and had_mesh:
+            for tag in (int(left.tag), int(right.tag), connector.tag):
+                mesh_results[tag] = mesh_line_geometry(project, tag)
+
+        return LineCornerEditResult(
+            operation="chamfer",
+            source_line_tags=(int(left.tag), int(right.tag)),
+            connector_line_tags=[connector.tag],
+            created_point_tags=created_point_tags,
+            created_line_tags=[connector.tag],
+            mesh_results=mesh_results,
+        )
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+
+
+def fillet_lines(
+    project: ProjectDatabase,
+    left_line_tag: int,
+    right_line_tag: int,
+    *,
+    radius: float,
+    segments: int = 8,
+    remesh: bool = True,
+) -> LineCornerEditResult:
+    """Replace one shared corner by a tangent polyline approximation of a fillet."""
+
+    (
+        left,
+        right,
+        corner_tag,
+        _left_other,
+        _right_other,
+        corner,
+        left_xyz,
+        right_xyz,
+    ) = _line_shared_corner(project, left_line_tag, right_line_tag)
+    if not _corner_recipe_is_compatible(left, right):
+        raise ValueError(
+            "Fillet requires matching mesh / FE recipes on the two Lines. "
+            "Use Copy Mesh / FE Recipe first."
+        )
+
+    radius = float(radius)
+    if not math.isfinite(radius) or radius <= 0.0:
+        raise ValueError("Fillet radius must be finite and positive.")
+    segment_count = int(segments)
+    if not 2 <= segment_count <= 64:
+        raise ValueError("Fillet segment count must be in 2..64.")
+
+    u, left_length = _unit_direction(corner, left_xyz)
+    v, right_length = _unit_direction(corner, right_xyz)
+    dot = max(
+        -1.0,
+        min(
+            1.0,
+            sum(u[index] * v[index] for index in range(3)),
+        ),
+    )
+    angle = math.acos(dot)
+    if angle <= 1.0e-8 or abs(math.pi - angle) <= 1.0e-8:
+        raise ValueError(
+            "Fillet requires two non-collinear, non-opposite Geometry Lines."
+        )
+
+    tangent_distance = radius / math.tan(0.5 * angle)
+    tolerance = _merge_tolerance(
+        project,
+        (corner, left_xyz, right_xyz),
+    )
+    if tangent_distance >= min(left_length, right_length) - tolerance:
+        raise ValueError(
+            "Fillet radius is too large for the connected Line lengths."
+        )
+
+    cross_uv = (
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    )
+    normal_length = math.sqrt(sum(value * value for value in cross_uv))
+    if normal_length <= 1.0e-12:
+        raise ValueError("Fillet plane is undefined for collinear Lines.")
+    normal = tuple(value / normal_length for value in cross_uv)
+
+    tangent_a = tuple(
+        float(corner[index]) + tangent_distance * u[index]
+        for index in range(3)
+    )
+    tangent_b = tuple(
+        float(corner[index]) + tangent_distance * v[index]
+        for index in range(3)
+    )
+    bisector_raw = tuple(u[index] + v[index] for index in range(3))
+    bisector_length = math.sqrt(
+        sum(value * value for value in bisector_raw)
+    )
+    if bisector_length <= 1.0e-12:
+        raise ValueError("Fillet bisector is undefined.")
+    bisector = tuple(
+        value / bisector_length
+        for value in bisector_raw
+    )
+    center_distance = radius / math.sin(0.5 * angle)
+    center = tuple(
+        float(corner[index]) + center_distance * bisector[index]
+        for index in range(3)
+    )
+    r0 = tuple(
+        tangent_a[index] - center[index]
+        for index in range(3)
+    )
+    r1 = tuple(
+        tangent_b[index] - center[index]
+        for index in range(3)
+    )
+    cross_r = (
+        r0[1] * r1[2] - r0[2] * r1[1],
+        r0[2] * r1[0] - r0[0] * r1[2],
+        r0[0] * r1[1] - r0[1] * r1[0],
+    )
+    signed_angle = math.atan2(
+        sum(normal[index] * cross_r[index] for index in range(3)),
+        sum(r0[index] * r1[index] for index in range(3)),
+    )
+    if abs(signed_angle) <= 1.0e-12:
+        raise ValueError("Fillet arc angle is too small.")
+
+    states = {
+        int(left.tag): inspect_line_mesh_state(project, int(left.tag)),
+        int(right.tag): inspect_line_mesh_state(project, int(right.tag)),
+    }
+    if any(not state.healthy for state in states.values()):
+        raise ValueError("Fillet requires healthy Line mesh ownership.")
+    mesh_flags = {
+        bool(state.live_element_tags)
+        for state in states.values()
+    }
+    if len(mesh_flags) != 1:
+        raise ValueError(
+            "Fillet requires both source Lines to be either meshed or "
+            "unmeshed before the corner edit."
+        )
+    had_mesh = next(iter(mesh_flags))
+    candidate_owned_nodes = {
+        int(node_tag)
+        for state in states.values()
+        for node_tag in state.owned_node_tags
+    }
+    before = project.to_dict()
+    created_point_tags: list[int] = []
+    created_line_tags: list[int] = []
+    mesh_results: dict[int, LineMeshResult] = {}
+
+    try:
+        for tag, state in states.items():
+            if state.live_element_tags:
+                delete_line_mesh(project, tag)
+
+        arc_point_tags: list[int] = []
+        for index in range(segment_count + 1):
+            fraction = index / segment_count
+            phi = signed_angle * fraction
+            cos_phi = math.cos(phi)
+            sin_phi = math.sin(phi)
+            cross_nr0 = (
+                normal[1] * r0[2] - normal[2] * r0[1],
+                normal[2] * r0[0] - normal[0] * r0[2],
+                normal[0] * r0[1] - normal[1] * r0[0],
+            )
+            dot_nr0 = sum(
+                normal[axis] * r0[axis]
+                for axis in range(3)
+            )
+            rotated = tuple(
+                r0[axis] * cos_phi
+                + cross_nr0[axis] * sin_phi
+                + normal[axis] * dot_nr0 * (1.0 - cos_phi)
+                for axis in range(3)
+            )
+            xyz = tuple(
+                center[axis] + rotated[axis]
+                for axis in range(3)
+            )
+            point_tag = _find_geometry_point_at(
+                project,
+                xyz,
+                tolerance,
+            )
+            if point_tag is None:
+                point_tag = project.next_point_tag()
+                project.add_point(
+                    PointGeometryData(
+                        point_tag,
+                        f"Fillet point {index + 1} {point_tag}",
+                        xyz,
+                    )
+                )
+                created_point_tags.append(point_tag)
+            arc_point_tags.append(point_tag)
+
+        _set_line_corner_endpoint(
+            project,
+            project.lines[int(left.tag)],
+            corner_tag,
+            arc_point_tags[0],
+        )
+        _set_line_corner_endpoint(
+            project,
+            project.lines[int(right.tag)],
+            corner_tag,
+            arc_point_tags[-1],
+        )
+
+        for index in range(segment_count):
+            connector = _new_line_from_recipe(
+                project,
+                project.lines[int(left.tag)],
+                arc_point_tags[index],
+                arc_point_tags[index + 1],
+                (
+                    f"Fillet {left.tag}-{right.tag} "
+                    f"[{index + 1}/{segment_count}]"
+                ),
+            )
+            project.add_line(connector)
+            created_line_tags.append(connector.tag)
+
+        _remove_orphan_fe_nodes(project, candidate_owned_nodes)
+
+        if remesh and had_mesh:
+            for tag in (
+                int(left.tag),
+                int(right.tag),
+                *created_line_tags,
+            ):
+                mesh_results[tag] = mesh_line_geometry(project, tag)
+
+        return LineCornerEditResult(
+            operation="fillet",
+            source_line_tags=(int(left.tag), int(right.tag)),
+            connector_line_tags=list(created_line_tags),
+            created_point_tags=created_point_tags,
+            created_line_tags=created_line_tags,
             mesh_results=mesh_results,
         )
     except Exception:
