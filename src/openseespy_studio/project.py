@@ -3322,10 +3322,18 @@ class SurfaceEdgeSupportData:
                 "Surface edge support must restrain at least one DOF."
             )
         self.fixity = values  # type: ignore[assignment]
-        self.generated_node_tags = sorted({
-            _strict_int(tag, "Surface edge support generated node tag")
-            for tag in self.generated_node_tags
-        })
+        ordered_nodes: list[int] = []
+        seen_nodes: set[int] = set()
+        for tag in self.generated_node_tags:
+            node_tag = _strict_int(
+                tag,
+                "Surface edge support generated node tag",
+            )
+            if node_tag in seen_nodes:
+                continue
+            seen_nodes.add(node_tag)
+            ordered_nodes.append(node_tag)
+        self.generated_node_tags = ordered_nodes
 
     def to_dict(self) -> dict[str, Any]:
         return {
