@@ -4764,7 +4764,9 @@ class MainWindow(QMainWindow):
                 surface_geometry_tags
             )
         else:
-            self.viewport.clear_surface_orientation(render=False)
+            self.viewport.clear_surface_orientation(
+                render=geometry_mode
+            )
 
         self._sync_ribbon_context(selected_payload_kinds)
 
