@@ -323,6 +323,12 @@ class ModelViewport(QWidget):
             raise ValueError(f"Unknown interaction tool: {tool}")
         self._interaction_tool = tool
         self._box_origin = None
+        self._left_press_pos = None
+        self._right_press_pos = None
+        self._nav_mode = None
+        self._nav_last_pos = None
+        self._last_geometry_sketch_qt_pos = None
+        self._pending_hover_vtk_pos = None
         self._rubber_band.hide() if self._rubber_band is not None else None
 
     def interaction_tool(self) -> str:
@@ -336,8 +342,11 @@ class ModelViewport(QWidget):
         normalized = str(plane).strip().lower()
         if normalized not in {"xy", "xz", "yz"}:
             raise ValueError("Geometry sketch plane must be XY, XZ, or YZ.")
+        numeric_offset = float(offset)
+        if not math.isfinite(numeric_offset):
+            raise ValueError("Geometry sketch plane offset must be finite.")
         self._geometry_sketch_plane = normalized
-        self._geometry_sketch_plane_offset = float(offset)
+        self._geometry_sketch_plane_offset = numeric_offset
         if self._geometry_sketch_grid_visible:
             self._remove_overlay("geometry-sketch-grid")
             if self._display_domain == "geometry":
@@ -364,6 +373,8 @@ class ModelViewport(QWidget):
         point = tuple(float(value) for value in xyz)
         if len(point) != 3:
             raise ValueError("Sketch plane point requires X, Y, Z.")
+        if not all(math.isfinite(value) for value in point):
+            raise ValueError("Sketch plane point coordinates must be finite.")
         axis = {"xy": 2, "xz": 1, "yz": 0}[
             self._geometry_sketch_plane
         ]
@@ -406,19 +417,27 @@ class ModelViewport(QWidget):
         far = display_world(1.0)
         if near is None or far is None:
             return None
+        if not np.all(np.isfinite(near)) or not np.all(np.isfinite(far)):
+            return None
         direction = far - near
+        if not np.all(np.isfinite(direction)):
+            return None
         axis = {"xy": 2, "xz": 1, "yz": 0}[
             self._geometry_sketch_plane
         ]
         denominator = float(direction[axis])
-        if abs(denominator) <= 1.0e-14:
+        if not math.isfinite(denominator) or abs(denominator) <= 1.0e-14:
             return None
         t = (
             float(self._geometry_sketch_plane_offset)
             - float(near[axis])
         ) / denominator
+        if not math.isfinite(t) or t < -1.0e-6 or t > 1.0 + 1.0e-6:
+            return None
         point = near + t * direction
         point[axis] = float(self._geometry_sketch_plane_offset)
+        if not np.all(np.isfinite(point)):
+            return None
         return tuple(float(value) for value in point)
 
     def clear_frame_anchor(self, *, render: bool = True) -> None:
@@ -575,6 +594,22 @@ class ModelViewport(QWidget):
             pickable=False,
             render=False,
         )
+
+    def _invalidate_geometry_sketch_cursor_preview(
+        self,
+        *,
+        render: bool = True,
+    ) -> None:
+        if isinstance(self._geometry_sketch_preview, dict):
+            self._geometry_sketch_preview = dict(
+                self._geometry_sketch_preview
+            )
+            self._geometry_sketch_preview["cursor"] = None
+            self._geometry_sketch_preview["snap_label"] = None
+            self._last_geometry_sketch_qt_pos = None
+            self._render_geometry_sketch_preview(render=render)
+        else:
+            self._last_geometry_sketch_qt_pos = None
 
     def clear_geometry_sketch_preview(
         self,
@@ -893,8 +928,8 @@ class ModelViewport(QWidget):
         return "replace"
 
     def _start_navigation(self, modifiers, pos: tuple[float, float]) -> None:
-        # ANSYS-style current navigation:
-        # MMB = rotate, Ctrl+MMB = pan, Shift+MMB = zoom.
+        # ANSYS-style navigation. During an active 2D sketch, plain MMB pans
+        # instead of rotating the camera away from the locked work plane.
         ctrl = bool(modifiers & Qt.ControlModifier)
         shift = bool(modifiers & Qt.ShiftModifier)
         if ctrl and shift:
@@ -903,8 +938,11 @@ class ModelViewport(QWidget):
             self._nav_mode = "pan"
         elif shift:
             self._nav_mode = "zoom"
+        elif self._interaction_tool == "geometry_sketch":
+            self._nav_mode = "pan"
         else:
             self._nav_mode = "rotate"
+        self._invalidate_geometry_sketch_cursor_preview(render=False)
         self._nav_last_pos = pos
         self._hover_ref = None
         self._hover_pick_timer.stop()
@@ -982,6 +1020,7 @@ class ModelViewport(QWidget):
     def _wheel_zoom(self, delta_y: int) -> None:
         if delta_y == 0:
             return
+        self._invalidate_geometry_sketch_cursor_preview(render=False)
         self._set_id_labels_visible(False, render=False)
         self._set_navigation_lod(True, render=False)
         steps = delta_y / 120.0
@@ -2227,6 +2266,7 @@ class ModelViewport(QWidget):
         self._selected_nodes.clear()
         self._selected_elements.clear()
         self._hover_ref = None
+        self._last_geometry_sketch_qt_pos = None
         self._render_model(reset_camera=bool(reset_camera))
 
     def set_display_domain(self, domain: str) -> None:
@@ -2240,6 +2280,11 @@ class ModelViewport(QWidget):
         self._selected_nodes.clear()
         self._selected_elements.clear()
         self._hover_ref = None
+        self._left_press_pos = None
+        self._right_press_pos = None
+        self._last_geometry_sketch_qt_pos = None
+        if normalized != "geometry":
+            self.clear_geometry_sketch_preview(render=False)
         self._render_model(reset_camera=True)
 
     def set_geometry_line_selection(
@@ -6747,19 +6792,26 @@ class ModelViewport(QWidget):
         return str(self._current_view)
 
     def set_view(self, view: str, *, render: bool = True) -> None:
-        self._current_view = view
-        function = {
+        normalized = str(view).strip().lower()
+        functions = {
             "iso": self.plotter.view_isometric,
             "xy": self.plotter.view_xy,
             "xz": self.plotter.view_xz,
             "yz": self.plotter.view_yz,
-        }[view]
+        }
+        if normalized not in functions:
+            raise ValueError(
+                "Viewport view must be iso, xy, xz, or yz."
+            )
+        self._current_view = normalized
+        self._invalidate_geometry_sketch_cursor_preview(render=False)
+        function = functions[normalized]
         function()
         if render:
             self.plotter.render()
 
         for button in self.view_group.buttons():
-            button.setChecked(button.property("view_name") == view)
+            button.setChecked(button.property("view_name") == normalized)
 
     def fit_view(self) -> None:
         if self._selected_nodes or self._selected_elements:
