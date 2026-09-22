@@ -118,6 +118,7 @@ from ..surface_mesher import (
     sync_surface_edge_support,
     sync_surface_pressure,
     sync_surface_recorder,
+    sync_selection_set_surface_scope,
     surface_boundary_edges,
     surface_boundary_node_tags,
     surface_edge_info,
@@ -4168,8 +4169,14 @@ class MainWindow(QMainWindow):
 
         for name in sorted(self.project.selection_sets):
             selection_set = self.project.selection_sets[name]
+            scope_suffix = (
+                f" [Surface:{selection_set.surface_scope_mode}]"
+                if selection_set.surface_tags
+                else ""
+            )
             item = QTreeWidgetItem([
-                f"{name}  ({len(selection_set.node_tags)}N / "
+                f"{name}{scope_suffix}  "
+                f"({len(selection_set.node_tags)}N / "
                 f"{len(selection_set.element_tags)}E)"
             ])
             item.setIcon(0, studio_icon("select"))
@@ -4719,6 +4726,7 @@ class MainWindow(QMainWindow):
         solution_information_tag: int | None = None
         solver_output_tag: int | None = None
         solution_convergence_tag: int | None = None
+        named_selection_name: str | None = None
         job_id: int | None = None
         job_plot_ref: tuple[int, int] | None = None
         show_jobs_root = False
@@ -4737,6 +4745,7 @@ class MainWindow(QMainWindow):
             elif kind == "set":
                 selection_set = self.project.selection_sets.get(str(tag))
                 if selection_set is not None:
+                    named_selection_name = str(tag)
                     nodes.update(selection_set.node_tags)
                     elements.update(selection_set.element_tags)
             elif kind == "point_geometry":
@@ -4898,6 +4907,8 @@ class MainWindow(QMainWindow):
             self._show_element_load_properties(element_load_tag)
         elif mass_source_tag is not None:
             self._show_mass_source_properties(mass_source_tag)
+        elif named_selection_name is not None:
+            self._show_named_selection_properties(named_selection_name)
         elif cyclic_protocol_tag is not None:
             self._show_cyclic_protocol_properties(cyclic_protocol_tag)
         elif analysis_tag is not None:
@@ -13280,6 +13291,22 @@ class MainWindow(QMainWindow):
             )
             if managed_results else "None"
         )
+        managed_selections = sorted(
+            (
+                selection
+                for selection in self.project.selection_sets.values()
+                if int(tag) in selection.surface_tags
+            ),
+            key=lambda item: item.name,
+        )
+        managed_selection_text = (
+            " · ".join(
+                f"{selection.name} "
+                f"[{self._surface_selection_mode_label(selection.surface_scope_mode)}]"
+                for selection in managed_selections
+            )
+            if managed_selections else "None"
+        )
 
         rows = [
             ("Tag", surface.tag),
@@ -13289,6 +13316,7 @@ class MainWindow(QMainWindow):
             ("Managed Surface pressures", managed_pressure_text),
             ("Managed Surface recorders", managed_recorder_text),
             ("Managed Shell results", managed_result_text),
+            ("Managed named selections", managed_selection_text),
             ("Shape", surface.surface_type),
             ("Topology", topology),
             ("Normal", normal_text),
@@ -16783,14 +16811,192 @@ class MainWindow(QMainWindow):
             return
 
         before = self.project.to_dict()
-        self.project.selection_sets[name] = SelectionSetData(
+        selection_set = SelectionSetData(
             name=name,
             node_tags=set(nodes),
             element_tags=set(elements),
         )
+        try:
+            self.project.add_selection_set(selection_set)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Named Selection", str(exc))
+            return
         self._refresh_tree()
         self._record_project_change(f"Create named selection {name}", before)
         self.status_message.setText(f"Created named selection: {name}")
+
+    @staticmethod
+    def _surface_selection_mode_label(mode: str) -> str:
+        return {
+            "elements": "Shell elements",
+            "nodes": "FE nodes",
+            "nodes_and_elements": "FE nodes + Shell elements",
+        }.get(str(mode), str(mode))
+
+    def _create_surface_named_selection(self, surface_tags) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self.project.surfaces
+        })
+        if not tags:
+            return
+
+        name, ok = QInputDialog.getText(
+            self,
+            "Managed Surface Named Selection",
+            "Name:",
+        )
+        name = str(name).strip()
+        if not ok or not name:
+            return
+        if name in self.project.selection_sets:
+            QMessageBox.warning(
+                self,
+                "Managed Surface Named Selection",
+                f"A named selection called '{name}' already exists.",
+            )
+            return
+
+        modes = [
+            ("FE nodes + Shell elements", "nodes_and_elements"),
+            ("Shell elements only", "elements"),
+            ("FE nodes only", "nodes"),
+        ]
+        labels = [label for label, _ in modes]
+        label, ok = QInputDialog.getItem(
+            self,
+            "Managed Surface Named Selection",
+            "FE scope:",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        mode = modes[labels.index(label)][1]
+
+        before = self.project.to_dict()
+        selection_set = SelectionSetData(
+            name=name,
+            surface_tags=set(tags),
+            surface_scope_mode=mode,
+        )
+        try:
+            self.project.add_selection_set(selection_set)
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Managed Surface Named Selection",
+                str(exc),
+            )
+            return
+
+        self._refresh_tree()
+        self._record_project_change(
+            f"Create managed Surface named selection {name}",
+            before,
+        )
+        self.status_message.setText(
+            f"Created managed named selection '{name}' from "
+            f"{len(tags)} Surface(s) · "
+            f"{len(selection_set.node_tags)} node(s) · "
+            f"{len(selection_set.element_tags)} Shell(s)"
+        )
+
+    def _edit_managed_named_selection(self, name: str) -> None:
+        selection_set = self.project.selection_sets.get(str(name))
+        if selection_set is None or not selection_set.surface_tags:
+            return
+        modes = [
+            ("FE nodes + Shell elements", "nodes_and_elements"),
+            ("Shell elements only", "elements"),
+            ("FE nodes only", "nodes"),
+        ]
+        labels = [label for label, _ in modes]
+        current = next(
+            (
+                index
+                for index, (_, mode) in enumerate(modes)
+                if mode == selection_set.surface_scope_mode
+            ),
+            0,
+        )
+        label, ok = QInputDialog.getItem(
+            self,
+            "Edit Managed Surface Named Selection",
+            "FE scope:",
+            labels,
+            current,
+            False,
+        )
+        if not ok:
+            return
+        mode = modes[labels.index(label)][1]
+        if mode == selection_set.surface_scope_mode:
+            return
+
+        before = self.project.to_dict()
+        updated = SelectionSetData(
+            name=selection_set.name,
+            surface_tags=set(selection_set.surface_tags),
+            surface_scope_mode=mode,
+        )
+        try:
+            self.project.update_selection_set(name, updated)
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Edit Managed Surface Named Selection",
+                str(exc),
+            )
+            return
+        self._refresh_tree()
+        self._show_named_selection_properties(updated.name)
+        self._record_project_change(
+            f"Edit managed named selection {updated.name}",
+            before,
+        )
+
+    def _show_named_selection_properties(self, name: str) -> None:
+        selection_set = self.project.selection_sets.get(str(name))
+        if selection_set is None:
+            return
+        rows: list[tuple[str, object]] = [
+            ("Name", selection_set.name),
+            (
+                "Ownership",
+                (
+                    "Geometry Surface · remesh-safe"
+                    if selection_set.surface_tags
+                    else "Direct FE · fixed IDs"
+                ),
+            ),
+            ("Nodes", len(selection_set.node_tags)),
+            ("Elements", len(selection_set.element_tags)),
+        ]
+        if selection_set.surface_tags:
+            rows.extend([
+                (
+                    "Source Surfaces",
+                    ", ".join(
+                        f"S{tag}" for tag in sorted(
+                            selection_set.surface_tags
+                        )
+                    ),
+                ),
+                (
+                    "Scope mode",
+                    self._surface_selection_mode_label(
+                        selection_set.surface_scope_mode
+                    ),
+                ),
+                (
+                    "Lifecycle",
+                    "FE membership regenerates after Surface remesh",
+                ),
+            ])
+        self.properties_panel.set_properties("Named Selection", rows)
 
     def _populate_result_choice_menu(
         self,
@@ -18053,6 +18259,15 @@ class MainWindow(QMainWindow):
                 lambda checked=False, tags=tuple(surface_tags):
                 self._select_generated_fe_for_surfaces(tags)
             )
+            create_managed_set = menu.addAction(
+                "Create Managed Named Selection..."
+                if count == 1
+                else f"Create Managed Named Selection ({count} Surfaces)..."
+            )
+            create_managed_set.triggered.connect(
+                lambda checked=False, tags=tuple(surface_tags):
+                self._create_surface_named_selection(tags)
+            )
             preview_pressure = menu.addAction(
                 "Preview Pressure Direction..."
             )
@@ -18317,7 +18532,9 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "named_sets_root":
-            create = menu.addAction("Create from Current Selection...")
+            create = menu.addAction(
+                "Create Direct FE Selection from Current Selection..."
+            )
             create.triggered.connect(self._create_named_selection)
             exec_menu()
             return
@@ -19156,15 +19373,28 @@ class MainWindow(QMainWindow):
             return
 
         name = str(value)
+        selection_set = self.project.selection_sets.get(name)
+        if selection_set is None:
+            return
+        properties_action = menu.addAction("Properties")
+        properties_action.triggered.connect(
+            lambda: self._show_named_selection_properties(name)
+        )
         select_action = menu.addAction("Select")
         select_action.triggered.connect(
             lambda: self._select_named_selection(name)
         )
 
         update_action = menu.addAction("Update from Current Selection")
+        update_action.setEnabled(not selection_set.surface_tags)
         update_action.triggered.connect(
             lambda: self._update_named_selection(name)
         )
+        if selection_set.surface_tags:
+            edit_scope_action = menu.addAction("Edit Surface Scope Mode...")
+            edit_scope_action.triggered.connect(
+                lambda: self._edit_managed_named_selection(name)
+            )
 
         menu.addSeparator()
         rename_action = menu.addAction("Rename...")
@@ -19245,6 +19475,20 @@ class MainWindow(QMainWindow):
         selection_set = self.project.selection_sets.get(name)
         if selection_set is None:
             return
+        if selection_set.surface_tags:
+            QMessageBox.information(
+                self,
+                "Managed Surface Named Selection",
+                "This named selection is managed by Geometry Surface "
+                + ", ".join(
+                    f"S{tag}" for tag in sorted(
+                        selection_set.surface_tags
+                    )
+                )
+                + ". Change its Geometry scope mode instead of replacing "
+                "it with FE IDs.",
+            )
+            return
         nodes, elements = self._selection_sets()
         if not nodes and not elements:
             return
@@ -19277,9 +19521,18 @@ class MainWindow(QMainWindow):
             return
 
         before = self.project.to_dict()
-        self.project.selection_sets.pop(old_name)
-        selection_set.name = new_name
-        self.project.selection_sets[new_name] = selection_set
+        renamed = SelectionSetData(
+            name=new_name,
+            node_tags=set(selection_set.node_tags),
+            element_tags=set(selection_set.element_tags),
+            surface_tags=set(selection_set.surface_tags),
+            surface_scope_mode=selection_set.surface_scope_mode,
+        )
+        try:
+            self.project.update_selection_set(old_name, renamed)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Named Selection", str(exc))
+            return
         self._refresh_tree()
         self._record_project_change(
             f"Rename named selection {old_name}",
@@ -19298,8 +19551,14 @@ class MainWindow(QMainWindow):
         node_tags = set(self.model.nodes)
         element_tags = set(self.model.elements)
         for selection_set in self.project.selection_sets.values():
-            selection_set.node_tags.intersection_update(node_tags)
-            selection_set.element_tags.intersection_update(element_tags)
+            if selection_set.surface_tags:
+                sync_selection_set_surface_scope(
+                    self.project,
+                    selection_set.name,
+                )
+            else:
+                selection_set.node_tags.intersection_update(node_tags)
+                selection_set.element_tags.intersection_update(element_tags)
 
     def _export_script(self) -> None:
         """Regenerate, validate and export a standalone OpenSeesPy script."""
