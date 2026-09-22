@@ -3945,19 +3945,6 @@ class MainWindow(QMainWindow):
             )
             surfaces.addChild(item)
 
-            if live_elements:
-                mesh_summary = QTreeWidgetItem([
-                    f"Mesh ({len(mesh_nodes)} nodes · "
-                    f"{len(live_elements)} elements)"
-                ])
-                mesh_summary.setIcon(0, studio_icon("grid"))
-                mesh_summary.setData(
-                    0,
-                    Qt.UserRole,
-                    ("surface_mesh", tag),
-                )
-                item.addChild(mesh_summary)
-
         for tag in sorted(self.model.elements):
             element = self.model.elements[tag]
             item = QTreeWidgetItem([f"Element {tag}"])
@@ -4544,10 +4531,7 @@ class MainWindow(QMainWindow):
                 if selection_set is not None:
                     nodes.update(selection_set.node_tags)
                     elements.update(selection_set.element_tags)
-            elif kind in {
-                "surface_geometry",
-                "surface_mesh",
-            }:
+            elif kind == "surface_geometry":
                 surface_geometry_tag = int(tag)
                 surface = self.project.surfaces.get(int(tag))
                 if surface is not None:
