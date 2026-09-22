@@ -700,9 +700,9 @@ def _element_geometry_checks(
                                         "node tags.",
                                         "node",
                                         pair[0],
-                                        "Merge/reuse coincident nodes when "
-                                        "the shell patches should be "
-                                        "structurally continuous.",
+                                        "Run Surfaces → Stitch Coincident "
+                                        "Shell Nodes when these patches "
+                                        "should be structurally continuous.",
                                     )
                                 )
                 buckets.setdefault(base, []).append(int(node.tag))
