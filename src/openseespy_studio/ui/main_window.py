@@ -2017,7 +2017,7 @@ class MainWindow(QMainWindow):
         )
         self._make_action(
             "surface_geometry",
-            "Surface...",
+            "Surface Geometry...",
             "grid",
             self._create_surface_geometry,
             "Create reusable Rectangle or Quad surface geometry for Shell meshing",
@@ -3861,8 +3861,7 @@ class MainWindow(QMainWindow):
             for element in self.model.elements.values()
         )
         surfaces = QTreeWidgetItem([
-            f"Surfaces ({len(self.project.surfaces)} geometry / "
-            f"{shell_count} shell)"
+            f"Surface Geometry ({len(self.project.surfaces)})"
         ])
         surfaces.setIcon(0, studio_icon("element"))
         surfaces.setData(0, Qt.UserRole, ("surfaces_root", None))
@@ -7341,7 +7340,7 @@ class MainWindow(QMainWindow):
                 if not self._ensure_prerequisite(
                     title="Shell Surface Pressure",
                     message=(
-                        "Surface pressure requires a Shell / Surface element. "
+                        "Surface pressure requires meshed Shell elements. "
                         "Create one now?"
                     ),
                     action_label="Create & Mesh Surface Now...",
@@ -8638,7 +8637,7 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
-            QMessageBox.warning(self, "Create Shell", str(exc))
+            QMessageBox.warning(self, "Direct Shell Element", str(exc))
             self._refresh_all()
             return
 
@@ -8864,8 +8863,8 @@ class MainWindow(QMainWindow):
                 if not self._ensure_prerequisite(
                     title="Assign Shell Section",
                     message=(
-                        "This workflow requires a Shell element first. "
-                        "Create one now?"
+                        "This workflow requires meshed Shell elements first. "
+                        "Create and mesh Surface Geometry now?"
                     ),
                     action_label="Create & Mesh Surface Now...",
                     available=lambda: any(
@@ -12994,7 +12993,7 @@ class MainWindow(QMainWindow):
                 if not self._ensure_prerequisite(
                     title="Shell Recorder",
                     message=(
-                        "Shell Recorder requires a Shell / Surface element. "
+                        "Shell Recorder requires meshed Shell elements. "
                         "Create one now?"
                     ),
                     action_label="Create & Mesh Surface Now...",
@@ -13049,8 +13048,8 @@ class MainWindow(QMainWindow):
                 if not self._ensure_prerequisite(
                     title="Shell Result",
                     message=(
-                        "Shell Results require at least one Shell / Surface "
-                        "element. Create one now?"
+                        "Shell Results require at least one meshed Shell "
+                        "element. Create and mesh Surface Geometry now?"
                     ),
                     action_label="Create & Mesh Surface Now...",
                     available=lambda: any(
