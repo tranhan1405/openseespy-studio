@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -51,6 +52,7 @@ class SurfaceGeometryDialog(QDialog):
             tuple[float, float, float],
         ] | None = None,
         initial_point_tags: tuple[int, int, int, int] | None = None,
+        preview_callback=None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -61,6 +63,7 @@ class SurfaceGeometryDialog(QDialog):
         self.resize(520, 650)
         self._surface = surface
         self._sections = dict(sections)
+        self._preview_callback = preview_callback
         self._corner_point_tags = (
             surface.corner_point_tags
             if surface is not None
@@ -292,6 +295,16 @@ class SurfaceGeometryDialog(QDialog):
         note.setWordWrap(True)
         root.addWidget(note)
 
+        buttons_row = QHBoxLayout()
+        self.preview_button = QPushButton("Preview Mesh")
+        self.preview_button.setEnabled(preview_callback is not None)
+        self.preview_button.setToolTip(
+            "Preview the current mesh sizing without changing the FE model"
+        )
+        self.preview_button.clicked.connect(self._preview_mesh)
+        buttons_row.addWidget(self.preview_button)
+        buttons_row.addStretch(1)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
@@ -300,7 +313,8 @@ class SurfaceGeometryDialog(QDialog):
         )
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
+        buttons_row.addWidget(buttons)
+        root.addLayout(buttons_row)
 
         self.surface_type.currentTextChanged.connect(self._sync_shape)
         self.formulation.currentTextChanged.connect(
@@ -431,6 +445,16 @@ class SurfaceGeometryDialog(QDialog):
                 if self._surface else []
             ),
         )
+
+    def _preview_mesh(self) -> None:
+        if self._preview_callback is None:
+            return
+        try:
+            surface = self.data()
+            self._preview_callback(surface)
+        except (TypeError, ValueError) as exc:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Surface Mesh Preview", str(exc))
 
     def _accept(self) -> None:
         try:
