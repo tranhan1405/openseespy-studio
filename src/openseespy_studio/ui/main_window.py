@@ -14171,6 +14171,7 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError) as exc:
             QMessageBox.warning(self, "Create Geometry Point", str(exc))
             return None
+        self.viewport.set_display_domain("geometry")
         self._refresh_all(f"Created Geometry Point {point.tag}")
         self._show_point_geometry_properties(point.tag)
         self._record_project_change(
@@ -14349,11 +14350,11 @@ class MainWindow(QMainWindow):
             return None
 
         self.model = self.project.model
+        self.viewport.set_display_domain("geometry")
         self._refresh_all(
             f"Created Geometry Line {line.tag} · Mesh not configured"
         )
         self.selection.clear()
-        self.viewport.set_display_domain("geometry")
         self._show_line_geometry_properties(line.tag)
         self._record_project_change(
             f"Create Geometry Line {line.tag}",
@@ -15682,11 +15683,11 @@ class MainWindow(QMainWindow):
             return None
 
         self.model = self.project.model
+        self.viewport.set_display_domain("geometry")
         self._refresh_all(
             f"Created Geometry Surface {surface.tag} · Mesh not configured"
         )
         self.selection.clear()
-        self.viewport.set_display_domain("geometry")
         self._show_surface_geometry_properties(surface.tag)
         self._record_project_change(
             f"Create Surface {surface.tag}",
