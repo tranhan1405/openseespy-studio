@@ -14,6 +14,7 @@ class ShellMeshSpec:
     formulation: str = "ASDShellQ4"
     section_tag: int = 0
     corotational: bool = False
+    local_x: tuple[float, float, float] | None = None
     group: str = "shell"
 
 
@@ -151,6 +152,11 @@ def build_shell_mesh(
                         bool(spec.corotational)
                         if formulation == "ASDShellQ4"
                         else False
+                    ),
+                    shell_local_x=(
+                        spec.local_x
+                        if formulation == "ASDShellQ4"
+                        else None
                     ),
                 )
                 created_elements.append(next_element)
