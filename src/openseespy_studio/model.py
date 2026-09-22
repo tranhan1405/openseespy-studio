@@ -131,6 +131,7 @@ class Element:
     k: int | None = None
     l: int | None = None
     shell_corotational: bool = False
+    shell_local_x: tuple[float, float, float] | None = None
 
     @property
     def is_shell(self) -> bool:
@@ -235,6 +236,19 @@ class Element:
             self.shell_corotational,
             "Shell corotational flag",
         )
+        if self.shell_local_x is not None:
+            values = tuple(float(value) for value in self.shell_local_x)
+            if len(values) != 3 or any(
+                not math.isfinite(value) for value in values
+            ):
+                raise ValueError(
+                    "Shell local X vector needs three finite values."
+                )
+            if sum(value * value for value in values) <= 1.0e-24:
+                raise ValueError(
+                    "Shell local X vector cannot be zero."
+                )
+            self.shell_local_x = values
         if self.is_shell:
             if self.k is None or self.l is None:
                 raise ValueError(
@@ -250,6 +264,9 @@ class Element:
             self.k = None
             self.l = None
             self.shell_corotational = False
+            self.shell_local_x = None
+        if self.is_shell and self.element_type != "ASDShellQ4":
+            self.shell_local_x = None
 
         uses_section_reference = self.element_type != "truss"
         uses_frame_reference = self.element_type in FRAME_ELEMENT_TYPES
@@ -431,6 +448,7 @@ class StructuralModel:
         k: int | None = None,
         l: int | None = None,
         shell_corotational: bool = False,
+        shell_local_x: tuple[float, float, float] | None = None,
     ) -> Element:
         tag = _strict_int(tag, "Element tag")
         i = _strict_int(i, "Element I-node tag")
@@ -497,6 +515,7 @@ class StructuralModel:
             k,
             l,
             shell_corotational,
+            shell_local_x,
         )
         self.elements[tag] = ele
         return ele
@@ -958,6 +977,7 @@ class StructuralModel:
                         else None
                     ),
                     shell_corotational=source.shell_corotational,
+                    shell_local_x=source.shell_local_x,
                 )
                 created_elements.add(new_tag)
 
@@ -1003,6 +1023,11 @@ class StructuralModel:
                     "k": element.k,
                     "l": element.l,
                     "shell_corotational": element.shell_corotational,
+                    "shell_local_x": (
+                        list(element.shell_local_x)
+                        if element.shell_local_x is not None
+                        else None
+                    ),
                 }
                 for element in sorted(self.elements.values(), key=lambda item: item.tag)
             ],
@@ -1100,6 +1125,11 @@ class StructuralModel:
                 item.get("k"),
                 item.get("l"),
                 item.get("shell_corotational", False),
+                (
+                    tuple(item["shell_local_x"])
+                    if item.get("shell_local_x") is not None
+                    else None
+                ),
             )
 
         return model
