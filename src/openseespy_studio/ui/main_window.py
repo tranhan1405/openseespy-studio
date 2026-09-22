@@ -10790,10 +10790,22 @@ class MainWindow(QMainWindow):
                     return True
 
         for element in self.model.elements.values():
-            if float(element.mass_per_length) <= 0.0:
+            has_element_mass = float(element.mass_per_length) > 0.0
+            if element.element_type in SHELL_ELEMENT_TYPES:
+                section = self.project.sections.get(
+                    int(element.section_tag)
+                    if element.section_tag is not None
+                    else -1
+                )
+                has_element_mass = has_element_mass or bool(
+                    section is not None
+                    and section.section_type in SHELL_SECTION_TYPES
+                    and float(section.parameters.get("rho", 0.0)) > 0.0
+                )
+            if not has_element_mass:
                 continue
-            for node_tag in (int(element.i), int(element.j)):
-                node = self.model.nodes.get(node_tag)
+            for node_tag in element.node_tags():
+                node = self.model.nodes.get(int(node_tag))
                 if node is None:
                     continue
                 if any(
