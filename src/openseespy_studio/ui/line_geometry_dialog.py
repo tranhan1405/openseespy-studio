@@ -196,6 +196,16 @@ class LineGeometryDialog(QDialog):
         )
         mesh_form.addRow("Target size:", self.target_size)
 
+        self.bias = _float_spin(
+            line.bias if line else 1.0,
+            low=1.0e-6,
+        )
+        self.bias.setToolTip(
+            "Last element length / first element length. "
+            "1.0 gives a uniform Line mesh."
+        )
+        mesh_form.addRow("Bias (last / first):", self.bias)
+
         self.reuse_nodes = QCheckBox("Reuse coincident existing FE nodes")
         self.reuse_nodes.setChecked(
             line.reuse_existing_nodes if line else True
@@ -383,6 +393,7 @@ class LineGeometryDialog(QDialog):
                 if self.mesh_mode.currentData() == "target_size"
                 else None
             ),
+            bias=self.bias.value(),
             reuse_existing_nodes=self.reuse_nodes.isChecked(),
             element_family=family,
             element_type=(
@@ -412,6 +423,10 @@ class LineGeometryDialog(QDialog):
             do_rayleigh=self.do_rayleigh.isChecked(),
             generated_node_tags=(
                 list(self._line.generated_node_tags)
+                if self._line else []
+            ),
+            owned_node_tags=(
+                list(self._line.owned_node_tags)
                 if self._line else []
             ),
             generated_element_tags=(
