@@ -174,6 +174,7 @@ from .surface_dialog import SurfaceGeometryDialog
 from .surface_edge_load_dialog import SurfaceEdgeLoadDialog
 from .surface_pressure_dialog import SurfacePressureDialog
 from .surface_recorder_dialog import SurfaceRecorderDialog
+from .surface_result_dialog import SurfaceResultDialog
 from .line_geometry_dialog import LineGeometryDialog, PointGeometryDialog
 from .transformation_dialog import TransformationDialog
 from .test_column_dialog import TestColumnWizard
@@ -1275,6 +1276,26 @@ class PropertiesPanel(QWidget):
         self.result_element_scope.setText(
             ", ".join(map(str, result.element_scope))
         )
+        managed_surface_scope = bool(result.surface_scope)
+        self.result_node_scope.setReadOnly(managed_surface_scope)
+        self.result_element_scope.setReadOnly(managed_surface_scope)
+        self.result_use_selection.setEnabled(not managed_surface_scope)
+        if managed_surface_scope:
+            scope_text = ", ".join(
+                f"S{tag}" for tag in result.surface_scope
+            )
+            tooltip = (
+                "Geometry-managed Shell result scope: "
+                + scope_text
+                + ". FE element tags are regenerated after remeshing."
+            )
+            self.result_node_scope.setToolTip(tooltip)
+            self.result_element_scope.setToolTip(tooltip)
+            self.result_use_selection.setToolTip(tooltip)
+        else:
+            self.result_node_scope.setToolTip("")
+            self.result_element_scope.setToolTip("")
+            self.result_use_selection.setToolTip("")
 
         for widget in self._result_optional_widgets:
             self._set_form_row_visible(widget, False)
@@ -9521,6 +9542,279 @@ class MainWindow(QMainWindow):
             before,
         )
 
+    def _compatible_surface_result_analyses(self):
+        return {
+            int(tag): analysis
+            for tag, analysis in self.project.analyses.items()
+            if (
+                "ShellForce"
+                in self.project._allowed_solution_result_types(analysis)
+                and "ShellDeformation"
+                in self.project._allowed_solution_result_types(analysis)
+            )
+        }
+
+    def _manage_surface_shell_result(self, surface_tags) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self.project.surfaces
+        })
+        if not tags:
+            return
+
+        unmeshed = [
+            tag
+            for tag in tags
+            if inspect_surface_mesh_state(
+                self.project,
+                tag,
+            ).status != "meshed"
+        ]
+        if unmeshed:
+            QMessageBox.information(
+                self,
+                "Managed Surface Shell Result",
+                "Mesh the following Surface geometry first: "
+                + ", ".join(map(str, unmeshed)),
+            )
+            return
+
+        analyses = self._compatible_surface_result_analyses()
+        if not analyses:
+            if not self._ensure_prerequisite(
+                title="Managed Surface Shell Result",
+                message=(
+                    "Shell result requests require compatible Analysis "
+                    "Settings. Create them now?"
+                ),
+                action_label="Create Analysis Settings Now...",
+                available=lambda: bool(
+                    self._compatible_surface_result_analyses()
+                ),
+                creator=self._create_analysis,
+            ):
+                return
+            analyses = self._compatible_surface_result_analyses()
+            if not analyses:
+                return
+
+        target_scope = set(tags)
+        existing = sorted(
+            (
+                result
+                for result in self.project.solution_results.values()
+                if (
+                    result.surface_scope
+                    and set(result.surface_scope) == target_scope
+                    and result.result_type
+                    in {"ShellForce", "ShellDeformation"}
+                )
+            ),
+            key=lambda item: item.tag,
+        )
+        choices = ["Create new result..."] + [
+            f"Edit Result {item.tag} · {item.result_type} · "
+            f"{item.settings.get('component', '')}"
+            for item in existing
+        ]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Managed Surface Shell Result",
+            "Definition:",
+            choices,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        editing = (
+            None if choice == choices[0]
+            else existing[choices.index(choice) - 1]
+        )
+
+        dialog = SurfaceResultDialog(
+            analyses,
+            surface_tags=(
+                editing.surface_scope
+                if editing is not None
+                else tags
+            ),
+            result=editing,
+            next_tag=self.project.next_solution_result_tag(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        result = dialog.data()
+
+        before = self.project.to_dict()
+        try:
+            if editing is None:
+                self.project.add_solution_result(result)
+            else:
+                self.project.update_solution_result(
+                    editing.tag,
+                    result,
+                )
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Managed Surface Shell Result",
+                str(exc),
+            )
+            return
+
+        self.model = self.project.model
+        self._refresh_all(
+            f"{'Updated' if editing is not None else 'Created'} managed "
+            f"Shell result {result.tag} · {len(result.surface_scope)} "
+            f"Surface(s) · {len(result.element_scope)} Shell element(s)"
+        )
+        self.viewport.set_display_domain("geometry")
+        self._show_surface_geometry_properties(tags[0])
+        self._record_project_change(
+            f"Managed Surface Shell result {result.tag}",
+            before,
+        )
+
+    def _managed_surface_results_for_surface(
+        self,
+        surface_tag: int,
+    ) -> list[SolutionResultData]:
+        tag = int(surface_tag)
+        return sorted(
+            (
+                result
+                for result in self.project.solution_results.values()
+                if (
+                    tag in result.surface_scope
+                    and result.result_type
+                    in {"ShellForce", "ShellDeformation"}
+                )
+            ),
+            key=lambda item: item.tag,
+        )
+
+    def _select_managed_surface_result_scope(
+        self,
+        surface_tag: int,
+    ) -> None:
+        tag = int(surface_tag)
+        results = self._managed_surface_results_for_surface(tag)
+        if not results:
+            QMessageBox.information(
+                self,
+                "Managed Surface Shell Result",
+                f"Surface {tag} has no managed Shell result request.",
+            )
+            return
+        labels = [
+            f"Result {result.tag} · {result.result_type} · "
+            f"{result.settings.get('component', '')}"
+            for result in results
+        ]
+        label, ok = QInputDialog.getItem(
+            self,
+            "Select Managed Result FE Scope",
+            f"Surface {tag}:",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        result = results[labels.index(label)]
+        self.viewport.set_display_domain("fe")
+        self.selection.set_selection(
+            elements=set(result.element_scope),
+        )
+        self.status_message.setText(
+            f"Selected {len(result.element_scope)} Shell element(s) for "
+            f"managed result {result.tag}"
+        )
+
+    def _remove_managed_surface_shell_result(
+        self,
+        surface_tag: int,
+    ) -> None:
+        tag = int(surface_tag)
+        results = self._managed_surface_results_for_surface(tag)
+        if not results:
+            QMessageBox.information(
+                self,
+                "Remove Managed Surface Shell Result",
+                f"Surface {tag} has no managed Shell result request.",
+            )
+            return
+        labels = [
+            f"Result {result.tag} · {result.result_type} · "
+            f"{result.settings.get('component', '')} · "
+            f"{len(result.surface_scope)} Surface(s)"
+            for result in results
+        ]
+        label, ok = QInputDialog.getItem(
+            self,
+            "Remove Managed Surface Shell Result",
+            f"Surface {tag}:",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        result = results[labels.index(label)]
+        before = self.project.to_dict()
+        if len(result.surface_scope) == 1:
+            self.project.remove_solution_result(result.tag)
+            message = f"Removed managed Shell result {result.tag}"
+        else:
+            updated = SolutionResultData(
+                tag=result.tag,
+                analysis_tag=result.analysis_tag,
+                name=result.name,
+                result_type=result.result_type,
+                node_scope=list(result.node_scope),
+                element_scope=list(result.element_scope),
+                surface_scope=[
+                    item
+                    for item in result.surface_scope
+                    if int(item) != tag
+                ],
+                settings=dict(result.settings),
+            )
+            try:
+                self.project.update_solution_result(
+                    result.tag,
+                    updated,
+                )
+            except (TypeError, ValueError) as exc:
+                self.project = ProjectDatabase.from_dict(before)
+                self.model = self.project.model
+                self._refresh_all()
+                QMessageBox.warning(
+                    self,
+                    "Remove Managed Surface Shell Result",
+                    str(exc),
+                )
+                return
+            message = (
+                f"Removed Surface {tag} from managed Shell result "
+                f"{result.tag}"
+            )
+
+        self.model = self.project.model
+        self._refresh_all(message)
+        self.viewport.set_display_domain("geometry")
+        self._show_surface_geometry_properties(tag)
+        self._record_project_change(
+            f"Update managed Surface Shell result {result.tag}",
+            before,
+        )
+
     def _create_shell_pressure_for_elements(
         self,
         selected,
@@ -12976,6 +13270,16 @@ class MainWindow(QMainWindow):
             )
             if managed_recorders else "None"
         )
+        managed_results = self._managed_surface_results_for_surface(tag)
+        managed_result_text = (
+            " · ".join(
+                f"R{result.tag} {result.result_type}/"
+                f"{result.settings.get('component', '')} "
+                f"({len(result.element_scope)} Shell(s))"
+                for result in managed_results
+            )
+            if managed_results else "None"
+        )
 
         rows = [
             ("Tag", surface.tag),
@@ -12984,6 +13288,7 @@ class MainWindow(QMainWindow):
             ("Managed edge line loads", managed_edge_load_text),
             ("Managed Surface pressures", managed_pressure_text),
             ("Managed Surface recorders", managed_recorder_text),
+            ("Managed Shell results", managed_result_text),
             ("Shape", surface.surface_type),
             ("Topology", topology),
             ("Normal", normal_text),
@@ -15284,6 +15589,7 @@ class MainWindow(QMainWindow):
             result_type=source.result_type,
             node_scope=list(source.node_scope),
             element_scope=list(source.element_scope),
+            surface_scope=list(source.surface_scope),
             settings=dict(source.settings),
         )
         self.project.add_solution_result(duplicate)
@@ -15365,6 +15671,9 @@ class MainWindow(QMainWindow):
             if raw_elements
             else set()
         )
+        if current.surface_scope:
+            node_scope = []
+            element_scope = list(current.element_scope)
         settings = (
             dict(data.get("settings", {}))
             if isinstance(data.get("settings", {}), dict)
@@ -15377,6 +15686,7 @@ class MainWindow(QMainWindow):
             result_type=current.result_type,
             node_scope=node_scope,
             element_scope=element_scope,
+            surface_scope=list(current.surface_scope),
             settings=settings,
         )
 
@@ -15434,7 +15744,17 @@ class MainWindow(QMainWindow):
         self,
         tag: int,
     ) -> None:
-        if int(tag) not in self.project.solution_results:
+        result = self.project.solution_results.get(int(tag))
+        if result is None:
+            return
+        if result.surface_scope:
+            QMessageBox.information(
+                self,
+                "Managed Surface Shell Result",
+                "This result scope is managed by Geometry Surface "
+                + ", ".join(f"S{item}" for item in result.surface_scope)
+                + ". Select/edit the Geometry Surface result instead.",
+            )
             return
         self.properties_panel.set_solution_scope(
             set(self.selection.nodes),
@@ -17814,6 +18134,37 @@ class MainWindow(QMainWindow):
                 remove_shell_recorder.triggered.connect(
                     lambda checked=False, t=tag:
                     self._remove_managed_surface_shell_recorder(t)
+                )
+            managed_shell_result = menu.addAction(
+                "Managed Shell Result..."
+                if count == 1
+                else f"Managed Shell Result on {count} Surfaces..."
+            )
+            managed_shell_result.setEnabled(live_mesh)
+            managed_shell_result.triggered.connect(
+                lambda checked=False, tags=tuple(surface_tags):
+                self._manage_surface_shell_result(tags)
+            )
+            if count == 1:
+                select_result_scope = menu.addAction(
+                    "Select Managed Result FE Scope..."
+                )
+                select_result_scope.setEnabled(
+                    bool(self._managed_surface_results_for_surface(tag))
+                )
+                select_result_scope.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._select_managed_surface_result_scope(t)
+                )
+                remove_shell_result = menu.addAction(
+                    "Remove Managed Shell Result..."
+                )
+                remove_shell_result.setEnabled(
+                    bool(self._managed_surface_results_for_surface(tag))
+                )
+                remove_shell_result.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._remove_managed_surface_shell_result(t)
                 )
             clear_pressure_preview = menu.addAction(
                 "Clear Pressure Preview"
