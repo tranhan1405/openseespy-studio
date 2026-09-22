@@ -3040,6 +3040,8 @@ class ModelViewport(QWidget):
         self._undeformed_model_visible = True
 
         if self._model is None:
+            if preserved_camera is not None:
+                self.plotter.camera_position = preserved_camera
             self.plotter.render()
             return
         if (
@@ -3048,6 +3050,8 @@ class ModelViewport(QWidget):
             and not self._lines
             and not self._surfaces
         ):
+            if preserved_camera is not None:
+                self.plotter.camera_position = preserved_camera
             self.plotter.render()
             return
 
@@ -3251,6 +3255,8 @@ class ModelViewport(QWidget):
 
         if not self._model.nodes:
             self._update_model_color_legend([])
+            if preserved_camera is not None:
+                self.plotter.camera_position = preserved_camera
             self.plotter.render()
             return
 
