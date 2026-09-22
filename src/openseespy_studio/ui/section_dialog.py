@@ -1856,11 +1856,16 @@ class SectionDialog(QDialog):
         if not dialog.exec():
             return
         try:
+            dependencies = dialog.pending_materials()
             material = dialog.material_data()
-            if material.tag in self.materials:
-                raise ValueError(
-                    f"Material tag {material.tag} already exists."
-                )
+            candidates = list(dependencies) + [material]
+            used = set(self.materials)
+            for candidate in candidates:
+                if candidate.tag in used:
+                    raise ValueError(
+                        f"Material tag {candidate.tag} already exists."
+                    )
+                used.add(candidate.tag)
         except (TypeError, ValueError) as exc:
             QMessageBox.warning(
                 self,
@@ -1869,8 +1874,10 @@ class SectionDialog(QDialog):
             )
             return
 
-        self.materials[material.tag] = material
-        self._pending_materials.append(material)
+        for candidate in candidates:
+            copied = MaterialData.from_dict(candidate.to_dict())
+            self.materials[copied.tag] = copied
+            self._pending_materials.append(copied)
         self._refresh_material_selectors(select_tag=material.tag)
 
     def _build_elastic_page(
