@@ -1623,6 +1623,7 @@ class MainWindow(QMainWindow):
         self._frame_first_node_tag: int | None = None
         self._truss_first_node_tag: int | None = None
         self._geometry_line_point_tags: list[int] = []
+        self._geometry_line_anchor_snap: dict[str, object] | None = None
         self._geometry_surface_point_tags: list[int] = []
         self._geometry_sketch_intersections = []
         self._geometry_trim_subject_tag: int | None = None
@@ -2312,7 +2313,7 @@ class MainWindow(QMainWindow):
         ):
             self._make_action(
                 key, label, icon,
-                lambda checked=False, v=view: self.viewport.set_view(v),
+                lambda checked=False, v=view: self._set_view_from_ui(v),
                 f"{label} view",
             )
 
@@ -5094,6 +5095,8 @@ class MainWindow(QMainWindow):
             bool(selected_payload_kinds)
             and selected_payload_kinds <= geometry_tree_kinds
         )
+        if not geometry_mode and self._geometry_sketch_tool_active():
+            self._activate_select_tool()
         self.viewport.set_display_domain(
             "geometry" if geometry_mode else "fe"
         )
@@ -5250,6 +5253,7 @@ class MainWindow(QMainWindow):
         self.viewport.geometry_sketch_finished.connect(
             self._finish_geometry_sketch
         )
+        self.viewport.view_requested.connect(self._set_view_from_ui)
         self.viewport.set_selection_filter(self.selection.filter)
 
     def _install_shortcuts(self) -> None:
@@ -5268,6 +5272,7 @@ class MainWindow(QMainWindow):
 
     def _leave_geometry_line_pick_mode(self) -> None:
         self._geometry_line_point_tags = []
+        self._geometry_line_anchor_snap = None
         action = self.actions.get("line_geometry_pick")
         if action is not None:
             action.setChecked(False)
@@ -5338,6 +5343,52 @@ class MainWindow(QMainWindow):
         view = self.viewport.current_view().lower()
         return view if view in {"xy", "xz", "yz"} else "xy"
 
+    def _geometry_sketch_tool_active(self) -> bool:
+        return bool(
+            self.viewport.interaction_tool() == "geometry_sketch"
+            and (
+                (
+                    self.actions.get("line_geometry_pick") is not None
+                    and self.actions["line_geometry_pick"].isChecked()
+                )
+                or (
+                    self.actions.get("surface_geometry_pick") is not None
+                    and self.actions["surface_geometry_pick"].isChecked()
+                )
+            )
+        )
+
+    def _reset_active_geometry_sketch_anchor(self) -> None:
+        self._geometry_line_point_tags = []
+        self._geometry_line_anchor_snap = None
+        self._geometry_surface_point_tags = []
+        self.viewport.clear_geometry_pick_preview(render=False)
+        self.viewport.clear_geometry_sketch_preview(render=False)
+        self._refresh_geometry_sketch_snap_cache()
+
+    def _set_view_from_ui(self, view: str) -> None:
+        target = str(view).strip().lower()
+        sketch_active = self._geometry_sketch_tool_active()
+        self.viewport.set_view(target)
+
+        if not sketch_active:
+            return
+
+        if target in {"xy", "xz", "yz"}:
+            self._reset_active_geometry_sketch_anchor()
+            self.viewport.set_geometry_sketch_plane(target, 0.0)
+            self.viewport.set_interaction_tool("geometry_sketch")
+            self.status_message.setText(
+                f"Sketch plane changed to {target.upper()} · "
+                "current chain reset · click first point"
+            )
+            return
+
+        plane, offset = self.viewport.geometry_sketch_plane()
+        self.status_message.setText(
+            f"ISO view · sketch remains {plane.upper()} @ {offset:g}"
+        )
+
     def _refresh_geometry_sketch_snap_cache(self) -> None:
         try:
             self._geometry_sketch_intersections = (
@@ -5365,6 +5416,7 @@ class MainWindow(QMainWindow):
         self._leave_truss_pick_mode()
         self._leave_geometry_surface_pick_mode()
         self._geometry_line_point_tags = []
+        self._geometry_line_anchor_snap = None
         self._refresh_geometry_sketch_snap_cache()
         self.viewport.clear_geometry_pick_preview(render=False)
         self.viewport.clear_geometry_sketch_preview(render=False)
@@ -6061,8 +6113,22 @@ class MainWindow(QMainWindow):
         sx, sy = float(screen[0]), float(screen[1])
         first_anchor = (
             not self._geometry_line_point_tags
+            and self._geometry_line_anchor_snap is None
             and not self._geometry_surface_point_tags
         )
+        snap_action = self.actions.get("geometry_snap")
+        snap_enabled = (
+            snap_action is None or snap_action.isChecked()
+        )
+        if not snap_enabled:
+            return {
+                "xyz": xyz,
+                "kind": "free",
+                "label": "Free",
+                "point_tag": None,
+                "line_tags": (),
+            }
+
         exact_tag = payload.get("tag")
         if (
             payload.get("kind") == "geometry_point"
@@ -6088,19 +6154,6 @@ class MainWindow(QMainWindow):
                     "point_tag": int(exact_tag),
                     "line_tags": (),
                 }
-
-        snap_action = self.actions.get("geometry_snap")
-        snap_enabled = (
-            snap_action is None or snap_action.isChecked()
-        )
-        if not snap_enabled:
-            return {
-                "xyz": xyz,
-                "kind": "free",
-                "label": "Free",
-                "point_tag": None,
-                "line_tags": (),
-            }
 
         candidates: list[
             tuple[
@@ -6206,19 +6259,28 @@ class MainWindow(QMainWindow):
                 "line_tags": best[5],
             }
 
-        anchor_tag = None
+        anchor_xyz = None
         if self._geometry_line_point_tags:
-            anchor_tag = int(self._geometry_line_point_tags[-1])
+            anchor = self.project.points.get(
+                int(self._geometry_line_point_tags[-1])
+            )
+            if anchor is not None:
+                anchor_xyz = tuple(float(value) for value in anchor.xyz)
+        elif self._geometry_line_anchor_snap is not None:
+            anchor_xyz = tuple(
+                float(value)
+                for value in self._geometry_line_anchor_snap["xyz"]
+            )
         elif self._geometry_surface_point_tags:
-            anchor_tag = int(self._geometry_surface_point_tags[0])
-        anchor = (
-            self.project.points.get(anchor_tag)
-            if anchor_tag is not None
-            else None
-        )
-        if anchor is not None:
+            anchor = self.project.points.get(
+                int(self._geometry_surface_point_tags[0])
+            )
+            if anchor is not None:
+                anchor_xyz = tuple(float(value) for value in anchor.xyz)
+
+        if anchor_xyz is not None:
             plane, offset = self.viewport.geometry_sketch_plane()
-            a = tuple(float(value) for value in anchor.xyz)
+            a = anchor_xyz
             if plane == "xy":
                 inferred = (
                     ("Horizontal", (xyz[0], a[1], offset)),
@@ -6276,36 +6338,81 @@ class MainWindow(QMainWindow):
                 best = (distance2, int(tag))
         return None if best is None else best[1]
 
+    def _geometry_lines_containing_interior_point(
+        self,
+        xyz,
+    ) -> list[int]:
+        point = tuple(float(value) for value in xyz)
+        tolerance = self._geometry_sketch_tolerance()
+        tags: list[int] = []
+        for tag, line in self.project.lines.items():
+            point_i = self.project.points.get(int(line.point_i))
+            point_j = self.project.points.get(int(line.point_j))
+            if point_i is None or point_j is None:
+                continue
+            a = tuple(float(value) for value in point_i.xyz)
+            b = tuple(float(value) for value in point_j.xyz)
+            direction = tuple(
+                b[axis] - a[axis]
+                for axis in range(3)
+            )
+            length2 = sum(value * value for value in direction)
+            if length2 <= 1.0e-24:
+                continue
+            parameter = sum(
+                (point[axis] - a[axis]) * direction[axis]
+                for axis in range(3)
+            ) / length2
+            if not 1.0e-8 < parameter < 1.0 - 1.0e-8:
+                continue
+            projected = tuple(
+                a[axis] + parameter * direction[axis]
+                for axis in range(3)
+            )
+            distance2 = sum(
+                (projected[axis] - point[axis]) ** 2
+                for axis in range(3)
+            )
+            if distance2 <= tolerance * tolerance:
+                tags.append(int(tag))
+        return sorted(tags)
+
     def _materialize_geometry_sketch_point(
         self,
         snap: dict[str, object],
     ) -> tuple[int, bool]:
-        existing = snap.get("point_tag")
-        if existing is not None and int(existing) in self.project.points:
-            return int(existing), False
-
         xyz = tuple(float(value) for value in snap["xyz"])
-        near = self._find_geometry_point_near(xyz)
+        existing = snap.get("point_tag")
         changed = False
-        if near is None:
-            point_tag = self.project.next_point_tag()
-            self.project.add_point(
-                PointGeometryData(
-                    point_tag,
-                    f"Point {point_tag}",
-                    xyz,
-                )
-            )
-            changed = True
-        else:
-            point_tag = int(near)
 
-        for line_tag in snap.get("line_tags", ()):
-            if int(line_tag) not in self.project.lines:
-                continue
+        if existing is not None and int(existing) in self.project.points:
+            point_tag = int(existing)
+        else:
+            near = self._find_geometry_point_near(xyz)
+            if near is None:
+                point_tag = self.project.next_point_tag()
+                self.project.add_point(
+                    PointGeometryData(
+                        point_tag,
+                        f"Point {point_tag}",
+                        xyz,
+                    )
+                )
+                changed = True
+            else:
+                point_tag = int(near)
+
+        # Resolve topology from geometry, not from cached picker line tags.
+        # This remains correct if another snap has already split/replaced the
+        # originally picked Line. It also makes an existing Point embedded in
+        # a Line a true shared topology vertex.
+        while True:
+            interior_tags = self._geometry_lines_containing_interior_point(xyz)
+            if not interior_tags:
+                break
             split_line_geometry_at_point(
                 self.project,
-                int(line_tag),
+                interior_tags[0],
                 xyz,
                 remesh=True,
             )
@@ -6388,11 +6495,45 @@ class MainWindow(QMainWindow):
         if snap is None:
             return
 
-        if not self._geometry_line_point_tags:
+        if (
+            not self._geometry_line_point_tags
+            and self._geometry_line_anchor_snap is None
+        ):
+            anchor_xyz = tuple(float(value) for value in snap["xyz"])
+            self.viewport.set_geometry_sketch_plane_offset_from_point(
+                anchor_xyz
+            )
+            self._geometry_line_anchor_snap = dict(snap)
+            self.viewport.show_geometry_sketch_preview([anchor_xyz])
+            plane, offset = self.viewport.geometry_sketch_plane()
+            self.status_message.setText(
+                f"Polyline anchor · {plane.upper()} @ {offset:g} · "
+                "click next point"
+            )
+            return
+
+
+        if (
+            not self._geometry_line_point_tags
+            and self._geometry_line_anchor_snap is not None
+        ):
             before = self.project.to_dict()
             try:
-                point_tag, changed = self._materialize_geometry_sketch_point(
-                    snap
+                point_i, _anchor_changed = (
+                    self._materialize_geometry_sketch_point(
+                        self._geometry_line_anchor_snap
+                    )
+                )
+                point_j, _point_changed = (
+                    self._materialize_geometry_sketch_point(snap)
+                )
+                if point_i == point_j:
+                    raise ValueError(
+                        "Polyline segment requires two different points."
+                    )
+                line_tag, line_created = self._draw_geometry_line_segment(
+                    point_i,
+                    point_j,
                 )
             except (TypeError, ValueError) as exc:
                 self.project = ProjectDatabase.from_dict(before)
@@ -6400,28 +6541,32 @@ class MainWindow(QMainWindow):
                 self._refresh_all(reset_camera=False)
                 self.status_message.setText(str(exc))
                 return
-            point = self.project.points[point_tag]
-            self.viewport.set_geometry_sketch_plane_offset_from_point(
-                point.xyz
+
+            self._geometry_line_anchor_snap = None
+            self._geometry_line_point_tags = [point_j]
+            self._refresh_geometry_sketch_snap_cache()
+            self.model = self.project.model
+            self._refresh_all(
+                (
+                    f"Drawn Geometry Line {line_tag}"
+                    if line_created
+                    else f"Snapped to existing Line {line_tag}"
+                ),
+                reset_camera=False,
             )
-            self._geometry_line_point_tags = [point_tag]
-            if changed:
-                self.model = self.project.model
-                self._refresh_all(
-                    f"Sketch anchor Point {point_tag}",
-                    reset_camera=False,
-                )
-                self._record_project_change(
-                    f"Sketch Geometry Point {point_tag}",
-                    before,
-                )
-            self.viewport.show_geometry_sketch_preview(
-                [point.xyz]
+            self._record_project_change(
+                f"Draw Geometry Line {line_tag}",
+                before,
             )
-            plane, offset = self.viewport.geometry_sketch_plane()
+            point = self.project.points[point_j]
+            self.viewport.show_geometry_sketch_preview([point.xyz])
             self.status_message.setText(
-                f"Polyline anchor P{point_tag} · "
-                f"{plane.upper()} @ {offset:g} · click next point"
+                (
+                    f"Created L{line_tag} · P{point_i} → P{point_j} · "
+                    if line_created
+                    else f"Line L{line_tag} already exists · "
+                )
+                + "click next point · right-click to finish"
             )
             return
 
@@ -6634,6 +6779,17 @@ class MainWindow(QMainWindow):
                         snap_label=label,
                     )
                     return
+            if self._geometry_line_anchor_snap is not None:
+                anchor_xyz = tuple(
+                    float(value)
+                    for value in self._geometry_line_anchor_snap["xyz"]
+                )
+                self.viewport.show_geometry_sketch_preview(
+                    [anchor_xyz],
+                    cursor=xyz,
+                    snap_label=label,
+                )
+                return
             self.viewport.show_geometry_sketch_preview(
                 [],
                 cursor=xyz,
@@ -13128,10 +13284,28 @@ class MainWindow(QMainWindow):
         )
 
     def _apply_project_snapshot(self, snapshot: dict) -> None:
+        sketch_active = self._geometry_sketch_tool_active()
         self.project = ProjectDatabase.from_dict(snapshot)
         self.model = self.project.model
         self.selection.clear()
-        self._refresh_all()
+
+        if sketch_active:
+            self._geometry_line_point_tags = []
+            self._geometry_line_anchor_snap = None
+            self._geometry_surface_point_tags = []
+            self.viewport.clear_geometry_pick_preview(render=False)
+            self.viewport.clear_geometry_sketch_preview(render=False)
+
+        self._refresh_all(reset_camera=not sketch_active)
+
+        if sketch_active:
+            self._refresh_geometry_sketch_snap_cache()
+            self.viewport.set_display_domain("geometry")
+            self.viewport.set_interaction_tool("geometry_sketch")
+            self.status_message.setText(
+                "Undo/Redo applied · current sketch chain reset · "
+                "click first point"
+            )
 
     def _recent_project_paths(self) -> list[str]:
         settings = QSettings(LEGACY_SETTINGS_ORGANIZATION, LEGACY_SETTINGS_APPLICATION)
