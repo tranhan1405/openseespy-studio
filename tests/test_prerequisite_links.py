@@ -131,3 +131,61 @@ def test_second_prerequisite_link_batch():
     for method_name, dependency_marker in expected.items():
         source = inspect.getsource(getattr(MainWindow, method_name))
         assert dependency_marker in source
+
+
+def test_third_prerequisite_link_batch():
+    measure_source = inspect.getsource(
+        MainWindow._activate_measure_distance
+    )
+    assert "_ensure_node_count" in measure_source
+    assert "2," in measure_source
+
+    menu_source = inspect.getsource(
+        MainWindow._show_viewport_context_menu
+    )
+    cases = {
+        "support": (
+            "apply_support.triggered.connect(self._apply_restraint)",
+            "support_menu.setEnabled(bool(self.selection.nodes))",
+        ),
+        "constraint": (
+            "constraint_action.triggered.connect(self._create_constraint)",
+            "constraint_action.setEnabled(len(self.selection.nodes) >= 2)",
+        ),
+        "connection": (
+            "connection_action.triggered.connect(self._create_connection)",
+            "connection_action.setEnabled(1 <= len(self.selection.nodes) <= 2)",
+        ),
+        "mass": (
+            "mass_action.triggered.connect(self._assign_mass)",
+            "mass_action.setEnabled(bool(self.selection.nodes))",
+        ),
+        "nodal_load": (
+            "load_action.triggered.connect(self._create_nodal_load)",
+            "load_action.setEnabled(bool(self.selection.nodes))",
+        ),
+        "prescribed_displacement": (
+            "self._create_prescribed_displacement",
+            "displacement_action.setEnabled(bool(self.selection.nodes))",
+        ),
+        "beam_load": (
+            "beam_load_action.triggered.connect(self._create_element_load)",
+            "beam_load_action.setEnabled(has_frame and not has_truss)",
+        ),
+        "formulation": (
+            "self._set_element_formulation",
+            "formulation_action.setEnabled(has_frame and not has_truss)",
+        ),
+    }
+    for trigger_marker, stale_gate in cases.values():
+        assert trigger_marker in menu_source
+        assert stale_gate not in menu_source
+
+    assert "assign_menu.setEnabled(bool(selected_elements))" not in menu_source
+    assert "assign_material.setEnabled(has_truss)" not in menu_source
+    assert "assign_section.setEnabled(has_frame)" not in menu_source
+    assert "assign_transformation.setEnabled(has_frame)" not in menu_source
+    assert "clear_material.setEnabled(has_truss)" in menu_source
+    assert "clear_section.setEnabled(has_frame)" in menu_source
+    assert "clear_transformation.setEnabled(has_frame)" in menu_source
+
