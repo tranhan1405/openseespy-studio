@@ -353,9 +353,9 @@ def test_surface_context_exposes_lifecycle_orientation_and_quality_tools():
     assert "Remesh Surface" in source
     assert "Delete Generated Mesh" in source
     assert "Flip Surface Normal" in source
-    assert "_remesh_surface_geometry" in source
-    assert "_delete_surface_mesh" in source
-    assert "_flip_surface_normal" in source
+    assert "_remesh_surface_geometries" in source
+    assert "_delete_surface_meshes" in source
+    assert "_flip_surface_normals" in source
 
     assert "Worst aspect ratio" in properties
     assert "Worst skew" in properties
