@@ -267,12 +267,32 @@ def test_line_mesh_ui_exposes_preview_remesh_delete_audit_and_fe_bridge():
     assert "Delete Generated Line Mesh" in context
     assert "Select Generated FE" in context
     assert "Audit Line Mesh Integrity" in context
+    assert "Mesh Quality..." in context
+    assert "Reverse Line Direction" in context
+    assert "Copy This Mesh / FE Recipe" in context
+    assert "Generate / Remesh" in context
+    assert "Audit Line Network Connectivity" in context
     assert "remesh_line_geometry" in edit
     assert "line_mesh_preview_points" in preview
     assert 'set_display_domain("fe")' in select_fe
     assert "Mesh bias" in properties
     assert 'name="line-mesh-preview"' in viewport
     assert "pickable=False" in viewport
+
+    quality = inspect.getsource(MainWindow._show_line_mesh_quality)
+    reverse = inspect.getsource(MainWindow._reverse_line_geometry)
+    copy_recipe = inspect.getsource(
+        MainWindow._copy_line_mesh_recipe_to_selected
+    )
+    batch = inspect.getsource(MainWindow._remesh_line_geometries)
+    network = inspect.getsource(
+        MainWindow._audit_line_network_connectivity_ui
+    )
+    assert "line_mesh_quality" in quality
+    assert "reverse_line_geometry" in reverse
+    assert "copy_line_mesh_recipe" in copy_recipe
+    assert "remesh_line_batch" in batch
+    assert "audit_line_network_connectivity" in network
 
 def test_line_mesh_quality_reports_actual_biased_fe_lengths():
     project = _frame_project(length=10.0)
