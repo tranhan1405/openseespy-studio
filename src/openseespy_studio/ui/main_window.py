@@ -6082,17 +6082,22 @@ class MainWindow(QMainWindow):
 
     def _geometry_sketch_tolerance(self) -> float:
         coords = [
-            point.xyz
+            tuple(float(value) for value in point.xyz)
             for point in self.project.points.values()
+            if all(math.isfinite(float(value)) for value in point.xyz)
         ]
         if not coords:
-            return 1.0e-8
+            return 1.0e-9
         spans = [
             max(point[axis] for point in coords)
             - min(point[axis] for point in coords)
             for axis in range(3)
         ]
-        return max(max(spans, default=1.0) * 1.0e-8, 1.0e-8)
+        scale = max(max(spans, default=1.0), 1.0)
+        # Geometry coincidence is a topology decision, not a screen-snap
+        # tolerance. Keep it tight and cap growth for very large/global
+        # coordinate systems so unrelated free points cannot collapse.
+        return max(min(scale * 1.0e-9, 1.0e-6), 1.0e-9)
 
     def _geometry_point_on_active_sketch_plane(self, xyz) -> bool:
         plane, offset = self.viewport.geometry_sketch_plane()
@@ -6109,8 +6114,17 @@ class MainWindow(QMainWindow):
         screen = payload.get("screen")
         if raw is None or screen is None:
             return None
-        xyz = tuple(float(value) for value in raw)
-        sx, sy = float(screen[0]), float(screen[1])
+        try:
+            xyz = tuple(float(value) for value in raw)
+            sx, sy = float(screen[0]), float(screen[1])
+        except (TypeError, ValueError, IndexError):
+            return None
+        if len(xyz) != 3:
+            return None
+        if not all(math.isfinite(value) for value in xyz):
+            return None
+        if not math.isfinite(sx) or not math.isfinite(sy):
+            return None
         first_anchor = (
             not self._geometry_line_point_tags
             and self._geometry_line_anchor_snap is None
@@ -6128,32 +6142,6 @@ class MainWindow(QMainWindow):
                 "point_tag": None,
                 "line_tags": (),
             }
-
-        exact_tag = payload.get("tag")
-        if (
-            payload.get("kind") == "geometry_point"
-            and exact_tag is not None
-            and int(exact_tag) in self.project.points
-        ):
-            point = self.project.points[int(exact_tag)]
-            px, py = self.viewport.geometry_world_to_screen(point.xyz)
-            exact_distance2 = (px - sx) ** 2 + (py - sy) ** 2
-            if (
-                exact_distance2 <= 16.0 * 16.0
-                and (
-                    first_anchor
-                    or self._geometry_point_on_active_sketch_plane(
-                        point.xyz
-                    )
-                )
-            ):
-                return {
-                    "xyz": tuple(point.xyz),
-                    "kind": "endpoint",
-                    "label": f"Endpoint P{int(exact_tag)}",
-                    "point_tag": int(exact_tag),
-                    "line_tags": (),
-                }
 
         candidates: list[
             tuple[
@@ -6186,6 +6174,8 @@ class MainWindow(QMainWindow):
             ):
                 return
             px, py = self.viewport.geometry_world_to_screen(candidate)
+            if not math.isfinite(px) or not math.isfinite(py):
+                return
             distance2 = (px - sx) ** 2 + (py - sy) ** 2
             if distance2 <= radius2:
                 candidates.append(
@@ -6250,7 +6240,10 @@ class MainWindow(QMainWindow):
             )
 
         if candidates:
-            best = min(candidates, key=lambda item: (item[0], item[1]))
+            # Pick what is visually nearest to the cursor. Type priority is
+            # only a tie-breaker; a distant endpoint must not steal a closer
+            # midpoint/intersection.
+            best = min(candidates, key=lambda item: (item[1], item[0]))
             return {
                 "xyz": best[3],
                 "kind": best[2],
@@ -6299,6 +6292,8 @@ class MainWindow(QMainWindow):
             inference_candidates = []
             for label, candidate in inferred:
                 px, py = self.viewport.geometry_world_to_screen(candidate)
+                if not math.isfinite(px) or not math.isfinite(py):
+                    continue
                 distance2 = (px - sx) ** 2 + (py - sy) ** 2
                 if distance2 <= 10.0 * 10.0:
                     inference_candidates.append(
