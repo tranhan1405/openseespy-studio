@@ -255,7 +255,8 @@ def test_unmeshed_surface_geometry_is_rendered_in_viewport():
 
     assert "surfaces:" in draw_source
     assert "self._surfaces" in draw_source
-    assert "surface-geometry-" in render_source
+    assert 'name="surface-geometry"' in render_source
+    assert '"surface_tag"' in render_source
     assert "not self._model.nodes" in render_source
     assert "and not self._points" in render_source
     assert "and not self._lines" in render_source
