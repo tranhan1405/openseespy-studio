@@ -5,12 +5,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from openseespy_studio.generator import section_to_openseespy, to_openseespy
+from openseespy_studio.generator import (
+    recorder_to_openseespy,
+    section_to_openseespy,
+    to_openseespy,
+)
 from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.model import SHELL_ELEMENT_TYPES, StructuralModel
 from openseespy_studio.project import (
     AnalysisSettingsData,
     ProjectDatabase,
+    RecorderData,
     SectionData,
     SolutionResultData,
 )
@@ -473,3 +478,97 @@ def test_shell_deformation_ui_routes_and_tables_exist():
     assert "shell_deformation_gp_table" in build_source
     assert "Membrane Strain" in build_source
     assert "shell_section_deformations" in populate_source
+
+
+def test_shell_deformed_and_mode_shape_use_four_node_surface_topology():
+    source = inspect.getsource(ModelViewport._show_vector_overlay)
+    assert "element.node_tags()" in source
+    assert "element.element_type in SHELL_ELEMENT_TYPES" in source
+    assert "shell_points" in source
+    assert "faces=np.asarray" in source
+    assert "scoped_nodes.update(element.node_tags())" in source
+
+    zoom_source = inspect.getsource(ModelViewport.zoom_to_selection)
+    assert "for node_tag in element.node_tags()" in zoom_source
+
+
+def test_shell_recorder_generates_and_round_trips_native_material_gp_query():
+    project = ProjectDatabase(
+        name="shell-recorder",
+        model=_shell_model(),
+    )
+    project.add_section(_shell_section())
+    recorder = RecorderData(
+        tag=1,
+        name="Shell GP2 deformation",
+        recorder_type="Shell",
+        target_tags=[10],
+        response="deformation",
+        section_number=2,
+        file_name="recorders/shell_gp2.out",
+        include_time=True,
+    )
+    project.add_recorder(recorder)
+
+    lines = recorder_to_openseespy(recorder)
+    command = lines[-1]
+    assert "'material', 2, 'deformation'" in command
+    assert "'-ele', 10" in command
+
+    script = to_openseespy(
+        project.model,
+        sections=project.sections,
+        recorders=project.recorders,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    imported = import_openseespy_source(
+        script,
+        source_name="shell-recorder-roundtrip.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert imported.error_count == 0
+    restored = next(iter(imported.project.recorders.values()))
+    assert restored.recorder_type == "Shell"
+    assert restored.target_tags == [10]
+    assert restored.section_number == 2
+    assert restored.response == "deformation"
+
+
+def test_shell_recorder_rejects_non_shell_targets_and_invalid_gp():
+    project = ProjectDatabase(
+        name="shell-recorder-validation",
+        model=_shell_model(),
+    )
+    project.add_section(_shell_section())
+
+    with pytest.raises(ValueError, match=r"Gauss point"):
+        RecorderData(
+            tag=1,
+            name="Bad GP",
+            recorder_type="Shell",
+            target_tags=[10],
+            response="force",
+            section_number=5,
+        )
+
+    project.model.add_node(5, 0.0, 0.0, 2.0)
+    project.model.add_element(
+        20,
+        1,
+        5,
+        element_type="truss",
+        group="truss",
+        truss_area=0.01,
+        truss_material_tag=1,
+    )
+    recorder = RecorderData(
+        tag=2,
+        name="Wrong target",
+        recorder_type="Shell",
+        target_tags=[20],
+        response="force",
+        section_number=1,
+    )
+    with pytest.raises(ValueError, match=r"Shell recorders require Shell"):
+        project.add_recorder(recorder)
