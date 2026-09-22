@@ -1574,10 +1574,23 @@ class MaterialDialog(QDialog):
             return
 
         try:
+            dependencies = dialog.pending_materials()
             preset = dialog.material_data()
+            used = set(self.materials)
+            for dependency in dependencies:
+                if dependency.tag in used:
+                    raise ValueError(
+                        f"Material tag {dependency.tag} already exists."
+                    )
+                used.add(dependency.tag)
         except ValueError as exc:
             QMessageBox.warning(self, "Material Library", str(exc))
             return
+
+        for dependency in dependencies:
+            copied = MaterialData.from_dict(dependency.to_dict())
+            self.materials[copied.tag] = copied
+            self._pending_materials.append(copied)
 
         preset.tag = self.tag.value()
         self._initial_material = preset
