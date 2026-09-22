@@ -6118,6 +6118,8 @@ class MainWindow(QMainWindow):
         self._record_project_change("Clear nodal mass", before)
 
     def _create_mass_source(self) -> None:
+        if not self._offer_structural_model_creator():
+            return
         dialog = MassSourceDialog(
             self.project,
             next_tag=self.project.next_mass_source_tag(),
@@ -9753,6 +9755,64 @@ class MainWindow(QMainWindow):
 
         self.properties_panel.set_properties("Constraint", rows)
 
+    def _ensure_first_mode_modal_prerequisite(
+        self,
+        template_kind: str,
+    ) -> bool:
+        for job_id in sorted(self._jobs, reverse=True):
+            job = self._jobs[job_id]
+            if job.analysis_type == "Modal" and job.results:
+                return True
+
+        modal_tags = sorted(
+            tag
+            for tag, analysis in self.project.analyses.items()
+            if analysis.analysis_type == "Modal"
+        )
+        if not modal_tags:
+            if not self._ask_create_prerequisite(
+                title=f"{template_kind} · First-mode Loading",
+                message=(
+                    "First-mode proportional loading requires a completed "
+                    "Modal analysis first. Create the Modal analysis now?"
+                ),
+                action_label="Create Modal Analysis Now...",
+            ):
+                return False
+            self._create_analysis_template("Modal")
+            modal_tags = sorted(
+                tag
+                for tag, analysis in self.project.analyses.items()
+                if analysis.analysis_type == "Modal"
+            )
+            if not modal_tags:
+                return False
+
+        modal_tag = modal_tags[-1]
+        if self._latest_job_for_analysis(modal_tag) is not None:
+            return True
+
+        if (
+            self._analysis_process is not None
+            and self._analysis_process.state() != QProcess.NotRunning
+        ):
+            self.status_message.setText(
+                "First-mode loading is waiting for a completed Modal result."
+            )
+            return False
+
+        modal = self.project.analyses[modal_tag]
+        if self._ask_create_prerequisite(
+            title=f"{template_kind} · First-mode Loading",
+            message=(
+                f"Modal analysis '{modal.name}' exists but has not been "
+                "completed. Run it now?"
+            ),
+            action_label="Run Modal Analysis Now...",
+        ):
+            self._run_analysis_from_tree(modal_tag)
+        return False
+
     def _first_mode_lateral_weights(
         self,
         *,
@@ -9914,11 +9974,23 @@ class MainWindow(QMainWindow):
         if not dialog.exec():
             return
 
-        before = self.project.to_dict()
         try:
             request = dialog.request()
             kind = str(request["template"])
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "Analysis Template", str(exc))
+            return
 
+        if (
+            kind in {"Pushover", "Cyclic"}
+            and request["driver_pattern_tag"] is None
+            and str(request["distribution"]) == "First-mode proportional"
+            and not self._ensure_first_mode_modal_prerequisite(kind)
+        ):
+            return
+
+        before = self.project.to_dict()
+        try:
             raw_mass_source = request.get("mass_source")
             if isinstance(raw_mass_source, dict):
                 source = MassSourceData.from_dict(
@@ -10552,14 +10624,76 @@ class MainWindow(QMainWindow):
             "click Apply or Evaluate to save."
         )
 
+    def _offer_result_analysis_run(
+        self,
+        *,
+        title: str,
+        analysis_tag: int | None = None,
+    ) -> bool:
+        if not self.model.nodes:
+            if not self._offer_structural_model_creator():
+                return False
+
+        target_tag = (
+            int(analysis_tag)
+            if analysis_tag is not None
+            else self.project.active_analysis_tag
+        )
+        settings = self.project.analyses.get(target_tag)
+        if settings is None:
+            if not self._ensure_prerequisite(
+                title=title,
+                message=(
+                    "This result workflow requires Analysis Settings first. "
+                    "Create them now?"
+                ),
+                action_label="Create Analysis Settings Now...",
+                available=lambda: (
+                    self.project.analyses.get(
+                        self.project.active_analysis_tag
+                    )
+                    is not None
+                ),
+                creator=self._create_analysis,
+            ):
+                return False
+            target_tag = self.project.active_analysis_tag
+            settings = self.project.analyses.get(target_tag)
+            if settings is None:
+                return False
+
+        if (
+            self._analysis_process is not None
+            and self._analysis_process.state() != QProcess.NotRunning
+        ):
+            self.status_message.setText(
+                f"{title}: analysis is already running; "
+                "open the result again when it completes."
+            )
+            return False
+
+        if not self._ask_create_prerequisite(
+            title=title,
+            message=(
+                f"{title} requires a completed result from "
+                f"'{settings.name}'. Run that analysis now?"
+            ),
+            action_label="Run Analysis Now...",
+        ):
+            return False
+
+        self._run_analysis_from_tree(int(settings.tag))
+        return True
+
     def _load_analysis_result(
         self,
         analysis_tag: int,
     ) -> dict[str, object] | None:
         job = self._latest_job_for_analysis(analysis_tag)
         if job is None:
-            self.status_message.setText(
-                "Result object is not evaluated yet — run its analysis first."
+            self._offer_result_analysis_run(
+                title="Evaluate Result",
+                analysis_tag=analysis_tag,
             )
             return None
         result = dict(job.results)
@@ -10614,6 +10748,12 @@ class MainWindow(QMainWindow):
         if not objects:
             self.status_message.setText(
                 "There are no result requests to evaluate."
+            )
+            return
+        if self._latest_job_for_analysis(analysis_tag) is None:
+            self._offer_result_analysis_run(
+                title="Evaluate All Results",
+                analysis_tag=analysis_tag,
             )
             return
         for result in objects:
@@ -10916,6 +11056,18 @@ class MainWindow(QMainWindow):
 
     def _create_named_selection(self) -> None:
         nodes, elements = self._selection_sets()
+        if (
+            not nodes
+            and not elements
+            and not self.model.nodes
+            and not self.model.elements
+        ):
+            if not self._ensure_node_count(
+                1,
+                title="Named Selection",
+            ):
+                return
+            nodes, elements = self._selection_sets()
         if not nodes and not elements:
             QMessageBox.information(
                 self,
@@ -11049,12 +11201,10 @@ class MainWindow(QMainWindow):
         """Open the same result catalog used by a Job's Plot submenu."""
         job = self._plot_source_job()
         if job is None:
+            self._offer_result_analysis_run(title="Plot Results")
             self.results_panel.show_jobs()
             self.results_dock.show()
             self.results_dock.raise_()
-            self.status_message.setText(
-                "No completed analysis result is available to plot."
-            )
             return
 
         menu = QMenu(self)
@@ -11582,10 +11732,8 @@ class MainWindow(QMainWindow):
             if completed:
                 job_id = max(completed)
         if job_id is None:
-            QMessageBox.information(
-                self,
-                "Export Job Results",
-                "No completed Job results are available to export.",
+            self._offer_result_analysis_run(
+                title="Export Job Results",
             )
             return
         self._export_job_result_json(job_id)
@@ -11900,9 +12048,6 @@ class MainWindow(QMainWindow):
 
         if kind == "named_sets_root":
             create = menu.addAction("Create from Current Selection...")
-            create.setEnabled(
-                bool(self.selection.nodes or self.selection.elements)
-            )
             create.triggered.connect(self._create_named_selection)
             exec_menu()
             return
@@ -11924,7 +12069,6 @@ class MainWindow(QMainWindow):
             apply_support = menu.addAction(
                 "Apply / Edit Support on Current Selection..."
             )
-            apply_support.setEnabled(bool(self.selection.nodes))
             apply_support.triggered.connect(self._apply_restraint)
             clear_support = menu.addAction(
                 "Clear Support on Current Selection"
@@ -12008,7 +12152,6 @@ class MainWindow(QMainWindow):
             nodal_load.triggered.connect(self._create_nodal_load)
 
             constraint = menu.addAction("Create Constraint...")
-            constraint.setEnabled(len(self.selection.nodes) >= 2)
             constraint.triggered.connect(self._create_constraint)
             connection = menu.addAction("Create ZeroLength / Link...")
             connection.setEnabled(1 <= len(self.selection.nodes) <= 2)
