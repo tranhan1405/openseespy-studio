@@ -5098,6 +5098,188 @@ class ResultsPanel(QWidget):
             f"strain={numeric('strain')}"
         )
 
+    @staticmethod
+    def _set_combo_data(combo: QComboBox, value: object) -> None:
+        index = combo.findData(value)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
+    def _import_response2000_data(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Response-2000 Moment-Curvature Data",
+            "",
+            (
+                "Response/chart data (*.txt *.csv *.tsv *.dat);;"
+                "All files (*)"
+            ),
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8-sig") as stream:
+                dataset = parse_response2000_chart_text(stream.read())
+        except (OSError, UnicodeError) as exc:
+            self.response2000_info.setText(
+                f"Could not read Response-2000 data: {exc}"
+            )
+            self.response2000_controls.show()
+            return
+
+        headers = dataset.get("headers", [])
+        rows = dataset.get("rows", [])
+        if (
+            not isinstance(headers, (list, tuple))
+            or len(headers) < 2
+            or not isinstance(rows, (list, tuple))
+            or not rows
+        ):
+            self.response2000_info.setText(
+                "No usable two-column numeric chart data was found. "
+                "Use Response-2000 > right-click Moment-Curvature chart > "
+                "Copy Chart Data / View Data, then save or paste the numeric "
+                "table to a text/CSV file."
+            )
+            self.response2000_controls.show()
+            return
+
+        self._response2000_dataset = dict(dataset)
+        self._response2000_path = str(path)
+
+        self.response2000_curvature_column.blockSignals(True)
+        self.response2000_moment_column.blockSignals(True)
+        try:
+            self.response2000_curvature_column.clear()
+            self.response2000_moment_column.clear()
+            for index, header in enumerate(headers):
+                label = str(header)
+                self.response2000_curvature_column.addItem(label, index)
+                self.response2000_moment_column.addItem(label, index)
+
+            x_index, y_index = suggest_response2000_columns(headers)
+            self.response2000_curvature_column.setCurrentIndex(
+                max(0, min(int(x_index), len(headers) - 1))
+            )
+            self.response2000_moment_column.setCurrentIndex(
+                max(0, min(int(y_index), len(headers) - 1))
+            )
+        finally:
+            self.response2000_curvature_column.blockSignals(False)
+            self.response2000_moment_column.blockSignals(False)
+
+        curvature_header = str(
+            headers[self.response2000_curvature_column.currentIndex()]
+        )
+        moment_header = str(
+            headers[self.response2000_moment_column.currentIndex()]
+        )
+        x_unit, y_unit = suggest_response2000_units(
+            curvature_header,
+            moment_header,
+        )
+        self.response2000_curvature_unit.blockSignals(True)
+        self.response2000_moment_unit.blockSignals(True)
+        try:
+            self._set_combo_data(
+                self.response2000_curvature_unit,
+                x_unit,
+            )
+            self._set_combo_data(
+                self.response2000_moment_unit,
+                y_unit,
+            )
+        finally:
+            self.response2000_curvature_unit.blockSignals(False)
+            self.response2000_moment_unit.blockSignals(False)
+
+        self.response2000_curvature_factor.setValue(1.0)
+        self.response2000_moment_factor.setValue(1.0)
+        self.response2000_controls.show()
+        self._update_moment_curvature_plot()
+
+    def _clear_response2000_data(self) -> None:
+        self._response2000_dataset = {}
+        self._response2000_path = ""
+        self.response2000_curvature_column.clear()
+        self.response2000_moment_column.clear()
+        self.response2000_compare_table.setRowCount(0)
+        self.response2000_compare_table.hide()
+        self.response2000_controls.hide()
+        self.moment_curvature_plot.clear_overlay()
+        self._update_moment_curvature_plot()
+
+    def _response2000_series(self) -> tuple[list[float], list[float]]:
+        x_column = self.response2000_curvature_column.currentData()
+        y_column = self.response2000_moment_column.currentData()
+        if x_column is None or y_column is None:
+            return [], []
+        return response2000_series(
+            self._response2000_dataset,
+            int(x_column),
+            int(y_column),
+            curvature_unit=str(
+                self.response2000_curvature_unit.currentData() or "same"
+            ),
+            moment_unit=str(
+                self.response2000_moment_unit.currentData() or "same"
+            ),
+            units=self._project_units,
+            curvature_factor=float(
+                self.response2000_curvature_factor.value()
+            ),
+            moment_factor=float(
+                self.response2000_moment_factor.value()
+            ),
+        )
+
+    def _populate_response2000_comparison(
+        self,
+        simulation_x: list[float],
+        simulation_y: list[float],
+        response_x: list[float],
+        response_y: list[float],
+    ) -> dict[str, Any]:
+        comparison = response2000_curve_comparison(
+            simulation_x,
+            simulation_y,
+            response_x,
+            response_y,
+        )
+        rows = comparison.get("metrics", [])
+        if not isinstance(rows, list) or not rows:
+            self.response2000_compare_table.setRowCount(0)
+            self.response2000_compare_table.hide()
+            return comparison
+
+        def value_text(value: object) -> str:
+            if value is None:
+                return "-"
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return "-"
+            if not math.isfinite(number):
+                return "-"
+            return f"{number:.6g}"
+
+        self.response2000_compare_table.setRowCount(len(rows))
+        for row_index, metric in enumerate(rows):
+            values = (
+                str(metric.get("label", "-")),
+                value_text(metric.get("simulation")),
+                value_text(metric.get("response2000")),
+                value_text(metric.get("difference_percent")),
+            )
+            for column, value in enumerate(values):
+                self.response2000_compare_table.setItem(
+                    row_index,
+                    column,
+                    QTableWidgetItem(value),
+                )
+        self.response2000_compare_table.show()
+        return comparison
+
     def _update_moment_curvature_plot(self) -> None:
         x, y, component, element_tag = moment_curvature_curve(self._result)
         if not x or not y:
@@ -5116,13 +5298,17 @@ class ResultsPanel(QWidget):
                 "Points: -   Peak |M|: -   Peak |κ|: -   Final: -"
             )
             self.moment_curvature_plot.set_series([], [])
+            self.moment_curvature_plot.clear_overlay()
+            self.response2000_compare_table.setRowCount(0)
+            self.response2000_compare_table.hide()
             return
 
         component_label = component or "M"
         peak_m = max(abs(value) for value in y)
         peak_k = max(abs(value) for value in x)
         self.moment_curvature_info.setText(
-            f"zeroLengthSection element {element_tag if element_tag is not None else '-'} "
+            f"zeroLengthSection element "
+            f"{element_tag if element_tag is not None else '-'} "
             f"· X = curvature κ · Y = section moment {component_label}"
         )
         self.moment_curvature_metrics.setText(
@@ -5132,6 +5318,52 @@ class ResultsPanel(QWidget):
             f"Final: ({x[-1]:.6g}, {y[-1]:.6g})"
         )
         self.moment_curvature_plot.set_series(x, y)
+
+        response_x, response_y = self._response2000_series()
+        if response_x and response_y:
+            self.moment_curvature_plot.set_overlay(
+                response_x,
+                response_y,
+                label="Response-2000",
+            )
+            comparison = self._populate_response2000_comparison(
+                x,
+                y,
+                response_x,
+                response_y,
+            )
+            filename = (
+                self._response2000_path.replace("\\", "/").split("/")[-1]
+                if self._response2000_path
+                else "Response-2000 data"
+            )
+            nrmse = comparison.get("moment_nrmse_percent")
+            nrmse_text = (
+                f"{float(nrmse):.3g}%"
+                if nrmse is not None
+                else "-"
+            )
+            unit_system = UnitSystem.from_mapping(self._project_units)
+            self.response2000_info.setText(
+                f"{filename} · {len(response_x)} valid point(s) · "
+                f"converted to SARE units "
+                f"[κ: 1/{unit_system.length}, "
+                f"M: {unit_system.moment_label}] · "
+                f"moment NRMSE over common κ range = {nrmse_text}. "
+                "Dashed curve = Response-2000; solid curve = SARE/OpenSees."
+            )
+            self.response2000_controls.show()
+        else:
+            self.moment_curvature_plot.clear_overlay()
+            self.response2000_compare_table.setRowCount(0)
+            self.response2000_compare_table.hide()
+            if self._response2000_dataset:
+                self.response2000_info.setText(
+                    "Choose numeric curvature and moment columns. Check source "
+                    "units/signs; the × factors can reverse sign or apply an "
+                    "additional scale."
+                )
+                self.response2000_controls.show()
 
     def _send_moment_curvature_to_hinge(self) -> None:
         x, y, component, element_tag = moment_curvature_curve(self._result)
