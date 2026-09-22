@@ -868,6 +868,26 @@ class ShellMeshDialog(QDialog):
         )
         form.addRow("", self.corotational)
 
+        self.use_local_x = QCheckBox(
+            "Override ASDShellQ4 local X axis for all mesh elements"
+        )
+        form.addRow("", self.use_local_x)
+
+        local_row = QHBoxLayout()
+        self.local_x_spins = [
+            _float_spin(
+                1.0 if index == 0 else 0.0,
+                low=-1.0e12,
+                high=1.0e12,
+            )
+            for index in range(3)
+        ]
+        for label, spin in zip(("X", "Y", "Z"), self.local_x_spins):
+            local_row.addWidget(QLabel(label))
+            local_row.addWidget(spin)
+        form.addRow("Local X vector:", local_row)
+        self.use_local_x.toggled.connect(self._sync_formulation)
+
         self.formulation.currentTextChanged.connect(
             self._sync_formulation
         )
@@ -902,8 +922,12 @@ class ShellMeshDialog(QDialog):
     def _sync_formulation(self, *_args) -> None:
         enabled = self.formulation.currentText() == "ASDShellQ4"
         self.corotational.setEnabled(enabled)
+        self.use_local_x.setEnabled(enabled)
+        for spin in self.local_x_spins:
+            spin.setEnabled(enabled and self.use_local_x.isChecked())
         if not enabled:
             self.corotational.setChecked(False)
+            self.use_local_x.setChecked(False)
 
     def _update_info(self, *_args) -> None:
         nu = self.divisions_u.value()
@@ -930,6 +954,17 @@ class ShellMeshDialog(QDialog):
             raise ValueError(
                 "Shell mesh requires a shell-compatible Section."
             )
+        local_x = None
+        if (
+            self.formulation.currentText() == "ASDShellQ4"
+            and self.use_local_x.isChecked()
+        ):
+            local_x = tuple(
+                float(spin.value())
+                for spin in self.local_x_spins
+            )
+            if sum(value * value for value in local_x) <= 1.0e-24:
+                raise ValueError("Shell local X vector cannot be zero.")
         return ShellMeshSpec(
             corner_nodes=corners,
             divisions_u=self.divisions_u.value(),
@@ -937,6 +972,7 @@ class ShellMeshDialog(QDialog):
             formulation=self.formulation.currentText(),
             section_tag=int(section_tag),
             corotational=self.corotational.isChecked(),
+            local_x=local_x,
         )
 
     def _accept(self) -> None:
