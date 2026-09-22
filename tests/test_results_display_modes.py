@@ -721,6 +721,21 @@ def test_dense_results_use_subtabs(qapp):
             panel.cyclic_detail_tabs.tabText(index)
             for index in range(panel.cyclic_detail_tabs.count())
         ] == ["Curve", "Experiment", "Reversals", "Cycles"]
+
+        panel.moment_curvature_detail_tabs.setCurrentIndex(1)
+        panel.show_solution_result("MomentCurvature")
+        assert panel.moment_curvature_detail_tabs.currentIndex() == 0
+
+        panel.specimen_detail_tabs.setCurrentIndex(2)
+        panel.show_solution_result("SpecimenResponse")
+        assert panel.specimen_detail_tabs.currentIndex() == 0
+
+        panel.convergence_detail_tabs.setCurrentIndex(1)
+        panel.show_solution_result("Convergence")
+        assert panel.convergence_detail_tabs.currentIndex() == 0
+
+        panel.show_calibration()
+        assert panel.calibration_detail_tabs.currentIndex() == 2
     finally:
         panel.close()
         panel.deleteLater()
