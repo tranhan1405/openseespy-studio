@@ -1589,7 +1589,7 @@ def test_geometry_sketch_snaps_endpoint_midpoint_and_intersection():
     assert '"midpoint"' in snap
     assert '"intersection"' in snap
     assert "16.0 * 16.0" in snap
-    assert "exact_distance2 <= 16.0 * 16.0" in snap
+    assert "best = min(candidates, key=lambda item: (item[1], item[0]))" in snap
     assert "split_line_geometry_at_point" in materialize
 
     # Rebuilding the tree during a sketch commit must not emit selection
@@ -2231,6 +2231,171 @@ def test_geometry_double_click_finishes_sketch_instead_of_editing_entity():
     assert marker in event_filter
     assert "self._left_press_pos = None" in event_filter
     assert "self.geometry_sketch_finished.emit()" in event_filter
+
+
+def test_geometry_sketch_tolerance_is_bounded_for_huge_coordinates():
+    project = ProjectDatabase(name="huge-coordinate-sketch")
+    project.add_point(PointGeometryData(1, "A", (0.0, 0.0, 0.0)))
+    project.add_point(
+        PointGeometryData(2, "B", (1.0e12, 0.0, 0.0))
+    )
+    dummy = SimpleNamespace(project=project)
+
+    tolerance = MainWindow._geometry_sketch_tolerance(dummy)
+
+    assert 1.0e-9 <= tolerance <= 1.0e-6
+
+
+def test_geometry_sketch_rejects_nonfinite_mouse_payloads():
+    dummy = SimpleNamespace(
+        project=ProjectDatabase(name="invalid-sketch-payload"),
+        actions={},
+        _geometry_line_point_tags=[],
+        _geometry_line_anchor_snap=None,
+        _geometry_surface_point_tags=[],
+    )
+
+    assert MainWindow._geometry_sketch_snap(
+        dummy,
+        {
+            "world": (math.nan, 0.0, 0.0),
+            "screen": (10.0, 10.0),
+        },
+    ) is None
+    assert MainWindow._geometry_sketch_snap(
+        dummy,
+        {
+            "world": (0.0, 0.0, 0.0),
+            "screen": (math.inf, 10.0),
+        },
+    ) is None
+
+
+def test_geometry_snap_prefers_visually_nearest_candidate_over_type_priority():
+    project = ProjectDatabase(name="nearest-snap")
+    project.add_point(PointGeometryData(1, "Endpoint", (0.15, 0.0, 0.0)))
+
+    class SnapAction:
+        def isChecked(self):
+            return True
+
+    class ViewportStub:
+        def geometry_world_to_screen(self, xyz):
+            return (float(xyz[0]) * 100.0, float(xyz[1]) * 100.0)
+
+        def geometry_sketch_plane(self):
+            return ("xy", 0.0)
+
+    dummy = SimpleNamespace(
+        project=project,
+        viewport=ViewportStub(),
+        actions={"geometry_snap": SnapAction()},
+        _geometry_line_point_tags=[],
+        _geometry_line_anchor_snap=None,
+        _geometry_surface_point_tags=[],
+        _geometry_sketch_intersections=[
+            SimpleNamespace(
+                point=(0.01, 0.0, 0.0),
+                line_tags=(10, 11),
+                parameters=(0.5, 0.5),
+            )
+        ],
+    )
+    dummy._geometry_point_on_active_sketch_plane = lambda _xyz: True
+
+    snap = MainWindow._geometry_sketch_snap(
+        dummy,
+        {
+            "world": (0.0, 0.0, 0.0),
+            "screen": (0.0, 0.0),
+        },
+    )
+
+    assert snap is not None
+    assert snap["kind"] == "intersection"
+    assert snap["xyz"] == pytest.approx((0.01, 0.0, 0.0))
+
+
+def test_geometry_sketch_tool_switch_clears_ghost_mouse_state():
+    source = inspect.getsource(ModelViewport.set_interaction_tool)
+
+    for state in (
+        "_left_press_pos = None",
+        "_right_press_pos = None",
+        "_nav_mode = None",
+        "_nav_last_pos = None",
+        "_last_geometry_sketch_qt_pos = None",
+        "_pending_hover_vtk_pos = None",
+    ):
+        assert state in source
+
+
+def test_geometry_sketch_plain_middle_mouse_cannot_rotate_workplane_edge_on():
+    source = inspect.getsource(ModelViewport._start_navigation)
+
+    assert 'self._interaction_tool == "geometry_sketch"' in source
+    assert 'self._nav_mode = "pan"' in source
+    assert 'self._nav_mode = "rotate"' in source
+
+
+def test_geometry_sketch_navigation_invalidates_stale_cursor_preview():
+    start = inspect.getsource(ModelViewport._start_navigation)
+    wheel = inspect.getsource(ModelViewport._wheel_zoom)
+    helper = inspect.getsource(
+        ModelViewport._invalidate_geometry_sketch_cursor_preview
+    )
+
+    assert "_invalidate_geometry_sketch_cursor_preview" in start
+    assert "_invalidate_geometry_sketch_cursor_preview" in wheel
+    assert '["cursor"] = None' in helper
+    assert '["snap_label"] = None' in helper
+    assert "_last_geometry_sketch_qt_pos = None" in helper
+
+
+def test_geometry_workplane_mapping_rejects_nonfinite_and_out_of_clip_hits():
+    source = inspect.getsource(ModelViewport.geometry_workplane_point)
+
+    assert "np.all(np.isfinite(near))" in source
+    assert "np.all(np.isfinite(far))" in source
+    assert "math.isfinite(denominator)" in source
+    assert "not math.isfinite(t)" in source
+    assert "t < -1.0e-6" in source
+    assert "t > 1.0 + 1.0e-6" in source
+    assert "np.all(np.isfinite(point))" in source
+
+
+def test_geometry_sketch_plane_rejects_nan_inf_offsets_and_points():
+    plane = inspect.getsource(ModelViewport.set_geometry_sketch_plane)
+    offset = inspect.getsource(
+        ModelViewport.set_geometry_sketch_plane_offset_from_point
+    )
+
+    assert "math.isfinite(numeric_offset)" in plane
+    assert "offset must be finite" in plane
+    assert "all(math.isfinite(value) for value in point)" in offset
+    assert "coordinates must be finite" in offset
+
+
+def test_geometry_view_change_validates_name_and_resets_sketch_cursor_state():
+    source = inspect.getsource(ModelViewport.set_view)
+
+    assert "normalized = str(view).strip().lower()" in source
+    assert "if normalized not in functions:" in source
+    assert "Viewport view must be iso, xy, xz, or yz." in source
+    assert "_invalidate_geometry_sketch_cursor_preview" in source
+    assert "self._current_view = normalized" in source
+
+
+def test_geometry_redraw_and_domain_switch_reset_stale_sketch_pointer_state():
+    draw = inspect.getsource(ModelViewport.draw_model)
+    domain = inspect.getsource(ModelViewport.set_display_domain)
+
+    assert "_last_geometry_sketch_qt_pos = None" in draw
+    assert "_left_press_pos = None" in domain
+    assert "_right_press_pos = None" in domain
+    assert "_last_geometry_sketch_qt_pos = None" in domain
+    assert 'normalized != "geometry"' in domain
+    assert "clear_geometry_sketch_preview" in domain
 
 
 def test_geometry_rectangle_draw_uses_two_click_geometry_only_surface():
