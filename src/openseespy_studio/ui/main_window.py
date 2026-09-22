@@ -6455,6 +6455,44 @@ class MainWindow(QMainWindow):
             self.viewport.set_geometry_sketch_plane_offset_from_point(
                 anchor_xyz
             )
+
+            # Midpoint/intersection snaps change existing topology. Commit
+            # those immediately so the snap cache is rebuilt before P2.
+            # Free/endpoint anchors remain transient until a real segment is
+            # created, avoiding orphan Points when the user cancels after P1.
+            if snap.get("line_tags"):
+                before = self.project.to_dict()
+                try:
+                    point_tag, changed = (
+                        self._materialize_geometry_sketch_point(snap)
+                    )
+                except (TypeError, ValueError) as exc:
+                    self.project = ProjectDatabase.from_dict(before)
+                    self.model = self.project.model
+                    self._refresh_all(reset_camera=False)
+                    self.status_message.setText(str(exc))
+                    return
+                self._geometry_line_point_tags = [point_tag]
+                self._refresh_geometry_sketch_snap_cache()
+                if changed:
+                    self.model = self.project.model
+                    self._refresh_all(
+                        f"Sketch topology anchor Point {point_tag}",
+                        reset_camera=False,
+                    )
+                    self._record_project_change(
+                        f"Sketch topology Point {point_tag}",
+                        before,
+                    )
+                point = self.project.points[point_tag]
+                self.viewport.show_geometry_sketch_preview([point.xyz])
+                plane, offset = self.viewport.geometry_sketch_plane()
+                self.status_message.setText(
+                    f"Polyline anchor P{point_tag} · "
+                    f"{plane.upper()} @ {offset:g} · click next point"
+                )
+                return
+
             self._geometry_line_anchor_snap = dict(snap)
             self.viewport.show_geometry_sketch_preview([anchor_xyz])
             plane, offset = self.viewport.geometry_sketch_plane()
