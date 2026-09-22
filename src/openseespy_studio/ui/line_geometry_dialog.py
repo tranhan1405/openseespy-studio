@@ -134,6 +134,7 @@ class LineGeometryDialog(QDialog):
         self.tag = QSpinBox()
         self.tag.setRange(1, 10_000_000)
         self.tag.setValue(line.tag if line else int(next_tag))
+        self.tag.setEnabled(line is None)
         form.addRow("Tag:", self.tag)
 
         self.name = QLineEdit(
