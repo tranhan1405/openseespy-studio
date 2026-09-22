@@ -81,10 +81,11 @@ def test_layered_shell_round_trip_and_total_thickness():
     )
     section = SectionData(
         3,
-        "Two layer",
+        "Three layer",
         "LayeredShell",
         shell_layers=[
-            ShellLayerData(1, 0.08),
+            ShellLayerData(1, 0.04),
+            ShellLayerData(1, 0.04),
             ShellLayerData(2, 0.02),
         ],
     )
@@ -93,6 +94,19 @@ def test_layered_shell_round_trip_and_total_thickness():
     restored = ProjectDatabase.from_dict(project.to_dict())
     assert restored.sections[3].shell_total_thickness() == pytest.approx(0.10)
     assert restored.sections[3].shell_nd_material_tags() == {1, 2}
+
+
+def test_layered_shell_requires_at_least_three_layers():
+    with pytest.raises(ValueError, match=r"at least three material layers"):
+        SectionData(
+            99,
+            "Invalid two-layer shell",
+            "LayeredShell",
+            shell_layers=[
+                ShellLayerData(1, 0.05),
+                ShellLayerData(1, 0.05),
+            ],
+        )
 
 
 def test_nonlinear_shell_generator_orders_nd_material_before_section():
@@ -151,7 +165,8 @@ def test_layered_shell_generator_emits_layer_pairs():
         "Layers",
         "LayeredShell",
         shell_layers=[
-            ShellLayerData(1, 0.08),
+            ShellLayerData(1, 0.04),
+            ShellLayerData(1, 0.04),
             ShellLayerData(2, 0.02),
         ],
     )
@@ -160,7 +175,10 @@ def test_layered_shell_generator_emits_layer_pairs():
         units={"length": "m", "force": "N", "time": "s"},
         nd_materials=nd_materials,
     )[0]
-    assert line == "ops.section('LayeredShell', 7, 2, 1, 0.08, 2, 0.02)"
+    assert line == (
+        "ops.section('LayeredShell', 7, 3, "
+        "1, 0.04, 1, 0.04, 2, 0.02)"
+    )
 
 
 @pytest.mark.parametrize(
