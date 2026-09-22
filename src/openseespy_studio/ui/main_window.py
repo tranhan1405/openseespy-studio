@@ -2883,16 +2883,21 @@ class MainWindow(QMainWindow):
         add_group(
             home,
             "Geometry",
-            large=("frame_2d",),
+            large=("line_geometry",),
             small=(
-                "column_1d",
-                "grid",
                 "point_geometry",
-                "line_geometry",
                 "surface_geometry",
-                "node",
+                "column_1d",
+                "frame_2d",
+                "grid",
                 "extrude",
             ),
+        )
+        add_group(
+            home,
+            "FE Model",
+            large=("node",),
+            small=("shell_input",),
             widgets=(frame_button, truss_button),
         )
         add_group(
