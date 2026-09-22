@@ -11410,7 +11410,7 @@ class MainWindow(QMainWindow):
                 lambda checked=False, k=str(kind), v=value:
                 self._ask_ai_about_tree_item(k, v)
             )
-            exec_menu()
+            menu.exec(self.tree.viewport().mapToGlobal(position))
 
         if kind == "model_root":
             menu.addAction(self.actions["check_model"])
