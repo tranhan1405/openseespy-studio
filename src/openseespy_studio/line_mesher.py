@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import math
 
 from .model import FRAME_ELEMENT_TYPES
-from .project import LineGeometryData, ProjectDatabase
+from .project import LineGeometryData, PointGeometryData, ProjectDatabase
 
 
 @dataclass(slots=True)
@@ -1235,4 +1235,499 @@ def audit_line_network_connectivity(
                 )
             )
     return issues
+
+@dataclass(slots=True)
+class LineGeometryIntersection:
+    line_tags: tuple[int, int]
+    point: tuple[float, float, float]
+    parameters: tuple[float, float]
+    kind: str
+
+
+@dataclass(slots=True)
+class LineSplitResult:
+    original_line_tag: int
+    line_tags: list[int] = field(default_factory=list)
+    created_line_tags: list[int] = field(default_factory=list)
+    point_tags: list[int] = field(default_factory=list)
+    created_point_tags: list[int] = field(default_factory=list)
+    mesh_results: dict[int, LineMeshResult] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class LineNetworkConformResult:
+    input_line_tags: list[int] = field(default_factory=list)
+    output_line_tags: list[int] = field(default_factory=list)
+    split_line_tags: list[int] = field(default_factory=list)
+    created_line_tags: list[int] = field(default_factory=list)
+    created_point_tags: list[int] = field(default_factory=list)
+    intersection_count: int = 0
+    mesh_results: dict[int, LineMeshResult] = field(default_factory=dict)
+
+
+def line_geometry_intersections(
+    project: ProjectDatabase,
+    line_tags=None,
+) -> list[LineGeometryIntersection]:
+    """Return non-collinear geometric intersections between Geometry Lines."""
+
+    tags = sorted({
+        int(tag)
+        for tag in (
+            project.lines.keys()
+            if line_tags is None
+            else line_tags
+        )
+        if int(tag) in project.lines
+    })
+    if len(tags) < 2:
+        return []
+
+    point_coords = [
+        project.points[point_tag].xyz
+        for tag in tags
+        for point_tag in (
+            project.lines[tag].point_i,
+            project.lines[tag].point_j,
+        )
+        if point_tag in project.points
+    ]
+    tolerance = _merge_tolerance(
+        project,
+        point_coords or [(0.0, 0.0, 0.0)],
+    )
+    endpoint_tol = 1.0e-8
+    intersections: list[LineGeometryIntersection] = []
+
+    for left_index, left_tag in enumerate(tags):
+        left = project.lines[left_tag]
+        a, b, _ = _line_points(project, left)
+        for right_tag in tags[left_index + 1:]:
+            right = project.lines[right_tag]
+            c, d, _ = _line_points(project, right)
+            intersection = _segment_intersection(
+                a,
+                b,
+                c,
+                d,
+                tolerance,
+            )
+            if intersection is None:
+                continue
+            point, s, t = intersection
+            left_end = s <= endpoint_tol or s >= 1.0 - endpoint_tol
+            right_end = t <= endpoint_tol or t >= 1.0 - endpoint_tol
+            if left_end and right_end:
+                kind = "endpoint"
+            elif left_end or right_end:
+                kind = "t_junction"
+            else:
+                kind = "crossing"
+            intersections.append(
+                LineGeometryIntersection(
+                    line_tags=(left_tag, right_tag),
+                    point=tuple(float(value) for value in point),
+                    parameters=(float(s), float(t)),
+                    kind=kind,
+                )
+            )
+    return intersections
+
+
+def _find_geometry_point_at(
+    project: ProjectDatabase,
+    xyz: tuple[float, float, float],
+    tolerance: float,
+) -> int | None:
+    best: tuple[float, int] | None = None
+    tol2 = tolerance * tolerance
+    for tag, point in project.points.items():
+        distance2 = sum(
+            (float(point.xyz[index]) - float(xyz[index])) ** 2
+            for index in range(3)
+        )
+        if distance2 <= tol2 and (
+            best is None or distance2 < best[0]
+        ):
+            best = (distance2, int(tag))
+    return None if best is None else best[1]
+
+
+def _allocate_split_divisions(
+    total_divisions: int,
+    fractions: list[float],
+) -> list[int]:
+    count = len(fractions)
+    if count <= 0:
+        return []
+    total = max(int(total_divisions), count)
+    allocation = [1] * count
+    remaining = total - count
+    if remaining <= 0:
+        return allocation
+
+    weight_sum = sum(max(float(value), 0.0) for value in fractions)
+    if weight_sum <= 1.0e-15:
+        for index in range(remaining):
+            allocation[index % count] += 1
+        return allocation
+
+    raw = [
+        remaining * max(float(value), 0.0) / weight_sum
+        for value in fractions
+    ]
+    base = [int(math.floor(value)) for value in raw]
+    allocation = [
+        allocation[index] + base[index]
+        for index in range(count)
+    ]
+    leftovers = remaining - sum(base)
+    order = sorted(
+        range(count),
+        key=lambda index: (
+            -(raw[index] - base[index]),
+            -fractions[index],
+            index,
+        ),
+    )
+    for index in order[:leftovers]:
+        allocation[index] += 1
+    return allocation
+
+
+def _split_unmeshed_line(
+    project: ProjectDatabase,
+    line_tag: int,
+    split_points: list[tuple[float, int]],
+) -> LineSplitResult:
+    """Split one unmeshed Line at normalized parameters using existing Points."""
+
+    tag = int(line_tag)
+    source = project.lines.get(tag)
+    if source is None:
+        raise ValueError(f"Line geometry {tag} does not exist.")
+    if inspect_line_mesh_state(project, tag).live_element_tags:
+        raise ValueError(
+            f"Line geometry {tag} must be unmeshed before topology splitting."
+        )
+
+    endpoint_tol = 1.0e-8
+    normalized: list[tuple[float, int]] = []
+    for parameter, point_tag in sorted(
+        (
+            (float(parameter), int(point_tag))
+            for parameter, point_tag in split_points
+        ),
+        key=lambda item: item[0],
+    ):
+        if parameter <= endpoint_tol or parameter >= 1.0 - endpoint_tol:
+            continue
+        if point_tag not in project.points:
+            raise ValueError(
+                f"Split point Geometry Point {point_tag} does not exist."
+            )
+        if normalized and abs(parameter - normalized[-1][0]) <= endpoint_tol:
+            continue
+        normalized.append((parameter, point_tag))
+
+    if not normalized:
+        return LineSplitResult(
+            original_line_tag=tag,
+            line_tags=[tag],
+        )
+
+    boundaries = [
+        (0.0, int(source.point_i)),
+        *normalized,
+        (1.0, int(source.point_j)),
+    ]
+    fractions = [
+        boundaries[index + 1][0] - boundaries[index][0]
+        for index in range(len(boundaries) - 1)
+    ]
+    if any(value <= endpoint_tol for value in fractions):
+        raise ValueError(
+            f"Line geometry {tag} split would create a zero-length segment."
+        )
+
+    if source.mesh_mode == "divisions":
+        divisions = _allocate_split_divisions(
+            source.divisions,
+            fractions,
+        )
+    else:
+        divisions = [source.divisions] * len(fractions)
+
+    source_data = source.to_dict()
+    child_tags: list[int] = []
+    created_line_tags: list[int] = []
+    for index, fraction in enumerate(fractions):
+        child_tag = tag if index == 0 else project.next_line_tag()
+        data = dict(source_data)
+        data["tag"] = child_tag
+        data["name"] = (
+            source.name
+            if index == 0
+            else f"{source.name} [{index + 1}/{len(fractions)}]"
+        )
+        data["point_i"] = boundaries[index][1]
+        data["point_j"] = boundaries[index + 1][1]
+        data["divisions"] = divisions[index]
+        data["bias"] = float(source.bias) ** float(fraction)
+        data["generated_node_tags"] = []
+        data["owned_node_tags"] = []
+        data["generated_element_tags"] = []
+        child = LineGeometryData.from_dict(data)
+        if index == 0:
+            project.update_line(tag, child)
+        else:
+            project.add_line(child)
+            created_line_tags.append(child_tag)
+        child_tags.append(child_tag)
+
+    return LineSplitResult(
+        original_line_tag=tag,
+        line_tags=child_tags,
+        created_line_tags=created_line_tags,
+        point_tags=[point_tag for _, point_tag in normalized],
+    )
+
+
+def split_line_geometry_at_point(
+    project: ProjectDatabase,
+    line_tag: int,
+    xyz,
+    *,
+    remesh: bool = True,
+) -> LineSplitResult:
+    """Split a Line at one interior point projected onto its straight segment."""
+
+    tag = int(line_tag)
+    line = project.lines.get(tag)
+    if line is None:
+        raise ValueError(f"Line geometry {tag} does not exist.")
+    point = tuple(float(value) for value in xyz)
+    if len(point) != 3 or any(not math.isfinite(value) for value in point):
+        raise ValueError("Line split point requires three finite coordinates.")
+
+    a, b, length = _line_points(project, line)
+    direction = tuple(b[index] - a[index] for index in range(3))
+    length2 = length * length
+    parameter = sum(
+        (point[index] - a[index]) * direction[index]
+        for index in range(3)
+    ) / length2
+    projected = tuple(
+        a[index] + parameter * direction[index]
+        for index in range(3)
+    )
+    tolerance = _merge_tolerance(project, (a, b, point))
+    if _distance(projected, point) > tolerance:
+        raise ValueError("Line split point is not on the Geometry Line.")
+    if not 1.0e-8 < parameter < 1.0 - 1.0e-8:
+        raise ValueError("Line split point must lie inside the Line, not at an end.")
+
+    before = project.to_dict()
+    state = inspect_line_mesh_state(project, tag)
+    had_mesh = bool(state.live_element_tags)
+    created_point_tags: list[int] = []
+    try:
+        if had_mesh:
+            delete_line_mesh(project, tag)
+        point_tag = _find_geometry_point_at(
+            project,
+            projected,
+            tolerance,
+        )
+        if point_tag is None:
+            point_tag = project.next_point_tag()
+            project.add_point(
+                PointGeometryData(
+                    point_tag,
+                    f"Line intersection {point_tag}",
+                    projected,
+                )
+            )
+            created_point_tags.append(point_tag)
+
+        result = _split_unmeshed_line(
+            project,
+            tag,
+            [(parameter, point_tag)],
+        )
+        result.created_point_tags = created_point_tags
+        if had_mesh and remesh:
+            for child_tag in result.line_tags:
+                result.mesh_results[child_tag] = mesh_line_geometry(
+                    project,
+                    child_tag,
+                )
+        return result
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+
+
+def conform_line_network(
+    project: ProjectDatabase,
+    line_tags=None,
+    *,
+    mesh: bool = True,
+) -> LineNetworkConformResult:
+    """Split selected Lines at crossings/T-junctions and create a conforming FE network."""
+
+    tags = sorted({
+        int(tag)
+        for tag in (
+            project.lines.keys()
+            if line_tags is None
+            else line_tags
+        )
+    })
+    missing = [tag for tag in tags if tag not in project.lines]
+    if missing:
+        raise ValueError(
+            "Geometry Line tag(s) do not exist: "
+            + ", ".join(map(str, missing))
+        )
+    if not tags:
+        return LineNetworkConformResult()
+
+    intersections = line_geometry_intersections(project, tags)
+    interior_by_line: dict[int, list[tuple[float, tuple[float, float, float]]]] = {
+        tag: [] for tag in tags
+    }
+    endpoint_tol = 1.0e-8
+    for intersection in intersections:
+        left_tag, right_tag = intersection.line_tags
+        left_parameter, right_parameter = intersection.parameters
+        if endpoint_tol < left_parameter < 1.0 - endpoint_tol:
+            interior_by_line[left_tag].append(
+                (left_parameter, intersection.point)
+            )
+        if endpoint_tol < right_parameter < 1.0 - endpoint_tol:
+            interior_by_line[right_tag].append(
+                (right_parameter, intersection.point)
+            )
+
+    states = {
+        tag: inspect_line_mesh_state(project, tag)
+        for tag in tags
+    }
+    stale = [
+        tag for tag, state in states.items()
+        if not state.healthy
+    ]
+    if stale:
+        raise ValueError(
+            "Cannot conform stale Line mesh ownership: "
+            + ", ".join(map(str, stale))
+        )
+
+    candidate_owned_nodes = {
+        int(node_tag)
+        for state in states.values()
+        for node_tag in state.owned_node_tags
+    }
+    before = project.to_dict()
+    created_point_tags: list[int] = []
+    created_line_tags: list[int] = []
+    split_line_tags: list[int] = []
+    output_line_tags: list[int] = []
+    mesh_results: dict[int, LineMeshResult] = {}
+
+    try:
+        for tag in tags:
+            if states[tag].live_element_tags:
+                delete_line_mesh(project, tag)
+
+        for node_tag in sorted(candidate_owned_nodes):
+            if node_tag not in project.model.nodes:
+                continue
+            if any(
+                node_tag in element.node_tags()
+                for element in project.model.elements.values()
+            ):
+                continue
+            project.model.nodes.pop(node_tag, None)
+
+        point_coords = [
+            project.points[point_tag].xyz
+            for tag in tags
+            for point_tag in (
+                project.lines[tag].point_i,
+                project.lines[tag].point_j,
+            )
+            if point_tag in project.points
+        ]
+        tolerance = _merge_tolerance(
+            project,
+            point_coords or [(0.0, 0.0, 0.0)],
+        )
+
+        split_definitions: dict[int, list[tuple[float, int]]] = {
+            tag: [] for tag in tags
+        }
+        canonical_points: list[tuple[tuple[float, float, float], int]] = []
+
+        for tag in tags:
+            for parameter, xyz in sorted(interior_by_line[tag]):
+                point_tag = None
+                for existing_xyz, existing_tag in canonical_points:
+                    if _distance(existing_xyz, xyz) <= tolerance:
+                        point_tag = existing_tag
+                        break
+                if point_tag is None:
+                    point_tag = _find_geometry_point_at(
+                        project,
+                        xyz,
+                        tolerance,
+                    )
+                if point_tag is None:
+                    point_tag = project.next_point_tag()
+                    project.add_point(
+                        PointGeometryData(
+                            point_tag,
+                            f"Line intersection {point_tag}",
+                            xyz,
+                        )
+                    )
+                    created_point_tags.append(point_tag)
+                canonical_points.append((xyz, point_tag))
+                split_definitions[tag].append((parameter, point_tag))
+
+        for tag in tags:
+            if split_definitions[tag]:
+                split = _split_unmeshed_line(
+                    project,
+                    tag,
+                    split_definitions[tag],
+                )
+                split_line_tags.append(tag)
+                created_line_tags.extend(split.created_line_tags)
+                output_line_tags.extend(split.line_tags)
+            else:
+                output_line_tags.append(tag)
+
+        output_line_tags = sorted(set(output_line_tags))
+        if mesh:
+            for tag in output_line_tags:
+                mesh_results[tag] = mesh_line_geometry(project, tag)
+
+        return LineNetworkConformResult(
+            input_line_tags=tags,
+            output_line_tags=output_line_tags,
+            split_line_tags=sorted(split_line_tags),
+            created_line_tags=sorted(set(created_line_tags)),
+            created_point_tags=sorted(set(created_point_tags)),
+            intersection_count=len(intersections),
+            mesh_results=mesh_results,
+        )
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
 
