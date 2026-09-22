@@ -1935,6 +1935,8 @@ def test_new_empty_project_draw_polyline_with_real_qt_mouse_events():
     finally:
         if "original_mapper" in locals():
             window.viewport.geometry_workplane_point = original_mapper
+        window._set_dirty(False)
+        window.undo_stack.setClean()
         window.close()
         app.processEvents()
         if owns_app:
@@ -1968,6 +1970,8 @@ def test_empty_project_polyline_direct_payload_commits_segment():
         assert len(window.project.points) == 2, window.status_message.text()
         assert len(window.project.lines) == 1, window.status_message.text()
     finally:
+        window._set_dirty(False)
+        window.undo_stack.setClean()
         window.close()
         app.processEvents()
 
@@ -2015,6 +2019,8 @@ def test_new_empty_project_draw_rectangle_with_real_qt_mouse_events():
     finally:
         if "original_mapper" in locals():
             window.viewport.geometry_workplane_point = original_mapper
+        window._set_dirty(False)
+        window.undo_stack.setClean()
         window.close()
         app.processEvents()
 
@@ -2044,5 +2050,7 @@ def test_new_empty_project_point_dialog_creates_visible_geometry():
         assert window.viewport._display_domain == "geometry"
         assert 1 in window.viewport._points
     finally:
+        window._set_dirty(False)
+        window.undo_stack.setClean()
         window.close()
         app.processEvents()
