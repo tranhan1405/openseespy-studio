@@ -85,6 +85,8 @@ class ModelViewport(QWidget):
         self._lines: dict[int, LineGeometryData] = {}
         self._surfaces: dict[int, SurfaceGeometryData] = {}
         self._display_domain = "fe"
+        self._geometry_mesh_overlay_visible = False
+        self._surface_orientation_tags: set[int] = set()
         self._units: dict[str, str] = {
             "length": "m",
             "force": "kN",
@@ -1835,6 +1837,145 @@ class ModelViewport(QWidget):
         self._hover_ref = None
         self._render_model(reset_camera=True)
 
+    def set_geometry_mesh_overlay_visible(
+        self,
+        visible: bool,
+    ) -> None:
+        """Toggle a non-pickable Shell FE wireframe over Geometry mode."""
+        value = bool(visible)
+        if value == self._geometry_mesh_overlay_visible:
+            return
+        self._geometry_mesh_overlay_visible = value
+        if self._display_domain == "geometry":
+            self._render_model(reset_camera=False)
+
+    def geometry_mesh_overlay_visible(self) -> bool:
+        return bool(self._geometry_mesh_overlay_visible)
+
+    def clear_surface_orientation(
+        self,
+        *,
+        render: bool = True,
+    ) -> None:
+        self._surface_orientation_tags.clear()
+        for name in (
+            "surface-axis-x",
+            "surface-axis-y",
+            "surface-axis-n",
+        ):
+            self._remove_overlay(name)
+        if render:
+            self.plotter.render()
+
+    def show_surface_orientation(
+        self,
+        surface_tags,
+    ) -> None:
+        self._surface_orientation_tags = {
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self._surfaces
+        }
+        if self._display_domain != "geometry":
+            self.set_display_domain("geometry")
+            return
+        self._render_surface_orientation_overlays()
+        self.plotter.render()
+
+    @staticmethod
+    def _surface_axes(surface):
+        points = np.asarray(surface.points, dtype=float)
+        if points.shape != (4, 3):
+            return None
+        center = points.mean(axis=0)
+
+        normal = np.zeros(3, dtype=float)
+        for index in range(4):
+            current = points[index]
+            following = points[(index + 1) % 4]
+            normal += np.asarray((
+                (current[1] - following[1])
+                * (current[2] + following[2]),
+                (current[2] - following[2])
+                * (current[0] + following[0]),
+                (current[0] - following[0])
+                * (current[1] + following[1]),
+            ))
+        norm_n = float(np.linalg.norm(normal))
+        if norm_n <= 1.0e-12:
+            return None
+        normal /= norm_n
+
+        if getattr(surface, "local_x", None) is not None:
+            local_x = np.asarray(surface.local_x, dtype=float)
+        else:
+            local_x = points[1] - points[0]
+        local_x = local_x - normal * float(np.dot(local_x, normal))
+        norm_x = float(np.linalg.norm(local_x))
+        if norm_x <= 1.0e-12:
+            local_x = points[3] - points[0]
+            local_x = local_x - normal * float(np.dot(local_x, normal))
+            norm_x = float(np.linalg.norm(local_x))
+        if norm_x <= 1.0e-12:
+            return None
+        local_x /= norm_x
+        local_y = np.cross(normal, local_x)
+        norm_y = float(np.linalg.norm(local_y))
+        if norm_y <= 1.0e-12:
+            return None
+        local_y /= norm_y
+
+        edge_lengths = [
+            float(np.linalg.norm(points[(i + 1) % 4] - points[i]))
+            for i in range(4)
+        ]
+        scale = max(min(edge_lengths), 1.0e-6) * 0.28
+        return center, local_x, local_y, normal, scale
+
+    def _render_surface_orientation_overlays(self) -> None:
+        for name in (
+            "surface-axis-x",
+            "surface-axis-y",
+            "surface-axis-n",
+        ):
+            self._remove_overlay(name)
+        if (
+            self._display_domain != "geometry"
+            or not self._surface_orientation_tags
+        ):
+            return
+
+        x_records = []
+        y_records = []
+        n_records = []
+        for tag in sorted(self._surface_orientation_tags):
+            surface = self._surfaces.get(tag)
+            if surface is None:
+                continue
+            axes = self._surface_axes(surface)
+            if axes is None:
+                continue
+            center, local_x, local_y, normal, scale = axes
+            x_records.append((center, local_x, scale))
+            y_records.append((center, local_y, scale))
+            n_records.append((center, normal, scale))
+
+        for name, records, color in (
+            ("surface-axis-x", x_records, "#d62728"),
+            ("surface-axis-y", y_records, "#2ca02c"),
+            ("surface-axis-n", n_records, "#1f77b4"),
+        ):
+            mesh = self._batched_arrow_mesh(records)
+            if mesh is None:
+                continue
+            self.plotter.add_mesh(
+                mesh,
+                name=name,
+                color=color,
+                pickable=False,
+                render=False,
+            )
+
     def _render_model(self, *, reset_camera: bool) -> None:
         # A model/visibility rebuild invalidates every cached post-processing
         # mesh because its geometry/scope may no longer match the scene.
@@ -1941,6 +2082,35 @@ class ModelViewport(QWidget):
                     render=False,
                 )
 
+            if self._geometry_mesh_overlay_visible:
+                shell_tags = sorted({
+                    int(element_tag)
+                    for surface in self._surfaces.values()
+                    for element_tag in surface.generated_element_tags
+                    if (
+                        int(element_tag) in self._model.elements
+                        and self._model.elements[
+                            int(element_tag)
+                        ].element_type in SHELL_ELEMENT_TYPES
+                    )
+                })
+                mesh = self._batched_shell_mesh(
+                    self._model,
+                    shell_tags,
+                )
+                if mesh is not None:
+                    self.plotter.add_mesh(
+                        mesh,
+                        name="geometry-shell-mesh-overlay",
+                        style="wireframe",
+                        color="#40586f",
+                        line_width=1.4,
+                        opacity=0.72,
+                        pickable=False,
+                        render=False,
+                    )
+
+            self._render_surface_orientation_overlays()
             self.set_view(self._current_view, render=False)
             if reset_camera:
                 self.plotter.reset_camera()
