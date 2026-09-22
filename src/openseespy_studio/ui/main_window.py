@@ -13463,6 +13463,7 @@ class MainWindow(QMainWindow):
                 tags,
             )
         except (TypeError, ValueError) as exc:
+            self.viewport.clear_line_intersection_preview()
             QMessageBox.warning(
                 self,
                 "Geometry Line Intersections",
@@ -13470,7 +13471,7 @@ class MainWindow(QMainWindow):
             )
             return
         if not intersections:
-            self.viewport.clear_line_intersection_preview(render=False)
+            self.viewport.clear_line_intersection_preview()
             QMessageBox.information(
                 self,
                 "Geometry Line Intersections",
