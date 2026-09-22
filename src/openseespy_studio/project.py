@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 36
+PROJECT_FORMAT_VERSION = 37
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -3455,6 +3455,75 @@ class SurfaceEdgeLoadData:
 
 
 @dataclass
+class SurfacePressureData:
+    tag: int
+    name: str
+    surface_tag: int
+    pattern_tag: int
+    pressure: float
+    generated_element_load_tags: list[int] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.tag = _strict_int(self.tag, "Surface pressure tag")
+        self.surface_tag = _strict_int(
+            self.surface_tag,
+            "Surface pressure Surface tag",
+        )
+        self.pattern_tag = _strict_int(
+            self.pattern_tag,
+            "Surface pressure pattern tag",
+        )
+        self.name = str(self.name).strip() or f"Surface Pressure {self.tag}"
+        self.pressure = float(self.pressure)
+        if self.tag <= 0 or self.surface_tag <= 0 or self.pattern_tag <= 0:
+            raise ValueError(
+                "Surface pressure tag, Surface tag, and pattern tag "
+                "must be positive."
+            )
+        if not math.isfinite(self.pressure):
+            raise ValueError("Surface pressure value must be finite.")
+        if abs(self.pressure) <= 1.0e-15:
+            raise ValueError("Surface pressure value cannot be zero.")
+        ordered: list[int] = []
+        seen: set[int] = set()
+        for tag in self.generated_element_load_tags:
+            load_tag = _strict_int(
+                tag,
+                "Surface pressure generated element-load tag",
+            )
+            if load_tag in seen:
+                continue
+            seen.add(load_tag)
+            ordered.append(load_tag)
+        self.generated_element_load_tags = ordered
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "surface_tag": self.surface_tag,
+            "pattern_tag": self.pattern_tag,
+            "pressure": self.pressure,
+            "generated_element_load_tags": list(
+                self.generated_element_load_tags
+            ),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SurfacePressureData":
+        return cls(
+            tag=data["tag"],
+            name=str(data.get("name", "")),
+            surface_tag=data["surface_tag"],
+            pattern_tag=data["pattern_tag"],
+            pressure=float(data.get("pressure", 0.0)),
+            generated_element_load_tags=list(
+                data.get("generated_element_load_tags", [])
+            ),
+        )
+
+
+@dataclass
 class SelectionSetData:
     name: str
     node_tags: set[int] = field(default_factory=set)
@@ -3501,6 +3570,9 @@ class ProjectDatabase:
     surface_edge_loads: dict[int, SurfaceEdgeLoadData] = field(
         default_factory=dict
     )
+    surface_pressures: dict[int, SurfacePressureData] = field(
+        default_factory=dict
+    )
     materials: dict[int, MaterialData] = field(default_factory=dict)
     nd_materials: dict[int, NDMaterialData] = field(default_factory=dict)
 
@@ -3541,6 +3613,7 @@ class ProjectDatabase:
         self.surfaces.clear()
         self.surface_edge_supports.clear()
         self.surface_edge_loads.clear()
+        self.surface_pressures.clear()
         self.constraints.clear()
         self.connections.clear()
         self.time_series.clear()
@@ -4174,6 +4247,9 @@ class ProjectDatabase:
             for edge_load in self.surface_edge_loads.values():
                 if edge_load.surface_tag == original_tag:
                     edge_load.surface_tag = surface.tag
+            for surface_pressure in self.surface_pressures.values():
+                if surface_pressure.surface_tag == original_tag:
+                    surface_pressure.surface_tag = surface.tag
 
     def remove_surface(self, tag: int) -> None:
         tag = _strict_int(tag, "Surface geometry tag")
@@ -4187,7 +4263,12 @@ class ProjectDatabase:
             for edge_load in self.surface_edge_loads.values()
             if edge_load.surface_tag == tag
         )
-        if support_tags or edge_load_tags:
+        pressure_tags = sorted(
+            pressure.tag
+            for pressure in self.surface_pressures.values()
+            if pressure.surface_tag == tag
+        )
+        if support_tags or edge_load_tags or pressure_tags:
             details: list[str] = []
             if support_tags:
                 details.append(
@@ -4198,6 +4279,11 @@ class ProjectDatabase:
                 details.append(
                     "managed edge line load(s) "
                     + ", ".join(map(str, edge_load_tags))
+                )
+            if pressure_tags:
+                details.append(
+                    "managed Surface pressure(s) "
+                    + ", ".join(map(str, pressure_tags))
                 )
             raise ValueError(
                 f"Surface geometry {tag} has "
@@ -4359,6 +4445,104 @@ class ProjectDatabase:
     def remove_surface_edge_load_definition(self, tag: int) -> None:
         normalized = _strict_int(tag, "Surface edge load tag")
         self.surface_edge_loads.pop(normalized, None)
+
+    def next_surface_pressure_tag(self) -> int:
+        return max(self.surface_pressures, default=0) + 1
+
+    def _validate_surface_pressure(
+        self,
+        pressure: SurfacePressureData,
+        *,
+        replacing_tag: int | None = None,
+    ) -> None:
+        surface = self.surfaces.get(pressure.surface_tag)
+        if surface is None:
+            raise ValueError(
+                "Surface pressure references missing Surface "
+                f"{pressure.surface_tag}."
+            )
+        pattern = self.load_patterns.get(pressure.pattern_tag)
+        if pattern is None:
+            raise ValueError(
+                "Surface pressure references missing load pattern "
+                f"{pressure.pattern_tag}."
+            )
+        if pattern.pattern_type != "Plain":
+            raise ValueError(
+                "Managed Surface pressure requires a Plain load pattern."
+            )
+        for tag, existing in self.surface_pressures.items():
+            if int(tag) == int(pressure.tag):
+                continue
+            if replacing_tag is not None and int(tag) == int(replacing_tag):
+                continue
+            if (
+                existing.surface_tag == pressure.surface_tag
+                and existing.pattern_tag == pressure.pattern_tag
+            ):
+                raise ValueError(
+                    f"Surface {pressure.surface_tag} already has managed "
+                    f"pressure {existing.tag} in Plain pattern "
+                    f"{pressure.pattern_tag}."
+                )
+        for load_tag in pressure.generated_element_load_tags:
+            load = self.element_loads.get(int(load_tag))
+            if load is None:
+                raise ValueError(
+                    f"Managed Surface pressure {pressure.tag} references "
+                    f"missing generated element load {load_tag}."
+                )
+            if (
+                load.load_type != "SurfacePressure"
+                or load.pattern_tag != pressure.pattern_tag
+                or load.element_tag not in surface.generated_element_tags
+            ):
+                raise ValueError(
+                    f"Managed Surface pressure {pressure.tag} has invalid "
+                    f"generated element-load provenance at load {load_tag}."
+                )
+
+    def add_surface_pressure(
+        self,
+        pressure: SurfacePressureData,
+    ) -> None:
+        if pressure.tag in self.surface_pressures:
+            raise ValueError(
+                f"Surface pressure tag {pressure.tag} already exists."
+            )
+        self._validate_surface_pressure(pressure)
+        self.surface_pressures[pressure.tag] = pressure
+
+    def update_surface_pressure(
+        self,
+        original_tag: int,
+        pressure: SurfacePressureData,
+    ) -> None:
+        original_tag = _strict_int(
+            original_tag,
+            "Surface pressure original tag",
+        )
+        if original_tag not in self.surface_pressures:
+            raise ValueError(
+                f"Surface pressure tag {original_tag} does not exist."
+            )
+        if (
+            pressure.tag != original_tag
+            and pressure.tag in self.surface_pressures
+        ):
+            raise ValueError(
+                f"Surface pressure tag {pressure.tag} already exists."
+            )
+        self._validate_surface_pressure(
+            pressure,
+            replacing_tag=original_tag,
+        )
+        self.surface_pressures.pop(original_tag)
+        self.surface_pressures[pressure.tag] = pressure
+
+    def remove_surface_pressure_definition(self, tag: int) -> None:
+        normalized = _strict_int(tag, "Surface pressure tag")
+        self.surface_pressures.pop(normalized, None)
 
     @staticmethod
     def material_dependencies(material: MaterialData) -> list[int]:
@@ -6294,11 +6478,17 @@ class ProjectDatabase:
                 for edge_load in self.surface_edge_loads.values()
                 if edge_load.pattern_tag == original_tag
             ]
+            dependent_surface_pressure = [
+                pressure.tag
+                for pressure in self.surface_pressures.values()
+                if pressure.pattern_tag == original_tag
+            ]
             if (
                 dependent_nodal
                 or dependent_element
                 or dependent_displacement
                 or dependent_surface_edge_load
+                or dependent_surface_pressure
             ):
                 raise ValueError(
                     "A Plain pattern containing nodal loads, beam loads, "
@@ -6324,6 +6514,9 @@ class ProjectDatabase:
             for edge_load in self.surface_edge_loads.values():
                 if edge_load.pattern_tag == original_tag:
                     edge_load.pattern_tag = pattern.tag
+            for surface_pressure in self.surface_pressures.values():
+                if surface_pressure.pattern_tag == original_tag:
+                    surface_pressure.pattern_tag = pattern.tag
             for analysis in self.analyses.values():
                 if original_tag in analysis.deferred_pattern_tags:
                     analysis.deferred_pattern_tags = [
@@ -6374,6 +6567,11 @@ class ProjectDatabase:
         ):
             if edge_load.pattern_tag == tag:
                 self.surface_edge_loads.pop(edge_load_tag)
+        for pressure_tag, pressure in list(
+            self.surface_pressures.items()
+        ):
+            if pressure.pattern_tag == tag:
+                self.surface_pressures.pop(pressure_tag)
         for source in self.mass_sources.values():
             source.load_factors.pop(tag, None)
 
@@ -7743,6 +7941,10 @@ class ProjectDatabase:
                 self.surface_edge_loads[tag].to_dict()
                 for tag in sorted(self.surface_edge_loads)
             ],
+            "surface_pressures": [
+                self.surface_pressures[tag].to_dict()
+                for tag in sorted(self.surface_pressures)
+            ],
             "materials": [
                 self.materials[tag].to_dict()
                 for tag in sorted(self.materials)
@@ -7894,6 +8096,27 @@ class ProjectDatabase:
                     f"Duplicate Surface edge load tag {edge_load.tag}."
                 )
             result[edge_load.tag] = edge_load
+        return result
+
+    @staticmethod
+    def _load_surface_pressures(
+        raw: Any,
+    ) -> dict[int, SurfacePressureData]:
+        result: dict[int, SurfacePressureData] = {}
+        for index, item in enumerate(
+            _require_list(raw, "Surface pressures")
+        ):
+            pressure = SurfacePressureData.from_dict(
+                _require_object(
+                    item,
+                    f"Surface pressure item {index}",
+                )
+            )
+            if pressure.tag in result:
+                raise ValueError(
+                    f"Duplicate Surface pressure tag {pressure.tag}."
+                )
+            result[pressure.tag] = pressure
         return result
 
     @staticmethod
@@ -8270,6 +8493,9 @@ class ProjectDatabase:
             surface_edge_loads=cls._load_surface_edge_loads(
                 data.get("surface_edge_loads", [])
             ),
+            surface_pressures=cls._load_surface_pressures(
+                data.get("surface_pressures", [])
+            ),
             materials=cls._load_materials(data.get("materials", [])),
             nd_materials=cls._load_nd_materials(
                 data.get("nd_materials", [])
@@ -8321,6 +8547,8 @@ class ProjectDatabase:
             project._validate_surface_edge_support(support)
         for edge_load in project.surface_edge_loads.values():
             project._validate_surface_edge_load(edge_load)
+        for surface_pressure in project.surface_pressures.values():
+            project._validate_surface_pressure(surface_pressure)
 
         if (
             project.active_analysis_tag is not None
