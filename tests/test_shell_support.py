@@ -998,3 +998,152 @@ def test_shell_properties_expose_advanced_asd_controls_and_safe_edits():
     assert '"shell_drilling_stab"' in edit_source
     assert '"shell_drilling_nl"' in edit_source
     assert "Edit shell topology and formulation" in edit_source
+
+
+def test_model_check_warns_on_high_shell_aspect_ratio():
+    model = StructuralModel("shell-quality-aspect", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 20.0, 0.0, 0.0)
+    model.add_node(3, 20.0, 1.0, 0.0)
+    model.add_node(4, 0.0, 1.0, 0.0)
+    model.add_element(
+        10, 1, 2,
+        element_type="ASDShellQ4",
+        section_tag=7,
+        group="shell",
+        k=3,
+        l=4,
+    )
+    project = ProjectDatabase(name="shell-quality-aspect", model=model)
+    project.add_section(_shell_section())
+
+    issues = validate_project(project)
+    quality = [
+        issue for issue in issues
+        if issue.category == "Shell quality"
+    ]
+    assert any("aspect ratio" in issue.message for issue in quality)
+
+
+def test_model_check_warns_on_shell_warpage():
+    model = StructuralModel("shell-quality-warpage", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    model.add_node(3, 1.0, 1.0, 0.0)
+    model.add_node(4, 0.0, 1.0, 0.5)
+    model.add_element(
+        10, 1, 2,
+        element_type="ASDShellQ4",
+        section_tag=7,
+        group="shell",
+        k=3,
+        l=4,
+    )
+    project = ProjectDatabase(name="shell-quality-warpage", model=model)
+    project.add_section(_shell_section())
+
+    issues = validate_project(project)
+    quality = [
+        issue for issue in issues
+        if issue.category == "Shell quality"
+    ]
+    assert any("warpage angle" in issue.message for issue in quality)
+
+
+def _two_shell_orientation_project(*, inconsistent: bool) -> ProjectDatabase:
+    model = StructuralModel("shell-orientation", ndm=3, ndf=6)
+    coordinates = {
+        1: (0.0, 0.0, 0.0),
+        2: (1.0, 0.0, 0.0),
+        3: (1.0, 1.0, 0.0),
+        4: (0.0, 1.0, 0.0),
+        5: (2.0, 0.0, 0.0),
+        6: (2.0, 1.0, 0.0),
+    }
+    for tag, xyz in coordinates.items():
+        model.add_node(tag, *xyz)
+    model.add_element(
+        10, 1, 2,
+        element_type="ASDShellQ4",
+        section_tag=7,
+        group="shell",
+        k=3,
+        l=4,
+    )
+    if inconsistent:
+        nodes = (3, 6, 5, 2)
+    else:
+        nodes = (2, 5, 6, 3)
+    model.add_element(
+        20, nodes[0], nodes[1],
+        element_type="ASDShellQ4",
+        section_tag=7,
+        group="shell",
+        k=nodes[2],
+        l=nodes[3],
+    )
+    project = ProjectDatabase(name="shell-orientation", model=model)
+    project.add_section(_shell_section())
+    return project
+
+
+def test_model_check_detects_adjacent_shell_normal_inconsistency():
+    inconsistent = _two_shell_orientation_project(inconsistent=True)
+    issues = validate_project(inconsistent)
+    orientation = [
+        issue for issue in issues
+        if issue.category == "Shell orientation"
+    ]
+    assert len(orientation) == 1
+    assert "shared edge 2-3" in orientation[0].message
+    assert "surface normals are inconsistent" in orientation[0].message
+
+    consistent = _two_shell_orientation_project(inconsistent=False)
+    assert not [
+        issue for issue in validate_project(consistent)
+        if issue.category == "Shell orientation"
+    ]
+
+
+def test_reverse_shell_orientation_flips_order_and_clears_orientation_warning():
+    project = _two_shell_orientation_project(inconsistent=True)
+    element = project.model.elements[20]
+    before = element.node_tags()
+
+    updated = project.model.reverse_shell_orientation([20])
+    project.validate_element_state(20)
+
+    assert updated == [20]
+    assert project.model.elements[20].node_tags() == (
+        before[0], before[3], before[2], before[1]
+    )
+    assert not [
+        issue for issue in validate_project(project)
+        if issue.category == "Shell orientation"
+    ]
+
+
+def test_shell_axis_viewport_and_reverse_normal_ui_routes_exist():
+    axes_source = inspect.getsource(ModelViewport._draw_section_axes)
+    assert "shell_x_records" in axes_source
+    assert "shell_y_records" in axes_source
+    assert "shell_n_records" in axes_source
+    assert "display-shell-axis-x" in axes_source
+    assert "display-shell-axis-y" in axes_source
+    assert "display-shell-axis-normal" in axes_source
+
+    display_source = inspect.getsource(ModelViewport._update_display_option)
+    assert "display-shell-axis-normal" in display_source
+
+    reverse_source = inspect.getsource(
+        MainWindow._reverse_selected_shell_normals
+    )
+    assert "reverse_shell_orientation" in reverse_source
+    assert "validate_element_state" in reverse_source
+
+    tree_source = inspect.getsource(MainWindow._show_tree_context_menu)
+    viewport_source = inspect.getsource(
+        MainWindow._show_viewport_context_menu
+    )
+    assert "Reverse Shell Normal" in tree_source
+    assert "Reverse Shell Normal" in viewport_source
