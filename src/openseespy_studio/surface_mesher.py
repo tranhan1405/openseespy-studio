@@ -1150,6 +1150,11 @@ def mesh_surface_geometry(
     surface = project.surfaces.get(tag)
     if surface is None:
         raise ValueError(f"Surface geometry {tag} does not exist.")
+    if not surface.mesh_recipe_configured:
+        raise ValueError(
+            f"Surface geometry {tag} has no Mesh recipe yet. "
+            "Configure Surface Mesh before generating Shell FE."
+        )
     if surface.section_tag is None:
         raise ValueError(
             f"Surface geometry {tag} requires a Shell Section before meshing."
