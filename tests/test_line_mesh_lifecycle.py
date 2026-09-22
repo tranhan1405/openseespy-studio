@@ -7,12 +7,14 @@ import pytest
 from openseespy_studio.line_mesher import (
     audit_line_mesh_integrity,
     audit_line_network_connectivity,
+    chamfer_lines,
     conform_line_network,
     copy_line_mesh_recipe,
     copy_offset_line_geometry,
     delete_line_geometry,
     delete_line_mesh,
     divide_line_geometry,
+    fillet_lines,
     inspect_line_mesh_state,
     line_geometry_intersections,
     line_mesh_coordinates,
@@ -23,7 +25,9 @@ from openseespy_studio.line_mesher import (
     remesh_line_geometry,
     reverse_line_geometry,
     split_line_geometry_at_point,
+    split_line_pair_at_intersection,
     trim_extend_line_to_line,
+    trim_extend_lines_to_line,
 )
 from openseespy_studio.project import (
     LineGeometryData,
@@ -822,6 +826,235 @@ def test_trim_extend_splits_target_and_shares_topology():
     assert len(junction_nodes) == 1
 
 
+def test_split_by_line_creates_shared_topology_on_both_lines():
+    project = _frame_project(length=10.0)
+    project.add_point(PointGeometryData(3, "C", (5.0, -5.0, 0.0)))
+    project.add_point(PointGeometryData(4, "D", (5.0, 5.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Horizontal",
+            1,
+            2,
+            divisions=2,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "Vertical",
+            3,
+            4,
+            divisions=2,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    remesh_line_batch(project, [1, 2])
+
+    result = split_line_pair_at_intersection(project, 1, 2, remesh=True)
+
+    assert result.intersection == pytest.approx((5.0, 0.0, 0.0))
+    assert len(result.output_line_tags[1]) == 2
+    assert len(result.output_line_tags[2]) == 2
+    assert len(result.created_line_tags) == 2
+    point_tag = result.intersection_point_tag
+    assert sum(
+        point_tag in {line.point_i, line.point_j}
+        for line in project.lines.values()
+    ) == 4
+    junction_nodes = {
+        line.generated_node_tags[0]
+        if line.point_i == point_tag
+        else line.generated_node_tags[-1]
+        for line in project.lines.values()
+        if point_tag in {line.point_i, line.point_j}
+    }
+    assert len(junction_nodes) == 1
+
+
+def test_batch_trim_splits_one_boundary_for_multiple_subjects():
+    project = _frame_project(length=10.0)
+    project.add_point(PointGeometryData(3, "A2", (0.0, 2.0, 0.0)))
+    project.add_point(PointGeometryData(4, "B2", (10.0, 2.0, 0.0)))
+    project.add_point(PointGeometryData(5, "C", (6.0, -1.0, 0.0)))
+    project.add_point(PointGeometryData(6, "D", (6.0, 3.0, 0.0)))
+    for tag, name, pi, pj in (
+        (1, "S1", 1, 2),
+        (2, "S2", 3, 4),
+        (3, "Boundary", 5, 6),
+    ):
+        project.add_line(
+            LineGeometryData(
+                tag,
+                name,
+                pi,
+                pj,
+                divisions=2,
+                section_tag=1,
+                transformation_tag=1,
+            )
+        )
+    remesh_line_batch(project, [1, 2, 3])
+
+    result = trim_extend_lines_to_line(
+        project,
+        [1, 2],
+        3,
+        operation="trim",
+        remesh=True,
+    )
+
+    assert result.operation == "trim"
+    assert len(result.target_line_tags) == 3
+    assert len(result.created_line_tags) == 2
+    assert project.points[project.lines[1].point_j].xyz == pytest.approx(
+        (6.0, 0.0, 0.0)
+    )
+    assert project.points[project.lines[2].point_j].xyz == pytest.approx(
+        (6.0, 2.0, 0.0)
+    )
+    assert set(result.mesh_results) >= {1, 2}
+
+
+def test_batch_extend_moves_multiple_nearest_endpoints_to_boundary():
+    project = _frame_project(length=3.0)
+    project.add_point(PointGeometryData(3, "A2", (0.0, 2.0, 0.0)))
+    project.add_point(PointGeometryData(4, "B2", (3.0, 2.0, 0.0)))
+    project.add_point(PointGeometryData(5, "C", (6.0, -1.0, 0.0)))
+    project.add_point(PointGeometryData(6, "D", (6.0, 3.0, 0.0)))
+    for tag, name, pi, pj in (
+        (1, "S1", 1, 2),
+        (2, "S2", 3, 4),
+        (3, "Boundary", 5, 6),
+    ):
+        project.add_line(
+            LineGeometryData(
+                tag,
+                name,
+                pi,
+                pj,
+                section_tag=1,
+                transformation_tag=1,
+            )
+        )
+
+    result = trim_extend_lines_to_line(
+        project,
+        [1, 2],
+        3,
+        operation="extend",
+        remesh=True,
+    )
+
+    assert result.operation == "extend"
+    assert project.points[project.lines[1].point_j].xyz == pytest.approx(
+        (6.0, 0.0, 0.0)
+    )
+    assert project.points[project.lines[2].point_j].xyz == pytest.approx(
+        (6.0, 2.0, 0.0)
+    )
+    assert len(result.target_line_tags) == 3
+
+
+def test_chamfer_replaces_shared_corner_with_straight_connector():
+    project = _frame_project(length=5.0)
+    project.add_point(PointGeometryData(3, "C", (5.0, 5.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Horizontal",
+            1,
+            2,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "Vertical",
+            2,
+            3,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+
+    result = chamfer_lines(project, 1, 2, distance=1.0)
+
+    assert len(result.connector_line_tags) == 1
+    connector = project.lines[result.connector_line_tags[0]]
+    coords = {
+        project.points[connector.point_i].xyz,
+        project.points[connector.point_j].xyz,
+    }
+    assert coords == {(4.0, 0.0, 0.0), (5.0, 1.0, 0.0)}
+    assert 2 not in {
+        project.lines[1].point_i,
+        project.lines[1].point_j,
+        project.lines[2].point_i,
+        project.lines[2].point_j,
+    }
+
+
+def test_fillet_creates_tangent_polyline_arc_and_trims_source_lines():
+    project = _frame_project(length=5.0)
+    project.add_point(PointGeometryData(3, "C", (5.0, 5.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Horizontal",
+            1,
+            2,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "Vertical",
+            2,
+            3,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+
+    result = fillet_lines(project, 1, 2, radius=1.0, segments=4)
+
+    assert len(result.connector_line_tags) == 4
+    first = project.lines[result.connector_line_tags[0]]
+    last = project.lines[result.connector_line_tags[-1]]
+    assert project.points[first.point_i].xyz == pytest.approx(
+        (4.0, 0.0, 0.0)
+    )
+    assert project.points[last.point_j].xyz == pytest.approx(
+        (5.0, 1.0, 0.0)
+    )
+    center = (4.0, 1.0, 0.0)
+    fillet_point_tags = {
+        tag
+        for line_tag in result.connector_line_tags
+        for tag in (
+            project.lines[line_tag].point_i,
+            project.lines[line_tag].point_j,
+        )
+    }
+    for point_tag in fillet_point_tags:
+        xyz = project.points[point_tag].xyz
+        distance = math.sqrt(
+            sum(
+                (xyz[index] - center[index]) ** 2
+                for index in range(3)
+            )
+        )
+        assert distance == pytest.approx(1.0)
+
+
 def test_explicit_trim_never_silently_extends():
     project = _frame_project(length=3.0)
     project.add_point(PointGeometryData(3, "C", (5.0, -2.0, 0.0)))
@@ -1392,6 +1625,12 @@ def test_geometry_ribbon_tab_groups_spaceclaim_style_tools():
     assert '"geometry_extend_pick"' in ribbon
     assert '"geometry_split"' in ribbon
     assert '"geometry_join"' in ribbon
+    assert '"geometry_split_by_line"' in ribbon
+    assert '"geometry_fillet"' in ribbon
+    assert '"geometry_chamfer"' in ribbon
+    assert '"geometry_trim_multiple"' in ribbon
+    assert '"geometry_extend_multiple"' in ribbon
+    assert '"Corner & Batch"' in ribbon
     assert '"geometry_snap"' in ribbon
     assert '"geometry_grid"' in ribbon
 
@@ -1439,6 +1678,34 @@ def test_geometry_trim_and_extend_are_strict_click_side_workflows():
     assert "geometry_trim_pick" in click
     assert "geometry_extend_pick" in click
     assert "_handle_geometry_trim_click(payload)" in click
+
+
+def test_geometry_second_cad_batch_is_wired_to_real_operations():
+    split = inspect.getsource(
+        MainWindow._split_selected_geometry_lines_at_intersection
+    )
+    fillet = inspect.getsource(
+        MainWindow._fillet_selected_geometry_lines
+    )
+    chamfer = inspect.getsource(
+        MainWindow._chamfer_selected_geometry_lines
+    )
+    batch_activate = inspect.getsource(
+        MainWindow._activate_geometry_batch_target_tool
+    )
+    batch_handle = inspect.getsource(
+        MainWindow._handle_geometry_batch_target_click
+    )
+    click = inspect.getsource(MainWindow._viewport_entity_clicked)
+
+    assert "split_line_pair_at_intersection" in split
+    assert "fillet_lines" in fillet
+    assert "segments=8" in fillet
+    assert "chamfer_lines" in chamfer
+    assert "at least two Geometry Lines" in batch_activate
+    assert "trim_extend_lines_to_line" in batch_handle
+    assert "geometry_trim_multiple" in click
+    assert "geometry_extend_multiple" in click
 
 
 def test_geometry_snap_has_orthogonal_inference_and_toggle():
