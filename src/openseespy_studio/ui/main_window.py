@@ -3853,60 +3853,52 @@ class MainWindow(QMainWindow):
         geometry.setExpanded(True)
         root.addChild(geometry)
 
-        nodes = QTreeWidgetItem([f"Nodes ({len(self.model.nodes)})"])
-        nodes.setIcon(0, studio_icon("node"))
-        nodes.setData(0, Qt.UserRole, ("nodes_root", None))
-        shell_count = sum(
-            element.element_type in SHELL_ELEMENT_TYPES
-            for element in self.model.elements.values()
-        )
         surfaces = QTreeWidgetItem([
             f"Surfaces ({len(self.project.surfaces)})"
         ])
         surfaces.setIcon(0, studio_icon("element"))
         surfaces.setData(0, Qt.UserRole, ("surfaces_root", None))
+        geometry.addChild(surfaces)
 
-        frame_grids = QTreeWidgetItem(["Frame Grids (1)" if self.model.nodes else "Frame Grids (0)"])
-        frame_grids.setIcon(0, studio_icon("grid"))
-        frame_grids.setData(0, Qt.UserRole, ("frame_grids_root", None))
-        geometry.addChildren([nodes, surfaces, frame_grids])
+        # Tree philosophy: preprocessing geometry and solver FE entities have
+        # separate homes.  A Surface may own the recipe/history of a mesh,
+        # but generated nodes/elements are real OpenSees entities and live
+        # only under FE Model.
+        fe_model = QTreeWidgetItem(["FE Model"])
+        fe_model.setIcon(0, studio_icon("model"))
+        fe_model.setData(0, Qt.UserRole, ("fe_model_root", None))
+        fe_model.setExpanded(True)
+        root.addChild(fe_model)
 
-        surface_owned_elements = {
-            int(element_tag)
-            for surface in self.project.surfaces.values()
-            for element_tag in surface.generated_element_tags
-            if int(element_tag) in self.model.elements
-        }
-        direct_element_count = (
-            len(self.model.elements)
-            - len(surface_owned_elements)
-            + len(self.project.connections)
+        nodes = QTreeWidgetItem([f"Nodes ({len(self.model.nodes)})"])
+        nodes.setIcon(0, studio_icon("node"))
+        nodes.setData(0, Qt.UserRole, ("nodes_root", None))
+        fe_model.addChild(nodes)
+
+        total_element_count = (
+            len(self.model.elements) + len(self.project.connections)
         )
         elements = QTreeWidgetItem([
-            f"Elements ({direct_element_count})"
+            f"Elements ({total_element_count})"
         ])
         elements.setIcon(0, studio_icon("element"))
         elements.setData(0, Qt.UserRole, ("elements_root", None))
         elements.setExpanded(True)
-        root.addChild(elements)
+        fe_model.addChild(elements)
 
         type_counts: dict[str, int] = {}
-        for tag, element in self.model.elements.items():
-            if int(tag) in surface_owned_elements:
-                continue
+        for element in self.model.elements.values():
             type_counts[element.element_type] = (
                 type_counts.get(element.element_type, 0) + 1
             )
 
+        # Only show element families that actually exist. Creation belongs in
+        # commands/context menus, not in a forest of permanent "(0)" rows.
         type_items: dict[str, QTreeWidgetItem] = {}
-        known_types = {
-            "elasticBeamColumn",
-            "forceBeamColumn",
-            "dispBeamColumn",
-            "truss",
-        }
-        for element_type in sorted(known_types | set(type_counts)):
-            item = QTreeWidgetItem([f"{element_type} ({type_counts.get(element_type, 0)})"])
+        for element_type in sorted(type_counts):
+            item = QTreeWidgetItem([
+                f"{element_type} ({type_counts[element_type]})"
+            ])
             item.setIcon(0, studio_icon("element"))
             item.setData(
                 0,
@@ -3956,7 +3948,7 @@ class MainWindow(QMainWindow):
             if live_elements:
                 mesh_summary = QTreeWidgetItem([
                     f"Mesh ({len(mesh_nodes)} nodes · "
-                    f"{len(live_elements)} shell elements)"
+                    f"{len(live_elements)} elements)"
                 ])
                 mesh_summary.setIcon(0, studio_icon("grid"))
                 mesh_summary.setData(
@@ -3966,32 +3958,7 @@ class MainWindow(QMainWindow):
                 )
                 item.addChild(mesh_summary)
 
-                shell_group = QTreeWidgetItem([
-                    f"Shell Elements ({len(live_elements)})"
-                ])
-                shell_group.setIcon(0, studio_icon("element"))
-                shell_group.setData(
-                    0,
-                    Qt.UserRole,
-                    ("surface_shells", tag),
-                )
-                item.addChild(shell_group)
-                for element_tag in live_elements:
-                    element_item = QTreeWidgetItem([
-                        f"Element {element_tag}"
-                    ])
-                    element_item.setIcon(0, studio_icon("element"))
-                    element_item.setData(
-                        0,
-                        Qt.UserRole,
-                        ("element", element_tag),
-                    )
-                    shell_group.addChild(element_item)
-                    self._tree_element_items[element_tag] = element_item
-
         for tag in sorted(self.model.elements):
-            if int(tag) in surface_owned_elements:
-                continue
             element = self.model.elements[tag]
             item = QTreeWidgetItem([f"Element {tag}"])
             item.setIcon(0, studio_icon("element"))
@@ -4005,7 +3972,7 @@ class MainWindow(QMainWindow):
         named_sets.setIcon(0, studio_icon("select"))
         named_sets.setData(0, Qt.UserRole, ("named_sets_root", None))
         named_sets.setExpanded(True)
-        root.addChild(named_sets)
+        fe_model.addChild(named_sets)
 
         for name in sorted(self.project.selection_sets):
             selection_set = self.project.selection_sets[name]
@@ -4017,13 +3984,23 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("set", name))
             named_sets.addChild(item)
 
+        properties_root = QTreeWidgetItem(["Properties"])
+        properties_root.setIcon(0, studio_icon("material"))
+        properties_root.setData(
+            0,
+            Qt.UserRole,
+            ("properties_root", None),
+        )
+        properties_root.setExpanded(True)
+        root.addChild(properties_root)
+
         materials_root = QTreeWidgetItem([
             f"Materials ({len(self.project.materials)})"
         ])
         materials_root.setIcon(0, studio_icon("material"))
         materials_root.setData(0, Qt.UserRole, ("materials_root", None))
         materials_root.setExpanded(True)
-        root.addChild(materials_root)
+        properties_root.addChild(materials_root)
 
         for tag in sorted(self.project.materials):
             material = self.project.materials[tag]
@@ -4044,7 +4021,7 @@ class MainWindow(QMainWindow):
             ("nd_materials_root", None),
         )
         nd_materials_root.setExpanded(True)
-        root.addChild(nd_materials_root)
+        properties_root.addChild(nd_materials_root)
 
         for tag in sorted(self.project.nd_materials):
             material = self.project.nd_materials[tag]
@@ -4061,7 +4038,7 @@ class MainWindow(QMainWindow):
         sections_root.setIcon(0, studio_icon("section"))
         sections_root.setData(0, Qt.UserRole, ("sections_root", None))
         sections_root.setExpanded(True)
-        root.addChild(sections_root)
+        properties_root.addChild(sections_root)
 
         for tag in sorted(self.project.sections):
             section = self.project.sections[tag]
@@ -4082,7 +4059,7 @@ class MainWindow(QMainWindow):
             ("transformations_root", None),
         )
         transformations_root.setExpanded(True)
-        root.addChild(transformations_root)
+        properties_root.addChild(transformations_root)
 
         for tag in sorted(self.project.transformations):
             transformation = self.project.transformations[tag]
@@ -4093,6 +4070,16 @@ class MainWindow(QMainWindow):
             item.setIcon(0, studio_icon("transform"))
             item.setData(0, Qt.UserRole, ("transformation", tag))
             transformations_root.addChild(item)
+
+        loads_bc_root = QTreeWidgetItem(["Loads & BCs"])
+        loads_bc_root.setIcon(0, studio_icon("load"))
+        loads_bc_root.setData(
+            0,
+            Qt.UserRole,
+            ("loads_bc_root", None),
+        )
+        loads_bc_root.setExpanded(True)
+        root.addChild(loads_bc_root)
 
         constrained_nodes = {
             tag: classify_fixity(node.fixity)
@@ -4105,7 +4092,7 @@ class MainWindow(QMainWindow):
         boundary_root.setIcon(0, studio_icon("boundary"))
         boundary_root.setData(0, Qt.UserRole, ("boundary_root", None))
         boundary_root.setExpanded(True)
-        root.addChild(boundary_root)
+        loads_bc_root.addChild(boundary_root)
 
         grouped: dict[str, list[int]] = {}
         for tag, support_type in constrained_nodes.items():
@@ -4146,7 +4133,7 @@ class MainWindow(QMainWindow):
         constraints_root.setIcon(0, studio_icon("transform"))
         constraints_root.setData(0, Qt.UserRole, ("constraints_root", None))
         constraints_root.setExpanded(True)
-        root.addChild(constraints_root)
+        loads_bc_root.addChild(constraints_root)
 
         for tag in sorted(self.project.constraints):
             constraint = self.project.constraints[tag]
@@ -4168,6 +4155,8 @@ class MainWindow(QMainWindow):
                 for tag, connection in self.project.connections.items()
                 if connection.connection_type == connection_type
             ]
+            if not tags:
+                continue
             group = QTreeWidgetItem([
                 f"{connection_type} ({len(tags)})"
             ])
@@ -4197,7 +4186,7 @@ class MainWindow(QMainWindow):
         masses_root = QTreeWidgetItem([f"Masses ({len(mass_nodes)})"])
         masses_root.setIcon(0, studio_icon("load"))
         masses_root.setData(0, Qt.UserRole, ("masses_root", None))
-        root.addChild(masses_root)
+        loads_bc_root.addChild(masses_root)
         for tag in sorted(mass_nodes):
             item = QTreeWidgetItem([f"Node {tag}"])
             item.setIcon(0, studio_icon("load"))
@@ -4214,7 +4203,7 @@ class MainWindow(QMainWindow):
             ("mass_sources_root", None),
         )
         mass_sources_root.setExpanded(True)
-        root.addChild(mass_sources_root)
+        loads_bc_root.addChild(mass_sources_root)
         for tag in sorted(self.project.mass_sources):
             source = self.project.mass_sources[tag]
             item = QTreeWidgetItem([
@@ -4228,7 +4217,7 @@ class MainWindow(QMainWindow):
         loading_root.setIcon(0, studio_icon("load"))
         loading_root.setData(0, Qt.UserRole, ("loading_root", None))
         loading_root.setExpanded(True)
-        root.addChild(loading_root)
+        loads_bc_root.addChild(loading_root)
 
         ground_motion_patterns = {
             tag: pattern
@@ -14345,19 +14334,31 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "geometry_root":
-            node_action = menu.addAction("New Node...")
-            node_action.triggered.connect(self._create_node)
-            element_action = menu.addAction("New Element...")
-            element_action.triggered.connect(self._create_element)
             surface_action = menu.addAction("New Surface...")
             surface_action.triggered.connect(self._create_surface_geometry)
             menu.addSeparator()
-            quick_column = menu.addAction("Quick 1D Column / Test Specimen...")
+            quick_column = menu.addAction("Generate 1D Test Specimen...")
             quick_column.triggered.connect(self._show_test_column_wizard)
-            quick_2d = menu.addAction("Quick 2D Frame...")
+            quick_2d = menu.addAction("Generate 2D Frame...")
             quick_2d.triggered.connect(self._show_frame_grid_2d)
-            grid_action = menu.addAction("Create 3D / Frame Grid...")
+            grid_action = menu.addAction("Generate 3D Frame Grid...")
             grid_action.triggered.connect(self._show_frame_grid)
+            exec_menu()
+            return
+
+        if kind == "fe_model_root":
+            node_action = menu.addAction("New Node...")
+            node_action.triggered.connect(self._create_node)
+            frame_action = menu.addAction("New Frame...")
+            frame_action.triggered.connect(self._create_element)
+            truss_action = menu.addAction("New Truss...")
+            truss_action.triggered.connect(self._create_truss)
+            shell_action = menu.addAction("New Direct Shell Element...")
+            shell_action.triggered.connect(self._create_shell)
+            connection_action = menu.addAction(
+                "New ZeroLength / Link Element..."
+            )
+            connection_action.triggered.connect(self._create_connection)
             exec_menu()
             return
 
