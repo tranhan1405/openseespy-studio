@@ -2198,7 +2198,8 @@ class ModelViewport(QWidget):
                 actor = self._point_picker.GetActor()
                 point_id = self._point_picker.GetPointId()
                 if (
-                    actor == self._geometry_point_actor
+                    self._actor_key(actor)
+                    == self._actor_key(self._geometry_point_actor)
                     and 0 <= point_id < len(self._geometry_point_tags)
                 ):
                     return (
