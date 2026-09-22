@@ -5199,6 +5199,38 @@ class MainWindow(QMainWindow):
         self.selection.set_filter(value)
         measure_action = self.actions.get("measure_distance")
         frame_pick_action = self.actions.get("frame_pick")
+        truss_pick_action = self.actions.get("truss_pick")
+        if measure_action is not None and measure_action.isChecked():
+            self.viewport.set_selection_filter("node")
+            self.status_message.setText(
+                f"Selection filter saved as {text}; "
+                "Measure Distance temporarily snaps to nodes"
+            )
+            return
+        if frame_pick_action is not None and frame_pick_action.isChecked():
+            self.viewport.set_selection_filter("node")
+            self.status_message.setText(
+                f"Selection filter saved as {text}; "
+                "Create Frame temporarily snaps to nodes"
+            )
+            return
+        if truss_pick_action is not None and truss_pick_action.isChecked():
+            self.viewport.set_selection_filter("node")
+            self.status_message.setText(
+                f"Selection filter saved as {text}; "
+                "Create Truss temporarily snaps to nodes"
+            )
+            return
+        self.viewport.set_selection_filter(value)
+        self.status_message.setText(f"Selection filter: {text}")
+
+    def _viewport_entity_clicked(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        kind = payload.get("kind")
+        tag = payload.get("tag")
+        mode = payload.get("mode", "replace")
+
         line_pick_action = self.actions.get(
             "line_geometry_pick"
         )
@@ -5295,38 +5327,6 @@ class MainWindow(QMainWindow):
                     + "click corner 1 of 4"
                 )
             return
-
-        truss_pick_action = self.actions.get("truss_pick")
-        if measure_action is not None and measure_action.isChecked():
-            self.viewport.set_selection_filter("node")
-            self.status_message.setText(
-                f"Selection filter saved as {text}; "
-                "Measure Distance temporarily snaps to nodes"
-            )
-            return
-        if frame_pick_action is not None and frame_pick_action.isChecked():
-            self.viewport.set_selection_filter("node")
-            self.status_message.setText(
-                f"Selection filter saved as {text}; "
-                "Create Frame temporarily snaps to nodes"
-            )
-            return
-        if truss_pick_action is not None and truss_pick_action.isChecked():
-            self.viewport.set_selection_filter("node")
-            self.status_message.setText(
-                f"Selection filter saved as {text}; "
-                "Create Truss temporarily snaps to nodes"
-            )
-            return
-        self.viewport.set_selection_filter(value)
-        self.status_message.setText(f"Selection filter: {text}")
-
-    def _viewport_entity_clicked(self, payload: object) -> None:
-        if not isinstance(payload, dict):
-            return
-        kind = payload.get("kind")
-        tag = payload.get("tag")
-        mode = payload.get("mode", "replace")
 
         truss_pick_action = self.actions.get("truss_pick")
         if truss_pick_action is not None and truss_pick_action.isChecked():
