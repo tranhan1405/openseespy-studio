@@ -130,6 +130,11 @@ def _find_topology_endpoint_node(
             continue
         if not other.generated_node_tags:
             continue
+        if not any(
+            int(element_tag) in project.model.elements
+            for element_tag in other.generated_element_tags
+        ):
+            continue
         if int(other.point_i) == endpoint_point_tag:
             candidates.append(int(other.generated_node_tags[0]))
         if int(other.point_j) == endpoint_point_tag:
