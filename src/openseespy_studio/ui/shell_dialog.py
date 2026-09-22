@@ -587,8 +587,8 @@ class ShellElementDialog(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle(
-            "Edit Shell Element" if element is not None
-            else "Create Shell Element"
+            "Edit Direct Shell Element" if element is not None
+            else "Create Direct Shell Element"
         )
         self.setModal(True)
         self.setMinimumWidth(500)
@@ -749,7 +749,9 @@ class ShellElementDialog(QDialog):
         note = QLabel(
             "Node ordering must follow the shell boundary consistently "
             "(clockwise or counter-clockwise). Shells require ndm=3, ndf=6. "
-            "ASDShellQ4 is the recommended default general-purpose element."
+            "ASDShellQ4 is the recommended default general-purpose element. "
+            "This dialog creates one FE element directly; use Surface Geometry "
+            "for reusable shapes and mapped meshing."
         )
         note.setWordWrap(True)
         root.addWidget(note)
@@ -842,7 +844,7 @@ class ShellElementDialog(QDialog):
         try:
             self.values()
         except (TypeError, ValueError) as exc:
-            QMessageBox.warning(self, "Shell Element", str(exc))
+            QMessageBox.warning(self, "Direct Shell Element", str(exc))
             return
         self.accept()
 
