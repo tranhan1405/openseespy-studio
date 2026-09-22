@@ -266,3 +266,38 @@ def test_fifth_prerequisite_link_batch():
         assert "_offer_result_analysis_run" in source
         assert title in source
 
+
+def test_sixth_prerequisite_link_batch():
+    expected = {
+        "_create_analysis_of_type": "_ensure_dynamic_mass",
+        "_show_hinge_state_result": "_offer_result_analysis_run",
+        "_show_mode_shape_result": "_ensure_active_modal_result",
+        "_activate_job_result": "_offer_job_analysis_rerun",
+        "_show_job_plot": "_offer_job_analysis_rerun",
+        "_quick_plot_job_result": "_offer_job_analysis_rerun",
+        "_export_job_result_json": "_offer_job_analysis_rerun",
+    }
+    for method_name, marker in expected.items():
+        source = inspect.getsource(getattr(MainWindow, method_name))
+        assert marker in source
+
+    dynamic_source = inspect.getsource(MainWindow._ensure_dynamic_mass)
+    assert "_create_mass_source" in dynamic_source
+    assert "_has_dynamic_mass" in dynamic_source
+
+    modal_source = inspect.getsource(MainWindow._ensure_active_modal_result)
+    assert "_ensure_first_mode_modal_prerequisite" in modal_source
+    assert 'job.analysis_type == "Modal"' in modal_source
+
+    rerun_source = inspect.getsource(MainWindow._offer_job_analysis_rerun)
+    assert "_run_analysis_from_tree" in rerun_source
+    assert "Run Analysis Again..." in rerun_source
+
+    tree_source = inspect.getsource(MainWindow._show_tree_context_menu)
+    assert "activate.setEnabled(bool(job and job.results))" not in tree_source
+    assert "plot_menu.setEnabled(bool(job and job.results))" not in tree_source
+    assert "export.setEnabled(bool(job and job.results))" not in tree_source
+    assert "activate.setEnabled(job is not None)" in tree_source
+    assert "plot_menu.setEnabled(job is not None)" in tree_source
+    assert "export.setEnabled(job is not None)" in tree_source
+
