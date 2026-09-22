@@ -4190,9 +4190,14 @@ class MainWindow(QMainWindow):
 
     def _refresh_tree(self) -> None:
         expansion_state = self._capture_tree_expansion_state()
+        selected_state = {
+            self._tree_item_state_key(item)
+            for item in self.tree.selectedItems()
+        }
         vertical_scroll = self.tree.verticalScrollBar().value()
         horizontal_scroll = self.tree.horizontalScrollBar().value()
 
+        previous_signal_state = self.tree.blockSignals(True)
         self.tree.clear()
         self._tree_node_items.clear()
         self._tree_element_items.clear()
@@ -4948,8 +4953,20 @@ class MainWindow(QMainWindow):
         # Rebuilding the tree is common after edits/imports. Preserve the
         # user's navigation context instead of reopening default branches.
         self._restore_tree_expansion_state(expansion_state)
+
+        if selected_state:
+            def restore_selection(item: QTreeWidgetItem) -> None:
+                if self._tree_item_state_key(item) in selected_state:
+                    item.setSelected(True)
+                for child_index in range(item.childCount()):
+                    restore_selection(item.child(child_index))
+
+            for root_index in range(self.tree.topLevelItemCount()):
+                restore_selection(self.tree.topLevelItem(root_index))
+
         self.tree.verticalScrollBar().setValue(vertical_scroll)
         self.tree.horizontalScrollBar().setValue(horizontal_scroll)
+        self.tree.blockSignals(previous_signal_state)
 
     def _tree_selection_changed(self) -> None:
         nodes: set[int] = set()
@@ -6053,8 +6070,16 @@ class MainWindow(QMainWindow):
             and int(exact_tag) in self.project.points
         ):
             point = self.project.points[int(exact_tag)]
-            if first_anchor or self._geometry_point_on_active_sketch_plane(
-                point.xyz
+            px, py = self.viewport.geometry_world_to_screen(point.xyz)
+            exact_distance2 = (px - sx) ** 2 + (py - sy) ** 2
+            if (
+                exact_distance2 <= 16.0 * 16.0
+                and (
+                    first_anchor
+                    or self._geometry_point_on_active_sketch_plane(
+                        point.xyz
+                    )
+                )
             ):
                 return {
                     "xyz": tuple(point.xyz),
