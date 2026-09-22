@@ -1605,6 +1605,31 @@ def test_generated_shell_analysis_captures_force_and_deformation_results(
         live_convergence=False,
     )
 
+    force_recorder_path = tmp_path / "shell_gp1_force.out"
+    deformation_recorder_path = tmp_path / "shell_gp1_deformation.out"
+    recorders = {
+        1: RecorderData(
+            1,
+            "Shell GP1 force",
+            "Shell",
+            target_tags=[1],
+            response="force",
+            file_name=str(force_recorder_path),
+            include_time=True,
+            section_number=1,
+        ),
+        2: RecorderData(
+            2,
+            "Shell GP1 deformation",
+            "Shell",
+            target_tags=[1],
+            response="deformation",
+            file_name=str(deformation_recorder_path),
+            include_time=True,
+            section_number=1,
+        ),
+    }
+
     script = to_openseespy(
         model,
         sections=sections,
@@ -1613,6 +1638,7 @@ def test_generated_shell_analysis_captures_force_and_deformation_results(
         nodal_loads=nodal_loads,
         analyses={1: analysis},
         active_analysis_tag=1,
+        recorders=recorders,
         units={"length": "m", "force": "N", "time": "s"},
     )
     assert "# ERROR:" not in script
@@ -1638,3 +1664,20 @@ def test_generated_shell_analysis_captures_force_and_deformation_results(
         abs(float(value)) > 0.0
         for value in deformation["average"]
     )
+
+    for recorder_path in (
+        force_recorder_path,
+        deformation_recorder_path,
+    ):
+        assert recorder_path.exists()
+        rows = [
+            line.strip()
+            for line in recorder_path.read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if line.strip()
+        ]
+        assert rows
+        values = [float(value) for value in rows[-1].split()]
+        # time/load factor + 8 shell section components
+        assert len(values) >= 9
