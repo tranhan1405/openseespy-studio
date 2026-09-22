@@ -63,6 +63,8 @@ class ModelViewport(QWidget):
     entity_double_clicked = Signal(object)
     context_requested = Signal(object)
     box_selected = Signal(object)
+    geometry_sketch_moved = Signal(object)
+    geometry_sketch_finished = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -158,6 +160,10 @@ class ModelViewport(QWidget):
         self._nav_mode: str | None = None
         self._nav_last_pos: tuple[float, float] | None = None
         self._interaction_tool = "select"
+        self._geometry_sketch_plane = "xy"
+        self._geometry_sketch_plane_offset = 0.0
+        self._geometry_sketch_preview: dict[str, object] | None = None
+        self._last_geometry_sketch_qt_pos: tuple[float, float] | None = None
         self._measurement_actor_names: set[str] = set()
         self._measurement_counter = 0
         self._box_origin: QPoint | None = None
@@ -305,7 +311,7 @@ class ModelViewport(QWidget):
         self._reset_scene()
 
     def set_interaction_tool(self, tool: str) -> None:
-        if tool not in {"select", "box"}:
+        if tool not in {"select", "box", "geometry_sketch"}:
             raise ValueError(f"Unknown interaction tool: {tool}")
         self._interaction_tool = tool
         self._box_origin = None
@@ -313,6 +319,79 @@ class ModelViewport(QWidget):
 
     def interaction_tool(self) -> str:
         return self._interaction_tool
+
+    def set_geometry_sketch_plane(
+        self,
+        plane: str,
+        offset: float = 0.0,
+    ) -> None:
+        normalized = str(plane).strip().lower()
+        if normalized not in {"xy", "xz", "yz"}:
+            raise ValueError("Geometry sketch plane must be XY, XZ, or YZ.")
+        self._geometry_sketch_plane = normalized
+        self._geometry_sketch_plane_offset = float(offset)
+
+    def geometry_sketch_plane(self) -> tuple[str, float]:
+        return (
+            self._geometry_sketch_plane,
+            float(self._geometry_sketch_plane_offset),
+        )
+
+    def set_geometry_sketch_plane_offset_from_point(self, xyz) -> None:
+        point = tuple(float(value) for value in xyz)
+        if len(point) != 3:
+            raise ValueError("Sketch plane point requires X, Y, Z.")
+        axis = {"xy": 2, "xz": 1, "yz": 0}[
+            self._geometry_sketch_plane
+        ]
+        self._geometry_sketch_plane_offset = float(point[axis])
+
+    def geometry_world_to_screen(
+        self,
+        xyz,
+    ) -> tuple[float, float]:
+        return self._world_to_qt(xyz)
+
+    def geometry_workplane_point(
+        self,
+        x: int,
+        y: int,
+    ) -> tuple[float, float, float] | None:
+        renderer = self.plotter.renderer
+
+        def display_world(depth: float) -> np.ndarray | None:
+            renderer.SetDisplayPoint(float(x), float(y), float(depth))
+            renderer.DisplayToWorld()
+            value = renderer.GetWorldPoint()
+            if value is None or abs(float(value[3])) <= 1.0e-15:
+                return None
+            return np.asarray(
+                [
+                    float(value[0]) / float(value[3]),
+                    float(value[1]) / float(value[3]),
+                    float(value[2]) / float(value[3]),
+                ],
+                dtype=float,
+            )
+
+        near = display_world(0.0)
+        far = display_world(1.0)
+        if near is None or far is None:
+            return None
+        direction = far - near
+        axis = {"xy": 2, "xz": 1, "yz": 0}[
+            self._geometry_sketch_plane
+        ]
+        denominator = float(direction[axis])
+        if abs(denominator) <= 1.0e-14:
+            return None
+        t = (
+            float(self._geometry_sketch_plane_offset)
+            - float(near[axis])
+        ) / denominator
+        point = near + t * direction
+        point[axis] = float(self._geometry_sketch_plane_offset)
+        return tuple(float(value) for value in point)
 
     def clear_frame_anchor(self, *, render: bool = True) -> None:
         """Remove the temporary first-node marker for Frame picking."""
@@ -369,6 +448,123 @@ class ModelViewport(QWidget):
 
     def show_line_anchor(self, node_tag: int) -> None:
         self.show_frame_anchor(node_tag)
+
+    def clear_geometry_sketch_preview(
+        self,
+        *,
+        render: bool = True,
+    ) -> None:
+        self._geometry_sketch_preview = None
+        for name in (
+            "geometry-sketch-preview-path",
+            "geometry-sketch-preview-points",
+            "geometry-sketch-snap",
+            "geometry-sketch-label",
+        ):
+            self._remove_overlay(name)
+        if render:
+            self.plotter.render()
+
+    def show_geometry_sketch_preview(
+        self,
+        points,
+        *,
+        cursor=None,
+        closed: bool = False,
+        snap_label: str | None = None,
+    ) -> None:
+        coords = [
+            tuple(float(value) for value in point)
+            for point in points
+        ]
+        cursor_point = (
+            None
+            if cursor is None
+            else tuple(float(value) for value in cursor)
+        )
+        self._geometry_sketch_preview = {
+            "points": coords,
+            "cursor": cursor_point,
+            "closed": bool(closed),
+            "snap_label": snap_label,
+        }
+        self._render_geometry_sketch_preview(render=True)
+
+    def _render_geometry_sketch_preview(
+        self,
+        *,
+        render: bool = False,
+    ) -> None:
+        for name in (
+            "geometry-sketch-preview-path",
+            "geometry-sketch-preview-points",
+            "geometry-sketch-snap",
+            "geometry-sketch-label",
+        ):
+            self._remove_overlay(name)
+        data = self._geometry_sketch_preview
+        if (
+            self._display_domain != "geometry"
+            or not isinstance(data, dict)
+        ):
+            if render:
+                self.plotter.render()
+            return
+
+        points = list(data.get("points", []))
+        cursor = data.get("cursor")
+        closed = bool(data.get("closed", False))
+        snap_label = data.get("snap_label")
+        path_points = list(points)
+        if cursor is not None:
+            path_points.append(cursor)
+        if closed and len(path_points) >= 3:
+            path_points.append(path_points[0])
+
+        if points:
+            self.plotter.add_mesh(
+                pv.PolyData(np.asarray(points, dtype=float)),
+                name="geometry-sketch-preview-points",
+                color="#ff7a00",
+                render_points_as_spheres=True,
+                point_size=13,
+                pickable=False,
+                render=False,
+            )
+        if len(path_points) >= 2:
+            self.plotter.add_mesh(
+                pv.lines_from_points(
+                    np.asarray(path_points, dtype=float),
+                    close=False,
+                ),
+                name="geometry-sketch-preview-path",
+                color="#ff7a00",
+                line_width=3.5,
+                render_lines_as_tubes=False,
+                pickable=False,
+                render=False,
+            )
+        if cursor is not None:
+            self.plotter.add_mesh(
+                pv.PolyData(np.asarray([cursor], dtype=float)),
+                name="geometry-sketch-snap",
+                color="#00a8a8",
+                render_points_as_spheres=True,
+                point_size=15,
+                pickable=False,
+                render=False,
+            )
+            if snap_label:
+                self._add_annotation_labels(
+                    [cursor],
+                    [str(snap_label)],
+                    name="geometry-sketch-label",
+                    text_color="#087f7f",
+                    font_size=10,
+                    always_visible=True,
+                )
+        if render:
+            self.plotter.render()
 
     def clear_geometry_pick_preview(
         self,
@@ -773,6 +969,28 @@ class ModelViewport(QWidget):
                 return True
 
             if event.buttons() == Qt.NoButton:
+                if (
+                    self._interaction_tool == "geometry_sketch"
+                    and self._display_domain == "geometry"
+                ):
+                    last = self._last_geometry_sketch_qt_pos
+                    if (
+                        last is None
+                        or (qt_pos[0] - last[0]) ** 2
+                        + (qt_pos[1] - last[1]) ** 2 >= 9.0
+                    ):
+                        self._last_geometry_sketch_qt_pos = qt_pos
+                        vtk_pos = self._vtk_position_from_qt(event)
+                        world = self.geometry_workplane_point(*vtk_pos)
+                        if world is not None:
+                            self.geometry_sketch_moved.emit(
+                                {
+                                    "world": world,
+                                    "screen": qt_pos,
+                                    "plane": self._geometry_sketch_plane,
+                                }
+                            )
+                    return False
                 self._schedule_hover_from_qt(event)
                 return False
 
@@ -817,6 +1035,12 @@ class ModelViewport(QWidget):
 
                 if not self._moved(self._left_press_pos, vtk_pos):
                     entity = self.pick_entity(*vtk_pos)
+                    world = (
+                        self.geometry_workplane_point(*vtk_pos)
+                        if self._display_domain == "geometry"
+                        else None
+                    )
+                    pos = event.position()
                     self.entity_clicked.emit(
                         {
                             "kind": entity[0] if entity else None,
@@ -824,12 +1048,26 @@ class ModelViewport(QWidget):
                             "mode": self._selection_mode_from_modifiers(
                                 event.modifiers()
                             ),
+                            "world": world,
+                            "screen": (float(pos.x()), float(pos.y())),
+                            "plane": (
+                                self._geometry_sketch_plane
+                                if self._display_domain == "geometry"
+                                else None
+                            ),
                         }
                     )
                 self._left_press_pos = None
                 return True
 
             if event.button() == Qt.RightButton:
+                if (
+                    self._interaction_tool == "geometry_sketch"
+                    and not self._moved(self._right_press_pos, vtk_pos)
+                ):
+                    self._right_press_pos = None
+                    self.geometry_sketch_finished.emit()
+                    return True
                 if not self._moved(self._right_press_pos, vtk_pos):
                     entity = self.pick_entity(*vtk_pos)
                     self.context_requested.emit(
@@ -2752,6 +2990,7 @@ class ModelViewport(QWidget):
 
             self._render_line_mesh_preview()
             self._render_line_intersection_preview()
+            self._render_geometry_sketch_preview(render=False)
 
             if self._surface_mesh_preview_tags:
                 preview_points: list[tuple[float, float, float]] = []
