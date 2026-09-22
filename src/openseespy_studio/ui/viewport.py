@@ -432,7 +432,12 @@ class ModelViewport(QWidget):
             float(self._geometry_sketch_plane_offset)
             - float(near[axis])
         ) / denominator
-        if not math.isfinite(t) or t < -1.0e-6 or t > 1.0 + 1.0e-6:
+        # Display depth 0..1 only defines two points on the camera ray.
+        # The active sketch plane may legitimately lie beyond the current far
+        # clipping plane (especially in an empty/new Geometry scene), so do
+        # not reject t > 1.  Reject only intersections behind the near-point
+        # ray direction.
+        if not math.isfinite(t) or t < -1.0e-6:
             return None
         point = near + t * direction
         point[axis] = float(self._geometry_sketch_plane_offset)
