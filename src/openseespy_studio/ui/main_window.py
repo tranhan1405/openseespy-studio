@@ -5124,6 +5124,15 @@ class MainWindow(QMainWindow):
                 if element is None:
                     return
 
+                if (
+                    element.element_type in SHELL_ELEMENT_TYPES
+                    and property_id != "group"
+                ):
+                    raise ValueError(
+                        "Edit shell topology, formulation and section through "
+                        "'Edit Shell Definition...'."
+                    )
+
                 if property_id == "element_type":
                     new_type = str(value)
                     if new_type not in {
@@ -5160,6 +5169,14 @@ class MainWindow(QMainWindow):
                         ):
                             raise ValueError(
                                 "elasticBeamColumn requires an Elastic section."
+                            )
+                        if (
+                            element.element_type in SHELL_ELEMENT_TYPES
+                            and section.section_type not in SHELL_SECTION_TYPES
+                        ):
+                            raise ValueError(
+                                "Shell elements require a shell-compatible "
+                                "section."
                             )
                     element.section_tag = section_tag
                 elif property_id == "transf_tag":
@@ -5448,6 +5465,50 @@ class MainWindow(QMainWindow):
         if kind == "element":
             element = self.model.elements.get(tag)
             if element is None:
+                return
+
+            if element.element_type in SHELL_ELEMENT_TYPES:
+                section_text = "Unassigned"
+                if element.section_tag is not None:
+                    section = self.project.sections.get(
+                        int(element.section_tag)
+                    )
+                    section_text = (
+                        f"{element.section_tag} - {section.name}"
+                        if section is not None
+                        else f"{element.section_tag} (missing)"
+                    )
+                self.properties_panel.set_properties(
+                    "Shell Element",
+                    [
+                        ("Tag", tag),
+                        ("Type", element.element_type),
+                        (
+                            "Nodes",
+                            ", ".join(
+                                map(str, element.node_tags())
+                            ),
+                        ),
+                        ("Topology", "4-node quadrilateral surface"),
+                        ("Section", section_text),
+                        (
+                            "Kinematics",
+                            (
+                                "Corotational"
+                                if element.shell_corotational
+                                else "Small displacement"
+                            ),
+                        ),
+                        ("Transformation", "Not used by Shell"),
+                        ("Beam integration", "Not used by Shell"),
+                        ("Group", element.group),
+                        (
+                            "Edit",
+                            "Right-click element → Edit Shell Definition...",
+                        ),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
                 return
 
             if element.element_type == "truss":
@@ -9396,6 +9457,72 @@ class MainWindow(QMainWindow):
     def _show_section_properties(self, tag: int) -> None:
         section = self.project.sections.get(tag)
         if section is None:
+            return
+
+        unit_system = UnitSystem.from_mapping(self.project.units)
+        stress_unit = unit_system.engineering_stress_label
+
+        if section.section_type in SHELL_SECTION_TYPES:
+            p = section.parameters
+            self.properties_panel.set_properties(
+                "Shell Section",
+                [
+                    ("Tag", section.tag),
+                    (
+                        "Name",
+                        section.name,
+                        {"id": "name", "editable": True, "kind": "text"},
+                    ),
+                    ("Type", "ElasticMembranePlate"),
+                    ("OpenSees", "ElasticMembranePlateSection"),
+                    (
+                        f"E [{stress_unit}]",
+                        f"{unit_system.engineering_stress_from_pa(p['E']):g}",
+                        {
+                            "id": "parameter:E",
+                            "editable": True,
+                            "kind": "float",
+                        },
+                    ),
+                    (
+                        "Poisson ratio ν",
+                        f"{p['nu']:g}",
+                        {
+                            "id": "parameter:nu",
+                            "editable": True,
+                            "kind": "float",
+                        },
+                    ),
+                    (
+                        f"Thickness h [{unit_system.length}]",
+                        f"{p['h']:g}",
+                        {
+                            "id": "parameter:h",
+                            "editable": True,
+                            "kind": "float",
+                        },
+                    ),
+                    (
+                        "Mass density ρ [model mass/L³]",
+                        f"{p['rho']:g}",
+                        {
+                            "id": "parameter:rho",
+                            "editable": True,
+                            "kind": "float",
+                        },
+                    ),
+                    (
+                        "Out-of-plane E modifier",
+                        f"{p['EpModifier']:g}",
+                        {
+                            "id": "parameter:EpModifier",
+                            "editable": True,
+                            "kind": "float",
+                        },
+                    ),
+                ],
+                context={"kind": "section", "tag": int(tag)},
+            )
             return
 
         rows = [
