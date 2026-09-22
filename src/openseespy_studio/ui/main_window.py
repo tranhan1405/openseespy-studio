@@ -12707,6 +12707,8 @@ class MainWindow(QMainWindow):
         self,
         checked: bool = False,
     ) -> None:
+        self._log("Opening Moment-Curvature research workflow")
+        self.status_message.setText("Opening Moment-Curvature...")
         if (
             self._analysis_process is not None
             and self._analysis_process.state() != QProcess.NotRunning
@@ -12728,14 +12730,6 @@ class MainWindow(QMainWindow):
                 "section test.",
             )
             return
-        if not self.project.sections:
-            QMessageBox.information(
-                self,
-                "Moment-Curvature",
-                "Create a Section first, then run Moment-Curvature.",
-            )
-            return
-
         dialog = MomentCurvatureDialog(self.project, self)
         if not dialog.exec():
             return
