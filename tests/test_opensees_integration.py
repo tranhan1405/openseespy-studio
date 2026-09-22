@@ -1142,6 +1142,12 @@ def test_research_material_commands_load_in_real_opensees(tmp_path: Path):
             "HystereticSmooth",
             parameters=MATERIAL_DEFAULTS["HystereticSmooth"],
         ),
+        7: MaterialData(
+            7,
+            "Ramberg-Osgood steel",
+            "RambergOsgoodSteel",
+            parameters=MATERIAL_DEFAULTS["RambergOsgoodSteel"],
+        ),
     }
 
     script = to_openseespy(
