@@ -8389,6 +8389,9 @@ class MainWindow(QMainWindow):
                 section_tag,
                 corotational,
                 local_x,
+                no_eas,
+                drilling_stab,
+                drilling_nl,
             ) = dialog.values()
         except ValueError as exc:
             QMessageBox.warning(self, "Create Shell", str(exc))
@@ -8411,6 +8414,9 @@ class MainWindow(QMainWindow):
                 l=node_tags[3],
                 shell_corotational=corotational,
                 shell_local_x=local_x,
+                shell_no_eas=no_eas,
+                shell_drilling_stab=drilling_stab,
+                shell_drilling_nl=drilling_nl,
             )
             self.project.validate_element_state(tag)
         except ValueError as exc:
@@ -8450,6 +8456,9 @@ class MainWindow(QMainWindow):
                 section_tag,
                 corotational,
                 local_x,
+                no_eas,
+                drilling_stab,
+                drilling_nl,
             ) = dialog.values()
         except ValueError as exc:
             QMessageBox.warning(self, "Edit Shell", str(exc))
@@ -8469,6 +8478,9 @@ class MainWindow(QMainWindow):
                 l=node_tags[3],
                 shell_corotational=corotational,
                 shell_local_x=local_x,
+                shell_no_eas=no_eas,
+                shell_drilling_stab=drilling_stab,
+                shell_drilling_nl=drilling_nl,
             )
             self.model.elements[element.tag] = updated
             self.project.validate_element_state(element.tag)
