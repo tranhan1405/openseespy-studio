@@ -19,11 +19,13 @@ from .project import (
     FiberData,
     LoadPatternData,
     MaterialData,
+    NDMaterialData,
     NodalLoadData,
     PrescribedDisplacementData,
     ProjectDatabase,
     RecorderData,
     SectionData,
+    ShellLayerData,
     TimeSeriesData,
     TransformationData,
 )
@@ -287,7 +289,7 @@ class _Importer:
 
     OPS_COMMANDS = {
         "model", "wipe", "wipeAnalysis", "node", "fix", "mass",
-        "uniaxialMaterial", "section", "fiber", "patch", "layer",
+        "uniaxialMaterial", "nDMaterial", "section", "fiber", "patch", "layer",
         "geomTransf", "beamIntegration", "element",
         "equalDOF", "rigidLink", "rigidDiaphragm",
         "timeSeries", "pattern", "load",
@@ -570,6 +572,41 @@ class _Importer:
                 "execution requires a compatible/custom OpenSees build.",
             )
 
+    def add_nd_material(self, node: ast.Call, args: list[Any]) -> None:
+        if len(args) < 4:
+            raise ValueError(
+                "nDMaterial needs type, tag, E and Poisson ratio"
+            )
+        kind = str(args[0])
+        tag = int(args[1])
+        if kind != "ElasticIsotropic":
+            self.issue(
+                "UNSUPPORTED",
+                node,
+                f"nDMaterial {kind}",
+                f"nDMaterial {kind!r} is not supported by Studio yet.",
+            )
+            return
+        density_model = float(args[4]) if len(args) >= 5 else 0.0
+        density_kg_m3 = (
+            density_model
+            * self.units.mass_unit_kg
+            / (self.units.length_to_m ** 3)
+        )
+        self.project.add_nd_material(
+            NDMaterialData(
+                tag,
+                f"Imported ElasticIsotropic {tag}",
+                "ElasticIsotropic",
+                parameters={
+                    "E": self.stress_to_pa(args[2]),
+                    "nu": float(args[3]),
+                    "rho": density_kg_m3,
+                },
+            )
+        )
+        self.count("nD Materials")
+
     def add_section(self, node: ast.Call, args: list[Any]) -> None:
         if len(args) < 2:
             raise ValueError("section needs type and tag")
@@ -621,6 +658,53 @@ class _Importer:
                             else 1.0
                         ),
                     },
+                )
+            )
+            self.current_fiber_section = None
+            self.count("Sections")
+            return
+        if kind == "PlateFiber":
+            if len(args) < 4:
+                raise ValueError(
+                    "PlateFiber needs nDMaterial tag and thickness"
+                )
+            self.project.add_section(
+                SectionData(
+                    tag,
+                    f"Imported PlateFiber {tag}",
+                    "PlateFiber",
+                    parameters={"h": float(args[3])},
+                    nd_material_tag=int(args[2]),
+                )
+            )
+            self.current_fiber_section = None
+            self.count("Sections")
+            return
+        if kind == "LayeredShell":
+            if len(args) < 5:
+                raise ValueError(
+                    "LayeredShell needs nLayers and material/thickness pairs"
+                )
+            layer_count = int(args[2])
+            expected = 3 + 2 * layer_count
+            if layer_count < 1 or len(args) < expected:
+                raise ValueError(
+                    "LayeredShell material/thickness pair count does not "
+                    "match nLayers."
+                )
+            layers = [
+                ShellLayerData(
+                    int(args[3 + 2 * index]),
+                    float(args[4 + 2 * index]),
+                )
+                for index in range(layer_count)
+            ]
+            self.project.add_section(
+                SectionData(
+                    tag,
+                    f"Imported LayeredShell {tag}",
+                    "LayeredShell",
+                    shell_layers=layers,
                 )
             )
             self.current_fiber_section = None
@@ -1703,6 +1787,8 @@ class _Importer:
                 self.count("Mass assignments")
             elif command == "uniaxialMaterial":
                 self.add_material(node, args)
+            elif command == "nDMaterial":
+                self.add_nd_material(node, args)
             elif command == "section":
                 self.add_section(node, args)
             elif command == "fiber":
