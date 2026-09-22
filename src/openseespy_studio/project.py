@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 30
+PROJECT_FORMAT_VERSION = 31
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -510,6 +510,95 @@ class MaterialData:
             factors=[
                 float(value) for value in data.get("factors", [])
             ],
+            source=deepcopy(dict(data.get("source", {}))),
+        )
+
+
+ND_MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
+    "ElasticIsotropic": ("E", "nu", "rho"),
+}
+
+ND_MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
+    "ElasticIsotropic": {
+        "E": 2.0e11,
+        "nu": 0.30,
+        "rho": 0.0,
+    },
+}
+
+
+@dataclass
+class NDMaterialData:
+    """OpenSees nDMaterial definition kept separate from uniaxial materials."""
+
+    tag: int
+    name: str
+    material_type: str
+    parameters: dict[str, float] = field(default_factory=dict)
+    source: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.tag = _strict_int(self.tag, "nDMaterial tag")
+        self.name = str(self.name).strip() or f"nDMaterial {self.tag}"
+        self.material_type = str(self.material_type)
+        if self.tag <= 0:
+            raise ValueError("nDMaterial tag must be a positive integer.")
+        if self.material_type not in ND_MATERIAL_PARAMETER_ORDER:
+            raise ValueError(
+                f"Unsupported nDMaterial type: {self.material_type}"
+            )
+        defaults = ND_MATERIAL_DEFAULTS[self.material_type]
+        self.parameters = {
+            key: float(self.parameters.get(key, defaults[key]))
+            for key in ND_MATERIAL_PARAMETER_ORDER[self.material_type]
+        }
+        if any(
+            not math.isfinite(value)
+            for value in self.parameters.values()
+        ):
+            raise ValueError("nDMaterial parameters must be finite.")
+        if self.material_type == "ElasticIsotropic":
+            if self.parameters["E"] <= 0.0:
+                raise ValueError(
+                    "ElasticIsotropic elastic modulus E must be positive."
+                )
+            if not -1.0 < self.parameters["nu"] < 0.5:
+                raise ValueError(
+                    "ElasticIsotropic Poisson ratio must satisfy "
+                    "-1 < nu < 0.5."
+                )
+            if self.parameters["rho"] < 0.0:
+                raise ValueError(
+                    "ElasticIsotropic density rho cannot be negative."
+                )
+        if not isinstance(self.source, dict):
+            raise ValueError("nDMaterial source metadata must be an object.")
+        self.source = deepcopy(self.source)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "material_type": self.material_type,
+            "parameters": dict(self.parameters),
+            "source": deepcopy(self.source),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "NDMaterialData":
+        return cls(
+            tag=data["tag"],
+            name=str(data.get("name", f"nDMaterial {data['tag']}")),
+            material_type=str(
+                data.get(
+                    "material_type",
+                    data.get("type", "ElasticIsotropic"),
+                )
+            ),
+            parameters={
+                str(key): float(value)
+                for key, value in dict(data.get("parameters", {})).items()
+            },
             source=deepcopy(dict(data.get("source", {}))),
         )
 
@@ -2565,6 +2654,7 @@ class ProjectDatabase:
     model: StructuralModel = field(default_factory=StructuralModel)
     selection_sets: dict[str, SelectionSetData] = field(default_factory=dict)
     materials: dict[int, MaterialData] = field(default_factory=dict)
+    nd_materials: dict[int, NDMaterialData] = field(default_factory=dict)
 
     # Reserved object stores. They are persisted now so future editors can be
     # added without changing the top-level project architecture.
@@ -2677,6 +2767,43 @@ class ProjectDatabase:
             for material in self.materials.values()
             if target in self.material_dependencies(material)
         )
+
+    def next_nd_material_tag(self) -> int:
+        return max(self.nd_materials, default=0) + 1
+
+    def add_nd_material(self, material: NDMaterialData) -> None:
+        if material.tag in self.nd_materials:
+            raise ValueError(
+                f"nDMaterial tag {material.tag} already exists."
+            )
+        self.nd_materials[material.tag] = material
+
+    def update_nd_material(
+        self,
+        original_tag: int,
+        material: NDMaterialData,
+    ) -> None:
+        original_tag = _strict_int(
+            original_tag,
+            "nDMaterial original tag",
+        )
+        if original_tag not in self.nd_materials:
+            raise ValueError(
+                f"nDMaterial tag {original_tag} does not exist."
+            )
+        if (
+            material.tag != original_tag
+            and material.tag in self.nd_materials
+        ):
+            raise ValueError(
+                f"nDMaterial tag {material.tag} already exists."
+            )
+        self.nd_materials.pop(original_tag)
+        self.nd_materials[material.tag] = material
+
+    def remove_nd_material(self, tag: int) -> None:
+        tag = _strict_int(tag, "nDMaterial tag")
+        self.nd_materials.pop(tag, None)
 
     def next_material_tag(self) -> int:
         return max(self.materials, default=0) + 1
@@ -5762,6 +5889,10 @@ class ProjectDatabase:
                 self.materials[tag].to_dict()
                 for tag in sorted(self.materials)
             ],
+            "nd_materials": [
+                self.nd_materials[tag].to_dict()
+                for tag in sorted(self.nd_materials)
+            ],
             "sections": [
                 self.sections[tag].to_dict()
                 for tag in sorted(self.sections)
@@ -5862,6 +5993,23 @@ class ProjectDatabase:
                     )
                 materials[material.tag] = material
 
+        return materials
+
+    @staticmethod
+    def _load_nd_materials(raw: Any) -> dict[int, NDMaterialData]:
+        materials: dict[int, NDMaterialData] = {}
+        if raw is None:
+            return materials
+        items = _require_list(raw, "nDMaterials")
+        for index, item in enumerate(items):
+            material = NDMaterialData.from_dict(
+                _require_object(item, f"nDMaterial item {index}")
+            )
+            if material.tag in materials:
+                raise ValueError(
+                    f"Duplicate nDMaterial tag {material.tag}."
+                )
+            materials[material.tag] = material
         return materials
 
     @staticmethod
@@ -6166,6 +6314,9 @@ class ProjectDatabase:
             model=StructuralModel.from_dict(data.get("model", {})),
             selection_sets=selection_sets,
             materials=cls._load_materials(data.get("materials", [])),
+            nd_materials=cls._load_nd_materials(
+                data.get("nd_materials", [])
+            ),
             sections=cls._load_sections(data.get("sections", [])),
             transformations=cls._load_transformations(data.get("transformations", [])),
             constraints=cls._load_constraints(data.get("constraints", [])),
