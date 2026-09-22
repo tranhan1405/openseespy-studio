@@ -721,12 +721,13 @@ def test_shell_pressure_ui_and_viewport_routes_exist():
     )
     assert 'allowed_load_types={"SurfacePressure"}' in helper_source
     assert "SHELL_ELEMENT_TYPES" in source
-    assert "generated_element_tags" in surface_source
+    assert "SurfacePressureDialog" in surface_source
+    assert "sync_surface_pressure" in surface_source
 
     context_source = inspect.getsource(
         MainWindow._show_tree_context_menu
     )
-    assert "Create Pressure on Surface..." in context_source
+    assert "Managed Surface Pressure..." in context_source
 
     viewport_source = inspect.getsource(ModelViewport._draw_element_loads)
     assert 'load.load_type == "SurfacePressure"' in viewport_source
