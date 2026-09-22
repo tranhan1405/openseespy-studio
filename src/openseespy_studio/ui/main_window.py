@@ -125,6 +125,7 @@ from .material_dialog import MaterialDialog
 from .material_library_dialog import MaterialLibraryDialog
 from .mass_source_dialog import MassSourceDialog
 from .model_check_dialog import ModelCheckDialog
+from .moment_curvature_dialog import MomentCurvatureDialog
 from .recorder_dialog import RecorderDialog
 from .section_dialog import SectionDialog
 from .transformation_dialog import TransformationDialog
