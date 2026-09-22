@@ -741,3 +741,72 @@ def test_dense_results_use_subtabs(qapp):
         panel.deleteLater()
         qapp.processEvents()
 
+
+def test_clear_all_resets_dense_result_state(qapp):
+    panel = ResultsPanel()
+    try:
+        # Seed state that previously survived Delete All Jobs / result reset.
+        panel._response2000_dataset = {"headers": ["k", "M"], "rows": [[0, 0]]}
+        panel._response2000_path = "/tmp/response.txt"
+        panel._response2000_source_name = "response.txt"
+        panel.response2000_curvature_column.addItem("k", 0)
+        panel.response2000_moment_column.addItem("M", 1)
+        panel.response2000_compare_table.setRowCount(2)
+        panel.response2000_curvature_factor.setValue(2.0)
+        panel.response2000_moment_factor.setValue(-1.0)
+        panel.moment_curvature_plot.set_overlay([0.0, 1.0], [0.0, 2.0])
+
+        panel.specimen_quantity.addItem("Old response", "old")
+        panel.specimen_plot.set_series([0.0, 1.0], [0.0, 1.0])
+        panel.specimen_research_table.setRowCount(2)
+        panel.specimen_fiber_table.setRowCount(3)
+        panel.specimen_exp_x_scale.setValue(2.0)
+        panel.specimen_exp_y_scale.setValue(3.0)
+
+        panel.cyclic_cycle_table.setRowCount(4)
+        panel.cyclic_exp_x_scale.setValue(4.0)
+        panel.cyclic_exp_y_scale.setValue(5.0)
+        panel.cyclic_experiment_info.setText("old experiment")
+        panel.cyclic_research_info.setText("old research")
+
+        panel.motion_source.addItem("Old motion", 1)
+        panel.motion_slider.setRange(0, 9)
+        panel.motion_counter.setText("5 / 10")
+
+        panel.clear_all()
+        qapp.processEvents()
+
+        assert panel._response2000_dataset == {}
+        assert panel._response2000_path == ""
+        assert panel._response2000_source_name == ""
+        assert panel.response2000_curvature_column.count() == 0
+        assert panel.response2000_moment_column.count() == 0
+        assert panel.response2000_compare_table.rowCount() == 0
+        assert panel.moment_curvature_plot._overlay_x == []
+        assert panel.moment_curvature_plot._overlay_y == []
+        assert panel.response2000_curvature_factor.value() == pytest.approx(1.0)
+        assert panel.response2000_moment_factor.value() == pytest.approx(1.0)
+
+        assert panel.specimen_quantity.count() == 0
+        assert panel.specimen_plot._x == []
+        assert panel.specimen_plot._y == []
+        assert panel.specimen_research_table.rowCount() == 0
+        assert panel.specimen_fiber_table.rowCount() == 0
+        assert panel.specimen_exp_x_scale.value() == pytest.approx(1.0)
+        assert panel.specimen_exp_y_scale.value() == pytest.approx(1.0)
+        assert panel.specimen_metrics.text().startswith("Mmax: -")
+
+        assert panel.cyclic_cycle_table.rowCount() == 0
+        assert panel.cyclic_exp_x_scale.value() == pytest.approx(1.0)
+        assert panel.cyclic_exp_y_scale.value() == pytest.approx(1.0)
+        assert "Optional:" in panel.cyclic_experiment_info.text()
+        assert "1D-column research metrics" in panel.cyclic_research_info.text()
+
+        assert panel.motion_slider.maximum() == 0
+        assert panel.motion_counter.text() == "0 / 0"
+        assert not panel.motion_play.isEnabled()
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
