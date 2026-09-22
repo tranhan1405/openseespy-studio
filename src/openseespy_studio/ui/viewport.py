@@ -43,8 +43,10 @@ from ..postprocess import component_end_resultants, nodal_result_scalar
 from ..project import (
     ConnectionData,
     ElementLoadData,
+    LineGeometryData,
     MaterialData,
     NodalLoadData,
+    PointGeometryData,
     PrescribedDisplacementData,
     SectionData,
     SurfaceGeometryData,
@@ -79,6 +81,8 @@ class ModelViewport(QWidget):
         self._transformations: dict[int, TransformationData] = {}
         self._sections: dict[int, SectionData] = {}
         self._materials: dict[int, MaterialData] = {}
+        self._points: dict[int, PointGeometryData] = {}
+        self._lines: dict[int, LineGeometryData] = {}
         self._surfaces: dict[int, SurfaceGeometryData] = {}
         self._units: dict[str, str] = {
             "length": "m",
@@ -1737,10 +1741,14 @@ class ModelViewport(QWidget):
         model: StructuralModel,
         connections: dict[int, ConnectionData] | None = None,
         surfaces: dict[int, SurfaceGeometryData] | None = None,
+        points: dict[int, PointGeometryData] | None = None,
+        lines: dict[int, LineGeometryData] | None = None,
     ) -> None:
         self._model = model
         self._connections = dict(connections or {})
         self._surfaces = dict(surfaces or {})
+        self._points = dict(points or {})
+        self._lines = dict(lines or {})
         self._hidden_nodes.clear()
         self._hidden_elements.clear()
         self._isolate_active = False
@@ -1773,7 +1781,12 @@ class ModelViewport(QWidget):
         if self._model is None:
             self.plotter.render()
             return
-        if not self._model.nodes and not self._surfaces:
+        if (
+            not self._model.nodes
+            and not self._points
+            and not self._lines
+            and not self._surfaces
+        ):
             self.plotter.render()
             return
 
@@ -1821,6 +1834,49 @@ class ModelViewport(QWidget):
 
         self._cell_picker.InitializePickList()
         self._cell_picker.PickFromListOn()
+
+        # Geometry Points/Lines are preprocessing entities, deliberately
+        # distinct from OpenSees Nodes/Elements.  Render them even before an
+        # FE mesh exists; generated FE entities are rendered separately.
+        if self._points:
+            geometry_point_tags = sorted(self._points)
+            geometry_points = np.asarray(
+                [self._points[tag].xyz for tag in geometry_point_tags],
+                dtype=float,
+            )
+            actor = self.plotter.add_mesh(
+                pv.PolyData(geometry_points),
+                name="geometry-points",
+                color="#d9892b",
+                render_points_as_spheres=True,
+                point_size=10,
+                opacity=0.9,
+                pickable=False,
+                render=False,
+            )
+            self._undeformed_element_actors.append(actor)
+
+        for line_tag in sorted(self._lines):
+            line = self._lines[line_tag]
+            point_i = self._points.get(line.point_i)
+            point_j = self._points.get(line.point_j)
+            if point_i is None or point_j is None:
+                continue
+            live_mesh = any(
+                int(element_tag) in self._model.elements
+                for element_tag in line.generated_element_tags
+            )
+            actor = self.plotter.add_mesh(
+                pv.Line(point_i.xyz, point_j.xyz),
+                name=f"line-geometry-{line_tag}",
+                color="#d9892b",
+                line_width=4,
+                render_lines_as_tubes=True,
+                opacity=0.32 if live_mesh else 0.9,
+                pickable=False,
+                render=False,
+            )
+            self._undeformed_element_actors.append(actor)
 
         # Geometry Surfaces are independent preprocessing objects. Draw them
         # even before any FE nodes/elements exist so creating a Surface is
