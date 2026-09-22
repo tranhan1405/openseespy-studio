@@ -179,7 +179,9 @@ def test_surface_ui_treats_surface_as_mesh_owner():
     dialog_source = inspect.getsource(SurfaceGeometryDialog)
     tree_source = inspect.getsource(MainWindow._refresh_tree)
     context_source = inspect.getsource(MainWindow._show_tree_context_menu)
-    create_source = inspect.getsource(MainWindow._create_surface_geometry)
+    create_source = inspect.getsource(
+        MainWindow._create_surface_geometry_from_points
+    )
 
     assert "Rectangle" in dialog_source
     assert "Quad" in dialog_source
@@ -194,7 +196,8 @@ def test_surface_ui_treats_surface_as_mesh_owner():
     assert "Shell Elements (" not in tree_source
     assert "Mesh (" not in tree_source
 
-    assert "New Surface..." in context_source
+    assert "New Surface by Picking..." in context_source
+    assert "New Surface by Input..." in context_source
     assert "Generate Surface Mesh..." in context_source
     assert "add_surface" in create_source
     assert "mesh_surface_geometry" in create_source
@@ -208,7 +211,8 @@ def test_surface_geometry_is_primary_shell_preprocessing_route():
     direct_source = inspect.getsource(MainWindow._create_shell)
 
     assert '"surface_geometry"' in build_source
-    assert '"Surface..."' in build_source
+    assert '"surface_geometry_pick"' in build_source
+    assert '"Create by Input..."' in build_source
     assert 'actions["shell_mesh"]' not in build_source
     assert '"shell_input"' in build_source
     assert '"Direct Shell Element..."' in build_source
@@ -220,7 +224,8 @@ def test_surface_geometry_is_primary_shell_preprocessing_route():
     assert "New Shell / Surface..." not in context_source
     assert "Mesh Shell Surface..." not in context_source
     assert "New Direct Shell Element..." in context_source
-    assert "New Surface..." in context_source
+    assert "New Surface by Picking..." in context_source
+    assert "New Surface by Input..." in context_source
 
     pressure_source = inspect.getsource(
         MainWindow._create_shell_pressure
@@ -262,7 +267,9 @@ def test_unmeshed_surface_geometry_is_rendered_in_viewport():
 
 
 def test_new_surface_creation_is_atomic_create_and_mesh_workflow():
-    create_source = inspect.getsource(MainWindow._create_surface_geometry)
+    create_source = inspect.getsource(
+        MainWindow._create_surface_geometry_from_points
+    )
 
     assert "_ensure_prerequisite" in create_source
     assert "Create Shell Section Now..." in create_source
