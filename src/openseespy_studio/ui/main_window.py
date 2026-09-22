@@ -3955,7 +3955,10 @@ class MainWindow(QMainWindow):
         self.tree.clear()
         self._tree_node_items.clear()
         self._tree_element_items.clear()
-        self._tree_surface_items.clear()
+        if not hasattr(self, "_tree_surface_items"):
+            self._tree_surface_items = {}
+        else:
+            self._tree_surface_items.clear()
 
         root = QTreeWidgetItem(["OpenSees Model"])
         root.setIcon(0, studio_icon("model"))
@@ -5247,13 +5250,6 @@ class MainWindow(QMainWindow):
         self.selection.set_filter(value)
         measure_action = self.actions.get("measure_distance")
         frame_pick_action = self.actions.get("frame_pick")
-        if kind == "geometry_surface" and tag is not None:
-            self._select_geometry_surface_from_viewport(
-                int(tag),
-                str(mode),
-            )
-            return
-
         truss_pick_action = self.actions.get("truss_pick")
         if measure_action is not None and measure_action.isChecked():
             self.viewport.set_selection_filter("node")
@@ -5408,6 +5404,13 @@ class MainWindow(QMainWindow):
                     )
                     + "click corner 1 of 4"
                 )
+            return
+
+        if kind == "geometry_surface" and tag is not None:
+            self._select_geometry_surface_from_viewport(
+                int(tag),
+                str(mode),
+            )
             return
 
         truss_pick_action = self.actions.get("truss_pick")
