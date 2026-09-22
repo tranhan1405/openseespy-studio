@@ -11985,7 +11985,7 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             is_truss_group = element_type == "truss"
             formulation = menu.addAction("Element Formulation...")
-            formulation.setEnabled(bool(tags) and not is_truss_group)
+            formulation.setEnabled(not is_truss_group)
             formulation.triggered.connect(
                 lambda checked=False, t=element_type: (
                     self._select_all_tree_elements(t),
@@ -11993,9 +11993,8 @@ class MainWindow(QMainWindow):
                 )
             )
             assign = menu.addMenu("Assign")
-            assign.setEnabled(bool(tags))
             material = assign.addAction("Material (Truss)...")
-            material.setEnabled(bool(tags) and is_truss_group)
+            material.setEnabled(is_truss_group)
             material.triggered.connect(
                 lambda checked=False, t=element_type: (
                     self._select_all_tree_elements(t),
@@ -12003,7 +12002,7 @@ class MainWindow(QMainWindow):
                 )
             )
             section = assign.addAction("Section...")
-            section.setEnabled(bool(tags) and not is_truss_group)
+            section.setEnabled(not is_truss_group)
             section.triggered.connect(
                 lambda checked=False, t=element_type: (
                     self._select_all_tree_elements(t),
@@ -12011,7 +12010,7 @@ class MainWindow(QMainWindow):
                 )
             )
             transformation = assign.addAction("Transformation...")
-            transformation.setEnabled(bool(tags) and not is_truss_group)
+            transformation.setEnabled(not is_truss_group)
             transformation.triggered.connect(
                 lambda checked=False, t=element_type: (
                     self._select_all_tree_elements(t),
@@ -12027,7 +12026,7 @@ class MainWindow(QMainWindow):
                     )
                 )
             beam_load = menu.addAction("Create Beam Load...")
-            beam_load.setEnabled(bool(tags) and not is_truss_group)
+            beam_load.setEnabled(not is_truss_group)
             beam_load.triggered.connect(
                 lambda checked=False, t=element_type: (
                     self._select_all_tree_elements(t),
@@ -12214,7 +12213,7 @@ class MainWindow(QMainWindow):
 
             menu.addSeparator()
             formulation = menu.addAction("Element Formulation...")
-            formulation.setEnabled(has_frame and not has_truss)
+            formulation.setEnabled(has_frame)
             formulation.triggered.connect(
                 self._set_element_formulation
             )
@@ -12255,7 +12254,7 @@ class MainWindow(QMainWindow):
                 self._clear_transformation_assignment
             )
             beam_load = menu.addAction("Create Beam Load...")
-            beam_load.setEnabled(has_frame and not has_truss)
+            beam_load.setEnabled(has_frame)
             beam_load.triggered.connect(self._create_element_load)
 
             menu.addSeparator()
@@ -15045,7 +15044,9 @@ class MainWindow(QMainWindow):
         smooth_curvature: bool,
     ) -> None:
         if not self._last_result:
-            self.status_message.setText("No analysis result available")
+            self._offer_result_analysis_run(
+                title="Deformed Shape",
+            )
             return
         self.viewport.show_deformed_shape(
             self._last_result,
@@ -15100,7 +15101,9 @@ class MainWindow(QMainWindow):
         component: str,
     ) -> None:
         if not self._last_result:
-            self.status_message.setText("No nodal result available")
+            self._offer_result_analysis_run(
+                title="Nodal Result",
+            )
             return
         self.viewport.show_node_contour(
             self._last_result,
@@ -15142,8 +15145,8 @@ class MainWindow(QMainWindow):
         scale: float,
     ) -> None:
         if not self._last_result:
-            self.status_message.setText(
-                "No member-force result available"
+            self._offer_result_analysis_run(
+                title="Member Force Result",
             )
             return
         self.viewport.show_member_force_diagram(
