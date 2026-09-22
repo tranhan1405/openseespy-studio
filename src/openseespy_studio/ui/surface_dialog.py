@@ -211,10 +211,10 @@ class SurfaceGeometryDialog(QDialog):
         root.addWidget(mesh_group)
 
         note = QLabel(
-            "A Surface owns its mapped Shell mesh. Creating a new Surface "
-            "will immediately generate the required FE nodes and Shell "
-            "elements. Use the Surface object as the main preprocessing "
-            "object; the generated FE entities are managed underneath it."
+            "A Surface stores the reusable geometry and mesh definition. "
+            "Creating a new Surface immediately generates the required FE "
+            "nodes and Shell elements; those generated entities belong to "
+            "FE Model and are managed there."
         )
         note.setWordWrap(True)
         root.addWidget(note)
