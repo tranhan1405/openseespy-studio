@@ -40,6 +40,14 @@ from ..calibration import (
     calibration_round_best_parameter_series,
 )
 from ..jobs import JobRecord
+from ..response2000 import (
+    parse_response2000_chart_text,
+    response2000_curve_comparison,
+    response2000_series,
+    suggest_response2000_columns,
+    suggest_response2000_units,
+)
+from ..units import UnitSystem
 from ..motion import (
     available_modal_modes,
     motion_frame,
@@ -943,6 +951,9 @@ class ResultsPanel(QWidget):
         self._calibration_rows: list[dict[str, Any]] = []
         self._cyclic_experiment_dataset: dict[str, Any] = {}
         self._cyclic_experiment_path = ""
+        self._project_units = UnitSystem.from_mapping(None).as_mapping()
+        self._response2000_dataset: dict[str, Any] = {}
+        self._response2000_path = ""
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 5, 6, 5)
@@ -1007,6 +1018,11 @@ class ResultsPanel(QWidget):
 
     def sizeHint(self) -> QSize:
         return QSize(360, 300)
+
+    def set_units(self, units) -> None:
+        self._project_units = UnitSystem.from_mapping(units).as_mapping()
+        if hasattr(self, "response2000_curvature_unit"):
+            self._update_moment_curvature_plot()
 
     def _select_tab(self, title: str) -> None:
         for index in range(self.tabs.count()):
@@ -2142,16 +2158,131 @@ class ResultsPanel(QWidget):
         layout.addWidget(self.moment_curvature_metrics)
 
         row = QHBoxLayout()
+        import_response = QPushButton("Import Response-2000...")
+        import_response.clicked.connect(self._import_response2000_data)
+        row.addWidget(import_response)
+
+        clear_response = QPushButton("Clear Response-2000")
+        clear_response.clicked.connect(self._clear_response2000_data)
+        row.addWidget(clear_response)
+
         send_to_hinge = QPushButton("Send to Hinge Backbone...")
         send_to_hinge.clicked.connect(
             self._send_moment_curvature_to_hinge
         )
         row.addWidget(send_to_hinge)
+
         row.addStretch(1)
         export = QPushButton("Export CSV")
         export.clicked.connect(self._export_moment_curvature_csv)
         row.addWidget(export)
         layout.addLayout(row)
+
+        self.response2000_controls = QWidget()
+        response_controls_layout = QVBoxLayout(self.response2000_controls)
+        response_controls_layout.setContentsMargins(0, 0, 0, 0)
+        response_controls_layout.setSpacing(3)
+
+        x_row = QHBoxLayout()
+        x_row.addWidget(QLabel("Response κ:"))
+        self.response2000_curvature_column = QComboBox()
+        self.response2000_curvature_column.currentIndexChanged.connect(
+            self._update_moment_curvature_plot
+        )
+        x_row.addWidget(self.response2000_curvature_column, 1)
+
+        self.response2000_curvature_unit = QComboBox()
+        for label, value in (
+            ("Same as SARE", "same"),
+            ("rad/km", "rad_per_km"),
+            ("1/m", "per_m"),
+            ("1/mm", "per_mm"),
+            ("1/cm", "per_cm"),
+            ("1/in", "per_in"),
+            ("1/ft", "per_ft"),
+        ):
+            self.response2000_curvature_unit.addItem(label, value)
+        self.response2000_curvature_unit.currentIndexChanged.connect(
+            self._update_moment_curvature_plot
+        )
+        x_row.addWidget(self.response2000_curvature_unit)
+
+        x_row.addWidget(QLabel("×"))
+        self.response2000_curvature_factor = QDoubleSpinBox()
+        self.response2000_curvature_factor.setRange(-1.0e12, 1.0e12)
+        self.response2000_curvature_factor.setDecimals(8)
+        self.response2000_curvature_factor.setValue(1.0)
+        self.response2000_curvature_factor.setMaximumWidth(105)
+        self.response2000_curvature_factor.valueChanged.connect(
+            self._update_moment_curvature_plot
+        )
+        x_row.addWidget(self.response2000_curvature_factor)
+        response_controls_layout.addLayout(x_row)
+
+        y_row = QHBoxLayout()
+        y_row.addWidget(QLabel("Response M:"))
+        self.response2000_moment_column = QComboBox()
+        self.response2000_moment_column.currentIndexChanged.connect(
+            self._update_moment_curvature_plot
+        )
+        y_row.addWidget(self.response2000_moment_column, 1)
+
+        self.response2000_moment_unit = QComboBox()
+        for label, value in (
+            ("Same as SARE", "same"),
+            ("kN·m", "kn_m"),
+            ("N·m", "n_m"),
+            ("N·mm", "n_mm"),
+            ("kN·mm", "kn_mm"),
+            ("kip·ft", "kip_ft"),
+            ("kip·in", "kip_in"),
+            ("kgf·m", "kgf_m"),
+            ("kgf·cm", "kgf_cm"),
+        ):
+            self.response2000_moment_unit.addItem(label, value)
+        self.response2000_moment_unit.currentIndexChanged.connect(
+            self._update_moment_curvature_plot
+        )
+        y_row.addWidget(self.response2000_moment_unit)
+
+        y_row.addWidget(QLabel("×"))
+        self.response2000_moment_factor = QDoubleSpinBox()
+        self.response2000_moment_factor.setRange(-1.0e12, 1.0e12)
+        self.response2000_moment_factor.setDecimals(8)
+        self.response2000_moment_factor.setValue(1.0)
+        self.response2000_moment_factor.setMaximumWidth(105)
+        self.response2000_moment_factor.valueChanged.connect(
+            self._update_moment_curvature_plot
+        )
+        y_row.addWidget(self.response2000_moment_factor)
+        response_controls_layout.addLayout(y_row)
+
+        self.response2000_info = QLabel(
+            "Optional validation overlay: import chart data copied/exported "
+            "from Response-2000 Moment-Curvature."
+        )
+        self.response2000_info.setWordWrap(True)
+        response_controls_layout.addWidget(self.response2000_info)
+
+        self.response2000_compare_table = QTableWidget(0, 4)
+        self.response2000_compare_table.setHorizontalHeaderLabels(
+            ["Validation metric", "SARE/OpenSees", "Response-2000", "Δ [%]"]
+        )
+        self.response2000_compare_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.response2000_compare_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.response2000_compare_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.response2000_compare_table.setAlternatingRowColors(True)
+        self.response2000_compare_table.hide()
+        response_controls_layout.addWidget(self.response2000_compare_table)
+
+        self.response2000_controls.hide()
+        layout.addWidget(self.response2000_controls)
 
         self.moment_curvature_plot = TimeHistoryPlot(
             empty_message="No moment-curvature data"
