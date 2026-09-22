@@ -5192,6 +5192,7 @@ class MainWindow(QMainWindow):
 
     def _activate_box_tool(self) -> None:
         self._leave_measure_mode()
+        self._leave_geometry_trim_mode()
         self._leave_frame_pick_mode()
         self._leave_truss_pick_mode()
         self._leave_geometry_line_pick_mode()
@@ -5230,6 +5231,7 @@ class MainWindow(QMainWindow):
             return
 
         self._leave_measure_mode()
+        self._leave_geometry_trim_mode()
         self._leave_frame_pick_mode()
         self._leave_truss_pick_mode()
         self._leave_geometry_surface_pick_mode()
@@ -5262,6 +5264,7 @@ class MainWindow(QMainWindow):
             return
 
         self._leave_measure_mode()
+        self._leave_geometry_trim_mode()
         self._leave_frame_pick_mode()
         self._leave_truss_pick_mode()
         self._leave_geometry_line_pick_mode()
@@ -5422,6 +5425,7 @@ class MainWindow(QMainWindow):
             return
 
         self._leave_measure_mode()
+        self._leave_geometry_trim_mode()
         self._leave_truss_pick_mode()
         self._leave_geometry_line_pick_mode()
         self._leave_geometry_surface_pick_mode()
@@ -5467,6 +5471,7 @@ class MainWindow(QMainWindow):
                 return
 
         self._leave_measure_mode()
+        self._leave_geometry_trim_mode()
         self._leave_frame_pick_mode()
         self._leave_geometry_line_pick_mode()
         self._leave_geometry_surface_pick_mode()
@@ -5498,6 +5503,7 @@ class MainWindow(QMainWindow):
                 return
 
         self._leave_frame_pick_mode()
+        self._leave_geometry_trim_mode()
         self._leave_truss_pick_mode()
         self._leave_geometry_line_pick_mode()
         self._leave_geometry_surface_pick_mode()
@@ -6476,6 +6482,8 @@ class MainWindow(QMainWindow):
             kind = (
                 "Surface"
                 if raw_kind == "geometry_surface"
+                else "Geometry Line"
+                if raw_kind == "geometry_line"
                 else "Geometry Point"
                 if raw_kind == "geometry_point"
                 else raw_kind.title()
