@@ -98,12 +98,19 @@ def _element_geometry_checks(
         connectivity = tuple(sorted(node_tags))
         if connectivity in seen_connectivity:
             other = seen_connectivity[connectivity]
+            duplicate_message = (
+                f"Element {tag} duplicates the node pair of element {other}."
+                if len(node_tags) == 2
+                else (
+                    f"Element {tag} duplicates the shell connectivity of "
+                    f"element {other}."
+                )
+            )
             issues.append(
                 ValidationIssue(
                     "WARNING",
                     "Geometry",
-                    f"Element {tag} duplicates the connectivity of "
-                    f"element {other}.",
+                    duplicate_message,
                     "element",
                     tag,
                     "Confirm that the duplicate element is intentional.",
