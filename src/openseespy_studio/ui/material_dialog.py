@@ -601,6 +601,7 @@ class MaterialDialog(QDialog):
         self.unit_system = UnitSystem.from_mapping(units)
         self._editing_existing = material is not None
         self.materials = dict(materials or {})
+        self._pending_materials: list[MaterialData] = []
         if material is not None:
             self.materials.pop(material.tag, None)
 
@@ -970,11 +971,20 @@ class MaterialDialog(QDialog):
         self._base_material_combo = self._reference_material_combo(selected)
         if self._base_material_combo.count() == 0:
             self._base_material_combo.addItem(
-                "Create a base material first",
+                "No base material available",
                 None,
             )
             self._base_material_combo.setEnabled(False)
-        form.addRow("Base material:", self._base_material_combo)
+
+        holder = QWidget()
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        row.addWidget(self._base_material_combo, 1)
+        create_base = QPushButton("New Base Material...")
+        create_base.clicked.connect(self._create_dependency_material)
+        row.addWidget(create_base)
+        form.addRow("Base material:", holder)
         self.parameter_form.addRow(group)
 
     def _add_component_row(
@@ -1041,10 +1051,15 @@ class MaterialDialog(QDialog):
 
         buttons = QHBoxLayout()
         add_button = QPushButton("Add Material")
+        new_material_button = QPushButton("New Component Material...")
         remove_button = QPushButton("Remove Selected")
         add_button.clicked.connect(lambda: self._add_component_row())
+        new_material_button.clicked.connect(
+            self._create_dependency_material
+        )
         remove_button.clicked.connect(self._remove_component_rows)
         buttons.addWidget(add_button)
+        buttons.addWidget(new_material_button)
         buttons.addWidget(remove_button)
         buttons.addStretch(1)
         layout.addLayout(buttons)
@@ -1067,6 +1082,125 @@ class MaterialDialog(QDialog):
                 else 1.0
             )
             self._add_component_row(tag, factor)
+
+    def _next_dependency_material_tag(self) -> int:
+        used = set(self.materials)
+        used.add(int(self.tag.value()))
+        return max(used, default=0) + 1
+
+    def pending_materials(self) -> list[MaterialData]:
+        return [
+            MaterialData.from_dict(material.to_dict())
+            for material in self._pending_materials
+        ]
+
+    def _refresh_dependency_selectors(
+        self,
+        *,
+        select_tag: int | None = None,
+    ) -> None:
+        if self._base_material_combo is not None:
+            current = self._base_material_combo.currentData()
+            self._base_material_combo.blockSignals(True)
+            self._base_material_combo.clear()
+            for tag in sorted(self.materials):
+                material = self.materials[tag]
+                suffix = (
+                    " · new"
+                    if any(
+                        item.tag == tag
+                        for item in self._pending_materials
+                    )
+                    else ""
+                )
+                self._base_material_combo.addItem(
+                    f"{tag} - {material.name} "
+                    f"({material.material_type}){suffix}",
+                    tag,
+                )
+            wanted = select_tag if select_tag is not None else current
+            if wanted is not None:
+                index = self._base_material_combo.findData(int(wanted))
+                if index >= 0:
+                    self._base_material_combo.setCurrentIndex(index)
+            self._base_material_combo.setEnabled(
+                self._base_material_combo.count() > 0
+            )
+            self._base_material_combo.blockSignals(False)
+
+        table = self._component_table
+        if table is not None:
+            for row in range(table.rowCount()):
+                combo = table.cellWidget(row, 0)
+                if not isinstance(combo, QComboBox):
+                    continue
+                current = combo.currentData()
+                combo.blockSignals(True)
+                combo.clear()
+                for tag in sorted(self.materials):
+                    material = self.materials[tag]
+                    suffix = (
+                        " · new"
+                        if any(
+                            item.tag == tag
+                            for item in self._pending_materials
+                        )
+                        else ""
+                    )
+                    combo.addItem(
+                        f"{tag} - {material.name} "
+                        f"({material.material_type}){suffix}",
+                        tag,
+                    )
+                wanted = (
+                    select_tag
+                    if select_tag is not None and row == table.rowCount() - 1
+                    else current
+                )
+                if wanted is not None:
+                    index = combo.findData(int(wanted))
+                    if index >= 0:
+                        combo.setCurrentIndex(index)
+                combo.setEnabled(combo.count() > 0)
+                combo.blockSignals(False)
+        self._parameter_changed()
+
+    def _create_dependency_material(self) -> None:
+        dialog = MaterialDialog(
+            next_tag=self._next_dependency_material_tag(),
+            units=self.unit_system.as_mapping(),
+            materials=self.materials,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        try:
+            staged = dialog.pending_materials()
+            material = dialog.material_data()
+            candidates = list(staged) + [material]
+            used = set(self.materials)
+            for candidate in candidates:
+                if candidate.tag in used:
+                    raise ValueError(
+                        f"Material tag {candidate.tag} already exists."
+                    )
+                used.add(candidate.tag)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Material Dependency",
+                str(exc),
+            )
+            return
+
+        for candidate in candidates:
+            copied = MaterialData.from_dict(candidate.to_dict())
+            self.materials[copied.tag] = copied
+            self._pending_materials.append(copied)
+        self._refresh_dependency_selectors(
+            select_tag=material.tag,
+        )
 
     def _wrapper_references(
         self,
@@ -1503,6 +1637,22 @@ class MaterialDialog(QDialog):
         base_material_tag, material_tags, factors = (
             self._wrapper_references(material_type)
         )
+        if (
+            material_type in {"MinMax", "Fatigue"}
+            and base_material_tag is None
+        ):
+            raise ValueError(
+                f"{material_type} requires a base material. "
+                "Use 'New Base Material...' to create one here."
+            )
+        if (
+            material_type in {"Parallel", "Series"}
+            and not material_tags
+        ):
+            raise ValueError(
+                f"{material_type} requires at least one component material. "
+                "Use 'New Component Material...' to create one here."
+            )
         parameters = {
             key: self._stored_value(
                 material_type,
