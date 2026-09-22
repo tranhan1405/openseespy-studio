@@ -410,3 +410,70 @@ def test_series_material_requires_component_and_can_stage_one_inline(
         assert [item.tag for item in dialog.pending_materials()] == [2]
     finally:
         _close(dialog)
+
+
+
+def test_verified_wrapper_library_can_stage_base_material_inline(
+    monkeypatch,
+):
+    dialog = MaterialLibraryDialog(
+        next_tag=1,
+        units={"length": "mm", "force": "N", "time": "s"},
+        materials={},
+    )
+
+    class _FakeMaterialDialog:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def exec(self):
+            return 1
+
+        def pending_materials(self):
+            return []
+
+        def material_data(self):
+            return MaterialData(
+                tag=2,
+                name="Verified wrapper base",
+                material_type="Steel02",
+            )
+
+    try:
+        target = "zhang-2025-rebar-ld5-fatigue"
+        root = dialog.tree.invisibleRootItem()
+        stack = [
+            root.child(index)
+            for index in range(root.childCount())
+        ]
+        item = None
+        while stack:
+            current = stack.pop(0)
+            if current.data(0, 256) == target:
+                item = current
+                break
+            stack.extend(
+                current.child(index)
+                for index in range(current.childCount())
+            )
+
+        assert item is not None
+        dialog.tree.setCurrentItem(item)
+        _APP.processEvents()
+        assert not dialog.add_button.isEnabled()
+
+        monkeypatch.setattr(
+            "openseespy_studio.ui.material_dialog.MaterialDialog",
+            _FakeMaterialDialog,
+        )
+        dialog._create_wrapper_base_material()
+
+        assert dialog.wrapper_base_combo.currentData() == 2
+        assert [item.tag for item in dialog.pending_materials()] == [2]
+        assert dialog.add_button.isEnabled()
+
+        wrapper = dialog.material_data()
+        assert wrapper.material_type == "Fatigue"
+        assert wrapper.base_material_tag == 2
+    finally:
+        _close(dialog)
