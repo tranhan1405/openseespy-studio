@@ -129,6 +129,13 @@ class ModelViewport(QWidget):
             list[tuple[float, float, float]],
             str,
         ] | None = None
+        self._line_intersection_preview: list[
+            tuple[
+                tuple[float, float, float],
+                str,
+                tuple[int, int],
+            ]
+        ] = []
         self._surface_mesh_preview_tags: set[int] = set()
         self._surface_quality_tags: set[int] = set()
         self._surface_quality_metric: str | None = None
@@ -1956,6 +1963,84 @@ class ModelViewport(QWidget):
             always_visible=True,
         )
 
+    def show_line_intersection_preview(
+        self,
+        intersections,
+    ) -> None:
+        preview: list[
+            tuple[
+                tuple[float, float, float],
+                str,
+                tuple[int, int],
+            ]
+        ] = []
+        for item in intersections:
+            point = tuple(float(value) for value in item.point)
+            if len(point) != 3:
+                continue
+            preview.append(
+                (
+                    point,
+                    str(item.kind),
+                    (
+                        int(item.line_tags[0]),
+                        int(item.line_tags[1]),
+                    ),
+                )
+            )
+        self._line_intersection_preview = preview
+        if self._display_domain != "geometry":
+            self.set_display_domain("geometry")
+            return
+        self._render_model(reset_camera=False)
+
+    def clear_line_intersection_preview(
+        self,
+        *,
+        render: bool = True,
+    ) -> None:
+        self._line_intersection_preview = []
+        self._remove_overlay("line-intersection-preview")
+        self._remove_overlay("line-intersection-preview-label")
+        if render:
+            self.plotter.render()
+
+    def _render_line_intersection_preview(self) -> None:
+        if (
+            self._display_domain != "geometry"
+            or not self._line_intersection_preview
+        ):
+            return
+        points = [
+            item[0]
+            for item in self._line_intersection_preview
+        ]
+        array = np.asarray(points, dtype=float)
+        self.plotter.add_mesh(
+            pv.PolyData(array),
+            name="line-intersection-preview",
+            color="#d64b4b",
+            render_points_as_spheres=True,
+            point_size=16,
+            pickable=False,
+            render=False,
+        )
+        labels = [
+            (
+                f"{kind} · L{line_tags[0]}/L{line_tags[1]}"
+            )
+            for _point, kind, line_tags
+            in self._line_intersection_preview
+        ]
+        self._add_annotation_labels(
+            points,
+            labels,
+            name="line-intersection-preview-label",
+            text_color="#8f2d2d",
+            font_size=10,
+            always_visible=True,
+        )
+
     def show_surface_mesh_definition_preview(
         self,
         surface: SurfaceGeometryData,
@@ -2666,6 +2751,7 @@ class ModelViewport(QWidget):
                 )
 
             self._render_line_mesh_preview()
+            self._render_line_intersection_preview()
 
             if self._surface_mesh_preview_tags:
                 preview_points: list[tuple[float, float, float]] = []
