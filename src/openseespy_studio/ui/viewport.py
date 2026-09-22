@@ -47,6 +47,7 @@ from ..project import (
     NodalLoadData,
     PrescribedDisplacementData,
     SectionData,
+    SurfaceGeometryData,
     TransformationData,
 )
 from .icons import studio_icon
@@ -78,6 +79,7 @@ class ModelViewport(QWidget):
         self._transformations: dict[int, TransformationData] = {}
         self._sections: dict[int, SectionData] = {}
         self._materials: dict[int, MaterialData] = {}
+        self._surfaces: dict[int, SurfaceGeometryData] = {}
         self._units: dict[str, str] = {
             "length": "m",
             "force": "kN",
@@ -1734,9 +1736,11 @@ class ModelViewport(QWidget):
         self,
         model: StructuralModel,
         connections: dict[int, ConnectionData] | None = None,
+        surfaces: dict[int, SurfaceGeometryData] | None = None,
     ) -> None:
         self._model = model
         self._connections = dict(connections or {})
+        self._surfaces = dict(surfaces or {})
         self._hidden_nodes.clear()
         self._hidden_elements.clear()
         self._isolate_active = False
@@ -1766,7 +1770,10 @@ class ModelViewport(QWidget):
         self._navigation_lod_enabled = False
         self._undeformed_model_visible = True
 
-        if self._model is None or not self._model.nodes:
+        if self._model is None:
+            self.plotter.render()
+            return
+        if not self._model.nodes and not self._surfaces:
             self.plotter.render()
             return
 
@@ -1813,6 +1820,37 @@ class ModelViewport(QWidget):
 
         self._cell_picker.InitializePickList()
         self._cell_picker.PickFromListOn()
+
+        # Geometry Surfaces are independent preprocessing objects. Draw them
+        # even before any FE nodes/elements exist so creating a Surface is
+        # immediately visible in the viewport.
+        for surface_tag in sorted(self._surfaces):
+            surface = self._surfaces[surface_tag]
+            points = np.asarray(surface.points, dtype=float)
+            if points.shape != (4, 3):
+                continue
+            face = pv.PolyData(
+                points,
+                faces=np.asarray([4, 0, 1, 2, 3], dtype=np.int64),
+                deep=True,
+            )
+            live_mesh = any(
+                int(element_tag) in self._model.elements
+                for element_tag in surface.generated_element_tags
+            )
+            actor = self.plotter.add_mesh(
+                face,
+                name=f"surface-geometry-{surface_tag}",
+                color="#6aaed6",
+                edge_color="#1f6f9f",
+                show_edges=True,
+                line_width=2,
+                opacity=0.06 if live_mesh else 0.22,
+                smooth_shading=False,
+                pickable=False,
+                render=False,
+            )
+            self._undeformed_element_actors.append(actor)
 
         for group_name, mesh in group_meshes.items():
             has_rgb = self._apply_element_colors(mesh, element_colors)
