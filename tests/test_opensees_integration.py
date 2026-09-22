@@ -1910,6 +1910,11 @@ def test_new_empty_project_draw_polyline_with_real_qt_mouse_events():
         p1 = QPoint(width // 3, height // 2)
         p2 = QPoint(2 * width // 3, height // 2)
 
+        original_mapper = window.viewport.geometry_workplane_point
+        window.viewport.geometry_workplane_point = (
+            lambda x, y: (float(x), float(y), 0.0)
+        )
+
         QTest.mouseClick(widget, Qt.LeftButton, pos=p1)
         app.processEvents()
         assert window._geometry_line_anchor_snap is not None
@@ -1928,6 +1933,8 @@ def test_new_empty_project_draw_polyline_with_real_qt_mouse_events():
         line = next(iter(window.project.lines.values()))
         assert line.point_i != line.point_j
     finally:
+        if "original_mapper" in locals():
+            window.viewport.geometry_workplane_point = original_mapper
         window.close()
         app.processEvents()
         if owns_app:
@@ -1960,6 +1967,82 @@ def test_empty_project_polyline_direct_payload_commits_segment():
         )
         assert len(window.project.points) == 2, window.status_message.text()
         assert len(window.project.lines) == 1, window.status_message.text()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+
+def test_new_empty_project_draw_rectangle_with_real_qt_mouse_events():
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+
+    from openseespy_studio.ui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        window._new_model()
+        action = window.actions["surface_geometry_pick"]
+        action.trigger()
+        app.processEvents()
+
+        assert action.isChecked()
+        assert window.viewport.interaction_tool() == "geometry_sketch"
+        assert window.viewport._display_domain == "geometry"
+
+        original_mapper = window.viewport.geometry_workplane_point
+        window.viewport.geometry_workplane_point = (
+            lambda x, y: (float(x), float(y), 0.0)
+        )
+
+        widget = window.viewport.plotter.interactor
+        p1 = QPoint(120, 120)
+        p2 = QPoint(320, 260)
+        QTest.mouseClick(widget, Qt.LeftButton, pos=p1)
+        app.processEvents()
+        assert window._geometry_surface_anchor_snap is not None
+
+        QTest.mouseClick(widget, Qt.LeftButton, pos=p2)
+        app.processEvents()
+
+        assert len(window.project.points) == 4
+        assert len(window.project.surfaces) == 1
+        surface = next(iter(window.project.surfaces.values()))
+        assert surface.corner_point_tags is not None
+        assert len(set(surface.corner_point_tags)) == 4
+    finally:
+        if "original_mapper" in locals():
+            window.viewport.geometry_workplane_point = original_mapper
+        window.close()
+        app.processEvents()
+
+
+def test_new_empty_project_point_dialog_creates_visible_geometry():
+    from unittest.mock import patch
+
+    from PySide6.QtWidgets import QApplication
+
+    from openseespy_studio.project import PointGeometryData
+    from openseespy_studio.ui.dialogs import PointGeometryDialog
+    from openseespy_studio.ui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        window._new_model()
+        point = PointGeometryData(1, "Point 1", (1.0, 2.0, 3.0))
+        with (
+            patch.object(PointGeometryDialog, "exec", return_value=True),
+            patch.object(PointGeometryDialog, "data", return_value=point),
+        ):
+            tag = window._create_point_geometry()
+
+        assert tag == 1
+        assert len(window.project.points) == 1
+        assert window.viewport._display_domain == "geometry"
+        assert 1 in window.viewport._points
     finally:
         window.close()
         app.processEvents()
