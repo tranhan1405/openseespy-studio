@@ -132,7 +132,7 @@ def build_moment_curvature_project(
                 "Section material dependencies contain an unresolved cycle."
             )
 
-    project.sections = {section_tag: deepcopy(section)}
+    project.add_section(deepcopy(section))
 
     project.add_connection(
         ConnectionData(
