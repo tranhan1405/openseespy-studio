@@ -167,6 +167,7 @@ class ModelViewport(QWidget):
         self._geometry_sketch_plane = "xy"
         self._geometry_sketch_plane_offset = 0.0
         self._geometry_sketch_preview: dict[str, object] | None = None
+        self._geometry_sketch_grid_visible = False
         self._last_geometry_sketch_qt_pos: tuple[float, float] | None = None
         self._measurement_actor_names: set[str] = set()
         self._measurement_counter = 0
@@ -334,12 +335,27 @@ class ModelViewport(QWidget):
             raise ValueError("Geometry sketch plane must be XY, XZ, or YZ.")
         self._geometry_sketch_plane = normalized
         self._geometry_sketch_plane_offset = float(offset)
+        if self._geometry_sketch_grid_visible:
+            self._remove_overlay("geometry-sketch-grid")
+            if self._display_domain == "geometry":
+                self._render_geometry_sketch_grid()
+                self.plotter.render()
 
     def geometry_sketch_plane(self) -> tuple[str, float]:
         return (
             self._geometry_sketch_plane,
             float(self._geometry_sketch_plane_offset),
         )
+
+    def set_geometry_sketch_grid_visible(self, visible: bool) -> None:
+        self._geometry_sketch_grid_visible = bool(visible)
+        self._remove_overlay("geometry-sketch-grid")
+        if (
+            self._geometry_sketch_grid_visible
+            and self._display_domain == "geometry"
+        ):
+            self._render_geometry_sketch_grid()
+        self.plotter.render()
 
     def set_geometry_sketch_plane_offset_from_point(self, xyz) -> None:
         point = tuple(float(value) for value in xyz)
@@ -349,6 +365,11 @@ class ModelViewport(QWidget):
             self._geometry_sketch_plane
         ]
         self._geometry_sketch_plane_offset = float(point[axis])
+        if self._geometry_sketch_grid_visible:
+            self._remove_overlay("geometry-sketch-grid")
+            if self._display_domain == "geometry":
+                self._render_geometry_sketch_grid()
+                self.plotter.render()
 
     def geometry_world_to_screen(
         self,
@@ -452,6 +473,105 @@ class ModelViewport(QWidget):
 
     def show_line_anchor(self, node_tag: int) -> None:
         self.show_frame_anchor(node_tag)
+
+    @staticmethod
+    def _nice_geometry_grid_spacing(span: float) -> float:
+        value = max(float(span) / 12.0, 1.0e-9)
+        power = 10.0 ** math.floor(math.log10(value))
+        scaled = value / power
+        if scaled <= 1.0:
+            factor = 1.0
+        elif scaled <= 2.0:
+            factor = 2.0
+        elif scaled <= 5.0:
+            factor = 5.0
+        else:
+            factor = 10.0
+        return factor * power
+
+    def _render_geometry_sketch_grid(self) -> None:
+        self._remove_overlay("geometry-sketch-grid")
+        if (
+            not self._geometry_sketch_grid_visible
+            or self._display_domain != "geometry"
+        ):
+            return
+
+        if self._points:
+            coords = np.asarray(
+                [point.xyz for point in self._points.values()],
+                dtype=float,
+            )
+            mins = coords.min(axis=0)
+            maxs = coords.max(axis=0)
+        else:
+            mins = np.asarray((-5.0, -5.0, -5.0), dtype=float)
+            maxs = np.asarray((5.0, 5.0, 5.0), dtype=float)
+
+        plane = self._geometry_sketch_plane
+        offset = float(self._geometry_sketch_plane_offset)
+        axes = {
+            "xy": (0, 1, 2),
+            "xz": (0, 2, 1),
+            "yz": (1, 2, 0),
+        }[plane]
+        a_axis, b_axis, fixed_axis = axes
+        span = max(
+            float(maxs[a_axis] - mins[a_axis]),
+            float(maxs[b_axis] - mins[b_axis]),
+            10.0,
+        )
+        spacing = self._nice_geometry_grid_spacing(span)
+        half = max(6.0 * spacing, 0.75 * span)
+        center_a = 0.5 * float(mins[a_axis] + maxs[a_axis])
+        center_b = 0.5 * float(mins[b_axis] + maxs[b_axis])
+        start_a = math.floor((center_a - half) / spacing) * spacing
+        end_a = math.ceil((center_a + half) / spacing) * spacing
+        start_b = math.floor((center_b - half) / spacing) * spacing
+        end_b = math.ceil((center_b + half) / spacing) * spacing
+
+        points: list[tuple[float, float, float]] = []
+        lines: list[int] = []
+
+        def point(a_value: float, b_value: float):
+            xyz = [0.0, 0.0, 0.0]
+            xyz[a_axis] = float(a_value)
+            xyz[b_axis] = float(b_value)
+            xyz[fixed_axis] = offset
+            return tuple(xyz)
+
+        count_a = int(round((end_a - start_a) / spacing))
+        count_b = int(round((end_b - start_b) / spacing))
+        for index in range(count_a + 1):
+            value = start_a + index * spacing
+            base = len(points)
+            points.extend((
+                point(value, start_b),
+                point(value, end_b),
+            ))
+            lines.extend((2, base, base + 1))
+        for index in range(count_b + 1):
+            value = start_b + index * spacing
+            base = len(points)
+            points.extend((
+                point(start_a, value),
+                point(end_a, value),
+            ))
+            lines.extend((2, base, base + 1))
+
+        if not points:
+            return
+        mesh = pv.PolyData(np.asarray(points, dtype=float))
+        mesh.lines = np.asarray(lines, dtype=np.int64)
+        self.plotter.add_mesh(
+            mesh,
+            name="geometry-sketch-grid",
+            color="#cfd8e3",
+            line_width=1.0,
+            opacity=0.55,
+            pickable=False,
+            render=False,
+        )
 
     def clear_geometry_sketch_preview(
         self,
