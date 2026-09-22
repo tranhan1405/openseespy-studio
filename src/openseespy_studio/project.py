@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 39
+PROJECT_FORMAT_VERSION = 40
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -3618,6 +3618,8 @@ class SelectionSetData:
     name: str
     node_tags: set[int] = field(default_factory=set)
     element_tags: set[int] = field(default_factory=set)
+    surface_tags: set[int] = field(default_factory=set)
+    surface_scope_mode: str = "nodes_and_elements"
 
     def __post_init__(self) -> None:
         self.name = str(self.name)
@@ -3629,12 +3631,32 @@ class SelectionSetData:
             _strict_int(tag, "Selection-set element tag")
             for tag in self.element_tags
         }
+        self.surface_tags = {
+            _strict_int(tag, "Selection-set Surface tag")
+            for tag in self.surface_tags
+        }
+        self.surface_scope_mode = str(self.surface_scope_mode)
+        if self.surface_scope_mode not in {
+            "elements",
+            "nodes",
+            "nodes_and_elements",
+        }:
+            raise ValueError(
+                "Selection-set Surface scope mode must be 'elements', "
+                "'nodes', or 'nodes_and_elements'."
+            )
+
+    @property
+    def is_surface_managed(self) -> bool:
+        return bool(self.surface_tags)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "node_tags": sorted(self.node_tags),
             "element_tags": sorted(self.element_tags),
+            "surface_tags": sorted(self.surface_tags),
+            "surface_scope_mode": self.surface_scope_mode,
         }
 
     @classmethod
@@ -3643,6 +3665,10 @@ class SelectionSetData:
             name=str(data["name"]),
             node_tags=set(data.get("node_tags", [])),
             element_tags=set(data.get("element_tags", [])),
+            surface_tags=set(data.get("surface_tags", [])),
+            surface_scope_mode=str(
+                data.get("surface_scope_mode", "nodes_and_elements")
+            ),
         )
 
 
@@ -3693,6 +3719,155 @@ class ProjectDatabase:
     units: dict[str, str] = field(
         default_factory=lambda: dict(DEFAULT_PROJECT_UNITS)
     )
+
+    def _materialize_selection_set_surface_scope(
+        self,
+        selection_set: SelectionSetData,
+    ) -> None:
+        if not selection_set.surface_tags:
+            return
+        missing_surfaces = sorted(
+            tag
+            for tag in selection_set.surface_tags
+            if tag not in self.surfaces
+        )
+        if missing_surfaces:
+            raise ValueError(
+                f"Named selection {selection_set.name!r} references "
+                "missing Surface tag(s): "
+                + ", ".join(map(str, missing_surfaces))
+            )
+        include_nodes = selection_set.surface_scope_mode in {
+            "nodes",
+            "nodes_and_elements",
+        }
+        include_elements = selection_set.surface_scope_mode in {
+            "elements",
+            "nodes_and_elements",
+        }
+        selection_set.node_tags = (
+            {
+                int(node_tag)
+                for surface_tag in selection_set.surface_tags
+                for node_tag in self.surfaces[
+                    surface_tag
+                ].generated_node_tags
+                if int(node_tag) in self.model.nodes
+            }
+            if include_nodes
+            else set()
+        )
+        selection_set.element_tags = (
+            {
+                int(element_tag)
+                for surface_tag in selection_set.surface_tags
+                for element_tag in self.surfaces[
+                    surface_tag
+                ].generated_element_tags
+                if (
+                    int(element_tag) in self.model.elements
+                    and self.model.elements[
+                        int(element_tag)
+                    ].element_type in SHELL_ELEMENT_TYPES
+                )
+            }
+            if include_elements
+            else set()
+        )
+
+    def validate_selection_set(
+        self,
+        selection_set: SelectionSetData,
+    ) -> None:
+        if not selection_set.name.strip():
+            raise ValueError("Named selection requires a non-empty name.")
+        if selection_set.surface_tags:
+            missing_surfaces = sorted(
+                tag
+                for tag in selection_set.surface_tags
+                if tag not in self.surfaces
+            )
+            if missing_surfaces:
+                raise ValueError(
+                    f"Named selection {selection_set.name!r} references "
+                    "missing Surface tag(s): "
+                    + ", ".join(map(str, missing_surfaces))
+                )
+            expected = SelectionSetData(
+                name=selection_set.name,
+                surface_tags=set(selection_set.surface_tags),
+                surface_scope_mode=selection_set.surface_scope_mode,
+            )
+            self._materialize_selection_set_surface_scope(expected)
+            if (
+                selection_set.node_tags != expected.node_tags
+                or selection_set.element_tags != expected.element_tags
+            ):
+                raise ValueError(
+                    f"Managed named selection {selection_set.name!r} has "
+                    "stale FE membership."
+                )
+            return
+
+        missing_nodes = sorted(
+            tag
+            for tag in selection_set.node_tags
+            if tag not in self.model.nodes
+        )
+        missing_elements = sorted(
+            tag
+            for tag in selection_set.element_tags
+            if tag not in self.model.elements
+        )
+        if missing_nodes or missing_elements:
+            details: list[str] = []
+            if missing_nodes:
+                details.append(
+                    "missing node(s) " + ", ".join(map(str, missing_nodes))
+                )
+            if missing_elements:
+                details.append(
+                    "missing element(s) "
+                    + ", ".join(map(str, missing_elements))
+                )
+            raise ValueError(
+                f"Named selection {selection_set.name!r} references "
+                + "; ".join(details)
+                + "."
+            )
+
+    def add_selection_set(self, selection_set: SelectionSetData) -> None:
+        name = str(selection_set.name)
+        if name in self.selection_sets:
+            raise ValueError(
+                f"A named selection called {name!r} already exists."
+            )
+        self._materialize_selection_set_surface_scope(selection_set)
+        self.validate_selection_set(selection_set)
+        self.selection_sets[name] = selection_set
+
+    def update_selection_set(
+        self,
+        original_name: str,
+        selection_set: SelectionSetData,
+    ) -> None:
+        original = str(original_name)
+        if original not in self.selection_sets:
+            raise ValueError(
+                f"Named selection {original!r} does not exist."
+            )
+        if (
+            selection_set.name != original
+            and selection_set.name in self.selection_sets
+        ):
+            raise ValueError(
+                f"A named selection called {selection_set.name!r} "
+                "already exists."
+            )
+        self._materialize_selection_set_surface_scope(selection_set)
+        self.validate_selection_set(selection_set)
+        self.selection_sets.pop(original)
+        self.selection_sets[selection_set.name] = selection_set
 
     def clear_model_linked_data(self) -> None:
         """Clear objects whose meaning depends on the current model geometry.
@@ -4353,6 +4528,15 @@ class ProjectDatabase:
                         surface.tag if item == original_tag else item
                         for item in result.surface_scope
                     ]
+            for selection_set in self.selection_sets.values():
+                if original_tag in selection_set.surface_tags:
+                    selection_set.surface_tags = {
+                        surface.tag if item == original_tag else item
+                        for item in selection_set.surface_tags
+                    }
+                    self._materialize_selection_set_surface_scope(
+                        selection_set
+                    )
 
     def remove_surface(self, tag: int) -> None:
         tag = _strict_int(tag, "Surface geometry tag")
@@ -4381,12 +4565,18 @@ class ProjectDatabase:
             for result in self.solution_results.values()
             if tag in result.surface_scope
         )
+        managed_selection_names = sorted(
+            selection.name
+            for selection in self.selection_sets.values()
+            if tag in selection.surface_tags
+        )
         if (
             support_tags
             or edge_load_tags
             or pressure_tags
             or surface_recorder_tags
             or managed_result_tags
+            or managed_selection_names
         ):
             details: list[str] = []
             if support_tags:
@@ -4413,6 +4603,11 @@ class ProjectDatabase:
                 details.append(
                     "managed Surface result request(s) "
                     + ", ".join(map(str, managed_result_tags))
+                )
+            if managed_selection_names:
+                details.append(
+                    "managed Surface named selection(s) "
+                    + ", ".join(managed_selection_names)
                 )
             raise ValueError(
                 f"Surface geometry {tag} has "
@@ -8859,6 +9054,9 @@ class ProjectDatabase:
                 }
             ),
         )
+        for selection_set in project.selection_sets.values():
+            project._materialize_selection_set_surface_scope(selection_set)
+            project.validate_selection_set(selection_set)
         for line in project.lines.values():
             project._validate_line_geometry(line)
         for surface in project.surfaces.values():
