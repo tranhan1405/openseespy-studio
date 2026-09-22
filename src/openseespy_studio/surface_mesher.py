@@ -8,7 +8,7 @@ from .shell_mesh import (
     ShellMeshBuildResult,
     ShellMeshSpec,
     build_shell_mesh,
-    resolve_shell_mesh_divisions,
+    resolve_shell_mesh_parameters,
 )
 
 
@@ -211,6 +211,9 @@ def mesh_surface_geometry(
                 if surface.mesh_mode == "target_size"
                 else None
             ),
+            bias_u=surface.bias_u,
+            bias_v=surface.bias_v,
+            edge_divisions=surface.edge_divisions,
             formulation=surface.formulation,
             section_tag=surface.section_tag,
             corotational=surface.corotational,
@@ -530,11 +533,11 @@ def _surface_bilinear_point(
     )
 
 
-def surface_preview_divisions(
+def surface_preview_parameters(
     surface: SurfaceGeometryData,
-) -> tuple[int, int]:
-    """Resolve the Surface's requested mesh sizing without mutating FE state."""
-    return resolve_shell_mesh_divisions(
+) -> tuple[list[float], list[float]]:
+    """Resolve requested Surface grid coordinates without mutating FE state."""
+    return resolve_shell_mesh_parameters(
         *surface.points,
         divisions_u=surface.divisions_u,
         divisions_v=surface.divisions_v,
@@ -543,7 +546,18 @@ def surface_preview_divisions(
             if surface.mesh_mode == "target_size"
             else None
         ),
+        bias_u=surface.bias_u,
+        bias_v=surface.bias_v,
+        edge_divisions=surface.edge_divisions,
     )
+
+
+def surface_preview_divisions(
+    surface: SurfaceGeometryData,
+) -> tuple[int, int]:
+    """Resolve the Surface's requested mesh sizing without mutating FE state."""
+    u_coordinates, v_coordinates = surface_preview_parameters(surface)
+    return len(u_coordinates) - 1, len(v_coordinates) - 1
 
 
 def surface_mesh_preview_segments(
@@ -555,7 +569,9 @@ def surface_mesh_preview_segments(
     ]
 ]]:
     """Return structured U/V grid segments without creating Nodes/Elements."""
-    nu, nv = surface_preview_divisions(surface)
+    u_coordinates, v_coordinates = surface_preview_parameters(surface)
+    nu = len(u_coordinates) - 1
+    nv = len(v_coordinates) - 1
     segments: list[
         tuple[
             tuple[float, float, float],
@@ -563,21 +579,19 @@ def surface_mesh_preview_segments(
         ]
     ] = []
 
-    for i in range(nu + 1):
-        u = i / nu
+    for u in u_coordinates:
         for j in range(nv):
-            v0 = j / nv
-            v1 = (j + 1) / nv
+            v0 = v_coordinates[j]
+            v1 = v_coordinates[j + 1]
             segments.append((
                 _surface_bilinear_point(surface, u, v0),
                 _surface_bilinear_point(surface, u, v1),
             ))
 
-    for j in range(nv + 1):
-        v = j / nv
+    for v in v_coordinates:
         for i in range(nu):
-            u0 = i / nu
-            u1 = (i + 1) / nu
+            u0 = u_coordinates[i]
+            u1 = u_coordinates[i + 1]
             segments.append((
                 _surface_bilinear_point(surface, u0, v),
                 _surface_bilinear_point(surface, u1, v),
