@@ -1089,6 +1089,11 @@ class _Importer:
                 if len(local_values) >= 3
                 else None
             )
+            drilling_stab = (
+                self.flag_value(rest, "-drillingStab", None)
+                if kind == "ASDShellQ4"
+                else None
+            )
             self.project.model.add_element(
                 tag,
                 ni,
@@ -1103,6 +1108,19 @@ class _Importer:
                     and "-corotational" in rest
                 ),
                 shell_local_x=local_x,
+                shell_no_eas=(
+                    kind == "ASDShellQ4"
+                    and "-noeas" in rest
+                ),
+                shell_drilling_stab=(
+                    float(drilling_stab)
+                    if drilling_stab is not None
+                    else None
+                ),
+                shell_drilling_nl=(
+                    kind == "ASDShellQ4"
+                    and "-drillingNL" in rest
+                ),
             )
             self.count("Elements")
             return
