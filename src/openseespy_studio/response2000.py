@@ -89,8 +89,51 @@ def parse_response2000_chart_text(text: str) -> dict[str, Any]:
         or "kappa" in joined
         or "κ" in joined
     ) and "moment" in joined:
-        headers[0] = "Curvature"
-        headers[1] = "Moment"
+        curvature_label = "Curvature"
+        moment_label = "Moment"
+
+        compact = (
+            joined.replace(" ", "")
+            .replace("·", "")
+            .replace("–", "-")
+        )
+        if "rad/km" in compact or "/km" in compact:
+            curvature_label += " (rad/km)"
+        elif "1/mm" in compact or "/mm" in compact:
+            curvature_label += " (1/mm)"
+        elif "1/cm" in compact or "/cm" in compact:
+            curvature_label += " (1/cm)"
+        elif "1/in" in compact or "/in" in compact:
+            curvature_label += " (1/in)"
+        elif "1/ft" in compact or "/ft" in compact:
+            curvature_label += " (1/ft)"
+        elif "1/m" in compact or "rad/m" in compact:
+            curvature_label += " (1/m)"
+
+        moment_compact = (
+            compact.replace("-", "")
+            .replace("(", "")
+            .replace(")", "")
+        )
+        if "knmm" in moment_compact:
+            moment_label += " (kN-mm)"
+        elif "nmm" in moment_compact:
+            moment_label += " (N-mm)"
+        elif "knm" in moment_compact:
+            moment_label += " (kN-m)"
+        elif "kipft" in moment_compact:
+            moment_label += " (kip-ft)"
+        elif "kipin" in moment_compact:
+            moment_label += " (kip-in)"
+        elif "kgfcm" in moment_compact:
+            moment_label += " (kgf-cm)"
+        elif "kgfm" in moment_compact:
+            moment_label += " (kgf-m)"
+        elif "nm" in moment_compact:
+            moment_label += " (N-m)"
+
+        headers[0] = curvature_label
+        headers[1] = moment_label
 
     return {
         "headers": headers,
