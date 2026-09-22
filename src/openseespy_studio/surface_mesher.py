@@ -1018,6 +1018,124 @@ def remove_surface_from_managed_result_scopes(
     return sorted(removed_results)
 
 
+def managed_surface_selection_names(
+    project: ProjectDatabase,
+) -> set[str]:
+    return {
+        str(selection.name)
+        for selection in project.selection_sets.values()
+        if selection.surface_tags
+    }
+
+
+def sync_selection_set_surface_scope(
+    project: ProjectDatabase,
+    name: str,
+) -> tuple[set[int], set[int]]:
+    key = str(name)
+    selection = project.selection_sets.get(key)
+    if selection is None:
+        raise ValueError(f"Named selection {key!r} does not exist.")
+    if not selection.surface_tags:
+        return set(selection.node_tags), set(selection.element_tags)
+    project._materialize_selection_set_surface_scope(selection)
+    project.validate_selection_set(selection)
+    return set(selection.node_tags), set(selection.element_tags)
+
+
+def sync_surface_selection_sets_for_surface(
+    project: ProjectDatabase,
+    surface_tag: int,
+) -> list[str]:
+    tag = int(surface_tag)
+    names = sorted(
+        selection.name
+        for selection in project.selection_sets.values()
+        if tag in selection.surface_tags
+    )
+    for name in names:
+        sync_selection_set_surface_scope(project, name)
+    return names
+
+
+def detach_surface_selection_scope(
+    project: ProjectDatabase,
+    surface_tag: int,
+) -> list[str]:
+    tag = int(surface_tag)
+    changed: list[str] = []
+    for selection in project.selection_sets.values():
+        if tag not in selection.surface_tags:
+            continue
+        include_nodes = selection.surface_scope_mode in {
+            "nodes",
+            "nodes_and_elements",
+        }
+        include_elements = selection.surface_scope_mode in {
+            "elements",
+            "nodes_and_elements",
+        }
+        remaining = {
+            int(source_tag)
+            for source_tag in selection.surface_tags
+            if int(source_tag) != tag
+            and int(source_tag) in project.surfaces
+        }
+        selection.node_tags = (
+            {
+                int(node_tag)
+                for source_tag in remaining
+                for node_tag in project.surfaces[
+                    source_tag
+                ].generated_node_tags
+                if int(node_tag) in project.model.nodes
+            }
+            if include_nodes
+            else set()
+        )
+        selection.element_tags = (
+            {
+                int(element_tag)
+                for source_tag in remaining
+                for element_tag in project.surfaces[
+                    source_tag
+                ].generated_element_tags
+                if (
+                    int(element_tag) in project.model.elements
+                    and project.model.elements[
+                        int(element_tag)
+                    ].element_type in SHELL_ELEMENT_TYPES
+                )
+            }
+            if include_elements
+            else set()
+        )
+        changed.append(str(selection.name))
+    return sorted(changed)
+
+
+def remove_surface_from_managed_selection_sets(
+    project: ProjectDatabase,
+    surface_tag: int,
+) -> list[str]:
+    tag = int(surface_tag)
+    removed: list[str] = []
+    for name, selection in list(project.selection_sets.items()):
+        if tag not in selection.surface_tags:
+            continue
+        selection.surface_tags = {
+            int(source_tag)
+            for source_tag in selection.surface_tags
+            if int(source_tag) != tag
+        }
+        if not selection.surface_tags:
+            project.selection_sets.pop(name, None)
+            removed.append(str(name))
+        else:
+            sync_selection_set_surface_scope(project, name)
+    return sorted(removed)
+
+
 def mesh_surface_geometry(
     project: ProjectDatabase,
     surface_tag: int,
@@ -1087,6 +1205,7 @@ def mesh_surface_geometry(
         sync_surface_pressures_for_surface(project, surface.tag)
         sync_surface_recorders_for_surface(project, surface.tag)
         sync_surface_results_for_surface(project, surface.tag)
+        sync_surface_selection_sets_for_surface(project, surface.tag)
     except Exception:
         restored = ProjectDatabase.from_dict(before)
         project.__dict__.clear()
@@ -1170,12 +1289,16 @@ def _surface_element_dependency_blockers(
             "result request(s) " + ", ".join(map(str, result_tags))
         )
 
+    managed_selection_names = managed_surface_selection_names(project)
     set_names = sorted(
         selection.name
         for selection in project.selection_sets.values()
-        if any(
-            int(tag) in element_tags
-            for tag in selection.element_tags
+        if (
+            selection.name not in managed_selection_names
+            and any(
+                int(tag) in element_tags
+                for tag in selection.element_tags
+            )
         )
     )
     if set_names:
@@ -1237,6 +1360,7 @@ def _surface_node_is_externally_used(
         return True
     if any(
         tag in selection.node_tags
+        and not selection.surface_tags
         for selection in project.selection_sets.values()
     ):
         return True
@@ -1392,6 +1516,7 @@ def delete_surface_mesh(
 
     before = project.to_dict()
     try:
+        detach_surface_selection_scope(project, tag)
         detach_surface_result_scope(project, tag)
 
         surface_recorder_tags = sorted(
@@ -1497,6 +1622,7 @@ def delete_surface_geometry(
         for surface_recorder_tag in surface_recorder_tags:
             project.surface_recorders.pop(surface_recorder_tag, None)
         remove_surface_from_managed_result_scopes(project, tag)
+        remove_surface_from_managed_selection_sets(project, tag)
         project.remove_surface(tag)
     except Exception:
         restored = ProjectDatabase.from_dict(before)
