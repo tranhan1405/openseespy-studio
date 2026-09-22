@@ -1777,7 +1777,8 @@ class ModelViewport(QWidget):
             self.plotter.render()
             return
 
-        self._add_ground_grid(self._model)
+        if self._model.nodes:
+            self._add_ground_grid(self._model)
 
         low, high = self._model.bounds()
         span = max(
