@@ -977,6 +977,11 @@ def detach_surface_result_scope(
     surface = project.surfaces.get(tag)
     if surface is None:
         raise ValueError(f"Surface geometry {tag} does not exist.")
+    if not surface.mesh_recipe_configured:
+        raise ValueError(
+            f"Surface geometry {tag} has no Mesh recipe yet. "
+            "Configure Surface Mesh before generating Shell FE."
+        )
     owned_elements = {
         int(element_tag)
         for element_tag in surface.generated_element_tags
