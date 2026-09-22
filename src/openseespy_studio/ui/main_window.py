@@ -6446,7 +6446,7 @@ class MainWindow(QMainWindow):
         ):
             return None
         series = self.project.time_series.get(pattern.time_series_tag)
-        if series is None:
+        if series is None or series.series_type != "Path":
             return None
         return series, pattern
 
@@ -6503,13 +6503,86 @@ class MainWindow(QMainWindow):
     def _edit_ground_motion(self, pattern_tag: int) -> None:
         pair = self._ground_motion_pair(pattern_tag)
         if pair is None:
-            QMessageBox.warning(
-                self,
-                "Ground Motion Editor",
-                "This UniformExcitation pattern does not reference a valid "
-                "Path time series.",
+            pattern = self.project.load_patterns.get(int(pattern_tag))
+            if (
+                pattern is None
+                or pattern.pattern_type != "UniformExcitation"
+            ):
+                QMessageBox.warning(
+                    self,
+                    "Ground Motion Editor",
+                    "The selected object is not a valid UniformExcitation "
+                    "ground-motion pattern.",
+                )
+                return
+
+            if not self._ask_create_prerequisite(
+                title="Ground Motion Editor",
+                message=(
+                    "This UniformExcitation pattern has no valid Path time "
+                    "series. Create and link a replacement ground-motion "
+                    "record now?"
+                ),
+                action_label="Create / Link Path Series Now...",
+            ):
+                return
+
+            dialog = GroundMotionDialog(
+                next_series_tag=self.project.next_time_series_tag(),
+                next_pattern_tag=pattern.tag,
+                units=self.project.units,
+                initial_source="builtin",
+                parent=self,
+            )
+            dialog.pattern_tag.setValue(pattern.tag)
+            dialog.pattern_tag.setEnabled(False)
+            dialog.name.setText(pattern.name)
+            direction_index = dialog.direction.findData(pattern.direction)
+            if direction_index >= 0:
+                dialog.direction.setCurrentIndex(direction_index)
+            dialog.scale.setValue(float(pattern.factor))
+            dialog.vel0.setValue(float(pattern.vel0))
+            if not dialog.exec():
+                return
+
+            before = self.project.to_dict()
+            try:
+                new_series, repaired_pattern = dialog.data()
+                if new_series.tag in self.project.time_series:
+                    raise ValueError(
+                        f"Time series tag {new_series.tag} already exists."
+                    )
+                self.project.add_time_series(new_series)
+                try:
+                    self.project.update_load_pattern(
+                        pattern.tag,
+                        repaired_pattern,
+                    )
+                except Exception:
+                    self.project.time_series.pop(new_series.tag, None)
+                    raise
+            except ValueError as exc:
+                self.project = ProjectDatabase.from_dict(before)
+                self.model = self.project.model
+                QMessageBox.warning(
+                    self,
+                    "Ground Motion Editor",
+                    str(exc),
+                )
+                self._refresh_all()
+                return
+
+            self._refresh_project_metadata(
+                f"Repaired ground motion {repaired_pattern.tag}: "
+                f"linked Path series {new_series.tag}"
+            )
+            self._show_ground_motion_properties(repaired_pattern.tag)
+            self._record_project_change(
+                f"Repair ground motion {repaired_pattern.tag}",
+                before,
             )
             return
+
         series, pattern = pair
         dialog = GroundMotionDialog(
             series=series,
@@ -10347,9 +10420,22 @@ class MainWindow(QMainWindow):
         )
         if not dialog.exec():
             return
-        before = self.project.to_dict()
         try:
             updated = dialog.data()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Analysis Settings", str(exc))
+            return
+
+        if (
+            updated.analysis_type in {"Modal", "Transient"}
+            and not self._ensure_dynamic_mass(
+                title="Analysis Settings",
+            )
+        ):
+            return
+
+        before = self.project.to_dict()
+        try:
             self._apply_analysis_driving_load(updated, dialog)
             self.project.update_analysis(tag, updated)
         except ValueError as exc:
