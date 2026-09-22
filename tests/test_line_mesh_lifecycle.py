@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import math
+from types import SimpleNamespace
 
 import pytest
 
@@ -1597,6 +1598,47 @@ def test_geometry_sketch_snaps_endpoint_midpoint_and_intersection():
     assert "self.tree.blockSignals(previous_signal_state)" in refresh_tree
     assert "selected_state" in refresh_tree
     assert "restore_selection" in refresh_tree
+
+
+def test_geometry_free_line_ignores_stale_far_point_picker_hit():
+    project = ProjectDatabase(name="free-line-snap")
+    project.add_point(PointGeometryData(1, "Anchor", (0.0, 0.0, 0.0)))
+
+    class SnapAction:
+        def isChecked(self):
+            return True
+
+    class ViewportStub:
+        def geometry_world_to_screen(self, _xyz):
+            return (100.0, 100.0)
+
+        def geometry_sketch_plane(self):
+            return ("xy", 0.0)
+
+    dummy = SimpleNamespace(
+        project=project,
+        viewport=ViewportStub(),
+        actions={"geometry_snap": SnapAction()},
+        _geometry_line_point_tags=[1],
+        _geometry_surface_point_tags=[],
+        _geometry_sketch_intersections=[],
+        _geometry_point_on_active_sketch_plane=lambda _xyz: True,
+    )
+
+    snap = MainWindow._geometry_sketch_snap(
+        dummy,
+        {
+            "kind": "geometry_point",
+            "tag": 1,
+            "world": (2.0, 3.0, 0.0),
+            "screen": (300.0, 300.0),
+        },
+    )
+
+    assert snap is not None
+    assert snap["kind"] == "free"
+    assert snap["point_tag"] is None
+    assert snap["xyz"] == pytest.approx((2.0, 3.0, 0.0))
 
 
 def test_geometry_rectangle_draw_uses_two_click_geometry_only_surface():
