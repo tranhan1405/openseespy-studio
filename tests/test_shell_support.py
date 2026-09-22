@@ -12,7 +12,7 @@ from openseespy_studio.generator import (
 )
 from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.mass_source import evaluate_mass_source
-from openseespy_studio.model import SHELL_ELEMENT_TYPES, StructuralModel
+from openseespy_studio.model import (\n    SHELL_ELEMENT_TYPES,\n    StructuralModel,\n    shell_surface_geometry,\n)
 from openseespy_studio.project import (
     AnalysisSettingsData,
     ElementLoadData,
@@ -1596,3 +1596,107 @@ def test_shell_stitch_ui_and_model_check_repair_route_are_exposed():
     assert "Stitch Coincident Shell Nodes" in tree_source
     assert "Stitch Coincident Shell Nodes" in viewport_source
     assert "Stitch Coincident" in validation_source
+
+
+def test_shell_surface_geometry_uses_ordered_newell_normal_on_warped_quad():
+    model = StructuralModel("warped-pressure-normal", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 2.0, 0.0, 0.0)
+    model.add_node(3, 2.0, 2.0, 1.0)
+    model.add_node(4, 0.0, 2.0, 0.0)
+    model.add_element(
+        10, 1, 2,
+        element_type="ASDShellQ4",
+        section_tag=7,
+        group="shell",
+        k=3,
+        l=4,
+    )
+    element = model.elements[10]
+
+    center, normal, area = shell_surface_geometry(model, element)
+
+    assert center == pytest.approx((1.0, 1.0, 0.25))
+    assert sum(value * value for value in normal) == pytest.approx(1.0)
+    assert normal[2] > 0.0
+    assert area > 4.0
+
+    model.reverse_shell_orientation([10])
+    reversed_center, reversed_normal, reversed_area = shell_surface_geometry(
+        model,
+        model.elements[10],
+    )
+    assert reversed_center == pytest.approx(center)
+    assert reversed_area == pytest.approx(area)
+    assert reversed_normal == pytest.approx(
+        tuple(-value for value in normal)
+    )
+
+
+def test_reverse_shell_normal_preserves_global_surface_pressure_vector():
+    project = _shell_pressure_project(-1250.0)
+    element = project.model.elements[10]
+    _center, normal_before, _area = shell_surface_geometry(
+        project.model,
+        element,
+    )
+    pressure_before = project.element_loads[1].pressure
+    vector_before = tuple(
+        pressure_before * value for value in normal_before
+    )
+
+    result = project.reverse_shell_orientation_preserving_pressure([10])
+
+    element_after = project.model.elements[10]
+    _center, normal_after, _area = shell_surface_geometry(
+        project.model,
+        element_after,
+    )
+    pressure_after = project.element_loads[1].pressure
+    vector_after = tuple(
+        pressure_after * value for value in normal_after
+    )
+
+    assert result["element_tags"] == [10]
+    assert result["pressure_load_tags"] == [1]
+    assert element_after.node_tags() == (1, 4, 3, 2)
+    assert pressure_after == pytest.approx(1250.0)
+    assert normal_after == pytest.approx(
+        tuple(-value for value in normal_before)
+    )
+    assert vector_after == pytest.approx(vector_before)
+
+
+def test_reverse_shell_normal_without_pressure_needs_no_pressure_adjustment():
+    project = ProjectDatabase(
+        name="shell-reverse-no-pressure",
+        model=_shell_model(),
+    )
+    project.add_section(_shell_section())
+
+    result = project.reverse_shell_orientation_preserving_pressure([10])
+
+    assert result["element_tags"] == [10]
+    assert result["pressure_load_tags"] == []
+    assert project.model.elements[10].node_tags() == (1, 4, 3, 2)
+
+
+def test_shell_pressure_viewport_and_properties_use_shared_surface_geometry():
+    viewport_source = inspect.getsource(ModelViewport._draw_element_loads)
+    property_source = inspect.getsource(
+        MainWindow._show_element_load_properties
+    )
+
+    assert "shell_surface_geometry" in viewport_source
+    assert "shell_surface_geometry" in property_source
+    assert "Shell normal XYZ" in property_source
+    assert "Global pressure vector" in property_source
+
+
+def test_reverse_shell_normal_ui_preserves_pressure_and_reports_adjustment():
+    source = inspect.getsource(MainWindow._reverse_selected_shell_normals)
+
+    assert "reverse_shell_orientation_preserving_pressure" in source
+    assert 'result["pressure_load_tags"]' in source
+    assert "preserved" in source
+    assert "surface pressure load(s)" in source
