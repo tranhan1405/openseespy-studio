@@ -33,7 +33,7 @@ from ..deformed_geometry import (
     deformed_member_frames,
     section_axis_strength_labels,
 )
-from ..model import SHELL_ELEMENT_TYPES, StructuralModel, classify_fixity
+from ..model import (\n    SHELL_ELEMENT_TYPES,\n    StructuralModel,\n    classify_fixity,\n    shell_surface_geometry,\n)
 from ..postprocess import component_end_resultants, nodal_result_scalar
 from ..project import (
     ConnectionData,
@@ -3024,26 +3024,16 @@ class ModelViewport(QWidget):
             if element is None:
                 continue
             if load.load_type == "SurfacePressure":
-                node_tags = element.node_tags()
-                if len(node_tags) != 4:
+                try:
+                    _center, shell_normal, _area = shell_surface_geometry(
+                        self._model,
+                        element,
+                    )
+                except ValueError:
                     continue
-                shell_nodes = [
-                    self._model.nodes.get(node_tag)
-                    for node_tag in node_tags
-                ]
-                if any(node is None for node in shell_nodes):
-                    continue
-                p1 = np.asarray(shell_nodes[0].xyz, dtype=float)
-                p2 = np.asarray(shell_nodes[1].xyz, dtype=float)
-                p4 = np.asarray(shell_nodes[3].xyz, dtype=float)
-                normal = np.cross(p2 - p1, p4 - p1)
-                norm = float(np.linalg.norm(normal))
-                if norm <= 1.0e-12:
-                    continue
-                normal /= norm
                 vector = tuple(
                     float(load.pressure) * float(value)
-                    for value in normal
+                    for value in shell_normal
                 )
                 prefix = "P_normal"
                 magnitude = abs(float(load.pressure))
