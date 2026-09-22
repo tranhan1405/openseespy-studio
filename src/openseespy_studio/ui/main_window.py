@@ -19525,13 +19525,13 @@ class MainWindow(QMainWindow):
         if kind == "geometry_root":
             point_action = menu.addAction("New Point...")
             point_action.triggered.connect(self._create_point_geometry)
-            line_pick = menu.addAction("New Line by Picking...")
+            line_pick = menu.addAction("Draw Polyline")
             line_pick.triggered.connect(
                 self._activate_geometry_line_pick_tool
             )
             line_action = menu.addAction("New Line by Input...")
             line_action.triggered.connect(self._create_line_geometry)
-            surface_pick = menu.addAction("New Surface by Picking...")
+            surface_pick = menu.addAction("Draw Rectangle")
             surface_pick.triggered.connect(
                 self._activate_geometry_surface_pick_tool
             )
