@@ -8,7 +8,7 @@ from openseespy_studio.moment_curvature import (
     MomentCurvatureSpec,
     build_moment_curvature_project,
 )
-from openseespy_studio.project import ProjectDatabase, SectionData
+from openseespy_studio.project import MaterialData, ProjectDatabase, SectionData
 
 
 def _project(*, ndm: int, ndf: int) -> ProjectDatabase:
@@ -152,3 +152,34 @@ def test_2d_rejects_my_axis():
                 increments=20,
             ),
         )
+
+
+def test_isolated_project_ignores_unrelated_project_materials():
+    source = _project(ndm=2, ndf=3)
+    source.add_material(
+        MaterialData(
+            99,
+            "Unused legacy reference",
+            "RambergOsgoodSteel",
+            parameters={
+                "fy": 600.0e6,
+                "E0": 200.0e9,
+                "a": 0.002,
+                "n": 10.0,
+            },
+        )
+    )
+
+    test_project = build_moment_curvature_project(
+        source,
+        MomentCurvatureSpec(
+            section_tag=7,
+            axis="Mz",
+            max_curvature=0.01,
+            increments=20,
+        ),
+    )
+
+    assert test_project.materials == {}
+    script = _script(test_project)
+    assert "RambergOsgoodSteel" not in script
