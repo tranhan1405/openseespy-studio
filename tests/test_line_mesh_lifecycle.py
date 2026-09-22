@@ -1600,6 +1600,84 @@ def test_geometry_sketch_snaps_endpoint_midpoint_and_intersection():
     assert "restore_selection" in refresh_tree
 
 
+def test_geometry_free_line_three_clicks_commit_two_lines():
+    project = ProjectDatabase(name="three-click-free-line")
+
+    class SnapAction:
+        def isChecked(self):
+            return False
+
+    class ViewportStub:
+        def __init__(self):
+            self.plane = ("xy", 0.0)
+
+        def geometry_world_to_screen(self, xyz):
+            return (float(xyz[0]) * 100.0, float(xyz[1]) * 100.0)
+
+        def geometry_sketch_plane(self):
+            return self.plane
+
+        def set_geometry_sketch_plane_offset_from_point(self, xyz):
+            self.plane = ("xy", float(xyz[2]))
+
+        def show_geometry_sketch_preview(self, *_args, **_kwargs):
+            return None
+
+    class StatusStub:
+        def setText(self, _text):
+            return None
+
+    dummy = SimpleNamespace(
+        project=project,
+        model=project.model,
+        viewport=ViewportStub(),
+        actions={"geometry_snap": SnapAction()},
+        status_message=StatusStub(),
+        _geometry_line_point_tags=[],
+        _geometry_surface_point_tags=[],
+        _geometry_sketch_intersections=[],
+    )
+    for name in (
+        "_geometry_sketch_tolerance",
+        "_geometry_point_on_active_sketch_plane",
+        "_geometry_sketch_snap",
+        "_find_geometry_point_near",
+        "_materialize_geometry_sketch_point",
+        "_existing_geometry_line_between",
+        "_draw_geometry_line_segment",
+        "_handle_geometry_line_sketch_click",
+    ):
+        setattr(
+            dummy,
+            name,
+            getattr(MainWindow, name).__get__(dummy, type(dummy)),
+        )
+
+    dummy._refresh_geometry_sketch_snap_cache = lambda: None
+    dummy._refresh_all = lambda *_args, **_kwargs: None
+    dummy._record_project_change = lambda *_args, **_kwargs: None
+
+    for world, screen in (
+        ((0.0, 0.0, 0.0), (100.0, 100.0)),
+        ((2.0, 1.0, 0.0), (300.0, 200.0)),
+        ((4.0, 3.0, 0.0), (500.0, 400.0)),
+    ):
+        dummy._handle_geometry_line_sketch_click(
+            {
+                "kind": None,
+                "tag": None,
+                "world": world,
+                "screen": screen,
+            }
+        )
+
+    assert len(project.points) == 3
+    assert len(project.lines) == 2
+    assert dummy._geometry_line_point_tags == [3]
+    assert (project.lines[1].point_i, project.lines[1].point_j) == (1, 2)
+    assert (project.lines[2].point_i, project.lines[2].point_j) == (2, 3)
+
+
 def test_geometry_free_line_ignores_stale_far_point_picker_hit():
     project = ProjectDatabase(name="free-line-snap")
     project.add_point(PointGeometryData(1, "Anchor", (0.0, 0.0, 0.0)))
