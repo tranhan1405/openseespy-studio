@@ -7876,6 +7876,27 @@ class ProjectDatabase:
             )
         }
 
+    def _materialize_solution_result_surface_scope(
+        self,
+        result: SolutionResultData,
+    ) -> None:
+        if not result.surface_scope:
+            return
+        result.element_scope = sorted({
+            int(element_tag)
+            for surface_tag in result.surface_scope
+            if surface_tag in self.surfaces
+            for element_tag in self.surfaces[
+                surface_tag
+            ].generated_element_tags
+            if (
+                int(element_tag) in self.model.elements
+                and self.model.elements[
+                    int(element_tag)
+                ].element_type in SHELL_ELEMENT_TYPES
+            )
+        })
+
     def _validate_solution_result(self, result: SolutionResultData) -> None:
         if result.analysis_tag not in self.analyses:
             raise ValueError(
@@ -8136,6 +8157,7 @@ class ProjectDatabase:
             raise ValueError(
                 f"Solution result tag {result.tag} already exists."
             )
+        self._materialize_solution_result_surface_scope(result)
         self._validate_solution_result(result)
         self.solution_results[result.tag] = result
 
@@ -8159,6 +8181,7 @@ class ProjectDatabase:
             raise ValueError(
                 f"Solution result tag {result.tag} already exists."
             )
+        self._materialize_solution_result_surface_scope(result)
         self._validate_solution_result(result)
         self.solution_results.pop(original_tag)
         self.solution_results[result.tag] = result
