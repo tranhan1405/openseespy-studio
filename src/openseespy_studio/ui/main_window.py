@@ -5572,6 +5572,30 @@ class MainWindow(QMainWindow):
                                 else "Automatic from node ordering"
                             ),
                         ),
+                        (
+                            "Enhanced assumed strain",
+                            (
+                                "Disabled (-noeas)"
+                                if element.shell_no_eas
+                                else "Enabled"
+                            ),
+                        ),
+                        (
+                            "Drilling stabilization",
+                            (
+                                f"{element.shell_drilling_stab:g}"
+                                if element.shell_drilling_stab is not None
+                                else "OpenSees default"
+                            ),
+                        ),
+                        (
+                            "Nonlinear drilling",
+                            (
+                                "Enabled (-drillingNL)"
+                                if element.shell_drilling_nl
+                                else "Disabled"
+                            ),
+                        ),
                         ("Transformation", "Not used by Shell"),
                         ("Beam integration", "Not used by Shell"),
                         ("Group", element.group),
