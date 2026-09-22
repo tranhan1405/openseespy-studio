@@ -7,10 +7,18 @@ from typing import Dict, Iterable, Tuple
 
 Vec3 = Tuple[float, float, float]
 
-SUPPORTED_ELEMENT_TYPES = {
+FRAME_ELEMENT_TYPES = {
     "elasticBeamColumn",
     "forceBeamColumn",
     "dispBeamColumn",
+}
+SHELL_ELEMENT_TYPES = {
+    "ASDShellQ4",
+    "ShellMITC4",
+    "ShellDKGQ",
+    "ShellNLDKGQ",
+}
+SUPPORTED_ELEMENT_TYPES = FRAME_ELEMENT_TYPES | SHELL_ELEMENT_TYPES | {
     "truss",
 }
 
@@ -120,6 +128,20 @@ class Element:
     truss_area: float = 0.0
     truss_material_tag: int | None = None
     truss_do_rayleigh: bool = False
+    k: int | None = None
+    l: int | None = None
+    shell_corotational: bool = False
+
+    @property
+    def is_shell(self) -> bool:
+        return self.element_type in SHELL_ELEMENT_TYPES
+
+    def node_tags(self) -> tuple[int, ...]:
+        if self.is_shell:
+            if self.k is None or self.l is None:
+                return (self.i, self.j)
+            return (self.i, self.j, self.k, self.l)
+        return (self.i, self.j)
 
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Element tag")
@@ -209,13 +231,34 @@ class Element:
             self.truss_do_rayleigh,
             "Truss Rayleigh flag",
         )
-        uses_frame_references = self.element_type != "truss"
+        self.shell_corotational = _strict_bool(
+            self.shell_corotational,
+            "Shell corotational flag",
+        )
+        if self.is_shell:
+            if self.k is None or self.l is None:
+                raise ValueError(
+                    f"{self.element_type} requires four node tags."
+                )
+            self.k = _strict_int(self.k, "Element K-node tag")
+            self.l = _strict_int(self.l, "Element L-node tag")
+            if len(set(self.node_tags())) != 4:
+                raise ValueError(
+                    f"{self.element_type} requires four distinct node tags."
+                )
+        else:
+            self.k = None
+            self.l = None
+            self.shell_corotational = False
+
+        uses_section_reference = self.element_type != "truss"
+        uses_frame_reference = self.element_type in FRAME_ELEMENT_TYPES
         self.section_tag = (
             None
             if self.section_tag is None
             else (
                 _strict_int(self.section_tag, "Element section tag")
-                if uses_frame_references
+                if uses_section_reference
                 else int(self.section_tag)
             )
         )
@@ -227,12 +270,14 @@ class Element:
                     self.transf_tag,
                     "Element transformation tag",
                 )
-                if uses_frame_references
+                if uses_frame_reference
                 else int(self.transf_tag)
             )
         )
+        if self.is_shell:
+            self.transf_tag = None
 
-        if self.integration_type not in {
+        if self.element_type in FRAME_ELEMENT_TYPES and self.integration_type not in {
             "Lobatto",
             "Legendre",
             "Radau",
@@ -251,10 +296,16 @@ class Element:
             "HingeMidpoint",
             "HingeEndpoint",
         }
-        if self.integration_type in {"Lobatto", "Legendre", "Radau"}:
+        if (
+            self.element_type in FRAME_ELEMENT_TYPES
+            and self.integration_type in {"Lobatto", "Legendre", "Radau"}
+        ):
             if self.integration_points < 2:
                 raise ValueError("Beam integration needs at least 2 points.")
-        elif self.integration_type in beam_hinge_types:
+        elif (
+            self.element_type in FRAME_ELEMENT_TYPES
+            and self.integration_type in beam_hinge_types
+        ):
             if (
                 self.hinge_i_section_tag is None
                 or self.hinge_j_section_tag is None
@@ -265,7 +316,10 @@ class Element:
                 )
             if self.hinge_i_length < 0.0 or self.hinge_j_length < 0.0:
                 raise ValueError("Plastic hinge lengths cannot be negative.")
-        elif self.integration_type == "ConcentratedPlasticity":
+        elif (
+            self.element_type in FRAME_ELEMENT_TYPES
+            and self.integration_type == "ConcentratedPlasticity"
+        ):
             if (
                 self.hinge_i_section_tag is None
                 or self.hinge_j_section_tag is None
@@ -374,6 +428,9 @@ class StructuralModel:
         truss_area: float = 0.0,
         truss_material_tag: int | None = None,
         truss_do_rayleigh: bool = False,
+        k: int | None = None,
+        l: int | None = None,
+        shell_corotational: bool = False,
     ) -> Element:
         tag = _strict_int(tag, "Element tag")
         i = _strict_int(i, "Element I-node tag")
@@ -385,12 +442,31 @@ class StructuralModel:
             raise ValueError(f"Element tag {tag} already exists")
         if element_type not in SUPPORTED_ELEMENT_TYPES:
             raise ValueError(f"Unsupported element type: {element_type}")
-        if i == j:
+        is_shell = element_type in SHELL_ELEMENT_TYPES
+        raw_nodes = [i, j]
+        if is_shell:
+            if k is None or l is None:
+                raise ValueError(
+                    f"{element_type} element {tag} requires four nodes."
+                )
+            k = _strict_int(k, "Element K-node tag")
+            l = _strict_int(l, "Element L-node tag")
+            raw_nodes.extend([k, l])
+        if len(set(raw_nodes)) != len(raw_nodes):
             raise ValueError(
-                f"Element {tag} must connect two different node tags."
+                f"Element {tag} must reference distinct node tags."
             )
-        if i not in self.nodes or j not in self.nodes:
-            raise ValueError(f"Element {tag} references missing nodes {i}, {j}")
+        missing = [node_tag for node_tag in raw_nodes if node_tag not in self.nodes]
+        if missing:
+            raise ValueError(
+                f"Element {tag} references missing node tag(s): "
+                + ", ".join(map(str, missing))
+            )
+        if is_shell and (self.ndm, self.ndf) != (3, 6):
+            raise ValueError(
+                f"{element_type} requires a 3D/6DOF model; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
         ele = Element(
             tag,
             i,
@@ -413,6 +489,9 @@ class StructuralModel:
             truss_area,
             truss_material_tag,
             truss_do_rayleigh,
+            k,
+            l,
+            shell_corotational,
         )
         self.elements[tag] = ele
         return ele
@@ -510,7 +589,7 @@ class StructuralModel:
         connected = [
             element_tag
             for element_tag, element in self.elements.items()
-            if element.i == tag or element.j == tag
+            if tag in element.node_tags()
         ]
         if connected and not cascade:
             raise ValueError(
@@ -664,7 +743,7 @@ class StructuralModel:
             normalized_tag = _strict_int(element_tag, "Element tag")
             element = self.elements.get(normalized_tag)
             if element is not None:
-                tags.update((element.i, element.j))
+                tags.update(element.node_tags())
         return tags
 
     def translate_entities(
@@ -863,6 +942,17 @@ class StructuralModel:
                     source.truss_area,
                     source.truss_material_tag,
                     source.truss_do_rayleigh,
+                    k=(
+                        node_map[source.k]
+                        if source.k is not None
+                        else None
+                    ),
+                    l=(
+                        node_map[source.l]
+                        if source.l is not None
+                        else None
+                    ),
+                    shell_corotational=source.shell_corotational,
                 )
                 created_elements.add(new_tag)
 
@@ -905,6 +995,9 @@ class StructuralModel:
                     "truss_area": element.truss_area,
                     "truss_material_tag": element.truss_material_tag,
                     "truss_do_rayleigh": element.truss_do_rayleigh,
+                    "k": element.k,
+                    "l": element.l,
+                    "shell_corotational": element.shell_corotational,
                 }
                 for element in sorted(self.elements.values(), key=lambda item: item.tag)
             ],
@@ -999,6 +1092,9 @@ class StructuralModel:
                 float(item.get("truss_area", 0.0)),
                 item.get("truss_material_tag"),
                 item.get("truss_do_rayleigh", False),
+                item.get("k"),
+                item.get("l"),
+                item.get("shell_corotational", False),
             )
 
         return model
