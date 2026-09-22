@@ -2266,6 +2266,7 @@ class ModelViewport(QWidget):
         self._selected_nodes.clear()
         self._selected_elements.clear()
         self._hover_ref = None
+        self._last_geometry_sketch_qt_pos = None
         self._render_model(reset_camera=bool(reset_camera))
 
     def set_display_domain(self, domain: str) -> None:
@@ -2279,6 +2280,11 @@ class ModelViewport(QWidget):
         self._selected_nodes.clear()
         self._selected_elements.clear()
         self._hover_ref = None
+        self._left_press_pos = None
+        self._right_press_pos = None
+        self._last_geometry_sketch_qt_pos = None
+        if normalized != "geometry":
+            self.clear_geometry_sketch_preview(render=False)
         self._render_model(reset_camera=True)
 
     def set_geometry_line_selection(
