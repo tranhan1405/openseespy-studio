@@ -1269,3 +1269,96 @@ def test_geometry_sketch_has_live_preview_and_right_click_finish():
     assert "_geometry_sketch_preview" in preview
     assert "geometry_sketch_finished.emit()" in event_filter
 
+def test_geometry_ribbon_tab_groups_spaceclaim_style_tools():
+    ribbon = inspect.getsource(MainWindow._build_actions_and_ribbon)
+
+    assert 'self.ribbon_tabs.addTab(' in ribbon
+    assert '"Geometry"' in ribbon
+    assert 'geometry_page = RibbonPage()' in ribbon
+    assert '"Draw"' in ribbon
+    assert '"Modify"' in ribbon
+    assert '"Sketch"' in ribbon
+    assert '"Work Plane"' in ribbon
+    assert '"geometry_trim_pick"' in ribbon
+    assert '"geometry_snap"' in ribbon
+    assert '"geometry_grid"' in ribbon
+
+
+def test_geometry_lines_are_pickable_hoverable_and_tree_selectable():
+    render = inspect.getsource(ModelViewport._render_model)
+    picking = inspect.getsource(ModelViewport.pick_entity)
+    highlight = inspect.getsource(
+        ModelViewport._update_highlight_overlays
+    )
+    selection = inspect.getsource(
+        MainWindow._select_geometry_line_from_viewport
+    )
+
+    assert 'name="line-geometry"' in render
+    assert "pickable=True" in render
+    assert "_cell_picker.AddPickList" in render
+    assert '"geometry_line"' in picking
+    assert '"hover-geometry-line"' in highlight
+    assert '"selection-geometry-lines"' in highlight
+    assert "_tree_line_items" in selection
+
+
+def test_geometry_trim_tool_is_two_click_nearest_endpoint_workflow():
+    activate = inspect.getsource(
+        MainWindow._activate_geometry_trim_tool
+    )
+    handle = inspect.getsource(
+        MainWindow._handle_geometry_trim_click
+    )
+    click = inspect.getsource(MainWindow._viewport_entity_clicked)
+
+    assert "click the Geometry Line to trim" in activate
+    assert "_geometry_trim_subject_tag" in handle
+    assert "trim_extend_line_to_line" in handle
+    assert 'endpoint="nearest"' in handle
+    assert "geometry_trim_pick" in click
+    assert "_handle_geometry_trim_click" in click
+
+
+def test_geometry_snap_has_orthogonal_inference_and_toggle():
+    snap = inspect.getsource(MainWindow._geometry_sketch_snap)
+    toggle = inspect.getsource(MainWindow._toggle_geometry_snap)
+
+    assert 'self.actions.get("geometry_snap")' in snap
+    assert '"orthogonal"' in snap
+    assert "Orthogonal ·" in snap
+    assert '"Horizontal"' in snap
+    assert '"Vertical"' in snap
+    assert "Geometry snapping" in toggle
+
+
+def test_geometry_sketch_grid_is_workplane_aware_and_toggleable():
+    toggle = inspect.getsource(MainWindow._toggle_geometry_grid)
+    setter = inspect.getsource(
+        ModelViewport.set_geometry_sketch_grid_visible
+    )
+    render = inspect.getsource(
+        ModelViewport._render_geometry_sketch_grid
+    )
+
+    assert "set_geometry_sketch_grid_visible" in toggle
+    assert "_geometry_sketch_grid_visible" in setter
+    assert '"xy": (0, 1, 2)' in render
+    assert '"xz": (0, 2, 1)' in render
+    assert '"yz": (1, 2, 0)' in render
+    assert 'name="geometry-sketch-grid"' in render
+
+
+def test_geometry_tools_are_mutually_exclusive():
+    line = inspect.getsource(
+        MainWindow._activate_geometry_line_pick_tool
+    )
+    surface = inspect.getsource(
+        MainWindow._activate_geometry_surface_pick_tool
+    )
+    frame = inspect.getsource(MainWindow._activate_frame_pick_tool)
+
+    assert "_leave_geometry_trim_mode" in line
+    assert "_leave_geometry_trim_mode" in surface
+    assert "_leave_geometry_trim_mode" in frame
+
