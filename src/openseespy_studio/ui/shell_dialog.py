@@ -7,15 +7,29 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPushButton,
     QSpinBox,
+    QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from ..model import SHELL_ELEMENT_TYPES
-from ..project import SECTION_DEFAULTS, SHELL_SECTION_TYPES, SectionData
+from ..project import (
+    ND_MATERIAL_DEFAULTS,
+    NDMaterialData,
+    SECTION_DEFAULTS,
+    SHELL_SECTION_TYPES,
+    SectionData,
+    ShellLayerData,
+)
 from ..shell_mesh import ShellMeshSpec
 from ..units import UnitSystem
 
@@ -34,14 +48,136 @@ def _float_spin(
     return spin
 
 
+class NDMaterialDialog(QDialog):
+    """Small shell-focused editor for OpenSees nDMaterial definitions."""
+
+    def __init__(
+        self,
+        *,
+        next_tag: int,
+        material: NDMaterialData | None = None,
+        units=None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle(
+            "Edit nD Material" if material is not None else "New nD Material"
+        )
+        self.setModal(True)
+        self.setMinimumWidth(420)
+        self.unit_system = UnitSystem.from_mapping(units)
+        defaults = ND_MATERIAL_DEFAULTS["ElasticIsotropic"]
+        p = material.parameters if material is not None else defaults
+
+        root = QVBoxLayout(self)
+        form = QFormLayout()
+        root.addLayout(form)
+
+        self.tag = QSpinBox()
+        self.tag.setRange(1, 2_147_483_647)
+        self.tag.setValue(
+            material.tag if material is not None else int(next_tag)
+        )
+        form.addRow("Tag:", self.tag)
+
+        self.name = QLineEdit(
+            material.name
+            if material is not None
+            else f"ElasticIsotropic {int(next_tag)}"
+        )
+        form.addRow("Name:", self.name)
+
+        self.material_type = QComboBox()
+        self.material_type.addItem("ElasticIsotropic")
+        form.addRow("OpenSees nDMaterial:", self.material_type)
+
+        self.elastic_modulus = _float_spin(
+            self.unit_system.engineering_stress_from_pa(
+                float(p.get("E", defaults["E"]))
+            ),
+            low=1.0e-12,
+        )
+        form.addRow(
+            f"E [{self.unit_system.engineering_stress_label}]:",
+            self.elastic_modulus,
+        )
+
+        self.poisson = _float_spin(
+            float(p.get("nu", defaults["nu"])),
+            low=-0.999999,
+            high=0.499999,
+            decimals=6,
+        )
+        form.addRow("Poisson ratio ν:", self.poisson)
+
+        self.density = _float_spin(
+            self.unit_system.engineering_density_from_kg_per_m3(
+                float(p.get("rho", defaults["rho"]))
+            ),
+            low=0.0,
+        )
+        form.addRow(
+            f"Density ρ [{self.unit_system.engineering_density_label}]:",
+            self.density,
+        )
+
+        note = QLabel(
+            "nD materials are stored separately from uniaxial materials. "
+            "The first nonlinear-shell family uses ElasticIsotropic; more "
+            "constitutive nD models can be added without changing the "
+            "uniaxial Material Library."
+        )
+        note.setWordWrap(True)
+        root.addWidget(note)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    def material_data(self) -> NDMaterialData:
+        return NDMaterialData(
+            tag=self.tag.value(),
+            name=self.name.text().strip()
+            or f"ElasticIsotropic {self.tag.value()}",
+            material_type="ElasticIsotropic",
+            parameters={
+                "E": self.unit_system.engineering_stress_to_pa(
+                    self.elastic_modulus.value()
+                ),
+                "nu": self.poisson.value(),
+                "rho": self.unit_system.engineering_density_to_kg_per_m3(
+                    self.density.value()
+                ),
+            },
+        )
+
+    def _accept(self) -> None:
+        try:
+            self.material_data()
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "nD Material", str(exc))
+            return
+        self.accept()
+
+
 class ShellSectionDialog(QDialog):
-    """Elastic membrane-plate section for shell elements."""
+    """Elastic, PlateFiber, or layered shell-section editor."""
+
+    SECTION_TYPES = (
+        ("Elastic membrane plate", "ElasticMembranePlate"),
+        ("PlateFiber", "PlateFiber"),
+        ("LayeredShell", "LayeredShell"),
+    )
 
     def __init__(
         self,
         *,
         next_tag: int | None = None,
         section: SectionData | None = None,
+        nd_materials=None,
         units=None,
         parent=None,
     ):
@@ -51,16 +187,22 @@ class ShellSectionDialog(QDialog):
             else "New Shell Section"
         )
         self.setModal(True)
-        self.setMinimumWidth(470)
+        self.setMinimumWidth(560)
         self.unit_system = UnitSystem.from_mapping(units)
+        self._nd_materials = dict(nd_materials or {})
+        self._staged_nd_materials: dict[int, NDMaterialData] = {}
+        self._layers: list[ShellLayerData] = [
+            ShellLayerData(layer.material_tag, layer.thickness)
+            for layer in (section.shell_layers if section is not None else [])
+        ]
 
-        if section is not None and section.section_type not in SHELL_SECTION_TYPES:
+        if (
+            section is not None
+            and section.section_type not in SHELL_SECTION_TYPES
+        ):
             raise ValueError(
                 f"Section {section.tag} is not a shell-compatible section."
             )
-
-        defaults = SECTION_DEFAULTS["ElasticMembranePlate"]
-        p = section.parameters if section is not None else defaults
 
         root = QVBoxLayout(self)
         form = QFormLayout()
@@ -79,62 +221,164 @@ class ShellSectionDialog(QDialog):
         )
         form.addRow("Name:", self.name)
 
-        formulation = QLabel("ElasticMembranePlateSection")
-        formulation.setStyleSheet("font-weight: 600;")
-        form.addRow("OpenSees section:", formulation)
+        self.section_type = QComboBox()
+        for label, value in self.SECTION_TYPES:
+            self.section_type.addItem(label, value)
+        if section is not None:
+            index = self.section_type.findData(section.section_type)
+            if index >= 0:
+                self.section_type.setCurrentIndex(index)
+        form.addRow("Shell section type:", self.section_type)
 
+        self.pages = QStackedWidget()
+        root.addWidget(self.pages, 1)
+
+        # ElasticMembranePlate page.
+        elastic_page = QWidget()
+        elastic_form = QFormLayout(elastic_page)
+        elastic_defaults = SECTION_DEFAULTS["ElasticMembranePlate"]
+        elastic_p = (
+            section.parameters
+            if section is not None
+            and section.section_type == "ElasticMembranePlate"
+            else elastic_defaults
+        )
         self.elastic_modulus = _float_spin(
             self.unit_system.engineering_stress_from_pa(
-                float(p.get("E", defaults["E"]))
+                float(elastic_p.get("E", elastic_defaults["E"]))
             ),
             low=1.0e-12,
         )
-        self.elastic_modulus.setSingleStep(100.0)
-        form.addRow(
+        elastic_form.addRow(
             f"E [{self.unit_system.engineering_stress_label}]:",
             self.elastic_modulus,
         )
-
         self.poisson = _float_spin(
-            float(p.get("nu", defaults["nu"])),
+            float(elastic_p.get("nu", elastic_defaults["nu"])),
             low=-0.999999,
             high=0.499999,
             decimals=6,
         )
-        form.addRow("Poisson ratio ν:", self.poisson)
-
-        thickness_value = (
+        elastic_form.addRow("Poisson ratio ν:", self.poisson)
+        elastic_thickness = (
             float(section.parameters["h"])
             if section is not None
+            and section.section_type == "ElasticMembranePlate"
             else self.unit_system.length_from_m(0.20)
         )
-        self.thickness = _float_spin(
-            thickness_value,
-            low=1.0e-12,
-        )
-        form.addRow(
+        self.thickness = _float_spin(elastic_thickness, low=1.0e-12)
+        elastic_form.addRow(
             f"Thickness h [{self.unit_system.length}]:",
             self.thickness,
         )
-
         self.density = _float_spin(
-            float(p.get("rho", defaults["rho"])),
+            float(elastic_p.get("rho", elastic_defaults["rho"])),
             low=0.0,
         )
-        form.addRow("Mass density ρ [model mass/L³]:", self.density)
-
+        elastic_form.addRow("Mass density ρ [model mass/L³]:", self.density)
         self.ep_modifier = _float_spin(
-            float(p.get("EpModifier", defaults["EpModifier"])),
+            float(
+                elastic_p.get(
+                    "EpModifier",
+                    elastic_defaults["EpModifier"],
+                )
+            ),
             low=1.0e-12,
             decimals=6,
         )
-        form.addRow("Out-of-plane E modifier:", self.ep_modifier)
+        elastic_form.addRow(
+            "Out-of-plane E modifier:",
+            self.ep_modifier,
+        )
+        self.pages.addWidget(elastic_page)
+
+        # PlateFiber page.
+        plate_page = QWidget()
+        plate_form = QFormLayout(plate_page)
+        plate_row = QHBoxLayout()
+        self.plate_material = QComboBox()
+        plate_row.addWidget(self.plate_material, 1)
+        plate_new = QPushButton("New nD Material...")
+        plate_new.clicked.connect(self._new_nd_material)
+        plate_row.addWidget(plate_new)
+        plate_form.addRow("nD Material:", plate_row)
+        plate_thickness = (
+            float(section.parameters["h"])
+            if section is not None
+            and section.section_type == "PlateFiber"
+            else self.unit_system.length_from_m(0.20)
+        )
+        self.plate_thickness = _float_spin(
+            plate_thickness,
+            low=1.0e-12,
+        )
+        plate_form.addRow(
+            f"Thickness h [{self.unit_system.length}]:",
+            self.plate_thickness,
+        )
+        plate_note = QLabel(
+            "PlateFiber integrates the selected nD material through the "
+            "shell thickness and enables material-level stress/strain "
+            "responses."
+        )
+        plate_note.setWordWrap(True)
+        plate_form.addRow(plate_note)
+        self.pages.addWidget(plate_page)
+
+        # LayeredShell page.
+        layered_page = QWidget()
+        layered_layout = QVBoxLayout(layered_page)
+        layer_input = QHBoxLayout()
+        self.layer_material = QComboBox()
+        layer_input.addWidget(self.layer_material, 1)
+        self.layer_thickness = _float_spin(
+            self.unit_system.length_from_m(0.05),
+            low=1.0e-12,
+        )
+        self.layer_thickness.setMaximumWidth(130)
+        layer_input.addWidget(self.layer_thickness)
+        add_layer = QPushButton("Add Layer")
+        add_layer.clicked.connect(self._add_layer)
+        layer_input.addWidget(add_layer)
+        new_layer_material = QPushButton("New nD Material...")
+        new_layer_material.clicked.connect(self._new_nd_material)
+        layer_input.addWidget(new_layer_material)
+        layered_layout.addLayout(layer_input)
+
+        self.layer_table = QTableWidget(0, 3)
+        self.layer_table.setHorizontalHeaderLabels(
+            ["Layer", "nD Material", f"Thickness [{self.unit_system.length}]"]
+        )
+        self.layer_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.layer_table.horizontalHeader().setStretchLastSection(True)
+        layered_layout.addWidget(self.layer_table, 1)
+        remove_layer = QPushButton("Remove Selected Layer")
+        remove_layer.clicked.connect(self._remove_layer)
+        layered_layout.addWidget(remove_layer)
+        self.pages.addWidget(layered_page)
+
+        self.section_type.currentIndexChanged.connect(
+            self._sync_section_page
+        )
+        self._refresh_nd_material_choices()
+        if (
+            section is not None
+            and section.section_type == "PlateFiber"
+            and section.nd_material_tag is not None
+        ):
+            index = self.plate_material.findData(section.nd_material_tag)
+            if index >= 0:
+                self.plate_material.setCurrentIndex(index)
+        self._refresh_layer_table()
+        self._sync_section_page()
 
         note = QLabel(
-            "Initial shell support uses OpenSees ElasticMembranePlateSection. "
-            "It is compatible with ASDShellQ4, ShellMITC4, ShellDKGQ and "
-            "ShellNLDKGQ. PlateFiber/LayeredShell will be added as nonlinear "
-            "shell-section families without introducing solid elements."
+            "Shell scope in SARE ends at surface elements. "
+            "ElasticMembranePlate is the simple elastic option; PlateFiber "
+            "and LayeredShell provide the nonlinear-shell foundation without "
+            "adding solid/brick elements."
         )
         note.setWordWrap(True)
         root.addWidget(note)
@@ -146,26 +390,175 @@ class ShellSectionDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
 
+    def _all_nd_materials(self) -> dict[int, NDMaterialData]:
+        result = dict(self._nd_materials)
+        result.update(self._staged_nd_materials)
+        return result
+
+    def _refresh_nd_material_choices(self) -> None:
+        plate_current = self.plate_material.currentData()
+        layer_current = self.layer_material.currentData()
+        for combo in (self.plate_material, self.layer_material):
+            combo.clear()
+            for tag, material in sorted(self._all_nd_materials().items()):
+                combo.addItem(
+                    f"{tag} - {material.name} ({material.material_type})",
+                    int(tag),
+                )
+        for combo, current in (
+            (self.plate_material, plate_current),
+            (self.layer_material, layer_current),
+        ):
+            if current is not None:
+                index = combo.findData(int(current))
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+
+    def _next_staged_nd_material_tag(self) -> int:
+        return max(
+            set(self._nd_materials) | set(self._staged_nd_materials),
+            default=0,
+        ) + 1
+
+    def _new_nd_material(self) -> None:
+        dialog = NDMaterialDialog(
+            next_tag=self._next_staged_nd_material_tag(),
+            units=self.unit_system.as_mapping(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        material = dialog.material_data()
+        if material.tag in self._all_nd_materials():
+            QMessageBox.warning(
+                self,
+                "nD Material",
+                f"nDMaterial tag {material.tag} already exists.",
+            )
+            return
+        self._staged_nd_materials[material.tag] = material
+        self._refresh_nd_material_choices()
+        for combo in (self.plate_material, self.layer_material):
+            index = combo.findData(material.tag)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+
+    def staged_nd_materials(self) -> list[NDMaterialData]:
+        return [
+            self._staged_nd_materials[tag]
+            for tag in sorted(self._staged_nd_materials)
+        ]
+
+    def _sync_section_page(self, *_args) -> None:
+        section_type = str(self.section_type.currentData())
+        page_index = {
+            "ElasticMembranePlate": 0,
+            "PlateFiber": 1,
+            "LayeredShell": 2,
+        }[section_type]
+        self.pages.setCurrentIndex(page_index)
+
+    def _add_layer(self) -> None:
+        material_tag = self.layer_material.currentData()
+        if material_tag is None:
+            QMessageBox.warning(
+                self,
+                "LayeredShell",
+                "Create or choose an nD Material first.",
+            )
+            return
+        self._layers.append(
+            ShellLayerData(
+                int(material_tag),
+                self.layer_thickness.value(),
+            )
+        )
+        self._refresh_layer_table()
+
+    def _remove_layer(self) -> None:
+        row = self.layer_table.currentRow()
+        if row < 0 or row >= len(self._layers):
+            return
+        self._layers.pop(row)
+        self._refresh_layer_table()
+
+    def _refresh_layer_table(self) -> None:
+        self.layer_table.setRowCount(len(self._layers))
+        materials = self._all_nd_materials()
+        for row, layer in enumerate(self._layers):
+            material = materials.get(int(layer.material_tag))
+            label = (
+                f"{layer.material_tag} - {material.name}"
+                if material is not None
+                else f"{layer.material_tag} (missing)"
+            )
+            self.layer_table.setItem(
+                row,
+                0,
+                QTableWidgetItem(str(row + 1)),
+            )
+            self.layer_table.setItem(row, 1, QTableWidgetItem(label))
+            self.layer_table.setItem(
+                row,
+                2,
+                QTableWidgetItem(f"{layer.thickness:g}"),
+            )
+
     def section_data(self) -> SectionData:
-        return SectionData(
-            tag=self.tag.value(),
-            name=self.name.text().strip()
+        section_type = str(self.section_type.currentData())
+        common = {
+            "tag": self.tag.value(),
+            "name": self.name.text().strip()
             or f"Shell Section {self.tag.value()}",
-            section_type="ElasticMembranePlate",
-            parameters={
-                "E": self.unit_system.engineering_stress_to_pa(
-                    self.elastic_modulus.value()
-                ),
-                "nu": self.poisson.value(),
-                "h": self.thickness.value(),
-                "rho": self.density.value(),
-                "EpModifier": self.ep_modifier.value(),
-            },
+            "section_type": section_type,
+        }
+        if section_type == "ElasticMembranePlate":
+            return SectionData(
+                **common,
+                parameters={
+                    "E": self.unit_system.engineering_stress_to_pa(
+                        self.elastic_modulus.value()
+                    ),
+                    "nu": self.poisson.value(),
+                    "h": self.thickness.value(),
+                    "rho": self.density.value(),
+                    "EpModifier": self.ep_modifier.value(),
+                },
+            )
+        if section_type == "PlateFiber":
+            material_tag = self.plate_material.currentData()
+            if material_tag is None:
+                raise ValueError(
+                    "PlateFiber requires an nD Material. "
+                    "Use 'New nD Material...' to define one here."
+                )
+            return SectionData(
+                **common,
+                parameters={"h": self.plate_thickness.value()},
+                nd_material_tag=int(material_tag),
+            )
+        return SectionData(
+            **common,
+            shell_layers=[
+                ShellLayerData(layer.material_tag, layer.thickness)
+                for layer in self._layers
+            ],
         )
 
     def _accept(self) -> None:
         try:
-            self.section_data()
+            section = self.section_data()
+            available = self._all_nd_materials()
+            missing = sorted(
+                tag
+                for tag in section.shell_nd_material_tags()
+                if tag not in available
+            )
+            if missing:
+                raise ValueError(
+                    "Shell section references missing nDMaterial tag(s): "
+                    + ", ".join(map(str, missing))
+                )
         except (TypeError, ValueError) as exc:
             QMessageBox.warning(self, "Shell Section", str(exc))
             return
