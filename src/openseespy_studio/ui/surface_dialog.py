@@ -53,13 +53,20 @@ class SurfaceGeometryDialog(QDialog):
         ] | None = None,
         initial_point_tags: tuple[int, int, int, int] | None = None,
         preview_callback=None,
+        mode: str = "full",
         parent=None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(
-            "Edit Surface Geometry" if surface is not None
-            else "New Surface Geometry"
-        )
+        self._mode = str(mode).strip().lower()
+        if self._mode not in {"geometry", "mesh", "full"}:
+            raise ValueError("Surface dialog mode must be geometry, mesh, or full.")
+        if self._mode == "mesh":
+            self.setWindowTitle("Configure Surface Mesh / Shell Recipe")
+        else:
+            self.setWindowTitle(
+                "Edit Surface Geometry" if surface is not None
+                else "New Surface Geometry"
+            )
         self.resize(520, 650)
         self._surface = surface
         self._sections = dict(sections)
@@ -165,6 +172,7 @@ class SurfaceGeometryDialog(QDialog):
         root.addWidget(self.quad_group)
 
         mesh_group = QGroupBox("Mapped Quad Mesh")
+        self.mesh_group = mesh_group
         mesh_form = QFormLayout(mesh_group)
 
         self.section = QComboBox()
@@ -328,10 +336,9 @@ class SurfaceGeometryDialog(QDialog):
         root.addWidget(mesh_group)
 
         note = QLabel(
-            "A Surface stores the reusable geometry and mesh definition. "
-            "Creating a new Surface immediately generates the required FE "
-            "nodes and Shell elements; those generated entities belong to "
-            "FE Model and are managed there."
+            "Geometry and Mesh are separate. Create/edit the Surface shape "
+            "first; configure the Shell mesh recipe separately before "
+            "generating FE nodes and elements."
         )
         note.setWordWrap(True)
         root.addWidget(note)
@@ -349,9 +356,24 @@ class SurfaceGeometryDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
-        buttons.button(QDialogButtonBox.Ok).setText(
-            "Update Surface" if surface else "Create Surface + Mesh"
-        )
+        if self._mode == "geometry":
+            buttons.button(QDialogButtonBox.Ok).setText(
+                "Update Geometry" if surface else "Create Geometry"
+            )
+            self.mesh_group.setVisible(False)
+            self.preview_button.setVisible(False)
+            self.resize(520, 430)
+        elif self._mode == "mesh":
+            buttons.button(QDialogButtonBox.Ok).setText("Save Mesh Recipe")
+            self.tag.setEnabled(False)
+            self.name.setEnabled(False)
+            self.surface_type.setEnabled(False)
+            self.rectangle_group.setEnabled(False)
+            self.quad_group.setEnabled(False)
+        else:
+            buttons.button(QDialogButtonBox.Ok).setText(
+                "Update Surface" if surface else "Create Surface + Mesh"
+            )
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         buttons_row.addWidget(buttons)
@@ -421,19 +443,43 @@ class SurfaceGeometryDialog(QDialog):
         )
 
     def data(self) -> SurfaceGeometryData:
+        if self._mode == "geometry":
+            if self._surface is None:
+                return SurfaceGeometryData(
+                    tag=self.tag.value(),
+                    name=self.name.text().strip(),
+                    surface_type=self.surface_type.currentText(),
+                    points=self._points(),
+                    mesh_recipe_configured=False,
+                    section_tag=None,
+                    corner_point_tags=self._corner_point_tags,
+                )
+            data = self._surface.to_dict()
+            data.update({
+                "tag": self.tag.value(),
+                "name": self.name.text().strip(),
+                "surface_type": self.surface_type.currentText(),
+                "points": [list(point) for point in self._points()],
+                "corner_point_tags": (
+                    None
+                    if self._corner_point_tags is None
+                    else list(self._corner_point_tags)
+                ),
+            })
+            return SurfaceGeometryData.from_dict(data)
+
         section_tag = self.section.currentData()
         if section_tag is None:
             raise ValueError(
-                "Surface requires a Shell Section before it can be created."
+                "Surface mesh recipe requires a Shell Section."
             )
         return SurfaceGeometryData(
             tag=self.tag.value(),
             name=self.name.text().strip(),
             surface_type=self.surface_type.currentText(),
             points=self._points(),
-            section_tag=(
-                None if section_tag is None else int(section_tag)
-            ),
+            mesh_recipe_configured=True,
+            section_tag=int(section_tag),
             formulation=self.formulation.currentText(),
             corner_point_tags=self._corner_point_tags,
             corotational=(
