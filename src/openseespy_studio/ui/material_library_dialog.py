@@ -55,6 +55,7 @@ class MaterialLibraryDialog(QDialog):
         self._next_tag = int(next_tag)
         self._units = UnitSystem.from_mapping(units)
         self._materials = dict(materials or {})
+        self._pending_materials: list[MaterialData] = []
         self._records = load_verified_material_library()
         self._record_by_id = {record.id: record for record in self._records}
         self._selected_record: MaterialLibraryRecord | None = None
@@ -131,6 +132,11 @@ class MaterialLibraryDialog(QDialog):
             self._update_accept_state
         )
         wrapper_base_layout.addWidget(self.wrapper_base_combo, 1)
+        self.wrapper_new_base = QPushButton("New Base Material...")
+        self.wrapper_new_base.clicked.connect(
+            self._create_wrapper_base_material
+        )
+        wrapper_base_layout.addWidget(self.wrapper_new_base)
         right_layout.addWidget(self.wrapper_base_host)
         self.wrapper_base_host.hide()
 
@@ -526,6 +532,90 @@ class MaterialLibraryDialog(QDialog):
         url = str(record.parameter_evidence.get("url", "")).strip()
         if url:
             QDesktopServices.openUrl(QUrl(url))
+
+    def _next_dependency_material_tag(self) -> int:
+        used = set(self._materials)
+        used.add(int(self._next_tag))
+        return max(used, default=0) + 1
+
+    def pending_materials(self) -> list[MaterialData]:
+        return [
+            MaterialData.from_dict(material.to_dict())
+            for material in self._pending_materials
+        ]
+
+    def _refresh_wrapper_base_combo(
+        self,
+        *,
+        select_tag: int | None = None,
+    ) -> None:
+        current = self.wrapper_base_combo.currentData()
+        self.wrapper_base_combo.blockSignals(True)
+        self.wrapper_base_combo.clear()
+        for tag in sorted(self._materials):
+            material = self._materials[tag]
+            suffix = (
+                " · new"
+                if any(
+                    item.tag == tag
+                    for item in self._pending_materials
+                )
+                else ""
+            )
+            self.wrapper_base_combo.addItem(
+                f"{tag} · {material.name} · "
+                f"{material.material_type}{suffix}",
+                int(tag),
+            )
+        wanted = select_tag if select_tag is not None else current
+        if wanted is not None:
+            index = self.wrapper_base_combo.findData(int(wanted))
+            if index >= 0:
+                self.wrapper_base_combo.setCurrentIndex(index)
+        self.wrapper_base_combo.blockSignals(False)
+        self._update_accept_state()
+
+    def _create_wrapper_base_material(self) -> None:
+        # Local import avoids a module cycle: MaterialDialog loads this
+        # library dialog lazily for verified presets.
+        from .material_dialog import MaterialDialog
+
+        dialog = MaterialDialog(
+            next_tag=self._next_dependency_material_tag(),
+            units=self._units.as_mapping(),
+            materials=self._materials,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        try:
+            dependencies = dialog.pending_materials()
+            material = dialog.material_data()
+            candidates = list(dependencies) + [material]
+            used = set(self._materials)
+            used.add(int(self._next_tag))
+            for candidate in candidates:
+                if candidate.tag in used:
+                    raise ValueError(
+                        f"Material tag {candidate.tag} already exists "
+                        "or is reserved for the library material."
+                    )
+                used.add(candidate.tag)
+        except (TypeError, ValueError) as exc:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Material Library",
+                str(exc),
+            )
+            return
+
+        for candidate in candidates:
+            copied = MaterialData.from_dict(candidate.to_dict())
+            self._materials[copied.tag] = copied
+            self._pending_materials.append(copied)
+        self._refresh_wrapper_base_combo(select_tag=material.tag)
 
     def _selected_wrapper_base_tag(self) -> int | None:
         data = self.wrapper_base_combo.currentData()
