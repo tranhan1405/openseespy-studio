@@ -2445,6 +2445,66 @@ def test_geometry_rectangle_draw_uses_two_click_geometry_only_surface():
     assert 'plane == "xz"' in corners
 
 
+def test_geometry_qt_vtk_mapping_handles_hidpi_render_scale():
+    class WidgetStub:
+        def width(self):
+            return 400
+
+        def height(self):
+            return 300
+
+    class RenderWindowStub:
+        def GetSize(self):
+            return (800, 600)
+
+    dummy = SimpleNamespace(
+        plotter=SimpleNamespace(
+            interactor=WidgetStub(),
+            ren_win=RenderWindowStub(),
+        )
+    )
+
+    scales = ModelViewport._qt_vtk_pixel_scales(dummy)
+
+    assert scales == pytest.approx((2.0, 2.0))
+
+
+def test_geometry_qt_to_vtk_click_mapping_uses_render_pixel_scale():
+    class PositionStub:
+        def x(self):
+            return 100.0
+
+        def y(self):
+            return 50.0
+
+    class EventStub:
+        def position(self):
+            return PositionStub()
+
+    class WidgetStub:
+        def width(self):
+            return 400
+
+        def height(self):
+            return 300
+
+    class RenderWindowStub:
+        def GetSize(self):
+            return (800, 600)
+
+    dummy = SimpleNamespace(
+        plotter=SimpleNamespace(
+            interactor=WidgetStub(),
+            ren_win=RenderWindowStub(),
+        )
+    )
+    dummy._qt_vtk_pixel_scales = lambda: (2.0, 2.0)
+
+    point = ModelViewport._vtk_position_from_qt(dummy, EventStub())
+
+    assert point == (200, 500)
+
+
 def test_geometry_sketch_activation_aligns_blank_iso_view_and_shows_grid():
     prepare = inspect.getsource(MainWindow._prepare_geometry_sketch_view)
     line = inspect.getsource(MainWindow._activate_geometry_line_pick_tool)
