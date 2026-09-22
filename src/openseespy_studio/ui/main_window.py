@@ -93,6 +93,7 @@ from ..result_catalog import (
     result_choices_for_analysis,
 )
 from ..shell_mesh import build_shell_mesh
+from ..surface_mesher import mesh_surface_geometry
 from ..section_response import section_response_sources
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
@@ -136,6 +137,7 @@ from .moment_curvature_dialog import MomentCurvatureDialog
 from .recorder_dialog import RecorderDialog
 from .section_dialog import SectionDialog
 from .shell_dialog import NDMaterialDialog, ShellElementDialog, ShellMeshDialog, ShellSectionDialog
+from .surface_dialog import SurfaceGeometryDialog
 from .transformation_dialog import TransformationDialog
 from .test_column_dialog import TestColumnWizard
 from .icons import studio_icon
@@ -3863,7 +3865,8 @@ class MainWindow(QMainWindow):
             for element in self.model.elements.values()
         )
         surfaces = QTreeWidgetItem([
-            f"Shell / Surface Bodies ({shell_count})"
+            f"Surfaces ({len(self.project.surfaces)} geometry / "
+            f"{shell_count} shell)"
         ])
         surfaces.setIcon(0, studio_icon("element"))
         surfaces.setData(0, Qt.UserRole, ("surfaces_root", None))
@@ -3910,6 +3913,24 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("node", tag))
             nodes.addChild(item)
             self._tree_node_items[tag] = item
+
+        for tag in sorted(self.project.surfaces):
+            surface = self.project.surfaces[tag]
+            meshed = any(
+                element_tag in self.model.elements
+                for element_tag in surface.generated_element_tags
+            )
+            status = "Meshed" if meshed else "Unmeshed"
+            item = QTreeWidgetItem([
+                f"Surface {tag} · {surface.name} [{status}]"
+            ])
+            item.setIcon(0, studio_icon("grid"))
+            item.setData(
+                0,
+                Qt.UserRole,
+                ("surface_geometry", tag),
+            )
+            surfaces.addChild(item)
 
         for tag in sorted(self.model.elements):
             element = self.model.elements[tag]
@@ -9998,6 +10019,227 @@ class MainWindow(QMainWindow):
         )
 
 
+    def _create_surface_geometry(self) -> None:
+        dialog = SurfaceGeometryDialog(
+            next_tag=self.project.next_surface_tag(),
+            sections=self._shell_sections(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            surface = dialog.data()
+            self.project.add_surface(surface)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "Surface Geometry", str(exc))
+            return
+        self._refresh_all(f"Created surface geometry {surface.tag}")
+        self._show_surface_geometry_properties(surface.tag)
+        self._record_project_change(
+            f"Create surface geometry {surface.tag}",
+            before,
+        )
+
+    def _edit_surface_geometry(self, tag: int) -> None:
+        surface = self.project.surfaces.get(int(tag))
+        if surface is None:
+            return
+        if any(
+            element_tag in self.model.elements
+            for element_tag in surface.generated_element_tags
+        ):
+            QMessageBox.information(
+                self,
+                "Edit Surface Geometry",
+                "This Surface already owns generated Shell elements. "
+                "Remeshing support will manage geometry edits in the next "
+                "surface-mesher stage; keep the current mesh or delete it first.",
+            )
+            return
+        dialog = SurfaceGeometryDialog(
+            next_tag=surface.tag,
+            sections=self._shell_sections(),
+            surface=surface,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated = dialog.data()
+            self.project.update_surface(tag, updated)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "Surface Geometry", str(exc))
+            return
+        self._refresh_all(f"Updated surface geometry {updated.tag}")
+        self._show_surface_geometry_properties(updated.tag)
+        self._record_project_change(
+            f"Edit surface geometry {tag}",
+            before,
+        )
+
+    def _mesh_surface_geometry(self, tag: int) -> None:
+        surface = self.project.surfaces.get(int(tag))
+        if surface is None:
+            return
+        if surface.section_tag is None:
+            if not self._ensure_prerequisite(
+                title="Mesh Surface Geometry",
+                message=(
+                    "This Surface needs a Shell Section before meshing. "
+                    "Create one now?"
+                ),
+                action_label="Create Shell Section Now...",
+                available=lambda: bool(self._shell_sections()),
+                creator=self._create_shell_section,
+            ):
+                return
+            self._edit_surface_geometry(tag)
+            surface = self.project.surfaces.get(int(tag))
+            if surface is None or surface.section_tag is None:
+                return
+
+        before = self.project.to_dict()
+        try:
+            result = mesh_surface_geometry(self.project, tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Mesh Surface Geometry",
+                str(exc),
+            )
+            return
+
+        self.model = self.project.model
+        conformity = []
+        if result.conformed_u:
+            conformity.append("U conformed")
+        if result.conformed_v:
+            conformity.append("V conformed")
+        suffix = (
+            " · " + ", ".join(conformity)
+            if conformity else ""
+        )
+        self._refresh_all(
+            f"Meshed Surface {tag} · "
+            f"{result.divisions_u}×{result.divisions_v} · "
+            f"{len(result.element_tags)} shell element(s) · "
+            f"{len(result.created_node_tags)} new node(s) · "
+            f"{len(result.reused_node_tags)} reused node(s)"
+            f"{suffix}"
+        )
+        self.selection.set_selection(
+            elements=set(result.element_tags)
+        )
+        self._record_project_change(
+            f"Mesh surface geometry {tag}",
+            before,
+        )
+
+    def _delete_surface_geometry(self, tag: int) -> None:
+        surface = self.project.surfaces.get(int(tag))
+        if surface is None:
+            return
+        live_mesh = [
+            element_tag
+            for element_tag in surface.generated_element_tags
+            if element_tag in self.model.elements
+        ]
+        message = f"Delete geometry Surface {tag} ({surface.name})?"
+        if live_mesh:
+            message += (
+                "\n\nGenerated Shell elements will be kept as ordinary "
+                "FE elements; only the reusable geometry object is removed."
+            )
+        answer = QMessageBox.question(
+            self,
+            "Delete Surface Geometry",
+            message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        before = self.project.to_dict()
+        self.project.remove_surface(tag)
+        self._refresh_all(f"Deleted surface geometry {tag}")
+        self._record_project_change(
+            f"Delete surface geometry {tag}",
+            before,
+        )
+
+    def _show_surface_geometry_properties(self, tag: int) -> None:
+        surface = self.project.surfaces.get(int(tag))
+        if surface is None:
+            return
+        section = (
+            self.project.sections.get(surface.section_tag)
+            if surface.section_tag is not None
+            else None
+        )
+        live_elements = [
+            element_tag
+            for element_tag in surface.generated_element_tags
+            if element_tag in self.model.elements
+        ]
+        rows = [
+            ("Tag", surface.tag),
+            ("Name", surface.name),
+            ("Shape", surface.surface_type),
+            (
+                "Corners",
+                " · ".join(
+                    "(" + ", ".join(f"{value:g}" for value in point) + ")"
+                    for point in surface.points
+                ),
+            ),
+            (
+                "Shell Section",
+                (
+                    f"{section.tag} - {section.name}"
+                    if section is not None else "Not assigned"
+                ),
+            ),
+            ("Formulation", surface.formulation),
+            (
+                "Mesh sizing",
+                (
+                    f"Target size {surface.target_size:g}"
+                    if (
+                        surface.mesh_mode == "target_size"
+                        and surface.target_size is not None
+                    )
+                    else (
+                        f"{surface.divisions_u} × "
+                        f"{surface.divisions_v} divisions"
+                    )
+                ),
+            ),
+            (
+                "Conform shared edges",
+                "Yes" if surface.conform_existing_edges else "No",
+            ),
+            (
+                "Reuse coincident nodes",
+                "Yes" if surface.reuse_existing_nodes else "No",
+            ),
+            (
+                "Mesh status",
+                (
+                    f"Meshed · {len(live_elements)} Shell element(s)"
+                    if live_elements else "Unmeshed"
+                ),
+            ),
+        ]
+        self.properties_panel.set_properties(
+            "Surface Geometry",
+            rows,
+        )
+
     def _shell_sections(self) -> dict[int, SectionData]:
         return {
             int(tag): section
@@ -14006,6 +14248,8 @@ class MainWindow(QMainWindow):
             node_action.triggered.connect(self._create_node)
             element_action = menu.addAction("New Element...")
             element_action.triggered.connect(self._create_element)
+            surface_action = menu.addAction("New Surface Geometry...")
+            surface_action.triggered.connect(self._create_surface_geometry)
             menu.addSeparator()
             quick_column = menu.addAction("Quick 1D Column / Test Specimen...")
             quick_column.triggered.connect(self._show_test_column_wizard)
@@ -14034,9 +14278,12 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "surfaces_root":
-            create = menu.addAction("New Shell / Surface...")
+            create_geometry = menu.addAction("New Surface Geometry...")
+            create_geometry.triggered.connect(self._create_surface_geometry)
+            menu.addSeparator()
+            create = menu.addAction("Legacy: New Direct Shell...")
             create.triggered.connect(self._create_shell)
-            mesh = menu.addAction("Mesh Surface...")
+            mesh = menu.addAction("Legacy: Mesh from 4 Model Nodes...")
             mesh.triggered.connect(self._create_shell_mesh)
             stitch = menu.addAction("Stitch Coincident Shell Nodes...")
             stitch.triggered.connect(self._stitch_coincident_shell_nodes)
@@ -14044,6 +14291,43 @@ class MainWindow(QMainWindow):
             section.triggered.connect(self._create_shell_section)
             pressure = menu.addAction("Create Surface Pressure...")
             pressure.triggered.connect(self._create_shell_pressure)
+            exec_menu()
+            return
+
+        if kind == "surface_geometry":
+            tag = int(value)
+            surface = self.project.surfaces.get(tag)
+            if surface is None:
+                return
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda checked=False, t=tag:
+                self._show_surface_geometry_properties(t)
+            )
+            edit = menu.addAction("Edit Surface Geometry...")
+            edit.setEnabled(not any(
+                element_tag in self.model.elements
+                for element_tag in surface.generated_element_tags
+            ))
+            edit.triggered.connect(
+                lambda checked=False, t=tag:
+                self._edit_surface_geometry(t)
+            )
+            mesh = menu.addAction("Mesh Surface Geometry...")
+            mesh.setEnabled(not any(
+                element_tag in self.model.elements
+                for element_tag in surface.generated_element_tags
+            ))
+            mesh.triggered.connect(
+                lambda checked=False, t=tag:
+                self._mesh_surface_geometry(t)
+            )
+            menu.addSeparator()
+            delete = menu.addAction("Delete Surface Geometry")
+            delete.triggered.connect(
+                lambda checked=False, t=tag:
+                self._delete_surface_geometry(t)
+            )
             exec_menu()
             return
 
