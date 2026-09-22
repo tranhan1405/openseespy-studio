@@ -16561,12 +16561,13 @@
         "600 MPa high-strength seismic reinforcing steel",
         "Residual monotonic stress-strain response after heating to 600 °C",
         "Natural/air cooling",
-        "OpenSees RambergOsgoodSteel"
+        "Reference/preview use in SARE; not executable with stock OpenSeesPy 3.8.x"
       ],
       "limitations": [
         "Post-fire residual material calibration; not an ambient-temperature generic rebar preset.",
         "The journal reports the Ramberg–Osgood coefficient α in the normalized form α·(fy/E)·(σ/fy)^n, whereas OpenSees source code expects the direct strain coefficient a·(σ/fy)^n.",
-        "SARE therefore stores the mathematically equivalent OpenSees coefficient a = α·fy/E = 0.007574193878; no curve fitting or additional assumption is introduced."
+        "SARE therefore stores the mathematically equivalent OpenSees coefficient a = α·fy/E = 0.007574193878; no curve fitting or additional assumption is introduced.",
+        "Stock OpenSeesPy 3.8.x explicitly reports RambergOsgoodSteel as temporarily removed from compiled Tcl/Py builds because of known issues and unreliable results; SARE therefore treats this record as reference-only."
       ],
       "primary_reference": {
         "type": "journal",
@@ -16593,6 +16594,11 @@
         "doi_verified": true,
         "parameter_location_identified": true,
         "units_checked": true
+      },
+      "runtime_support": {
+        "stock_openseespy": false,
+        "status": "reference_only",
+        "note": "Reference only in SARE: stock OpenSeesPy 3.8.x reports RambergOsgoodSteel as temporarily removed from compiled Tcl/Py builds because of known issues and unreliable results. The published parameters remain available for traceable reference and preview, but this record must not be inserted into an executable model."
       }
     },
     {
@@ -16619,12 +16625,13 @@
         "600 MPa high-strength seismic reinforcing steel",
         "Residual monotonic stress-strain response after heating to 600 °C",
         "Furnace cooling",
-        "OpenSees RambergOsgoodSteel"
+        "Reference/preview use in SARE; not executable with stock OpenSeesPy 3.8.x"
       ],
       "limitations": [
         "Post-fire residual material calibration; not an ambient-temperature generic rebar preset.",
         "The journal reports the Ramberg–Osgood coefficient α in the normalized form α·(fy/E)·(σ/fy)^n, whereas OpenSees source code expects the direct strain coefficient a·(σ/fy)^n.",
-        "SARE therefore stores the mathematically equivalent OpenSees coefficient a = α·fy/E = 0.006062630952; no curve fitting or additional assumption is introduced."
+        "SARE therefore stores the mathematically equivalent OpenSees coefficient a = α·fy/E = 0.006062630952; no curve fitting or additional assumption is introduced.",
+        "Stock OpenSeesPy 3.8.x explicitly reports RambergOsgoodSteel as temporarily removed from compiled Tcl/Py builds because of known issues and unreliable results; SARE therefore treats this record as reference-only."
       ],
       "primary_reference": {
         "type": "journal",
@@ -16651,6 +16658,11 @@
         "doi_verified": true,
         "parameter_location_identified": true,
         "units_checked": true
+      },
+      "runtime_support": {
+        "stock_openseespy": false,
+        "status": "reference_only",
+        "note": "Reference only in SARE: stock OpenSeesPy 3.8.x reports RambergOsgoodSteel as temporarily removed from compiled Tcl/Py builds because of known issues and unreliable results. The published parameters remain available for traceable reference and preview, but this record must not be inserted into an executable model."
       }
     },
     {
@@ -16677,12 +16689,13 @@
         "600 MPa high-strength seismic reinforcing steel",
         "Residual monotonic stress-strain response after heating to 600 °C",
         "Water cooling",
-        "OpenSees RambergOsgoodSteel"
+        "Reference/preview use in SARE; not executable with stock OpenSeesPy 3.8.x"
       ],
       "limitations": [
         "Post-fire residual material calibration; not an ambient-temperature generic rebar preset.",
         "The journal reports the Ramberg–Osgood coefficient α in the normalized form α·(fy/E)·(σ/fy)^n, whereas OpenSees source code expects the direct strain coefficient a·(σ/fy)^n.",
-        "SARE therefore stores the mathematically equivalent OpenSees coefficient a = α·fy/E = 0.005756751000; no curve fitting or additional assumption is introduced."
+        "SARE therefore stores the mathematically equivalent OpenSees coefficient a = α·fy/E = 0.005756751000; no curve fitting or additional assumption is introduced.",
+        "Stock OpenSeesPy 3.8.x explicitly reports RambergOsgoodSteel as temporarily removed from compiled Tcl/Py builds because of known issues and unreliable results; SARE therefore treats this record as reference-only."
       ],
       "primary_reference": {
         "type": "journal",
@@ -16709,6 +16722,11 @@
         "doi_verified": true,
         "parameter_location_identified": true,
         "units_checked": true
+      },
+      "runtime_support": {
+        "stock_openseespy": false,
+        "status": "reference_only",
+        "note": "Reference only in SARE: stock OpenSeesPy 3.8.x reports RambergOsgoodSteel as temporarily removed from compiled Tcl/Py builds because of known issues and unreliable results. The published parameters remain available for traceable reference and preview, but this record must not be inserted into an executable model."
       }
     }
   ]
