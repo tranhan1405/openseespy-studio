@@ -20,6 +20,7 @@ from openseespy_studio.project import (
     MATERIAL_DEFAULTS,
     AnalysisSettingsData,
     ConnectionData,
+    ElementLoadData,
     FiberData,
     LoadPatternData,
     MaterialData,
@@ -1681,3 +1682,112 @@ def test_generated_shell_analysis_captures_force_and_deformation_results(
         values = [float(value) for value in rows[-1].split()]
         # time/load factor + 8 shell section components
         assert len(values) >= 9
+
+
+def test_generated_shell_surface_pressure_runs_in_real_opensees(
+    tmp_path: Path,
+):
+    model = StructuralModel("real-shell-pressure", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    model.add_node(3, 1.0, 1.0, 0.0)
+    model.add_node(4, 0.0, 1.0, 0.0)
+    model.set_fixity(1, (1, 1, 1, 1, 1, 1))
+    model.set_fixity(4, (1, 1, 1, 1, 1, 1))
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="ASDShellQ4",
+        section_tag=1,
+        group="shell",
+        k=3,
+        l=4,
+    )
+
+    sections = {
+        1: SectionData(
+            1,
+            "Elastic shell",
+            "ElasticMembranePlate",
+            parameters={
+                "E": 30.0e9,
+                "nu": 0.2,
+                "h": 0.10,
+                "rho": 0.0,
+                "EpModifier": 1.0,
+            },
+        )
+    }
+    series = {
+        1: TimeSeriesData(1, "Pressure", "Linear", factor=1.0)
+    }
+    patterns = {
+        1: LoadPatternData(
+            1,
+            "Pressure",
+            "Plain",
+            time_series_tag=1,
+        )
+    }
+    pressure = {
+        1: ElementLoadData(
+            1,
+            "Uniform shell pressure",
+            1,
+            1,
+            "SurfacePressure",
+            pressure=-1000.0,
+        )
+    }
+    analysis = AnalysisSettingsData(
+        1,
+        "Shell pressure static",
+        analysis_type="Static",
+        constraints_handler="Plain",
+        numberer="RCM",
+        system="BandGeneral",
+        test="NormDispIncr",
+        tolerance=1.0e-10,
+        max_iterations=30,
+        algorithm="Newton",
+        steps=1,
+        load_increment=1.0,
+        recovery=False,
+        adaptive_step=False,
+        live_convergence=False,
+    )
+
+    script = to_openseespy(
+        model,
+        sections=sections,
+        time_series=series,
+        load_patterns=patterns,
+        element_loads=pressure,
+        analyses={1: analysis},
+        active_analysis_tag=1,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    assert "# ERROR:" not in script
+    assert "ops.element('SurfaceLoad', 2, 1, 2, 3, 4, -1000)" in script
+    assert "ops.eleLoad('-ele', 2, '-type', '-surfaceLoad')" in script
+
+    script_path = tmp_path / "shell-pressure.py"
+    result_path = tmp_path / "shell-pressure-result.json"
+    script_path.write_text(script, encoding="utf-8")
+
+    exit_code = run_script(script_path, result_path)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0, payload.get("error", "")
+    assert payload["status"] == "completed"
+    final = payload["results"]["final"]
+
+    assert float(final["node_displacements"]["2"][2]) < 0.0
+    assert float(final["node_displacements"]["3"][2]) < 0.0
+
+    reaction_z = (
+        float(final["node_reactions"]["1"][2])
+        + float(final["node_reactions"]["4"][2])
+    )
+    assert reaction_z == pytest.approx(1000.0, rel=1.0e-6)
