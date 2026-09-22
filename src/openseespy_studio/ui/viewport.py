@@ -614,8 +614,11 @@ class ModelViewport(QWidget):
 
         if not points:
             return
-        mesh = pv.PolyData(np.asarray(points, dtype=float))
-        mesh.lines = np.asarray(lines, dtype=np.int64)
+        mesh = pv.PolyData(
+            np.asarray(points, dtype=float),
+            lines=np.asarray(lines, dtype=np.int64),
+            deep=True,
+        )
         self.plotter.add_mesh(
             mesh,
             name="geometry-sketch-grid",
@@ -2206,8 +2209,11 @@ class ModelViewport(QWidget):
             base = len(points)
             points.extend((start, end))
             lines.extend((2, base, base + 1))
-        mesh = pv.PolyData(np.asarray(points, dtype=float))
-        mesh.lines = np.asarray(lines, dtype=np.int64)
+        mesh = pv.PolyData(
+            np.asarray(points, dtype=float),
+            lines=np.asarray(lines, dtype=np.int64),
+            deep=True,
+        )
         self.plotter.add_mesh(
             mesh,
             name="surface-mesh-preview",
@@ -2500,8 +2506,11 @@ class ModelViewport(QWidget):
             label_texts.append(f"S{surface_tag}:E{edge_index}")
 
         if points:
-            mesh = pv.PolyData(np.asarray(points, dtype=float))
-            mesh.lines = np.asarray(lines, dtype=np.int64)
+            mesh = pv.PolyData(
+                np.asarray(points, dtype=float),
+                lines=np.asarray(lines, dtype=np.int64),
+                deep=True,
+            )
             self.plotter.add_mesh(
                 mesh,
                 name="surface-edge-preview",
@@ -2864,11 +2873,9 @@ class ModelViewport(QWidget):
 
             if line_points:
                 self._geometry_line_mesh = pv.PolyData(
-                    np.asarray(line_points, dtype=float)
-                )
-                self._geometry_line_mesh.lines = np.asarray(
-                    line_cells,
-                    dtype=np.int64,
+                    np.asarray(line_points, dtype=float),
+                    lines=np.asarray(line_cells, dtype=np.int64),
+                    deep=True,
                 )
                 self._geometry_line_mesh.cell_data["line_tag"] = np.asarray(
                     self._geometry_line_tags,
@@ -2956,11 +2963,9 @@ class ModelViewport(QWidget):
                         preview_lines.extend((2, base, base + 1))
                 if preview_points:
                     preview = pv.PolyData(
-                        np.asarray(preview_points, dtype=float)
-                    )
-                    preview.lines = np.asarray(
-                        preview_lines,
-                        dtype=np.int64,
+                        np.asarray(preview_points, dtype=float),
+                        lines=np.asarray(preview_lines, dtype=np.int64),
+                        deep=True,
                     )
                     self.plotter.add_mesh(
                         preview,
