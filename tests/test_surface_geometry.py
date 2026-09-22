@@ -212,5 +212,18 @@ def test_surface_geometry_is_primary_shell_preprocessing_route():
     assert "New Direct Shell Element..." in context_source
     assert "New Surface Geometry..." in context_source
 
+    pressure_source = inspect.getsource(
+        MainWindow._create_shell_pressure
+    )
+    recorder_source = inspect.getsource(
+        MainWindow._prepare_recorder_targets
+    )
+    result_source = inspect.getsource(
+        MainWindow._prepare_solution_result_prerequisites
+    )
+
     assert "Direct Shell Element" in direct_source
-    assert "_create_surface_geometry_and_mesh" in context_source or True
+    assert "_create_surface_geometry_and_mesh" in pressure_source
+    assert "_create_surface_geometry_and_mesh" in recorder_source
+    assert "_create_surface_geometry_and_mesh" in result_source
+    assert "Create & Mesh Surface Now..." in pressure_source
