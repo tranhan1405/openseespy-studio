@@ -814,6 +814,7 @@ class ElementLoadDialog(QDialog):
         next_tag=1,
         element_tag=1,
         units=None,
+        allowed_load_types=None,
         parent=None,
     ):
         super().__init__(parent)
