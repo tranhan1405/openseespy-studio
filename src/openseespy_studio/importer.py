@@ -593,6 +593,36 @@ class _Importer:
             self.current_fiber_section = None
             self.count("Sections")
             return
+        if kind == "ElasticMembranePlateSection":
+            if len(args) < 5:
+                raise ValueError(
+                    "ElasticMembranePlateSection needs E, nu and thickness"
+                )
+            self.project.add_section(
+                SectionData(
+                    tag,
+                    f"Imported Elastic Membrane Plate {tag}",
+                    "ElasticMembranePlate",
+                    parameters={
+                        "E": self.stress_to_pa(args[2]),
+                        "nu": float(args[3]),
+                        "h": float(args[4]),
+                        "rho": (
+                            float(args[5])
+                            if len(args) >= 6
+                            else 0.0
+                        ),
+                        "EpModifier": (
+                            float(args[6])
+                            if len(args) >= 7
+                            else 1.0
+                        ),
+                    },
+                )
+            )
+            self.current_fiber_section = None
+            self.count("Sections")
+            return
         if kind == "Fiber":
             gj = self.flag_value(args[2:], "-GJ", 1.0e6)
             self.project.add_section(
@@ -927,6 +957,37 @@ class _Importer:
             raise ValueError(
                 f"Element tag {tag} is already used by a connection."
             )
+
+        if kind in {
+            "ASDShellQ4",
+            "ShellMITC4",
+            "ShellDKGQ",
+            "ShellNLDKGQ",
+        }:
+            if len(args) < 7:
+                raise ValueError(
+                    f"{kind} needs four node tags and a section tag"
+                )
+            nk = int(args[4])
+            nl = int(args[5])
+            section_tag = int(args[6])
+            rest = args[7:]
+            self.project.model.add_element(
+                tag,
+                ni,
+                nj,
+                element_type=kind,
+                section_tag=section_tag,
+                group="shell",
+                k=nk,
+                l=nl,
+                shell_corotational=(
+                    kind == "ASDShellQ4"
+                    and "-corotational" in rest
+                ),
+            )
+            self.count("Elements")
+            return
 
         if kind.lower() == "truss":
             if len(args) < 6:
