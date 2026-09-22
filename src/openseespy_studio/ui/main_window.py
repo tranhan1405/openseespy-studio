@@ -5673,6 +5673,19 @@ class MainWindow(QMainWindow):
                     "line_tags": (),
                 }
 
+        snap_action = self.actions.get("geometry_snap")
+        snap_enabled = (
+            snap_action is None or snap_action.isChecked()
+        )
+        if not snap_enabled:
+            return {
+                "xyz": xyz,
+                "kind": "free",
+                "label": "Free",
+                "point_tag": None,
+                "line_tags": (),
+            }
+
         candidates: list[
             tuple[
                 int,
@@ -5776,6 +5789,55 @@ class MainWindow(QMainWindow):
                 "point_tag": best[4],
                 "line_tags": best[5],
             }
+
+        anchor_tag = None
+        if self._geometry_line_point_tags:
+            anchor_tag = int(self._geometry_line_point_tags[-1])
+        elif self._geometry_surface_point_tags:
+            anchor_tag = int(self._geometry_surface_point_tags[0])
+        anchor = (
+            self.project.points.get(anchor_tag)
+            if anchor_tag is not None
+            else None
+        )
+        if anchor is not None:
+            plane, offset = self.viewport.geometry_sketch_plane()
+            a = tuple(float(value) for value in anchor.xyz)
+            if plane == "xy":
+                inferred = (
+                    ("Horizontal", (xyz[0], a[1], offset)),
+                    ("Vertical", (a[0], xyz[1], offset)),
+                )
+            elif plane == "xz":
+                inferred = (
+                    ("Horizontal", (xyz[0], offset, a[2])),
+                    ("Vertical", (a[0], offset, xyz[2])),
+                )
+            else:
+                inferred = (
+                    ("Horizontal", (offset, xyz[1], a[2])),
+                    ("Vertical", (offset, a[1], xyz[2])),
+                )
+            inference_candidates = []
+            for label, candidate in inferred:
+                px, py = self.viewport.geometry_world_to_screen(candidate)
+                distance2 = (px - sx) ** 2 + (py - sy) ** 2
+                if distance2 <= 10.0 * 10.0:
+                    inference_candidates.append(
+                        (distance2, label, candidate)
+                    )
+            if inference_candidates:
+                _distance2, label, candidate = min(
+                    inference_candidates,
+                    key=lambda item: item[0],
+                )
+                return {
+                    "xyz": tuple(float(value) for value in candidate),
+                    "kind": "orthogonal",
+                    "label": f"Orthogonal · {label}",
+                    "point_tag": None,
+                    "line_tags": (),
+                }
         return {
             "xyz": xyz,
             "kind": "free",
