@@ -40,7 +40,7 @@ from ..model import (
     shell_surface_geometry,
 )
 from ..postprocess import component_end_resultants, nodal_result_scalar
-from ..shell_quality import shell_element_quality
+from ..shell_quality import shell_element_quality_from_model
 from ..surface_mesher import surface_mesh_preview_segments
 from ..project import (
     ConnectionData,
@@ -1981,8 +1981,8 @@ class ModelViewport(QWidget):
 
         values: dict[int, float] = {}
         for tag in element_tags:
-            quality = shell_element_quality(
-                type("_QualityProject", (), {"model": self._model})(),
+            quality = shell_element_quality_from_model(
+                self._model,
                 tag,
             )
             if self._surface_quality_metric == "aspect_ratio":
