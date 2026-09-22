@@ -2918,6 +2918,223 @@ class ProjectDatabase:
             for _, tags in sorted(groups.items())
             if len(tags) > 1
         ]
+    def stitch_coincident_shell_nodes(
+        self,
+        *,
+        tolerance: float | None = None,
+    ) -> dict[str, object]:
+        """Merge safe coincident shell nodes and remap shell connectivity."""
+        groups = self.coincident_shell_node_groups(
+            tolerance=tolerance,
+        )
+        if not groups:
+            return {
+                "groups": [],
+                "merged_nodes": [],
+                "kept_nodes": [],
+                "remapped_elements": [],
+            }
+
+        mapping: dict[int, int] = {}
+        kept_nodes: list[int] = []
+        for group in groups:
+            keeper = min(int(tag) for tag in group)
+            kept_nodes.append(keeper)
+            keeper_node = self.model.nodes[keeper]
+            for raw_tag in group:
+                tag = int(raw_tag)
+                if tag == keeper:
+                    continue
+                node = self.model.nodes[tag]
+                if tuple(node.fixity) != tuple(keeper_node.fixity):
+                    raise ValueError(
+                        f"Cannot stitch shell nodes {keeper} and {tag}: "
+                        "their support/fixity states differ."
+                    )
+                if tuple(node.mass) != tuple(keeper_node.mass):
+                    raise ValueError(
+                        f"Cannot stitch shell nodes {keeper} and {tag}: "
+                        "their nodal mass values differ."
+                    )
+                mapping[tag] = keeper
+
+        if not mapping:
+            return {
+                "groups": groups,
+                "merged_nodes": [],
+                "kept_nodes": sorted(set(kept_nodes)),
+                "remapped_elements": [],
+            }
+
+        removed = set(mapping)
+        blockers: list[str] = []
+
+        non_shell_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type not in SHELL_ELEMENT_TYPES
+                and any(tag in removed for tag in element.node_tags())
+            )
+        )
+        if non_shell_users:
+            blockers.append(
+                "non-shell element(s) "
+                + ", ".join(map(str, non_shell_users))
+            )
+
+        load_users = sorted(
+            load.tag
+            for load in self.nodal_loads.values()
+            if load.node_tag in removed
+        )
+        if load_users:
+            blockers.append(
+                "nodal load(s) " + ", ".join(map(str, load_users))
+            )
+
+        displacement_users = sorted(
+            displacement.tag
+            for displacement in self.prescribed_displacements.values()
+            if displacement.node_tag in removed
+        )
+        if displacement_users:
+            blockers.append(
+                "prescribed displacement(s) "
+                + ", ".join(map(str, displacement_users))
+            )
+
+        constraint_users = sorted(
+            constraint.tag
+            for constraint in self.constraints.values()
+            if (
+                constraint.retained_node in removed
+                or any(
+                    tag in removed
+                    for tag in constraint.constrained_nodes
+                )
+            )
+        )
+        if constraint_users:
+            blockers.append(
+                "constraint(s) "
+                + ", ".join(map(str, constraint_users))
+            )
+
+        connection_users = sorted(
+            connection.tag
+            for connection in self.connections.values()
+            if (
+                connection.node_i in removed
+                or connection.node_j in removed
+                or connection.generated_ground_node in removed
+            )
+        )
+        if connection_users:
+            blockers.append(
+                "connection(s) "
+                + ", ".join(map(str, connection_users))
+            )
+
+        node_recorder_users = sorted(
+            recorder.tag
+            for recorder in self.recorders.values()
+            if (
+                recorder.recorder_type == "Node"
+                and any(tag in removed for tag in recorder.target_tags)
+            )
+        )
+        if node_recorder_users:
+            blockers.append(
+                "node recorder(s) "
+                + ", ".join(map(str, node_recorder_users))
+            )
+
+        control_users = sorted(
+            analysis.tag
+            for analysis in self.analyses.values()
+            if (
+                self._analysis_uses_control_node(analysis)
+                and int(analysis.control_node) in removed
+            )
+        )
+        if control_users:
+            blockers.append(
+                "analysis control node(s) in analysis tag(s) "
+                + ", ".join(map(str, control_users))
+            )
+
+        result_users = sorted(
+            result.tag
+            for result in self.solution_results.values()
+            if any(tag in removed for tag in result.node_scope)
+        )
+        if result_users:
+            blockers.append(
+                "solution result node scope(s) "
+                + ", ".join(map(str, result_users))
+            )
+
+        if blockers:
+            raise ValueError(
+                "Cannot stitch coincident shell nodes because node(s) "
+                + ", ".join(map(str, sorted(removed)))
+                + " are referenced by "
+                + "; ".join(blockers)
+                + ". Reassign those references first."
+            )
+
+        remapped_elements: list[int] = []
+        proposed: dict[int, tuple[int, int, int, int]] = {}
+        for element in self.model.elements.values():
+            if element.element_type not in SHELL_ELEMENT_TYPES:
+                continue
+            tags = tuple(
+                mapping.get(int(tag), int(tag))
+                for tag in element.node_tags()
+            )
+            if len(tags) != 4:
+                continue
+            if len(set(tags)) != 4:
+                raise ValueError(
+                    f"Cannot stitch coincident shell nodes because shell "
+                    f"element {element.tag} would collapse to fewer than "
+                    "four distinct nodes."
+                )
+            if tags != element.node_tags():
+                proposed[element.tag] = (
+                    int(tags[0]),
+                    int(tags[1]),
+                    int(tags[2]),
+                    int(tags[3]),
+                )
+
+        for tag, tags in proposed.items():
+            element = self.model.elements[tag]
+            element.i, element.j, element.k, element.l = tags
+            element.__post_init__()
+            remapped_elements.append(int(tag))
+
+        for selection_set in self.selection_sets.values():
+            selection_set.node_tags = {
+                mapping.get(int(tag), int(tag))
+                for tag in selection_set.node_tags
+                if int(tag) not in removed or int(tag) in mapping
+            }
+
+        for tag in sorted(removed):
+            self.model.nodes.pop(tag, None)
+
+        for tag in remapped_elements:
+            self.validate_element_state(tag)
+
+        return {
+            "groups": [list(group) for group in groups],
+            "merged_nodes": sorted(removed),
+            "kept_nodes": sorted(set(kept_nodes)),
+            "remapped_elements": sorted(remapped_elements),
+        }
+
 
     @staticmethod
     def material_dependencies(material: MaterialData) -> list[int]:
