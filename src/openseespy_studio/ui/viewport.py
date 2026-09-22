@@ -40,6 +40,7 @@ from ..model import (
     shell_surface_geometry,
 )
 from ..postprocess import component_end_resultants, nodal_result_scalar
+from ..surface_mesher import surface_mesh_preview_segments
 from ..project import (
     ConnectionData,
     ElementLoadData,
@@ -106,6 +107,7 @@ class ModelViewport(QWidget):
         self._selection_filter = "all"
         self._selected_nodes: set[int] = set()
         self._selected_elements: set[int] = set()
+        self._selected_geometry_surfaces: set[int] = set()
         self._hover_ref: tuple[str, int] | None = None
 
         self._hidden_nodes: set[int] = set()
@@ -118,6 +120,10 @@ class ModelViewport(QWidget):
         self._node_tags: list[int] = []
         self._geometry_point_actor = None
         self._geometry_point_tags: list[int] = []
+        self._geometry_surface_actor = None
+        self._geometry_surface_mesh = None
+        self._geometry_surface_tags: list[int] = []
+        self._surface_mesh_preview_tags: set[int] = set()
         self._element_actor_data: dict[str, tuple[object, np.ndarray]] = {}
         self._annotation_label_actors: dict[str, object] = {}
         self._undeformed_element_actors: list[object] = []
@@ -1837,6 +1843,42 @@ class ModelViewport(QWidget):
         self._hover_ref = None
         self._render_model(reset_camera=True)
 
+    def set_geometry_surface_selection(
+        self,
+        surface_tags,
+    ) -> None:
+        self._selected_geometry_surfaces = {
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self._surfaces
+        }
+        if self._display_domain == "geometry":
+            self._update_highlight_overlays()
+
+    def show_surface_mesh_preview(
+        self,
+        surface_tags,
+    ) -> None:
+        self._surface_mesh_preview_tags = {
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self._surfaces
+        }
+        if self._display_domain != "geometry":
+            self.set_display_domain("geometry")
+            return
+        self._render_model(reset_camera=False)
+
+    def clear_surface_mesh_preview(
+        self,
+        *,
+        render: bool = True,
+    ) -> None:
+        self._surface_mesh_preview_tags.clear()
+        self._remove_overlay("surface-mesh-preview")
+        if render:
+            self.plotter.render()
+
     def set_geometry_mesh_overlay_visible(
         self,
         visible: bool,
@@ -1991,6 +2033,9 @@ class ModelViewport(QWidget):
         self._node_tags = []
         self._geometry_point_actor = None
         self._geometry_point_tags = []
+        self._geometry_surface_actor = None
+        self._geometry_surface_mesh = None
+        self._geometry_surface_tags = []
         self._element_actor_data.clear()
         self._undeformed_element_actors.clear()
         self._navigation_proxy_actor = None
@@ -2056,31 +2101,85 @@ class ModelViewport(QWidget):
                     render=False,
                 )
 
+            surface_points: list[tuple[float, float, float]] = []
+            surface_faces: list[int] = []
+            self._geometry_surface_tags = []
             for surface_tag in sorted(self._surfaces):
                 surface = self._surfaces[surface_tag]
-                points = np.asarray(surface.points, dtype=float)
-                if points.shape != (4, 3):
+                points = [
+                    tuple(float(value) for value in point)
+                    for point in surface.points
+                ]
+                if len(points) != 4:
                     continue
-                face = pv.PolyData(
-                    points,
-                    faces=np.asarray(
-                        [4, 0, 1, 2, 3],
-                        dtype=np.int64,
-                    ),
+                base = len(surface_points)
+                surface_points.extend(points)
+                surface_faces.extend(
+                    (4, base, base + 1, base + 2, base + 3)
+                )
+                self._geometry_surface_tags.append(int(surface_tag))
+
+            if surface_points:
+                self._geometry_surface_mesh = pv.PolyData(
+                    np.asarray(surface_points, dtype=float),
+                    faces=np.asarray(surface_faces, dtype=np.int64),
                     deep=True,
                 )
-                self.plotter.add_mesh(
-                    face,
-                    name=f"surface-geometry-{surface_tag}",
+                self._geometry_surface_mesh.cell_data[
+                    "surface_tag"
+                ] = np.asarray(
+                    self._geometry_surface_tags,
+                    dtype=np.int64,
+                )
+                self._geometry_surface_actor = self.plotter.add_mesh(
+                    self._geometry_surface_mesh,
+                    name="surface-geometry",
                     color="#6aaed6",
                     edge_color="#1f6f9f",
                     show_edges=True,
                     line_width=2,
                     opacity=0.24,
                     smooth_shading=False,
-                    pickable=False,
+                    pickable=True,
                     render=False,
                 )
+                self._cell_picker.AddPickList(
+                    self._geometry_surface_actor
+                )
+
+            if self._surface_mesh_preview_tags:
+                preview_points: list[tuple[float, float, float]] = []
+                preview_lines: list[int] = []
+                for surface_tag in sorted(
+                    self._surface_mesh_preview_tags
+                ):
+                    surface = self._surfaces.get(surface_tag)
+                    if surface is None:
+                        continue
+                    _nu, _nv, segments = surface_mesh_preview_segments(
+                        surface
+                    )
+                    for start, end in segments:
+                        base = len(preview_points)
+                        preview_points.extend((start, end))
+                        preview_lines.extend((2, base, base + 1))
+                if preview_points:
+                    preview = pv.PolyData(
+                        np.asarray(preview_points, dtype=float)
+                    )
+                    preview.lines = np.asarray(
+                        preview_lines,
+                        dtype=np.int64,
+                    )
+                    self.plotter.add_mesh(
+                        preview,
+                        name="surface-mesh-preview",
+                        color="#8a2be2",
+                        line_width=2.2,
+                        render_lines_as_tubes=False,
+                        pickable=False,
+                        render=False,
+                    )
 
             if self._geometry_mesh_overlay_visible:
                 shell_tags = sorted({
@@ -2360,22 +2459,33 @@ class ModelViewport(QWidget):
     def pick_entity(self, x: int, y: int) -> tuple[str, int] | None:
         renderer = self.plotter.renderer
 
-        if (
-            self._display_domain == "geometry"
-            and self._geometry_point_actor is not None
-        ):
-            if self._point_picker.Pick(x, y, 0, renderer):
-                actor = self._point_picker.GetActor()
-                point_id = self._point_picker.GetPointId()
-                if (
-                    self._actor_key(actor)
-                    == self._actor_key(self._geometry_point_actor)
-                    and 0 <= point_id < len(self._geometry_point_tags)
-                ):
-                    return (
-                        "geometry_point",
-                        int(self._geometry_point_tags[point_id]),
-                    )
+        if self._display_domain == "geometry":
+            if self._geometry_point_actor is not None:
+                if self._point_picker.Pick(x, y, 0, renderer):
+                    actor = self._point_picker.GetActor()
+                    point_id = self._point_picker.GetPointId()
+                    if (
+                        self._actor_key(actor)
+                        == self._actor_key(self._geometry_point_actor)
+                        and 0 <= point_id < len(self._geometry_point_tags)
+                    ):
+                        return (
+                            "geometry_point",
+                            int(self._geometry_point_tags[point_id]),
+                        )
+            if self._geometry_surface_actor is not None:
+                if self._cell_picker.Pick(x, y, 0, renderer):
+                    actor = self._cell_picker.GetActor()
+                    cell_id = self._cell_picker.GetCellId()
+                    if (
+                        self._actor_key(actor)
+                        == self._actor_key(self._geometry_surface_actor)
+                        and 0 <= cell_id < len(self._geometry_surface_tags)
+                    ):
+                        return (
+                            "geometry_surface",
+                            int(self._geometry_surface_tags[cell_id]),
+                        )
             return None
 
         if self._selection_filter in {"all", "node"} and self._node_actor is not None:
@@ -2474,6 +2584,24 @@ class ModelViewport(QWidget):
         self._set_navigation_lod(False, render=False)
         self._set_id_labels_visible(True, render=True)
 
+    def _geometry_surface_overlay_mesh(self, tags: set[int]):
+        if (
+            not tags
+            or self._geometry_surface_mesh is None
+            or not self._geometry_surface_tags
+        ):
+            return None
+        ids = [
+            index
+            for index, tag in enumerate(self._geometry_surface_tags)
+            if int(tag) in tags
+        ]
+        if not ids:
+            return None
+        return self._geometry_surface_mesh.extract_cells(
+            np.asarray(ids, dtype=np.int64)
+        )
+
     def _element_overlay_mesh(self, tags: set[int]):
         if not tags:
             return None
@@ -2520,10 +2648,53 @@ class ModelViewport(QWidget):
             "selection-nodes",
             "hover-element",
             "hover-node",
+            "selection-geometry-surfaces",
+            "hover-geometry-surface",
         ):
             self._remove_overlay(name)
 
         if self._model is None:
+            return
+
+        if self._display_domain == "geometry":
+            selected_surface_mesh = self._geometry_surface_overlay_mesh(
+                self._selected_geometry_surfaces
+            )
+            if selected_surface_mesh is not None:
+                self.plotter.add_mesh(
+                    selected_surface_mesh,
+                    name="selection-geometry-surfaces",
+                    color="#ff9800",
+                    edge_color="#c75f00",
+                    show_edges=True,
+                    line_width=4,
+                    opacity=0.42,
+                    pickable=False,
+                    render=False,
+                )
+            if (
+                self._hover_ref
+                and self._hover_ref[0] == "geometry_surface"
+                and self._hover_ref[1]
+                not in self._selected_geometry_surfaces
+            ):
+                hover_surface = self._geometry_surface_overlay_mesh(
+                    {int(self._hover_ref[1])}
+                )
+                if hover_surface is not None:
+                    self.plotter.add_mesh(
+                        hover_surface,
+                        name="hover-geometry-surface",
+                        color="#20c5e8",
+                        edge_color="#087a94",
+                        show_edges=True,
+                        line_width=3,
+                        opacity=0.34,
+                        pickable=False,
+                        render=False,
+                    )
+            if render:
+                self.plotter.render()
             return
 
         selected_element_mesh = self._element_overlay_mesh(self._selected_elements)
