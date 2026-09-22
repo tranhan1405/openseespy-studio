@@ -7,6 +7,7 @@ from openseespy_studio.hinge_backbone import (
     HingeBackbonePoint,
     build_symmetric_hysteretic_hinge,
     hinge_rotations,
+    suggest_hinge_backbone_points,
 )
 
 
@@ -122,3 +123,34 @@ def test_monotonic_backbone_does_not_silently_infer_cyclic_parameters():
     assert material.parameters["damage1"] == pytest.approx(0.1)
     assert material.parameters["damage2"] == pytest.approx(0.2)
     assert material.parameters["beta"] == pytest.approx(0.3)
+
+
+
+def test_suggest_hinge_points_uses_positive_curve_and_terminal_point():
+    curvature = [
+        0.0,
+        0.0005,
+        0.0010,
+        0.0020,
+        0.0040,
+        0.0080,
+        0.0120,
+    ]
+    moment = [
+        0.0,
+        40.0e3,
+        78.0e3,
+        125.0e3,
+        150.0e3,
+        158.0e3,
+        155.0e3,
+    ]
+
+    points = suggest_hinge_backbone_points(curvature, moment)
+
+    assert len(points) == 3
+    assert 0.0 < points[0].deformation < points[1].deformation
+    assert points[1].deformation < points[2].deformation
+    assert points[2].deformation == pytest.approx(0.0120)
+    assert points[2].moment_nm == pytest.approx(155.0e3)
+    assert all(point.moment_nm > 0.0 for point in points)
