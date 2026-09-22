@@ -256,14 +256,14 @@ def _mesh_merge_tolerance(
     return 1.0e-9 * span
 
 
-def _existing_shell_edge_divisions(
+def _existing_shell_edge_parameters(
     project: ProjectDatabase,
     start_tag: int,
     end_tag: int,
     *,
     tolerance: float,
-) -> int | None:
-    """Return existing conforming edge divisions when a full shell chain exists."""
+) -> list[float] | None:
+    """Return ordered normalized positions for an existing full Shell edge."""
     start = project.model.nodes.get(int(start_tag))
     end = project.model.nodes.get(int(end_tag))
     if start is None or end is None:
@@ -284,7 +284,9 @@ def _existing_shell_edge_divisions(
         tags = element.node_tags()
         shell_nodes.update(int(tag) for tag in tags)
         for left, right in zip(tags, tags[1:] + tags[:1]):
-            shell_edges.add(tuple(sorted((int(left), int(right)))))
+            shell_edges.add(
+                tuple(sorted((int(left), int(right))))
+            )
 
     if int(start_tag) not in shell_nodes or int(end_tag) not in shell_nodes:
         return None
@@ -309,7 +311,9 @@ def _existing_shell_edge_divisions(
             for index in range(3)
         )
         if distance2 <= tolerance2:
-            points.append((max(0.0, min(1.0, t)), int(tag)))
+            points.append(
+                (max(0.0, min(1.0, t)), int(tag))
+            )
 
     points.sort(key=lambda item: (item[0], item[1]))
     unique: list[tuple[float, int]] = []
@@ -324,73 +328,154 @@ def _existing_shell_edge_divisions(
         return None
     if unique[0][1] != int(start_tag) or unique[-1][1] != int(end_tag):
         return None
-
     for left, right in zip(unique, unique[1:]):
         if tuple(sorted((left[1], right[1]))) not in shell_edges:
             return None
 
-    divisions = len(unique) - 1
-    for index, (t, _tag) in enumerate(unique):
-        expected = index / divisions
-        if abs(t - expected) > max(
-            1.0e-8,
-            5.0 * tolerance / math.sqrt(length2),
-        ):
-            raise ValueError(
-                "Existing shell edge mesh is non-uniform; structured "
-                "automatic conformity requires evenly spaced edge nodes."
-            )
-    return divisions
+    parameters = [float(t) for t, _tag in unique]
+    parameters[0] = 0.0
+    parameters[-1] = 1.0
+    return parameters
 
 
-def _conform_shell_mesh_divisions(
+def _existing_shell_edge_divisions(
+    project: ProjectDatabase,
+    start_tag: int,
+    end_tag: int,
+    *,
+    tolerance: float,
+) -> int | None:
+    parameters = _existing_shell_edge_parameters(
+        project,
+        start_tag,
+        end_tag,
+        tolerance=tolerance,
+    )
+    return None if parameters is None else len(parameters) - 1
+
+
+def _parameter_sets_compatible(
+    left: list[float],
+    right: list[float],
+    *,
+    tolerance: float = 1.0e-7,
+) -> bool:
+    return (
+        len(left) == len(right)
+        and all(
+            abs(float(a) - float(b)) <= tolerance
+            for a, b in zip(left, right)
+        )
+    )
+
+
+def _coordinates_changed(
+    requested: list[float],
+    resolved: list[float],
+) -> bool:
+    return not _parameter_sets_compatible(
+        requested,
+        resolved,
+        tolerance=1.0e-10,
+    )
+
+
+def _conform_shell_mesh_coordinates(
     project: ProjectDatabase,
     corners: tuple[int, int, int, int],
     *,
-    nu: int,
-    nv: int,
+    u_coordinates: list[float],
+    v_coordinates: list[float],
     tolerance: float,
-) -> tuple[int, int, bool, bool]:
-    u_counts = {
-        count
-        for count in (
-            _existing_shell_edge_divisions(
-                project, corners[0], corners[1], tolerance=tolerance
+) -> tuple[list[float], list[float], bool, bool]:
+    u_existing = [
+        values
+        for values in (
+            _existing_shell_edge_parameters(
+                project,
+                corners[0],
+                corners[1],
+                tolerance=tolerance,
             ),
-            _existing_shell_edge_divisions(
-                project, corners[3], corners[2], tolerance=tolerance
-            ),
-        )
-        if count is not None
-    }
-    v_counts = {
-        count
-        for count in (
-            _existing_shell_edge_divisions(
-                project, corners[0], corners[3], tolerance=tolerance
-            ),
-            _existing_shell_edge_divisions(
-                project, corners[1], corners[2], tolerance=tolerance
+            _existing_shell_edge_parameters(
+                project,
+                corners[3],
+                corners[2],
+                tolerance=tolerance,
             ),
         )
-        if count is not None
-    }
-    if len(u_counts) > 1:
+        if values is not None
+    ]
+    v_existing = [
+        values
+        for values in (
+            _existing_shell_edge_parameters(
+                project,
+                corners[0],
+                corners[3],
+                tolerance=tolerance,
+            ),
+            _existing_shell_edge_parameters(
+                project,
+                corners[1],
+                corners[2],
+                tolerance=tolerance,
+            ),
+        )
+        if values is not None
+    ]
+
+    if (
+        len(u_existing) > 1
+        and not _parameter_sets_compatible(
+            u_existing[0],
+            u_existing[1],
+        )
+    ):
         raise ValueError(
-            "Opposite existing shell edges have incompatible U divisions."
+            "Opposite existing Shell edges have incompatible U seed "
+            "positions."
         )
-    if len(v_counts) > 1:
+    if (
+        len(v_existing) > 1
+        and not _parameter_sets_compatible(
+            v_existing[0],
+            v_existing[1],
+        )
+    ):
         raise ValueError(
-            "Opposite existing shell edges have incompatible V divisions."
+            "Opposite existing Shell edges have incompatible V seed "
+            "positions."
         )
 
-    conformed_u = bool(u_counts and next(iter(u_counts)) != nu)
-    conformed_v = bool(v_counts and next(iter(v_counts)) != nv)
-    if u_counts:
-        nu = next(iter(u_counts))
-    if v_counts:
-        nv = next(iter(v_counts))
-    return nu, nv, conformed_u, conformed_v
+    resolved_u = (
+        list(u_existing[0])
+        if u_existing
+        else list(u_coordinates)
+    )
+    resolved_v = (
+        list(v_existing[0])
+        if v_existing
+        else list(v_coordinates)
+    )
+    return (
+        resolved_u,
+        resolved_v,
+        bool(
+            u_existing
+            and _coordinates_changed(
+                u_coordinates,
+                resolved_u,
+            )
+        ),
+        bool(
+            v_existing
+            and _coordinates_changed(
+                v_coordinates,
+                resolved_v,
+            )
+        ),
+    )
 
 
 def _node_spatial_key(
@@ -508,17 +593,20 @@ def build_shell_mesh(
     conformed_u = False
     conformed_v = False
     if spec.conform_existing_edges:
-        nu, nv, conformed_u, conformed_v = (
-            _conform_shell_mesh_divisions(
-                project,
-                corners,
-                nu=nu,
-                nv=nv,
-                tolerance=merge_tolerance,
-            )
+        (
+            u_coordinates,
+            v_coordinates,
+            conformed_u,
+            conformed_v,
+        ) = _conform_shell_mesh_coordinates(
+            project,
+            corners,
+            u_coordinates=u_coordinates,
+            v_coordinates=v_coordinates,
+            tolerance=merge_tolerance,
         )
-        u_coordinates = biased_mesh_coordinates(nu, spec.bias_u)
-        v_coordinates = biased_mesh_coordinates(nv, spec.bias_v)
+        nu = len(u_coordinates) - 1
+        nv = len(v_coordinates) - 1
 
     formulation = str(spec.formulation)
     if formulation not in SHELL_ELEMENT_TYPES:
