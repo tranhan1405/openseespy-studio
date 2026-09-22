@@ -200,7 +200,8 @@ def test_layered_shell_generator_emits_layer_pairs():
                 "Layers",
                 "LayeredShell",
                 shell_layers=[
-                    ShellLayerData(1, 0.08),
+                    ShellLayerData(1, 0.04),
+                    ShellLayerData(1, 0.04),
                     ShellLayerData(2, 0.02),
                 ],
             ),
