@@ -1852,6 +1852,9 @@ class MainWindow(QMainWindow):
         self.results_panel.calibration_case_apply_requested.connect(
             self._apply_selected_calibration_case
         )
+        self.results_panel.moment_curvature_hinge_requested.connect(
+            self._open_hinge_backbone_from_result
+        )
         self._active_result_display_kind: str | None = None
         self._syncing_result_display_controls = False
         self.results_panel.deformation_display.currentIndexChanged.connect(
@@ -12785,10 +12788,19 @@ class MainWindow(QMainWindow):
             self.script.setPlainText(original_script)
             self._refresh_project_metadata()
 
-    def _open_hinge_backbone(self) -> None:
+    def _open_hinge_backbone_from_result(self, payload: object) -> None:
+        prefill = dict(payload) if isinstance(payload, dict) else {}
+        self._open_hinge_backbone(prefill=prefill)
+
+    def _open_hinge_backbone(
+        self,
+        *,
+        prefill: dict | None = None,
+    ) -> None:
         dialog = HingeBackboneDialog(
             next_tag=self.project.next_material_tag(),
             units=self.project.units,
+            prefill=prefill,
             parent=self,
         )
         if not dialog.exec():
