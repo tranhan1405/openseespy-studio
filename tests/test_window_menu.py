@@ -7,7 +7,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QDockWidget
 
-from openseespy_studio.ui.main_window import MainWindow, _dock_toggle_action
+from openseespy_studio.ui.main_window import (
+    MainWindow,
+    MomentCurvatureDialog,
+    _dock_toggle_action,
+)
 
 
 _APP = QApplication.instance() or QApplication([])
@@ -53,3 +57,8 @@ def test_moment_curvature_action_callback_accepts_qaction_checked_argument():
         "checked",
     ]
     assert parameters[1].default is False
+
+
+
+def test_main_window_imports_moment_curvature_dialog():
+    assert MomentCurvatureDialog.__name__ == "MomentCurvatureDialog"
