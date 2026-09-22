@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 41
+PROJECT_FORMAT_VERSION = 42
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -3294,6 +3294,10 @@ class SurfaceGeometryData:
             name=str(data.get("name", "")),
             surface_type=str(data.get("surface_type", "Quad")),
             points=points,  # type: ignore[arg-type]
+            mesh_recipe_configured=data.get(
+                "mesh_recipe_configured",
+                True,
+            ),
             section_tag=data.get("section_tag"),
             formulation=str(data.get("formulation", "ASDShellQ4")),
             corner_point_tags=(
