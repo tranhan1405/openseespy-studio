@@ -277,3 +277,42 @@ def test_support_round_trip_validation_does_not_treat_itself_as_duplicate():
 
     assert list(restored.surface_edge_supports) == [11]
     assert restored.surface_edge_supports[11].edge_index == 2
+
+
+def test_flip_surface_preserves_biased_seeded_mesh_recipe():
+    project = _project()
+    project.add_surface(
+        SurfaceGeometryData(
+            1,
+            "Seeded biased",
+            points=rectangle_surface_points((0, 0, 0), 6, 3),
+            section_tag=7,
+            divisions_u=3,
+            divisions_v=2,
+            bias_u=4.0,
+            bias_v=0.5,
+            edge_divisions=(3, 2, 3, 2),
+            conform_existing_edges=False,
+        )
+    )
+    first = mesh_surface_geometry(project, 1)
+    before_xyz = {
+        tuple(project.model.nodes[tag].xyz)
+        for tag in first.created_node_tags + first.reused_node_tags
+        if tag in project.model.nodes
+    }
+
+    flip_surface_orientation(project, 1)
+
+    surface = project.surfaces[1]
+    after_xyz = {
+        tuple(project.model.nodes[tag].xyz)
+        for tag in set(surface.generated_node_tags)
+        if tag in project.model.nodes
+    }
+    assert surface.divisions_u == 2
+    assert surface.divisions_v == 3
+    assert surface.bias_u == pytest.approx(0.5)
+    assert surface.bias_v == pytest.approx(4.0)
+    assert surface.edge_divisions == (2, 3, 2, 3)
+    assert after_xyz == before_xyz

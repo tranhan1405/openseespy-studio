@@ -933,6 +933,21 @@ def flip_surface_orientation(
             if support.surface_tag == tag:
                 support.edge_index = 5 - int(support.edge_index)
 
+        # Reversing winding with P1 fixed exchanges the Surface U/V
+        # directions. Preserve the physical mapped-mesh recipe instead of
+        # silently changing the subdivisions on each physical edge.
+        surface.divisions_u, surface.divisions_v = (
+            surface.divisions_v,
+            surface.divisions_u,
+        )
+        surface.bias_u, surface.bias_v = (
+            surface.bias_v,
+            surface.bias_u,
+        )
+        if surface.edge_divisions is not None:
+            e1, e2, e3, e4 = surface.edge_divisions
+            surface.edge_divisions = (e4, e3, e2, e1)
+
         p1, p2, p3, p4 = surface.points
         surface.points = (p1, p4, p3, p2)
         if surface.corner_point_tags is not None:
