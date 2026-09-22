@@ -136,6 +136,26 @@ def result_choices_for_analysis(
             )
         )
 
+    for label, component in (
+        ("Membrane strain Exx", "Exx"),
+        ("Membrane strain Eyy", "Eyy"),
+        ("Membrane shear Gxy", "Gxy"),
+        ("Curvature Kxx", "Kxx"),
+        ("Curvature Kyy", "Kyy"),
+        ("Twist curvature Kxy", "Kxy"),
+        ("Transverse shear Gxz", "Gxz"),
+        ("Transverse shear Gyz", "Gyz"),
+    ):
+        choices.append(
+            ResultChoice(
+                "Shell Results",
+                label,
+                "ShellDeformation",
+                f"Shell {component}",
+                {"component": component},
+            )
+        )
+
     choices.append(
         ResultChoice(
             "Nonlinear Results",
