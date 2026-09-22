@@ -1625,8 +1625,12 @@ def test_geometry_ribbon_tab_groups_spaceclaim_style_tools():
     assert '"Sketch Aids"' in ribbon
     assert '"Mesh Preview"' in ribbon
     assert 'geometry_surface_button.setText("Rectangle")' in ribbon
-    assert 'geometry_page,\n            "Sketch"' not in ribbon
-    assert 'geometry_page,\n            "Geometry"' not in ribbon
+    assert (
+        'geometry_index = self.ribbon_tabs.addTab(\n'
+        '            geometry_page,\n'
+        '            "Sketch",\n'
+        '        )'
+    ) in ribbon
     assert 'geometry_page,\n            "Create"' in ribbon
     assert 'geometry_page,\n            "Modify"' in ribbon
     assert '"geometry_trim_pick"' in ribbon
@@ -1640,7 +1644,6 @@ def test_geometry_ribbon_tab_groups_spaceclaim_style_tools():
     assert '"geometry_extend_multiple"' in ribbon
     assert '"geometry_snap"' in ribbon
     assert '"geometry_grid"' in ribbon
-    assert 'geometry_page,\n            "Sketch",' in ribbon
 
 
 def test_geometry_lines_are_pickable_hoverable_and_tree_selectable():
