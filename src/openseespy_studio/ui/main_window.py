@@ -8719,8 +8719,28 @@ class MainWindow(QMainWindow):
             return
 
         self.model = self.project.model
+        merged_nodes = {
+            int(tag)
+            for tag in result.get("merged_nodes", [])
+        }
+        kept_nodes = {
+            int(tag)
+            for tag in result.get("kept_nodes", [])
+            if int(tag) in self.model.nodes
+        }
+        remapped_elements = {
+            int(tag)
+            for tag in result.get("remapped_elements", [])
+            if int(tag) in self.model.elements
+        }
         self._refresh_all(
-            "Stitched coincident shell nodes"
+            f"Stitched {len(merged_nodes)} duplicate shell node(s) into "
+            f"{len(kept_nodes)} keeper node(s) · "
+            f"{len(remapped_elements)} shell element(s) remapped"
+        )
+        self.selection.set_selection(
+            nodes=kept_nodes,
+            elements=remapped_elements,
         )
         self._record_project_change(
             "Stitch coincident shell nodes",
