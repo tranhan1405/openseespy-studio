@@ -4593,9 +4593,35 @@ class MainWindow(QMainWindow):
         if len(self.model.nodes) < 2:
             if action is not None:
                 action.setChecked(False)
-            self.status_message.setText(
-                "Create Frame requires at least two model nodes"
-            )
+            if not self._ensure_node_count(
+                2,
+                title="Create Frame",
+            ):
+                return
+        if not self._ensure_prerequisite(
+            title="Create Frame",
+            message=(
+                "Quick Frame creation requires at least one Elastic Section. "
+                "Create a Section now?"
+            ),
+            action_label="Create Section Now...",
+            available=lambda: any(
+                section.section_type == "Elastic"
+                for section in self.project.sections.values()
+            ),
+            creator=self._create_section,
+        ):
+            return
+        if not self._ensure_prerequisite(
+            title="Create Frame",
+            message=(
+                "Quick Frame creation requires a Geometric Transformation. "
+                "Create one now?"
+            ),
+            action_label="Create Transformation Now...",
+            available=lambda: bool(self.project.transformations),
+            creator=self._create_transformation,
+        ):
             return
 
         self._leave_measure_mode()
@@ -4621,10 +4647,11 @@ class MainWindow(QMainWindow):
         if len(self.model.nodes) < 2:
             if action is not None:
                 action.setChecked(False)
-            self.status_message.setText(
-                "Create Truss requires at least two model nodes"
-            )
-            return
+            if not self._ensure_node_count(
+                2,
+                title="Create Truss",
+            ):
+                return
         if not self.project.materials:
             if action is not None:
                 action.setChecked(False)
@@ -6565,6 +6592,11 @@ class MainWindow(QMainWindow):
         )
 
     def _create_nodal_load(self) -> None:
+        if not self._ensure_node_count(
+            1,
+            title="Nodal Load",
+        ):
+            return
         plain = self._plain_load_patterns()
         if not plain:
             if not self._ensure_plain_load_pattern(title="Nodal Load"):
@@ -6663,6 +6695,11 @@ class MainWindow(QMainWindow):
         self.properties_panel.set_properties("Nodal Load", rows)
 
     def _create_prescribed_displacement(self) -> None:
+        if not self._ensure_node_count(
+            1,
+            title="Prescribed Displacement",
+        ):
+            return
         plain = self._plain_load_patterns()
         if not plain:
             if not self._ensure_plain_load_pattern(
@@ -7569,20 +7606,39 @@ class MainWindow(QMainWindow):
         node_j: int,
     ) -> None:
         """Create one quick frame member between two existing nodes."""
-        tag = self.project.next_element_tag()
-
-        section_tag = next(
-            (
-                section_tag
-                for section_tag in sorted(self.project.sections)
-                if self.project.sections[section_tag].section_type == "Elastic"
+        if not self._ensure_prerequisite(
+            title="Create Frame",
+            message=(
+                "Quick Frame creation requires an Elastic Section. "
+                "Create a Section now?"
             ),
-            None,
+            action_label="Create Section Now...",
+            available=lambda: any(
+                section.section_type == "Elastic"
+                for section in self.project.sections.values()
+            ),
+            creator=self._create_section,
+        ):
+            return
+        if not self._ensure_prerequisite(
+            title="Create Frame",
+            message=(
+                "Quick Frame creation requires a Geometric Transformation. "
+                "Create one now?"
+            ),
+            action_label="Create Transformation Now...",
+            available=lambda: bool(self.project.transformations),
+            creator=self._create_transformation,
+        ):
+            return
+
+        tag = self.project.next_element_tag()
+        section_tag = next(
+            section_tag
+            for section_tag in sorted(self.project.sections)
+            if self.project.sections[section_tag].section_type == "Elastic"
         )
-        transf_tag = next(
-            iter(sorted(self.project.transformations)),
-            None,
-        )
+        transf_tag = min(self.project.transformations)
 
         before = self.project.to_dict()
         try:
@@ -12852,6 +12908,17 @@ class MainWindow(QMainWindow):
                 "Stop the cyclic calibration batch before starting a "
                 "section test.",
             )
+            return
+        if not self._ensure_prerequisite(
+            title="Moment-Curvature",
+            message=(
+                "Moment-Curvature requires an existing Section. "
+                "Create the Section now?"
+            ),
+            action_label="Create Section Now...",
+            available=lambda: bool(self.project.sections),
+            creator=self._create_section,
+        ):
             return
         dialog = MomentCurvatureDialog(self.project, self)
         if not dialog.exec():
