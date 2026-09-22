@@ -84,6 +84,7 @@ class ModelViewport(QWidget):
         self._points: dict[int, PointGeometryData] = {}
         self._lines: dict[int, LineGeometryData] = {}
         self._surfaces: dict[int, SurfaceGeometryData] = {}
+        self._display_domain = "fe"
         self._units: dict[str, str] = {
             "length": "m",
             "force": "kN",
@@ -1759,6 +1760,19 @@ class ModelViewport(QWidget):
         self._hover_ref = None
         self._render_model(reset_camera=True)
 
+    def set_display_domain(self, domain: str) -> None:
+        """Show either preprocessing Geometry or the OpenSees FE model."""
+        normalized = str(domain).strip().lower()
+        if normalized not in {"geometry", "fe"}:
+            raise ValueError("Viewport display domain must be geometry or fe.")
+        if normalized == self._display_domain:
+            return
+        self._display_domain = normalized
+        self._selected_nodes.clear()
+        self._selected_elements.clear()
+        self._hover_ref = None
+        self._render_model(reset_camera=True)
+
     def _render_model(self, *, reset_camera: bool) -> None:
         # A model/visibility rebuild invalidates every cached post-processing
         # mesh because its geometry/scope may no longer match the scene.
@@ -1790,8 +1804,89 @@ class ModelViewport(QWidget):
             self.plotter.render()
             return
 
-        if self._model.nodes:
-            self._add_ground_grid(self._model)
+        if self._display_domain == "geometry":
+            self._update_model_color_legend([])
+            self._cell_picker.InitializePickList()
+            self._cell_picker.PickFromListOn()
+            self._point_picker.InitializePickList()
+            self._point_picker.PickFromListOn()
+
+            if self._points:
+                geometry_point_tags = sorted(self._points)
+                geometry_points = np.asarray(
+                    [
+                        self._points[tag].xyz
+                        for tag in geometry_point_tags
+                    ],
+                    dtype=float,
+                )
+                self.plotter.add_mesh(
+                    pv.PolyData(geometry_points),
+                    name="geometry-points",
+                    color="#d9892b",
+                    render_points_as_spheres=True,
+                    point_size=10,
+                    opacity=0.95,
+                    pickable=False,
+                    render=False,
+                )
+
+            for line_tag in sorted(self._lines):
+                line = self._lines[line_tag]
+                point_i = self._points.get(line.point_i)
+                point_j = self._points.get(line.point_j)
+                if point_i is None or point_j is None:
+                    continue
+                self.plotter.add_mesh(
+                    pv.Line(point_i.xyz, point_j.xyz),
+                    name=f"line-geometry-{line_tag}",
+                    color="#d9892b",
+                    line_width=4,
+                    render_lines_as_tubes=True,
+                    opacity=0.95,
+                    pickable=False,
+                    render=False,
+                )
+
+            for surface_tag in sorted(self._surfaces):
+                surface = self._surfaces[surface_tag]
+                points = np.asarray(surface.points, dtype=float)
+                if points.shape != (4, 3):
+                    continue
+                face = pv.PolyData(
+                    points,
+                    faces=np.asarray(
+                        [4, 0, 1, 2, 3],
+                        dtype=np.int64,
+                    ),
+                    deep=True,
+                )
+                self.plotter.add_mesh(
+                    face,
+                    name=f"surface-geometry-{surface_tag}",
+                    color="#6aaed6",
+                    edge_color="#1f6f9f",
+                    show_edges=True,
+                    line_width=2,
+                    opacity=0.24,
+                    smooth_shading=False,
+                    pickable=False,
+                    render=False,
+                )
+
+            self.set_view(self._current_view, render=False)
+            if reset_camera:
+                self.plotter.reset_camera()
+                self.plotter.camera.zoom(1.18)
+            self.plotter.render()
+            return
+
+        if not self._model.nodes:
+            self._update_model_color_legend([])
+            self.plotter.render()
+            return
+
+        self._add_ground_grid(self._model)
 
         low, high = self._model.bounds()
         span = max(
@@ -1834,80 +1929,6 @@ class ModelViewport(QWidget):
 
         self._cell_picker.InitializePickList()
         self._cell_picker.PickFromListOn()
-
-        # Geometry Points/Lines are preprocessing entities, deliberately
-        # distinct from OpenSees Nodes/Elements.  Render them even before an
-        # FE mesh exists; generated FE entities are rendered separately.
-        if self._points:
-            geometry_point_tags = sorted(self._points)
-            geometry_points = np.asarray(
-                [self._points[tag].xyz for tag in geometry_point_tags],
-                dtype=float,
-            )
-            actor = self.plotter.add_mesh(
-                pv.PolyData(geometry_points),
-                name="geometry-points",
-                color="#d9892b",
-                render_points_as_spheres=True,
-                point_size=10,
-                opacity=0.9,
-                pickable=False,
-                render=False,
-            )
-            self._undeformed_element_actors.append(actor)
-
-        for line_tag in sorted(self._lines):
-            line = self._lines[line_tag]
-            point_i = self._points.get(line.point_i)
-            point_j = self._points.get(line.point_j)
-            if point_i is None or point_j is None:
-                continue
-            live_mesh = any(
-                int(element_tag) in self._model.elements
-                for element_tag in line.generated_element_tags
-            )
-            actor = self.plotter.add_mesh(
-                pv.Line(point_i.xyz, point_j.xyz),
-                name=f"line-geometry-{line_tag}",
-                color="#d9892b",
-                line_width=4,
-                render_lines_as_tubes=True,
-                opacity=0.32 if live_mesh else 0.9,
-                pickable=False,
-                render=False,
-            )
-            self._undeformed_element_actors.append(actor)
-
-        # Geometry Surfaces are independent preprocessing objects. Draw them
-        # even before any FE nodes/elements exist so creating a Surface is
-        # immediately visible in the viewport.
-        for surface_tag in sorted(self._surfaces):
-            surface = self._surfaces[surface_tag]
-            points = np.asarray(surface.points, dtype=float)
-            if points.shape != (4, 3):
-                continue
-            face = pv.PolyData(
-                points,
-                faces=np.asarray([4, 0, 1, 2, 3], dtype=np.int64),
-                deep=True,
-            )
-            live_mesh = any(
-                int(element_tag) in self._model.elements
-                for element_tag in surface.generated_element_tags
-            )
-            actor = self.plotter.add_mesh(
-                face,
-                name=f"surface-geometry-{surface_tag}",
-                color="#6aaed6",
-                edge_color="#1f6f9f",
-                show_edges=True,
-                line_width=2,
-                opacity=0.06 if live_mesh else 0.22,
-                smooth_shading=False,
-                pickable=False,
-                render=False,
-            )
-            self._undeformed_element_actors.append(actor)
 
         for group_name, mesh in group_meshes.items():
             has_rgb = self._apply_element_colors(mesh, element_colors)
