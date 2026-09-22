@@ -73,7 +73,7 @@ when it can be traced to a specific source and parameter-evidence location.
 Journal references require a DOI. Unsupported or merely "commonly used"
 values are not silently promoted to verified presets.
 
-The library currently contains **183 verified parameter records**:
+The library currently contains **184 verified parameter records**:
 
 - 2 Steel02 Grade-60 reinforcing-steel records from Carreño et al. (2020),
   DOI `10.1061/(ASCE)ST.1943-541X.0002505`.
@@ -154,7 +154,7 @@ The library currently contains **183 verified parameter records**:
   FRPConfinedConcrete test script and retains its documented N-mm-MPa
   convention.
 
-These are **published/calibrated parameter records**, not 183 unrelated
+These are **published/calibrated parameter records**, not 184 unrelated
 chemical materials. SARE exposes specimen/configuration, modelling
 representation, applicability and limitations so a paper-specific parameter
 set is not mistaken for a universal material-grade default.
