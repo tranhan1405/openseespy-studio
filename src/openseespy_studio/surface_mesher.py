@@ -4,11 +4,13 @@ from dataclasses import dataclass, field
 import math
 
 from .project import (
+    ElementLoadData,
     NodalLoadData,
     ProjectDatabase,
     SurfaceEdgeLoadData,
     SurfaceEdgeSupportData,
     SurfaceGeometryData,
+    SurfacePressureData,
 )
 from .shell_mesh import (
     ShellMeshBuildResult,
@@ -613,6 +615,149 @@ def remove_surface_edge_load(
     return removed
 
 
+def managed_surface_pressure_element_load_tags(
+    project: ProjectDatabase,
+) -> set[int]:
+    return {
+        int(load_tag)
+        for pressure in project.surface_pressures.values()
+        for load_tag in pressure.generated_element_load_tags
+        if int(load_tag) in project.element_loads
+    }
+
+
+def detach_surface_pressure(
+    project: ProjectDatabase,
+    pressure_tag: int,
+) -> list[int]:
+    tag = int(pressure_tag)
+    pressure = project.surface_pressures.get(tag)
+    if pressure is None:
+        raise ValueError(f"Surface pressure {tag} does not exist.")
+    removed: list[int] = []
+    for load_tag in list(pressure.generated_element_load_tags):
+        normalized = int(load_tag)
+        if normalized in project.element_loads:
+            project.element_loads.pop(normalized)
+            removed.append(normalized)
+    pressure.generated_element_load_tags = []
+    return removed
+
+
+def sync_surface_pressure(
+    project: ProjectDatabase,
+    pressure_tag: int,
+) -> list[int]:
+    tag = int(pressure_tag)
+    pressure = project.surface_pressures.get(tag)
+    if pressure is None:
+        raise ValueError(f"Surface pressure {tag} does not exist.")
+    project._validate_surface_pressure(pressure)
+    state = inspect_surface_mesh_state(project, pressure.surface_tag)
+    if state.status != "meshed":
+        raise ValueError(
+            f"Surface {pressure.surface_tag} must have a healthy mesh "
+            "before managed pressure can be applied."
+        )
+
+    before = project.to_dict()
+    try:
+        detach_surface_pressure(project, tag)
+        surface = project.surfaces[pressure.surface_tag]
+        element_tags = [
+            int(element_tag)
+            for element_tag in surface.generated_element_tags
+            if (
+                int(element_tag) in project.model.elements
+                and project.model.elements[
+                    int(element_tag)
+                ].element_type in SHELL_ELEMENT_TYPES
+            )
+        ]
+        next_tag = project.next_element_load_tag()
+        generated: list[int] = []
+        for element_tag in element_tags:
+            while next_tag in project.element_loads:
+                next_tag += 1
+            load = ElementLoadData(
+                tag=next_tag,
+                name=(
+                    f"{pressure.name} [managed S{pressure.surface_tag}] "
+                    f"Shell {element_tag}"
+                ),
+                pattern_tag=pressure.pattern_tag,
+                element_tag=element_tag,
+                load_type="SurfacePressure",
+                pressure=pressure.pressure,
+            )
+            project.add_element_load(load)
+            generated.append(next_tag)
+            next_tag += 1
+        pressure.generated_element_load_tags = generated
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+    return list(pressure.generated_element_load_tags)
+
+
+def sync_surface_pressures_for_surface(
+    project: ProjectDatabase,
+    surface_tag: int,
+) -> list[int]:
+    pressure_tags = sorted(
+        pressure.tag
+        for pressure in project.surface_pressures.values()
+        if pressure.surface_tag == int(surface_tag)
+    )
+    generated: list[int] = []
+    for pressure_tag in pressure_tags:
+        generated.extend(sync_surface_pressure(project, pressure_tag))
+    return generated
+
+
+def replace_surface_pressure(
+    project: ProjectDatabase,
+    pressure: SurfacePressureData,
+) -> list[int]:
+    existing = project.surface_pressures.get(int(pressure.tag))
+    if existing is None:
+        raise ValueError(
+            f"Surface pressure {int(pressure.tag)} does not exist."
+        )
+    before = project.to_dict()
+    try:
+        detach_surface_pressure(project, existing.tag)
+        pressure.generated_element_load_tags = []
+        project.update_surface_pressure(existing.tag, pressure)
+        return sync_surface_pressure(project, pressure.tag)
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+
+
+def remove_surface_pressure(
+    project: ProjectDatabase,
+    pressure_tag: int,
+) -> list[int]:
+    tag = int(pressure_tag)
+    if tag not in project.surface_pressures:
+        raise ValueError(f"Surface pressure {tag} does not exist.")
+    before = project.to_dict()
+    try:
+        removed = detach_surface_pressure(project, tag)
+        project.remove_surface_pressure_definition(tag)
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+    return removed
+
+
 def mesh_surface_geometry(
     project: ProjectDatabase,
     surface_tag: int,
@@ -679,6 +824,7 @@ def mesh_surface_geometry(
         surface.divisions_v = mesh_result.divisions_v
         sync_surface_edge_supports_for_surface(project, surface.tag)
         sync_surface_edge_loads_for_surface(project, surface.tag)
+        sync_surface_pressures_for_surface(project, surface.tag)
     except Exception:
         restored = ProjectDatabase.from_dict(before)
         project.__dict__.clear()
@@ -711,10 +857,16 @@ def _surface_element_dependency_blockers(
     if not element_tags:
         return blockers
 
+    managed_pressure_load_tags = managed_surface_pressure_element_load_tags(
+        project
+    )
     load_tags = sorted(
         load.tag
         for load in project.element_loads.values()
-        if int(load.element_tag) in element_tags
+        if (
+            int(load.element_tag) in element_tags
+            and int(load.tag) not in managed_pressure_load_tags
+        )
     )
     if load_tags:
         blockers.append(
@@ -972,6 +1124,14 @@ def delete_surface_mesh(
 
     before = project.to_dict()
     try:
+        pressure_tags = sorted(
+            pressure.tag
+            for pressure in project.surface_pressures.values()
+            if pressure.surface_tag == tag
+        )
+        for pressure_tag in pressure_tags:
+            detach_surface_pressure(project, pressure_tag)
+
         edge_load_tags = sorted(
             edge_load.tag
             for edge_load in project.surface_edge_loads.values()
@@ -1039,11 +1199,18 @@ def delete_surface_geometry(
             for edge_load in project.surface_edge_loads.values()
             if edge_load.surface_tag == tag
         )
+        pressure_tags = sorted(
+            pressure.tag
+            for pressure in project.surface_pressures.values()
+            if pressure.surface_tag == tag
+        )
         deleted = delete_surface_mesh(project, tag)
         for support_tag in support_tags:
             project.surface_edge_supports.pop(support_tag, None)
         for edge_load_tag in edge_load_tags:
             project.surface_edge_loads.pop(edge_load_tag, None)
+        for pressure_tag in pressure_tags:
+            project.surface_pressures.pop(pressure_tag, None)
         project.remove_surface(tag)
     except Exception:
         restored = ProjectDatabase.from_dict(before)
@@ -1127,6 +1294,9 @@ def flip_surface_orientation(
         for edge_load in project.surface_edge_loads.values():
             if edge_load.surface_tag == tag:
                 edge_load.edge_index = 5 - int(edge_load.edge_index)
+        for pressure in project.surface_pressures.values():
+            if pressure.surface_tag == tag:
+                pressure.pressure = -float(pressure.pressure)
 
         # Reversing winding with P1 fixed exchanges the Surface U/V
         # directions. Preserve the physical mapped-mesh recipe instead of
