@@ -28,6 +28,7 @@ from openseespy_studio.result_catalog import result_choices_for_analysis
 from openseespy_studio.shell_mesh import ShellMeshSpec, build_shell_mesh
 from openseespy_studio.ui.main_window import MainWindow
 from openseespy_studio.ui.results_panel import ResultsPanel
+from openseespy_studio.ui.shell_dialog import ShellMeshDialog
 from openseespy_studio.ui.viewport import ModelViewport
 from openseespy_studio.validation import validate_project
 
@@ -1147,3 +1148,196 @@ def test_shell_axis_viewport_and_reverse_normal_ui_routes_exist():
     )
     assert "Reverse Shell Normal" in tree_source
     assert "Reverse Shell Normal" in viewport_source
+
+
+def test_shell_mesh_reuses_existing_shared_edge_nodes():
+    model = StructuralModel("adjacent-shell-mesh", ndm=3, ndf=6)
+    coordinates = {
+        1: (0.0, 0.0, 0.0),
+        2: (1.0, 0.0, 0.0),
+        3: (1.0, 1.0, 0.0),
+        4: (0.0, 1.0, 0.0),
+        5: (2.0, 0.0, 0.0),
+        6: (2.0, 1.0, 0.0),
+    }
+    for tag, xyz in coordinates.items():
+        model.add_node(tag, *xyz)
+    project = ProjectDatabase(name="adjacent-shell-mesh", model=model)
+    project.add_section(_shell_section())
+
+    left = build_shell_mesh(
+        project,
+        ShellMeshSpec(
+            corner_nodes=(1, 2, 3, 4),
+            divisions_u=1,
+            divisions_v=2,
+            formulation="ASDShellQ4",
+            section_tag=7,
+        ),
+    )
+    shared_midpoint = left.grid[1][-1]
+
+    right = build_shell_mesh(
+        project,
+        ShellMeshSpec(
+            corner_nodes=(2, 5, 6, 3),
+            divisions_u=1,
+            divisions_v=2,
+            formulation="ASDShellQ4",
+            section_tag=7,
+        ),
+    )
+
+    assert right.grid[1][0] == shared_midpoint
+    assert shared_midpoint in right.reused_node_tags
+    assert project.model.nodes[shared_midpoint].xyz == pytest.approx(
+        (1.0, 0.5, 0.0)
+    )
+
+
+def test_shell_mesh_can_disable_existing_node_reuse():
+    model = StructuralModel("no-reuse-shell-mesh", ndm=3, ndf=6)
+    coordinates = {
+        1: (0.0, 0.0, 0.0),
+        2: (1.0, 0.0, 0.0),
+        3: (1.0, 1.0, 0.0),
+        4: (0.0, 1.0, 0.0),
+        5: (2.0, 0.0, 0.0),
+        6: (2.0, 1.0, 0.0),
+    }
+    for tag, xyz in coordinates.items():
+        model.add_node(tag, *xyz)
+    project = ProjectDatabase(name="no-reuse-shell-mesh", model=model)
+    project.add_section(_shell_section())
+
+    left = build_shell_mesh(
+        project,
+        ShellMeshSpec(
+            corner_nodes=(1, 2, 3, 4),
+            divisions_u=1,
+            divisions_v=2,
+            formulation="ASDShellQ4",
+            section_tag=7,
+        ),
+    )
+    shared_midpoint = left.grid[1][-1]
+
+    right = build_shell_mesh(
+        project,
+        ShellMeshSpec(
+            corner_nodes=(2, 5, 6, 3),
+            divisions_u=1,
+            divisions_v=2,
+            formulation="ASDShellQ4",
+            section_tag=7,
+            reuse_existing_nodes=False,
+        ),
+    )
+
+    assert right.grid[1][0] != shared_midpoint
+    assert right.reused_node_tags == []
+    assert (
+        project.model.nodes[right.grid[1][0]].xyz
+        == pytest.approx(project.model.nodes[shared_midpoint].xyz)
+    )
+
+
+def test_shell_mesh_target_size_resolves_actual_divisions():
+    model = StructuralModel("target-size-shell", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 4.0, 0.0, 0.0)
+    model.add_node(3, 4.0, 2.0, 0.0)
+    model.add_node(4, 0.0, 2.0, 0.0)
+    project = ProjectDatabase(name="target-size-shell", model=model)
+    project.add_section(_shell_section())
+
+    result = build_shell_mesh(
+        project,
+        ShellMeshSpec(
+            corner_nodes=(1, 2, 3, 4),
+            target_size=1.1,
+            formulation="ASDShellQ4",
+            section_tag=7,
+        ),
+    )
+
+    assert result.divisions_u == 4
+    assert result.divisions_v == 2
+    assert len(result.element_tags) == 8
+
+
+def test_shell_mesh_target_size_respects_division_limit():
+    model = StructuralModel("tiny-target-shell", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    model.add_node(3, 1.0, 1.0, 0.0)
+    model.add_node(4, 0.0, 1.0, 0.0)
+    project = ProjectDatabase(name="tiny-target-shell", model=model)
+    project.add_section(_shell_section())
+
+    with pytest.raises(ValueError, match=r"limited to 500"):
+        build_shell_mesh(
+            project,
+            ShellMeshSpec(
+                corner_nodes=(1, 2, 3, 4),
+                target_size=0.001,
+                formulation="ASDShellQ4",
+                section_tag=7,
+            ),
+        )
+
+
+def test_model_check_warns_on_coincident_shell_node_tags():
+    model = StructuralModel("coincident-shell-nodes", ndm=3, ndf=6)
+    coordinates = {
+        1: (0.0, 0.0, 0.0),
+        2: (1.0, 0.0, 0.0),
+        3: (1.0, 1.0, 0.0),
+        4: (0.0, 1.0, 0.0),
+        5: (1.0, 0.0, 0.0),
+        6: (2.0, 0.0, 0.0),
+        7: (2.0, 1.0, 0.0),
+        8: (1.0, 1.0, 0.0),
+    }
+    for tag, xyz in coordinates.items():
+        model.add_node(tag, *xyz)
+    model.add_element(
+        10, 1, 2,
+        element_type="ASDShellQ4",
+        section_tag=7,
+        group="shell",
+        k=3,
+        l=4,
+    )
+    model.add_element(
+        20, 5, 6,
+        element_type="ASDShellQ4",
+        section_tag=7,
+        group="shell",
+        k=7,
+        l=8,
+    )
+    project = ProjectDatabase(name="coincident-shell-nodes", model=model)
+    project.add_section(_shell_section())
+
+    issues = validate_project(project)
+    connectivity = [
+        issue for issue in issues
+        if issue.category == "Shell connectivity"
+    ]
+
+    assert any("nodes 2 and 5" in issue.message for issue in connectivity)
+    assert any("nodes 3 and 8" in issue.message for issue in connectivity)
+
+
+def test_shell_mesh_dialog_exposes_sizing_and_reuse_controls():
+    init_source = inspect.getsource(ShellMeshDialog.__init__)
+    info_source = inspect.getsource(ShellMeshDialog._update_info)
+    spec_source = inspect.getsource(ShellMeshDialog.spec)
+
+    assert "By divisions" in init_source
+    assert "By target element size" in init_source
+    assert "reuse_existing_nodes" in init_source
+    assert "resolve_shell_mesh_divisions" in info_source
+    assert "target_size" in spec_source
+    assert "reuse_existing_nodes" in spec_source
