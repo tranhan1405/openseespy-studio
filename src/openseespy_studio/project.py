@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 35
+PROJECT_FORMAT_VERSION = 36
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -3360,6 +3360,101 @@ class SurfaceEdgeSupportData:
 
 
 @dataclass
+class SurfaceEdgeLoadData:
+    tag: int
+    name: str
+    surface_tag: int
+    edge_index: int
+    pattern_tag: int
+    values_per_length: tuple[
+        float, float, float, float, float, float
+    ] = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    generated_nodal_load_tags: list[int] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.tag = _strict_int(self.tag, "Surface edge load tag")
+        self.surface_tag = _strict_int(
+            self.surface_tag,
+            "Surface edge load Surface tag",
+        )
+        self.edge_index = _strict_int(
+            self.edge_index,
+            "Surface edge load edge index",
+        )
+        self.pattern_tag = _strict_int(
+            self.pattern_tag,
+            "Surface edge load pattern tag",
+        )
+        self.name = str(self.name).strip() or f"Surface Edge Load {self.tag}"
+        if self.tag <= 0 or self.surface_tag <= 0 or self.pattern_tag <= 0:
+            raise ValueError(
+                "Surface edge load tag, Surface tag, and pattern tag "
+                "must be positive."
+            )
+        if self.edge_index not in {1, 2, 3, 4}:
+            raise ValueError(
+                "Surface edge load edge index must be 1, 2, 3, or 4."
+            )
+        values = tuple(float(value) for value in self.values_per_length)
+        if len(values) != 6:
+            raise ValueError(
+                "Surface edge line load requires six global line-resultant "
+                "components."
+            )
+        if any(not math.isfinite(value) for value in values):
+            raise ValueError(
+                "Surface edge line load components must be finite."
+            )
+        if not any(abs(value) > 1.0e-15 for value in values):
+            raise ValueError(
+                "Surface edge line load requires at least one nonzero "
+                "component."
+            )
+        self.values_per_length = values  # type: ignore[assignment]
+        ordered: list[int] = []
+        seen: set[int] = set()
+        for tag in self.generated_nodal_load_tags:
+            load_tag = _strict_int(
+                tag,
+                "Surface edge load generated nodal-load tag",
+            )
+            if load_tag in seen:
+                continue
+            seen.add(load_tag)
+            ordered.append(load_tag)
+        self.generated_nodal_load_tags = ordered
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "surface_tag": self.surface_tag,
+            "edge_index": self.edge_index,
+            "pattern_tag": self.pattern_tag,
+            "values_per_length": list(self.values_per_length),
+            "generated_nodal_load_tags": list(
+                self.generated_nodal_load_tags
+            ),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SurfaceEdgeLoadData":
+        return cls(
+            tag=data["tag"],
+            name=str(data.get("name", "")),
+            surface_tag=data["surface_tag"],
+            edge_index=data["edge_index"],
+            pattern_tag=data["pattern_tag"],
+            values_per_length=tuple(
+                data.get("values_per_length", (0.0,) * 6)
+            ),
+            generated_nodal_load_tags=list(
+                data.get("generated_nodal_load_tags", [])
+            ),
+        )
+
+
+@dataclass
 class SelectionSetData:
     name: str
     node_tags: set[int] = field(default_factory=set)
@@ -3403,6 +3498,9 @@ class ProjectDatabase:
     surface_edge_supports: dict[int, SurfaceEdgeSupportData] = field(
         default_factory=dict
     )
+    surface_edge_loads: dict[int, SurfaceEdgeLoadData] = field(
+        default_factory=dict
+    )
     materials: dict[int, MaterialData] = field(default_factory=dict)
     nd_materials: dict[int, NDMaterialData] = field(default_factory=dict)
 
@@ -3442,6 +3540,7 @@ class ProjectDatabase:
         self.lines.clear()
         self.surfaces.clear()
         self.surface_edge_supports.clear()
+        self.surface_edge_loads.clear()
         self.constraints.clear()
         self.connections.clear()
         self.time_series.clear()
@@ -4072,6 +4171,9 @@ class ProjectDatabase:
             for support in self.surface_edge_supports.values():
                 if support.surface_tag == original_tag:
                     support.surface_tag = surface.tag
+            for edge_load in self.surface_edge_loads.values():
+                if edge_load.surface_tag == original_tag:
+                    edge_load.surface_tag = surface.tag
 
     def remove_surface(self, tag: int) -> None:
         tag = _strict_int(tag, "Surface geometry tag")
@@ -4080,10 +4182,26 @@ class ProjectDatabase:
             for support in self.surface_edge_supports.values()
             if support.surface_tag == tag
         )
-        if support_tags:
+        edge_load_tags = sorted(
+            edge_load.tag
+            for edge_load in self.surface_edge_loads.values()
+            if edge_load.surface_tag == tag
+        )
+        if support_tags or edge_load_tags:
+            details: list[str] = []
+            if support_tags:
+                details.append(
+                    "managed edge support(s) "
+                    + ", ".join(map(str, support_tags))
+                )
+            if edge_load_tags:
+                details.append(
+                    "managed edge line load(s) "
+                    + ", ".join(map(str, edge_load_tags))
+                )
             raise ValueError(
-                f"Surface geometry {tag} has managed edge support(s): "
-                + ", ".join(map(str, support_tags))
+                f"Surface geometry {tag} has "
+                + "; ".join(details)
                 + ". Remove them through the Surface lifecycle workflow."
             )
         self.surfaces.pop(tag, None)
@@ -4158,6 +4276,89 @@ class ProjectDatabase:
     def remove_surface_edge_support_definition(self, tag: int) -> None:
         normalized = _strict_int(tag, "Surface edge support tag")
         self.surface_edge_supports.pop(normalized, None)
+
+    def next_surface_edge_load_tag(self) -> int:
+        return max(self.surface_edge_loads, default=0) + 1
+
+    def _validate_surface_edge_load(
+        self,
+        edge_load: SurfaceEdgeLoadData,
+        *,
+        replacing_tag: int | None = None,
+    ) -> None:
+        if edge_load.surface_tag not in self.surfaces:
+            raise ValueError(
+                "Surface edge load references missing Surface "
+                f"{edge_load.surface_tag}."
+            )
+        pattern = self.load_patterns.get(edge_load.pattern_tag)
+        if pattern is None:
+            raise ValueError(
+                "Surface edge load references missing load pattern "
+                f"{edge_load.pattern_tag}."
+            )
+        if pattern.pattern_type != "Plain":
+            raise ValueError(
+                "Surface edge line loads require a Plain load pattern."
+            )
+        for tag, existing in self.surface_edge_loads.items():
+            if int(tag) == int(edge_load.tag):
+                continue
+            if replacing_tag is not None and int(tag) == int(replacing_tag):
+                continue
+            if (
+                existing.surface_tag == edge_load.surface_tag
+                and existing.edge_index == edge_load.edge_index
+                and existing.pattern_tag == edge_load.pattern_tag
+            ):
+                raise ValueError(
+                    f"Surface {edge_load.surface_tag} edge "
+                    f"{edge_load.edge_index} already has managed line load "
+                    f"{existing.tag} in Plain pattern "
+                    f"{edge_load.pattern_tag}."
+                )
+
+    def add_surface_edge_load(
+        self,
+        edge_load: SurfaceEdgeLoadData,
+    ) -> None:
+        if edge_load.tag in self.surface_edge_loads:
+            raise ValueError(
+                f"Surface edge load tag {edge_load.tag} already exists."
+            )
+        self._validate_surface_edge_load(edge_load)
+        self.surface_edge_loads[edge_load.tag] = edge_load
+
+    def update_surface_edge_load(
+        self,
+        original_tag: int,
+        edge_load: SurfaceEdgeLoadData,
+    ) -> None:
+        original_tag = _strict_int(
+            original_tag,
+            "Surface edge load original tag",
+        )
+        if original_tag not in self.surface_edge_loads:
+            raise ValueError(
+                f"Surface edge load tag {original_tag} does not exist."
+            )
+        if (
+            edge_load.tag != original_tag
+            and edge_load.tag in self.surface_edge_loads
+        ):
+            raise ValueError(
+                f"Surface edge load tag {edge_load.tag} already exists."
+            )
+        self._validate_surface_edge_load(
+            edge_load,
+            replacing_tag=original_tag,
+        )
+        self.surface_edge_loads.pop(original_tag)
+        self.surface_edge_loads[edge_load.tag] = edge_load
+
+    def remove_surface_edge_load_definition(self, tag: int) -> None:
+        normalized = _strict_int(tag, "Surface edge load tag")
+        self.surface_edge_loads.pop(normalized, None)
 
     @staticmethod
     def material_dependencies(material: MaterialData) -> list[int]:
@@ -6088,10 +6289,16 @@ class ProjectDatabase:
                 for displacement in self.prescribed_displacements.values()
                 if displacement.pattern_tag == original_tag
             ]
+            dependent_surface_edge_load = [
+                edge_load.tag
+                for edge_load in self.surface_edge_loads.values()
+                if edge_load.pattern_tag == original_tag
+            ]
             if (
                 dependent_nodal
                 or dependent_element
                 or dependent_displacement
+                or dependent_surface_edge_load
             ):
                 raise ValueError(
                     "A Plain pattern containing nodal loads, beam loads, "
@@ -6114,6 +6321,9 @@ class ProjectDatabase:
             for displacement in self.prescribed_displacements.values():
                 if displacement.pattern_tag == original_tag:
                     displacement.pattern_tag = pattern.tag
+            for edge_load in self.surface_edge_loads.values():
+                if edge_load.pattern_tag == original_tag:
+                    edge_load.pattern_tag = pattern.tag
             for analysis in self.analyses.values():
                 if original_tag in analysis.deferred_pattern_tags:
                     analysis.deferred_pattern_tags = [
@@ -6159,6 +6369,11 @@ class ProjectDatabase:
         ):
             if displacement.pattern_tag == tag:
                 self.prescribed_displacements.pop(displacement_tag)
+        for edge_load_tag, edge_load in list(
+            self.surface_edge_loads.items()
+        ):
+            if edge_load.pattern_tag == tag:
+                self.surface_edge_loads.pop(edge_load_tag)
         for source in self.mass_sources.values():
             source.load_factors.pop(tag, None)
 
@@ -7524,6 +7739,10 @@ class ProjectDatabase:
                 self.surface_edge_supports[tag].to_dict()
                 for tag in sorted(self.surface_edge_supports)
             ],
+            "surface_edge_loads": [
+                self.surface_edge_loads[tag].to_dict()
+                for tag in sorted(self.surface_edge_loads)
+            ],
             "materials": [
                 self.materials[tag].to_dict()
                 for tag in sorted(self.materials)
@@ -7654,6 +7873,27 @@ class ProjectDatabase:
                     f"Duplicate Surface edge support tag {support.tag}."
                 )
             result[support.tag] = support
+        return result
+
+    @staticmethod
+    def _load_surface_edge_loads(
+        raw: Any,
+    ) -> dict[int, SurfaceEdgeLoadData]:
+        result: dict[int, SurfaceEdgeLoadData] = {}
+        for index, item in enumerate(
+            _require_list(raw, "Surface edge loads")
+        ):
+            edge_load = SurfaceEdgeLoadData.from_dict(
+                _require_object(
+                    item,
+                    f"Surface edge load item {index}",
+                )
+            )
+            if edge_load.tag in result:
+                raise ValueError(
+                    f"Duplicate Surface edge load tag {edge_load.tag}."
+                )
+            result[edge_load.tag] = edge_load
         return result
 
     @staticmethod
@@ -8027,6 +8267,9 @@ class ProjectDatabase:
             surface_edge_supports=cls._load_surface_edge_supports(
                 data.get("surface_edge_supports", [])
             ),
+            surface_edge_loads=cls._load_surface_edge_loads(
+                data.get("surface_edge_loads", [])
+            ),
             materials=cls._load_materials(data.get("materials", [])),
             nd_materials=cls._load_nd_materials(
                 data.get("nd_materials", [])
@@ -8076,6 +8319,8 @@ class ProjectDatabase:
             project._validate_surface_geometry(surface)
         for support in project.surface_edge_supports.values():
             project._validate_surface_edge_support(support)
+        for edge_load in project.surface_edge_loads.values():
+            project._validate_surface_edge_load(edge_load)
 
         if (
             project.active_analysis_tag is not None
