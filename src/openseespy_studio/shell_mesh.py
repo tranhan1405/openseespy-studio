@@ -21,6 +21,7 @@ class ShellMeshSpec:
     drilling_stab: float | None = None
     drilling_nl: bool = False
     reuse_existing_nodes: bool = True
+    conform_existing_edges: bool = True
     merge_tolerance: float | None = None
     group: str = "shell"
 
@@ -33,6 +34,8 @@ class ShellMeshBuildResult:
     grid: list[list[int]] = field(default_factory=list)
     divisions_u: int = 0
     divisions_v: int = 0
+    conformed_u: bool = False
+    conformed_v: bool = False
 
 
 def _bilinear_point(
@@ -120,6 +123,143 @@ def _mesh_merge_tolerance(
         1.0,
     )
     return 1.0e-9 * span
+
+
+def _existing_shell_edge_divisions(
+    project: ProjectDatabase,
+    start_tag: int,
+    end_tag: int,
+    *,
+    tolerance: float,
+) -> int | None:
+    """Return existing conforming edge divisions when a full shell chain exists."""
+    start = project.model.nodes.get(int(start_tag))
+    end = project.model.nodes.get(int(end_tag))
+    if start is None or end is None:
+        return None
+
+    a = tuple(float(value) for value in start.xyz)
+    b = tuple(float(value) for value in end.xyz)
+    ab = tuple(b[index] - a[index] for index in range(3))
+    length2 = sum(value * value for value in ab)
+    if length2 <= tolerance * tolerance:
+        return None
+
+    shell_edges: set[tuple[int, int]] = set()
+    shell_nodes: set[int] = set()
+    for element in project.model.elements.values():
+        if element.element_type not in SHELL_ELEMENT_TYPES:
+            continue
+        tags = element.node_tags()
+        shell_nodes.update(int(tag) for tag in tags)
+        for left, right in zip(tags, tags[1:] + tags[:1]):
+            shell_edges.add(tuple(sorted((int(left), int(right)))))
+
+    if int(start_tag) not in shell_nodes or int(end_tag) not in shell_nodes:
+        return None
+
+    tolerance2 = tolerance * tolerance
+    points: list[tuple[float, int]] = []
+    for tag in shell_nodes:
+        node = project.model.nodes.get(tag)
+        if node is None:
+            continue
+        point = tuple(float(value) for value in node.xyz)
+        ap = tuple(point[index] - a[index] for index in range(3))
+        t = sum(ap[index] * ab[index] for index in range(3)) / length2
+        if t < -1.0e-10 or t > 1.0 + 1.0e-10:
+            continue
+        closest = tuple(
+            a[index] + t * ab[index]
+            for index in range(3)
+        )
+        distance2 = sum(
+            (point[index] - closest[index]) ** 2
+            for index in range(3)
+        )
+        if distance2 <= tolerance2:
+            points.append((max(0.0, min(1.0, t)), int(tag)))
+
+    points.sort(key=lambda item: (item[0], item[1]))
+    unique: list[tuple[float, int]] = []
+    for t, tag in points:
+        if unique and abs(t - unique[-1][0]) <= 1.0e-10:
+            if tag in {int(start_tag), int(end_tag)}:
+                unique[-1] = (t, tag)
+            continue
+        unique.append((t, tag))
+
+    if len(unique) < 2:
+        return None
+    if unique[0][1] != int(start_tag) or unique[-1][1] != int(end_tag):
+        return None
+
+    for left, right in zip(unique, unique[1:]):
+        if tuple(sorted((left[1], right[1]))) not in shell_edges:
+            return None
+
+    divisions = len(unique) - 1
+    for index, (t, _tag) in enumerate(unique):
+        expected = index / divisions
+        if abs(t - expected) > max(
+            1.0e-8,
+            5.0 * tolerance / math.sqrt(length2),
+        ):
+            raise ValueError(
+                "Existing shell edge mesh is non-uniform; structured "
+                "automatic conformity requires evenly spaced edge nodes."
+            )
+    return divisions
+
+
+def _conform_shell_mesh_divisions(
+    project: ProjectDatabase,
+    corners: tuple[int, int, int, int],
+    *,
+    nu: int,
+    nv: int,
+    tolerance: float,
+) -> tuple[int, int, bool, bool]:
+    u_counts = {
+        count
+        for count in (
+            _existing_shell_edge_divisions(
+                project, corners[0], corners[1], tolerance=tolerance
+            ),
+            _existing_shell_edge_divisions(
+                project, corners[3], corners[2], tolerance=tolerance
+            ),
+        )
+        if count is not None
+    }
+    v_counts = {
+        count
+        for count in (
+            _existing_shell_edge_divisions(
+                project, corners[0], corners[3], tolerance=tolerance
+            ),
+            _existing_shell_edge_divisions(
+                project, corners[1], corners[2], tolerance=tolerance
+            ),
+        )
+        if count is not None
+    }
+    if len(u_counts) > 1:
+        raise ValueError(
+            "Opposite existing shell edges have incompatible U divisions."
+        )
+    if len(v_counts) > 1:
+        raise ValueError(
+            "Opposite existing shell edges have incompatible V divisions."
+        )
+
+    conformed_u = bool(u_counts and next(iter(u_counts)) != nu)
+    conformed_v = bool(v_counts and next(iter(v_counts)) != nv)
+    if u_counts:
+        nu = next(iter(u_counts))
+    if v_counts:
+        nv = next(iter(v_counts))
+    return nu, nv, conformed_u, conformed_v
 
 
 def _node_spatial_key(
@@ -225,6 +365,22 @@ def build_shell_mesh(
         divisions_v=spec.divisions_v,
         target_size=spec.target_size,
     )
+    merge_tolerance = _mesh_merge_tolerance(
+        project,
+        spec.merge_tolerance,
+    )
+    conformed_u = False
+    conformed_v = False
+    if spec.conform_existing_edges:
+        nu, nv, conformed_u, conformed_v = (
+            _conform_shell_mesh_divisions(
+                project,
+                corners,
+                nu=nu,
+                nv=nv,
+                tolerance=merge_tolerance,
+            )
+        )
 
     formulation = str(spec.formulation)
     if formulation not in SHELL_ELEMENT_TYPES:
@@ -253,10 +409,6 @@ def build_shell_mesh(
     grid: list[list[int]] = []
     created_nodes: list[int] = []
     reused_nodes: set[int] = set()
-    merge_tolerance = _mesh_merge_tolerance(
-        project,
-        spec.merge_tolerance,
-    )
     node_buckets: dict[tuple[int, int, int], list[int]] = {}
     if spec.reuse_existing_nodes:
         for tag, node in project.model.nodes.items():
@@ -365,4 +517,6 @@ def build_shell_mesh(
         grid=grid,
         divisions_u=nu,
         divisions_v=nv,
+        conformed_u=conformed_u,
+        conformed_v=conformed_v,
     )
