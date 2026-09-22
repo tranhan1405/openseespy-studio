@@ -719,3 +719,55 @@ def test_shell_pressure_ui_and_viewport_routes_exist():
     assert 'load.load_type == "SurfacePressure"' in viewport_source
     assert "np.cross" in viewport_source
     assert "+outward / -inward" in viewport_source
+
+
+def test_structured_shell_mesh_propagates_asd_local_x():
+    model = StructuralModel("mesh-local-x", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 2.0, 0.0, 0.0)
+    model.add_node(3, 2.0, 2.0, 0.0)
+    model.add_node(4, 0.0, 2.0, 0.0)
+    project = ProjectDatabase(name="mesh-local-x", model=model)
+    project.add_section(_shell_section())
+
+    result = build_shell_mesh(
+        project,
+        ShellMeshSpec(
+            corner_nodes=(1, 2, 3, 4),
+            divisions_u=2,
+            divisions_v=1,
+            formulation="ASDShellQ4",
+            section_tag=7,
+            local_x=(0.0, 1.0, 0.0),
+        ),
+    )
+
+    assert len(result.element_tags) == 2
+    assert all(
+        project.model.elements[tag].shell_local_x == (0.0, 1.0, 0.0)
+        for tag in result.element_tags
+    )
+
+    script = to_openseespy(
+        project.model,
+        sections=project.sections,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    assert script.count("'-local', 0, 1, 0") == 2
+
+
+def test_shell_local_x_parallel_to_normal_is_rejected():
+    project = ProjectDatabase(
+        name="invalid-local-x",
+        model=_shell_model(),
+    )
+    project.add_section(_shell_section())
+    element = project.model.elements[10]
+    element.shell_local_x = (0.0, 0.0, 1.0)
+
+    with pytest.raises(
+        ValueError,
+        match=r"parallel to the shell normal",
+    ):
+        project.validate_element_state(10)
+
