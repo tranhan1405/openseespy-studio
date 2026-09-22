@@ -189,3 +189,46 @@ def test_third_prerequisite_link_batch():
     assert "clear_section.setEnabled(has_frame)" in menu_source
     assert "clear_transformation.setEnabled(has_frame)" in menu_source
 
+
+def test_fourth_prerequisite_link_batch():
+    expected = {
+        "_create_mass_source": "_offer_structural_model_creator",
+        "_create_named_selection": "_ensure_node_count",
+        "_load_analysis_result": "_offer_result_analysis_run",
+        "_evaluate_all_solution_results": "_offer_result_analysis_run",
+        "_show_plot_menu": "_offer_result_analysis_run",
+        "_export_active_job_results": "_offer_result_analysis_run",
+        "_create_analysis_template": "_ensure_first_mode_modal_prerequisite",
+    }
+    for method_name, marker in expected.items():
+        source = inspect.getsource(getattr(MainWindow, method_name))
+        assert marker in source
+
+    tree_source = inspect.getsource(MainWindow._show_tree_context_menu)
+    assert (
+        "create.setEnabled(\n"
+        "                bool(self.selection.nodes or self.selection.elements)"
+        not in tree_source
+    )
+    assert (
+        "apply_support.setEnabled(bool(self.selection.nodes))"
+        not in tree_source
+    )
+    assert (
+        "constraint.setEnabled(len(self.selection.nodes) >= 2)"
+        not in tree_source
+    )
+
+    modal_source = inspect.getsource(
+        MainWindow._ensure_first_mode_modal_prerequisite
+    )
+    assert '_create_analysis_template("Modal")' in modal_source
+    assert "_run_analysis_from_tree(modal_tag)" in modal_source
+
+    result_source = inspect.getsource(
+        MainWindow._offer_result_analysis_run
+    )
+    assert "_offer_structural_model_creator" in result_source
+    assert "_create_analysis" in result_source
+    assert "_run_analysis_from_tree" in result_source
+
