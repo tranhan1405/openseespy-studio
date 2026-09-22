@@ -76,3 +76,24 @@ def test_dialog_returns_active_unit_values_for_isolated_builder():
         dialog.close()
         dialog.deleteLater()
         _APP.processEvents()
+
+
+
+def test_dialog_opens_with_visible_empty_section_state():
+    project = ProjectDatabase(
+        name="Empty MC",
+        model=StructuralModel("Empty MC", ndm=2, ndf=3),
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    dialog = MomentCurvatureDialog(project, None)
+    try:
+        assert dialog.section.currentData() is None
+        assert "No Sections available" in dialog.section.currentText()
+        assert (
+            dialog.buttons.button(dialog.buttons.Ok).isEnabled()
+            is False
+        )
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
