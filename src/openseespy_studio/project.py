@@ -5535,18 +5535,28 @@ class ProjectDatabase:
                         f"for ndf={self.model.ndf}."
                     )
 
-        if result.result_type == "ShellForce":
-            allowed_components = {
-                "Nxx", "Nyy", "Nxy",
-                "Mxx", "Myy", "Mxy",
-                "Qx", "Qy",
-            }
+        if result.result_type in {"ShellForce", "ShellDeformation"}:
+            if result.result_type == "ShellForce":
+                allowed_components = {
+                    "Nxx", "Nyy", "Nxy",
+                    "Mxx", "Myy", "Mxy",
+                    "Qx", "Qy",
+                }
+                default_component = "Nxx"
+            else:
+                allowed_components = {
+                    "Exx", "Eyy", "Gxy",
+                    "Kxx", "Kyy", "Kxy",
+                    "Gxz", "Gyz",
+                }
+                default_component = "Exx"
             component = str(
-                result.settings.get("component", "Nxx")
+                result.settings.get("component", default_component)
             )
             if component not in allowed_components:
                 raise ValueError(
-                    f"Unsupported ShellForce component {component!r}."
+                    f"Unsupported {result.result_type} component "
+                    f"{component!r}."
                 )
             scope = (
                 list(result.element_scope)
@@ -5559,7 +5569,7 @@ class ProjectDatabase:
             )
             if not scope:
                 raise ValueError(
-                    "ShellForce requires at least one Shell element."
+                    f"{result.result_type} requires at least one Shell element."
                 )
             incompatible = [
                 tag
@@ -5572,7 +5582,7 @@ class ProjectDatabase:
             ]
             if incompatible:
                 raise ValueError(
-                    "ShellForce requires Shell element tag(s): "
+                    f"{result.result_type} requires Shell element tag(s): "
                     + ", ".join(map(str, incompatible))
                 )
 
