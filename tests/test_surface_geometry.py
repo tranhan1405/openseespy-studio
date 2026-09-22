@@ -216,7 +216,7 @@ def test_surface_geometry_is_primary_shell_preprocessing_route():
         MainWindow._create_shell_pressure
     )
     recorder_source = inspect.getsource(
-        MainWindow._prepare_recorder_targets
+        MainWindow._recorder_target_creator
     )
     result_source = inspect.getsource(
         MainWindow._prepare_solution_result_prerequisites
@@ -227,3 +227,20 @@ def test_surface_geometry_is_primary_shell_preprocessing_route():
     assert "_create_surface_geometry_and_mesh" in recorder_source
     assert "_create_surface_geometry_and_mesh" in result_source
     assert "Create & Mesh Surface Now..." in pressure_source
+
+
+def test_unmeshed_surface_geometry_is_rendered_in_viewport():
+    draw_source = inspect.getsource(ModelViewport.draw_model)
+    render_source = inspect.getsource(ModelViewport._render_model)
+    refresh_source = inspect.getsource(MainWindow._refresh_all)
+    tree_selection_source = inspect.getsource(
+        MainWindow._tree_selection_changed
+    )
+
+    assert "surfaces:" in draw_source
+    assert "self._surfaces" in draw_source
+    assert "surface-geometry-" in render_source
+    assert "not self._model.nodes and not self._surfaces" in render_source
+    assert "self.project.surfaces" in refresh_source
+    assert 'kind == "surface_geometry"' in tree_selection_source
+    assert "_show_surface_geometry_properties" in tree_selection_source
