@@ -124,6 +124,11 @@ class ModelViewport(QWidget):
         self._geometry_surface_actor = None
         self._geometry_surface_mesh = None
         self._geometry_surface_tags: list[int] = []
+        self._line_mesh_preview: tuple[
+            int,
+            list[tuple[float, float, float]],
+            str,
+        ] | None = None
         self._surface_mesh_preview_tags: set[int] = set()
         self._surface_quality_tags: set[int] = set()
         self._surface_quality_metric: str | None = None
@@ -1867,6 +1872,90 @@ class ModelViewport(QWidget):
         if self._display_domain == "geometry":
             self._update_highlight_overlays()
 
+    def show_line_mesh_preview(
+        self,
+        line_tag: int,
+        points,
+        *,
+        family: str = "Frame",
+    ) -> None:
+        tag = int(line_tag)
+        coords = [
+            tuple(float(value) for value in point)
+            for point in points
+        ]
+        if len(coords) < 2:
+            raise ValueError(
+                "Line mesh preview requires at least two points."
+            )
+        if any(len(point) != 3 for point in coords):
+            raise ValueError(
+                "Line mesh preview points require three coordinates."
+            )
+        self._line_mesh_preview = (
+            tag,
+            coords,
+            str(family),
+        )
+        if self._display_domain != "geometry":
+            self.set_display_domain("geometry")
+            return
+        self._render_model(reset_camera=False)
+
+    def clear_line_mesh_preview(
+        self,
+        *,
+        render: bool = True,
+    ) -> None:
+        self._line_mesh_preview = None
+        self._remove_overlay("line-mesh-preview")
+        self._remove_overlay("line-mesh-preview-nodes")
+        self._remove_overlay("line-mesh-preview-label")
+        if render:
+            self.plotter.render()
+
+    def _render_line_mesh_preview(self) -> None:
+        if (
+            self._display_domain != "geometry"
+            or self._line_mesh_preview is None
+        ):
+            return
+        line_tag, coords, family = self._line_mesh_preview
+        if line_tag not in self._lines or len(coords) < 2:
+            return
+        array = np.asarray(coords, dtype=float)
+        mesh = pv.lines_from_points(array, close=False)
+        self.plotter.add_mesh(
+            mesh,
+            name="line-mesh-preview",
+            color="#8a2be2",
+            line_width=3.0,
+            render_lines_as_tubes=False,
+            pickable=False,
+            render=False,
+        )
+        self.plotter.add_mesh(
+            pv.PolyData(array),
+            name="line-mesh-preview-nodes",
+            color="#8a2be2",
+            render_points_as_spheres=True,
+            point_size=10,
+            pickable=False,
+            render=False,
+        )
+        midpoint = array[len(array) // 2]
+        self._add_annotation_labels(
+            [midpoint],
+            [
+                f"L{line_tag} · {family} · "
+                f"{len(coords) - 1} element(s)"
+            ],
+            name="line-mesh-preview-label",
+            text_color="#63308f",
+            font_size=10,
+            always_visible=True,
+        )
+
     def show_surface_mesh_definition_preview(
         self,
         surface: SurfaceGeometryData,
@@ -2575,6 +2664,8 @@ class ModelViewport(QWidget):
                 self._cell_picker.AddPickList(
                     self._geometry_surface_actor
                 )
+
+            self._render_line_mesh_preview()
 
             if self._surface_mesh_preview_tags:
                 preview_points: list[tuple[float, float, float]] = []
