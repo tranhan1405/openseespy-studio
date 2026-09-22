@@ -93,7 +93,14 @@ from ..result_catalog import (
     result_choices_for_analysis,
 )
 from ..shell_mesh import build_shell_mesh
-from ..surface_mesher import mesh_surface_geometry
+from ..surface_mesher import (
+    delete_surface_mesh,
+    flip_surface_orientation,
+    mesh_surface_geometry,
+    remesh_surface_geometry,
+    surface_unit_normal,
+)
+from ..shell_quality import shell_mesh_quality_summary
 from ..line_mesher import mesh_line_geometry
 from ..section_response import section_response_sources
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
@@ -10454,7 +10461,7 @@ class MainWindow(QMainWindow):
         point = self.project.points.get(int(tag))
         if point is None:
             return
-        meshed_users = [
+        meshed_lines = [
             line.tag
             for line in self.project.lines.values()
             if int(tag) in {line.point_i, line.point_j}
@@ -10463,13 +10470,34 @@ class MainWindow(QMainWindow):
                 for element_tag in line.generated_element_tags
             )
         ]
-        if meshed_users:
+        meshed_surfaces = [
+            surface.tag
+            for surface in self.project.surfaces.values()
+            if (
+                surface.corner_point_tags is not None
+                and int(tag) in surface.corner_point_tags
+                and any(
+                    element_tag in self.model.elements
+                    for element_tag in surface.generated_element_tags
+                )
+            )
+        ]
+        if meshed_lines or meshed_surfaces:
+            users = []
+            if meshed_lines:
+                users.append(
+                    "Line(s) " + ", ".join(map(str, sorted(meshed_lines)))
+                )
+            if meshed_surfaces:
+                users.append(
+                    "Surface(s) "
+                    + ", ".join(map(str, sorted(meshed_surfaces)))
+                )
             QMessageBox.information(
                 self,
                 "Edit Geometry Point",
-                "This Point is used by meshed Line(s): "
-                + ", ".join(map(str, sorted(meshed_users)))
-                + ". Delete the generated FE elements before moving it.",
+                "This Point is used by meshed " + "; ".join(users)
+                + ". Delete/remesh the generated FE mesh before moving it.",
             )
             return
         dialog = PointGeometryDialog(
@@ -10522,10 +10550,18 @@ class MainWindow(QMainWindow):
         point = self.project.points.get(int(tag))
         if point is None:
             return
-        users = sorted(
+        line_users = sorted(
             line.tag
             for line in self.project.lines.values()
             if int(tag) in {line.point_i, line.point_j}
+        )
+        surface_users = sorted(
+            surface.tag
+            for surface in self.project.surfaces.values()
+            if (
+                surface.corner_point_tags is not None
+                and int(tag) in surface.corner_point_tags
+            )
         )
         self.properties_panel.set_properties(
             "Geometry Point",
@@ -10538,7 +10574,13 @@ class MainWindow(QMainWindow):
                 ),
                 (
                     "Used by Lines",
-                    ", ".join(map(str, users)) if users else "-",
+                    ", ".join(map(str, line_users))
+                    if line_users else "-",
+                ),
+                (
+                    "Used by Surfaces",
+                    ", ".join(map(str, surface_users))
+                    if surface_users else "-",
                 ),
             ],
         )
@@ -10808,6 +10850,11 @@ class MainWindow(QMainWindow):
             next_tag=self.project.next_surface_tag(),
             sections=self._shell_sections(),
             initial_points=initial_points,
+            initial_point_tags=(
+                None
+                if point_tags is None
+                else tuple(int(tag) for tag in point_tags)
+            ),
             parent=self,
         )
         if not dialog.exec():
@@ -10851,19 +10898,10 @@ class MainWindow(QMainWindow):
         surface = self.project.surfaces.get(int(tag))
         if surface is None:
             return
-        if any(
+        had_mesh = any(
             element_tag in self.model.elements
             for element_tag in surface.generated_element_tags
-        ):
-            QMessageBox.information(
-                self,
-                "Edit Surface Geometry",
-                "This Surface already has a generated FE mesh. "
-                "The Surface stores the mesh definition, while generated "
-                "nodes/elements live under FE Model. Keep the current mesh "
-                "or delete it before editing the Surface geometry.",
-            )
-            return
+        )
         dialog = SurfaceGeometryDialog(
             next_tag=surface.tag,
             sections=self._shell_sections(),
@@ -10876,10 +10914,23 @@ class MainWindow(QMainWindow):
         try:
             updated = dialog.data()
             self.project.update_surface(tag, updated)
+            if had_mesh:
+                remesh_surface_geometry(self.project, updated.tag)
         except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
             QMessageBox.warning(self, "Surface Geometry", str(exc))
             return
-        self._refresh_all(f"Updated surface geometry {updated.tag}")
+        self.model = self.project.model
+        self._refresh_all(
+            (
+                f"Updated and remeshed Surface {updated.tag}"
+                if had_mesh
+                else f"Updated Surface {updated.tag}"
+            )
+        )
+        self.viewport.set_display_domain("geometry")
         self._show_surface_geometry_properties(updated.tag)
         self._record_project_change(
             f"Edit surface geometry {tag}",
@@ -10992,10 +11043,26 @@ class MainWindow(QMainWindow):
             for element_tag in surface.generated_element_tags
             if element_tag in self.model.elements
         ]
+        try:
+            normal = surface_unit_normal(surface)
+            normal_text = ", ".join(f"{value:.4g}" for value in normal)
+        except ValueError:
+            normal_text = "Undefined"
+
+        topology = (
+            "P" + " → P".join(
+                map(str, surface.corner_point_tags)
+            )
+            if surface.corner_point_tags is not None
+            else "Coordinate-defined"
+        )
+
         rows = [
             ("Tag", surface.tag),
             ("Name", surface.name),
             ("Shape", surface.surface_type),
+            ("Topology", topology),
+            ("Normal", normal_text),
             (
                 "Corners",
                 " · ".join(
@@ -11041,9 +11108,164 @@ class MainWindow(QMainWindow):
                 ),
             ),
         ]
+
+        if surface.formulation == "ASDShellQ4":
+            rows.extend([
+                (
+                    "Corotational",
+                    "Yes" if surface.corotational else "No",
+                ),
+                (
+                    "Local X",
+                    (
+                        ", ".join(
+                            f"{value:g}" for value in surface.local_x
+                        )
+                        if surface.local_x is not None
+                        else "Default"
+                    ),
+                ),
+                (
+                    "EAS",
+                    "Disabled" if surface.no_eas else "Enabled",
+                ),
+                (
+                    "Drilling stabilization",
+                    (
+                        f"{surface.drilling_stab:g}"
+                        if surface.drilling_stab is not None
+                        else "Default"
+                    ),
+                ),
+                (
+                    "Nonlinear drilling",
+                    "Yes" if surface.drilling_nl else "No",
+                ),
+            ])
+
+        if live_elements:
+            quality = shell_mesh_quality_summary(
+                self.project,
+                live_elements,
+            )
+            rows.extend([
+                ("Mesh quality", quality.heuristic_status),
+                ("Min element area", f"{quality.min_area:.5g}"),
+                (
+                    "Worst aspect ratio",
+                    f"{quality.max_aspect_ratio:.4g}"
+                    + (
+                        f" · E{quality.worst_aspect_element}"
+                        if quality.worst_aspect_element is not None
+                        else ""
+                    ),
+                ),
+                (
+                    "Worst skew",
+                    f"{quality.max_skew_deg:.3g}°"
+                    + (
+                        f" · E{quality.worst_skew_element}"
+                        if quality.worst_skew_element is not None
+                        else ""
+                    ),
+                ),
+                (
+                    "Worst warpage",
+                    f"{quality.max_warpage_deg:.3g}°"
+                    + (
+                        f" · E{quality.worst_warpage_element}"
+                        if quality.worst_warpage_element is not None
+                        else ""
+                    ),
+                ),
+            ])
+
         self.properties_panel.set_properties(
             "Surface Geometry",
             rows,
+        )
+
+    def _delete_surface_mesh(self, tag: int) -> None:
+        surface = self.project.surfaces.get(int(tag))
+        if surface is None:
+            return
+        before = self.project.to_dict()
+        try:
+            result = delete_surface_mesh(self.project, tag)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Delete Surface Mesh", str(exc))
+            return
+        self.model = self.project.model
+        self._refresh_all(
+            f"Deleted Surface {tag} mesh · "
+            f"{len(result.removed_element_tags)} element(s) · "
+            f"{len(result.removed_node_tags)} orphan node(s) removed · "
+            f"{len(result.kept_node_tags)} referenced node(s) kept"
+        )
+        self.viewport.set_display_domain("geometry")
+        self._show_surface_geometry_properties(tag)
+        self._record_project_change(
+            f"Delete Surface {tag} mesh",
+            before,
+        )
+
+    def _remesh_surface_geometry(self, tag: int) -> None:
+        surface = self.project.surfaces.get(int(tag))
+        if surface is None:
+            return
+        before = self.project.to_dict()
+        try:
+            result = remesh_surface_geometry(self.project, tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Remesh Surface", str(exc))
+            return
+        self.model = self.project.model
+        self._refresh_all(
+            f"Remeshed Surface {tag} · "
+            f"{result.mesh.divisions_u}×{result.mesh.divisions_v} · "
+            f"{len(result.mesh.element_tags)} Shell element(s)"
+        )
+        self.viewport.set_display_domain("geometry")
+        self._show_surface_geometry_properties(tag)
+        self._record_project_change(
+            f"Remesh Surface {tag}",
+            before,
+        )
+
+    def _flip_surface_normal(self, tag: int) -> None:
+        surface = self.project.surfaces.get(int(tag))
+        if surface is None:
+            return
+        before = self.project.to_dict()
+        try:
+            mesh = flip_surface_orientation(
+                self.project,
+                tag,
+                remesh_if_meshed=True,
+            )
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Flip Surface Normal", str(exc))
+            return
+        self.model = self.project.model
+        suffix = (
+            f" · remeshed {len(mesh.element_tags)} Shell element(s)"
+            if mesh is not None
+            else ""
+        )
+        self._refresh_all(
+            f"Flipped Surface {tag} normal{suffix}"
+        )
+        self.viewport.set_display_domain("geometry")
+        self._show_surface_geometry_properties(tag)
+        self._record_project_change(
+            f"Flip Surface {tag} normal",
+            before,
         )
 
     def _frame_sections(self) -> dict[int, SectionData]:
