@@ -198,7 +198,8 @@ def test_surface_ui_treats_surface_as_mesh_owner():
 
     assert "New Surface by Picking..." in context_source
     assert "New Surface by Input..." in context_source
-    assert "Generate Surface Mesh..." in context_source
+    assert "Mesh / Remesh Surface" in context_source
+    assert "Delete Generated Mesh" in context_source
     assert "add_surface" in create_source
     assert "mesh_surface_geometry" in create_source
     assert "ProjectDatabase.from_dict(before)" in create_source
