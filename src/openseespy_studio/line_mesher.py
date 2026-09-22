@@ -764,3 +764,427 @@ def delete_line_geometry(
         project.__dict__.update(restored.__dict__)
         raise
     return deleted
+
+@dataclass(slots=True)
+class LineMeshQuality:
+    """Length-quality summary for one Geometry Line FE discretization."""
+
+    line_tag: int
+    element_count: int
+    total_length: float
+    min_length: float
+    max_length: float
+    mean_length: float
+    length_ratio: float
+    lengths: list[float] = field(default_factory=list)
+
+    @property
+    def uniform(self) -> bool:
+        return self.length_ratio <= 1.0 + 1.0e-9
+
+
+@dataclass(slots=True)
+class LineConnectivityIssue:
+    """One geometric Line intersection that is not FE-connected."""
+
+    kind: str
+    line_tags: tuple[int, int]
+    point: tuple[float, float, float]
+    parameters: tuple[float, float]
+    message: str
+
+
+def _distance(
+    left: tuple[float, float, float],
+    right: tuple[float, float, float],
+) -> float:
+    return math.sqrt(
+        sum(
+            (float(left[index]) - float(right[index])) ** 2
+            for index in range(3)
+        )
+    )
+
+
+def line_mesh_quality(
+    project: ProjectDatabase,
+    line_tag: int,
+) -> LineMeshQuality:
+    """Return actual FE segment-length statistics, or preview stats if unmeshed."""
+
+    tag = int(line_tag)
+    line = project.lines.get(tag)
+    if line is None:
+        raise ValueError(f"Line geometry {tag} does not exist.")
+
+    state = inspect_line_mesh_state(project, tag)
+    lengths: list[float] = []
+    if state.live_element_tags:
+        for element_tag in line.generated_element_tags:
+            element = project.model.elements.get(int(element_tag))
+            if element is None or element.group != f"line:{tag}":
+                continue
+            node_i = project.model.nodes.get(int(element.i))
+            node_j = project.model.nodes.get(int(element.j))
+            if node_i is None or node_j is None:
+                continue
+            lengths.append(_distance(node_i.xyz, node_j.xyz))
+    else:
+        _divisions, points = line_mesh_preview_points(project, line)
+        lengths = [
+            _distance(a, b)
+            for a, b in zip(points[:-1], points[1:])
+        ]
+
+    if not lengths or any(length <= 1.0e-15 for length in lengths):
+        raise ValueError(
+            f"Line geometry {tag} does not have a valid positive-length mesh."
+        )
+
+    total = sum(lengths)
+    minimum = min(lengths)
+    maximum = max(lengths)
+    return LineMeshQuality(
+        line_tag=tag,
+        element_count=len(lengths),
+        total_length=total,
+        min_length=minimum,
+        max_length=maximum,
+        mean_length=total / len(lengths),
+        length_ratio=maximum / minimum,
+        lengths=list(lengths),
+    )
+
+
+def reverse_line_geometry(
+    project: ProjectDatabase,
+    line_tag: int,
+    *,
+    remesh: bool = True,
+) -> LineMeshResult | None:
+    """Reverse I/J while preserving the physical grading distribution."""
+
+    tag = int(line_tag)
+    line = project.lines.get(tag)
+    if line is None:
+        raise ValueError(f"Line geometry {tag} does not exist.")
+    state = inspect_line_mesh_state(project, tag)
+    had_live_mesh = bool(state.live_element_tags)
+    if had_live_mesh and not remesh:
+        raise ValueError(
+            "A meshed Geometry Line must be remeshed when its direction is "
+            "reversed."
+        )
+
+    before = project.to_dict()
+    try:
+        if had_live_mesh:
+            delete_line_mesh(project, tag)
+        line = project.lines[tag]
+        line.point_i, line.point_j = line.point_j, line.point_i
+        line.bias = 1.0 / float(line.bias)
+        project._validate_line_geometry(line)
+        if had_live_mesh:
+            return mesh_line_geometry(project, tag)
+        return None
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+
+
+_LINE_RECIPE_FIELDS = (
+    "mesh_mode",
+    "divisions",
+    "target_size",
+    "bias",
+    "reuse_existing_nodes",
+    "element_family",
+    "element_type",
+    "section_tag",
+    "transformation_tag",
+    "material_tag",
+    "area",
+    "integration_type",
+    "integration_points",
+    "mass_per_length",
+    "consistent_mass",
+    "do_rayleigh",
+)
+
+
+def copy_line_mesh_recipe(
+    project: ProjectDatabase,
+    source_tag: int,
+    target_tags,
+    *,
+    remesh_live: bool = True,
+) -> dict[int, LineMeshResult | None]:
+    """Copy FE/mesh settings without changing target Line identity/topology."""
+
+    source_key = int(source_tag)
+    source = project.lines.get(source_key)
+    if source is None:
+        raise ValueError(f"Source Line geometry {source_key} does not exist.")
+
+    targets = sorted({
+        int(tag)
+        for tag in target_tags
+        if int(tag) != source_key
+    })
+    missing = [tag for tag in targets if tag not in project.lines]
+    if missing:
+        raise ValueError(
+            "Target Line geometry tag(s) do not exist: "
+            + ", ".join(map(str, missing))
+        )
+
+    live_before = {
+        tag: bool(inspect_line_mesh_state(project, tag).live_element_tags)
+        for tag in targets
+    }
+    blocked = [
+        tag for tag, live in live_before.items()
+        if live and not remesh_live
+    ]
+    if blocked:
+        raise ValueError(
+            "Meshed target Line(s) require remesh_live=True: "
+            + ", ".join(map(str, blocked))
+        )
+
+    before = project.to_dict()
+    results: dict[int, LineMeshResult | None] = {}
+    try:
+        for tag in targets:
+            if live_before[tag]:
+                delete_line_mesh(project, tag)
+
+            current = project.lines[tag]
+            data = current.to_dict()
+            for field_name in _LINE_RECIPE_FIELDS:
+                data[field_name] = getattr(source, field_name)
+            data["generated_node_tags"] = []
+            data["owned_node_tags"] = []
+            data["generated_element_tags"] = []
+            updated = LineGeometryData.from_dict(data)
+            project.update_line(tag, updated)
+            results[tag] = (
+                mesh_line_geometry(project, tag)
+                if live_before[tag]
+                else None
+            )
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+    return results
+
+
+def remesh_line_batch(
+    project: ProjectDatabase,
+    line_tags,
+) -> dict[int, LineMeshResult]:
+    """Atomically remesh a connected set of Lines with shared-node reuse."""
+
+    tags = sorted({int(tag) for tag in line_tags})
+    if not tags:
+        return {}
+    missing = [tag for tag in tags if tag not in project.lines]
+    if missing:
+        raise ValueError(
+            "Geometry Line tag(s) do not exist: "
+            + ", ".join(map(str, missing))
+        )
+
+    states = {
+        tag: inspect_line_mesh_state(project, tag)
+        for tag in tags
+    }
+    stale = [
+        tag for tag, state in states.items()
+        if not state.healthy
+    ]
+    if stale:
+        raise ValueError(
+            "Cannot batch-remesh stale Line mesh ownership: "
+            + ", ".join(map(str, stale))
+        )
+
+    candidate_owned_nodes = {
+        int(node_tag)
+        for state in states.values()
+        for node_tag in state.owned_node_tags
+    }
+    before = project.to_dict()
+    try:
+        for tag in tags:
+            if states[tag].live_element_tags:
+                delete_line_mesh(project, tag)
+
+        for node_tag in sorted(candidate_owned_nodes):
+            if node_tag not in project.model.nodes:
+                continue
+            if any(
+                node_tag in element.node_tags()
+                for element in project.model.elements.values()
+            ):
+                continue
+            project.model.nodes.pop(node_tag, None)
+
+        results: dict[int, LineMeshResult] = {}
+        for tag in tags:
+            results[tag] = mesh_line_geometry(project, tag)
+        return results
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+
+
+def _segment_intersection(
+    a: tuple[float, float, float],
+    b: tuple[float, float, float],
+    c: tuple[float, float, float],
+    d: tuple[float, float, float],
+    tolerance: float,
+) -> tuple[tuple[float, float, float], float, float] | None:
+    """Return a non-parallel 3D segment intersection within tolerance."""
+
+    u = tuple(b[index] - a[index] for index in range(3))
+    v = tuple(d[index] - c[index] for index in range(3))
+    w = tuple(a[index] - c[index] for index in range(3))
+    uu = sum(value * value for value in u)
+    uv = sum(u[index] * v[index] for index in range(3))
+    vv = sum(value * value for value in v)
+    uw = sum(u[index] * w[index] for index in range(3))
+    vw = sum(v[index] * w[index] for index in range(3))
+    denominator = uu * vv - uv * uv
+    if uu <= 1.0e-24 or vv <= 1.0e-24:
+        return None
+    if abs(denominator) <= 1.0e-12 * uu * vv:
+        return None
+
+    s = (uv * vw - vv * uw) / denominator
+    t = (uu * vw - uv * uw) / denominator
+    param_tol = tolerance / max(math.sqrt(uu), math.sqrt(vv), tolerance)
+    if not (-param_tol <= s <= 1.0 + param_tol):
+        return None
+    if not (-param_tol <= t <= 1.0 + param_tol):
+        return None
+
+    p = tuple(a[index] + s * u[index] for index in range(3))
+    q = tuple(c[index] + t * v[index] for index in range(3))
+    if _distance(p, q) > tolerance:
+        return None
+    point = tuple(
+        0.5 * (p[index] + q[index])
+        for index in range(3)
+    )
+    return point, min(max(s, 0.0), 1.0), min(max(t, 0.0), 1.0)
+
+
+def _line_nodes_at_point(
+    project: ProjectDatabase,
+    line: LineGeometryData,
+    point: tuple[float, float, float],
+    tolerance: float,
+) -> set[int]:
+    return {
+        int(node_tag)
+        for node_tag in line.generated_node_tags
+        if (
+            int(node_tag) in project.model.nodes
+            and _distance(project.model.nodes[int(node_tag)].xyz, point)
+            <= tolerance
+        )
+    }
+
+
+def audit_line_network_connectivity(
+    project: ProjectDatabase,
+    line_tags=None,
+) -> list[LineConnectivityIssue]:
+    """Find geometric Line intersections that do not share an FE node."""
+
+    tags = sorted({
+        int(tag)
+        for tag in (
+            project.lines.keys()
+            if line_tags is None
+            else line_tags
+        )
+        if int(tag) in project.lines
+    })
+    if len(tags) < 2:
+        return []
+
+    points = [
+        project.points[point_tag].xyz
+        for tag in tags
+        for point_tag in (
+            project.lines[tag].point_i,
+            project.lines[tag].point_j,
+        )
+        if point_tag in project.points
+    ]
+    tolerance = _merge_tolerance(
+        project,
+        points or [(0.0, 0.0, 0.0)],
+    )
+    issues: list[LineConnectivityIssue] = []
+
+    for left_index, left_tag in enumerate(tags):
+        left = project.lines[left_tag]
+        left_state = inspect_line_mesh_state(project, left_tag)
+        if not left_state.live_element_tags:
+            continue
+        a, b, _ = _line_points(project, left)
+
+        for right_tag in tags[left_index + 1:]:
+            right = project.lines[right_tag]
+            right_state = inspect_line_mesh_state(project, right_tag)
+            if not right_state.live_element_tags:
+                continue
+            c, d, _ = _line_points(project, right)
+            intersection = _segment_intersection(
+                a, b, c, d, tolerance
+            )
+            if intersection is None:
+                continue
+            point, s, t = intersection
+            left_nodes = _line_nodes_at_point(
+                project, left, point, tolerance
+            )
+            right_nodes = _line_nodes_at_point(
+                project, right, point, tolerance
+            )
+            if left_nodes & right_nodes:
+                continue
+
+            endpoint_tol = 1.0e-8
+            left_end = s <= endpoint_tol or s >= 1.0 - endpoint_tol
+            right_end = t <= endpoint_tol or t >= 1.0 - endpoint_tol
+            if left_end and right_end:
+                kind = "endpoint"
+            elif left_end or right_end:
+                kind = "t_junction"
+            else:
+                kind = "crossing"
+            issues.append(
+                LineConnectivityIssue(
+                    kind=kind,
+                    line_tags=(left_tag, right_tag),
+                    point=tuple(float(value) for value in point),
+                    parameters=(float(s), float(t)),
+                    message=(
+                        f"Geometry Lines {left_tag} and {right_tag} intersect "
+                        f"but do not share an FE node ({kind})."
+                    ),
+                )
+            )
+    return issues
+
