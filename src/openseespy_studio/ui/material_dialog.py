@@ -1182,9 +1182,17 @@ class MaterialDialog(QDialog):
             copied = MaterialData.from_dict(candidate.to_dict())
             self.materials[copied.tag] = copied
             self._pending_materials.append(copied)
+
+        material_type = str(self.material_type.currentData())
         self._refresh_dependency_selectors(
-            select_tag=material.tag,
+            select_tag=(
+                material.tag
+                if material_type in {"MinMax", "Fatigue"}
+                else None
+            ),
         )
+        if material_type in {"Parallel", "Series"}:
+            self._add_component_row(material_tag=material.tag)
 
     def _wrapper_references(
         self,
