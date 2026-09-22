@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from ..hinge_backbone import (
     HingeBackbonePoint,
     build_symmetric_hysteretic_hinge,
+    suggest_hinge_backbone_points,
 )
 from ..project import MaterialData
 from ..units import UnitSystem
@@ -147,14 +148,14 @@ class HingeBackboneDialog(QDialog):
         self.points.horizontalHeader().setStretchLastSection(True)
         points_layout.addWidget(self.points)
 
-        point_note = QLabel(
+        self.point_note = QLabel(
             "SARE does not auto-label cracking, yield, or ultimate from a "
             "monotonic curve. The researcher confirms these points so the "
             "calibration remains traceable and reviewable."
         )
-        point_note.setWordWrap(True)
-        point_note.setStyleSheet("color: #617080;")
-        points_layout.addWidget(point_note)
+        self.point_note.setWordWrap(True)
+        self.point_note.setStyleSheet("color: #617080;")
+        points_layout.addWidget(self.point_note)
 
         content.addWidget(points_group)
 
@@ -258,6 +259,54 @@ class HingeBackboneDialog(QDialog):
             index = self.basis.findData(str(basis))
             if index >= 0:
                 self.basis.setCurrentIndex(index)
+
+        curve_x = self._prefill.get("curvature")
+        curve_y = self._prefill.get("moment")
+        if (
+            str(self.basis.currentData()) == "moment_curvature"
+            and isinstance(curve_x, (list, tuple))
+            and isinstance(curve_y, (list, tuple))
+        ):
+            try:
+                curvature_per_m = [
+                    float(value) / self._units.length_to_m
+                    for value in curve_x
+                ]
+                moment_nm = [
+                    self._units.moment_to_nm_value(float(value))
+                    for value in curve_y
+                ]
+                suggested = suggest_hinge_backbone_points(
+                    curvature_per_m,
+                    moment_nm,
+                )
+            except (TypeError, ValueError, ZeroDivisionError):
+                suggested = ()
+
+            if len(suggested) == 3:
+                for point, moment_spin, deformation_spin in zip(
+                    suggested,
+                    self._moment_spins,
+                    self._deformation_spins,
+                ):
+                    moment_spin.setValue(
+                        self._units.moment_from_nm(point.moment_nm)
+                    )
+                    deformation_spin.setValue(
+                        point.deformation * self._units.length_to_m
+                    )
+                self.point_note.setText(
+                    "Three values were prefilled from the SARE M–κ curve: "
+                    "Point 1 = first clear stiffness-drop suggestion, "
+                    "Point 2 = normalized curve-knee suggestion, and "
+                    "Point 3 = terminal positive-branch point. These are "
+                    "starting suggestions only; confirm or edit the physical "
+                    "cracking/yield/ultimate interpretation before creating "
+                    "the hinge material."
+                )
+                self.point_note.setStyleSheet(
+                    "padding: 6px; background: #fff4df; color: #7a5600;"
+                )
 
     @staticmethod
     def _factor_spin(
