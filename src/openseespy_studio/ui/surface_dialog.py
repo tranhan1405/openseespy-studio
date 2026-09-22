@@ -44,6 +44,12 @@ class SurfaceGeometryDialog(QDialog):
         next_tag: int,
         sections: dict[int, SectionData],
         surface: SurfaceGeometryData | None = None,
+        initial_points: tuple[
+            tuple[float, float, float],
+            tuple[float, float, float],
+            tuple[float, float, float],
+            tuple[float, float, float],
+        ] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -71,7 +77,11 @@ class SurfaceGeometryDialog(QDialog):
         self.surface_type = QComboBox()
         self.surface_type.addItems(["Rectangle", "Quad"])
         self.surface_type.setCurrentText(
-            surface.surface_type if surface else "Rectangle"
+            surface.surface_type
+            if surface
+            else "Quad"
+            if initial_points is not None
+            else "Rectangle"
         )
         form.addRow("Shape:", self.surface_type)
         root.addLayout(form)
@@ -85,6 +95,8 @@ class SurfaceGeometryDialog(QDialog):
         initial_points = (
             surface.points
             if surface is not None
+            else initial_points
+            if initial_points is not None
             else (
                 (0.0, 0.0, 0.0),
                 (1.0, 0.0, 0.0),
