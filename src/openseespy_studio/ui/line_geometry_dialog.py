@@ -116,6 +116,8 @@ class LineGeometryDialog(QDialog):
         transformations: dict[int, TransformationData],
         materials: dict[int, MaterialData],
         line: LineGeometryData | None = None,
+        initial_point_i: int | None = None,
+        initial_point_j: int | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -156,8 +158,17 @@ class LineGeometryDialog(QDialog):
                 self.point_i.setCurrentIndex(i)
             if j >= 0:
                 self.point_j.setCurrentIndex(j)
-        elif self.point_j.count() > 1:
-            self.point_j.setCurrentIndex(1)
+        else:
+            if initial_point_i is not None:
+                i = self.point_i.findData(int(initial_point_i))
+                if i >= 0:
+                    self.point_i.setCurrentIndex(i)
+            if initial_point_j is not None:
+                j = self.point_j.findData(int(initial_point_j))
+                if j >= 0:
+                    self.point_j.setCurrentIndex(j)
+            elif self.point_j.count() > 1:
+                self.point_j.setCurrentIndex(1)
         form.addRow("Start Point:", self.point_i)
         form.addRow("End Point:", self.point_j)
         root.addLayout(form)
