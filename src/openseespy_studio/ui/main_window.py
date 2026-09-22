@@ -19254,6 +19254,12 @@ class MainWindow(QMainWindow):
                 lambda checked=False, t=tag:
                 self._configure_line_mesh(t)
             )
+            quality = menu.addAction("Mesh Quality...")
+            quality.setEnabled(line.mesh_recipe_configured)
+            quality.triggered.connect(
+                lambda checked=False, t=tag:
+                self._show_line_mesh_quality(t)
+            )
             preview = menu.addAction("Preview Mesh")
             preview.setEnabled(line.mesh_recipe_configured)
             preview.triggered.connect(
@@ -19458,6 +19464,11 @@ class MainWindow(QMainWindow):
                 lambda checked=False, t=tag:
                 self._configure_surface_mesh(t)
             )
+            assign_section = menu.addAction("Assign Shell Section...")
+            assign_section.triggered.connect(
+                lambda checked=False, t=tag:
+                self._assign_shell_section_to_surfaces([t])
+            )
             preview = menu.addAction("Preview Mesh")
             preview.setEnabled(surface.mesh_recipe_configured)
             preview.triggered.connect(
@@ -19493,6 +19504,23 @@ class MainWindow(QMainWindow):
             audit.triggered.connect(
                 lambda checked=False, t=tag:
                 self._audit_surface_mesh_integrity([t])
+            )
+            quality_menu = menu.addMenu("Visualize Mesh Quality")
+            quality_menu.setEnabled(live_mesh)
+            for label, metric in (
+                ("Aspect Ratio", "aspect_ratio"),
+                ("Skew", "skew"),
+                ("Warpage", "warpage"),
+            ):
+                quality_action = quality_menu.addAction(label)
+                quality_action.triggered.connect(
+                    lambda checked=False, m=metric, t=tag:
+                    self._show_surface_quality_map([t], m)
+                )
+            quality_menu.addSeparator()
+            clear_quality = quality_menu.addAction("Clear Quality Map")
+            clear_quality.triggered.connect(
+                self._clear_surface_quality_map
             )
             exec_menu()
             return
