@@ -8,10 +8,12 @@ from .project import (
     ElementLoadData,
     NodalLoadData,
     ProjectDatabase,
+    RecorderData,
     SurfaceEdgeLoadData,
     SurfaceEdgeSupportData,
     SurfaceGeometryData,
     SurfacePressureData,
+    SurfaceRecorderData,
 )
 from .shell_mesh import (
     ShellMeshBuildResult,
@@ -759,6 +761,152 @@ def remove_surface_pressure(
     return removed
 
 
+def managed_surface_recorder_tags(
+    project: ProjectDatabase,
+) -> set[int]:
+    return {
+        int(surface_recorder.generated_recorder_tag)
+        for surface_recorder in project.surface_recorders.values()
+        if (
+            surface_recorder.generated_recorder_tag is not None
+            and int(surface_recorder.generated_recorder_tag)
+            in project.recorders
+        )
+    }
+
+
+def detach_surface_recorder(
+    project: ProjectDatabase,
+    surface_recorder_tag: int,
+) -> int | None:
+    tag = int(surface_recorder_tag)
+    surface_recorder = project.surface_recorders.get(tag)
+    if surface_recorder is None:
+        raise ValueError(f"Surface recorder {tag} does not exist.")
+    generated_tag = surface_recorder.generated_recorder_tag
+    if generated_tag is not None:
+        project.recorders.pop(int(generated_tag), None)
+    surface_recorder.generated_recorder_tag = None
+    return None if generated_tag is None else int(generated_tag)
+
+
+def sync_surface_recorder(
+    project: ProjectDatabase,
+    surface_recorder_tag: int,
+) -> int:
+    tag = int(surface_recorder_tag)
+    surface_recorder = project.surface_recorders.get(tag)
+    if surface_recorder is None:
+        raise ValueError(f"Surface recorder {tag} does not exist.")
+    state = inspect_surface_mesh_state(
+        project,
+        surface_recorder.surface_tag,
+    )
+    if state.status != "meshed":
+        raise ValueError(
+            f"Surface {surface_recorder.surface_tag} must have a healthy "
+            "mesh before a managed Shell recorder can be generated."
+        )
+
+    before = project.to_dict()
+    try:
+        detach_surface_recorder(project, tag)
+        surface = project.surfaces[surface_recorder.surface_tag]
+        target_tags = [
+            int(element_tag)
+            for element_tag in surface.generated_element_tags
+            if (
+                int(element_tag) in project.model.elements
+                and project.model.elements[
+                    int(element_tag)
+                ].element_type in SHELL_ELEMENT_TYPES
+            )
+        ]
+        if not target_tags:
+            raise ValueError(
+                f"Surface {surface.tag} has no generated Shell elements."
+            )
+        recorder_tag = project.next_recorder_tag()
+        recorder = RecorderData(
+            tag=recorder_tag,
+            name=(
+                f"{surface_recorder.name} "
+                f"[managed Surface {surface_recorder.surface_tag}]"
+            ),
+            recorder_type="Shell",
+            target_tags=target_tags,
+            response=surface_recorder.response,
+            file_name=surface_recorder.file_name,
+            include_time=surface_recorder.include_time,
+            section_number=surface_recorder.section_number,
+        )
+        project.add_recorder(recorder)
+        surface_recorder.generated_recorder_tag = recorder.tag
+        project._validate_surface_recorder(surface_recorder)
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+    return int(surface_recorder.generated_recorder_tag)
+
+
+def sync_surface_recorders_for_surface(
+    project: ProjectDatabase,
+    surface_tag: int,
+) -> list[int]:
+    definition_tags = sorted(
+        surface_recorder.tag
+        for surface_recorder in project.surface_recorders.values()
+        if surface_recorder.surface_tag == int(surface_tag)
+    )
+    return [
+        sync_surface_recorder(project, definition_tag)
+        for definition_tag in definition_tags
+    ]
+
+
+def replace_surface_recorder(
+    project: ProjectDatabase,
+    surface_recorder: SurfaceRecorderData,
+) -> int:
+    existing = project.surface_recorders.get(int(surface_recorder.tag))
+    if existing is None:
+        raise ValueError(
+            f"Surface recorder {int(surface_recorder.tag)} does not exist."
+        )
+    before = project.to_dict()
+    try:
+        detach_surface_recorder(project, existing.tag)
+        surface_recorder.generated_recorder_tag = None
+        project.update_surface_recorder(existing.tag, surface_recorder)
+        return sync_surface_recorder(project, surface_recorder.tag)
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+
+
+def remove_surface_recorder(
+    project: ProjectDatabase,
+    surface_recorder_tag: int,
+) -> int | None:
+    tag = int(surface_recorder_tag)
+    if tag not in project.surface_recorders:
+        raise ValueError(f"Surface recorder {tag} does not exist.")
+    before = project.to_dict()
+    try:
+        generated_tag = detach_surface_recorder(project, tag)
+        project.remove_surface_recorder_definition(tag)
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+    return generated_tag
+
+
 def mesh_surface_geometry(
     project: ProjectDatabase,
     surface_tag: int,
@@ -826,6 +974,7 @@ def mesh_surface_geometry(
         sync_surface_edge_supports_for_surface(project, surface.tag)
         sync_surface_edge_loads_for_surface(project, surface.tag)
         sync_surface_pressures_for_surface(project, surface.tag)
+        sync_surface_recorders_for_surface(project, surface.tag)
     except Exception:
         restored = ProjectDatabase.from_dict(before)
         project.__dict__.clear()
@@ -874,11 +1023,13 @@ def _surface_element_dependency_blockers(
             "element load(s) " + ", ".join(map(str, load_tags))
         )
 
+    managed_recorder_tags = managed_surface_recorder_tags(project)
     recorder_tags = sorted(
         recorder.tag
         for recorder in project.recorders.values()
         if (
             recorder.recorder_type != "Node"
+            and int(recorder.tag) not in managed_recorder_tags
             and any(
                 int(tag) in element_tags
                 for tag in recorder.target_tags
@@ -1125,6 +1276,14 @@ def delete_surface_mesh(
 
     before = project.to_dict()
     try:
+        surface_recorder_tags = sorted(
+            surface_recorder.tag
+            for surface_recorder in project.surface_recorders.values()
+            if surface_recorder.surface_tag == tag
+        )
+        for surface_recorder_tag in surface_recorder_tags:
+            detach_surface_recorder(project, surface_recorder_tag)
+
         pressure_tags = sorted(
             pressure.tag
             for pressure in project.surface_pressures.values()
@@ -1205,6 +1364,11 @@ def delete_surface_geometry(
             for pressure in project.surface_pressures.values()
             if pressure.surface_tag == tag
         )
+        surface_recorder_tags = sorted(
+            surface_recorder.tag
+            for surface_recorder in project.surface_recorders.values()
+            if surface_recorder.surface_tag == tag
+        )
         deleted = delete_surface_mesh(project, tag)
         for support_tag in support_tags:
             project.surface_edge_supports.pop(support_tag, None)
@@ -1212,6 +1376,8 @@ def delete_surface_geometry(
             project.surface_edge_loads.pop(edge_load_tag, None)
         for pressure_tag in pressure_tags:
             project.surface_pressures.pop(pressure_tag, None)
+        for surface_recorder_tag in surface_recorder_tags:
+            project.surface_recorders.pop(surface_recorder_tag, None)
         project.remove_surface(tag)
     except Exception:
         restored = ProjectDatabase.from_dict(before)
