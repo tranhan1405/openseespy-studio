@@ -167,6 +167,44 @@ def _pattern_amplitude(
     return abs(float(series.factor))
 
 
+def _shell_areal_mass(
+    project: ProjectDatabase,
+    section: SectionData,
+) -> float:
+    """Return shell mass per unit model area in consistent model units."""
+    if section.section_type == "ElasticMembranePlate":
+        return (
+            float(section.parameters.get("rho", 0.0))
+            * float(section.parameters.get("h", 0.0))
+        )
+
+    unit_system = UnitSystem.from_mapping(project.units)
+    if section.section_type == "PlateFiber":
+        if section.nd_material_tag is None:
+            return 0.0
+        material = project.nd_materials.get(int(section.nd_material_tag))
+        if material is None:
+            return 0.0
+        density = unit_system.density_from_kg_per_m3(
+            float(material.parameters.get("rho", 0.0))
+        )
+        return density * float(section.parameters.get("h", 0.0))
+
+    if section.section_type == "LayeredShell":
+        total = 0.0
+        for layer in section.shell_layers:
+            material = project.nd_materials.get(int(layer.material_tag))
+            if material is None:
+                continue
+            density = unit_system.density_from_kg_per_m3(
+                float(material.parameters.get("rho", 0.0))
+            )
+            total += density * float(layer.thickness)
+        return total
+
+    return 0.0
+
+
 def evaluate_mass_source(
     project: ProjectDatabase,
     source: MassSourceData,
@@ -224,11 +262,16 @@ def evaluate_mass_source(
                     "ShellDKGQ",
                     "ShellNLDKGQ",
                 }
-                and section.section_type == "ElasticMembranePlate"
+                and section.section_type in {
+                    "ElasticMembranePlate",
+                    "PlateFiber",
+                    "LayeredShell",
+                }
             ):
-                density = float(section.parameters.get("rho", 0.0))
-                thickness = float(section.parameters.get("h", 0.0))
-                total = density * thickness * _shell_area(
+                total = _shell_areal_mass(
+                    project,
+                    section,
+                ) * _shell_area(
                     project,
                     element.tag,
                 )
