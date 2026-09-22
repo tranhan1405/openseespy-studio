@@ -1079,6 +1079,16 @@ class _Importer:
             nl = int(args[5])
             section_tag = int(args[6])
             rest = args[7:]
+            local_values = (
+                self.flag_values(rest, "-local")
+                if kind == "ASDShellQ4"
+                else []
+            )
+            local_x = (
+                tuple(float(value) for value in local_values[:3])
+                if len(local_values) >= 3
+                else None
+            )
             self.project.model.add_element(
                 tag,
                 ni,
@@ -1092,6 +1102,7 @@ class _Importer:
                     kind == "ASDShellQ4"
                     and "-corotational" in rest
                 ),
+                shell_local_x=local_x,
             )
             self.count("Elements")
             return
