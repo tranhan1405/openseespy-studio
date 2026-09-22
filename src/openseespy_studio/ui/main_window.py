@@ -4823,9 +4823,9 @@ class MainWindow(QMainWindow):
                     elements.update(selection_set.element_tags)
             elif kind == "point_geometry":
                 point_geometry_tag = int(tag)
-            elif kind == "line_geometry":
+            elif kind in {"line_geometry", "line_mesh_recipe"}:
                 line_geometry_tag = int(tag)
-            elif kind == "surface_geometry":
+            elif kind in {"surface_geometry", "surface_mesh_recipe"}:
                 surface_geometry_tag = int(tag)
                 surface_geometry_tags.add(int(tag))
             elif kind == "material":
@@ -4888,6 +4888,11 @@ class MainWindow(QMainWindow):
             "point_geometry",
             "line_geometry",
             "surface_geometry",
+            "mesh_root",
+            "line_meshes_root",
+            "surface_meshes_root",
+            "line_mesh_recipe",
+            "surface_mesh_recipe",
         }
         geometry_mode = (
             bool(selected_payload_kinds)
@@ -18923,6 +18928,57 @@ class MainWindow(QMainWindow):
             exec_menu()
             return
 
+        if kind == "line_mesh_recipe":
+            tag = int(value)
+            line = self.project.lines.get(tag)
+            if line is None:
+                return
+            state = inspect_line_mesh_state(self.project, tag)
+            live_mesh = bool(state.live_element_tags)
+            configure = menu.addAction("Configure Line Mesh / FE Recipe...")
+            configure.triggered.connect(
+                lambda checked=False, t=tag:
+                self._configure_line_mesh(t)
+            )
+            preview = menu.addAction("Preview Mesh")
+            preview.setEnabled(line.mesh_recipe_configured)
+            preview.triggered.connect(
+                lambda checked=False, t=tag:
+                self._preview_line_mesh(t)
+            )
+            menu.addSeparator()
+            generate = menu.addAction(
+                "Remesh"
+                if live_mesh else "Generate Mesh"
+            )
+            generate.triggered.connect(
+                lambda checked=False, t=tag:
+                (
+                    self._remesh_line_geometry(t)
+                    if live_mesh
+                    else self._mesh_line_geometry(t)
+                )
+            )
+            delete_mesh = menu.addAction("Delete Generated Mesh")
+            delete_mesh.setEnabled(live_mesh)
+            delete_mesh.triggered.connect(
+                lambda checked=False, t=tag:
+                self._delete_line_mesh(t)
+            )
+            select_fe = menu.addAction("Select Generated FE")
+            select_fe.setEnabled(live_mesh)
+            select_fe.triggered.connect(
+                lambda checked=False, t=tag:
+                self._select_line_generated_fe(t)
+            )
+            audit = menu.addAction("Audit Mesh Integrity")
+            audit.triggered.connect(
+                lambda checked=False, t=tag:
+                self._audit_line_mesh_integrity(t)
+            )
+            exec_menu()
+            return
+
         if kind == "line_geometry":
             tag = int(value)
             line = self.project.lines.get(tag)
@@ -18944,10 +19000,17 @@ class MainWindow(QMainWindow):
             )
 
             if count == 1:
-                edit = menu.addAction("Edit Line / Mesh Settings...")
+                edit = menu.addAction("Edit Line Geometry...")
                 edit.triggered.connect(
                     lambda checked=False, t=tag:
                     self._edit_line_geometry(t)
+                )
+                configure_mesh = menu.addAction(
+                    "Configure Mesh / FE Recipe..."
+                )
+                configure_mesh.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._configure_line_mesh(t)
                 )
                 reverse = menu.addAction("Reverse Line Direction")
                 reverse.triggered.connect(
@@ -19136,6 +19199,57 @@ class MainWindow(QMainWindow):
             exec_menu()
             return
 
+        if kind == "surface_mesh_recipe":
+            tag = int(value)
+            surface = self.project.surfaces.get(tag)
+            if surface is None:
+                return
+            state = inspect_surface_mesh_state(self.project, tag)
+            live_mesh = bool(state.live_element_tags)
+            configure = menu.addAction("Configure Surface Mesh / Shell Recipe...")
+            configure.triggered.connect(
+                lambda checked=False, t=tag:
+                self._configure_surface_mesh(t)
+            )
+            preview = menu.addAction("Preview Mesh")
+            preview.setEnabled(surface.mesh_recipe_configured)
+            preview.triggered.connect(
+                lambda checked=False, t=tag:
+                self._preview_surface_meshes([t])
+            )
+            menu.addSeparator()
+            generate = menu.addAction(
+                "Remesh"
+                if live_mesh else "Generate Mesh"
+            )
+            generate.triggered.connect(
+                lambda checked=False, t=tag:
+                (
+                    self._remesh_surface_geometry(t)
+                    if live_mesh
+                    else self._mesh_surface_geometry(t)
+                )
+            )
+            delete_mesh = menu.addAction("Delete Generated Mesh")
+            delete_mesh.setEnabled(live_mesh)
+            delete_mesh.triggered.connect(
+                lambda checked=False, t=tag:
+                self._delete_surface_mesh(t)
+            )
+            select_fe = menu.addAction("Select Generated FE")
+            select_fe.setEnabled(live_mesh)
+            select_fe.triggered.connect(
+                lambda checked=False, t=tag:
+                self._select_generated_fe_for_surfaces([t])
+            )
+            audit = menu.addAction("Audit Mesh Integrity")
+            audit.triggered.connect(
+                lambda checked=False, t=tag:
+                self._audit_surface_mesh_integrity([t])
+            )
+            exec_menu()
+            return
+
         if kind == "surface_geometry":
             tag = int(value)
             surface = self.project.surfaces.get(tag)
@@ -19157,10 +19271,17 @@ class MainWindow(QMainWindow):
                 self._show_surface_geometry_properties(t)
             )
             if count == 1:
-                edit = menu.addAction("Edit Surface / Mesh Settings...")
+                edit = menu.addAction("Edit Surface Geometry...")
                 edit.triggered.connect(
                     lambda checked=False, t=tag:
                     self._edit_surface_geometry(t)
+                )
+                configure_mesh = menu.addAction(
+                    "Configure Mesh / Shell Recipe..."
+                )
+                configure_mesh.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._configure_surface_mesh(t)
                 )
 
             copy_surface = menu.addAction(
