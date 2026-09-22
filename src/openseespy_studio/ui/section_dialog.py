@@ -46,6 +46,7 @@ from ..section_visualization import (
 )
 from ..units import UnitSystem
 from .frp_column_dialog import FRPColumnWizardDialog
+from .material_dialog import MaterialDialog
 
 PA_PER_MPA = 1.0e6
 
@@ -1727,6 +1728,22 @@ class SectionDialog(QDialog):
         header.addRow("Tag:", self.tag)
         header.addRow("Name:", self.name)
         header.addRow("Type:", self.section_type)
+
+        resource_holder = QWidget()
+        resource_row = QHBoxLayout(resource_holder)
+        resource_row.setContentsMargins(0, 0, 0, 0)
+        resource_row.setSpacing(6)
+        self.new_material_button = QPushButton("New Material...")
+        self.new_material_button.setToolTip(
+            "Create a material without leaving the Section Editor. "
+            "It is committed only when the Section Editor is accepted."
+        )
+        self.new_material_button.clicked.connect(
+            self._create_staged_material
+        )
+        resource_row.addWidget(self.new_material_button)
+        resource_row.addStretch(1)
+        header.addRow("Resources:", resource_holder)
         root.addLayout(header)
 
         self.stack = QStackedWidget()
@@ -1751,6 +1768,110 @@ class SectionDialog(QDialog):
         self._sync_page(self.section_type.currentText())
         self._refresh_component_list()
         self._update_fiber_outputs()
+
+    def _next_material_tag(self) -> int:
+        return max(self.materials, default=0) + 1
+
+    def _refresh_material_selectors(
+        self,
+        *,
+        select_tag: int | None = None,
+    ) -> None:
+        if hasattr(self, "elastic_material"):
+            current = self.elastic_material.currentData()
+            self.elastic_material.blockSignals(True)
+            self.elastic_material.clear()
+            self.elastic_material.addItem(
+                "Manual section properties",
+                None,
+            )
+            for tag in sorted(self.materials):
+                material = self.materials[tag]
+                suffix = (
+                    " · new"
+                    if any(
+                        item.tag == tag
+                        for item in self._pending_materials
+                    )
+                    else ""
+                )
+                self.elastic_material.addItem(
+                    f"{tag} - {material.name} "
+                    f"({material.material_type}){suffix}",
+                    tag,
+                )
+            wanted = (
+                select_tag
+                if (
+                    select_tag is not None
+                    and self.section_type.currentText() == "Elastic"
+                )
+                else current
+            )
+            if wanted is not None:
+                index = self.elastic_material.findData(int(wanted))
+                if index >= 0:
+                    self.elastic_material.setCurrentIndex(index)
+            self.elastic_material.blockSignals(False)
+            self._update_elastic_material_link()
+
+        if hasattr(self, "fiber_table"):
+            for row in range(self.fiber_table.rowCount()):
+                combo = self.fiber_table.cellWidget(row, 3)
+                if not isinstance(combo, QComboBox):
+                    continue
+                current = combo.currentData()
+                combo.blockSignals(True)
+                combo.clear()
+                for tag in sorted(self.materials):
+                    material = self.materials[tag]
+                    suffix = (
+                        " · new"
+                        if any(
+                            item.tag == tag
+                            for item in self._pending_materials
+                        )
+                        else ""
+                    )
+                    combo.addItem(
+                        f"{tag} - {material.name}{suffix}",
+                        tag,
+                    )
+                if current is not None:
+                    index = combo.findData(int(current))
+                    if index >= 0:
+                        combo.setCurrentIndex(index)
+                combo.blockSignals(False)
+
+        self._refresh_frp_material_combo(select_tag)
+        self._update_fiber_outputs()
+
+    def _create_staged_material(self) -> None:
+        dialog = MaterialDialog(
+            next_tag=self._next_material_tag(),
+            units=self.unit_system.as_mapping(),
+            materials=self.materials,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            material = dialog.material_data()
+            if material.tag in self.materials:
+                raise ValueError(
+                    f"Material tag {material.tag} already exists."
+                )
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Section Material",
+                str(exc),
+            )
+            return
+
+        self.materials[material.tag] = material
+        self._pending_materials.append(material)
+        self._refresh_material_selectors(select_tag=material.tag)
 
     def _build_elastic_page(
         self,
@@ -2534,12 +2655,9 @@ class SectionDialog(QDialog):
 
     def _apply_shape_template(self, shape: str) -> None:
         if not self.materials:
-            QMessageBox.information(
-                self,
-                "Fiber Section Template",
-                "Create at least one material first.",
-            )
-            return
+            self._create_staged_material()
+            if not self.materials:
+                return
 
         dialog = ShapeTemplateDialog(
             self.materials,
@@ -2590,12 +2708,9 @@ class SectionDialog(QDialog):
 
     def _add_component(self, component_type: str) -> None:
         if not self.materials:
-            QMessageBox.information(
-                self,
-                "Fiber Section Builder",
-                "Create at least one material first.",
-            )
-            return
+            self._create_staged_material()
+            if not self.materials:
+                return
 
         original = list(self._components)
 
