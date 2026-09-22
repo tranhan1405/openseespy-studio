@@ -183,13 +183,15 @@ def test_surface_ui_treats_surface_as_mesh_owner():
 
     assert "Rectangle" in dialog_source
     assert "Quad" in dialog_source
-    assert "A Surface owns its mapped Shell mesh" in dialog_source
+    assert "A Surface stores the reusable geometry and mesh definition" in dialog_source
     assert "Create Surface + Mesh" in dialog_source
     assert "Surface requires a Shell Section" in dialog_source
 
     assert "surface_geometry" in tree_source
-    assert "surface_owned_elements" in tree_source
-    assert "Shell Elements (" in tree_source
+    assert "FE Model" in tree_source
+    assert "total_element_count" in tree_source
+    assert "surface_owned_elements" not in tree_source
+    assert "Shell Elements (" not in tree_source
     assert "Mesh (" in tree_source
 
     assert "New Surface..." in context_source
@@ -252,7 +254,7 @@ def test_unmeshed_surface_geometry_is_rendered_in_viewport():
     assert "self.project.surfaces" in refresh_source
     assert '"surface_geometry"' in tree_selection_source
     assert '"surface_mesh"' in tree_selection_source
-    assert '"surface_shells"' in tree_selection_source
+    assert '"surface_shells"' not in tree_selection_source
     assert "_show_surface_geometry_properties" in tree_selection_source
 
 
