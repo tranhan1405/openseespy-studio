@@ -5,21 +5,10 @@ import math
 from typing import Iterable
 
 from .beam_loads import resolve_self_weight_local
-from .project import AnalysisSettingsData, ProjectDatabase
+from .model import FRAME_ELEMENT_TYPES, SHELL_ELEMENT_TYPES, SUPPORTED_ELEMENT_TYPES
+from .project import AnalysisSettingsData, ProjectDatabase, SHELL_SECTION_TYPES
 from .units import UnitSystem
 
-
-FRAME_ELEMENT_TYPES = {
-    "elasticBeamColumn",
-    "forceBeamColumn",
-    "dispBeamColumn",
-}
-SUPPORTED_ELEMENT_TYPES = {
-    "elasticBeamColumn",
-    "forceBeamColumn",
-    "dispBeamColumn",
-    "truss",
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,18 +71,23 @@ def _element_geometry_checks(
     issues: list[ValidationIssue],
 ) -> None:
     model = project.model
-    seen_pairs: dict[tuple[int, int], int] = {}
+    seen_connectivity: dict[tuple[int, ...], int] = {}
 
     for tag in sorted(model.elements):
         element = model.elements[tag]
-        node_i = model.nodes.get(element.i)
-        node_j = model.nodes.get(element.j)
-        if node_i is None or node_j is None:
+        node_tags = tuple(int(value) for value in element.node_tags())
+        missing = [
+            node_tag
+            for node_tag in node_tags
+            if node_tag not in model.nodes
+        ]
+        if missing:
             issues.append(
                 ValidationIssue(
                     "ERROR",
                     "Geometry",
-                    f"Element {tag} references a missing node.",
+                    f"Element {tag} references missing node tag(s): "
+                    + ", ".join(map(str, missing)),
                     "element",
                     tag,
                     "Repair or recreate the element connectivity.",
@@ -101,6 +95,139 @@ def _element_geometry_checks(
             )
             continue
 
+        connectivity = tuple(sorted(node_tags))
+        if connectivity in seen_connectivity:
+            other = seen_connectivity[connectivity]
+            issues.append(
+                ValidationIssue(
+                    "WARNING",
+                    "Geometry",
+                    f"Element {tag} duplicates the connectivity of "
+                    f"element {other}.",
+                    "element",
+                    tag,
+                    "Confirm that the duplicate element is intentional.",
+                )
+            )
+        else:
+            seen_connectivity[connectivity] = tag
+
+        if element.element_type not in SUPPORTED_ELEMENT_TYPES:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Element formulation",
+                    f"Element {tag} uses {element.element_type}, which the "
+                    "current generator does not yet emit faithfully.",
+                    "element",
+                    tag,
+                    "Choose a formulation supported by SARE.",
+                )
+            )
+            continue
+
+        if element.element_type in SHELL_ELEMENT_TYPES:
+            if (int(model.ndm), int(model.ndf)) != (3, 6):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Shell",
+                        f"{element.element_type} element {tag} requires "
+                        "ndm=3 and ndf=6.",
+                        "element",
+                        tag,
+                        "Use the standard 3D/6DOF structural model for shell "
+                        "surfaces.",
+                    )
+                )
+
+            points = [
+                tuple(float(value) for value in model.nodes[node_tag].xyz)
+                for node_tag in node_tags
+            ]
+            edge_vectors = [
+                tuple(
+                    points[(index + 1) % 4][axis]
+                    - points[index][axis]
+                    for axis in range(3)
+                )
+                for index in range(4)
+            ]
+            if any(_norm(vector) <= 1.0e-12 for vector in edge_vectors):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Shell geometry",
+                        f"Shell element {tag} has a zero-length edge.",
+                        "element",
+                        tag,
+                        "Use four distinct boundary nodes in clockwise or "
+                        "counter-clockwise order.",
+                    )
+                )
+
+            diagonal_a = tuple(
+                points[2][axis] - points[0][axis]
+                for axis in range(3)
+            )
+            diagonal_b = tuple(
+                points[3][axis] - points[1][axis]
+                for axis in range(3)
+            )
+            area_measure = _norm(_cross(diagonal_a, diagonal_b))
+            if area_measure <= 1.0e-12:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Shell geometry",
+                        f"Shell element {tag} has zero or near-zero area.",
+                        "element",
+                        tag,
+                        "Reorder or move the four shell nodes.",
+                    )
+                )
+
+            if element.section_tag is None:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Shell Section",
+                        f"Shell element {tag} has no section assigned.",
+                        "element",
+                        tag,
+                        "Create and assign a Shell Section.",
+                    )
+                )
+            else:
+                section = project.sections.get(int(element.section_tag))
+                if section is None:
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Shell Section",
+                            f"Shell element {tag} references missing section "
+                            f"{element.section_tag}.",
+                            "element",
+                            tag,
+                            "Assign an existing Shell Section.",
+                        )
+                    )
+                elif section.section_type not in SHELL_SECTION_TYPES:
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Shell Section",
+                            f"Shell element {tag} cannot use "
+                            f"{section.section_type} section {section.tag}.",
+                            "element",
+                            tag,
+                            "Assign an ElasticMembranePlate Shell Section.",
+                        )
+                    )
+            continue
+
+        node_i = model.nodes[element.i]
+        node_j = model.nodes[element.j]
         axis = tuple(
             node_j.xyz[index] - node_i.xyz[index]
             for index in range(3)
@@ -115,36 +242,6 @@ def _element_geometry_checks(
                     "element",
                     tag,
                     "Move one end node or delete the element.",
-                )
-            )
-
-        pair = tuple(sorted((element.i, element.j)))
-        if pair in seen_pairs:
-            other = seen_pairs[pair]
-            issues.append(
-                ValidationIssue(
-                    "WARNING",
-                    "Geometry",
-                    f"Element {tag} duplicates the node pair of element {other}.",
-                    "element",
-                    tag,
-                    "Confirm that the duplicate member is intentional.",
-                )
-            )
-        else:
-            seen_pairs[pair] = tag
-
-        if element.element_type not in SUPPORTED_ELEMENT_TYPES:
-            issues.append(
-                ValidationIssue(
-                    "ERROR",
-                    "Element formulation",
-                    f"Element {tag} uses {element.element_type}, which the "
-                    "current generator does not yet emit faithfully.",
-                    "element",
-                    tag,
-                    "Use elasticBeamColumn for now or wait for the dedicated "
-                    "formulation generator.",
                 )
             )
 
@@ -340,7 +437,15 @@ def _support_and_connectivity_checks(
         active_nodes.update((a, b))
 
     for element in model.elements.values():
-        connect(element.i, element.j)
+        node_tags = element.node_tags()
+        if element.element_type in SHELL_ELEMENT_TYPES:
+            for left, right in zip(
+                node_tags,
+                node_tags[1:] + node_tags[:1],
+            ):
+                connect(left, right)
+        else:
+            connect(element.i, element.j)
     for connection in project.connections.values():
         connect(connection.node_i, connection.node_j)
     for constraint in project.constraints.values():
@@ -830,11 +935,24 @@ def _node_has_incident_element_mass(
     node_tag: int,
 ) -> bool:
     target = int(node_tag)
-    return any(
-        float(element.mass_per_length) > 0.0
-        and (int(element.i) == target or int(element.j) == target)
-        for element in project.model.elements.values()
-    )
+    for element in project.model.elements.values():
+        if target not in element.node_tags():
+            continue
+        if float(element.mass_per_length) > 0.0:
+            return True
+        if element.element_type in SHELL_ELEMENT_TYPES:
+            section = project.sections.get(
+                int(element.section_tag)
+                if element.section_tag is not None
+                else -1
+            )
+            if (
+                section is not None
+                and section.section_type in SHELL_SECTION_TYPES
+                and float(section.parameters.get("rho", 0.0)) > 0.0
+            ):
+                return True
+    return False
 
 
 def _has_dynamic_mass_in_direction(
@@ -855,11 +973,22 @@ def _has_dynamic_mass_in_direction(
             return True
 
     for element in project.model.elements.values():
-        if float(element.mass_per_length) <= 0.0:
+        has_element_mass = float(element.mass_per_length) > 0.0
+        if element.element_type in SHELL_ELEMENT_TYPES:
+            section = project.sections.get(
+                int(element.section_tag)
+                if element.section_tag is not None
+                else -1
+            )
+            has_element_mass = has_element_mass or bool(
+                section is not None
+                and section.section_type in SHELL_SECTION_TYPES
+                and float(section.parameters.get("rho", 0.0)) > 0.0
+            )
+        if not has_element_mass:
             continue
-        node_i = project.model.nodes.get(int(element.i))
-        node_j = project.model.nodes.get(int(element.j))
-        for node in (node_i, node_j):
+        for node_tag in element.node_tags():
+            node = project.model.nodes.get(int(node_tag))
             if (
                 node is not None
                 and index < len(node.fixity)
