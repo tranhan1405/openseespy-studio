@@ -26,7 +26,16 @@ Curvature-Y (rad/km)    Moment-Y (kN-m)
     assert dataset["format"] == "whitespace"
     assert len(dataset["rows"]) == 4
     assert dataset["rows"][2][:2] == pytest.approx([3.0, 210.0])
-    assert len(dataset["headers"]) >= 2
+    assert dataset["headers"][:2] == [
+        "Curvature (rad/km)",
+        "Moment (kN-m)",
+    ]
+    x_unit, y_unit = suggest_response2000_units(
+        dataset["headers"][0],
+        dataset["headers"][1],
+    )
+    assert x_unit == "rad_per_km"
+    assert y_unit == "kn_m"
 
 
 def test_response2000_header_detection_recognizes_common_axis_units():
