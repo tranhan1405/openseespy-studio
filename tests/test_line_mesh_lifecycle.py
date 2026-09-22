@@ -2129,8 +2129,13 @@ def test_geometry_free_line_undo_redo_resets_stale_chain_anchor():
 def test_geometry_view_change_cannot_leave_sketch_on_edge_on_old_plane():
     view_action = inspect.getsource(MainWindow._set_view_from_ui)
     build = inspect.getsource(MainWindow._build_actions_and_ribbon)
+    wire = inspect.getsource(MainWindow._wire_selection)
+    viewport_init = inspect.getsource(ModelViewport.__init__)
 
     assert "self._set_view_from_ui(v)" in build
+    assert "view_requested.connect(self._set_view_from_ui)" in wire
+    assert "self.view_requested.emit(v)" in viewport_init
+    assert 'self.view_requested.emit("iso")' in viewport_init
     assert 'target in {"xy", "xz", "yz"}' in view_action
     assert "_reset_active_geometry_sketch_anchor()" in view_action
     assert "set_geometry_sketch_plane(target, 0.0)" in view_action
