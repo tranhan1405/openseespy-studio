@@ -6168,6 +6168,13 @@ class MainWindow(QMainWindow):
         reverse_shell_action.triggered.connect(
             self._reverse_selected_shell_normals
         )
+        stitch_shell_action = menu.addAction(
+            "Stitch Coincident Shell Nodes..."
+        )
+        stitch_shell_action.setEnabled(has_shell)
+        stitch_shell_action.triggered.connect(
+            self._stitch_coincident_shell_nodes
+        )
 
         menu.addSeparator()
         copy_tag = menu.addAction("Copy Tag(s)")
@@ -8658,6 +8665,67 @@ class MainWindow(QMainWindow):
         self._refresh_all(f"Updated shell element {tag}")
         self._show_entity_properties("element", tag)
         self._record_project_change(f"Edit shell {tag}", before)
+
+    def _stitch_coincident_shell_nodes(self) -> None:
+        groups = self.project.coincident_shell_node_groups()
+        if not groups:
+            QMessageBox.information(
+                self,
+                "Stitch Coincident Shell Nodes",
+                "No coincident shell node groups were found.",
+            )
+            return
+
+        duplicate_count = sum(len(group) - 1 for group in groups)
+        preview = "; ".join(
+            " / ".join(map(str, group))
+            for group in groups[:6]
+        )
+        if len(groups) > 6:
+            preview += "; ..."
+
+        answer = QMessageBox.question(
+            self,
+            "Stitch Coincident Shell Nodes",
+            (
+                f"Found {len(groups)} coincident shell node group(s) "
+                f"containing {duplicate_count} duplicate node(s).\n\n"
+                f"Groups: {preview}\n\n"
+                "SARE will keep the lowest tag in each group and remap "
+                "Shell connectivity. The operation is blocked if a node to "
+                "be removed has incompatible support/mass data or is used "
+                "by loads, constraints, connections, recorders, analysis "
+                "control, result scopes, or non-shell elements.\n\n"
+                "Continue?"
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        before = self.project.to_dict()
+        try:
+            result = self.project.stitch_coincident_shell_nodes()
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Stitch Coincident Shell Nodes",
+                str(exc),
+            )
+            return
+
+        self.model = self.project.model
+        self._refresh_all(
+            "Stitched coincident shell nodes"
+        )
+        self._record_project_change(
+            "Stitch coincident shell nodes",
+            before,
+        )
 
     def _reverse_selected_shell_normals(self) -> None:
         shell_tags = sorted(
@@ -13915,6 +13983,8 @@ class MainWindow(QMainWindow):
             create.triggered.connect(self._create_shell)
             mesh = menu.addAction("Mesh Surface...")
             mesh.triggered.connect(self._create_shell_mesh)
+            stitch = menu.addAction("Stitch Coincident Shell Nodes...")
+            stitch.triggered.connect(self._stitch_coincident_shell_nodes)
             section = menu.addAction("New Shell Section...")
             section.triggered.connect(self._create_shell_section)
             pressure = menu.addAction("Create Surface Pressure...")
@@ -14193,6 +14263,13 @@ class MainWindow(QMainWindow):
             reverse_shell.setEnabled(has_shell)
             reverse_shell.triggered.connect(
                 self._reverse_selected_shell_normals
+            )
+            stitch_shell = modify.addAction(
+                "Stitch Coincident Shell Nodes..."
+            )
+            stitch_shell.setEnabled(has_shell)
+            stitch_shell.triggered.connect(
+                self._stitch_coincident_shell_nodes
             )
 
             copy_tag = menu.addAction("Copy Tag(s)")
