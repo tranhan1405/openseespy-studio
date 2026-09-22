@@ -325,29 +325,29 @@ def test_yao_2021_postfire_ramberg_osgood_sets_are_exact():
         )
 
 
-def test_yao_2021_ramberg_osgood_exports_with_unit_conversion():
+def test_yao_2021_ramberg_osgood_is_reference_only():
     record = _record("yao-2021-600c-natural-ramberg-osgood")
-    material = material_from_library_record(record, tag=62)
 
-    n_mm = material_to_openseespy(
-        material,
-        {"length": "mm", "force": "N", "time": "s"},
-    )
-    kn_m = material_to_openseespy(
-        material,
-        {"length": "m", "force": "kN", "time": "s"},
+    assert not record.is_runtime_supported
+    assert record.runtime_support["status"] == "reference_only"
+    assert "temporarily removed" in record.runtime_note
+
+    with pytest.raises(ValueError, match="reference-only"):
+        material_from_library_record(record, tag=62)
+
+
+def test_manual_ramberg_osgood_export_is_blocked():
+    material = MaterialData(
+        tag=62,
+        name="Legacy Ramberg-Osgood",
+        material_type="RambergOsgoodSteel",
     )
 
-    assert (
-        "ops.uniaxialMaterial('RambergOsgoodSteel', 62, "
-        "631.72, 196000"
-    ) in n_mm
-    assert (
-        "ops.uniaxialMaterial('RambergOsgoodSteel', 62, "
-        "631720, 1.96e+08"
-    ) in kn_m
-    assert "0.00757419, 9.82" in n_mm
-    assert "0.00757419, 9.82" in kn_m
+    with pytest.raises(ValueError, match="reference-only"):
+        material_to_openseespy(
+            material,
+            {"length": "mm", "force": "N", "time": "s"},
+        )
 
 
 def test_delgiudice_2022_adds_traceable_steel02_and_concrete01_sets():
