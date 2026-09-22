@@ -4795,10 +4795,24 @@ class MainWindow(QMainWindow):
             or job_plot_ref is not None
         )
         if not result_restores_scope:
-            self.selection.set_selection(
-                nodes=nodes,
-                elements=elements,
-            )
+            if geometry_mode:
+                # Geometry selection is owned by the Model Tree, not by the
+                # FE SelectionManager. Clear stale FE selection silently so
+                # its changed signal cannot erase the Geometry tree selection.
+                self.selection.blockSignals(True)
+                try:
+                    self.selection.set_selection(
+                        nodes=set(),
+                        elements=set(),
+                    )
+                finally:
+                    self.selection.blockSignals(False)
+                self.viewport.set_selection(set(), set())
+            else:
+                self.selection.set_selection(
+                    nodes=nodes,
+                    elements=elements,
+                )
 
         if point_geometry_tag is not None:
             self._show_point_geometry_properties(point_geometry_tag)
