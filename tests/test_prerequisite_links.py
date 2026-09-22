@@ -111,3 +111,23 @@ def test_major_dependent_workflows_use_prerequisite_links():
     for method_name, dependency_name in expected.items():
         source = inspect.getsource(getattr(MainWindow, method_name))
         assert dependency_name in source
+
+
+
+def test_second_prerequisite_link_batch():
+    expected = {
+        "_create_constraint": "_ensure_node_count",
+        "_create_recorder": "_ensure_node_count",
+        "_create_element_load": "create_if_missing=True",
+        "_apply_restraint": "create_if_missing=True",
+        "_assign_mass": "create_if_missing=True",
+        "_set_element_formulation": "create_if_missing=True",
+        "_assign_section_to_selection": "create_if_missing=True",
+        "_assign_transformation_to_selection": "create_if_missing=True",
+        "_assign_truss_material_to_selection": "_create_truss",
+        "_create_analysis_of_type": "_ensure_node_count",
+    }
+
+    for method_name, dependency_marker in expected.items():
+        source = inspect.getsource(getattr(MainWindow, method_name))
+        assert dependency_marker in source
