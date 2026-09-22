@@ -786,6 +786,32 @@ class StructuralModel:
     def next_element_tag(self) -> int:
         return max(self.elements, default=0) + 1
 
+    def reverse_shell_orientation(
+        self,
+        tags: Iterable[int],
+    ) -> list[int]:
+        """Reverse selected shell node ordering while preserving options."""
+        reversed_tags: list[int] = []
+        for raw_tag in tags:
+            tag = _strict_int(raw_tag, "Shell element tag")
+            element = self.elements.get(tag)
+            if element is None:
+                raise ValueError(f"Element {tag} does not exist.")
+            if element.element_type not in SHELL_ELEMENT_TYPES:
+                raise ValueError(
+                    f"Element {tag} is not a Shell element."
+                )
+            if element.l is None:
+                raise ValueError(
+                    f"Shell element {tag} is missing its fourth node."
+                )
+            old_j = element.j
+            element.j = element.l
+            element.l = old_j
+            element.__post_init__()
+            reversed_tags.append(tag)
+        return reversed_tags
+
     def entity_node_tags(
         self,
         *,
