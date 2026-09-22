@@ -7795,6 +7795,11 @@ class ProjectDatabase:
                 }
             ),
         )
+        for line in project.lines.values():
+            project._validate_line_geometry(line)
+        for surface in project.surfaces.values():
+            project._validate_surface_geometry(surface)
+
         if (
             project.active_analysis_tag is not None
             and project.active_analysis_tag not in project.analyses
