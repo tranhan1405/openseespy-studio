@@ -351,7 +351,10 @@ def test_reverse_meshed_line_preserves_physical_grading_and_remeshes():
         project.model.nodes[tag].xyz
         for tag in result.node_tags
     ]
-    assert after_xyz == pytest.approx(list(reversed(before_xyz)))
+    expected_xyz = list(reversed(before_xyz))
+    assert len(after_xyz) == len(expected_xyz)
+    for actual, expected in zip(after_xyz, expected_xyz):
+        assert actual == pytest.approx(expected)
     assert len(result.element_tags) == 4
     assert all(
         project.model.elements[tag].group == "line:1"
