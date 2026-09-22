@@ -193,6 +193,29 @@ def build_shell_mesh(
     p3 = project.model.nodes[corners[2]].xyz
     p4 = project.model.nodes[corners[3]].xyz
 
+    def triangle_area2(a, b, d) -> float:
+        ab = tuple(
+            float(b[index]) - float(a[index])
+            for index in range(3)
+        )
+        ad = tuple(
+            float(d[index]) - float(a[index])
+            for index in range(3)
+        )
+        cross = (
+            ab[1] * ad[2] - ab[2] * ad[1],
+            ab[2] * ad[0] - ab[0] * ad[2],
+            ab[0] * ad[1] - ab[1] * ad[0],
+        )
+        return math.sqrt(sum(value * value for value in cross))
+
+    corner_area2 = triangle_area2(p1, p2, p3)
+    corner_area2 += triangle_area2(p1, p3, p4)
+    if corner_area2 <= 1.0e-12:
+        raise ValueError(
+            "Shell mesh corner surface has zero or near-zero area."
+        )
+
     nu, nv = resolve_shell_mesh_divisions(
         p1,
         p2,
