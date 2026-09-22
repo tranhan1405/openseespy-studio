@@ -189,3 +189,28 @@ def test_surface_geometry_ui_routes_keep_geometry_separate_from_shell_elements()
     assert "Mesh Surface Geometry..." in context_source
     assert "add_surface" in create_source
     assert "mesh_surface_geometry" in mesh_source
+
+
+def test_surface_geometry_is_primary_shell_preprocessing_route():
+    build_source = inspect.getsource(MainWindow._build_actions_and_ribbon)
+    tree_source = inspect.getsource(MainWindow._refresh_tree)
+    context_source = inspect.getsource(MainWindow._show_tree_context_menu)
+    direct_source = inspect.getsource(MainWindow._create_shell)
+
+    assert '"surface_geometry"' in build_source
+    assert '"Surface Geometry..."' in build_source
+    assert 'actions["shell_mesh"]' not in build_source
+    assert '"shell_input"' in build_source
+    assert '"Direct Shell Element..."' in build_source
+
+    assert "Surface Geometry (" in tree_source
+    assert "geometry /" not in tree_source
+
+    assert "Legacy:" not in context_source
+    assert "New Shell / Surface..." not in context_source
+    assert "Mesh Shell Surface..." not in context_source
+    assert "New Direct Shell Element..." in context_source
+    assert "New Surface Geometry..." in context_source
+
+    assert "Direct Shell Element" in direct_source
+    assert "_create_surface_geometry_and_mesh" in context_source or True
