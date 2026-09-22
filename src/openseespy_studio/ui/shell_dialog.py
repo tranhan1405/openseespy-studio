@@ -30,7 +30,7 @@ from ..project import (
     SectionData,
     ShellLayerData,
 )
-from ..shell_mesh import ShellMeshSpec
+from ..shell_mesh import ShellMeshSpec, resolve_shell_mesh_divisions
 from ..units import UnitSystem
 
 
@@ -744,7 +744,11 @@ class ShellElementDialog(QDialog):
         self.formulation.currentTextChanged.connect(
             self._sync_formulation
         )
+        self.mesh_mode.currentIndexChanged.connect(
+            self._sync_mesh_sizing
+        )
         self._sync_formulation()
+        self._sync_mesh_sizing()
 
         note = QLabel(
             "Node ordering must follow the shell boundary consistently "
@@ -906,6 +910,11 @@ class ShellMeshDialog(QDialog):
             self.corner_combos.append(combo)
             form.addRow(label, combo)
 
+        self.mesh_mode = QComboBox()
+        self.mesh_mode.addItem("By divisions (Nu × Nv)", "divisions")
+        self.mesh_mode.addItem("By target element size", "target_size")
+        form.addRow("Mesh sizing:", self.mesh_mode)
+
         self.divisions_u = QSpinBox()
         self.divisions_u.setRange(1, 500)
         self.divisions_u.setValue(4)
@@ -915,6 +924,20 @@ class ShellMeshDialog(QDialog):
         self.divisions_v.setRange(1, 500)
         self.divisions_v.setValue(4)
         form.addRow("Divisions V:", self.divisions_v)
+
+        self.target_size = _float_spin(
+            1.0,
+            low=1.0e-12,
+            high=1.0e12,
+            decimals=8,
+        )
+        form.addRow("Target size [model length]:", self.target_size)
+
+        self.reuse_existing_nodes = QCheckBox(
+            "Reuse existing coincident nodes (recommended for adjacent patches)"
+        )
+        self.reuse_existing_nodes.setChecked(True)
+        form.addRow("", self.reuse_existing_nodes)
 
         self.formulation = QComboBox()
         self.formulation.addItems(list(ShellElementDialog.FORMULATIONS))
@@ -987,8 +1010,8 @@ class ShellMeshDialog(QDialog):
             "Corners must be ordered around the boundary. SARE uses bilinear "
             "interpolation between the four corners, so the same tool works "
             "for flat slabs, walls and moderately warped quadrilateral "
-            "surfaces. Existing corner nodes are reused; intermediate mesh "
-            "nodes are generated automatically."
+            "surfaces. Existing coincident nodes can be reused automatically "
+            "so separately meshed adjacent patches remain connected."
         )
         note.setWordWrap(True)
         root.addWidget(note)
@@ -999,6 +1022,11 @@ class ShellMeshDialog(QDialog):
 
         self.divisions_u.valueChanged.connect(self._update_info)
         self.divisions_v.valueChanged.connect(self._update_info)
+        self.target_size.valueChanged.connect(self._update_info)
+        self.mesh_mode.currentIndexChanged.connect(self._update_info)
+        self.reuse_existing_nodes.toggled.connect(self._update_info)
+        for combo in self.corner_combos:
+            combo.currentIndexChanged.connect(self._update_info)
         self._update_info()
 
         buttons = QDialogButtonBox(
@@ -1028,14 +1056,53 @@ class ShellMeshDialog(QDialog):
             self.drilling_nl.setChecked(False)
             self.use_local_x.setChecked(False)
 
+    def _sync_mesh_sizing(self, *_args) -> None:
+        target_mode = self.mesh_mode.currentData() == "target_size"
+        self.divisions_u.setEnabled(not target_mode)
+        self.divisions_v.setEnabled(not target_mode)
+        self.target_size.setEnabled(target_mode)
+
     def _update_info(self, *_args) -> None:
-        nu = self.divisions_u.value()
-        nv = self.divisions_v.value()
+        corners = [
+            int(combo.currentData())
+            for combo in self.corner_combos
+            if combo.currentData() is not None
+        ]
+        if len(corners) != 4 or any(
+            tag not in self._nodes for tag in corners
+        ):
+            self.preview_info.setText("Select four valid corner nodes.")
+            return
+        p1, p2, p3, p4 = (
+            self._nodes[tag].xyz for tag in corners
+        )
+        target_size = (
+            float(self.target_size.value())
+            if self.mesh_mode.currentData() == "target_size"
+            else None
+        )
+        try:
+            nu, nv = resolve_shell_mesh_divisions(
+                p1,
+                p2,
+                p3,
+                p4,
+                divisions_u=self.divisions_u.value(),
+                divisions_v=self.divisions_v.value(),
+                target_size=target_size,
+            )
+        except ValueError as exc:
+            self.preview_info.setText(str(exc))
+            return
         generated_nodes = (nu + 1) * (nv + 1) - 4
+        reuse_text = (
+            "existing coincident nodes will be reused"
+            if self.reuse_existing_nodes.isChecked()
+            else "new intermediate nodes will always be created"
+        )
         self.preview_info.setText(
             f"Mesh: {nu} × {nv} = {nu * nv} shell elements · "
-            f"up to {generated_nodes} generated nodes "
-            "(four corners are reused)."
+            f"up to {generated_nodes} intermediate nodes · {reuse_text}."
         )
 
     def spec(self) -> ShellMeshSpec:
@@ -1068,6 +1135,11 @@ class ShellMeshDialog(QDialog):
             corner_nodes=corners,
             divisions_u=self.divisions_u.value(),
             divisions_v=self.divisions_v.value(),
+            target_size=(
+                float(self.target_size.value())
+                if self.mesh_mode.currentData() == "target_size"
+                else None
+            ),
             formulation=self.formulation.currentText(),
             section_tag=int(section_tag),
             corotational=self.corotational.isChecked(),
@@ -1079,6 +1151,7 @@ class ShellMeshDialog(QDialog):
                 else None
             ),
             drilling_nl=self.drilling_nl.isChecked(),
+            reuse_existing_nodes=self.reuse_existing_nodes.isChecked(),
         )
 
     def _accept(self) -> None:
