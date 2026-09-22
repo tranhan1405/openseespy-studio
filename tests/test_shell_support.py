@@ -117,7 +117,7 @@ def test_elastic_membrane_plate_section_validates_and_generates():
 
     line = section_to_openseespy(
         section,
-        {"length": "m", "force": "N", "time": "s"},
+        units={"length": "m", "force": "N", "time": "s"},
     )[0]
 
     assert line.startswith(
