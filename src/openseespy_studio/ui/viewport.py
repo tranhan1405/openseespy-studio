@@ -567,6 +567,7 @@ class ModelViewport(QWidget):
         self._set_id_labels_visible(False, render=False)
         self._remove_overlay("hover-element")
         self._remove_overlay("hover-node")
+        self._remove_overlay("hover-geometry-surface")
         self._set_navigation_lod(True, render=True)
 
     def _navigate(self, pos: tuple[float, float]) -> None:
@@ -2240,6 +2241,7 @@ class ModelViewport(QWidget):
                         render=False,
                     )
 
+            self._update_highlight_overlays(render=False)
             self._render_surface_orientation_overlays()
             self.set_view(self._current_view, render=False)
             if reset_camera:
