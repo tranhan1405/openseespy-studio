@@ -154,6 +154,10 @@ def _element_geometry_checks(
 ) -> None:
     model = project.model
     seen_connectivity: dict[tuple[int, ...], int] = {}
+    shell_edge_owners: dict[
+        tuple[int, int],
+        list[tuple[int, int, int]],
+    ] = {}
 
     for tag in sorted(model.elements):
         element = model.elements[tag]
@@ -391,6 +395,15 @@ def _element_geometry_checks(
                             "Assign an ElasticMembranePlate Shell Section.",
                         )
                     )
+
+            for left, right in zip(
+                node_tags,
+                node_tags[1:] + node_tags[:1],
+            ):
+                edge_key = tuple(sorted((int(left), int(right))))
+                shell_edge_owners.setdefault(edge_key, []).append(
+                    (int(tag), int(left), int(right))
+                )
             continue
 
         node_i = model.nodes[element.i]
@@ -567,6 +580,46 @@ def _element_geometry_checks(
                     "element",
                     tag,
                     f"Consider vecxz={_format_vector(_suggest_vecxz(axis))}.",
+                )
+            )
+
+
+    for edge, owners in sorted(shell_edge_owners.items()):
+        if len(owners) > 2:
+            owner_tags = ", ".join(str(item[0]) for item in owners)
+            issues.append(
+                ValidationIssue(
+                    "WARNING",
+                    "Shell topology",
+                    f"Shell edge {edge[0]}-{edge[1]} is shared by "
+                    f"{len(owners)} elements ({owner_tags}).",
+                    "element",
+                    owners[0][0],
+                    "Check for overlapping or non-manifold shell surfaces.",
+                )
+            )
+        if len(owners) < 2:
+            continue
+
+        reference = owners[0]
+        for neighbour in owners[1:]:
+            same_direction = (
+                reference[1] == neighbour[1]
+                and reference[2] == neighbour[2]
+            )
+            if not same_direction:
+                continue
+            issues.append(
+                ValidationIssue(
+                    "WARNING",
+                    "Shell orientation",
+                    f"Shell elements {reference[0]} and {neighbour[0]} "
+                    f"traverse shared edge {edge[0]}-{edge[1]} in the same "
+                    "direction; their surface normals are inconsistent.",
+                    "element",
+                    neighbour[0],
+                    "Reverse one shell orientation so adjacent elements "
+                    "traverse their shared edge in opposite directions.",
                 )
             )
 
