@@ -180,9 +180,9 @@ def test_remesh_rebinds_edge_load_and_removes_old_equivalent_loads():
     item = project.surface_edge_loads[1]
     new_generated = set(item.generated_nodal_load_tags)
 
+    assert len(old_generated) == 3
     assert len(new_generated) == 7
-    assert old_generated.isdisjoint(project.nodal_loads)
-    assert new_generated <= set(project.nodal_loads)
+    assert set(project.nodal_loads) == new_generated
     assert sum(
         project.nodal_loads[tag].values[1]
         for tag in new_generated
