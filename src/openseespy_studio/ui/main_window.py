@@ -19090,6 +19090,127 @@ class MainWindow(QMainWindow):
             exec_menu()
             return
 
+        if kind == "mesh_root":
+            line_menu = menu.addMenu("Line Mesh")
+            line_generate = line_menu.addAction(
+                "Generate All Configured Line Meshes"
+            )
+            line_generate.setEnabled(any(
+                line.mesh_recipe_configured
+                and not inspect_line_mesh_state(
+                    self.project,
+                    int(tag),
+                ).live_element_tags
+                for tag, line in self.project.lines.items()
+            ))
+            line_generate.triggered.connect(
+                self._generate_all_configured_line_meshes
+            )
+            line_remesh = line_menu.addAction("Remesh All Meshed Lines")
+            line_remesh.setEnabled(any(
+                inspect_line_mesh_state(
+                    self.project,
+                    int(tag),
+                ).live_element_tags
+                for tag in self.project.lines
+            ))
+            line_remesh.triggered.connect(self._remesh_all_meshed_lines)
+            line_delete = line_menu.addAction(
+                "Delete All Generated Line Meshes"
+            )
+            line_delete.setEnabled(line_remesh.isEnabled())
+            line_delete.triggered.connect(self._delete_all_line_meshes)
+
+            surface_menu = menu.addMenu("Surface Mesh")
+            surface_generate = surface_menu.addAction(
+                "Generate All Configured Surface Meshes"
+            )
+            surface_generate.setEnabled(any(
+                surface.mesh_recipe_configured
+                and not inspect_surface_mesh_state(
+                    self.project,
+                    int(tag),
+                ).live_element_tags
+                for tag, surface in self.project.surfaces.items()
+            ))
+            surface_generate.triggered.connect(
+                self._generate_all_configured_surface_meshes
+            )
+            surface_remesh = surface_menu.addAction(
+                "Remesh All Meshed Surfaces"
+            )
+            surface_remesh.setEnabled(any(
+                inspect_surface_mesh_state(
+                    self.project,
+                    int(tag),
+                ).live_element_tags
+                for tag in self.project.surfaces
+            ))
+            surface_remesh.triggered.connect(
+                self._remesh_all_meshed_surfaces
+            )
+            surface_delete = surface_menu.addAction(
+                "Delete All Generated Surface Meshes"
+            )
+            surface_delete.setEnabled(surface_remesh.isEnabled())
+            surface_delete.triggered.connect(
+                self._delete_all_surface_meshes
+            )
+            exec_menu()
+            return
+
+        if kind == "line_meshes_root":
+            generate = menu.addAction(
+                "Generate All Configured Line Meshes"
+            )
+            generate.triggered.connect(
+                self._generate_all_configured_line_meshes
+            )
+            remesh = menu.addAction("Remesh All Meshed Lines")
+            remesh.triggered.connect(self._remesh_all_meshed_lines)
+            delete = menu.addAction("Delete All Generated Line Meshes")
+            delete.triggered.connect(self._delete_all_line_meshes)
+            menu.addSeparator()
+            audit = menu.addAction("Audit Line Network Connectivity")
+            audit.setEnabled(len(self.project.lines) >= 2)
+            audit.triggered.connect(
+                lambda checked=False:
+                self._audit_line_network_connectivity_ui(
+                    sorted(self.project.lines)
+                )
+            )
+            exec_menu()
+            return
+
+        if kind == "surface_meshes_root":
+            generate = menu.addAction(
+                "Generate All Configured Surface Meshes"
+            )
+            generate.triggered.connect(
+                self._generate_all_configured_surface_meshes
+            )
+            remesh = menu.addAction("Remesh All Meshed Surfaces")
+            remesh.triggered.connect(
+                self._remesh_all_meshed_surfaces
+            )
+            delete = menu.addAction(
+                "Delete All Generated Surface Meshes"
+            )
+            delete.triggered.connect(
+                self._delete_all_surface_meshes
+            )
+            menu.addSeparator()
+            audit = menu.addAction("Audit Surface Conformity")
+            audit.setEnabled(len(self.project.surfaces) >= 2)
+            audit.triggered.connect(
+                lambda checked=False:
+                self._audit_surface_conformity(
+                    sorted(self.project.surfaces)
+                )
+            )
+            exec_menu()
+            return
+
         if kind == "lines_root":
             create_pick = menu.addAction("New Line by Picking...")
             create_pick.triggered.connect(
