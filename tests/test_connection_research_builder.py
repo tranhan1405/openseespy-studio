@@ -317,3 +317,58 @@ def test_builder_edits_general_zero_length_section_selection():
     assert dialog.section_combo.currentData() == 7
     assert dialog.spec()["section_tag"] == 7
     dialog.close()
+
+
+
+def test_connection_builder_can_create_and_assign_material_inline(monkeypatch):
+    _app()
+    dialog = ConnectionDialog(
+        {},
+        next_tag=1,
+        initial_node_i=1,
+        initial_node_j=2,
+        node_positions={
+            1: (0.0, 0.0, 0.0),
+            2: (0.0, 0.0, 0.0),
+        },
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    class _FakeMaterialDialog:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def exec(self):
+            return 1
+
+        def pending_materials(self):
+            return []
+
+        def material_data(self):
+            return MaterialData(
+                tag=1,
+                name="RZ hinge",
+                material_type="Elastic",
+                parameters={"E": 1000.0},
+            )
+
+    try:
+        dialog.preset.setCurrentIndex(0)
+        for check in dialog.dof_checks:
+            check.setChecked(False)
+
+        monkeypatch.setattr(
+            "openseespy_studio.ui.connection_dialog.MaterialDialog",
+            _FakeMaterialDialog,
+        )
+        dialog._create_dof_material(5)
+
+        assert dialog.dof_checks[5].isChecked()
+        assert dialog.material_combos[5].currentData() == 1
+        assert [item.tag for item in dialog.pending_materials] == [1]
+
+        spec = dialog.spec()
+        assert spec["materials_by_dof"] == {6: 1}
+        assert [item.tag for item in spec["pending_materials"]] == [1]
+    finally:
+        dialog.close()
