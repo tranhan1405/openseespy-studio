@@ -1274,6 +1274,12 @@ class PropertiesPanel(QWidget):
             ]
         elif kind == "MemberForce":
             component_options = ["N", "Vy", "Vz", "T", "My", "Mz"]
+        elif kind == "ShellForce":
+            component_options = [
+                "Nxx", "Nyy", "Nxy",
+                "Mxx", "Myy", "Mxy",
+                "Qx", "Qy",
+            ]
         elif kind == "SectionResponse":
             component_options = ["P", "Mz", "My", "T"]
 
@@ -1393,6 +1399,7 @@ class PropertiesPanel(QWidget):
             "NodalDisplacement",
             "NodalReaction",
             "MemberForce",
+            "ShellForce",
             "SectionResponse",
         }:
             settings["component"] = self.result_component.currentText()
@@ -11943,7 +11950,42 @@ class MainWindow(QMainWindow):
         nodes = set(self.selection.nodes)
         elements = set(self.selection.elements)
 
-        if kind == "MemberForce":
+        if kind == "ShellForce":
+            shell_tags = sorted(
+                int(tag)
+                for tag, element in self.model.elements.items()
+                if element.element_type in SHELL_ELEMENT_TYPES
+            )
+            if not shell_tags:
+                if not self._ensure_prerequisite(
+                    title="Shell Result",
+                    message=(
+                        "Shell Results require at least one Shell / Surface "
+                        "element. Create one now?"
+                    ),
+                    action_label="Create Shell Now...",
+                    available=lambda: any(
+                        element.element_type in SHELL_ELEMENT_TYPES
+                        for element in self.model.elements.values()
+                    ),
+                    creator=self._create_shell,
+                ):
+                    return None
+                shell_tags = sorted(
+                    int(tag)
+                    for tag, element in self.model.elements.items()
+                    if element.element_type in SHELL_ELEMENT_TYPES
+                )
+            if not shell_tags:
+                return None
+            selected_shells = {
+                int(tag)
+                for tag in elements
+                if int(tag) in shell_tags
+            }
+            elements = selected_shells or set(shell_tags)
+
+        elif kind == "MemberForce":
             frame_tags = sorted(
                 int(tag)
                 for tag, element in self.model.elements.items()
@@ -12482,6 +12524,13 @@ class MainWindow(QMainWindow):
                 self.project.transformations,
                 str(options.get("component", "Mz")),
                 scale=float(options.get("scale", 1.0)),
+                element_tags=elements or None,
+                cache_key=result_cache_key,
+            )
+        elif result_type == "ShellForce":
+            self.viewport.show_shell_force_contour(
+                payload,
+                str(options.get("component", "Nxx")),
                 element_tags=elements or None,
                 cache_key=result_cache_key,
             )
