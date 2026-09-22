@@ -102,8 +102,13 @@ class ShellSectionDialog(QDialog):
         )
         form.addRow("Poisson ratio ν:", self.poisson)
 
+        thickness_value = (
+            float(section.parameters["h"])
+            if section is not None
+            else self.unit_system.length_from_m(0.20)
+        )
         self.thickness = _float_spin(
-            float(p.get("h", defaults["h"])),
+            thickness_value,
             low=1.0e-12,
         )
         form.addRow(
