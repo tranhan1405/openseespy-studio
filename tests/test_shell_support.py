@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 
 import pytest
 
@@ -205,9 +206,10 @@ def test_shell_section_density_counts_as_dynamic_mass():
     )
     project.add_section(_shell_section(rho=2500.0))
 
-    holder = object.__new__(MainWindow)
-    holder.project = project
-    holder.model = project.model
+    holder = SimpleNamespace(
+        project=project,
+        model=project.model,
+    )
 
     assert MainWindow._has_dynamic_mass(holder) is True
 
