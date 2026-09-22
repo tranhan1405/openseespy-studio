@@ -4547,7 +4547,6 @@ class MainWindow(QMainWindow):
             elif kind in {
                 "surface_geometry",
                 "surface_mesh",
-                "surface_shells",
             }:
                 surface_geometry_tag = int(tag)
                 surface = self.project.surfaces.get(int(tag))
@@ -10142,9 +10141,10 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "Edit Surface Geometry",
-                "This Surface already owns generated Shell elements. "
-                "Remeshing support will manage geometry edits in the next "
-                "surface-mesher stage; keep the current mesh or delete it first.",
+                "This Surface already has a generated FE mesh. "
+                "The Surface stores the mesh definition, while generated "
+                "nodes/elements live under FE Model. Keep the current mesh "
+                "or delete it before editing the Surface geometry.",
             )
             return
         dialog = SurfaceGeometryDialog(
@@ -14419,18 +14419,6 @@ class MainWindow(QMainWindow):
                 lambda checked=False, t=tag:
                 self._delete_surface_geometry(t)
             )
-            exec_menu()
-            return
-
-        if kind == "frame_grids_root":
-            quick_column = menu.addAction(
-                "Quick 1D Column / Test Specimen..."
-            )
-            quick_column.triggered.connect(self._show_test_column_wizard)
-            quick_2d = menu.addAction("Quick 2D Frame...")
-            quick_2d.triggered.connect(self._show_frame_grid_2d)
-            create = menu.addAction("Create / Edit Frame Grid...")
-            create.triggered.connect(self._show_frame_grid)
             exec_menu()
             return
 
