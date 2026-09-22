@@ -112,3 +112,48 @@ def test_dialog_accepts_prefill_from_sare_moment_curvature_result():
         assert dialog.hinge_length.isEnabled() is True
     finally:
         _close(dialog)
+
+
+
+def test_sare_curve_prefills_three_hinge_points_in_active_units():
+    dialog = HingeBackboneDialog(
+        next_tag=15,
+        units={"length": "mm", "force": "N", "time": "s"},
+        prefill={
+            "source_kind": "sare_moment_curvature",
+            "source_note": "SARE Moment-Curvature · Section 8 · Mz",
+            "basis": "moment_curvature",
+            "curvature": [
+                0.0,
+                0.5e-6,
+                1.0e-6,
+                2.0e-6,
+                4.0e-6,
+                8.0e-6,
+                12.0e-6,
+            ],
+            "moment": [
+                0.0,
+                40.0e6,
+                78.0e6,
+                125.0e6,
+                150.0e6,
+                158.0e6,
+                155.0e6,
+            ],
+        },
+    )
+    try:
+        moments = [spin.value() for spin in dialog._moment_spins]
+        curvatures = [
+            spin.value() for spin in dialog._deformation_spins
+        ]
+
+        assert all(value > 0.0 for value in moments)
+        assert 0.0 < curvatures[0] < curvatures[1] < curvatures[2]
+        assert curvatures[2] == pytest.approx(12.0e-6)
+        assert moments[2] == pytest.approx(155.0e6)
+        assert "prefilled" in dialog.point_note.text()
+        assert "starting suggestions only" in dialog.point_note.text()
+    finally:
+        _close(dialog)
