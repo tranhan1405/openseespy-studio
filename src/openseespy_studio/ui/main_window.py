@@ -1250,6 +1250,8 @@ class PropertiesPanel(QWidget):
             "NodalDisplacement",
             "NodalReaction",
             "MemberForce",
+            "ShellForce",
+            "ShellDeformation",
             "FiberStress",
             "FiberStrain",
             "HingeState",
@@ -1279,6 +1281,12 @@ class PropertiesPanel(QWidget):
                 "Nxx", "Nyy", "Nxy",
                 "Mxx", "Myy", "Mxy",
                 "Qx", "Qy",
+            ]
+        elif kind == "ShellDeformation":
+            component_options = [
+                "Exx", "Eyy", "Gxy",
+                "Kxx", "Kyy", "Kxy",
+                "Gxz", "Gyz",
             ]
         elif kind == "SectionResponse":
             component_options = ["P", "Mz", "My", "T"]
@@ -1400,6 +1408,7 @@ class PropertiesPanel(QWidget):
             "NodalReaction",
             "MemberForce",
             "ShellForce",
+            "ShellDeformation",
             "SectionResponse",
         }:
             settings["component"] = self.result_component.currentText()
@@ -11950,7 +11959,7 @@ class MainWindow(QMainWindow):
         nodes = set(self.selection.nodes)
         elements = set(self.selection.elements)
 
-        if kind == "ShellForce":
+        if kind in {"ShellForce", "ShellDeformation"}:
             shell_tags = sorted(
                 int(tag)
                 for tag, element in self.model.elements.items()
@@ -12531,6 +12540,13 @@ class MainWindow(QMainWindow):
             self.viewport.show_shell_force_contour(
                 payload,
                 str(options.get("component", "Nxx")),
+                element_tags=elements or None,
+                cache_key=result_cache_key,
+            )
+        elif result_type == "ShellDeformation":
+            self.viewport.show_shell_deformation_contour(
+                payload,
+                str(options.get("component", "Exx")),
                 element_tags=elements or None,
                 cache_key=result_cache_key,
             )
