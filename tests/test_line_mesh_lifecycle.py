@@ -6,12 +6,17 @@ import pytest
 
 from openseespy_studio.line_mesher import (
     audit_line_mesh_integrity,
+    audit_line_network_connectivity,
+    copy_line_mesh_recipe,
     delete_line_geometry,
     delete_line_mesh,
     inspect_line_mesh_state,
     line_mesh_coordinates,
+    line_mesh_quality,
     mesh_line_geometry,
+    remesh_line_batch,
     remesh_line_geometry,
+    reverse_line_geometry,
 )
 from openseespy_studio.project import (
     LineGeometryData,
@@ -268,3 +273,227 @@ def test_line_mesh_ui_exposes_preview_remesh_delete_audit_and_fe_bridge():
     assert "Mesh bias" in properties
     assert 'name="line-mesh-preview"' in viewport
     assert "pickable=False" in viewport
+
+def test_line_mesh_quality_reports_actual_biased_fe_lengths():
+    project = _frame_project(length=10.0)
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Quality beam",
+            1,
+            2,
+            divisions=5,
+            bias=4.0,
+            reuse_existing_nodes=False,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    mesh_line_geometry(project, 1)
+
+    quality = line_mesh_quality(project, 1)
+
+    assert quality.element_count == 5
+    assert quality.total_length == pytest.approx(10.0)
+    assert quality.length_ratio == pytest.approx(4.0)
+    assert quality.min_length > 0.0
+    assert quality.max_length > quality.min_length
+    assert not quality.uniform
+
+
+def test_reverse_meshed_line_preserves_physical_grading_and_remeshes():
+    project = _frame_project(length=10.0)
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Reverse beam",
+            1,
+            2,
+            divisions=4,
+            bias=8.0,
+            reuse_existing_nodes=False,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    before = mesh_line_geometry(project, 1)
+    before_xyz = [
+        project.model.nodes[tag].xyz
+        for tag in before.node_tags
+    ]
+    old_element_tags = set(before.element_tags)
+
+    result = reverse_line_geometry(project, 1)
+
+    assert result is not None
+    assert project.lines[1].point_i == 2
+    assert project.lines[1].point_j == 1
+    assert project.lines[1].bias == pytest.approx(1.0 / 8.0)
+    after_xyz = [
+        project.model.nodes[tag].xyz
+        for tag in result.node_tags
+    ]
+    assert after_xyz == pytest.approx(list(reversed(before_xyz)))
+    assert old_element_tags.isdisjoint(project.model.elements)
+
+
+def test_copy_line_mesh_recipe_can_convert_target_frame_to_truss():
+    project = _frame_project(length=8.0)
+    project.add_material(
+        MaterialData(
+            1,
+            "Truss steel",
+            "Elastic",
+            parameters={"E": 200.0e9},
+        )
+    )
+    project.add_point(PointGeometryData(3, "C", (0.0, 2.0, 0.0)))
+    project.add_point(PointGeometryData(4, "D", (8.0, 2.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Truss source",
+            1,
+            2,
+            divisions=6,
+            bias=2.0,
+            element_family="Truss",
+            material_tag=1,
+            area=0.004,
+            mass_per_length=12.0,
+            do_rayleigh=True,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "Frame target",
+            3,
+            4,
+            divisions=2,
+            element_family="Frame",
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+
+    results = copy_line_mesh_recipe(project, 1, [2])
+    target = project.lines[2]
+
+    assert results[2] is None
+    assert target.name == "Frame target"
+    assert (target.point_i, target.point_j) == (3, 4)
+    assert target.element_family == "Truss"
+    assert target.element_type == "truss"
+    assert target.divisions == 6
+    assert target.bias == pytest.approx(2.0)
+    assert target.material_tag == 1
+    assert target.area == pytest.approx(0.004)
+    assert target.mass_per_length == pytest.approx(12.0)
+    assert target.do_rayleigh
+
+    mesh = mesh_line_geometry(project, 2)
+    assert len(mesh.element_tags) == 6
+    assert all(
+        project.model.elements[tag].element_type == "truss"
+        for tag in mesh.element_tags
+    )
+
+
+def test_batch_remesh_rebuilds_shared_endpoint_without_orphan_nodes():
+    project = _frame_project(length=4.0)
+    project.add_point(PointGeometryData(3, "C", (4.0, 3.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "AB",
+            1,
+            2,
+            divisions=2,
+            reuse_existing_nodes=True,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "BC",
+            2,
+            3,
+            divisions=2,
+            reuse_existing_nodes=True,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    first = mesh_line_geometry(project, 1)
+    second = mesh_line_geometry(project, 2)
+    shared_before = set(first.node_tags) & set(second.node_tags)
+    assert len(shared_before) == 1
+
+    project.lines[1].divisions = 4
+    project.lines[2].divisions = 3
+    results = remesh_line_batch(project, [1, 2])
+
+    shared_after = (
+        set(results[1].node_tags)
+        & set(results[2].node_tags)
+    )
+    assert len(shared_after) == 1
+    assert len(results[1].element_tags) == 4
+    assert len(results[2].element_tags) == 3
+    used_nodes = {
+        node_tag
+        for element in project.model.elements.values()
+        for node_tag in element.node_tags()
+    }
+    assert set(project.model.nodes) == used_nodes
+
+
+def test_connectivity_audit_flags_disconnected_geometry_junction():
+    project = _frame_project(length=4.0)
+    project.add_point(PointGeometryData(3, "C", (4.0, 3.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "AB",
+            1,
+            2,
+            divisions=2,
+            reuse_existing_nodes=False,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "BC",
+            2,
+            3,
+            divisions=2,
+            reuse_existing_nodes=False,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    mesh_line_geometry(project, 1)
+    mesh_line_geometry(project, 2)
+
+    issues = audit_line_network_connectivity(project)
+
+    assert len(issues) == 1
+    assert issues[0].kind == "endpoint"
+    assert issues[0].line_tags == (1, 2)
+    assert issues[0].point == pytest.approx((4.0, 0.0, 0.0))
+
+    remesh_line_batch(project, [1, 2])
+    # reuse_existing_nodes=False remains an explicit disconnected recipe.
+    assert len(audit_line_network_connectivity(project)) == 1
+
+    project.lines[1].reuse_existing_nodes = True
+    project.lines[2].reuse_existing_nodes = True
+    remesh_line_batch(project, [1, 2])
+    assert audit_line_network_connectivity(project) == []
+
