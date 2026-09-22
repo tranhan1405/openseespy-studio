@@ -16286,6 +16286,16 @@ class MainWindow(QMainWindow):
                     self._edit_surface_geometry(t)
                 )
 
+            copy_surface = menu.addAction(
+                "Copy / Offset Surface..."
+                if count == 1
+                else f"Copy / Offset {count} Surfaces..."
+            )
+            copy_surface.triggered.connect(
+                lambda checked=False, tags=tuple(surface_tags):
+                self._copy_surface_geometries(tags)
+            )
+
             assign_section = menu.addAction(
                 "Assign Shell Section..."
                 if count == 1
@@ -16313,6 +16323,24 @@ class MainWindow(QMainWindow):
             integrity.triggered.connect(
                 lambda checked=False, tags=tuple(surface_tags):
                 self._audit_surface_mesh_integrity(tags)
+            )
+
+            quality_menu = menu.addMenu("Visualize Mesh Quality")
+            quality_menu.setEnabled(live_mesh)
+            for label, metric in (
+                ("Aspect Ratio", "aspect_ratio"),
+                ("Skew", "skew"),
+                ("Warpage", "warpage"),
+            ):
+                quality_action = quality_menu.addAction(label)
+                quality_action.triggered.connect(
+                    lambda checked=False, m=metric, tags=tuple(surface_tags):
+                    self._show_surface_quality_map(tags, m)
+                )
+            quality_menu.addSeparator()
+            clear_quality = quality_menu.addAction("Clear Quality Map")
+            clear_quality.triggered.connect(
+                self._clear_surface_quality_map
             )
 
             if count >= 2:
@@ -16367,6 +16395,13 @@ class MainWindow(QMainWindow):
                 lambda checked=False, tags=tuple(surface_tags):
                 self._select_generated_fe_for_surfaces(tags)
             )
+            preview_pressure = menu.addAction(
+                "Preview Pressure Direction..."
+            )
+            preview_pressure.triggered.connect(
+                lambda checked=False, tags=tuple(surface_tags):
+                self._preview_surface_pressure(tags)
+            )
             pressure = menu.addAction(
                 "Create Pressure on Surface..."
                 if count == 1
@@ -16376,6 +16411,12 @@ class MainWindow(QMainWindow):
             pressure.triggered.connect(
                 lambda checked=False, tags=tuple(surface_tags):
                 self._create_surface_pressure_for_surfaces(tags)
+            )
+            clear_pressure_preview = menu.addAction(
+                "Clear Pressure Preview"
+            )
+            clear_pressure_preview.triggered.connect(
+                self._clear_surface_pressure_preview
             )
             menu.addAction(self.actions["surface_mesh_overlay"])
 
