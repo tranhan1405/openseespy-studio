@@ -5,6 +5,7 @@ import inspect
 import pytest
 
 from openseespy_studio.generator import section_to_openseespy, to_openseespy
+from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.model import SHELL_ELEMENT_TYPES, StructuralModel
 from openseespy_studio.project import ProjectDatabase, SectionData
 from openseespy_studio.ui.main_window import MainWindow
@@ -225,3 +226,32 @@ def test_shell_ui_routes_exist_and_are_frame_safe():
     viewport_source = inspect.getsource(ModelViewport._combined_element_meshes)
     assert "_batched_shell_mesh" in viewport_source
     assert 'combined["shell"]' in viewport_source
+
+
+def test_shell_generated_script_round_trips_through_importer():
+    model = _shell_model(corotational=True)
+    script = to_openseespy(
+        model,
+        sections={7: _shell_section(rho=2500.0)},
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    imported = import_openseespy_source(
+        script,
+        source_name="shell-roundtrip.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert imported.error_count == 0
+    section = imported.project.sections[7]
+    assert section.section_type == "ElasticMembranePlate"
+    assert section.parameters["E"] == pytest.approx(30.0e9)
+    assert section.parameters["h"] == pytest.approx(0.18)
+    assert section.parameters["rho"] == pytest.approx(2500.0)
+
+    element = imported.project.model.elements[10]
+    assert element.element_type == "ASDShellQ4"
+    assert element.node_tags() == (1, 2, 3, 4)
+    assert element.section_tag == 7
+    assert element.shell_corotational is True
+
