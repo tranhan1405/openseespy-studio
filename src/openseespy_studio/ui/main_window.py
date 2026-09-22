@@ -3875,8 +3875,19 @@ class MainWindow(QMainWindow):
         frame_grids.setData(0, Qt.UserRole, ("frame_grids_root", None))
         geometry.addChildren([nodes, lines, surfaces, frame_grids])
 
+        surface_owned_elements = {
+            int(element_tag)
+            for surface in self.project.surfaces.values()
+            for element_tag in surface.generated_element_tags
+            if int(element_tag) in self.model.elements
+        }
+        direct_element_count = (
+            len(self.model.elements)
+            - len(surface_owned_elements)
+            + len(self.project.connections)
+        )
         elements = QTreeWidgetItem([
-            f"Elements ({len(self.model.elements) + len(self.project.connections)})"
+            f"Direct FE Elements ({direct_element_count})"
         ])
         elements.setIcon(0, studio_icon("element"))
         elements.setData(0, Qt.UserRole, ("elements_root", None))
@@ -3884,8 +3895,12 @@ class MainWindow(QMainWindow):
         root.addChild(elements)
 
         type_counts: dict[str, int] = {}
-        for element in self.model.elements.values():
-            type_counts[element.element_type] = type_counts.get(element.element_type, 0) + 1
+        for tag, element in self.model.elements.items():
+            if int(tag) in surface_owned_elements:
+                continue
+            type_counts[element.element_type] = (
+                type_counts.get(element.element_type, 0) + 1
+            )
 
         type_items: dict[str, QTreeWidgetItem] = {}
         known_types = {
@@ -3893,7 +3908,6 @@ class MainWindow(QMainWindow):
             "forceBeamColumn",
             "dispBeamColumn",
             "truss",
-            *SHELL_ELEMENT_TYPES,
         }
         for element_type in sorted(known_types | set(type_counts)):
             item = QTreeWidgetItem([f"{element_type} ({type_counts.get(element_type, 0)})"])
@@ -3915,11 +3929,23 @@ class MainWindow(QMainWindow):
 
         for tag in sorted(self.project.surfaces):
             surface = self.project.surfaces[tag]
-            meshed = any(
-                element_tag in self.model.elements
+            live_elements = [
+                int(element_tag)
                 for element_tag in surface.generated_element_tags
-            )
-            status = "Meshed" if meshed else "Unmeshed"
+                if int(element_tag) in self.model.elements
+            ]
+            mesh_nodes = sorted({
+                int(node_tag)
+                for element_tag in live_elements
+                for node_tag in self.model.elements[element_tag].node_tags()
+            })
+            if live_elements:
+                status = (
+                    f"{surface.divisions_u}×{surface.divisions_v} · "
+                    f"{len(live_elements)} shells"
+                )
+            else:
+                status = "Unmeshed"
             item = QTreeWidgetItem([
                 f"Surface {tag} · {surface.name} [{status}]"
             ])
@@ -3931,7 +3957,45 @@ class MainWindow(QMainWindow):
             )
             surfaces.addChild(item)
 
+            if live_elements:
+                mesh_summary = QTreeWidgetItem([
+                    f"Mesh ({len(mesh_nodes)} nodes · "
+                    f"{len(live_elements)} shell elements)"
+                ])
+                mesh_summary.setIcon(0, studio_icon("grid"))
+                mesh_summary.setData(
+                    0,
+                    Qt.UserRole,
+                    ("surface_mesh", tag),
+                )
+                item.addChild(mesh_summary)
+
+                shell_group = QTreeWidgetItem([
+                    f"Shell Elements ({len(live_elements)})"
+                ])
+                shell_group.setIcon(0, studio_icon("element"))
+                shell_group.setData(
+                    0,
+                    Qt.UserRole,
+                    ("surface_shells", tag),
+                )
+                item.addChild(shell_group)
+                for element_tag in live_elements:
+                    element_item = QTreeWidgetItem([
+                        f"Element {element_tag}"
+                    ])
+                    element_item.setIcon(0, studio_icon("element"))
+                    element_item.setData(
+                        0,
+                        Qt.UserRole,
+                        ("element", element_tag),
+                    )
+                    shell_group.addChild(element_item)
+                    self._tree_element_items[element_tag] = element_item
+
         for tag in sorted(self.model.elements):
+            if int(tag) in surface_owned_elements:
+                continue
             element = self.model.elements[tag]
             item = QTreeWidgetItem([f"Element {tag}"])
             item.setIcon(0, studio_icon("element"))
