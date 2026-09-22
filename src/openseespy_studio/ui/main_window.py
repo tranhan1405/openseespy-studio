@@ -4628,13 +4628,17 @@ class MainWindow(QMainWindow):
         if not self.project.materials:
             if action is not None:
                 action.setChecked(False)
-            QMessageBox.information(
-                self,
-                "Create Truss",
-                "Create a uniaxial Material first. Truss elements require "
-                "an area and material assignment.",
-            )
-            return
+            if not self._ensure_prerequisite(
+                title="Create Truss",
+                message=(
+                    "A Truss requires a uniaxial Material. "
+                    "Create the Material now?"
+                ),
+                action_label="Create Material Now...",
+                available=lambda: bool(self.project.materials),
+                creator=self._create_material,
+            ):
+                return
 
         self._leave_measure_mode()
         self._leave_frame_pick_mode()
@@ -5826,6 +5830,91 @@ class MainWindow(QMainWindow):
     def _selection_sets(self) -> tuple[set[int], set[int]]:
         return set(self.selection.nodes), set(self.selection.elements)
 
+    def _ask_create_prerequisite(
+        self,
+        *,
+        title: str,
+        message: str,
+        action_label: str,
+    ) -> bool:
+        box = QMessageBox(self)
+        box.setWindowTitle(str(title))
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText(str(message))
+        create_button = box.addButton(
+            str(action_label),
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        return box.clickedButton() is create_button
+
+    def _ensure_prerequisite(
+        self,
+        *,
+        title: str,
+        message: str,
+        action_label: str,
+        available,
+        creator,
+    ) -> bool:
+        if bool(available()):
+            return True
+        if not self._ask_create_prerequisite(
+            title=title,
+            message=message,
+            action_label=action_label,
+        ):
+            return False
+        creator()
+        return bool(available())
+
+    def _ensure_node_count(
+        self,
+        minimum: int,
+        *,
+        title: str,
+    ) -> bool:
+        required = max(1, int(minimum))
+        while len(self.model.nodes) < required:
+            current = len(self.model.nodes)
+            if not self._ask_create_prerequisite(
+                title=title,
+                message=(
+                    f"This workflow requires at least {required} node"
+                    f"{'s' if required != 1 else ''}. "
+                    f"The model currently has {current}.\n\n"
+                    "Create the missing node now?"
+                ),
+                action_label="Create Node Now...",
+            ):
+                return False
+            before = len(self.model.nodes)
+            self._create_node()
+            if len(self.model.nodes) <= before:
+                return False
+        return True
+
+    def _plain_load_patterns(self) -> dict[int, LoadPatternData]:
+        return {
+            tag: pattern
+            for tag, pattern in self.project.load_patterns.items()
+            if pattern.pattern_type == "Plain"
+        }
+
+    def _ensure_plain_load_pattern(self, *, title: str) -> bool:
+        return self._ensure_prerequisite(
+            title=title,
+            message=(
+                "This workflow requires a Plain load pattern first. "
+                "Create it now? If no Time Series exists, SARE will offer "
+                "to create that prerequisite too."
+            ),
+            action_label="Create Plain Load Pattern Now...",
+            available=lambda: bool(self._plain_load_patterns()),
+            creator=self._create_load_pattern,
+        )
+
     def _selected_node_tags(
         self,
         title: str,
@@ -6210,10 +6299,16 @@ class MainWindow(QMainWindow):
         self.properties_panel.set_properties("Time Series", rows)
 
     def _create_load_pattern(self) -> None:
-        if not self.project.time_series:
-            QMessageBox.information(
-                self, "Load Pattern", "Create a time series first."
-            )
+        if not self._ensure_prerequisite(
+            title="Load Pattern",
+            message=(
+                "A Load Pattern requires a Time Series. "
+                "Create a Time Series now?"
+            ),
+            action_label="Create Time Series Now...",
+            available=lambda: bool(self.project.time_series),
+            creator=self._create_time_series,
+        ):
             return
         dialog = LoadPatternDialog(
             self.project.time_series,
@@ -6470,16 +6565,11 @@ class MainWindow(QMainWindow):
         )
 
     def _create_nodal_load(self) -> None:
-        plain = {
-            tag: pattern
-            for tag, pattern in self.project.load_patterns.items()
-            if pattern.pattern_type == "Plain"
-        }
+        plain = self._plain_load_patterns()
         if not plain:
-            QMessageBox.information(
-                self, "Nodal Load", "Create a Plain load pattern first."
-            )
-            return
+            if not self._ensure_plain_load_pattern(title="Nodal Load"):
+                return
+            plain = self._plain_load_patterns()
         selected = sorted(self.selection.nodes)
         node_tag = selected[0] if selected else min(self.model.nodes, default=1)
         dialog = NodalLoadDialog(
@@ -6573,18 +6663,13 @@ class MainWindow(QMainWindow):
         self.properties_panel.set_properties("Nodal Load", rows)
 
     def _create_prescribed_displacement(self) -> None:
-        plain = {
-            tag: pattern
-            for tag, pattern in self.project.load_patterns.items()
-            if pattern.pattern_type == "Plain"
-        }
+        plain = self._plain_load_patterns()
         if not plain:
-            QMessageBox.information(
-                self,
-                "Prescribed Displacement",
-                "Create a Plain load pattern first.",
-            )
-            return
+            if not self._ensure_plain_load_pattern(
+                title="Prescribed Displacement"
+            ):
+                return
+            plain = self._plain_load_patterns()
 
         selected = sorted(self.selection.nodes)
         node_tag = (
@@ -6744,18 +6829,13 @@ class MainWindow(QMainWindow):
         )
 
     def _create_element_load(self) -> None:
-        plain = {
-            tag: pattern
-            for tag, pattern in self.project.load_patterns.items()
-            if pattern.pattern_type == "Plain"
-        }
+        plain = self._plain_load_patterns()
         if not plain:
-            QMessageBox.information(
-                self,
-                "Beam / Element Load",
-                "Create a Plain load pattern first.",
-            )
-            return
+            if not self._ensure_plain_load_pattern(
+                title="Beam / Element Load"
+            ):
+                return
+            plain = self._plain_load_patterns()
 
         selected = sorted(self.selection.elements)
         if not selected:
@@ -7043,12 +7123,16 @@ class MainWindow(QMainWindow):
         element_tags = self._selected_element_tags("Assign Section")
         if element_tags is None:
             return
-        if not self.project.sections:
-            QMessageBox.information(
-                self,
-                "Assign Section",
-                "No sections exist yet. Create a section first.",
-            )
+        if not self._ensure_prerequisite(
+            title="Assign Section",
+            message=(
+                "No Sections exist yet. Create a Section now, then return "
+                "directly to assignment?"
+            ),
+            action_label="Create Section Now...",
+            available=lambda: bool(self.project.sections),
+            creator=self._create_section,
+        ):
             return
 
         tags = sorted(self.project.sections)
@@ -7107,12 +7191,16 @@ class MainWindow(QMainWindow):
                 "Select at least one Truss element first.",
             )
             return
-        if not self.project.materials:
-            QMessageBox.information(
-                self,
-                "Assign Truss Material",
-                "No uniaxial materials exist yet. Create a material first.",
-            )
+        if not self._ensure_prerequisite(
+            title="Assign Truss Material",
+            message=(
+                "No uniaxial Materials exist yet. Create a Material now, "
+                "then return directly to assignment?"
+            ),
+            action_label="Create Material Now...",
+            available=lambda: bool(self.project.materials),
+            creator=self._create_material,
+        ):
             return
 
         tags = sorted(self.project.materials)
@@ -7197,13 +7285,16 @@ class MainWindow(QMainWindow):
         )
         if element_tags is None:
             return
-        if not self.project.transformations:
-            QMessageBox.information(
-                self,
-                "Assign Transformation",
-                "No transformations exist yet. "
-                "Create a transformation first.",
-            )
+        if not self._ensure_prerequisite(
+            title="Assign Transformation",
+            message=(
+                "No Geometric Transformations exist yet. Create one now, "
+                "then return directly to assignment?"
+            ),
+            action_label="Create Transformation Now...",
+            available=lambda: bool(self.project.transformations),
+            creator=self._create_transformation,
+        ):
             return
 
         tags = sorted(self.project.transformations)
@@ -7329,12 +7420,16 @@ class MainWindow(QMainWindow):
         node_j: int,
     ) -> None:
         """Create one quick axial Truss using current/default assignments."""
-        if not self.project.materials:
-            QMessageBox.information(
-                self,
-                "Create Truss",
-                "Create a uniaxial Material first.",
-            )
+        if not self._ensure_prerequisite(
+            title="Create Truss",
+            message=(
+                "A Truss requires a uniaxial Material. "
+                "Create the Material now?"
+            ),
+            action_label="Create Material Now...",
+            available=lambda: bool(self.project.materials),
+            creator=self._create_material,
+        ):
             return
 
         tag = self.project.next_element_tag()
@@ -7370,20 +7465,21 @@ class MainWindow(QMainWindow):
 
     def _create_truss(self) -> None:
         """Create a fully specified axial Truss element by input."""
-        if len(self.model.nodes) < 2:
-            QMessageBox.information(
-                self,
-                "Create Truss Element",
-                "Create at least two nodes first.",
-            )
+        if not self._ensure_node_count(
+            2,
+            title="Create Truss Element",
+        ):
             return
-        if not self.project.materials:
-            QMessageBox.information(
-                self,
-                "Create Truss Element",
-                "Create a uniaxial Material first. Truss elements require "
-                "an area and material assignment.",
-            )
+        if not self._ensure_prerequisite(
+            title="Create Truss Element",
+            message=(
+                "A Truss requires a uniaxial Material for its axial "
+                "constitutive response. Create the Material now?"
+            ),
+            action_label="Create Material Now...",
+            available=lambda: bool(self.project.materials),
+            creator=self._create_material,
+        ):
             return
 
         selected_nodes = sorted(self.selection.nodes)
@@ -7535,28 +7631,32 @@ class MainWindow(QMainWindow):
 
     def _create_frame(self) -> None:
         """Create a solver-ready frame member with explicit assignments."""
-        if len(self.model.nodes) < 2:
-            QMessageBox.information(
-                self,
-                "Create Frame Member",
-                "Create at least two nodes first.",
-            )
+        if not self._ensure_node_count(
+            2,
+            title="Create Frame Member",
+        ):
             return
-        if not self.project.sections:
-            QMessageBox.information(
-                self,
-                "Create Frame Member",
-                "Create a Section first. Frame members require an explicit "
-                "section assignment.",
-            )
+        if not self._ensure_prerequisite(
+            title="Create Frame Member",
+            message=(
+                "A Frame member requires an explicit Section. "
+                "Create the Section now?"
+            ),
+            action_label="Create Section Now...",
+            available=lambda: bool(self.project.sections),
+            creator=self._create_section,
+        ):
             return
-        if not self.project.transformations:
-            QMessageBox.information(
-                self,
-                "Create Frame Member",
-                "Create a Geometric Transformation first. Frame members "
-                "require an explicit transformation assignment.",
-            )
+        if not self._ensure_prerequisite(
+            title="Create Frame Member",
+            message=(
+                "A Frame member requires a Geometric Transformation. "
+                "Create the Transformation now?"
+            ),
+            action_label="Create Transformation Now...",
+            available=lambda: bool(self.project.transformations),
+            creator=self._create_transformation,
+        ):
             return
 
         selected_nodes = sorted(self.selection.nodes)
@@ -9105,12 +9205,10 @@ class MainWindow(QMainWindow):
                 )
 
     def _create_connection(self) -> None:
-        if not self.model.nodes:
-            QMessageBox.information(
-                self,
-                "Connection Editor",
-                "Create at least one node first.",
-            )
+        if not self._ensure_node_count(
+            1,
+            title="Connection Editor",
+        ):
             return
         node_i, node_j, to_ground = self._connection_dialog_defaults()
         dialog = ConnectionDialog(
@@ -12878,22 +12976,31 @@ class MainWindow(QMainWindow):
 
         active_tag = self.project.active_analysis_tag
         settings = self.project.analyses.get(active_tag)
-        if settings is None:
-            QMessageBox.information(
-                self,
-                "Calibration",
-                "Create an Analysis Settings object and set it Active first.",
-            )
-            return
-        if settings.analysis_type != "Cyclic":
-            QMessageBox.information(
-                self,
-                "Calibration",
-                "The first calibration workflow currently requires an "
-                "active Cyclic analysis so the model can be compared with "
-                "experimental force-displacement hysteresis.",
-            )
-            return
+        if settings is None or settings.analysis_type != "Cyclic":
+            if not self._ensure_prerequisite(
+                title="Cyclic Calibration",
+                message=(
+                    "Cyclic Calibration requires an active Cyclic analysis. "
+                    "Open the Cyclic Analysis Wizard now?"
+                ),
+                action_label="Create Cyclic Analysis Now...",
+                available=lambda: (
+                    (
+                        self.project.analyses.get(
+                            self.project.active_analysis_tag
+                        )
+                    ) is not None
+                    and self.project.analyses[
+                        self.project.active_analysis_tag
+                    ].analysis_type == "Cyclic"
+                ),
+                creator=lambda: self._create_analysis_template("Cyclic"),
+            ):
+                return
+            active_tag = self.project.active_analysis_tag
+            settings = self.project.analyses.get(active_tag)
+            if settings is None or settings.analysis_type != "Cyclic":
+                return
 
         issues = self._model_check_issues(settings)
         errors = [
@@ -13504,12 +13611,26 @@ class MainWindow(QMainWindow):
         active_tag = self.project.active_analysis_tag
         settings = self.project.analyses.get(active_tag)
         if settings is None:
-            QMessageBox.information(
-                self,
-                "Run",
-                "Create an Analysis Settings object and set it Active first.",
-            )
-            return
+            if not self._ensure_prerequisite(
+                title="Run",
+                message=(
+                    "Run requires an active Analysis Settings object. "
+                    "Create Analysis Settings now?"
+                ),
+                action_label="Create Analysis Settings Now...",
+                available=lambda: (
+                    self.project.analyses.get(
+                        self.project.active_analysis_tag
+                    )
+                    is not None
+                ),
+                creator=self._create_analysis,
+            ):
+                return
+            active_tag = self.project.active_analysis_tag
+            settings = self.project.analyses.get(active_tag)
+            if settings is None:
+                return
 
         script_text = self.script.toPlainText()
         if not script_text.strip():
