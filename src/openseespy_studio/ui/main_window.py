@@ -3699,7 +3699,11 @@ class MainWindow(QMainWindow):
 
     def _refresh_all(self, message: str = "") -> None:
         self._sync_viewport_display_data(refresh=False)
-        self.viewport.draw_model(self.model, self.project.connections)
+        self.viewport.draw_model(
+            self.model,
+            self.project.connections,
+            self.project.surfaces,
+        )
         self._refresh_project_metadata(
             message,
             sync_viewport_display=False,
@@ -4450,6 +4454,7 @@ class MainWindow(QMainWindow):
     def _tree_selection_changed(self) -> None:
         nodes: set[int] = set()
         elements: set[int] = set()
+        surface_geometry_tag: int | None = None
         material_tag: int | None = None
         nd_material_tag: int | None = None
         section_tag: int | None = None
@@ -4490,6 +4495,8 @@ class MainWindow(QMainWindow):
                 if selection_set is not None:
                     nodes.update(selection_set.node_tags)
                     elements.update(selection_set.element_tags)
+            elif kind == "surface_geometry":
+                surface_geometry_tag = int(tag)
             elif kind == "material":
                 material_tag = int(tag)
             elif kind == "nd_material":
@@ -4566,7 +4573,9 @@ class MainWindow(QMainWindow):
                 elements=elements,
             )
 
-        if material_tag is not None:
+        if surface_geometry_tag is not None:
+            self._show_surface_geometry_properties(surface_geometry_tag)
+        elif material_tag is not None:
             self._show_material_properties(material_tag)
         elif nd_material_tag is not None:
             self._show_nd_material_properties(nd_material_tag)
