@@ -295,6 +295,15 @@ def build_material_test_script(
     UniaxialMaterial constitutive object used by zeroLength and fiber models,
     without introducing a structural equilibrium problem into a material test.
     """
+    if material.material_type == "RambergOsgoodSteel":
+        raise ValueError(
+            "RambergOsgoodSteel material tests are disabled because stock "
+            "OpenSeesPy 3.8.x reports this material as temporarily removed "
+            "from compiled Tcl/Py builds due to known issues and unreliable "
+            "results. The library record remains available for reference "
+            "and constitutive preview only."
+        )
+
     material_map = dict(materials or {})
     material_map[material.tag] = material
 
