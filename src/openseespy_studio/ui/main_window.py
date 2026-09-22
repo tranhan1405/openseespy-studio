@@ -10236,6 +10236,50 @@ class MainWindow(QMainWindow):
     def _create_analysis(self) -> None:
         self._create_analysis_of_type(None)
 
+    def _has_dynamic_mass(self) -> bool:
+        translational_count = min(
+            int(self.model.ndm),
+            int(self.model.ndf),
+            3,
+        )
+        for node in self.model.nodes.values():
+            for index in range(translational_count):
+                if (
+                    index < len(node.fixity)
+                    and not bool(node.fixity[index])
+                    and index < len(node.mass)
+                    and float(node.mass[index]) > 0.0
+                ):
+                    return True
+
+        for element in self.model.elements.values():
+            if float(element.mass_per_length) <= 0.0:
+                continue
+            for node_tag in (int(element.i), int(element.j)):
+                node = self.model.nodes.get(node_tag)
+                if node is None:
+                    continue
+                if any(
+                    index < len(node.fixity)
+                    and not bool(node.fixity[index])
+                    for index in range(translational_count)
+                ):
+                    return True
+        return False
+
+    def _ensure_dynamic_mass(self, *, title: str) -> bool:
+        return self._ensure_prerequisite(
+            title=title,
+            message=(
+                "Modal and Transient analyses require positive dynamic mass "
+                "on at least one free translational DOF. Create/apply a "
+                "Mass Source now?"
+            ),
+            action_label="Create Mass Source Now...",
+            available=self._has_dynamic_mass,
+            creator=self._create_mass_source,
+        )
+
     def _create_analysis_of_type(
         self,
         analysis_type: str | None,
@@ -10272,6 +10316,13 @@ class MainWindow(QMainWindow):
                 ):
                     return
                 settings.control_node = min(self.model.nodes)
+            if (
+                settings.analysis_type in {"Modal", "Transient"}
+                and not self._ensure_dynamic_mass(
+                    title="Analysis Settings",
+                )
+            ):
+                return
             self._apply_analysis_driving_load(settings, dialog)
             self.project.add_analysis(settings)
         except ValueError as exc:
@@ -11476,11 +11527,56 @@ class MainWindow(QMainWindow):
             ],
         )
 
+    def _offer_job_analysis_rerun(
+        self,
+        job_id: int,
+        *,
+        title: str,
+    ) -> bool:
+        job = self._jobs.get(int(job_id))
+        if job is None:
+            return False
+        if job.results:
+            return True
+        if str(job.status) == "Running":
+            self.status_message.setText(
+                f"{title}: Job {job.job_id} is still running."
+            )
+            return False
+        settings = self.project.analyses.get(int(job.analysis_tag))
+        if settings is None:
+            self.status_message.setText(
+                f"{title}: analysis {job.analysis_tag} no longer exists."
+            )
+            return False
+        if (
+            self._analysis_process is not None
+            and self._analysis_process.state() != QProcess.NotRunning
+        ):
+            self.status_message.setText(
+                f"{title}: another analysis is currently running."
+            )
+            return False
+        if not self._ask_create_prerequisite(
+            title=title,
+            message=(
+                f"Job {job.job_id} has no captured result data. "
+                f"Rerun '{settings.name}' now?"
+            ),
+            action_label="Run Analysis Again...",
+        ):
+            return False
+        self._run_analysis_from_tree(int(settings.tag))
+        return False
+
     def _activate_job_result(self, job_id: int) -> None:
         job = self._jobs.get(int(job_id))
-        if job is None or not job.results:
-            self.status_message.setText(
-                f"Job {job_id} has no captured result data."
+        if job is None:
+            return
+        if not job.results:
+            self._offer_job_analysis_rerun(
+                job_id,
+                title="Activate Job Result",
             )
             return
         self._last_result = dict(job.results)
@@ -11501,9 +11597,12 @@ class MainWindow(QMainWindow):
         plot_id: int,
     ) -> None:
         job = self._jobs.get(int(job_id))
-        if job is None or not job.results:
-            self.status_message.setText(
-                f"Job {job_id} has no captured result data."
+        if job is None:
+            return
+        if not job.results:
+            self._offer_job_analysis_rerun(
+                job_id,
+                title="Show Job Plot",
             )
             return
         plot = job.plot(plot_id)
@@ -11686,9 +11785,12 @@ class MainWindow(QMainWindow):
         settings: dict[str, object],
     ) -> None:
         job = self._jobs.get(int(job_id))
-        if job is None or not job.results:
-            self.status_message.setText(
-                f"Job {job_id} has no captured result data."
+        if job is None:
+            return
+        if not job.results:
+            self._offer_job_analysis_rerun(
+                job_id,
+                title="Plot Job Result",
             )
             return
 
@@ -11740,7 +11842,13 @@ class MainWindow(QMainWindow):
 
     def _export_job_result_json(self, job_id: int) -> None:
         job = self._jobs.get(int(job_id))
-        if job is None or not job.results:
+        if job is None:
+            return
+        if not job.results:
+            self._offer_job_analysis_rerun(
+                job_id,
+                title="Export Job Results",
+            )
             return
         path, _ = QFileDialog.getSaveFileName(
             self,
@@ -12505,13 +12613,13 @@ class MainWindow(QMainWindow):
             job = self._jobs.get(job_id)
 
             activate = menu.addAction("Set as Active Result Source")
-            activate.setEnabled(bool(job and job.results))
+            activate.setEnabled(job is not None)
             activate.triggered.connect(
                 lambda: self._activate_job_result(job_id)
             )
 
             plot_menu = menu.addMenu("Plot")
-            plot_menu.setEnabled(bool(job and job.results))
+            plot_menu.setEnabled(job is not None)
             if job is not None:
                 self._populate_result_choice_menu(
                     plot_menu,
@@ -12536,7 +12644,7 @@ class MainWindow(QMainWindow):
             clear_display = menu.addAction("Clear Result Display")
             clear_display.triggered.connect(self._clear_result_display)
             export = menu.addAction("Export Results JSON...")
-            export.setEnabled(bool(job and job.results))
+            export.setEnabled(job is not None)
             export.triggered.connect(
                 lambda: self._export_job_result_json(job_id)
             )
@@ -15127,8 +15235,8 @@ class MainWindow(QMainWindow):
 
     def _show_hinge_state_result(self) -> None:
         if not self._last_result:
-            self.status_message.setText(
-                "No fiber-state result available"
+            self._offer_result_analysis_run(
+                title="Hinge / Yield State",
             )
             return
         self.viewport.show_hinge_states(
@@ -15161,6 +15269,32 @@ class MainWindow(QMainWindow):
             f"{float(scale):g}"
         )
 
+    def _ensure_active_modal_result(self) -> bool:
+        analysis = (
+            self._last_result.get("analysis", {})
+            if isinstance(self._last_result, dict)
+            else {}
+        )
+        if (
+            isinstance(analysis, dict)
+            and str(analysis.get("type", "")) == "Modal"
+        ):
+            return True
+
+        for job_id in sorted(self._jobs, reverse=True):
+            job = self._jobs[job_id]
+            if job.analysis_type == "Modal" and job.results:
+                self._last_result = dict(job.results)
+                self._last_result_cache_key = ("job", job.job_id)
+                self.results_panel.set_result(
+                    self._last_result,
+                    cache_key=self._last_result_cache_key,
+                )
+                return True
+
+        self._ensure_first_mode_modal_prerequisite("Mode Shape")
+        return False
+
     def _show_mode_shape_result(
         self,
         mode: int,
@@ -15169,8 +15303,7 @@ class MainWindow(QMainWindow):
         representation: str,
         smooth_curvature: bool,
     ) -> None:
-        if not self._last_result:
-            self.status_message.setText("No modal result available")
+        if not self._ensure_active_modal_result():
             return
         self.viewport.show_mode_shape(
             self._last_result,
