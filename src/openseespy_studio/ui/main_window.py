@@ -5067,6 +5067,7 @@ class MainWindow(QMainWindow):
         if action is not None:
             action.setChecked(False)
         self.viewport.clear_geometry_pick_preview(render=False)
+        self.viewport.clear_geometry_sketch_preview(render=False)
 
     def _leave_geometry_surface_pick_mode(self) -> None:
         self._geometry_surface_point_tags = []
@@ -5074,6 +5075,7 @@ class MainWindow(QMainWindow):
         if action is not None:
             action.setChecked(False)
         self.viewport.clear_geometry_pick_preview(render=False)
+        self.viewport.clear_geometry_sketch_preview(render=False)
 
     def _leave_measure_mode(self) -> None:
         self._measure_first_node_tag = None
@@ -5125,6 +5127,22 @@ class MainWindow(QMainWindow):
             "Box select: left→right = window, right→left = crossing"
         )
 
+    def _active_geometry_sketch_plane(self) -> str:
+        view = self.viewport.current_view().lower()
+        return view if view in {"xy", "xz", "yz"} else "xy"
+
+    def _refresh_geometry_sketch_snap_cache(self) -> None:
+        try:
+            self._geometry_sketch_intersections = (
+                line_geometry_intersections(self.project)
+            )
+        except (TypeError, ValueError):
+            self._geometry_sketch_intersections = []
+
+    def _finish_geometry_sketch(self) -> None:
+        self._activate_select_tool()
+        self.status_message.setText("Geometry sketch finished")
+
     def _activate_geometry_line_pick_tool(
         self,
         checked: bool = True,
@@ -5133,31 +5151,28 @@ class MainWindow(QMainWindow):
         if action is not None and not action.isChecked() and not checked:
             self._activate_select_tool()
             return
-        if len(self.project.points) < 2:
-            if action is not None:
-                action.setChecked(False)
-            QMessageBox.information(
-                self,
-                "Create Geometry Line",
-                "Create at least two Geometry Points first.",
-            )
-            return
 
         self._leave_measure_mode()
         self._leave_frame_pick_mode()
         self._leave_truss_pick_mode()
         self._leave_geometry_surface_pick_mode()
         self._geometry_line_point_tags = []
+        self._refresh_geometry_sketch_snap_cache()
         self.viewport.clear_geometry_pick_preview(render=False)
+        self.viewport.clear_geometry_sketch_preview(render=False)
         self.viewport.set_display_domain("geometry")
-        self.viewport.set_interaction_tool("select")
+        plane = self._active_geometry_sketch_plane()
+        self.viewport.set_geometry_sketch_plane(plane, 0.0)
+        self.viewport.set_interaction_tool("geometry_sketch")
         self.actions["select"].setChecked(False)
         self.actions["box"].setChecked(False)
         if action is not None:
             action.setChecked(True)
         self.viewport.plotter.render()
         self.status_message.setText(
-            "Create Geometry Line: click the first Geometry Point"
+            f"Draw Polyline · {plane.upper()} plane · "
+            "click anywhere; snap = endpoint / midpoint / intersection · "
+            "right-click or Esc to finish"
         )
 
     def _activate_geometry_surface_pick_tool(
@@ -5168,44 +5183,27 @@ class MainWindow(QMainWindow):
         if action is not None and not action.isChecked() and not checked:
             self._activate_select_tool()
             return
-        if len(self.project.points) < 4:
-            if action is not None:
-                action.setChecked(False)
-            QMessageBox.information(
-                self,
-                "Create Geometry Surface",
-                "Create at least four Geometry Points first.",
-            )
-            return
-        if not self._ensure_prerequisite(
-            title="New Surface",
-            message=(
-                "A Surface requires a shell-compatible Section. "
-                "Create one now?"
-            ),
-            action_label="Create Shell Section Now...",
-            available=lambda: bool(self._shell_sections()),
-            creator=self._create_shell_section,
-        ):
-            if action is not None:
-                action.setChecked(False)
-            return
 
         self._leave_measure_mode()
         self._leave_frame_pick_mode()
         self._leave_truss_pick_mode()
         self._leave_geometry_line_pick_mode()
         self._geometry_surface_point_tags = []
+        self._refresh_geometry_sketch_snap_cache()
         self.viewport.clear_geometry_pick_preview(render=False)
+        self.viewport.clear_geometry_sketch_preview(render=False)
         self.viewport.set_display_domain("geometry")
-        self.viewport.set_interaction_tool("select")
+        plane = self._active_geometry_sketch_plane()
+        self.viewport.set_geometry_sketch_plane(plane, 0.0)
+        self.viewport.set_interaction_tool("geometry_sketch")
         self.actions["select"].setChecked(False)
         self.actions["box"].setChecked(False)
         if action is not None:
             action.setChecked(True)
         self.viewport.plotter.render()
         self.status_message.setText(
-            "Create Geometry Surface: click corner 1 of 4"
+            f"Draw Rectangle · {plane.upper()} plane · "
+            "click two diagonal corners · right-click or Esc to finish"
         )
 
     def _activate_frame_pick_tool(self, checked: bool = True) -> None:
@@ -5446,6 +5444,567 @@ class MainWindow(QMainWindow):
         if item.isSelected():
             self.tree.scrollToItem(item)
 
+    def _geometry_sketch_tolerance(self) -> float:
+        coords = [
+            point.xyz
+            for point in self.project.points.values()
+        ]
+        if not coords:
+            return 1.0e-8
+        spans = [
+            max(point[axis] for point in coords)
+            - min(point[axis] for point in coords)
+            for axis in range(3)
+        ]
+        return max(max(spans, default=1.0) * 1.0e-8, 1.0e-8)
+
+    def _geometry_point_on_active_sketch_plane(self, xyz) -> bool:
+        plane, offset = self.viewport.geometry_sketch_plane()
+        axis = {"xy": 2, "xz": 1, "yz": 0}[plane]
+        return abs(float(xyz[axis]) - float(offset)) <= (
+            self._geometry_sketch_tolerance()
+        )
+
+    def _geometry_sketch_snap(
+        self,
+        payload: dict[str, object],
+    ) -> dict[str, object] | None:
+        raw = payload.get("world")
+        screen = payload.get("screen")
+        if raw is None or screen is None:
+            return None
+        xyz = tuple(float(value) for value in raw)
+        sx, sy = float(screen[0]), float(screen[1])
+        first_anchor = (
+            not self._geometry_line_point_tags
+            and not self._geometry_surface_point_tags
+        )
+        exact_tag = payload.get("tag")
+        if (
+            payload.get("kind") == "geometry_point"
+            and exact_tag is not None
+            and int(exact_tag) in self.project.points
+        ):
+            point = self.project.points[int(exact_tag)]
+            if first_anchor or self._geometry_point_on_active_sketch_plane(
+                point.xyz
+            ):
+                return {
+                    "xyz": tuple(point.xyz),
+                    "kind": "endpoint",
+                    "label": f"Endpoint P{int(exact_tag)}",
+                    "point_tag": int(exact_tag),
+                    "line_tags": (),
+                }
+
+        candidates: list[
+            tuple[
+                int,
+                float,
+                str,
+                tuple[float, float, float],
+                int | None,
+                tuple[int, ...],
+                str,
+            ]
+        ] = []
+        radius2 = 16.0 * 16.0
+
+        def add_candidate(
+            priority: int,
+            kind: str,
+            point,
+            *,
+            point_tag: int | None = None,
+            line_tags=(),
+            label: str,
+        ) -> None:
+            candidate = tuple(float(value) for value in point)
+            if (
+                not first_anchor
+                and not self._geometry_point_on_active_sketch_plane(
+                    candidate
+                )
+            ):
+                return
+            px, py = self.viewport.geometry_world_to_screen(candidate)
+            distance2 = (px - sx) ** 2 + (py - sy) ** 2
+            if distance2 <= radius2:
+                candidates.append(
+                    (
+                        priority,
+                        distance2,
+                        kind,
+                        candidate,
+                        point_tag,
+                        tuple(int(tag) for tag in line_tags),
+                        label,
+                    )
+                )
+
+        for tag, point in self.project.points.items():
+            add_candidate(
+                0,
+                "endpoint",
+                point.xyz,
+                point_tag=int(tag),
+                label=f"Endpoint P{int(tag)}",
+            )
+
+        for item in self._geometry_sketch_intersections:
+            interior = tuple(
+                int(line_tag)
+                for line_tag, parameter in zip(
+                    item.line_tags,
+                    item.parameters,
+                )
+                if 1.0e-8 < float(parameter) < 1.0 - 1.0e-8
+            )
+            add_candidate(
+                1,
+                "intersection",
+                item.point,
+                line_tags=interior,
+                label=(
+                    f"Intersection L{item.line_tags[0]}/"
+                    f"L{item.line_tags[1]}"
+                ),
+            )
+
+        for tag, line in self.project.lines.items():
+            point_i = self.project.points.get(int(line.point_i))
+            point_j = self.project.points.get(int(line.point_j))
+            if point_i is None or point_j is None:
+                continue
+            midpoint = tuple(
+                0.5 * (
+                    float(point_i.xyz[axis])
+                    + float(point_j.xyz[axis])
+                )
+                for axis in range(3)
+            )
+            add_candidate(
+                2,
+                "midpoint",
+                midpoint,
+                line_tags=(int(tag),),
+                label=f"Midpoint L{int(tag)}",
+            )
+
+        if candidates:
+            best = min(candidates, key=lambda item: (item[0], item[1]))
+            return {
+                "xyz": best[3],
+                "kind": best[2],
+                "label": best[6],
+                "point_tag": best[4],
+                "line_tags": best[5],
+            }
+        return {
+            "xyz": xyz,
+            "kind": "free",
+            "label": "Free",
+            "point_tag": None,
+            "line_tags": (),
+        }
+
+    def _find_geometry_point_near(self, xyz) -> int | None:
+        tolerance = self._geometry_sketch_tolerance()
+        best: tuple[float, int] | None = None
+        for tag, point in self.project.points.items():
+            distance2 = sum(
+                (float(point.xyz[axis]) - float(xyz[axis])) ** 2
+                for axis in range(3)
+            )
+            if distance2 <= tolerance * tolerance and (
+                best is None or distance2 < best[0]
+            ):
+                best = (distance2, int(tag))
+        return None if best is None else best[1]
+
+    def _materialize_geometry_sketch_point(
+        self,
+        snap: dict[str, object],
+    ) -> tuple[int, bool]:
+        existing = snap.get("point_tag")
+        if existing is not None and int(existing) in self.project.points:
+            return int(existing), False
+
+        xyz = tuple(float(value) for value in snap["xyz"])
+        near = self._find_geometry_point_near(xyz)
+        changed = False
+        if near is None:
+            point_tag = self.project.next_point_tag()
+            self.project.add_point(
+                PointGeometryData(
+                    point_tag,
+                    f"Point {point_tag}",
+                    xyz,
+                )
+            )
+            changed = True
+        else:
+            point_tag = int(near)
+
+        for line_tag in snap.get("line_tags", ()):
+            if int(line_tag) not in self.project.lines:
+                continue
+            split_line_geometry_at_point(
+                self.project,
+                int(line_tag),
+                xyz,
+                remesh=True,
+            )
+            changed = True
+        return point_tag, changed
+
+    def _existing_geometry_line_between(
+        self,
+        point_i: int,
+        point_j: int,
+    ) -> int | None:
+        endpoints = {int(point_i), int(point_j)}
+        for tag, line in self.project.lines.items():
+            if {int(line.point_i), int(line.point_j)} == endpoints:
+                return int(tag)
+        return None
+
+    def _draw_geometry_line_segment(
+        self,
+        point_i: int,
+        point_j: int,
+    ) -> tuple[int, bool]:
+        existing = self._existing_geometry_line_between(
+            point_i,
+            point_j,
+        )
+        if existing is not None:
+            return existing, False
+        tag = self.project.next_line_tag()
+        self.project.add_line(
+            LineGeometryData(
+                tag=tag,
+                name=f"Line {tag}",
+                point_i=int(point_i),
+                point_j=int(point_j),
+                mesh_recipe_configured=False,
+            )
+        )
+        return tag, True
+
+    def _rectangle_corners_from_diagonal(
+        self,
+        first,
+        opposite,
+    ) -> tuple[
+        tuple[float, float, float],
+        tuple[float, float, float],
+        tuple[float, float, float],
+        tuple[float, float, float],
+    ]:
+        a = tuple(float(value) for value in first)
+        c = tuple(float(value) for value in opposite)
+        plane, offset = self.viewport.geometry_sketch_plane()
+        if plane == "xy":
+            return (
+                (a[0], a[1], offset),
+                (c[0], a[1], offset),
+                (c[0], c[1], offset),
+                (a[0], c[1], offset),
+            )
+        if plane == "xz":
+            return (
+                (a[0], offset, a[2]),
+                (c[0], offset, a[2]),
+                (c[0], offset, c[2]),
+                (a[0], offset, c[2]),
+            )
+        return (
+            (offset, a[1], a[2]),
+            (offset, c[1], a[2]),
+            (offset, c[1], c[2]),
+            (offset, a[1], c[2]),
+        )
+
+    def _handle_geometry_line_sketch_click(
+        self,
+        payload: dict[str, object],
+    ) -> None:
+        snap = self._geometry_sketch_snap(payload)
+        if snap is None:
+            return
+
+        if not self._geometry_line_point_tags:
+            before = self.project.to_dict()
+            try:
+                point_tag, changed = self._materialize_geometry_sketch_point(
+                    snap
+                )
+            except (TypeError, ValueError) as exc:
+                self.project = ProjectDatabase.from_dict(before)
+                self.model = self.project.model
+                self._refresh_all()
+                self.status_message.setText(str(exc))
+                return
+            point = self.project.points[point_tag]
+            self.viewport.set_geometry_sketch_plane_offset_from_point(
+                point.xyz
+            )
+            self._geometry_line_point_tags = [point_tag]
+            if changed:
+                self.model = self.project.model
+                self._refresh_all(
+                    f"Sketch anchor Point {point_tag}"
+                )
+                self._record_project_change(
+                    f"Sketch Geometry Point {point_tag}",
+                    before,
+                )
+            self.viewport.show_geometry_sketch_preview(
+                [point.xyz]
+            )
+            plane, offset = self.viewport.geometry_sketch_plane()
+            self.status_message.setText(
+                f"Polyline anchor P{point_tag} · "
+                f"{plane.upper()} @ {offset:g} · click next point"
+            )
+            return
+
+        anchor = int(self._geometry_line_point_tags[-1])
+        if (
+            snap.get("point_tag") is not None
+            and int(snap["point_tag"]) == anchor
+        ):
+            self.status_message.setText(
+                "Polyline: choose a different next point"
+            )
+            return
+
+        before = self.project.to_dict()
+        try:
+            point_j, point_changed = (
+                self._materialize_geometry_sketch_point(snap)
+            )
+            if point_j == anchor:
+                raise ValueError(
+                    "Polyline segment requires two different points."
+                )
+            line_tag, line_created = self._draw_geometry_line_segment(
+                anchor,
+                point_j,
+            )
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            self.status_message.setText(str(exc))
+            return
+
+        self._geometry_line_point_tags = [point_j]
+        self._refresh_geometry_sketch_snap_cache()
+        if point_changed or line_created:
+            self.model = self.project.model
+            self._refresh_all(
+                (
+                    f"Drawn Geometry Line {line_tag}"
+                    if line_created
+                    else f"Snapped to existing Line {line_tag}"
+                )
+            )
+            self._record_project_change(
+                f"Draw Geometry Line {line_tag}",
+                before,
+            )
+        point = self.project.points[point_j]
+        self.viewport.show_geometry_sketch_preview([point.xyz])
+        self.status_message.setText(
+            (
+                f"Created L{line_tag} · P{anchor} → P{point_j} · "
+                if line_created
+                else f"Line L{line_tag} already exists · "
+            )
+            + "click next point · right-click to finish"
+        )
+
+    def _handle_geometry_rectangle_sketch_click(
+        self,
+        payload: dict[str, object],
+    ) -> None:
+        snap = self._geometry_sketch_snap(payload)
+        if snap is None:
+            return
+
+        if not self._geometry_surface_point_tags:
+            before = self.project.to_dict()
+            try:
+                point_tag, changed = self._materialize_geometry_sketch_point(
+                    snap
+                )
+            except (TypeError, ValueError) as exc:
+                self.project = ProjectDatabase.from_dict(before)
+                self.model = self.project.model
+                self._refresh_all()
+                self.status_message.setText(str(exc))
+                return
+            point = self.project.points[point_tag]
+            self.viewport.set_geometry_sketch_plane_offset_from_point(
+                point.xyz
+            )
+            self._geometry_surface_point_tags = [point_tag]
+            if changed:
+                self.model = self.project.model
+                self._refresh_all(
+                    f"Rectangle corner Point {point_tag}"
+                )
+                self._record_project_change(
+                    f"Sketch Geometry Point {point_tag}",
+                    before,
+                )
+            self.viewport.show_geometry_sketch_preview([point.xyz])
+            self.status_message.setText(
+                f"Rectangle first corner P{point_tag} · "
+                "click opposite corner"
+            )
+            return
+
+        first_tag = int(self._geometry_surface_point_tags[0])
+        before = self.project.to_dict()
+        try:
+            opposite_tag, changed = (
+                self._materialize_geometry_sketch_point(snap)
+            )
+            if opposite_tag == first_tag:
+                raise ValueError(
+                    "Rectangle diagonal corners must be different."
+                )
+            first = self.project.points[first_tag].xyz
+            opposite = self.project.points[opposite_tag].xyz
+            corners = self._rectangle_corners_from_diagonal(
+                first,
+                opposite,
+            )
+            tolerance = self._geometry_sketch_tolerance()
+            edge_u = math.sqrt(sum(
+                (corners[1][axis] - corners[0][axis]) ** 2
+                for axis in range(3)
+            ))
+            edge_v = math.sqrt(sum(
+                (corners[3][axis] - corners[0][axis]) ** 2
+                for axis in range(3)
+            ))
+            if edge_u <= tolerance or edge_v <= tolerance:
+                raise ValueError(
+                    "Rectangle requires non-zero width and height."
+                )
+
+            corner_tags = [first_tag]
+            for xyz in corners[1:]:
+                tag = self._find_geometry_point_near(xyz)
+                if tag is None:
+                    tag = self.project.next_point_tag()
+                    self.project.add_point(
+                        PointGeometryData(
+                            tag,
+                            f"Point {tag}",
+                            xyz,
+                        )
+                    )
+                    changed = True
+                corner_tags.append(int(tag))
+
+            surface_tag = self.project.next_surface_tag()
+            self.project.add_surface(
+                SurfaceGeometryData(
+                    tag=surface_tag,
+                    name=f"Surface {surface_tag}",
+                    surface_type="Rectangle",
+                    points=tuple(
+                        self.project.points[tag].xyz
+                        for tag in corner_tags
+                    ),
+                    mesh_recipe_configured=False,
+                    section_tag=None,
+                    corner_point_tags=tuple(corner_tags),
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            self.status_message.setText(str(exc))
+            return
+
+        self._geometry_surface_point_tags = []
+        self._refresh_geometry_sketch_snap_cache()
+        self.model = self.project.model
+        self._refresh_all(
+            f"Drawn Geometry Surface {surface_tag}"
+        )
+        self._record_project_change(
+            f"Draw Geometry Rectangle Surface {surface_tag}",
+            before,
+        )
+        self.viewport.clear_geometry_sketch_preview(render=False)
+        self.status_message.setText(
+            f"Created Surface {surface_tag} · "
+            "click first corner for another rectangle · "
+            "right-click to finish"
+        )
+
+    def _viewport_geometry_sketch_moved(
+        self,
+        payload: object,
+    ) -> None:
+        if not isinstance(payload, dict):
+            return
+        snap = self._geometry_sketch_snap(payload)
+        if snap is None:
+            return
+        xyz = snap["xyz"]
+        label = str(snap.get("label") or "")
+
+        line_action = self.actions.get("line_geometry_pick")
+        if line_action is not None and line_action.isChecked():
+            if self._geometry_line_point_tags:
+                anchor = self.project.points.get(
+                    int(self._geometry_line_point_tags[-1])
+                )
+                if anchor is not None:
+                    self.viewport.show_geometry_sketch_preview(
+                        [anchor.xyz],
+                        cursor=xyz,
+                        snap_label=label,
+                    )
+                    return
+            self.viewport.show_geometry_sketch_preview(
+                [],
+                cursor=xyz,
+                snap_label=label,
+            )
+            return
+
+        surface_action = self.actions.get("surface_geometry_pick")
+        if surface_action is not None and surface_action.isChecked():
+            if self._geometry_surface_point_tags:
+                first = self.project.points.get(
+                    int(self._geometry_surface_point_tags[0])
+                )
+                if first is not None:
+                    corners = self._rectangle_corners_from_diagonal(
+                        first.xyz,
+                        xyz,
+                    )
+                    self.viewport.show_geometry_sketch_preview(
+                        corners,
+                        closed=True,
+                    )
+                    return
+            self.viewport.show_geometry_sketch_preview(
+                [],
+                cursor=xyz,
+                snap_label=label,
+            )
+
     def _viewport_entity_clicked(self, payload: object) -> None:
         if not isinstance(payload, dict):
             return
@@ -5460,46 +6019,7 @@ class MainWindow(QMainWindow):
             line_pick_action is not None
             and line_pick_action.isChecked()
         ):
-            if kind != "geometry_point" or tag is None:
-                self.status_message.setText(
-                    "Create Geometry Line: click a Geometry Point"
-                )
-                return
-
-            point_tag = int(tag)
-            if point_tag in self._geometry_line_point_tags:
-                self.status_message.setText(
-                    "Create Geometry Line: choose a different second Point"
-                )
-                return
-
-            self._geometry_line_point_tags.append(point_tag)
-            self.viewport.show_geometry_pick_preview(
-                self._geometry_line_point_tags
-            )
-            if len(self._geometry_line_point_tags) < 2:
-                self.status_message.setText(
-                    f"Create Geometry Line: Point {point_tag} selected · "
-                    "click the second Point"
-                )
-                return
-
-            point_i, point_j = self._geometry_line_point_tags
-            self._geometry_line_point_tags = []
-            self.viewport.clear_geometry_pick_preview(render=False)
-            created = self._create_line_geometry_from_points(
-                point_i,
-                point_j,
-            )
-            if line_pick_action.isChecked():
-                self.status_message.setText(
-                    (
-                        f"Created Geometry Line from P{point_i} → P{point_j} · "
-                        if created is not None
-                        else "Line creation cancelled · "
-                    )
-                    + "click another first Point"
-                )
+            self._handle_geometry_line_sketch_click(payload)
             return
 
         surface_pick_action = self.actions.get(
@@ -5509,45 +6029,7 @@ class MainWindow(QMainWindow):
             surface_pick_action is not None
             and surface_pick_action.isChecked()
         ):
-            if kind != "geometry_point" or tag is None:
-                self.status_message.setText(
-                    "Create Geometry Surface: click a Geometry Point"
-                )
-                return
-
-            point_tag = int(tag)
-            if point_tag in self._geometry_surface_point_tags:
-                self.status_message.setText(
-                    "Create Geometry Surface: each corner must be different"
-                )
-                return
-
-            self._geometry_surface_point_tags.append(point_tag)
-            count = len(self._geometry_surface_point_tags)
-            self.viewport.show_geometry_pick_preview(
-                self._geometry_surface_point_tags,
-                closed=(count == 4),
-            )
-            if count < 4:
-                self.status_message.setText(
-                    f"Create Geometry Surface: corner {count}/4 = "
-                    f"Point {point_tag} · click corner {count + 1}"
-                )
-                return
-
-            picked = list(self._geometry_surface_point_tags)
-            self._geometry_surface_point_tags = []
-            self.viewport.clear_geometry_pick_preview(render=False)
-            created = self._create_surface_geometry_from_points(picked)
-            if surface_pick_action.isChecked():
-                self.status_message.setText(
-                    (
-                        "Created Geometry Surface · "
-                        if created is not None
-                        else "Surface creation cancelled · "
-                    )
-                    + "click corner 1 of 4"
-                )
+            self._handle_geometry_rectangle_sketch_click(payload)
             return
 
         if kind == "geometry_surface" and tag is not None:
