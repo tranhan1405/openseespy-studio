@@ -15423,28 +15423,41 @@ class MainWindow(QMainWindow):
             surface = self.project.surfaces.get(tag)
             if surface is None:
                 return
-            properties = menu.addAction("Properties")
+            live_mesh = any(
+                element_tag in self.model.elements
+                for element_tag in surface.generated_element_tags
+            )
+            properties = menu.addAction("Properties / Mesh Quality")
             properties.triggered.connect(
                 lambda checked=False, t=tag:
                 self._show_surface_geometry_properties(t)
             )
-            edit = menu.addAction("Edit Surface...")
-            edit.setEnabled(not any(
-                element_tag in self.model.elements
-                for element_tag in surface.generated_element_tags
-            ))
+            edit = menu.addAction("Edit Surface / Mesh Settings...")
             edit.triggered.connect(
                 lambda checked=False, t=tag:
                 self._edit_surface_geometry(t)
             )
-            mesh = menu.addAction("Generate Surface Mesh...")
-            mesh.setEnabled(not any(
-                element_tag in self.model.elements
-                for element_tag in surface.generated_element_tags
-            ))
-            mesh.triggered.connect(
+            if live_mesh:
+                remesh = menu.addAction("Remesh Surface")
+                remesh.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._remesh_surface_geometry(t)
+                )
+                delete_mesh = menu.addAction("Delete Generated Mesh")
+                delete_mesh.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._delete_surface_mesh(t)
+                )
+            else:
+                mesh = menu.addAction("Generate Surface Mesh...")
+                mesh.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._mesh_surface_geometry(t)
+                )
+            flip = menu.addAction("Flip Surface Normal")
+            flip.triggered.connect(
                 lambda checked=False, t=tag:
-                self._mesh_surface_geometry(t)
+                self._flip_surface_normal(t)
             )
             menu.addSeparator()
             delete = menu.addAction("Delete Surface")
