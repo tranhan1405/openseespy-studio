@@ -9,6 +9,7 @@ from openseespy_studio.generator import section_to_openseespy, to_openseespy
 from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.model import SHELL_ELEMENT_TYPES, StructuralModel
 from openseespy_studio.project import ProjectDatabase, SectionData
+from openseespy_studio.shell_mesh import ShellMeshSpec, build_shell_mesh
 from openseespy_studio.ui.main_window import MainWindow
 from openseespy_studio.ui.viewport import ModelViewport
 from openseespy_studio.validation import validate_project
@@ -256,4 +257,74 @@ def test_shell_generated_script_round_trips_through_importer():
     assert element.node_tags() == (1, 2, 3, 4)
     assert element.section_tag == 7
     assert element.shell_corotational is True
+
+
+def test_structured_shell_mesh_reuses_corners_and_builds_quads():
+    model = StructuralModel("mesh", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 4.0, 0.0, 0.0)
+    model.add_node(3, 4.0, 2.0, 0.0)
+    model.add_node(4, 0.0, 2.0, 0.0)
+    project = ProjectDatabase(name="mesh", model=model)
+    project.add_section(_shell_section())
+
+    result = build_shell_mesh(
+        project,
+        ShellMeshSpec(
+            corner_nodes=(1, 2, 3, 4),
+            divisions_u=2,
+            divisions_v=2,
+            formulation="ASDShellQ4",
+            section_tag=7,
+        ),
+    )
+
+    assert len(result.element_tags) == 4
+    assert len(result.node_tags) == 5
+    assert len(project.model.nodes) == 9
+    assert len(project.model.elements) == 4
+    assert result.grid[0][0] == 1
+    assert result.grid[0][-1] == 2
+    assert result.grid[-1][-1] == 3
+    assert result.grid[-1][0] == 4
+
+    center = project.model.nodes[result.grid[1][1]]
+    assert center.xyz == pytest.approx((2.0, 1.0, 0.0))
+
+    for element in project.model.elements.values():
+        assert element.element_type == "ASDShellQ4"
+        assert len(element.node_tags()) == 4
+        assert element.section_tag == 7
+
+
+def test_structured_shell_mesh_handles_warped_surface_bilinearly():
+    model = StructuralModel("warped", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 2.0, 0.0, 0.0)
+    model.add_node(3, 2.0, 2.0, 1.0)
+    model.add_node(4, 0.0, 2.0, 0.0)
+    project = ProjectDatabase(name="warped", model=model)
+    project.add_section(_shell_section())
+
+    result = build_shell_mesh(
+        project,
+        ShellMeshSpec(
+            corner_nodes=(1, 2, 3, 4),
+            divisions_u=2,
+            divisions_v=2,
+            formulation="ASDShellQ4",
+            section_tag=7,
+        ),
+    )
+
+    center = project.model.nodes[result.grid[1][1]]
+    assert center.xyz == pytest.approx((1.0, 1.0, 0.25))
+
+
+def test_shell_mesh_ui_route_is_exposed():
+    source = inspect.getsource(MainWindow._create_shell_mesh)
+    assert "_ensure_node_count(4" in source
+    assert "_create_shell_section" in source
+    assert "ShellMeshDialog" in source
+    assert "build_shell_mesh" in source
 
