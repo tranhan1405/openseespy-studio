@@ -8792,9 +8792,13 @@ class MainWindow(QMainWindow):
 
         before = self.project.to_dict()
         try:
-            updated = self.model.reverse_shell_orientation(shell_tags)
-            for tag in updated:
-                self.project.validate_element_state(tag)
+            result = (
+                self.project.reverse_shell_orientation_preserving_pressure(
+                    shell_tags
+                )
+            )
+            updated = result["element_tags"]
+            pressure_loads = result["pressure_load_tags"]
         except (TypeError, ValueError) as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
@@ -8806,8 +8810,14 @@ class MainWindow(QMainWindow):
             )
             return
 
+        pressure_text = (
+            f" · preserved {len(pressure_loads)} surface pressure load(s)"
+            if pressure_loads
+            else ""
+        )
         self._refresh_all(
             f"Reversed surface normal for {len(updated)} shell element(s)"
+            f"{pressure_text}"
         )
         self.selection.set_selection(elements=set(updated))
         self._record_project_change(
