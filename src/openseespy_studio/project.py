@@ -5535,6 +5535,47 @@ class ProjectDatabase:
                         f"for ndf={self.model.ndf}."
                     )
 
+        if result.result_type == "ShellForce":
+            allowed_components = {
+                "Nxx", "Nyy", "Nxy",
+                "Mxx", "Myy", "Mxy",
+                "Qx", "Qy",
+            }
+            component = str(
+                result.settings.get("component", "Nxx")
+            )
+            if component not in allowed_components:
+                raise ValueError(
+                    f"Unsupported ShellForce component {component!r}."
+                )
+            scope = (
+                list(result.element_scope)
+                if result.element_scope
+                else [
+                    tag
+                    for tag, element in self.model.elements.items()
+                    if element.element_type in SHELL_ELEMENT_TYPES
+                ]
+            )
+            if not scope:
+                raise ValueError(
+                    "ShellForce requires at least one Shell element."
+                )
+            incompatible = [
+                tag
+                for tag in scope
+                if (
+                    tag not in self.model.elements
+                    or self.model.elements[tag].element_type
+                    not in SHELL_ELEMENT_TYPES
+                )
+            ]
+            if incompatible:
+                raise ValueError(
+                    "ShellForce requires Shell element tag(s): "
+                    + ", ".join(map(str, incompatible))
+                )
+
         if result.result_type == "SectionResponse":
             if len(result.element_scope) != 1:
                 raise ValueError(
