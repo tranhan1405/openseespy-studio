@@ -5186,16 +5186,69 @@ class MainWindow(QMainWindow):
                 if element is None:
                     return
 
-                if (
-                    element.element_type in SHELL_ELEMENT_TYPES
-                    and property_id != "group"
-                ):
-                    raise ValueError(
-                        "Edit shell topology, formulation and section through "
-                        "'Edit Shell Definition...'."
-                    )
+                if element.element_type in SHELL_ELEMENT_TYPES:
+                    shell_direct_fields = {
+                        "group",
+                        "section_tag",
+                        "shell_corotational",
+                        "shell_local_x",
+                        "shell_no_eas",
+                        "shell_drilling_stab",
+                        "shell_drilling_nl",
+                    }
+                    if property_id not in shell_direct_fields:
+                        raise ValueError(
+                            "Edit shell topology and formulation through "
+                            "'Edit Shell Definition...'."
+                        )
 
-                if property_id == "element_type":
+                if property_id == "shell_corotational":
+                    element.shell_corotational = (
+                        value
+                        if isinstance(value, bool)
+                        else str(value).strip().lower()
+                        in {"1", "true", "yes", "on", "corotational"}
+                    )
+                elif property_id == "shell_no_eas":
+                    element.shell_no_eas = (
+                        value
+                        if isinstance(value, bool)
+                        else str(value).strip().lower()
+                        in {"1", "true", "yes", "on", "disabled", "noeas"}
+                    )
+                elif property_id == "shell_drilling_nl":
+                    element.shell_drilling_nl = (
+                        value
+                        if isinstance(value, bool)
+                        else str(value).strip().lower()
+                        in {"1", "true", "yes", "on", "enabled"}
+                    )
+                elif property_id == "shell_drilling_stab":
+                    text = str(value).strip().lower()
+                    element.shell_drilling_stab = (
+                        None
+                        if text in {"", "default", "auto", "none"}
+                        else float(text)
+                    )
+                elif property_id == "shell_local_x":
+                    text = str(value).strip()
+                    if text.lower() in {"", "auto", "default", "none"}:
+                        element.shell_local_x = None
+                    else:
+                        parts = [
+                            part.strip()
+                            for chunk in text.replace(";", ",").split(",")
+                            for part in chunk.split()
+                            if part.strip()
+                        ]
+                        if len(parts) != 3:
+                            raise ValueError(
+                                "Shell local X requires three values or 'auto'."
+                            )
+                        element.shell_local_x = tuple(
+                            float(part) for part in parts
+                        )
+                elif property_id == "element_type":
                     new_type = str(value)
                     if new_type not in {
                         "elasticBeamColumn",
@@ -5540,6 +5593,17 @@ class MainWindow(QMainWindow):
                         if section is not None
                         else f"{element.section_tag} (missing)"
                     )
+                shell_section_choices = []
+                for section_tag in sorted(self.project.sections):
+                    candidate = self.project.sections[section_tag]
+                    if candidate.section_type not in SHELL_SECTION_TYPES:
+                        continue
+                    shell_section_choices.append((
+                        f"{section_tag} - {candidate.name} "
+                        f"({candidate.section_type})",
+                        int(section_tag),
+                    ))
+                is_asd_shell = element.element_type == "ASDShellQ4"
                 self.properties_panel.set_properties(
                     "Shell Element",
                     [
@@ -5552,7 +5616,17 @@ class MainWindow(QMainWindow):
                             ),
                         ),
                         ("Topology", "4-node quadrilateral surface"),
-                        ("Section", section_text),
+                        (
+                            "Section",
+                            section_text,
+                            {
+                                "id": "section_tag",
+                                "editable": True,
+                                "kind": "choice",
+                                "current": element.section_tag,
+                                "choices": shell_section_choices,
+                            },
+                        ),
                         (
                             "Kinematics",
                             (
@@ -5560,6 +5634,16 @@ class MainWindow(QMainWindow):
                                 if element.shell_corotational
                                 else "Small displacement"
                             ),
+                            {
+                                "id": "shell_corotational",
+                                "editable": is_asd_shell,
+                                "kind": "choice",
+                                "current": bool(element.shell_corotational),
+                                "choices": [
+                                    ("Small displacement", False),
+                                    ("Corotational", True),
+                                ],
+                            },
                         ),
                         (
                             "Local X axis",
@@ -5569,8 +5653,13 @@ class MainWindow(QMainWindow):
                                     for value in element.shell_local_x
                                 )
                                 if element.shell_local_x is not None
-                                else "Automatic from node ordering"
+                                else "auto"
                             ),
+                            {
+                                "id": "shell_local_x",
+                                "editable": is_asd_shell,
+                                "kind": "text",
+                            },
                         ),
                         (
                             "Enhanced assumed strain",
@@ -5579,14 +5668,29 @@ class MainWindow(QMainWindow):
                                 if element.shell_no_eas
                                 else "Enabled"
                             ),
+                            {
+                                "id": "shell_no_eas",
+                                "editable": is_asd_shell,
+                                "kind": "choice",
+                                "current": bool(element.shell_no_eas),
+                                "choices": [
+                                    ("Enabled", False),
+                                    ("Disabled (-noeas)", True),
+                                ],
+                            },
                         ),
                         (
                             "Drilling stabilization",
                             (
                                 f"{element.shell_drilling_stab:g}"
                                 if element.shell_drilling_stab is not None
-                                else "OpenSees default"
+                                else "default"
                             ),
+                            {
+                                "id": "shell_drilling_stab",
+                                "editable": is_asd_shell,
+                                "kind": "text",
+                            },
                         ),
                         (
                             "Nonlinear drilling",
@@ -5595,10 +5699,28 @@ class MainWindow(QMainWindow):
                                 if element.shell_drilling_nl
                                 else "Disabled"
                             ),
+                            {
+                                "id": "shell_drilling_nl",
+                                "editable": is_asd_shell,
+                                "kind": "choice",
+                                "current": bool(element.shell_drilling_nl),
+                                "choices": [
+                                    ("Disabled", False),
+                                    ("Enabled (-drillingNL)", True),
+                                ],
+                            },
                         ),
                         ("Transformation", "Not used by Shell"),
                         ("Beam integration", "Not used by Shell"),
-                        ("Group", element.group),
+                        (
+                            "Group",
+                            element.group,
+                            {
+                                "id": "group",
+                                "editable": True,
+                                "kind": "text",
+                            },
+                        ),
                         (
                             "Edit",
                             "Right-click element → Edit Shell Definition...",
