@@ -79,6 +79,7 @@ from ..jobs import JobRecord
 from ..live_convergence import parse_opensees_convergence_line
 from ..model import StructuralModel, classify_fixity
 from ..mass_source import apply_mass_source, evaluate_mass_source
+from ..moment_curvature import build_moment_curvature_project
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
 from ..test_column import build_test_column
 from ..result_catalog import (
@@ -2268,6 +2269,16 @@ class MainWindow(QMainWindow):
         self._make_action("check_model", "Check Model", "analysis", self._check_model, "Validate the model before analysis")
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action(
+            "moment_curvature",
+            "Moment-Curvature...",
+            "analysis",
+            self._run_moment_curvature_workflow,
+            (
+                "Run an isolated zeroLengthSection section test and plot "
+                "moment versus curvature without modifying the model"
+            ),
+        )
+        self._make_action(
             "hinge_backbone",
             "Hinge Backbone...",
             "analysis",
@@ -2458,6 +2469,7 @@ class MainWindow(QMainWindow):
         menus["Analysis"].addAction(self.actions["run"])
         menus["Analysis"].addSeparator()
         research_menu = menus["Analysis"].addMenu("Research Workflows")
+        research_menu.addAction(self.actions["moment_curvature"])
         research_menu.addAction(self.actions["hinge_backbone"])
         research_menu.addAction(self.actions["calibration"])
 
@@ -2868,8 +2880,8 @@ class MainWindow(QMainWindow):
         add_group(
             analysis_page,
             "Research",
-            large=("hinge_backbone",),
-            small=("calibration", "ai_assistant"),
+            large=("moment_curvature",),
+            small=("hinge_backbone", "calibration", "ai_assistant"),
         )
         add_group(
             analysis_page,
@@ -12688,6 +12700,91 @@ class MainWindow(QMainWindow):
             return
         self._show_model_check(issues, allow_run=False)
 
+    def _run_moment_curvature_workflow(self) -> None:
+        if (
+            self._analysis_process is not None
+            and self._analysis_process.state() != QProcess.NotRunning
+        ):
+            QMessageBox.information(
+                self,
+                "Moment-Curvature",
+                "Stop the active analysis before starting a section test.",
+            )
+            return
+        if (
+            self._calibration_process is not None
+            and self._calibration_process.state() != QProcess.NotRunning
+        ):
+            QMessageBox.information(
+                self,
+                "Moment-Curvature",
+                "Stop the cyclic calibration batch before starting a "
+                "section test.",
+            )
+            return
+        if not self.project.sections:
+            QMessageBox.information(
+                self,
+                "Moment-Curvature",
+                "Create a Section first, then run Moment-Curvature.",
+            )
+            return
+
+        dialog = MomentCurvatureDialog(self.project, self)
+        if not dialog.exec():
+            return
+
+        try:
+            temporary_project = build_moment_curvature_project(
+                self.project,
+                dialog.spec(),
+            )
+            temporary_script = to_openseespy(
+                temporary_project.model,
+                temporary_project.materials,
+                temporary_project.sections,
+                temporary_project.transformations,
+                temporary_project.constraints,
+                temporary_project.connections,
+                temporary_project.time_series,
+                temporary_project.load_patterns,
+                temporary_project.nodal_loads,
+                temporary_project.analyses,
+                temporary_project.active_analysis_tag,
+                element_loads=temporary_project.element_loads,
+                prescribed_displacements=(
+                    temporary_project.prescribed_displacements
+                ),
+                recorders=temporary_project.recorders,
+                units=temporary_project.units,
+                solution_results=temporary_project.solution_results,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Moment-Curvature",
+                f"Could not build the isolated section test:\n\n{exc}",
+            )
+            return
+
+        original_project = self.project
+        original_model = self.model
+        original_script = self.script.toPlainText()
+
+        try:
+            # _start_analysis performs the normal model check, runtime
+            # material probes, Job creation and worker launch.  Swap in the
+            # isolated project only for that synchronous setup phase.
+            self.project = temporary_project
+            self.model = temporary_project.model
+            self.script.setPlainText(temporary_script)
+            self._start_analysis()
+        finally:
+            self.project = original_project
+            self.model = original_model
+            self.script.setPlainText(original_script)
+            self._refresh_project_metadata()
+
     def _open_hinge_backbone(self) -> None:
         dialog = HingeBackboneDialog(
             next_tag=self.project.next_material_tag(),
@@ -14199,10 +14296,11 @@ class MainWindow(QMainWindow):
                 cache_key=self._last_result_cache_key,
             )
             moment_curvature = result.get("moment_curvature", {})
-            if (
+            is_moment_curvature = (
                 isinstance(moment_curvature, dict)
                 and moment_curvature.get("kind") == "moment-curvature"
-            ):
+            )
+            if is_moment_curvature:
                 self.results_panel.show_solution_result("MomentCurvature")
                 self.results_dock.show()
                 self.results_dock.raise_()
@@ -14217,7 +14315,7 @@ class MainWindow(QMainWindow):
                         scale=1.0,
                         cache_key=self._last_result_cache_key,
                     )
-            elif result.get("final"):
+            elif result.get("final") and not is_moment_curvature:
                 self.viewport.show_deformed_shape(
                     result,
                     scale=10.0,
