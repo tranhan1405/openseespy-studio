@@ -2332,7 +2332,7 @@ class RecorderData:
             self.include_time,
             "Recorder include_time",
         )
-        if self.recorder_type in {"Section", "Fiber"}:
+        if self.recorder_type in {"Section", "Fiber", "Shell"}:
             self.section_number = _strict_int(
                 self.section_number,
                 "Recorder section number",
@@ -2360,7 +2360,9 @@ class RecorderData:
             raise ValueError("Recorder tag must be positive.")
         if not math.isfinite(self.fiber_y) or not math.isfinite(self.fiber_z):
             raise ValueError("Recorder fiber coordinates must be finite.")
-        if self.recorder_type not in {"Node", "Element", "Section", "Fiber"}:
+        if self.recorder_type not in {
+            "Node", "Element", "Section", "Fiber", "Shell"
+        }:
             raise ValueError(f"Unsupported recorder type: {self.recorder_type}")
         if not self.target_tags:
             raise ValueError("Recorder must target at least one node or element.")
@@ -2381,6 +2383,13 @@ class RecorderData:
                 raise ValueError("Unsupported Section recorder response.")
             if self.section_number < 1:
                 raise ValueError("Section recorder number must be at least 1.")
+        elif self.recorder_type == "Shell":
+            if self.response not in {"force", "deformation"}:
+                raise ValueError("Unsupported Shell recorder response.")
+            if self.section_number not in range(1, 5):
+                raise ValueError(
+                    "Shell recorder Gauss point must be in 1..4."
+                )
         elif self.recorder_type == "Fiber":
             if self.response not in {"stress", "strain", "stressStrain"}:
                 raise ValueError("Unsupported Fiber recorder response.")
@@ -4917,6 +4926,22 @@ class ProjectDatabase:
                 "Recorder references missing element tag(s): "
                 + ", ".join(map(str, missing))
             )
+        if recorder.recorder_type == "Shell":
+            incompatible = [
+                tag
+                for tag in recorder.target_tags
+                if (
+                    tag not in self.model.elements
+                    or self.model.elements[tag].element_type
+                    not in SHELL_ELEMENT_TYPES
+                )
+            ]
+            if incompatible:
+                raise ValueError(
+                    "Shell recorders require Shell element tag(s): "
+                    + ", ".join(map(str, incompatible))
+                )
+            return
         if recorder.recorder_type in {"Section", "Fiber"}:
             incompatible = [
                 tag
