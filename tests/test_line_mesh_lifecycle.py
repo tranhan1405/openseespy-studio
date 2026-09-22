@@ -1186,3 +1186,86 @@ def test_geometry_surface_context_has_no_mesh_lifecycle_commands():
     assert "Mesh / Remesh Surface" not in surface_block
     assert "Visualize Mesh Quality" not in surface_block
 
+def test_spaceclaim_style_geometry_sketch_actions_and_working_plane():
+    actions = inspect.getsource(MainWindow._build_actions_and_ribbon)
+    line_activate = inspect.getsource(
+        MainWindow._activate_geometry_line_pick_tool
+    )
+    surface_activate = inspect.getsource(
+        MainWindow._activate_geometry_surface_pick_tool
+    )
+    viewport_plane = inspect.getsource(
+        ModelViewport.geometry_workplane_point
+    )
+
+    assert '"Draw Polyline"' in actions
+    assert '"Draw Rectangle"' in actions
+    assert "Create at least two Geometry Points first" not in line_activate
+    assert "Create at least four Geometry Points first" not in surface_activate
+    assert "shell-compatible Section" not in surface_activate
+    assert 'set_interaction_tool("geometry_sketch")' in line_activate
+    assert 'set_interaction_tool("geometry_sketch")' in surface_activate
+    assert "_geometry_sketch_plane_offset" in viewport_plane
+
+
+def test_geometry_polyline_sketch_is_continuous_and_geometry_only():
+    click = inspect.getsource(
+        MainWindow._handle_geometry_line_sketch_click
+    )
+    draw = inspect.getsource(
+        MainWindow._draw_geometry_line_segment
+    )
+
+    assert "_geometry_line_point_tags = [point_j]" in click
+    assert "click next point" in click
+    assert "LineGeometryData" in draw
+    assert "mesh_recipe_configured=False" in draw
+    assert "_mesh_line_geometry" not in draw
+
+
+def test_geometry_sketch_snaps_endpoint_midpoint_and_intersection():
+    snap = inspect.getsource(MainWindow._geometry_sketch_snap)
+    materialize = inspect.getsource(
+        MainWindow._materialize_geometry_sketch_point
+    )
+
+    assert '"endpoint"' in snap
+    assert '"midpoint"' in snap
+    assert '"intersection"' in snap
+    assert "16.0 * 16.0" in snap
+    assert "split_line_geometry_at_point" in materialize
+
+
+def test_geometry_rectangle_draw_uses_two_click_geometry_only_surface():
+    rectangle = inspect.getsource(
+        MainWindow._handle_geometry_rectangle_sketch_click
+    )
+    corners = inspect.getsource(
+        MainWindow._rectangle_corners_from_diagonal
+    )
+
+    assert "opposite corner" in rectangle
+    assert "SurfaceGeometryData" in rectangle
+    assert 'surface_type="Rectangle"' in rectangle
+    assert "mesh_recipe_configured=False" in rectangle
+    assert "section_tag=None" in rectangle
+    assert 'plane == "xy"' in corners
+    assert 'plane == "xz"' in corners
+
+
+def test_geometry_sketch_has_live_preview_and_right_click_finish():
+    wire = inspect.getsource(MainWindow._wire_selection)
+    moved = inspect.getsource(
+        MainWindow._viewport_geometry_sketch_moved
+    )
+    preview = inspect.getsource(
+        ModelViewport.show_geometry_sketch_preview
+    )
+    event_filter = inspect.getsource(ModelViewport.eventFilter)
+
+    assert "geometry_sketch_moved.connect" in wire
+    assert "geometry_sketch_finished.connect" in wire
+    assert "show_geometry_sketch_preview" in moved
+    assert "_geometry_sketch_preview" in preview
+    assert "geometry_sketch_finished.emit()" in event_filter
+
