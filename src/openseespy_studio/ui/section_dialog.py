@@ -1846,13 +1846,20 @@ class SectionDialog(QDialog):
         self._refresh_frp_material_combo(select_tag)
         self._update_fiber_outputs()
 
-    def _create_staged_material(self) -> None:
+    def _create_staged_material(
+        self,
+        material_type: str | None = None,
+    ) -> None:
         dialog = MaterialDialog(
             next_tag=self._next_material_tag(),
             units=self.unit_system.as_mapping(),
             materials=self.materials,
             parent=self,
         )
+        if material_type is not None:
+            index = dialog.material_type.findData(str(material_type))
+            if index >= 0:
+                dialog.material_type.setCurrentIndex(index)
         if not dialog.exec():
             return
         try:
@@ -2154,7 +2161,19 @@ class SectionDialog(QDialog):
         frp_form = QFormLayout()
         self.frp_material_combo = QComboBox()
         self._refresh_frp_material_combo()
-        frp_form.addRow("FRP-confined concrete:", self.frp_material_combo)
+        frp_material_holder = QWidget()
+        frp_material_row = QHBoxLayout(frp_material_holder)
+        frp_material_row.setContentsMargins(0, 0, 0, 0)
+        frp_material_row.setSpacing(6)
+        frp_material_row.addWidget(self.frp_material_combo, 1)
+        new_frp_material = QPushButton("New FRP Material...")
+        new_frp_material.clicked.connect(
+            lambda: self._create_staged_material(
+                "FRPConfinedConcrete02"
+            )
+        )
+        frp_material_row.addWidget(new_frp_material)
+        frp_form.addRow("FRP-confined concrete:", frp_material_holder)
         frp_layout.addLayout(frp_form)
 
         wizard_row = QHBoxLayout()
