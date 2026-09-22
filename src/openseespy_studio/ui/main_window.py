@@ -13802,22 +13802,26 @@ class MainWindow(QMainWindow):
         point_j = self.project.points.get(line.point_j)
         state = inspect_line_mesh_state(self.project, tag)
         live_elements = list(state.live_element_tags)
-        recipe = line.element_type
-        if line.element_family == "Frame":
-            recipe += (
-                f" · Section {line.section_tag} · "
-                f"Transformation {line.transformation_tag}"
+        if line.mesh_recipe_configured:
+            recipe = line.element_type
+            if line.element_family == "Frame":
+                recipe += (
+                    f" · Section {line.section_tag} · "
+                    f"Transformation {line.transformation_tag}"
+                )
+            else:
+                recipe += (
+                    f" · Material {line.material_tag} · A={line.area:g}"
+                )
+            sizing = (
+                f"Target size {line.target_size:g}"
+                if line.mesh_mode == "target_size"
+                and line.target_size is not None
+                else f"{line.divisions} division(s)"
             )
         else:
-            recipe += (
-                f" · Material {line.material_tag} · A={line.area:g}"
-            )
-        sizing = (
-            f"Target size {line.target_size:g}"
-            if line.mesh_mode == "target_size"
-            and line.target_size is not None
-            else f"{line.divisions} division(s)"
-        )
+            recipe = "Not configured"
+            sizing = "Not configured"
         self.properties_panel.set_properties(
             "Geometry Line",
             [
@@ -13833,8 +13837,13 @@ class MainWindow(QMainWindow):
                     f"{line.point_j} - {point_j.name}"
                     if point_j is not None else f"{line.point_j} (missing)",
                 ),
-                ("FE family", line.element_family),
-                ("FE recipe", recipe),
+                (
+                    "FE family",
+                    line.element_family
+                    if line.mesh_recipe_configured
+                    else "-",
+                ),
+                ("Mesh recipe", recipe),
                 ("Mesh sizing", sizing),
                 ("Mesh bias", f"{line.bias:g}"),
                 (
@@ -14297,21 +14306,34 @@ class MainWindow(QMainWindow):
                 "Shell Section",
                 (
                     f"{section.tag} - {section.name}"
-                    if section is not None else "Not assigned"
+                    if (
+                        surface.mesh_recipe_configured
+                        and section is not None
+                    )
+                    else "Not configured"
                 ),
             ),
-            ("Formulation", surface.formulation),
+            (
+                "Formulation",
+                surface.formulation
+                if surface.mesh_recipe_configured
+                else "-",
+            ),
             (
                 "Mesh sizing",
                 (
-                    f"Target size {surface.target_size:g}"
-                    if (
-                        surface.mesh_mode == "target_size"
-                        and surface.target_size is not None
-                    )
+                    "Not configured"
+                    if not surface.mesh_recipe_configured
                     else (
-                        f"{surface.divisions_u} × "
-                        f"{surface.divisions_v} divisions"
+                        f"Target size {surface.target_size:g}"
+                        if (
+                            surface.mesh_mode == "target_size"
+                            and surface.target_size is not None
+                        )
+                        else (
+                            f"{surface.divisions_u} × "
+                            f"{surface.divisions_v} divisions"
+                        )
                     )
                 ),
             ),
