@@ -235,6 +235,8 @@ def test_surface_context_has_batch_section_preview_and_conformity_commands():
     assert "Assign Shell Section" in source
     assert "Preview Mesh" in source
     assert "Audit Shared-Edge Conformity" in source
+    assert "Audit Mesh Integrity" in source
+    assert "_audit_surface_mesh_integrity" in source
     assert "_assign_shell_section_to_surfaces" in source
     assert "_preview_surface_meshes" in source
     assert "_audit_surface_conformity" in source

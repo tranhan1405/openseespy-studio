@@ -16,8 +16,11 @@ from openseespy_studio.shell_quality import (
     shell_mesh_quality_summary,
 )
 from openseespy_studio.surface_mesher import (
+    audit_surface_mesh_integrity,
+    delete_surface_geometry,
     delete_surface_mesh,
     flip_surface_orientation,
+    inspect_surface_mesh_state,
     mesh_surface_geometry,
     rectangle_surface_points,
     remesh_surface_geometry,
@@ -187,6 +190,120 @@ def test_delete_surface_mesh_refuses_named_selection_dependency():
         delete_surface_mesh(project, 1)
 
     assert all(tag in project.model.elements for tag in mesh.element_tags)
+
+
+def test_surface_mesh_ownership_guard_refuses_foreign_tracked_element():
+    project = _project()
+    project.add_surface(
+        SurfaceGeometryData(
+            1,
+            "Panel",
+            points=rectangle_surface_points((0, 0, 0), 2, 1),
+            section_tag=7,
+        )
+    )
+    mesh = mesh_surface_geometry(project, 1)
+    project.model.elements[mesh.element_tags[0]].group = "manual-shell"
+
+    with pytest.raises(ValueError, match=r"ownership is inconsistent"):
+        delete_surface_mesh(project, 1)
+
+    assert mesh.element_tags[0] in project.model.elements
+    assert project.surfaces[1].generated_element_tags == mesh.element_tags
+
+
+def test_delete_surface_geometry_cascades_owned_mesh_without_orphans():
+    project = _project()
+    project.add_surface(
+        SurfaceGeometryData(
+            1,
+            "Panel",
+            points=rectangle_surface_points((0, 0, 0), 2, 1),
+            section_tag=7,
+            divisions_u=2,
+            divisions_v=1,
+        )
+    )
+    mesh = mesh_surface_geometry(project, 1)
+
+    deleted = delete_surface_geometry(project, 1)
+
+    assert 1 not in project.surfaces
+    assert set(mesh.element_tags).isdisjoint(project.model.elements)
+    assert deleted.removed_element_tags == mesh.element_tags
+    assert not any(
+        element.group == "surface:1"
+        for element in project.model.elements.values()
+    )
+
+
+def test_delete_surface_geometry_rolls_back_when_mesh_has_dependencies():
+    project = _project()
+    project.add_surface(
+        SurfaceGeometryData(
+            1,
+            "Panel",
+            points=rectangle_surface_points((0, 0, 0), 2, 1),
+            section_tag=7,
+        )
+    )
+    mesh = mesh_surface_geometry(project, 1)
+    project.selection_sets["keep-shell"] = SelectionSetData(
+        "keep-shell",
+        element_tags={mesh.element_tags[0]},
+    )
+
+    with pytest.raises(ValueError, match=r"named selection"):
+        delete_surface_geometry(project, 1)
+
+    assert 1 in project.surfaces
+    assert all(tag in project.model.elements for tag in mesh.element_tags)
+
+
+def test_surface_mesh_state_reports_healthy_and_stale_tracking():
+    project = _project()
+    project.add_surface(
+        SurfaceGeometryData(
+            1,
+            "Panel",
+            points=rectangle_surface_points((0, 0, 0), 2, 1),
+            section_tag=7,
+        )
+    )
+    mesh = mesh_surface_geometry(project, 1)
+
+    healthy = inspect_surface_mesh_state(project, 1)
+    assert healthy.status == "meshed"
+    assert healthy.healthy is True
+    assert healthy.issue_count == 0
+
+    project.model.elements.pop(mesh.element_tags[0])
+    stale = inspect_surface_mesh_state(project, 1)
+    assert stale.status == "stale"
+    assert stale.healthy is False
+    assert mesh.element_tags[0] in stale.missing_element_tags
+
+
+def test_surface_mesh_integrity_audit_finds_owned_but_untracked_elements():
+    project = _project()
+    for tag, x in ((1, 0.0), (2, 3.0)):
+        project.add_surface(
+            SurfaceGeometryData(
+                tag,
+                f"S{tag}",
+                points=rectangle_surface_points((x, 0, 0), 2, 1),
+                section_tag=7,
+            )
+        )
+        mesh_surface_geometry(project, tag)
+
+    rogue = project.surfaces[1].generated_element_tags.pop()
+    report = audit_surface_mesh_integrity(project, [1, 2])
+
+    assert report.surface_count == 2
+    assert report.healthy is False
+    assert [state.surface_tag for state in report.stale_states] == [1]
+    assert rogue in report.stale_states[0].untracked_owned_element_tags
 
 
 def test_remesh_surface_replaces_generated_mesh_atomically():
@@ -360,5 +477,12 @@ def test_surface_context_exposes_lifecycle_orientation_and_quality_tools():
     assert "Worst aspect ratio" in properties
     assert "Worst skew" in properties
     assert "Worst warpage" in properties
+    assert "Mesh integrity" in properties
+    assert "delete_surface_geometry" in inspect.getsource(
+        MainWindow._delete_surface_geometry
+    )
+    assert "Generated Shell mesh will be deleted with the Surface" in inspect.getsource(
+        MainWindow._delete_surface_geometry
+    )
     assert "Corotational" in properties
     assert "Topology" in properties

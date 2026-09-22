@@ -95,10 +95,13 @@ from ..result_catalog import (
 from ..shell_mesh import build_shell_mesh
 from ..surface_mesher import (
     audit_surface_conformity,
+    audit_surface_mesh_integrity,
+    delete_surface_geometry,
     delete_surface_mesh,
     flip_surface_orientation,
     mesh_surface_geometry,
     remesh_surface_geometry,
+    inspect_surface_mesh_state,
     surface_preview_divisions,
     surface_unit_normal,
 )
@@ -8068,6 +8071,70 @@ class MainWindow(QMainWindow):
             f"edge(s), {len(report.issues)} issue(s)"
         )
 
+    def _audit_surface_mesh_integrity(
+        self,
+        surface_tags=None,
+    ) -> None:
+        tags = (
+            sorted({
+                int(tag)
+                for tag in surface_tags
+                if int(tag) in self.project.surfaces
+            })
+            if surface_tags is not None
+            else sorted(self.project.surfaces)
+        )
+        if not tags:
+            return
+
+        report = audit_surface_mesh_integrity(self.project, tags)
+        rows = [
+            ("Surfaces checked", report.surface_count),
+            ("Stale meshes", len(report.stale_states)),
+            (
+                "Status",
+                "Healthy" if report.healthy else "Review required",
+            ),
+        ]
+        for state in report.stale_states[:12]:
+            details = []
+            if state.missing_element_tags:
+                details.append(
+                    f"{len(state.missing_element_tags)} missing element(s)"
+                )
+            if state.foreign_element_tags:
+                details.append(
+                    f"{len(state.foreign_element_tags)} foreign element(s)"
+                )
+            if state.untracked_owned_element_tags:
+                details.append(
+                    f"{len(state.untracked_owned_element_tags)} "
+                    "owned/untracked element(s)"
+                )
+            if state.missing_node_tags:
+                details.append(
+                    f"{len(state.missing_node_tags)} missing node(s)"
+                )
+            rows.append((
+                f"Surface {state.surface_tag}",
+                "; ".join(details) or "Stale tracking",
+            ))
+        if len(report.stale_states) > 12:
+            rows.append((
+                "More",
+                f"{len(report.stale_states) - 12} additional stale Surface(s)",
+            ))
+
+        self.properties_panel.set_properties(
+            "Surface Mesh Integrity Audit",
+            rows,
+        )
+        self.properties_dock.raise_()
+        self.status_message.setText(
+            f"Surface mesh integrity audit: {report.surface_count} checked · "
+            f"{len(report.stale_states)} stale"
+        )
+
     def _create_surface_pressure_for_surfaces(
         self,
         surface_tags,
@@ -11409,16 +11476,14 @@ class MainWindow(QMainWindow):
         surface = self.project.surfaces.get(int(tag))
         if surface is None:
             return
-        live_mesh = [
-            element_tag
-            for element_tag in surface.generated_element_tags
-            if element_tag in self.model.elements
-        ]
+        state = inspect_surface_mesh_state(self.project, int(tag))
         message = f"Delete geometry Surface {tag} ({surface.name})?"
-        if live_mesh:
+        if state.live_element_tags:
             message += (
-                "\n\nGenerated Shell elements will be kept as ordinary "
-                "FE elements; only the reusable geometry object is removed."
+                "\n\nGenerated Shell mesh will be deleted with the Surface. "
+                "Shared or externally used FE nodes are kept. Existing loads, "
+                "recorders, result requests or named selections referencing "
+                "the generated elements will block deletion."
             )
         answer = QMessageBox.question(
             self,
@@ -11429,9 +11494,24 @@ class MainWindow(QMainWindow):
         )
         if answer != QMessageBox.Yes:
             return
+
         before = self.project.to_dict()
-        self.project.remove_surface(tag)
-        self._refresh_all(f"Deleted surface geometry {tag}")
+        try:
+            deleted = delete_surface_geometry(self.project, tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Delete Surface", str(exc))
+            return
+
+        self.model = self.project.model
+        self._refresh_all(
+            f"Deleted Surface {tag} · "
+            f"{len(deleted.removed_element_tags)} Shell element(s) · "
+            f"{len(deleted.removed_node_tags)} generated node(s) removed · "
+            f"{len(deleted.kept_node_tags)} shared/external node(s) kept"
+        )
         self._record_project_change(
             f"Delete surface geometry {tag}",
             before,
@@ -11446,11 +11526,11 @@ class MainWindow(QMainWindow):
             if surface.section_tag is not None
             else None
         )
-        live_elements = [
-            element_tag
-            for element_tag in surface.generated_element_tags
-            if element_tag in self.model.elements
-        ]
+        mesh_state = inspect_surface_mesh_state(
+            self.project,
+            int(tag),
+        )
+        live_elements = list(mesh_state.live_element_tags)
         try:
             normal = surface_unit_normal(surface)
             normal_text = ", ".join(f"{value:.4g}" for value in normal)
@@ -11512,7 +11592,27 @@ class MainWindow(QMainWindow):
                 "Mesh status",
                 (
                     f"Meshed · {len(live_elements)} Shell element(s)"
-                    if live_elements else "Unmeshed"
+                    if mesh_state.status == "meshed"
+                    else (
+                        "Unmeshed"
+                        if mesh_state.status == "unmeshed"
+                        else "Stale · review required"
+                    )
+                ),
+            ),
+            (
+                "Mesh integrity",
+                (
+                    "OK"
+                    if mesh_state.healthy
+                    else (
+                        f"{mesh_state.issue_count} tracking issue(s) · "
+                        f"{len(mesh_state.missing_element_tags)} missing E · "
+                        f"{len(mesh_state.foreign_element_tags)} foreign E · "
+                        f"{len(mesh_state.untracked_owned_element_tags)} "
+                        "untracked E · "
+                        f"{len(mesh_state.missing_node_tags)} missing N"
+                    )
                 ),
             ),
         ]
@@ -15954,6 +16054,11 @@ class MainWindow(QMainWindow):
             clear_preview = menu.addAction("Clear Mesh Preview")
             clear_preview.triggered.connect(
                 self._clear_surface_mesh_preview
+            )
+            integrity = menu.addAction("Audit Mesh Integrity")
+            integrity.triggered.connect(
+                lambda checked=False, tags=tuple(surface_tags):
+                self._audit_surface_mesh_integrity(tags)
             )
 
             if count >= 2:

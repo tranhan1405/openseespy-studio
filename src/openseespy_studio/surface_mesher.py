@@ -50,6 +50,46 @@ class SurfaceConformityReport:
 
 
 @dataclass(slots=True)
+class SurfaceMeshState:
+    surface_tag: int
+    status: str
+    tracked_element_tags: list[int] = field(default_factory=list)
+    live_element_tags: list[int] = field(default_factory=list)
+    missing_element_tags: list[int] = field(default_factory=list)
+    foreign_element_tags: list[int] = field(default_factory=list)
+    untracked_owned_element_tags: list[int] = field(default_factory=list)
+    tracked_node_tags: list[int] = field(default_factory=list)
+    missing_node_tags: list[int] = field(default_factory=list)
+
+    @property
+    def healthy(self) -> bool:
+        return self.status in {"unmeshed", "meshed"}
+
+    @property
+    def issue_count(self) -> int:
+        return (
+            len(self.missing_element_tags)
+            + len(self.foreign_element_tags)
+            + len(self.untracked_owned_element_tags)
+            + len(self.missing_node_tags)
+        )
+
+
+@dataclass(slots=True)
+class SurfaceMeshIntegrityReport:
+    surface_count: int
+    states: list[SurfaceMeshState] = field(default_factory=list)
+
+    @property
+    def stale_states(self) -> list[SurfaceMeshState]:
+        return [state for state in self.states if not state.healthy]
+
+    @property
+    def healthy(self) -> bool:
+        return not self.stale_states
+
+
+@dataclass(slots=True)
 class SurfaceMeshResult:
     surface_tag: int
     corner_node_tags: list[int] = field(default_factory=list)
@@ -377,6 +417,112 @@ def _surface_node_is_externally_used(
     return False
 
 
+def inspect_surface_mesh_state(
+    project: ProjectDatabase,
+    surface_tag: int,
+) -> SurfaceMeshState:
+    """Describe whether a Surface still owns a complete generated FE mesh."""
+    tag = int(surface_tag)
+    surface = project.surfaces.get(tag)
+    if surface is None:
+        raise ValueError(f"Surface geometry {tag} does not exist.")
+
+    expected_group = f"surface:{tag}"
+    tracked_elements = sorted({
+        int(element_tag)
+        for element_tag in surface.generated_element_tags
+    })
+    live_elements = [
+        element_tag
+        for element_tag in tracked_elements
+        if element_tag in project.model.elements
+    ]
+    missing_elements = [
+        element_tag
+        for element_tag in tracked_elements
+        if element_tag not in project.model.elements
+    ]
+    foreign_elements = [
+        element_tag
+        for element_tag in live_elements
+        if project.model.elements[element_tag].group != expected_group
+    ]
+    owned_elements = sorted(
+        int(element_tag)
+        for element_tag, element in project.model.elements.items()
+        if element.group == expected_group
+    )
+    untracked_owned = [
+        element_tag
+        for element_tag in owned_elements
+        if element_tag not in tracked_elements
+    ]
+
+    tracked_nodes = sorted({
+        int(node_tag)
+        for node_tag in surface.generated_node_tags
+    })
+    missing_nodes = [
+        node_tag
+        for node_tag in tracked_nodes
+        if node_tag not in project.model.nodes
+    ]
+
+    has_tracking = bool(
+        tracked_elements
+        or tracked_nodes
+        or owned_elements
+    )
+    stale = bool(
+        missing_elements
+        or foreign_elements
+        or untracked_owned
+        or missing_nodes
+        or (has_tracking and not live_elements and not owned_elements)
+    )
+    if not has_tracking:
+        status = "unmeshed"
+    elif stale:
+        status = "stale"
+    else:
+        status = "meshed"
+
+    return SurfaceMeshState(
+        surface_tag=tag,
+        status=status,
+        tracked_element_tags=tracked_elements,
+        live_element_tags=live_elements,
+        missing_element_tags=missing_elements,
+        foreign_element_tags=foreign_elements,
+        untracked_owned_element_tags=untracked_owned,
+        tracked_node_tags=tracked_nodes,
+        missing_node_tags=missing_nodes,
+    )
+
+
+def audit_surface_mesh_integrity(
+    project: ProjectDatabase,
+    surface_tags=None,
+) -> SurfaceMeshIntegrityReport:
+    """Audit generated FE ownership/tracking for one or more Surfaces."""
+    tags = sorted(
+        int(tag)
+        for tag in (
+            project.surfaces
+            if surface_tags is None
+            else surface_tags
+        )
+        if int(tag) in project.surfaces
+    )
+    return SurfaceMeshIntegrityReport(
+        surface_count=len(tags),
+        states=[
+            inspect_surface_mesh_state(project, tag)
+            for tag in tags
+        ],
+    )
+
+
 def delete_surface_mesh(
     project: ProjectDatabase,
     surface_tag: int,
@@ -387,11 +533,27 @@ def delete_surface_mesh(
     if surface is None:
         raise ValueError(f"Surface geometry {tag} does not exist.")
 
-    live_elements = {
-        int(element_tag)
-        for element_tag in surface.generated_element_tags
-        if int(element_tag) in project.model.elements
-    }
+    state = inspect_surface_mesh_state(project, tag)
+    if state.foreign_element_tags or state.untracked_owned_element_tags:
+        details: list[str] = []
+        if state.foreign_element_tags:
+            details.append(
+                "tracked element(s) owned elsewhere: "
+                + ", ".join(map(str, state.foreign_element_tags))
+            )
+        if state.untracked_owned_element_tags:
+            details.append(
+                "owned but untracked element(s): "
+                + ", ".join(map(str, state.untracked_owned_element_tags))
+            )
+        raise ValueError(
+            "Cannot delete/remesh Surface generated FE mesh because its "
+            "tracked FE ownership is inconsistent ("
+            + "; ".join(details)
+            + "). Run Audit Mesh Integrity before changing the Surface."
+        )
+
+    live_elements = set(state.live_element_tags)
     blockers = _surface_element_dependency_blockers(
         project,
         live_elements,
@@ -432,6 +594,27 @@ def delete_surface_mesh(
         removed_node_tags=removed_nodes,
         kept_node_tags=kept_nodes,
     )
+
+
+def delete_surface_geometry(
+    project: ProjectDatabase,
+    surface_tag: int,
+) -> SurfaceMeshDeleteResult:
+    """Atomically delete a Surface together with the FE mesh it owns."""
+    tag = int(surface_tag)
+    if tag not in project.surfaces:
+        raise ValueError(f"Surface geometry {tag} does not exist.")
+
+    before = project.to_dict()
+    try:
+        deleted = delete_surface_mesh(project, tag)
+        project.remove_surface(tag)
+    except Exception:
+        restored = ProjectDatabase.from_dict(before)
+        project.__dict__.clear()
+        project.__dict__.update(restored.__dict__)
+        raise
+    return deleted
 
 
 def remesh_surface_geometry(
