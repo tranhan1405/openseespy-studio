@@ -6381,44 +6381,42 @@ class MainWindow(QMainWindow):
         self,
         snap: dict[str, object],
     ) -> tuple[int, bool]:
-        existing = snap.get("point_tag")
-        if existing is not None and int(existing) in self.project.points:
-            return int(existing), False
-
         xyz = tuple(float(value) for value in snap["xyz"])
-        near = self._find_geometry_point_near(xyz)
+        existing = snap.get("point_tag")
         changed = False
-        if near is None:
-            point_tag = self.project.next_point_tag()
-            self.project.add_point(
-                PointGeometryData(
-                    point_tag,
-                    f"Point {point_tag}",
-                    xyz,
-                )
-            )
-            changed = True
-        else:
-            point_tag = int(near)
 
-        if snap.get("line_tags"):
-            # Snap payload line tags can become stale when another snapped
-            # point is materialized first. Re-resolve topology from geometry
-            # after every split so multiple points on the same source Line
-            # and multi-Line intersections remain safe.
-            while True:
-                interior_tags = (
-                    self._geometry_lines_containing_interior_point(xyz)
-                )
-                if not interior_tags:
-                    break
-                split_line_geometry_at_point(
-                    self.project,
-                    interior_tags[0],
-                    xyz,
-                    remesh=True,
+        if existing is not None and int(existing) in self.project.points:
+            point_tag = int(existing)
+        else:
+            near = self._find_geometry_point_near(xyz)
+            if near is None:
+                point_tag = self.project.next_point_tag()
+                self.project.add_point(
+                    PointGeometryData(
+                        point_tag,
+                        f"Point {point_tag}",
+                        xyz,
+                    )
                 )
                 changed = True
+            else:
+                point_tag = int(near)
+
+        # Resolve topology from geometry, not from cached picker line tags.
+        # This remains correct if another snap has already split/replaced the
+        # originally picked Line. It also makes an existing Point embedded in
+        # a Line a true shared topology vertex.
+        while True:
+            interior_tags = self._geometry_lines_containing_interior_point(xyz)
+            if not interior_tags:
+                break
+            split_line_geometry_at_point(
+                self.project,
+                interior_tags[0],
+                xyz,
+                remesh=True,
+            )
+            changed = True
         return point_tag, changed
 
     def _existing_geometry_line_between(
