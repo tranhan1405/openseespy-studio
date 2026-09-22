@@ -983,6 +983,7 @@ class ResultsPanel(QWidget):
         self._build_mode_tab()
         self._build_node_tab()
         self._build_element_tab()
+        self._build_shell_tab()
         self._build_fiber_tab()
         self._build_hinge_tab()
         self._build_force_displacement_tab()
@@ -1102,6 +1103,19 @@ class ResultsPanel(QWidget):
             except (TypeError, ValueError):
                 pass
             self._select_tab("Member Forces")
+            return
+
+        if kind == "ShellForce":
+            component = str(options.get("component", "Nxx"))
+            tab = (
+                0
+                if component.startswith("N")
+                else 1
+                if component.startswith("M")
+                else 2
+            )
+            self.shell_detail_tabs.setCurrentIndex(tab)
+            self._select_tab("Shell Results")
             return
 
         if kind in {"FiberStress", "FiberStrain"}:
@@ -1769,6 +1783,87 @@ class ResultsPanel(QWidget):
         self.element_table.cellClicked.connect(self._element_clicked)
         layout.addWidget(self.element_table)
         self.tabs.addTab(page, "Member Forces")
+
+    def _build_shell_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+
+        self.shell_info = QLabel(
+            "Shell section resultants are averaged over available Gauss "
+            "points for contour/table summaries. The Gauss Points sub-tab "
+            "retains each integration-point response."
+        )
+        self.shell_info.setWordWrap(True)
+        layout.addWidget(self.shell_info)
+
+        self.shell_detail_tabs = CompactResultTabs()
+        self.shell_detail_tabs.setDocumentMode(True)
+        layout.addWidget(self.shell_detail_tabs, 1)
+
+        self.shell_tables: dict[str, QTableWidget] = {}
+
+        def add_summary_tab(
+            title: str,
+            components: tuple[str, ...],
+        ) -> None:
+            host = QWidget()
+            host_layout = QVBoxLayout(host)
+            host_layout.setContentsMargins(3, 3, 3, 3)
+            table = QTableWidget(0, 1 + len(components))
+            table.setHorizontalHeaderLabels(
+                ["Element", *components]
+            )
+            table.horizontalHeader().setSectionResizeMode(
+                QHeaderView.ResizeToContents
+            )
+            table.horizontalHeader().setStretchLastSection(True)
+            table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            table.setSelectionMode(QAbstractItemView.SingleSelection)
+            host_layout.addWidget(table, 1)
+            self.shell_tables[title] = table
+            self.shell_detail_tabs.addTab(host, title)
+
+        add_summary_tab("Membrane", ("Nxx", "Nyy", "Nxy"))
+        add_summary_tab("Bending", ("Mxx", "Myy", "Mxy"))
+        add_summary_tab("Shear", ("Qx", "Qy"))
+
+        gp_host = QWidget()
+        gp_layout = QVBoxLayout(gp_host)
+        gp_layout.setContentsMargins(3, 3, 3, 3)
+        self.shell_gp_table = QTableWidget(0, 10)
+        self.shell_gp_table.setHorizontalHeaderLabels(
+            [
+                "Element",
+                "GP",
+                "Nxx",
+                "Nyy",
+                "Nxy",
+                "Mxx",
+                "Myy",
+                "Mxy",
+                "Qx",
+                "Qy",
+            ]
+        )
+        self.shell_gp_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.shell_gp_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.shell_gp_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.shell_gp_table.setSelectionBehavior(
+            QAbstractItemView.SelectRows
+        )
+        gp_layout.addWidget(self.shell_gp_table, 1)
+        self.shell_detail_tabs.addTab(gp_host, "Gauss Points")
+
+        self.tabs.addTab(page, "Shell Results")
 
     def _build_fiber_tab(self) -> None:
         page = QWidget()
@@ -4581,6 +4676,7 @@ class ResultsPanel(QWidget):
         self._populate_convergence_dashboard()
         self._populate_node_table()
         self._populate_element_table()
+        self._populate_shell_results()
         self._populate_fiber_elements()
         self._populate_hinge_table()
         self._populate_history_nodes()
@@ -5113,6 +5209,130 @@ class ResultsPanel(QWidget):
         tag = item.data(Qt.UserRole)
         if tag is not None:
             self.element_selected.emit(int(tag))
+
+    def _populate_shell_results(self) -> None:
+        final = (
+            self._result.get("final", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        data = (
+            final.get("shell_section_forces", {})
+            if isinstance(final, dict)
+            else {}
+        )
+        if not isinstance(data, dict):
+            data = {}
+
+        component_names = (
+            "Nxx", "Nyy", "Nxy",
+            "Mxx", "Myy", "Mxy",
+            "Qx", "Qy",
+        )
+        groups = {
+            "Membrane": (0, 1, 2),
+            "Bending": (3, 4, 5),
+            "Shear": (6, 7),
+        }
+
+        valid_rows: list[
+            tuple[int, list[float], list[list[float]]]
+        ] = []
+        for raw_tag, payload in data.items():
+            if not isinstance(payload, dict):
+                continue
+            try:
+                tag = int(raw_tag)
+            except (TypeError, ValueError):
+                continue
+            average_raw = payload.get("average", [])
+            if (
+                not isinstance(average_raw, (list, tuple))
+                or len(average_raw) < 8
+            ):
+                continue
+            try:
+                average = [
+                    float(average_raw[index])
+                    for index in range(8)
+                ]
+            except (TypeError, ValueError):
+                continue
+
+            gp_rows: list[list[float]] = []
+            raw_gp = payload.get("gauss_points", [])
+            if isinstance(raw_gp, list):
+                for row in raw_gp:
+                    if (
+                        isinstance(row, (list, tuple))
+                        and len(row) >= 8
+                    ):
+                        try:
+                            gp_rows.append(
+                                [float(row[index]) for index in range(8)]
+                            )
+                        except (TypeError, ValueError):
+                            continue
+            valid_rows.append((tag, average, gp_rows))
+
+        valid_rows.sort(key=lambda item: item[0])
+
+        for title, indices in groups.items():
+            table = self.shell_tables[title]
+            table.setRowCount(len(valid_rows))
+            for row_index, (tag, average, _gp) in enumerate(valid_rows):
+                table.setItem(
+                    row_index,
+                    0,
+                    QTableWidgetItem(str(tag)),
+                )
+                for column, component_index in enumerate(
+                    indices,
+                    start=1,
+                ):
+                    table.setItem(
+                        row_index,
+                        column,
+                        QTableWidgetItem(
+                            f"{average[component_index]:.6g}"
+                        ),
+                    )
+
+        gp_count = sum(len(item[2]) for item in valid_rows)
+        self.shell_gp_table.setRowCount(gp_count)
+        row_index = 0
+        for tag, _average, gp_rows in valid_rows:
+            for gp_index, values in enumerate(gp_rows, start=1):
+                self.shell_gp_table.setItem(
+                    row_index,
+                    0,
+                    QTableWidgetItem(str(tag)),
+                )
+                self.shell_gp_table.setItem(
+                    row_index,
+                    1,
+                    QTableWidgetItem(str(gp_index)),
+                )
+                for component_index, value in enumerate(values):
+                    self.shell_gp_table.setItem(
+                        row_index,
+                        component_index + 2,
+                        QTableWidgetItem(f"{value:.6g}"),
+                    )
+                row_index += 1
+
+        if valid_rows:
+            self.shell_info.setText(
+                f"{len(valid_rows)} shell element(s) · "
+                f"{gp_count} available Gauss-point row(s) · "
+                "summary values are Gauss-point averages. "
+                "Components follow local shell axes."
+            )
+        else:
+            self.shell_info.setText(
+                "No shell section-force data are available in this result. "
+                "Run a non-modal analysis containing supported shell elements."
+            )
 
     def _populate_fiber_elements(self) -> None:
         previous = self.fiber_element.currentData()
