@@ -607,8 +607,14 @@ SECTION_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Elastic": ("E", "A", "Iz", "Iy", "G", "J"),
     "Fiber": ("GJ",),
     "ElasticMembranePlate": ("E", "nu", "h", "rho", "EpModifier"),
+    "PlateFiber": ("h",),
+    "LayeredShell": (),
 }
-SHELL_SECTION_TYPES = {"ElasticMembranePlate"}
+SHELL_SECTION_TYPES = {
+    "ElasticMembranePlate",
+    "PlateFiber",
+    "LayeredShell",
+}
 
 
 SECTION_DEFAULTS: dict[str, dict[str, float]] = {
@@ -630,6 +636,10 @@ SECTION_DEFAULTS: dict[str, dict[str, float]] = {
         "rho": 0.0,
         "EpModifier": 1.0,
     },
+    "PlateFiber": {
+        "h": 0.20,
+    },
+    "LayeredShell": {},
 }
 
 
@@ -947,6 +957,40 @@ class FiberComponentData:
 
 
 @dataclass
+class ShellLayerData:
+    material_tag: int
+    thickness: float
+
+    def __post_init__(self) -> None:
+        self.material_tag = _strict_int(
+            self.material_tag,
+            "Shell layer nDMaterial tag",
+        )
+        self.thickness = float(self.thickness)
+        if self.material_tag <= 0:
+            raise ValueError(
+                "Shell layer nDMaterial tag must be positive."
+            )
+        if not math.isfinite(self.thickness) or self.thickness <= 0.0:
+            raise ValueError(
+                "Shell layer thickness must be finite and positive."
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "material_tag": self.material_tag,
+            "thickness": self.thickness,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ShellLayerData":
+        return cls(
+            material_tag=data["material_tag"],
+            thickness=float(data["thickness"]),
+        )
+
+
+@dataclass
 class SectionData:
     tag: int
     name: str
@@ -956,6 +1000,8 @@ class SectionData:
     material_tag: int | None = None
     fiber_components: list[FiberComponentData] = field(default_factory=list)
     display_geometry: dict[str, Any] = field(default_factory=dict)
+    nd_material_tag: int | None = None
+    shell_layers: list[ShellLayerData] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Section tag")
@@ -998,6 +1044,39 @@ class SectionData:
                 raise ValueError(
                     "ElasticMembranePlate EpModifier must be positive."
                 )
+        if self.section_type == "PlateFiber":
+            if self.parameters["h"] <= 0.0:
+                raise ValueError(
+                    "PlateFiber thickness h must be positive."
+                )
+            self.nd_material_tag = (
+                None
+                if self.nd_material_tag is None
+                else _strict_int(
+                    self.nd_material_tag,
+                    "PlateFiber nDMaterial tag",
+                )
+            )
+            if self.nd_material_tag is None or self.nd_material_tag <= 0:
+                raise ValueError(
+                    "PlateFiber requires a valid nDMaterial tag."
+                )
+        elif self.section_type != "PlateFiber":
+            self.nd_material_tag = None
+
+        self.shell_layers = [
+            layer
+            if isinstance(layer, ShellLayerData)
+            else ShellLayerData.from_dict(dict(layer))
+            for layer in self.shell_layers
+        ]
+        if self.section_type == "LayeredShell":
+            if not self.shell_layers:
+                raise ValueError(
+                    "LayeredShell requires at least one material layer."
+                )
+        else:
+            self.shell_layers = []
         self.fibers = [
             fiber if isinstance(fiber, FiberData) else FiberData.from_dict(fiber)
             for fiber in self.fibers
@@ -1071,6 +1150,32 @@ class SectionData:
         z = sum(fiber.z * fiber.area for fiber in fibers) / total
         return total, (y, z)
 
+    def shell_nd_material_tags(self) -> set[int]:
+        if self.section_type == "PlateFiber":
+            return (
+                set()
+                if self.nd_material_tag is None
+                else {int(self.nd_material_tag)}
+            )
+        if self.section_type == "LayeredShell":
+            return {
+                int(layer.material_tag)
+                for layer in self.shell_layers
+            }
+        return set()
+
+    def shell_total_thickness(self) -> float:
+        if self.section_type == "ElasticMembranePlate":
+            return float(self.parameters["h"])
+        if self.section_type == "PlateFiber":
+            return float(self.parameters["h"])
+        if self.section_type == "LayeredShell":
+            return sum(
+                float(layer.thickness)
+                for layer in self.shell_layers
+            )
+        return 0.0
+
     def resolved_elastic_parameters(
         self,
         materials: dict[int, MaterialData] | None = None,
@@ -1106,6 +1211,11 @@ class SectionData:
                 for component in self.fiber_components
             ],
             "material_tag": self.material_tag,
+            "nd_material_tag": self.nd_material_tag,
+            "shell_layers": [
+                layer.to_dict()
+                for layer in self.shell_layers
+            ],
             "display_geometry": {
                 "shape": str(self.display_geometry.get("shape", "")),
                 "dimensions": dict(
@@ -1138,6 +1248,11 @@ class SectionData:
             ],
             material_tag=data.get("material_tag"),
             display_geometry=dict(data.get("display_geometry", {})),
+            nd_material_tag=data.get("nd_material_tag"),
+            shell_layers=[
+                ShellLayerData.from_dict(dict(item))
+                for item in data.get("shell_layers", [])
+            ],
         )
 
 
@@ -2778,6 +2893,14 @@ class ProjectDatabase:
             )
         self.nd_materials[material.tag] = material
 
+    def sections_using_nd_material(self, material_tag: int) -> list[int]:
+        target = _strict_int(material_tag, "nDMaterial tag")
+        return sorted(
+            section.tag
+            for section in self.sections.values()
+            if target in section.shell_nd_material_tags()
+        )
+
     def update_nd_material(
         self,
         original_tag: int,
@@ -2800,9 +2923,23 @@ class ProjectDatabase:
             )
         self.nd_materials.pop(original_tag)
         self.nd_materials[material.tag] = material
+        if material.tag != original_tag:
+            for section in self.sections.values():
+                if section.nd_material_tag == original_tag:
+                    section.nd_material_tag = material.tag
+                for layer in section.shell_layers:
+                    if layer.material_tag == original_tag:
+                        layer.material_tag = material.tag
 
     def remove_nd_material(self, tag: int) -> None:
         tag = _strict_int(tag, "nDMaterial tag")
+        section_users = self.sections_using_nd_material(tag)
+        if section_users:
+            raise ValueError(
+                f"nDMaterial {tag} is still referenced by Shell section(s): "
+                + ", ".join(map(str, section_users))
+                + ". Reassign those sections before deleting it."
+            )
         self.nd_materials.pop(tag, None)
 
     def next_material_tag(self) -> int:
@@ -3110,6 +3247,20 @@ class ProjectDatabase:
         self.sections.pop(tag, None)
 
     def _validate_section_materials(self, section: SectionData) -> None:
+        if section.section_type in {"PlateFiber", "LayeredShell"}:
+            missing_nd = sorted(
+                tag
+                for tag in section.shell_nd_material_tags()
+                if tag not in self.nd_materials
+            )
+            if missing_nd:
+                raise ValueError(
+                    f"{section.section_type} section references missing "
+                    "nDMaterial tag(s): "
+                    + ", ".join(map(str, missing_nd))
+                )
+            return
+
         if section.section_type == "Elastic":
             if (
                 section.material_tag is not None
