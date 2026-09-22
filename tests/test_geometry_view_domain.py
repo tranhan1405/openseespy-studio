@@ -51,7 +51,8 @@ def test_viewport_domains_are_mutually_exclusive():
     assert 'self._display_domain == "geometry"' in render
     assert 'name="geometry-points"' in render
     assert 'name=f"line-geometry-{line_tag}"' in render
-    assert 'name=f"surface-geometry-{surface_tag}"' in render
+    assert 'name="surface-geometry"' in render
+    assert '"surface_tag"' in render
 
     geometry_branch = render.split(
         'if self._display_domain == "geometry":', 1
@@ -66,4 +67,4 @@ def test_viewport_domains_are_mutually_exclusive():
     )[1]
     assert 'name="geometry-points"' not in fe_branch
     assert 'line-geometry-' not in fe_branch
-    assert 'surface-geometry-' not in fe_branch
+    assert 'name="surface-geometry"' not in fe_branch
