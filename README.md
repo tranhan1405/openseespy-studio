@@ -251,12 +251,30 @@ For Quick 1-D Column specimens, SARE can additionally capture and separate:
 - reversal strength/stiffness degradation
 - branch and detected closed-cycle energy
 
-### Experimental comparison and calibration
+### Section-to-hinge and cyclic calibration
+
+SARE keeps two research workflows deliberately separate:
+
+1. **Hinge Backbone** converts researcher-confirmed characteristic points from
+   a moment-rotation curve directly, or from moment-curvature using the
+   explicit assumption theta = kappa * L_eq, into a symmetric OpenSees
+   Hysteretic moment-rotation material. The source type and conversion
+   assumption are stored with the material. SARE does not infer cracking,
+   yield, ultimate, plastic-hinge length, pinching or deterioration silently.
+2. **Cyclic Calibration** compares a complete model response against
+   experimental cyclic data and varies selected material parameters. This is
+   the appropriate stage for fitting hysteretic pinching/degradation behavior.
+
+The resulting Hysteretic material is assigned separately through
+**Model > ZeroLength / Link...**, normally to a rotational hinge DOF. A
+zeroLengthSection remains a different modeling branch: it places a complete
+Section object at the interface instead of a calibrated uniaxial hinge
+backbone.
 
 Cyclic experimental CSV/TSV data can be imported and overlaid against
 OpenSees results.
 
-The calibration subsystem supports:
+The cyclic-calibration subsystem supports:
 
 1. material-parameter grid sweeps
 2. adaptive coarse-to-fine refinement
