@@ -4866,6 +4866,20 @@ class MainWindow(QMainWindow):
             shortcut.activated.connect(callback)
             self._shortcuts.append(shortcut)
 
+    def _leave_geometry_line_pick_mode(self) -> None:
+        self._geometry_line_point_tags = []
+        action = self.actions.get("line_geometry_pick")
+        if action is not None:
+            action.setChecked(False)
+        self.viewport.clear_geometry_pick_preview(render=False)
+
+    def _leave_geometry_surface_pick_mode(self) -> None:
+        self._geometry_surface_point_tags = []
+        action = self.actions.get("surface_geometry_pick")
+        if action is not None:
+            action.setChecked(False)
+        self.viewport.clear_geometry_pick_preview(render=False)
+
     def _leave_measure_mode(self) -> None:
         self._measure_first_node_tag = None
         self.viewport.clear_measure_anchor(render=False)
@@ -4894,6 +4908,8 @@ class MainWindow(QMainWindow):
         self._leave_measure_mode()
         self._leave_frame_pick_mode()
         self._leave_truss_pick_mode()
+        self._leave_geometry_line_pick_mode()
+        self._leave_geometry_surface_pick_mode()
         self.viewport.set_interaction_tool("select")
         self.actions["select"].setChecked(True)
         self.actions["box"].setChecked(False)
@@ -4904,12 +4920,97 @@ class MainWindow(QMainWindow):
         self._leave_measure_mode()
         self._leave_frame_pick_mode()
         self._leave_truss_pick_mode()
+        self._leave_geometry_line_pick_mode()
+        self._leave_geometry_surface_pick_mode()
         self.viewport.set_interaction_tool("box")
         self.actions["select"].setChecked(False)
         self.actions["box"].setChecked(True)
         self.viewport.plotter.render()
         self.status_message.setText(
             "Box select: left→right = window, right→left = crossing"
+        )
+
+    def _activate_geometry_line_pick_tool(
+        self,
+        checked: bool = True,
+    ) -> None:
+        action = self.actions.get("line_geometry_pick")
+        if action is not None and not action.isChecked() and not checked:
+            self._activate_select_tool()
+            return
+        if len(self.project.points) < 2:
+            if action is not None:
+                action.setChecked(False)
+            QMessageBox.information(
+                self,
+                "Create Geometry Line",
+                "Create at least two Geometry Points first.",
+            )
+            return
+
+        self._leave_measure_mode()
+        self._leave_frame_pick_mode()
+        self._leave_truss_pick_mode()
+        self._leave_geometry_surface_pick_mode()
+        self._geometry_line_point_tags = []
+        self.viewport.clear_geometry_pick_preview(render=False)
+        self.viewport.set_display_domain("geometry")
+        self.viewport.set_interaction_tool("select")
+        self.actions["select"].setChecked(False)
+        self.actions["box"].setChecked(False)
+        if action is not None:
+            action.setChecked(True)
+        self.viewport.plotter.render()
+        self.status_message.setText(
+            "Create Geometry Line: click the first Geometry Point"
+        )
+
+    def _activate_geometry_surface_pick_tool(
+        self,
+        checked: bool = True,
+    ) -> None:
+        action = self.actions.get("surface_geometry_pick")
+        if action is not None and not action.isChecked() and not checked:
+            self._activate_select_tool()
+            return
+        if len(self.project.points) < 4:
+            if action is not None:
+                action.setChecked(False)
+            QMessageBox.information(
+                self,
+                "Create Geometry Surface",
+                "Create at least four Geometry Points first.",
+            )
+            return
+        if not self._ensure_prerequisite(
+            title="New Surface",
+            message=(
+                "A Surface requires a shell-compatible Section. "
+                "Create one now?"
+            ),
+            action_label="Create Shell Section Now...",
+            available=lambda: bool(self._shell_sections()),
+            creator=self._create_shell_section,
+        ):
+            if action is not None:
+                action.setChecked(False)
+            return
+
+        self._leave_measure_mode()
+        self._leave_frame_pick_mode()
+        self._leave_truss_pick_mode()
+        self._leave_geometry_line_pick_mode()
+        self._geometry_surface_point_tags = []
+        self.viewport.clear_geometry_pick_preview(render=False)
+        self.viewport.set_display_domain("geometry")
+        self.viewport.set_interaction_tool("select")
+        self.actions["select"].setChecked(False)
+        self.actions["box"].setChecked(False)
+        if action is not None:
+            action.setChecked(True)
+        self.viewport.plotter.render()
+        self.status_message.setText(
+            "Create Geometry Surface: click corner 1 of 4"
         )
 
     def _activate_frame_pick_tool(self, checked: bool = True) -> None:
@@ -4953,6 +5054,8 @@ class MainWindow(QMainWindow):
 
         self._leave_measure_mode()
         self._leave_truss_pick_mode()
+        self._leave_geometry_line_pick_mode()
+        self._leave_geometry_surface_pick_mode()
         self._frame_first_node_tag = None
         self.viewport.clear_frame_anchor(render=False)
         self.viewport.set_interaction_tool("select")
@@ -4996,6 +5099,8 @@ class MainWindow(QMainWindow):
 
         self._leave_measure_mode()
         self._leave_frame_pick_mode()
+        self._leave_geometry_line_pick_mode()
+        self._leave_geometry_surface_pick_mode()
         self._truss_first_node_tag = None
         self.viewport.clear_truss_anchor(render=False)
         self.viewport.set_interaction_tool("select")
@@ -5025,6 +5130,8 @@ class MainWindow(QMainWindow):
 
         self._leave_frame_pick_mode()
         self._leave_truss_pick_mode()
+        self._leave_geometry_line_pick_mode()
+        self._leave_geometry_surface_pick_mode()
         self._measure_first_node_tag = None
         self.viewport.clear_measure_anchor(render=False)
         self.viewport.set_interaction_tool("select")
@@ -5067,6 +5174,18 @@ class MainWindow(QMainWindow):
         if (
             self.actions.get("truss_pick") is not None
             and self.actions["truss_pick"].isChecked()
+        ):
+            self._activate_select_tool()
+            return
+        if (
+            self.actions.get("line_geometry_pick") is not None
+            and self.actions["line_geometry_pick"].isChecked()
+        ):
+            self._activate_select_tool()
+            return
+        if (
+            self.actions.get("surface_geometry_pick") is not None
+            and self.actions["surface_geometry_pick"].isChecked()
         ):
             self._activate_select_tool()
             return
