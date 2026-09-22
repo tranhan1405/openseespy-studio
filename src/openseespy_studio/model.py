@@ -132,6 +132,9 @@ class Element:
     l: int | None = None
     shell_corotational: bool = False
     shell_local_x: tuple[float, float, float] | None = None
+    shell_no_eas: bool = False
+    shell_drilling_stab: float | None = None
+    shell_drilling_nl: bool = False
 
     @property
     def is_shell(self) -> bool:
@@ -236,6 +239,24 @@ class Element:
             self.shell_corotational,
             "Shell corotational flag",
         )
+        self.shell_no_eas = _strict_bool(
+            self.shell_no_eas,
+            "Shell no-EAS flag",
+        )
+        self.shell_drilling_nl = _strict_bool(
+            self.shell_drilling_nl,
+            "Shell nonlinear drilling flag",
+        )
+        if self.shell_drilling_stab is not None:
+            self.shell_drilling_stab = float(self.shell_drilling_stab)
+            if (
+                not math.isfinite(self.shell_drilling_stab)
+                or self.shell_drilling_stab < 0.0
+            ):
+                raise ValueError(
+                    "Shell drilling stabilization must be a finite "
+                    "non-negative value."
+                )
         if self.shell_local_x is not None:
             values = tuple(float(value) for value in self.shell_local_x)
             if len(values) != 3 or any(
@@ -265,8 +286,15 @@ class Element:
             self.l = None
             self.shell_corotational = False
             self.shell_local_x = None
+            self.shell_no_eas = False
+            self.shell_drilling_stab = None
+            self.shell_drilling_nl = False
         if self.is_shell and self.element_type != "ASDShellQ4":
+            self.shell_corotational = False
             self.shell_local_x = None
+            self.shell_no_eas = False
+            self.shell_drilling_stab = None
+            self.shell_drilling_nl = False
 
         uses_section_reference = self.element_type != "truss"
         uses_frame_reference = self.element_type in FRAME_ELEMENT_TYPES
@@ -449,6 +477,9 @@ class StructuralModel:
         l: int | None = None,
         shell_corotational: bool = False,
         shell_local_x: tuple[float, float, float] | None = None,
+        shell_no_eas: bool = False,
+        shell_drilling_stab: float | None = None,
+        shell_drilling_nl: bool = False,
     ) -> Element:
         tag = _strict_int(tag, "Element tag")
         i = _strict_int(i, "Element I-node tag")
@@ -516,6 +547,9 @@ class StructuralModel:
             l,
             shell_corotational,
             shell_local_x,
+            shell_no_eas,
+            shell_drilling_stab,
+            shell_drilling_nl,
         )
         self.elements[tag] = ele
         return ele
@@ -978,6 +1012,9 @@ class StructuralModel:
                     ),
                     shell_corotational=source.shell_corotational,
                     shell_local_x=source.shell_local_x,
+                    shell_no_eas=source.shell_no_eas,
+                    shell_drilling_stab=source.shell_drilling_stab,
+                    shell_drilling_nl=source.shell_drilling_nl,
                 )
                 created_elements.add(new_tag)
 
@@ -1028,6 +1065,9 @@ class StructuralModel:
                         if element.shell_local_x is not None
                         else None
                     ),
+                    "shell_no_eas": element.shell_no_eas,
+                    "shell_drilling_stab": element.shell_drilling_stab,
+                    "shell_drilling_nl": element.shell_drilling_nl,
                 }
                 for element in sorted(self.elements.values(), key=lambda item: item.tag)
             ],
@@ -1130,6 +1170,9 @@ class StructuralModel:
                     if item.get("shell_local_x") is not None
                     else None
                 ),
+                item.get("shell_no_eas", False),
+                item.get("shell_drilling_stab"),
+                item.get("shell_drilling_nl", False),
             )
 
         return model
