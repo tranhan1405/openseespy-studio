@@ -771,3 +771,140 @@ def test_shell_local_x_parallel_to_normal_is_rejected():
     ):
         project.validate_element_state(10)
 
+
+
+def test_asd_shell_advanced_options_round_trip_generate_and_import():
+    model = StructuralModel("advanced-asd-shell", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 2.0, 0.0, 0.0)
+    model.add_node(3, 2.0, 1.0, 0.0)
+    model.add_node(4, 0.0, 1.0, 0.0)
+    model.add_element(
+        10,
+        1,
+        2,
+        element_type="ASDShellQ4",
+        section_tag=7,
+        group="shell",
+        k=3,
+        l=4,
+        shell_corotational=True,
+        shell_local_x=(0.0, 1.0, 0.0),
+        shell_no_eas=True,
+        shell_drilling_stab=0.025,
+        shell_drilling_nl=True,
+    )
+
+    restored = StructuralModel.from_dict(model.to_dict())
+    element = restored.elements[10]
+    assert element.shell_corotational is True
+    assert element.shell_local_x == (0.0, 1.0, 0.0)
+    assert element.shell_no_eas is True
+    assert element.shell_drilling_stab == pytest.approx(0.025)
+    assert element.shell_drilling_nl is True
+
+    code = to_openseespy(
+        restored,
+        sections={7: _shell_section()},
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    shell_line = next(
+        line for line in code.splitlines()
+        if "ops.element('ASDShellQ4', 10" in line
+    )
+    assert "'-corotational'" in shell_line
+    assert "'-noeas'" in shell_line
+    assert "'-drillingStab', 0.025" in shell_line
+    assert "'-drillingNL'" in shell_line
+    assert "'-local', 0, 1, 0" in shell_line
+
+    imported = import_openseespy_source(
+        code,
+        source_name="advanced-asd-shell.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    assert imported.error_count == 0
+    imported_element = imported.project.model.elements[10]
+    assert imported_element.shell_no_eas is True
+    assert imported_element.shell_drilling_stab == pytest.approx(0.025)
+    assert imported_element.shell_drilling_nl is True
+    assert imported_element.shell_local_x == (0.0, 1.0, 0.0)
+
+
+def test_structured_shell_mesh_propagates_advanced_asd_options():
+    model = StructuralModel("advanced-mesh", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 2.0, 0.0, 0.0)
+    model.add_node(3, 2.0, 2.0, 0.0)
+    model.add_node(4, 0.0, 2.0, 0.0)
+    project = ProjectDatabase(name="advanced-mesh", model=model)
+    project.add_section(_shell_section())
+
+    result = build_shell_mesh(
+        project,
+        ShellMeshSpec(
+            corner_nodes=(1, 2, 3, 4),
+            divisions_u=2,
+            divisions_v=2,
+            formulation="ASDShellQ4",
+            section_tag=7,
+            no_eas=True,
+            drilling_stab=0.02,
+            drilling_nl=True,
+        ),
+    )
+
+    assert len(result.element_tags) == 4
+    for tag in result.element_tags:
+        element = project.model.elements[tag]
+        assert element.shell_no_eas is True
+        assert element.shell_drilling_stab == pytest.approx(0.02)
+        assert element.shell_drilling_nl is True
+
+
+def test_non_asd_shell_discards_asd_only_options():
+    model = StructuralModel("mitc-shell", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    model.add_node(3, 1.0, 1.0, 0.0)
+    model.add_node(4, 0.0, 1.0, 0.0)
+    element = model.add_element(
+        1,
+        1,
+        2,
+        element_type="ShellMITC4",
+        section_tag=7,
+        k=3,
+        l=4,
+        shell_corotational=True,
+        shell_local_x=(1.0, 0.0, 0.0),
+        shell_no_eas=True,
+        shell_drilling_stab=0.02,
+        shell_drilling_nl=True,
+    )
+
+    assert element.shell_corotational is False
+    assert element.shell_local_x is None
+    assert element.shell_no_eas is False
+    assert element.shell_drilling_stab is None
+    assert element.shell_drilling_nl is False
+
+
+def test_asd_shell_rejects_invalid_drilling_stabilization():
+    model = StructuralModel("invalid-drilling", ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    model.add_node(3, 1.0, 1.0, 0.0)
+    model.add_node(4, 0.0, 1.0, 0.0)
+
+    with pytest.raises(ValueError, match=r"drilling stabilization"):
+        model.add_element(
+            1,
+            1,
+            2,
+            element_type="ASDShellQ4",
+            section_tag=7,
+            k=3,
+            l=4,
+            shell_drilling_stab=-0.01,
+        )
