@@ -6116,6 +6116,19 @@ class MainWindow(QMainWindow):
             and self._geometry_line_anchor_snap is None
             and not self._geometry_surface_point_tags
         )
+        snap_action = self.actions.get("geometry_snap")
+        snap_enabled = (
+            snap_action is None or snap_action.isChecked()
+        )
+        if not snap_enabled:
+            return {
+                "xyz": xyz,
+                "kind": "free",
+                "label": "Free",
+                "point_tag": None,
+                "line_tags": (),
+            }
+
         exact_tag = payload.get("tag")
         if (
             payload.get("kind") == "geometry_point"
@@ -6141,19 +6154,6 @@ class MainWindow(QMainWindow):
                     "point_tag": int(exact_tag),
                     "line_tags": (),
                 }
-
-        snap_action = self.actions.get("geometry_snap")
-        snap_enabled = (
-            snap_action is None or snap_action.isChecked()
-        )
-        if not snap_enabled:
-            return {
-                "xyz": xyz,
-                "kind": "free",
-                "label": "Free",
-                "point_tag": None,
-                "line_tags": (),
-            }
 
         candidates: list[
             tuple[
