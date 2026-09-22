@@ -210,7 +210,8 @@ def test_surface_pressure_preview_uses_signed_surface_normal():
     context = inspect.getsource(MainWindow._show_tree_context_menu)
 
     assert "pressure >= 0.0" in viewport
-    assert '("+N)" if pressure >= 0.0 else "(-N)"' in viewport
+    assert '"(+N)"' in viewport
+    assert '"(-N)"' in viewport
     assert "show_surface_pressure_preview" in route
     assert "Preview Pressure Direction..." in context
     assert "Clear Pressure Preview" in context
