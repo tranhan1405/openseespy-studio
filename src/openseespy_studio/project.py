@@ -3350,6 +3350,49 @@ class ProjectDatabase:
                 raise ValueError(
                     f"Shell element {element.tag} has zero or near-zero area."
                 )
+
+            if element.shell_local_x is not None:
+                diagonal_13 = tuple(
+                    p[2][index] - p[0][index]
+                    for index in range(3)
+                )
+                diagonal_24 = tuple(
+                    p[3][index] - p[1][index]
+                    for index in range(3)
+                )
+                normal = (
+                    diagonal_13[1] * diagonal_24[2]
+                    - diagonal_13[2] * diagonal_24[1],
+                    diagonal_13[2] * diagonal_24[0]
+                    - diagonal_13[0] * diagonal_24[2],
+                    diagonal_13[0] * diagonal_24[1]
+                    - diagonal_13[1] * diagonal_24[0],
+                )
+                local_x = tuple(
+                    float(value)
+                    for value in element.shell_local_x
+                )
+                cross = (
+                    local_x[1] * normal[2]
+                    - local_x[2] * normal[1],
+                    local_x[2] * normal[0]
+                    - local_x[0] * normal[2],
+                    local_x[0] * normal[1]
+                    - local_x[1] * normal[0],
+                )
+                local_norm2 = sum(value * value for value in local_x)
+                normal_norm2 = sum(value * value for value in normal)
+                cross_norm2 = sum(value * value for value in cross)
+                if (
+                    normal_norm2 > 1.0e-24
+                    and cross_norm2
+                    <= 1.0e-16 * local_norm2 * normal_norm2
+                ):
+                    raise ValueError(
+                        f"Shell element {element.tag} local X vector is "
+                        "parallel to the shell normal; choose an in-plane "
+                        "direction."
+                    )
             return
 
         node_i = self.model.nodes[int(element.i)]
