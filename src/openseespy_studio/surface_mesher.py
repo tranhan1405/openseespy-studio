@@ -907,6 +907,117 @@ def remove_surface_recorder(
     return generated_tag
 
 
+def managed_surface_result_tags(
+    project: ProjectDatabase,
+) -> set[int]:
+    return {
+        int(result.tag)
+        for result in project.solution_results.values()
+        if result.surface_scope
+    }
+
+
+def sync_solution_result_surface_scope(
+    project: ProjectDatabase,
+    result_tag: int,
+) -> list[int]:
+    tag = int(result_tag)
+    result = project.solution_results.get(tag)
+    if result is None:
+        raise ValueError(f"Solution result {tag} does not exist.")
+    if not result.surface_scope:
+        return list(result.element_scope)
+    missing = [
+        surface_tag
+        for surface_tag in result.surface_scope
+        if surface_tag not in project.surfaces
+    ]
+    if missing:
+        raise ValueError(
+            "Managed Surface result references missing Surface tag(s): "
+            + ", ".join(map(str, missing))
+        )
+    result.element_scope = sorted({
+        int(element_tag)
+        for surface_tag in result.surface_scope
+        for element_tag in project.surfaces[
+            surface_tag
+        ].generated_element_tags
+        if (
+            int(element_tag) in project.model.elements
+            and project.model.elements[
+                int(element_tag)
+            ].element_type in SHELL_ELEMENT_TYPES
+        )
+    })
+    project._validate_solution_result(result)
+    return list(result.element_scope)
+
+
+def sync_surface_results_for_surface(
+    project: ProjectDatabase,
+    surface_tag: int,
+) -> list[int]:
+    tag = int(surface_tag)
+    result_tags = sorted(
+        result.tag
+        for result in project.solution_results.values()
+        if tag in result.surface_scope
+    )
+    for result_tag in result_tags:
+        sync_solution_result_surface_scope(project, result_tag)
+    return result_tags
+
+
+def detach_surface_result_scope(
+    project: ProjectDatabase,
+    surface_tag: int,
+) -> list[int]:
+    tag = int(surface_tag)
+    surface = project.surfaces.get(tag)
+    if surface is None:
+        raise ValueError(f"Surface geometry {tag} does not exist.")
+    owned_elements = {
+        int(element_tag)
+        for element_tag in surface.generated_element_tags
+    }
+    changed: list[int] = []
+    for result in project.solution_results.values():
+        if tag not in result.surface_scope:
+            continue
+        before = list(result.element_scope)
+        result.element_scope = [
+            int(element_tag)
+            for element_tag in result.element_scope
+            if int(element_tag) not in owned_elements
+        ]
+        if result.element_scope != before:
+            changed.append(int(result.tag))
+    return sorted(changed)
+
+
+def remove_surface_from_managed_result_scopes(
+    project: ProjectDatabase,
+    surface_tag: int,
+) -> list[int]:
+    tag = int(surface_tag)
+    removed_results: list[int] = []
+    for result_tag, result in list(project.solution_results.items()):
+        if tag not in result.surface_scope:
+            continue
+        result.surface_scope = [
+            surface
+            for surface in result.surface_scope
+            if int(surface) != tag
+        ]
+        if not result.surface_scope:
+            project.solution_results.pop(result_tag, None)
+            removed_results.append(int(result_tag))
+        else:
+            sync_solution_result_surface_scope(project, result_tag)
+    return sorted(removed_results)
+
+
 def mesh_surface_geometry(
     project: ProjectDatabase,
     surface_tag: int,
@@ -975,6 +1086,7 @@ def mesh_surface_geometry(
         sync_surface_edge_loads_for_surface(project, surface.tag)
         sync_surface_pressures_for_surface(project, surface.tag)
         sync_surface_recorders_for_surface(project, surface.tag)
+        sync_surface_results_for_surface(project, surface.tag)
     except Exception:
         restored = ProjectDatabase.from_dict(before)
         project.__dict__.clear()
@@ -1041,12 +1153,16 @@ def _surface_element_dependency_blockers(
             "recorder(s) " + ", ".join(map(str, recorder_tags))
         )
 
+    managed_result_tags = managed_surface_result_tags(project)
     result_tags = sorted(
         result.tag
         for result in project.solution_results.values()
-        if any(
-            int(tag) in element_tags
-            for tag in result.element_scope
+        if (
+            int(result.tag) not in managed_result_tags
+            and any(
+                int(tag) in element_tags
+                for tag in result.element_scope
+            )
         )
     )
     if result_tags:
@@ -1276,6 +1392,8 @@ def delete_surface_mesh(
 
     before = project.to_dict()
     try:
+        detach_surface_result_scope(project, tag)
+
         surface_recorder_tags = sorted(
             surface_recorder.tag
             for surface_recorder in project.surface_recorders.values()
@@ -1378,6 +1496,7 @@ def delete_surface_geometry(
             project.surface_pressures.pop(pressure_tag, None)
         for surface_recorder_tag in surface_recorder_tags:
             project.surface_recorders.pop(surface_recorder_tag, None)
+        remove_surface_from_managed_result_scopes(project, tag)
         project.remove_surface(tag)
     except Exception:
         restored = ProjectDatabase.from_dict(before)
