@@ -91,6 +91,7 @@ from ..result_catalog import (
     convergence_result_label,
     result_choices_for_analysis,
 )
+from ..shell_mesh import build_shell_mesh
 from ..section_response import section_response_sources
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
@@ -133,7 +134,7 @@ from .model_check_dialog import ModelCheckDialog
 from .moment_curvature_dialog import MomentCurvatureDialog
 from .recorder_dialog import RecorderDialog
 from .section_dialog import SectionDialog
-from .shell_dialog import ShellElementDialog, ShellSectionDialog
+from .shell_dialog import ShellElementDialog, ShellMeshDialog, ShellSectionDialog
 from .transformation_dialog import TransformationDialog
 from .test_column_dialog import TestColumnWizard
 from .icons import studio_icon
@@ -2002,6 +2003,13 @@ class MainWindow(QMainWindow):
             self._create_shell,
             "Create a four-node OpenSees shell surface element",
         )
+        self._make_action(
+            "shell_mesh",
+            "Mesh Surface...",
+            "grid",
+            self._create_shell_mesh,
+            "Create a structured quadrilateral shell mesh from four corner nodes",
+        )
         self._make_action("grid", "Grid", "grid", self._show_frame_grid, "Create frame grid")
         self._make_action(
             "column_1d",
@@ -2392,6 +2400,7 @@ class MainWindow(QMainWindow):
         shell_menu = geometry_menu.addMenu("Shell / Surface")
         shell_menu.setIcon(studio_icon("element"))
         shell_menu.addAction(self.actions["shell_input"])
+        shell_menu.addAction(self.actions["shell_mesh"])
         geometry_menu.addSeparator()
         geometry_menu.addActions([
             self.actions["column_1d"],
@@ -2840,6 +2849,7 @@ class MainWindow(QMainWindow):
                 "grid",
                 "node",
                 "shell_input",
+                "shell_mesh",
                 "extrude",
             ),
             widgets=(frame_button, truss_button),
@@ -8055,6 +8065,75 @@ class MainWindow(QMainWindow):
         self.selection.select("element", tag, "replace")
         self._record_project_change(f"Create frame {tag}", before)
 
+    def _create_shell_mesh(self) -> None:
+        if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
+            QMessageBox.warning(
+                self,
+                "Shell Surface Mesh",
+                "Shell meshing requires the 3D/6DOF structural model "
+                "(ndm=3, ndf=6). This is shell-surface kinematics, not "
+                "solid/brick continuum modeling.",
+            )
+            return
+        if not self._ensure_node_count(4, title="Shell Surface Mesh"):
+            return
+        if not self._ensure_prerequisite(
+            title="Shell Surface Mesh",
+            message=(
+                "A Shell mesh requires a shell-compatible Section. "
+                "Create one now?"
+            ),
+            action_label="Create Shell Section Now...",
+            available=lambda: bool(self._shell_sections()),
+            creator=self._create_shell_section,
+        ):
+            return
+
+        selected_nodes = [
+            int(tag)
+            for tag in sorted(self.selection.nodes)
+            if int(tag) in self.model.nodes
+        ]
+        dialog = ShellMeshDialog(
+            nodes=self.model.nodes,
+            sections=self.project.sections,
+            initial_nodes=selected_nodes[:4],
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            result = build_shell_mesh(
+                self.project,
+                dialog.spec(),
+            )
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "Shell Surface Mesh",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+
+        self.model = self.project.model
+        self._refresh_all(
+            f"Created shell surface mesh · "
+            f"{len(result.element_tags)} element(s) · "
+            f"{len(result.node_tags)} generated node(s)"
+        )
+        self.selection.set_selection(
+            elements=set(result.element_tags),
+        )
+        self._record_project_change(
+            "Create shell surface mesh",
+            before,
+        )
+
     def _create_shell(self) -> None:
         if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
             QMessageBox.warning(
@@ -13057,6 +13136,8 @@ class MainWindow(QMainWindow):
         if kind == "surfaces_root":
             create = menu.addAction("New Shell / Surface...")
             create.triggered.connect(self._create_shell)
+            mesh = menu.addAction("Mesh Surface...")
+            mesh.triggered.connect(self._create_shell_mesh)
             section = menu.addAction("New Shell Section...")
             section.triggered.connect(self._create_shell_section)
             exec_menu()
@@ -13081,6 +13162,8 @@ class MainWindow(QMainWindow):
             create_truss.triggered.connect(self._create_truss)
             create_shell = menu.addAction("New Shell / Surface...")
             create_shell.triggered.connect(self._create_shell)
+            mesh_shell = menu.addAction("Mesh Shell Surface...")
+            mesh_shell.triggered.connect(self._create_shell_mesh)
             create_connection = menu.addAction(
                 "New ZeroLength / Link Element..."
             )
