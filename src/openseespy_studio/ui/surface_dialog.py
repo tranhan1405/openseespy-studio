@@ -50,6 +50,7 @@ class SurfaceGeometryDialog(QDialog):
             tuple[float, float, float],
             tuple[float, float, float],
         ] | None = None,
+        initial_point_tags: tuple[int, int, int, int] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -60,6 +61,11 @@ class SurfaceGeometryDialog(QDialog):
         self.resize(520, 650)
         self._surface = surface
         self._sections = dict(sections)
+        self._corner_point_tags = (
+            surface.corner_point_tags
+            if surface is not None
+            else initial_point_tags
+        )
 
         root = QVBoxLayout(self)
         form = QFormLayout()
@@ -181,6 +187,61 @@ class SurfaceGeometryDialog(QDialog):
         )
         mesh_form.addRow("Formulation:", self.formulation)
 
+        self.corotational = QCheckBox(
+            "Corotational kinematics (ASDShellQ4)"
+        )
+        self.corotational.setChecked(
+            surface.corotational if surface else False
+        )
+        mesh_form.addRow("", self.corotational)
+
+        self.use_local_x = QCheckBox("Specify shell local X vector")
+        self.use_local_x.setChecked(
+            bool(surface and surface.local_x is not None)
+        )
+        mesh_form.addRow("", self.use_local_x)
+        local_x = (
+            surface.local_x
+            if surface and surface.local_x is not None
+            else (1.0, 0.0, 0.0)
+        )
+        self.local_x_spins = [_float_spin(value) for value in local_x]
+        local_x_row = QHBoxLayout()
+        for label, spin in zip(("X", "Y", "Z"), self.local_x_spins):
+            local_x_row.addWidget(QLabel(label))
+            local_x_row.addWidget(spin)
+        mesh_form.addRow("Local X:", local_x_row)
+
+        self.no_eas = QCheckBox("Disable EAS (ASDShellQ4)")
+        self.no_eas.setChecked(surface.no_eas if surface else False)
+        mesh_form.addRow("", self.no_eas)
+
+        self.use_drilling_stab = QCheckBox(
+            "Specify drilling stabilization"
+        )
+        self.use_drilling_stab.setChecked(
+            bool(surface and surface.drilling_stab is not None)
+        )
+        mesh_form.addRow("", self.use_drilling_stab)
+        self.drilling_stab = _float_spin(
+            surface.drilling_stab
+            if surface and surface.drilling_stab is not None
+            else 0.0,
+            low=0.0,
+        )
+        mesh_form.addRow(
+            "Drilling stabilization:",
+            self.drilling_stab,
+        )
+
+        self.drilling_nl = QCheckBox(
+            "Nonlinear drilling stabilization"
+        )
+        self.drilling_nl.setChecked(
+            surface.drilling_nl if surface else False
+        )
+        mesh_form.addRow("", self.drilling_nl)
+
         self.mesh_mode = QComboBox()
         self.mesh_mode.addItem("By divisions (Nu × Nv)", "divisions")
         self.mesh_mode.addItem("By target element size", "target_size")
@@ -242,10 +303,18 @@ class SurfaceGeometryDialog(QDialog):
         root.addWidget(buttons)
 
         self.surface_type.currentTextChanged.connect(self._sync_shape)
+        self.formulation.currentTextChanged.connect(
+            self._sync_formulation
+        )
         self.mesh_mode.currentIndexChanged.connect(self._sync_mesh_mode)
         self.reuse_nodes.toggled.connect(self._sync_conformity)
         self.conform_edges.toggled.connect(self._sync_conformity)
+        self.use_local_x.toggled.connect(self._sync_formulation)
+        self.use_drilling_stab.toggled.connect(
+            self._sync_formulation
+        )
         self._sync_shape()
+        self._sync_formulation()
         self._sync_mesh_mode()
         self._sync_conformity()
 
@@ -253,6 +322,21 @@ class SurfaceGeometryDialog(QDialog):
         rectangle = self.surface_type.currentText() == "Rectangle"
         self.rectangle_group.setVisible(rectangle)
         self.quad_group.setVisible(not rectangle)
+
+    def _sync_formulation(self, *_args) -> None:
+        advanced = self.formulation.currentText() == "ASDShellQ4"
+        self.corotational.setEnabled(advanced)
+        self.use_local_x.setEnabled(advanced)
+        self.no_eas.setEnabled(advanced)
+        self.use_drilling_stab.setEnabled(advanced)
+        self.drilling_nl.setEnabled(advanced)
+        for spin in self.local_x_spins:
+            spin.setEnabled(
+                advanced and self.use_local_x.isChecked()
+            )
+        self.drilling_stab.setEnabled(
+            advanced and self.use_drilling_stab.isChecked()
+        )
 
     def _sync_mesh_mode(self, *_args) -> None:
         target = self.mesh_mode.currentData() == "target_size"
@@ -296,6 +380,38 @@ class SurfaceGeometryDialog(QDialog):
                 None if section_tag is None else int(section_tag)
             ),
             formulation=self.formulation.currentText(),
+            corner_point_tags=self._corner_point_tags,
+            corotational=(
+                self.corotational.isChecked()
+                if self.formulation.currentText() == "ASDShellQ4"
+                else False
+            ),
+            local_x=(
+                tuple(spin.value() for spin in self.local_x_spins)
+                if (
+                    self.formulation.currentText() == "ASDShellQ4"
+                    and self.use_local_x.isChecked()
+                )
+                else None
+            ),
+            no_eas=(
+                self.no_eas.isChecked()
+                if self.formulation.currentText() == "ASDShellQ4"
+                else False
+            ),
+            drilling_stab=(
+                self.drilling_stab.value()
+                if (
+                    self.formulation.currentText() == "ASDShellQ4"
+                    and self.use_drilling_stab.isChecked()
+                )
+                else None
+            ),
+            drilling_nl=(
+                self.drilling_nl.isChecked()
+                if self.formulation.currentText() == "ASDShellQ4"
+                else False
+            ),
             mesh_mode=str(self.mesh_mode.currentData()),
             divisions_u=self.divisions_u.value(),
             divisions_v=self.divisions_v.value(),
