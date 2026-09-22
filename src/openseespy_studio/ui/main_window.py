@@ -4601,22 +4601,8 @@ class MainWindow(QMainWindow):
                 point_geometry_tag = int(tag)
             elif kind == "line_geometry":
                 line_geometry_tag = int(tag)
-                line = self.project.lines.get(int(tag))
-                if line is not None:
-                    elements.update(
-                        int(element_tag)
-                        for element_tag in line.generated_element_tags
-                        if int(element_tag) in self.model.elements
-                    )
             elif kind == "surface_geometry":
                 surface_geometry_tag = int(tag)
-                surface = self.project.surfaces.get(int(tag))
-                if surface is not None:
-                    elements.update(
-                        int(element_tag)
-                        for element_tag in surface.generated_element_tags
-                        if int(element_tag) in self.model.elements
-                    )
             elif kind == "material":
                 material_tag = int(tag)
             elif kind == "nd_material":
@@ -4668,6 +4654,23 @@ class MainWindow(QMainWindow):
                     job_plot_ref = None
             elif kind == "jobs_root":
                 show_jobs_root = True
+
+        geometry_tree_kinds = {
+            "geometry_root",
+            "points_root",
+            "lines_root",
+            "surfaces_root",
+            "point_geometry",
+            "line_geometry",
+            "surface_geometry",
+        }
+        geometry_mode = (
+            bool(selected_payload_kinds)
+            and selected_payload_kinds <= geometry_tree_kinds
+        )
+        self.viewport.set_display_domain(
+            "geometry" if geometry_mode else "fe"
+        )
 
         self._sync_ribbon_context(selected_payload_kinds)
 
