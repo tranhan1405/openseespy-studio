@@ -1662,7 +1662,7 @@ def test_geometry_free_line_first_click_is_transient_until_segment_exists():
     )
 
 
-def test_geometry_polyline_midpoint_first_click_commits_topology_anchor():
+def test_geometry_polyline_midpoint_anchor_is_transient_then_splits_on_p2():
     project = ProjectDatabase(name="midpoint-first-anchor")
     project.add_point(PointGeometryData(1, "A", (0.0, 0.0, 0.0)))
     project.add_point(PointGeometryData(2, "B", (4.0, 0.0, 0.0)))
@@ -1693,6 +1693,24 @@ def test_geometry_polyline_midpoint_first_click_commits_topology_anchor():
         def setText(self, _text):
             return None
 
+    snaps = iter(
+        (
+            {
+                "xyz": (2.0, 0.0, 0.0),
+                "kind": "midpoint",
+                "label": "Midpoint L1",
+                "point_tag": None,
+                "line_tags": (1,),
+            },
+            {
+                "xyz": (2.0, 2.0, 0.0),
+                "kind": "free",
+                "label": "Free",
+                "point_tag": None,
+                "line_tags": (),
+            },
+        )
+    )
     dummy = SimpleNamespace(
         project=project,
         model=project.model,
@@ -1703,17 +1721,14 @@ def test_geometry_polyline_midpoint_first_click_commits_topology_anchor():
         _geometry_surface_point_tags=[],
         _geometry_sketch_intersections=[],
     )
-    dummy._geometry_sketch_snap = lambda _payload: {
-        "xyz": (2.0, 0.0, 0.0),
-        "kind": "midpoint",
-        "label": "Midpoint L1",
-        "point_tag": None,
-        "line_tags": (1,),
-    }
+    dummy._geometry_sketch_snap = lambda _payload: next(snaps)
     for name in (
         "_geometry_sketch_tolerance",
         "_find_geometry_point_near",
+        "_geometry_lines_containing_interior_point",
         "_materialize_geometry_sketch_point",
+        "_existing_geometry_line_between",
+        "_draw_geometry_line_segment",
         "_handle_geometry_line_sketch_click",
     ):
         setattr(
@@ -1727,11 +1742,21 @@ def test_geometry_polyline_midpoint_first_click_commits_topology_anchor():
 
     dummy._handle_geometry_line_sketch_click({})
 
-    assert len(project.points) == 3
-    assert len(project.lines) == 2
+    # P1 is only a preview anchor; cancel here would leave topology unchanged.
+    assert len(project.points) == 2
+    assert len(project.lines) == 1
+    assert dummy._geometry_line_anchor_snap is not None
+
+    dummy._handle_geometry_line_sketch_click({})
+
+    # Committing P2 atomically materializes/splits the midpoint and creates
+    # the new free-line segment.
+    assert len(project.points) == 4
+    assert len(project.lines) == 3
     assert dummy._geometry_line_anchor_snap is None
-    assert dummy._geometry_line_point_tags == [3]
+    assert dummy._geometry_line_point_tags == [4]
     assert project.points[3].xyz == pytest.approx((2.0, 0.0, 0.0))
+    assert project.points[4].xyz == pytest.approx((2.0, 2.0, 0.0))
 
 
 def test_geometry_free_line_three_clicks_commit_two_lines():
