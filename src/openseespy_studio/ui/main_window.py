@@ -1621,6 +1621,7 @@ class MainWindow(QMainWindow):
         self._geometry_line_point_tags: list[int] = []
         self._geometry_surface_point_tags: list[int] = []
         self._geometry_sketch_intersections = []
+        self._geometry_trim_subject_tag: int | None = None
         self._job_ui_timer = QTimer(self)
         self._job_ui_timer.setInterval(1000)
         self._job_ui_timer.timeout.connect(self._refresh_running_job_ui)
@@ -2135,6 +2136,31 @@ class MainWindow(QMainWindow):
             "grid",
             self._create_surface_geometry,
             "Create reusable Rectangle or Quad surface geometry for Shell meshing",
+        )
+        self._make_action(
+            "geometry_trim_pick",
+            "Trim",
+            "delete",
+            self._activate_geometry_trim_tool,
+            "Click the Geometry Line to trim, then click the target Line",
+            checkable=True,
+        )
+        self._make_action(
+            "geometry_snap",
+            "Snap",
+            "select",
+            self._toggle_geometry_snap,
+            "Toggle endpoint, midpoint, intersection and orthogonal inference snapping",
+            checkable=True,
+        )
+        self.actions["geometry_snap"].setChecked(True)
+        self._make_action(
+            "geometry_grid",
+            "Grid",
+            "grid",
+            self._toggle_geometry_grid,
+            "Show or hide the active Geometry sketch grid",
+            checkable=True,
         )
         self._make_action(
             "surface_mesh_overlay",
@@ -5124,6 +5150,7 @@ class MainWindow(QMainWindow):
         self._leave_truss_pick_mode()
         self._leave_geometry_line_pick_mode()
         self._leave_geometry_surface_pick_mode()
+        self._leave_geometry_trim_mode()
         self.viewport.set_interaction_tool("select")
         self.actions["select"].setChecked(True)
         self.actions["box"].setChecked(False)
@@ -5221,6 +5248,105 @@ class MainWindow(QMainWindow):
         self.status_message.setText(
             f"Draw Rectangle · {plane.upper()} plane · "
             "click two diagonal corners · right-click or Esc to finish"
+        )
+
+    def _toggle_geometry_snap(self, checked: bool) -> None:
+        state = "on" if bool(checked) else "off"
+        self.status_message.setText(f"Geometry snapping: {state}")
+
+    def _toggle_geometry_grid(self, checked: bool) -> None:
+        self.viewport.set_display_domain("geometry")
+        self.viewport.set_geometry_sketch_grid_visible(bool(checked))
+        self.status_message.setText(
+            "Geometry sketch grid " + ("shown" if checked else "hidden")
+        )
+
+    def _leave_geometry_trim_mode(self) -> None:
+        self._geometry_trim_subject_tag = None
+        action = self.actions.get("geometry_trim_pick")
+        if action is not None:
+            action.setChecked(False)
+
+    def _activate_geometry_trim_tool(
+        self,
+        checked: bool = True,
+    ) -> None:
+        action = self.actions.get("geometry_trim_pick")
+        if action is not None and not action.isChecked() and not checked:
+            self._activate_select_tool()
+            return
+        if len(self.project.lines) < 2:
+            if action is not None:
+                action.setChecked(False)
+            QMessageBox.information(
+                self,
+                "Trim Geometry",
+                "Create at least two Geometry Lines before using Trim.",
+            )
+            return
+        self._leave_measure_mode()
+        self._leave_frame_pick_mode()
+        self._leave_truss_pick_mode()
+        self._leave_geometry_line_pick_mode()
+        self._leave_geometry_surface_pick_mode()
+        self._geometry_trim_subject_tag = None
+        self.viewport.set_display_domain("geometry")
+        self.viewport.set_interaction_tool("select")
+        self.actions["select"].setChecked(False)
+        self.actions["box"].setChecked(False)
+        if action is not None:
+            action.setChecked(True)
+        self.status_message.setText(
+            "Trim: click the Geometry Line to trim"
+        )
+
+    def _handle_geometry_trim_click(self, line_tag: int) -> None:
+        tag = int(line_tag)
+        if tag not in self.project.lines:
+            return
+        if self._geometry_trim_subject_tag is None:
+            self._geometry_trim_subject_tag = tag
+            self._select_geometry_line_from_viewport(tag, "replace")
+            self.status_message.setText(
+                f"Trim: Line {tag} selected · click target Line"
+            )
+            return
+        subject = int(self._geometry_trim_subject_tag)
+        if tag == subject:
+            self.status_message.setText(
+                "Trim: target must be a different Line"
+            )
+            return
+
+        before = self.project.to_dict()
+        try:
+            result = trim_extend_line_to_line(
+                self.project,
+                subject,
+                tag,
+                endpoint="nearest",
+                remesh=True,
+            )
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            self._geometry_trim_subject_tag = None
+            self.status_message.setText(f"Trim: {exc}")
+            return
+
+        self.model = self.project.model
+        self._geometry_trim_subject_tag = None
+        self._refresh_all(
+            f"Trimmed Line {subject} to Line {tag}"
+        )
+        self.viewport.set_display_domain("geometry")
+        self._record_project_change(
+            f"Trim Geometry Line {subject} to Line {tag}",
+            before,
+        )
+        self.status_message.setText(
+            f"Trimmed L{subject} to L{tag} · click another Line to trim"
         )
 
     def _activate_frame_pick_tool(self, checked: bool = True) -> None:
@@ -5384,6 +5510,12 @@ class MainWindow(QMainWindow):
         if (
             self.actions.get("truss_pick") is not None
             and self.actions["truss_pick"].isChecked()
+        ):
+            self._activate_select_tool()
+            return
+        if (
+            self.actions.get("geometry_trim_pick") is not None
+            and self.actions["geometry_trim_pick"].isChecked()
         ):
             self._activate_select_tool()
             return
@@ -6055,6 +6187,19 @@ class MainWindow(QMainWindow):
         kind = payload.get("kind")
         tag = payload.get("tag")
         mode = payload.get("mode", "replace")
+
+        trim_action = self.actions.get("geometry_trim_pick")
+        if (
+            trim_action is not None
+            and trim_action.isChecked()
+        ):
+            if kind == "geometry_line" and tag is not None:
+                self._handle_geometry_trim_click(int(tag))
+            else:
+                self.status_message.setText(
+                    "Trim: click a Geometry Line"
+                )
+            return
 
         line_pick_action = self.actions.get(
             "line_geometry_pick"
