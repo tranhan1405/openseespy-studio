@@ -3922,11 +3922,6 @@ class MainWindow(QMainWindow):
                 for element_tag in surface.generated_element_tags
                 if int(element_tag) in self.model.elements
             ]
-            mesh_nodes = sorted({
-                int(node_tag)
-                for element_tag in live_elements
-                for node_tag in self.model.elements[element_tag].node_tags()
-            })
             if live_elements:
                 status = (
                     f"{surface.divisions_u}×{surface.divisions_v} · "
