@@ -3351,23 +3351,109 @@ class ProjectDatabase:
                     f"Shell element {element.tag} has zero or near-zero area."
                 )
 
+            # Use a Newell polygon normal plus a dominant-plane projection to
+            # catch crossed or concave quadrilateral node ordering.  These
+            # topologies can have non-zero triangle area yet still produce an
+            # invalid/inverted shell mapping.
+            normal = [0.0, 0.0, 0.0]
+            for index in range(4):
+                current = p[index]
+                following = p[(index + 1) % 4]
+                normal[0] += (
+                    (current[1] - following[1])
+                    * (current[2] + following[2])
+                )
+                normal[1] += (
+                    (current[2] - following[2])
+                    * (current[0] + following[0])
+                )
+                normal[2] += (
+                    (current[0] - following[0])
+                    * (current[1] + following[1])
+                )
+            normal = tuple(normal)
+            normal_norm2 = sum(value * value for value in normal)
+            if normal_norm2 <= 1.0e-24:
+                raise ValueError(
+                    f"Shell element {element.tag} has invalid quadrilateral "
+                    "node ordering (crossed or degenerate boundary)."
+                )
+
+            drop_axis = max(
+                range(3),
+                key=lambda axis: abs(normal[axis]),
+            )
+            projected = [
+                tuple(
+                    point[axis]
+                    for axis in range(3)
+                    if axis != drop_axis
+                )
+                for point in p
+            ]
+
+            def orient2d(a, b, c) -> float:
+                return (
+                    (b[0] - a[0]) * (c[1] - a[1])
+                    - (b[1] - a[1]) * (c[0] - a[0])
+                )
+
+            def proper_intersection(a, b, c, d) -> bool:
+                o1 = orient2d(a, b, c)
+                o2 = orient2d(a, b, d)
+                o3 = orient2d(c, d, a)
+                o4 = orient2d(c, d, b)
+                scale = max(
+                    abs(o1), abs(o2), abs(o3), abs(o4), 1.0
+                )
+                tol = 1.0e-12 * scale
+                return (
+                    o1 * o2 < -(tol * tol)
+                    and o3 * o4 < -(tol * tol)
+                )
+
+            if (
+                proper_intersection(
+                    projected[0], projected[1],
+                    projected[2], projected[3],
+                )
+                or proper_intersection(
+                    projected[1], projected[2],
+                    projected[3], projected[0],
+                )
+            ):
+                raise ValueError(
+                    f"Shell element {element.tag} has self-intersecting "
+                    "quadrilateral node ordering."
+                )
+
+            turns = [
+                orient2d(
+                    projected[index],
+                    projected[(index + 1) % 4],
+                    projected[(index + 2) % 4],
+                )
+                for index in range(4)
+            ]
+            turn_scale = max(
+                max(abs(value) for value in turns),
+                1.0,
+            )
+            meaningful = [
+                value
+                for value in turns
+                if abs(value) > 1.0e-12 * turn_scale
+            ]
+            if (
+                meaningful
+                and min(meaningful) < 0.0 < max(meaningful)
+            ):
+                raise ValueError(
+                    f"Shell element {element.tag} is concave; use a convex "
+                    "four-node boundary or remesh the surface."
+                )
+
             if element.shell_local_x is not None:
-                diagonal_13 = tuple(
-                    p[2][index] - p[0][index]
-                    for index in range(3)
-                )
-                diagonal_24 = tuple(
-                    p[3][index] - p[1][index]
-                    for index in range(3)
-                )
-                normal = (
-                    diagonal_13[1] * diagonal_24[2]
-                    - diagonal_13[2] * diagonal_24[1],
-                    diagonal_13[2] * diagonal_24[0]
-                    - diagonal_13[0] * diagonal_24[2],
-                    diagonal_13[0] * diagonal_24[1]
-                    - diagonal_13[1] * diagonal_24[0],
-                )
                 local_x = tuple(
                     float(value)
                     for value in element.shell_local_x
