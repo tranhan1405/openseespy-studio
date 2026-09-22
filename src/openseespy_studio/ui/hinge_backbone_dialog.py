@@ -41,12 +41,14 @@ class HingeBackboneDialog(QDialog):
         *,
         next_tag: int,
         units=None,
+        prefill: dict | None = None,
         parent=None,
     ):
         super().__init__(parent)
         self.setWindowTitle("Hinge Backbone Builder")
         self.resize(760, 650)
         self._units = UnitSystem.from_mapping(units)
+        self._prefill = dict(prefill or {})
 
         root = QVBoxLayout(self)
 
@@ -234,7 +236,28 @@ class HingeBackboneDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         root.addWidget(self.buttons)
 
+        self._apply_prefill()
         self._sync_basis()
+
+    def _apply_prefill(self) -> None:
+        if not self._prefill:
+            return
+
+        source_kind = self._prefill.get("source_kind")
+        if source_kind is not None:
+            index = self.source_kind.findData(str(source_kind))
+            if index >= 0:
+                self.source_kind.setCurrentIndex(index)
+
+        source_note = str(self._prefill.get("source_note", "") or "").strip()
+        if source_note:
+            self.source_note.setText(source_note)
+
+        basis = self._prefill.get("basis")
+        if basis is not None:
+            index = self.basis.findData(str(basis))
+            if index >= 0:
+                self.basis.setCurrentIndex(index)
 
     @staticmethod
     def _factor_spin(
