@@ -8,9 +8,16 @@ import pytest
 from openseespy_studio.generator import section_to_openseespy, to_openseespy
 from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.model import SHELL_ELEMENT_TYPES, StructuralModel
-from openseespy_studio.project import ProjectDatabase, SectionData
+from openseespy_studio.project import (
+    AnalysisSettingsData,
+    ProjectDatabase,
+    SectionData,
+    SolutionResultData,
+)
+from openseespy_studio.result_catalog import result_choices_for_analysis
 from openseespy_studio.shell_mesh import ShellMeshSpec, build_shell_mesh
 from openseespy_studio.ui.main_window import MainWindow
+from openseespy_studio.ui.results_panel import ResultsPanel
 from openseespy_studio.ui.viewport import ModelViewport
 from openseespy_studio.validation import validate_project
 
@@ -357,3 +364,102 @@ def test_shell_mesh_failure_rolls_back_generated_nodes_and_elements():
     assert set(project.model.nodes) == before_nodes
     assert set(project.model.elements) == before_elements
 
+
+
+def test_shell_result_catalog_includes_force_and_deformation_only_nonmodal():
+    static_choices = result_choices_for_analysis("Static")
+    static_types = {choice.result_type for choice in static_choices}
+    assert "ShellForce" in static_types
+    assert "ShellDeformation" in static_types
+
+    modal_types = {
+        choice.result_type
+        for choice in result_choices_for_analysis("Modal")
+    }
+    assert "ShellForce" not in modal_types
+    assert "ShellDeformation" not in modal_types
+
+
+def test_shell_deformation_result_request_validates_scope_and_component():
+    project = ProjectDatabase(
+        name="shell-result",
+        model=_shell_model(),
+    )
+    project.add_section(_shell_section())
+    project.add_analysis(
+        AnalysisSettingsData(
+            1,
+            "Static shell",
+            analysis_type="Static",
+        )
+    )
+
+    result = SolutionResultData(
+        tag=1,
+        analysis_tag=1,
+        name="Shell Exx",
+        result_type="ShellDeformation",
+        element_scope=[10],
+        settings={"component": "Exx"},
+    )
+    project.add_solution_result(result)
+    assert project.solution_results[1].result_type == "ShellDeformation"
+
+    with pytest.raises(
+        ValueError,
+        match=r"Unsupported ShellDeformation component",
+    ):
+        project.add_solution_result(
+            SolutionResultData(
+                tag=2,
+                analysis_tag=1,
+                name="Bad shell deformation",
+                result_type="ShellDeformation",
+                element_scope=[10],
+                settings={"component": "BAD"},
+            )
+        )
+
+
+def test_shell_generator_captures_force_and_deformation_gauss_points():
+    code = to_openseespy(
+        _shell_model(),
+        sections={7: _shell_section()},
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert "_studio_shell_section_forces" in code
+    assert "_studio_shell_section_deformations" in code
+    assert "'material', _studio_gp, 'force'" in code
+    assert "'material', _studio_gp, 'deformation'" in code
+    assert "'shell_section_forces': _studio_shell_section_forces" in code
+    assert (
+        "'shell_section_deformations': "
+        "_studio_shell_section_deformations"
+    ) in code
+
+
+def test_shell_deformation_ui_routes_and_tables_exist():
+    prepare_source = inspect.getsource(
+        MainWindow._prepare_solution_result_prerequisites
+    )
+    assert '{"ShellForce", "ShellDeformation"}' in prepare_source
+
+    render_source = inspect.getsource(
+        MainWindow._render_result_choice
+    )
+    assert "show_shell_deformation_contour" in render_source
+
+    viewport_source = inspect.getsource(
+        ModelViewport.show_shell_deformation_contour
+    )
+    assert "shell_section_deformations" in viewport_source
+    assert "Kxx" in viewport_source
+
+    build_source = inspect.getsource(ResultsPanel._build_shell_tab)
+    populate_source = inspect.getsource(
+        ResultsPanel._populate_shell_results
+    )
+    assert "shell_deformation_gp_table" in build_source
+    assert "Membrane Strain" in build_source
+    assert "shell_section_deformations" in populate_source
