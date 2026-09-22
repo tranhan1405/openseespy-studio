@@ -35,3 +35,27 @@ def test_fiber_dominant_material_uses_total_fiber_area():
     )
 
     assert ModelViewport._dominant_fiber_material(None, section) == 1
+
+
+
+def test_centerline_selection_highlight_is_wider_than_base_line():
+    selected = ModelViewport._element_highlight_style("centerline")
+    hover = ModelViewport._element_highlight_style(
+        "centerline",
+        hover=True,
+    )
+
+    assert selected["render_lines_as_tubes"] is True
+    assert selected["show_edges"] is False
+    assert selected["line_width"] > 3
+    assert hover["render_lines_as_tubes"] is True
+    assert hover["line_width"] > 3
+    assert selected["line_width"] > hover["line_width"]
+
+
+def test_solid_representation_highlight_keeps_edge_overlay():
+    selected = ModelViewport._element_highlight_style("tube")
+
+    assert selected["render_lines_as_tubes"] is False
+    assert selected["show_edges"] is True
+    assert selected["line_width"] == 2
