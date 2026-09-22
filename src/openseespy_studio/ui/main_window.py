@@ -10380,14 +10380,28 @@ class MainWindow(QMainWindow):
         name: str,
         settings: dict[str, object] | None = None,
     ) -> None:
+        prepared = self._prepare_solution_result_prerequisites(
+            result_type,
+        )
+        if prepared is None:
+            return
+        node_scope, element_scope = prepared
+
+        if int(analysis_tag) not in self.project.analyses:
+            self.status_message.setText(
+                "The original analysis no longer exists after creating "
+                "the prerequisite model object."
+            )
+            return
+
         before = self.project.to_dict()
         result = SolutionResultData(
             tag=self.project.next_solution_result_tag(),
             analysis_tag=int(analysis_tag),
             name=str(name),
             result_type=str(result_type),
-            node_scope=sorted(self.selection.nodes),
-            element_scope=sorted(self.selection.elements),
+            node_scope=sorted(node_scope),
+            element_scope=sorted(element_scope),
             settings=dict(settings or {}),
         )
         try:
@@ -10986,6 +11000,335 @@ class MainWindow(QMainWindow):
                 ])
         self.properties_panel.set_properties("Analysis Settings", rows)
 
+    def _choose_existing_prerequisite_tag(
+        self,
+        *,
+        title: str,
+        label: str,
+        tags: list[int],
+    ) -> int | None:
+        unique = sorted({int(tag) for tag in tags})
+        if not unique:
+            return None
+        if len(unique) == 1:
+            return unique[0]
+        choice, ok = QInputDialog.getItem(
+            self,
+            title,
+            label,
+            [str(tag) for tag in unique],
+            0,
+            False,
+        )
+        if not ok:
+            return None
+        try:
+            return int(choice)
+        except (TypeError, ValueError):
+            return None
+
+    def _nonlinear_beam_tags(self) -> list[int]:
+        return sorted(
+            int(tag)
+            for tag, element in self.model.elements.items()
+            if element.element_type in {
+                "forceBeamColumn",
+                "dispBeamColumn",
+            }
+        )
+
+    def _create_nonlinear_beam_prerequisite(self) -> None:
+        self._create_frame()
+        selected = [
+            int(tag)
+            for tag in sorted(self.selection.elements)
+            if (
+                tag in self.model.elements
+                and self.model.elements[tag].element_type
+                in {
+                    "elasticBeamColumn",
+                    "forceBeamColumn",
+                    "dispBeamColumn",
+                }
+            )
+        ]
+        if not selected:
+            return
+        if any(
+            self.model.elements[tag].element_type
+            in {"forceBeamColumn", "dispBeamColumn"}
+            for tag in selected
+        ):
+            return
+        self._set_element_formulation()
+
+    def _ensure_nonlinear_beam_target(
+        self,
+        *,
+        title: str,
+    ) -> int | None:
+        selected = [
+            int(tag)
+            for tag in sorted(self.selection.elements)
+            if tag in self._nonlinear_beam_tags()
+        ]
+        if selected:
+            return selected[0]
+
+        existing = self._nonlinear_beam_tags()
+        if existing:
+            tag = self._choose_existing_prerequisite_tag(
+                title=title,
+                label="Choose an existing nonlinear beam-column element:",
+                tags=existing,
+            )
+            if tag is not None:
+                self.selection.set_selection(elements={tag})
+            return tag
+
+        if not self._ensure_prerequisite(
+            title=title,
+            message=(
+                f"{title} requires a forceBeamColumn or dispBeamColumn "
+                "element. Create a frame and define its nonlinear "
+                "formulation now?"
+            ),
+            action_label="Create Nonlinear Frame Now...",
+            available=lambda: bool(self._nonlinear_beam_tags()),
+            creator=self._create_nonlinear_beam_prerequisite,
+        ):
+            return None
+
+        existing = self._nonlinear_beam_tags()
+        if not existing:
+            return None
+        selected = [
+            int(tag)
+            for tag in sorted(self.selection.elements)
+            if tag in existing
+        ]
+        tag = (
+            selected[0]
+            if selected
+            else self._choose_existing_prerequisite_tag(
+                title=title,
+                label="Choose the nonlinear beam-column target:",
+                tags=existing,
+            )
+        )
+        if tag is not None:
+            self.selection.set_selection(elements={tag})
+        return tag
+
+    def _recorder_target_creator(
+        self,
+        recorder_type: str,
+    ) -> list[int]:
+        kind = str(recorder_type)
+        if kind == "Node":
+            if not self.model.nodes:
+                if not self._ensure_node_count(1, title="Node Recorder"):
+                    return []
+            selected = sorted(
+                int(tag)
+                for tag in self.selection.nodes
+                if tag in self.model.nodes
+            )
+            if selected:
+                return selected
+            tag = self._choose_existing_prerequisite_tag(
+                title="Node Recorder",
+                label="Choose a node target:",
+                tags=list(self.model.nodes),
+            )
+            return [tag] if tag is not None else []
+
+        if kind == "Element":
+            selected = sorted(
+                int(tag)
+                for tag in self.selection.elements
+                if (
+                    tag in self.model.elements
+                    or tag in self.project.connections
+                )
+            )
+            if selected:
+                return selected
+            existing = sorted(
+                set(self.model.elements)
+                | set(self.project.connections)
+            )
+            if not existing:
+                if not self._ensure_prerequisite(
+                    title="Element Recorder",
+                    message=(
+                        "Element Recorder requires an element target. "
+                        "Create a Frame element now?"
+                    ),
+                    action_label="Create Frame Now...",
+                    available=lambda: bool(
+                        self.model.elements
+                        or self.project.connections
+                    ),
+                    creator=self._create_frame,
+                ):
+                    return []
+                existing = sorted(
+                    set(self.model.elements)
+                    | set(self.project.connections)
+                )
+            tag = self._choose_existing_prerequisite_tag(
+                title="Element Recorder",
+                label="Choose an element target:",
+                tags=existing,
+            )
+            return [tag] if tag is not None else []
+
+        if kind in {"Section", "Fiber"}:
+            tag = self._ensure_nonlinear_beam_target(
+                title=f"{kind} Recorder",
+            )
+            return [tag] if tag is not None else []
+
+        return []
+
+    def _prepare_solution_result_prerequisites(
+        self,
+        result_type: str,
+    ) -> tuple[set[int], set[int]] | None:
+        kind = str(result_type)
+        nodes = set(self.selection.nodes)
+        elements = set(self.selection.elements)
+
+        if kind == "MemberForce":
+            frame_tags = sorted(
+                int(tag)
+                for tag, element in self.model.elements.items()
+                if element.element_type in {
+                    "elasticBeamColumn",
+                    "forceBeamColumn",
+                    "dispBeamColumn",
+                }
+            )
+            if not frame_tags:
+                if not self._ensure_prerequisite(
+                    title="Member Force Result",
+                    message=(
+                        "Member Force requires a Frame element. "
+                        "Create one now?"
+                    ),
+                    action_label="Create Frame Now...",
+                    available=lambda: any(
+                        element.element_type in {
+                            "elasticBeamColumn",
+                            "forceBeamColumn",
+                            "dispBeamColumn",
+                        }
+                        for element in self.model.elements.values()
+                    ),
+                    creator=self._create_frame,
+                ):
+                    return None
+                frame_tags = sorted(
+                    int(tag)
+                    for tag, element in self.model.elements.items()
+                    if element.element_type in {
+                        "elasticBeamColumn",
+                        "forceBeamColumn",
+                        "dispBeamColumn",
+                    }
+                )
+            selected = [tag for tag in sorted(elements) if tag in frame_tags]
+            if not selected:
+                tag = self._choose_existing_prerequisite_tag(
+                    title="Member Force Result",
+                    label="Choose a Frame element for this result:",
+                    tags=frame_tags,
+                )
+                if tag is None:
+                    return None
+                selected = [tag]
+            elements = set(selected)
+
+        elif kind == "SectionResponse":
+            sources = section_response_sources(
+                self.model,
+                self.project.connections,
+            )
+            source_tags = sorted(
+                int(item["element_tag"])
+                for item in sources
+            )
+            selected = [
+                tag for tag in sorted(elements)
+                if tag in source_tags
+            ]
+            if not selected and not source_tags:
+                tag = self._ensure_nonlinear_beam_target(
+                    title="Section Response Result",
+                )
+                if tag is None:
+                    return None
+                source_tags = [tag]
+                selected = [tag]
+            if not selected:
+                tag = self._choose_existing_prerequisite_tag(
+                    title="Section Response Result",
+                    label=(
+                        "Choose a zeroLengthSection or nonlinear "
+                        "beam-column target:"
+                    ),
+                    tags=source_tags,
+                )
+                if tag is None:
+                    return None
+                selected = [tag]
+            elements = {selected[0]}
+
+        elif kind in {"FiberStress", "FiberStrain", "HingeState"}:
+            tag = self._ensure_nonlinear_beam_target(
+                title={
+                    "FiberStress": "Fiber Stress Result",
+                    "FiberStrain": "Fiber Strain Result",
+                    "HingeState": "Hinge / Yield State Result",
+                }[kind],
+            )
+            if tag is None:
+                return None
+            elements = {tag}
+
+        elif kind == "SpecimenResponse":
+            specimen_tags = sorted(
+                int(tag)
+                for tag, element in self.model.elements.items()
+                if str(element.group) == "test-column"
+            )
+            if not specimen_tags:
+                if not self._ensure_prerequisite(
+                    title="Specimen Response Result",
+                    message=(
+                        "Specimen Response requires a Quick 1D Column / "
+                        "Test Specimen model. Open that wizard now?"
+                    ),
+                    action_label="Create 1D Column Now...",
+                    available=lambda: any(
+                        str(element.group) == "test-column"
+                        for element in self.model.elements.values()
+                    ),
+                    creator=self._show_test_column_wizard,
+                ):
+                    return None
+                specimen_tags = sorted(
+                    int(tag)
+                    for tag, element in self.model.elements.items()
+                    if str(element.group) == "test-column"
+                )
+            if not specimen_tags:
+                return None
+            elements = set(specimen_tags)
+
+        return nodes, elements
+
     def _create_recorder(self) -> None:
         if (
             not self.model.nodes
@@ -11003,6 +11346,7 @@ class MainWindow(QMainWindow):
             next_tag=self.project.next_recorder_tag(),
             initial_node_tags=initial_nodes,
             initial_element_tags=initial_elements,
+            target_creator=self._recorder_target_creator,
             parent=self,
         )
         if not dialog.exec():
@@ -12498,6 +12842,7 @@ class MainWindow(QMainWindow):
                     if analysis_settings is not None
                     else None
                 ),
+                section_response_available=True,
             )
 
             menu.addSeparator()
