@@ -792,6 +792,7 @@ def load_pattern_block_to_openseespy(
     materials: dict[int, MaterialData] | None = None,
     transformations: dict[int, TransformationData] | None = None,
     units: dict[str, str] | None = None,
+    surface_pressure_tags: dict[int, int] | None = None,
 ) -> list[str]:
     lines = [load_pattern_to_openseespy(pattern)]
     if pattern.pattern_type != "Plain":
@@ -813,6 +814,31 @@ def load_pattern_block_to_openseespy(
         )
     for load in sorted(element_loads or [], key=lambda item: item.tag):
         lines.append(f"# Element load {load.tag}: {load.name}")
+        if load.load_type == "SurfacePressure":
+            element = model.elements.get(int(load.element_tag))
+            helper_tag = (surface_pressure_tags or {}).get(int(load.tag))
+            if (
+                element is None
+                or element.element_type not in SHELL_ELEMENT_TYPES
+                or len(element.node_tags()) != 4
+                or helper_tag is None
+            ):
+                lines.append(
+                    f"# ERROR: SurfacePressure load {load.tag} could not "
+                    "create its native SurfaceLoad helper."
+                )
+                continue
+            n1, n2, n3, n4 = element.node_tags()
+            lines.append(
+                "ops.element('SurfaceLoad', "
+                f"{helper_tag}, {n1}, {n2}, {n3}, {n4}, "
+                f"{load.pressure:g})"
+            )
+            lines.append(
+                "ops.eleLoad('-ele', "
+                f"{helper_tag}, '-type', '-surfaceLoad')"
+            )
+            continue
         lines.append(
             element_load_to_openseespy(
                 load,
@@ -4060,6 +4086,22 @@ def to_openseespy(
     for load in (element_loads or {}).values():
         element_by_pattern.setdefault(load.pattern_tag, []).append(load)
 
+    reserved_element_tags = set(model.elements)
+    reserved_element_tags.update((connections or {}).keys())
+    next_surface_tag = max(reserved_element_tags, default=0) + 1
+    surface_pressure_tags: dict[int, int] = {}
+    for load in sorted(
+        (element_loads or {}).values(),
+        key=lambda item: int(item.tag),
+    ):
+        if load.load_type != "SurfacePressure":
+            continue
+        while next_surface_tag in reserved_element_tags:
+            next_surface_tag += 1
+        surface_pressure_tags[int(load.tag)] = next_surface_tag
+        reserved_element_tags.add(next_surface_tag)
+        next_surface_tag += 1
+
     displacement_by_pattern: dict[int, list[PrescribedDisplacementData]] = {}
     for displacement in (prescribed_displacements or {}).values():
         displacement_by_pattern.setdefault(
@@ -4190,6 +4232,7 @@ def to_openseespy(
                     materials=materials,
                     transformations=transformations,
                     units=units,
+                    surface_pressure_tags=surface_pressure_tags,
                 )
             )
 
