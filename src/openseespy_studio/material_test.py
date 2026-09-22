@@ -113,7 +113,7 @@ def default_material_test_spec(
             steps_per_segment=20,
         )
 
-    if material_type in {"Steel01", "Steel02", "Hardening"}:
+    if material_type in {"Steel01", "Steel02", "RambergOsgoodSteel", "Hardening"}:
         return MaterialTestSpec(
             protocol="symmetric_cyclic",
             amplitude=0.03,
@@ -230,6 +230,7 @@ def material_test_axis_labels(
         "Elastic",
         "Steel01",
         "Steel02",
+        "RambergOsgoodSteel",
         "Hardening",
         "ElasticPP",
         "ElasticBilin",
