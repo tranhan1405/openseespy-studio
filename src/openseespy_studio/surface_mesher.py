@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
+from .model import SHELL_ELEMENT_TYPES
 from .project import (
     ElementLoadData,
     NodalLoadData,
