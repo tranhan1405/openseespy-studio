@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -7,9 +9,11 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPushButton,
     QSpinBox,
     QVBoxLayout,
 )
@@ -34,6 +38,7 @@ class RecorderDialog(QDialog):
         recorder: RecorderData | None = None,
         initial_node_tags: set[int] | None = None,
         initial_element_tags: set[int] | None = None,
+        target_creator: Callable[[str], list[int]] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -42,6 +47,7 @@ class RecorderDialog(QDialog):
         )
         self.setMinimumWidth(470)
         self._recorder = recorder
+        self._target_creator = target_creator
 
         root = QVBoxLayout(self)
         form = QFormLayout()
@@ -77,7 +83,18 @@ class RecorderDialog(QDialog):
             )
         self.targets = QLineEdit(target_text)
         self.targets.setPlaceholderText("e.g. 1, 2, 5-10")
-        form.addRow("Target tags:", self.targets)
+
+        target_row = QHBoxLayout()
+        target_row.addWidget(self.targets, 1)
+        self.create_target = QPushButton("Create / Link Target...")
+        self.create_target.setToolTip(
+            "Create or link the prerequisite target required by the "
+            "selected recorder type"
+        )
+        self.create_target.setEnabled(self._target_creator is not None)
+        self.create_target.clicked.connect(self._create_or_link_target)
+        target_row.addWidget(self.create_target)
+        form.addRow("Target tags:", target_row)
 
         self.response = QComboBox()
         form.addRow("Response:", self.response)
@@ -170,6 +187,21 @@ class RecorderDialog(QDialog):
         self._update_type_controls()
         if recorder is not None:
             self.response.setCurrentText(recorder.response)
+
+    def _create_or_link_target(self) -> None:
+        if self._target_creator is None:
+            return
+        recorder_type = self.recorder_type.currentText()
+        try:
+            tags = [
+                int(tag)
+                for tag in self._target_creator(recorder_type)
+            ]
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "Recorder Target", str(exc))
+            return
+        if tags:
+            self.targets.setText(", ".join(map(str, sorted(set(tags)))))
 
     def _update_type_controls(self) -> None:
         recorder_type = self.recorder_type.currentText()
