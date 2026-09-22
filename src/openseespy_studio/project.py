@@ -2817,6 +2817,108 @@ class ProjectDatabase:
         self.solution_results.clear()
         self.active_analysis_tag = None
 
+    def coincident_shell_node_groups(
+        self,
+        *,
+        tolerance: float | None = None,
+    ) -> list[list[int]]:
+        """Return shell-used node groups that occupy the same position."""
+        shell_node_tags = {
+            int(node_tag)
+            for element in self.model.elements.values()
+            if element.element_type in SHELL_ELEMENT_TYPES
+            for node_tag in element.node_tags()
+            if int(node_tag) in self.model.nodes
+        }
+        if len(shell_node_tags) < 2:
+            return []
+
+        nodes = [
+            self.model.nodes[tag]
+            for tag in sorted(shell_node_tags)
+        ]
+        if tolerance is None:
+            xs = [float(node.xyz[0]) for node in nodes]
+            ys = [float(node.xyz[1]) for node in nodes]
+            zs = [float(node.xyz[2]) for node in nodes]
+            span = max(
+                max(xs) - min(xs),
+                max(ys) - min(ys),
+                max(zs) - min(zs),
+                1.0,
+            )
+            merge_tolerance = 1.0e-9 * span
+        else:
+            merge_tolerance = float(tolerance)
+            if (
+                not math.isfinite(merge_tolerance)
+                or merge_tolerance <= 0.0
+            ):
+                raise ValueError(
+                    "Shell stitch tolerance must be a finite positive value."
+                )
+
+        tolerance2 = merge_tolerance * merge_tolerance
+        buckets: dict[tuple[int, int, int], list[int]] = {}
+        parent = {tag: tag for tag in shell_node_tags}
+
+        def find(tag: int) -> int:
+            root = int(tag)
+            while parent[root] != root:
+                parent[root] = parent[parent[root]]
+                root = parent[root]
+            return root
+
+        def union(left: int, right: int) -> None:
+            root_left = find(left)
+            root_right = find(right)
+            if root_left == root_right:
+                return
+            if root_left < root_right:
+                parent[root_right] = root_left
+            else:
+                parent[root_left] = root_right
+
+        def key_for(xyz) -> tuple[int, int, int]:
+            return tuple(
+                int(round(float(value) / merge_tolerance))
+                for value in xyz
+            )
+
+        for node in nodes:
+            base = key_for(node.xyz)
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        for other_tag in buckets.get(
+                            (
+                                base[0] + dx,
+                                base[1] + dy,
+                                base[2] + dz,
+                            ),
+                            (),
+                        ):
+                            other = self.model.nodes[other_tag]
+                            distance2 = sum(
+                                (
+                                    float(node.xyz[index])
+                                    - float(other.xyz[index])
+                                ) ** 2
+                                for index in range(3)
+                            )
+                            if distance2 <= tolerance2:
+                                union(int(node.tag), int(other_tag))
+            buckets.setdefault(base, []).append(int(node.tag))
+
+        groups: dict[int, list[int]] = {}
+        for tag in sorted(shell_node_tags):
+            groups.setdefault(find(tag), []).append(tag)
+        return [
+            tags
+            for _, tags in sorted(groups.items())
+            if len(tags) > 1
+        ]
+
     @staticmethod
     def material_dependencies(material: MaterialData) -> list[int]:
         if material.material_type in {"MinMax", "Fatigue"}:
