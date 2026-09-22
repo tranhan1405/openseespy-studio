@@ -116,6 +116,26 @@ def result_choices_for_analysis(
             )
         )
 
+    for label, component in (
+        ("Membrane Nxx", "Nxx"),
+        ("Membrane Nyy", "Nyy"),
+        ("Membrane Nxy", "Nxy"),
+        ("Bending Mxx", "Mxx"),
+        ("Bending Myy", "Myy"),
+        ("Bending Mxy", "Mxy"),
+        ("Transverse Shear Qx", "Qx"),
+        ("Transverse Shear Qy", "Qy"),
+    ):
+        choices.append(
+            ResultChoice(
+                "Shell Results",
+                label,
+                "ShellForce",
+                f"Shell {component}",
+                {"component": component},
+            )
+        )
+
     choices.append(
         ResultChoice(
             "Nonlinear Results",
