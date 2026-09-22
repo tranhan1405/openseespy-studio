@@ -2916,11 +2916,36 @@ class ModelViewport(QWidget):
             element = self._model.elements.get(load.element_tag)
             if element is None:
                 continue
-            resolved = self._element_load_global_vector(load)
-            if resolved is None:
-                continue
-            vector, prefix = resolved
-            magnitude = self._vector_norm(vector)
+            if load.load_type == "SurfacePressure":
+                node_tags = element.node_tags()
+                if len(node_tags) != 4:
+                    continue
+                shell_nodes = [
+                    self._model.nodes.get(node_tag)
+                    for node_tag in node_tags
+                ]
+                if any(node is None for node in shell_nodes):
+                    continue
+                p1 = np.asarray(shell_nodes[0].xyz, dtype=float)
+                p2 = np.asarray(shell_nodes[1].xyz, dtype=float)
+                p4 = np.asarray(shell_nodes[3].xyz, dtype=float)
+                normal = np.cross(p2 - p1, p4 - p1)
+                norm = float(np.linalg.norm(normal))
+                if norm <= 1.0e-12:
+                    continue
+                normal /= norm
+                vector = tuple(
+                    float(load.pressure) * float(value)
+                    for value in normal
+                )
+                prefix = "P_normal"
+                magnitude = abs(float(load.pressure))
+            else:
+                resolved = self._element_load_global_vector(load)
+                if resolved is None:
+                    continue
+                vector, prefix = resolved
+                magnitude = self._vector_norm(vector)
             max_magnitude = max(max_magnitude, magnitude)
             entries.append((load, element, vector, prefix, magnitude))
 
@@ -2938,20 +2963,57 @@ class ModelViewport(QWidget):
         )
 
         for load, element, vector, prefix, magnitude in entries:
-            node_i = self._model.nodes.get(element.i)
-            node_j = self._model.nodes.get(element.j)
-            if node_i is None or node_j is None:
-                continue
-            p_i = np.asarray(node_i.xyz, dtype=float)
-            p_j = np.asarray(node_j.xyz, dtype=float)
-            member = p_j - p_i
-
             ratio = (
                 magnitude / max_magnitude
                 if max_magnitude > 1.0e-15
                 else 1.0
             )
             arrow_length = base_length * (0.45 + 0.55 * ratio)
+
+            if load.load_type == "SurfacePressure":
+                node_tags = element.node_tags()
+                shell_points = [
+                    np.asarray(
+                        self._model.nodes[node_tag].xyz,
+                        dtype=float,
+                    )
+                    for node_tag in node_tags
+                    if node_tag in self._model.nodes
+                ]
+                if len(shell_points) != 4:
+                    continue
+                p1, p2, p3, p4 = shell_points
+                for xi, eta in (
+                    (0.25, 0.25),
+                    (0.75, 0.25),
+                    (0.75, 0.75),
+                    (0.25, 0.75),
+                ):
+                    point = (
+                        (1.0 - xi) * (1.0 - eta) * p1
+                        + xi * (1.0 - eta) * p2
+                        + xi * eta * p3
+                        + (1.0 - xi) * eta * p4
+                    )
+                    arrow = self._arrow_record(
+                        point,
+                        vector,
+                        length=arrow_length,
+                    )
+                    if arrow is not None:
+                        arrows.append(arrow)
+                label_point = 0.25 * (p1 + p2 + p3 + p4)
+                unit = (
+                    f"{force_unit}/{self._units.get('length', '')}²"
+                )
+            else:
+                node_i = self._model.nodes.get(element.i)
+                node_j = self._model.nodes.get(element.j)
+                if node_i is None or node_j is None:
+                    continue
+                p_i = np.asarray(node_i.xyz, dtype=float)
+                p_j = np.asarray(node_j.xyz, dtype=float)
+                member = p_j - p_i
 
             if load.load_type in {"Uniform", "SelfWeight"}:
                 positions = (0.18, 0.39, 0.61, 0.82)
@@ -2966,7 +3028,7 @@ class ModelViewport(QWidget):
                         arrows.append(arrow)
                 label_point = p_i + 0.5 * member
                 unit = line_unit
-            else:
+            elif load.load_type != "SurfacePressure":
                 position = min(max(float(load.x_over_l), 0.0), 1.0)
                 label_point = p_i + position * member
                 arrow = self._arrow_record(
@@ -2993,6 +3055,12 @@ class ModelViewport(QWidget):
                     f"{prefix}_local",
                     local_vector,
                     unit,
+                )
+            elif load.load_type == "SurfacePressure":
+                title += (
+                    "\n"
+                    + f"P={load.pressure:g} {unit}"
+                    + " · +outward / -inward"
                 )
             else:
                 title += "\nSelf weight"
