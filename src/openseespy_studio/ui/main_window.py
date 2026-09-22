@@ -1622,6 +1622,8 @@ class MainWindow(QMainWindow):
         self._geometry_surface_point_tags: list[int] = []
         self._geometry_sketch_intersections = []
         self._geometry_trim_subject_tag: int | None = None
+        self._geometry_trim_endpoint = "nearest"
+        self._geometry_line_edit_operation = "trim"
         self._job_ui_timer = QTimer(self)
         self._job_ui_timer.setInterval(1000)
         self._job_ui_timer.timeout.connect(self._refresh_running_job_ui)
@@ -2142,8 +2144,30 @@ class MainWindow(QMainWindow):
             "Trim",
             "delete",
             self._activate_geometry_trim_tool,
-            "Click the Geometry Line to trim, then click the target Line",
+            "Click the side of a Geometry Line to trim, then click the cutting Line",
             checkable=True,
+        )
+        self._make_action(
+            "geometry_extend_pick",
+            "Extend",
+            "move",
+            self._activate_geometry_extend_tool,
+            "Click the endpoint side of a Geometry Line to extend, then click the boundary Line",
+            checkable=True,
+        )
+        self._make_action(
+            "geometry_split",
+            "Split / Divide...",
+            "element",
+            self._split_selected_geometry_line,
+            "Split one selected Geometry Line into real topology segments",
+        )
+        self._make_action(
+            "geometry_join",
+            "Join",
+            "copy",
+            self._join_selected_geometry_lines,
+            "Join selected contiguous collinear Geometry Lines",
         )
         self._make_action(
             "geometry_snap",
@@ -2580,6 +2604,13 @@ class MainWindow(QMainWindow):
             self.actions["extrude"],
         ])
         modify_menu = geometry_menu.addMenu("Modify")
+        modify_menu.addActions([
+            self.actions["geometry_trim_pick"],
+            self.actions["geometry_extend_pick"],
+            self.actions["geometry_split"],
+            self.actions["geometry_join"],
+        ])
+        modify_menu.addSeparator()
         modify_menu.addActions([
             self.actions["copy"],
             self.actions["move"],
@@ -3095,7 +3126,8 @@ class MainWindow(QMainWindow):
         add_group(
             geometry_page,
             "Modify",
-            large=("geometry_trim_pick",),
+            large=("geometry_trim_pick", "geometry_extend_pick"),
+            small=("geometry_split", "geometry_join"),
         )
         add_group(
             geometry_page,
@@ -5299,15 +5331,71 @@ class MainWindow(QMainWindow):
 
     def _leave_geometry_trim_mode(self) -> None:
         self._geometry_trim_subject_tag = None
-        action = self.actions.get("geometry_trim_pick")
-        if action is not None:
-            action.setChecked(False)
+        self._geometry_trim_endpoint = "nearest"
+        for key in ("geometry_trim_pick", "geometry_extend_pick"):
+            action = self.actions.get(key)
+            if action is not None:
+                action.setChecked(False)
 
-    def _activate_geometry_trim_tool(
+    def _geometry_line_endpoint_from_click(
         self,
+        line_tag: int,
+        payload: dict[str, object],
+    ) -> str:
+        """Return the endpoint on the side of the Line that the user clicked."""
+
+        line = self.project.lines.get(int(line_tag))
+        if line is None:
+            return "nearest"
+        point_i = self.project.points.get(int(line.point_i))
+        point_j = self.project.points.get(int(line.point_j))
+        if point_i is None or point_j is None:
+            return "nearest"
+
+        screen = payload.get("screen")
+        if screen is not None:
+            try:
+                sx, sy = float(screen[0]), float(screen[1])
+                ix, iy = self.viewport._world_to_qt(point_i.xyz)
+                jx, jy = self.viewport._world_to_qt(point_j.xyz)
+                distance_i = (sx - ix) ** 2 + (sy - iy) ** 2
+                distance_j = (sx - jx) ** 2 + (sy - jy) ** 2
+                return "i" if distance_i <= distance_j else "j"
+            except (TypeError, ValueError, IndexError):
+                pass
+
+        world = payload.get("world")
+        if world is not None:
+            try:
+                xyz = tuple(float(value) for value in world)
+                distance_i = sum(
+                    (xyz[index] - float(point_i.xyz[index])) ** 2
+                    for index in range(3)
+                )
+                distance_j = sum(
+                    (xyz[index] - float(point_j.xyz[index])) ** 2
+                    for index in range(3)
+                )
+                return "i" if distance_i <= distance_j else "j"
+            except (TypeError, ValueError, IndexError):
+                pass
+        return "nearest"
+
+    def _activate_geometry_line_target_tool(
+        self,
+        operation: str,
         checked: bool = True,
     ) -> None:
-        action = self.actions.get("geometry_trim_pick")
+        operation = str(operation).strip().lower()
+        if operation not in {"trim", "extend"}:
+            raise ValueError("Geometry Line edit operation must be trim or extend.")
+
+        action_key = (
+            "geometry_trim_pick"
+            if operation == "trim"
+            else "geometry_extend_pick"
+        )
+        action = self.actions.get(action_key)
         if action is not None and not action.isChecked() and not checked:
             self._activate_select_tool()
             return
@@ -5316,51 +5404,92 @@ class MainWindow(QMainWindow):
                 action.setChecked(False)
             QMessageBox.information(
                 self,
-                "Trim Geometry",
-                "Create at least two Geometry Lines before using Trim.",
+                f"{operation.capitalize()} Geometry",
+                (
+                    "Create at least two Geometry Lines before using "
+                    f"{operation.capitalize()}."
+                ),
             )
             return
+
         self._leave_measure_mode()
         self._leave_frame_pick_mode()
         self._leave_truss_pick_mode()
         self._leave_geometry_line_pick_mode()
         self._leave_geometry_surface_pick_mode()
+        self._leave_geometry_trim_mode()
+        self._geometry_line_edit_operation = operation
         self._geometry_trim_subject_tag = None
+        self._geometry_trim_endpoint = "nearest"
         self.viewport.set_display_domain("geometry")
         self.viewport.set_interaction_tool("select")
         self.actions["select"].setChecked(False)
         self.actions["box"].setChecked(False)
         if action is not None:
             action.setChecked(True)
+
+        label = operation.capitalize()
         self.status_message.setText(
-            "Trim: click the Geometry Line to trim"
+            f"{label}: click the side of the Geometry Line to {operation}"
         )
 
-    def _handle_geometry_trim_click(self, line_tag: int) -> None:
-        tag = int(line_tag)
+    def _activate_geometry_trim_tool(
+        self,
+        checked: bool = True,
+    ) -> None:
+        self._activate_geometry_line_target_tool("trim", checked)
+
+    def _activate_geometry_extend_tool(
+        self,
+        checked: bool = True,
+    ) -> None:
+        self._activate_geometry_line_target_tool("extend", checked)
+
+    def _handle_geometry_trim_click(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        tag = payload.get("tag")
+        if tag is None:
+            return
+        tag = int(tag)
         if tag not in self.project.lines:
             return
+
+        operation = self._geometry_line_edit_operation
+        label = operation.capitalize()
         if self._geometry_trim_subject_tag is None:
             self._geometry_trim_subject_tag = tag
+            self._geometry_trim_endpoint = (
+                self._geometry_line_endpoint_from_click(tag, payload)
+            )
             self._select_geometry_line_from_viewport(tag, "replace")
+            side = {
+                "i": "Point I side",
+                "j": "Point J side",
+                "nearest": "nearest endpoint",
+            }[self._geometry_trim_endpoint]
             self.status_message.setText(
-                f"Trim: Line {tag} selected · click target Line"
+                f"{label}: Line {tag}, {side} selected · "
+                "click the target boundary Line"
             )
             return
+
         subject = int(self._geometry_trim_subject_tag)
         if tag == subject:
             self.status_message.setText(
-                "Trim: target must be a different Line"
+                f"{label}: target must be a different Line"
             )
             return
 
+        endpoint = self._geometry_trim_endpoint
         before = self.project.to_dict()
         try:
             result = trim_extend_line_to_line(
                 self.project,
                 subject,
                 tag,
-                endpoint="nearest",
+                endpoint=endpoint,
+                operation=operation,
                 remesh=True,
             )
         except (TypeError, ValueError) as exc:
@@ -5368,21 +5497,27 @@ class MainWindow(QMainWindow):
             self.model = self.project.model
             self._refresh_all()
             self._geometry_trim_subject_tag = None
-            self.status_message.setText(f"Trim: {exc}")
+            self._geometry_trim_endpoint = "nearest"
+            self.viewport.set_display_domain("geometry")
+            self.status_message.setText(
+                f"{label}: {exc} · click another subject Line"
+            )
             return
 
         self.model = self.project.model
         self._geometry_trim_subject_tag = None
+        self._geometry_trim_endpoint = "nearest"
         self._refresh_all(
-            f"Trimmed Line {subject} to Line {tag}"
+            f"{label} Line {subject} to Line {tag}"
         )
         self.viewport.set_display_domain("geometry")
         self._record_project_change(
-            f"Trim Geometry Line {subject} to Line {tag}",
+            f"{label} Geometry Line {subject} to Line {tag}",
             before,
         )
         self.status_message.setText(
-            f"Trimmed L{subject} to L{tag} · click another Line to trim"
+            f"{label} complete: L{subject} → L{tag} · "
+            f"click another Line to {operation}"
         )
 
     def _activate_frame_pick_tool(self, checked: bool = True) -> None:
@@ -5552,9 +5687,10 @@ class MainWindow(QMainWindow):
         ):
             self._activate_select_tool()
             return
-        if (
-            self.actions.get("geometry_trim_pick") is not None
-            and self.actions["geometry_trim_pick"].isChecked()
+        if any(
+            self.actions.get(key) is not None
+            and self.actions[key].isChecked()
+            for key in ("geometry_trim_pick", "geometry_extend_pick")
         ):
             self._activate_select_tool()
             return
@@ -6290,15 +6426,21 @@ class MainWindow(QMainWindow):
         mode = payload.get("mode", "replace")
 
         trim_action = self.actions.get("geometry_trim_pick")
-        if (
-            trim_action is not None
-            and trim_action.isChecked()
-        ):
+        extend_action = self.actions.get("geometry_extend_pick")
+        line_edit_action = None
+        line_edit_label = ""
+        if trim_action is not None and trim_action.isChecked():
+            line_edit_action = trim_action
+            line_edit_label = "Trim"
+        elif extend_action is not None and extend_action.isChecked():
+            line_edit_action = extend_action
+            line_edit_label = "Extend"
+        if line_edit_action is not None:
             if kind == "geometry_line" and tag is not None:
-                self._handle_geometry_trim_click(int(tag))
+                self._handle_geometry_trim_click(payload)
             else:
                 self.status_message.setText(
-                    "Trim: click a Geometry Line"
+                    f"{line_edit_label}: click a Geometry Line"
                 )
             return
 
@@ -14174,6 +14316,28 @@ class MainWindow(QMainWindow):
             + ", ".join(map(str, tags)),
             before,
         )
+
+    def _split_selected_geometry_line(self) -> None:
+        tags = self._selected_line_geometry_tags()
+        if len(tags) != 1:
+            QMessageBox.information(
+                self,
+                "Split / Divide Geometry Line",
+                "Select exactly one Geometry Line, then run Split / Divide.",
+            )
+            return
+        self._divide_geometry_line(tags[0])
+
+    def _join_selected_geometry_lines(self) -> None:
+        tags = self._selected_line_geometry_tags()
+        if len(tags) < 2:
+            QMessageBox.information(
+                self,
+                "Join Geometry Lines",
+                "Select at least two contiguous collinear Geometry Lines.",
+            )
+            return
+        self._merge_selected_geometry_lines(tags)
 
     def _trim_extend_geometry_line(
         self,
