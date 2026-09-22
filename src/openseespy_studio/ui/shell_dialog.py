@@ -667,6 +667,34 @@ class ShellElementDialog(QDialog):
         )
         form.addRow("", self.corotational)
 
+        self.use_local_x = QCheckBox("Override ASDShellQ4 local X axis")
+        existing_local = (
+            getattr(element, "shell_local_x", None)
+            if element is not None
+            else None
+        )
+        self.use_local_x.setChecked(existing_local is not None)
+        form.addRow("", self.use_local_x)
+
+        local_row = QHBoxLayout()
+        self.local_x_spins = [
+            _float_spin(
+                (
+                    float(existing_local[index])
+                    if existing_local is not None
+                    else (1.0 if index == 0 else 0.0)
+                ),
+                low=-1.0e12,
+                high=1.0e12,
+            )
+            for index in range(3)
+        ]
+        for label, spin in zip(("X", "Y", "Z"), self.local_x_spins):
+            local_row.addWidget(QLabel(label))
+            local_row.addWidget(spin)
+        form.addRow("Local X vector:", local_row)
+        self.use_local_x.toggled.connect(self._sync_formulation)
+
         self.formulation.currentTextChanged.connect(
             self._sync_formulation
         )
@@ -688,13 +716,25 @@ class ShellElementDialog(QDialog):
         root.addWidget(buttons)
 
     def _sync_formulation(self, *_args) -> None:
-        self.corotational.setEnabled(
-            self.formulation.currentText() == "ASDShellQ4"
-        )
-        if self.formulation.currentText() != "ASDShellQ4":
+        is_asd = self.formulation.currentText() == "ASDShellQ4"
+        self.corotational.setEnabled(is_asd)
+        self.use_local_x.setEnabled(is_asd)
+        for spin in self.local_x_spins:
+            spin.setEnabled(is_asd and self.use_local_x.isChecked())
+        if not is_asd:
             self.corotational.setChecked(False)
+            self.use_local_x.setChecked(False)
 
-    def values(self) -> tuple[int, tuple[int, int, int, int], str, int, bool]:
+    def values(
+        self,
+    ) -> tuple[
+        int,
+        tuple[int, int, int, int],
+        str,
+        int,
+        bool,
+        tuple[float, float, float] | None,
+    ]:
         node_tags = tuple(
             int(combo.currentData())
             for combo in self.node_combos
@@ -714,12 +754,21 @@ class ShellElementDialog(QDialog):
             raise ValueError(
                 f"Unsupported shell formulation: {formulation}"
             )
+        local_x = None
+        if formulation == "ASDShellQ4" and self.use_local_x.isChecked():
+            local_x = tuple(
+                float(spin.value())
+                for spin in self.local_x_spins
+            )
+            if sum(value * value for value in local_x) <= 1.0e-24:
+                raise ValueError("Shell local X vector cannot be zero.")
         return (
             self.tag.value(),
             node_tags,
             formulation,
             int(section_tag),
             bool(self.corotational.isChecked()),
+            local_x,
         )
 
     def _accept(self) -> None:
