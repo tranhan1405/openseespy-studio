@@ -3064,22 +3064,6 @@ class MainWindow(QMainWindow):
 
         add_group(
             home,
-            "Geometry",
-            small=(
-                "point_geometry",
-                "surface_mesh_overlay",
-                "column_1d",
-                "frame_2d",
-                "grid",
-                "extrude",
-            ),
-            widgets=(
-                geometry_line_button,
-                geometry_surface_button,
-            ),
-        )
-        add_group(
-            home,
             "FE Model",
             large=("node",),
             small=("shell_input",),
@@ -3093,6 +3077,55 @@ class MainWindow(QMainWindow):
         )
         home.finish()
         self.ribbon_tabs.addTab(home, "Home")
+
+        geometry_page = RibbonPage()
+        add_group(
+            geometry_page,
+            "Draw",
+            small=(
+                "point_geometry",
+                "line_geometry",
+                "surface_geometry",
+            ),
+            widgets=(
+                geometry_line_button,
+                geometry_surface_button,
+            ),
+        )
+        add_group(
+            geometry_page,
+            "Modify",
+            large=("geometry_trim_pick",),
+        )
+        add_group(
+            geometry_page,
+            "Sketch",
+            small=(
+                "geometry_snap",
+                "geometry_grid",
+                "surface_mesh_overlay",
+            ),
+        )
+        add_group(
+            geometry_page,
+            "Work Plane",
+            large=("iso",),
+            small=("xy", "xz", "yz"),
+        )
+        add_group(
+            geometry_page,
+            "Generators",
+            small=("column_1d", "frame_2d", "grid"),
+        )
+        geometry_page.finish()
+        geometry_index = self.ribbon_tabs.addTab(
+            geometry_page,
+            "Geometry",
+        )
+        self.ribbon_tabs.tabBar().setTabTextColor(
+            geometry_index,
+            QColor("#1768ad"),
+        )
 
         model_page = RibbonPage()
         add_group(
