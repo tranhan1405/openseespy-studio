@@ -453,8 +453,13 @@ class StructuralModel:
             l = _strict_int(l, "Element L-node tag")
             raw_nodes.extend([k, l])
         if len(set(raw_nodes)) != len(raw_nodes):
+            if is_shell:
+                raise ValueError(
+                    f"{element_type} element {tag} requires four distinct "
+                    "node tags."
+                )
             raise ValueError(
-                f"Element {tag} must reference distinct node tags."
+                f"Element {tag} must connect two different node tags."
             )
         missing = [node_tag for node_tag in raw_nodes if node_tag not in self.nodes]
         if missing:
