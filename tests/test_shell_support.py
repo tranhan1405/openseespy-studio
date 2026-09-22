@@ -12,7 +12,11 @@ from openseespy_studio.generator import (
 )
 from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.mass_source import evaluate_mass_source
-from openseespy_studio.model import (\n    SHELL_ELEMENT_TYPES,\n    StructuralModel,\n    shell_surface_geometry,\n)
+from openseespy_studio.model import (
+    SHELL_ELEMENT_TYPES,
+    StructuralModel,
+    shell_surface_geometry,
+)
 from openseespy_studio.project import (
     AnalysisSettingsData,
     ElementLoadData,
