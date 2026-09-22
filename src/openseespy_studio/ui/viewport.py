@@ -114,6 +114,8 @@ class ModelViewport(QWidget):
 
         self._node_actor = None
         self._node_tags: list[int] = []
+        self._geometry_point_actor = None
+        self._geometry_point_tags: list[int] = []
         self._element_actor_data: dict[str, tuple[object, np.ndarray]] = {}
         self._annotation_label_actors: dict[str, object] = {}
         self._undeformed_element_actors: list[object] = []
@@ -336,6 +338,66 @@ class ModelViewport(QWidget):
 
     def show_line_anchor(self, node_tag: int) -> None:
         self.show_frame_anchor(node_tag)
+
+    def clear_geometry_pick_preview(
+        self,
+        *,
+        render: bool = True,
+    ) -> None:
+        for name in (
+            "geometry-pick-points",
+            "geometry-pick-path",
+        ):
+            self._remove_overlay(name)
+        if render:
+            self.plotter.render()
+
+    def show_geometry_pick_preview(
+        self,
+        point_tags: list[int] | tuple[int, ...],
+        *,
+        closed: bool = False,
+    ) -> None:
+        self.clear_geometry_pick_preview(render=False)
+        valid = [
+            int(tag)
+            for tag in point_tags
+            if int(tag) in self._points
+        ]
+        if not valid:
+            self.plotter.render()
+            return
+        coords = np.asarray(
+            [self._points[tag].xyz for tag in valid],
+            dtype=float,
+        )
+        self.plotter.add_mesh(
+            pv.PolyData(coords),
+            name="geometry-pick-points",
+            color="#ff7a00",
+            render_points_as_spheres=True,
+            point_size=16,
+            pickable=False,
+            render=False,
+        )
+        if len(coords) >= 2:
+            path_points = coords
+            if closed and len(coords) >= 3:
+                path_points = np.vstack((coords, coords[0]))
+            lines = pv.lines_from_points(
+                path_points,
+                close=False,
+            )
+            self.plotter.add_mesh(
+                lines,
+                name="geometry-pick-path",
+                color="#ff7a00",
+                line_width=4,
+                render_lines_as_tubes=True,
+                pickable=False,
+                render=False,
+            )
+        self.plotter.render()
 
     def clear_measure_anchor(self, *, render: bool = True) -> None:
         """Remove the temporary first-point marker for the Measure tool."""
@@ -1786,6 +1848,8 @@ class ModelViewport(QWidget):
         self._reset_scene()
         self._node_actor = None
         self._node_tags = []
+        self._geometry_point_actor = None
+        self._geometry_point_tags = []
         self._element_actor_data.clear()
         self._undeformed_element_actors.clear()
         self._navigation_proxy_actor = None
@@ -1812,23 +1876,26 @@ class ModelViewport(QWidget):
             self._point_picker.PickFromListOn()
 
             if self._points:
-                geometry_point_tags = sorted(self._points)
+                self._geometry_point_tags = sorted(self._points)
                 geometry_points = np.asarray(
                     [
                         self._points[tag].xyz
-                        for tag in geometry_point_tags
+                        for tag in self._geometry_point_tags
                     ],
                     dtype=float,
                 )
-                self.plotter.add_mesh(
+                self._geometry_point_actor = self.plotter.add_mesh(
                     pv.PolyData(geometry_points),
                     name="geometry-points",
                     color="#d9892b",
                     render_points_as_spheres=True,
                     point_size=10,
                     opacity=0.95,
-                    pickable=False,
+                    pickable=True,
                     render=False,
+                )
+                self._point_picker.AddPickList(
+                    self._geometry_point_actor
                 )
 
             for line_tag in sorted(self._lines):
@@ -2122,6 +2189,23 @@ class ModelViewport(QWidget):
 
     def pick_entity(self, x: int, y: int) -> tuple[str, int] | None:
         renderer = self.plotter.renderer
+
+        if (
+            self._display_domain == "geometry"
+            and self._geometry_point_actor is not None
+        ):
+            if self._point_picker.Pick(x, y, 0, renderer):
+                actor = self._point_picker.GetActor()
+                point_id = self._point_picker.GetPointId()
+                if (
+                    actor == self._geometry_point_actor
+                    and 0 <= point_id < len(self._geometry_point_tags)
+                ):
+                    return (
+                        "geometry_point",
+                        int(self._geometry_point_tags[point_id]),
+                    )
+            return None
 
         if self._selection_filter in {"all", "node"} and self._node_actor is not None:
             if self._point_picker.Pick(x, y, 0, renderer):
