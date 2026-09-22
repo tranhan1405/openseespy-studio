@@ -77,7 +77,12 @@ from ..generator import FrameGridSpec, cyclic_displacement_steps, generate_frame
 from ..importer import import_openseespy_source
 from ..jobs import JobRecord
 from ..live_convergence import parse_opensees_convergence_line
-from ..model import StructuralModel, classify_fixity
+from ..model import (
+    FRAME_ELEMENT_TYPES,
+    SHELL_ELEMENT_TYPES,
+    StructuralModel,
+    classify_fixity,
+)
 from ..mass_source import apply_mass_source, evaluate_mass_source
 from ..moment_curvature import build_moment_curvature_project
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
@@ -87,7 +92,7 @@ from ..result_catalog import (
     result_choices_for_analysis,
 )
 from ..section_response import section_response_sources
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
     build_worker_pythonpath,
     opensees_material_requires_runtime_probe,
@@ -128,6 +133,7 @@ from .model_check_dialog import ModelCheckDialog
 from .moment_curvature_dialog import MomentCurvatureDialog
 from .recorder_dialog import RecorderDialog
 from .section_dialog import SectionDialog
+from .shell_dialog import ShellElementDialog, ShellSectionDialog
 from .transformation_dialog import TransformationDialog
 from .test_column_dialog import TestColumnWizard
 from .icons import studio_icon
@@ -1989,6 +1995,13 @@ class MainWindow(QMainWindow):
             self._create_truss,
             "Create a Truss element by entering nodes, area, and material",
         )
+        self._make_action(
+            "shell_input",
+            "Shell...",
+            "element",
+            self._create_shell,
+            "Create a four-node OpenSees shell surface element",
+        )
         self._make_action("grid", "Grid", "grid", self._show_frame_grid, "Create frame grid")
         self._make_action(
             "column_1d",
@@ -2126,6 +2139,13 @@ class MainWindow(QMainWindow):
             "section",
             self._create_section,
             "Create OpenSees section",
+        )
+        self._make_action(
+            "new_shell_section",
+            "New Shell Section...",
+            "section",
+            self._create_shell_section,
+            "Create an ElasticMembranePlate shell section",
         )
         self._make_action(
             "new_transformation",
@@ -2369,6 +2389,9 @@ class MainWindow(QMainWindow):
         truss_menu.setIcon(studio_icon("element"))
         truss_menu.addAction(self.actions["truss_pick"])
         truss_menu.addAction(self.actions["truss_input"])
+        shell_menu = geometry_menu.addMenu("Shell / Surface")
+        shell_menu.setIcon(studio_icon("element"))
+        shell_menu.addAction(self.actions["shell_input"])
         geometry_menu.addSeparator()
         geometry_menu.addActions([
             self.actions["column_1d"],
@@ -2437,6 +2460,7 @@ class MainWindow(QMainWindow):
         model_menu.addAction(self.actions["material_library"])
         model_menu.addAction(self.actions["new_material"])
         model_menu.addAction(self.actions["new_section"])
+        model_menu.addAction(self.actions["new_shell_section"])
         model_menu.addAction(self.actions["new_transformation"])
         model_menu.addSeparator()
         model_menu.addAction(self.actions["assign_section"])
@@ -2815,6 +2839,7 @@ class MainWindow(QMainWindow):
                 "column_1d",
                 "grid",
                 "node",
+                "shell_input",
                 "extrude",
             ),
             widgets=(frame_button, truss_button),
@@ -2833,7 +2858,12 @@ class MainWindow(QMainWindow):
             model_page,
             "Definition",
             large=("new_section",),
-            small=("material_library", "new_material", "new_transformation"),
+            small=(
+                "material_library",
+                "new_material",
+                "new_shell_section",
+                "new_transformation",
+            ),
         )
         add_group(
             model_page,
@@ -7952,6 +7982,236 @@ class MainWindow(QMainWindow):
         self.selection.select("element", tag, "replace")
         self._record_project_change(f"Create frame {tag}", before)
 
+    def _create_shell(self) -> None:
+        if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
+            QMessageBox.warning(
+                self,
+                "Create Shell",
+                "OpenSees shell elements require a 3D/6DOF model "
+                "(ndm=3, ndf=6). SARE intentionally stops at shell "
+                "surfaces and does not add solid/brick elements.",
+            )
+            return
+        if not self._ensure_node_count(4, title="Create Shell"):
+            return
+        if not self._ensure_prerequisite(
+            title="Create Shell",
+            message=(
+                "A Shell element requires a shell-compatible Section. "
+                "Create an ElasticMembranePlate Section now?"
+            ),
+            action_label="Create Shell Section Now...",
+            available=lambda: bool(self._shell_sections()),
+            creator=self._create_shell_section,
+        ):
+            return
+
+        selected_nodes = [
+            int(tag)
+            for tag in sorted(self.selection.nodes)
+            if int(tag) in self.model.nodes
+        ]
+        dialog = ShellElementDialog(
+            tag=self.project.next_element_tag(),
+            nodes=self.model.nodes,
+            sections=self.project.sections,
+            initial_nodes=selected_nodes[:4],
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            (
+                tag,
+                node_tags,
+                formulation,
+                section_tag,
+                corotational,
+            ) = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Create Shell", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            if tag in self.project.connections:
+                raise ValueError(
+                    f"Element tag {tag} is already used by a connection."
+                )
+            self.model.add_element(
+                tag,
+                node_tags[0],
+                node_tags[1],
+                element_type=formulation,
+                section_tag=section_tag,
+                group="shell",
+                k=node_tags[2],
+                l=node_tags[3],
+                shell_corotational=corotational,
+            )
+            self.project.validate_element_state(tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Create Shell", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(
+            f"Created {formulation} shell {tag}: nodes "
+            + ", ".join(map(str, node_tags))
+            + f" · section {section_tag}"
+        )
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(f"Create shell {tag}", before)
+
+    def _edit_shell(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if element is None or element.element_type not in SHELL_ELEMENT_TYPES:
+            return
+        dialog = ShellElementDialog(
+            tag=element.tag,
+            nodes=self.model.nodes,
+            sections=self.project.sections,
+            element=element,
+            parent=self,
+        )
+        dialog.tag.setEnabled(False)
+        if not dialog.exec():
+            return
+        try:
+            (
+                _tag,
+                node_tags,
+                formulation,
+                section_tag,
+                corotational,
+            ) = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Edit Shell", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            updated = type(element)(
+                tag=element.tag,
+                i=node_tags[0],
+                j=node_tags[1],
+                element_type=formulation,
+                section_tag=section_tag,
+                transf_tag=None,
+                group=element.group or "shell",
+                k=node_tags[2],
+                l=node_tags[3],
+                shell_corotational=corotational,
+            )
+            self.model.elements[element.tag] = updated
+            self.project.validate_element_state(element.tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Edit Shell", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(f"Updated shell element {tag}")
+        self._show_entity_properties("element", tag)
+        self._record_project_change(f"Edit shell {tag}", before)
+
+    def _assign_shell_section_to_selection(self) -> None:
+        element_tags = {
+            int(tag)
+            for tag in self.selection.elements
+            if (
+                tag in self.model.elements
+                and self.model.elements[tag].element_type in SHELL_ELEMENT_TYPES
+            )
+        }
+        if not element_tags:
+            existing = {
+                int(tag)
+                for tag, element in self.model.elements.items()
+                if element.element_type in SHELL_ELEMENT_TYPES
+            }
+            if not existing:
+                if not self._ensure_prerequisite(
+                    title="Assign Shell Section",
+                    message=(
+                        "This workflow requires a Shell element first. "
+                        "Create one now?"
+                    ),
+                    action_label="Create Shell Now...",
+                    available=lambda: any(
+                        element.element_type in SHELL_ELEMENT_TYPES
+                        for element in self.model.elements.values()
+                    ),
+                    creator=self._create_shell,
+                ):
+                    return
+                element_tags = {
+                    int(tag)
+                    for tag in self.selection.elements
+                    if (
+                        tag in self.model.elements
+                        and self.model.elements[tag].element_type
+                        in SHELL_ELEMENT_TYPES
+                    )
+                }
+            else:
+                QMessageBox.information(
+                    self,
+                    "Assign Shell Section",
+                    "Select at least one Shell element first.",
+                )
+                return
+        if not element_tags:
+            return
+
+        if not self._ensure_prerequisite(
+            title="Assign Shell Section",
+            message=(
+                "No Shell Sections exist yet. Create one now?"
+            ),
+            action_label="Create Shell Section Now...",
+            available=lambda: bool(self._shell_sections()),
+            creator=self._create_shell_section,
+        ):
+            return
+
+        tags = sorted(self._shell_sections())
+        labels = [
+            f"{section_tag} - {self.project.sections[section_tag].name}"
+            for section_tag in tags
+        ]
+        label, ok = QInputDialog.getItem(
+            self,
+            "Assign Shell Section",
+            f"Assign to {len(element_tags)} selected shell element(s):",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        section_tag = tags[labels.index(label)]
+        before = self.project.to_dict()
+        try:
+            assigned = self.project.assign_section_to_elements(
+                element_tags,
+                section_tag,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Assign Shell Section", str(exc))
+            return
+        self._refresh_project_metadata(
+            f"Assigned shell section {section_tag} to "
+            f"{len(assigned)} element(s)"
+        )
+        self._record_project_change(
+            f"Assign shell section {section_tag}",
+            before,
+        )
+
     def _create_element(self) -> None:
         """Backward-compatible generic element command: use Frame."""
         self._create_frame()
@@ -8916,6 +9176,68 @@ class MainWindow(QMainWindow):
         )
 
 
+    def _shell_sections(self) -> dict[int, SectionData]:
+        return {
+            int(tag): section
+            for tag, section in self.project.sections.items()
+            if section.section_type in SHELL_SECTION_TYPES
+        }
+
+    def _create_shell_section(self) -> None:
+        dialog = ShellSectionDialog(
+            next_tag=self.project.next_section_tag(),
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            section = dialog.section_data()
+            self.project.add_section(section)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Shell Section", str(exc))
+            return
+        self._refresh_project_metadata(
+            f"Created shell section {section.tag}"
+        )
+        self._show_section_properties(section.tag)
+        self._record_project_change(
+            f"Create shell section {section.tag}",
+            before,
+        )
+
+    def _edit_shell_section(self, tag: int) -> None:
+        section = self.project.sections.get(int(tag))
+        if section is None:
+            return
+        dialog = ShellSectionDialog(
+            section=section,
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated = dialog.section_data()
+            self.project.update_section(tag, updated)
+            if updated.tag != tag:
+                for element in self.model.elements.values():
+                    if element.section_tag == tag:
+                        element.section_tag = updated.tag
+        except ValueError as exc:
+            QMessageBox.warning(self, "Shell Section", str(exc))
+            return
+        self._refresh_project_metadata(
+            f"Updated shell section {updated.tag}"
+        )
+        self._show_section_properties(updated.tag)
+        self._record_project_change(
+            f"Edit shell section {tag}",
+            before,
+        )
+
     def _create_section(self) -> None:
         dialog = SectionDialog(
             self.project.materials,
@@ -8952,6 +9274,9 @@ class MainWindow(QMainWindow):
     def _edit_section(self, tag: int) -> None:
         section = self.project.sections.get(tag)
         if section is None:
+            return
+        if section.section_type in SHELL_SECTION_TYPES:
+            self._edit_shell_section(tag)
             return
 
         dialog = SectionDialog(
