@@ -11388,6 +11388,33 @@ class MainWindow(QMainWindow):
             f"Job {job.job_id} · duplicated result: {duplicate['name']}"
         )
 
+    def _populate_materials_root_context_menu(
+        self,
+        menu: QMenu,
+    ) -> None:
+        create_action = menu.addAction("New Material...")
+        create_action.triggered.connect(self._create_material)
+        library_action = menu.addAction(
+            "Insert from Material Library..."
+        )
+        library_action.triggered.connect(self._show_material_library)
+
+    def _append_tree_ai_action(
+        self,
+        menu: QMenu,
+        kind: str,
+        value: object,
+    ) -> None:
+        actions = menu.actions()
+        if actions and not actions[-1].isSeparator():
+            menu.addSeparator()
+        ask_ai = menu.addAction("Ask AI about this")
+        ask_ai.setIcon(studio_icon("analysis"))
+        ask_ai.triggered.connect(
+            lambda checked=False, k=str(kind), v=value:
+            self._ask_ai_about_tree_item(k, v)
+        )
+
     def _show_tree_context_menu(self, position) -> None:
         item = self.tree.itemAt(position)
         if item is None:
@@ -11403,15 +11430,7 @@ class MainWindow(QMainWindow):
             # Creation/editing commands are the primary tree workflow.
             # AI help is deliberately appended last so it never displaces
             # direct modeling commands.
-            actions = menu.actions()
-            if actions and not actions[-1].isSeparator():
-                menu.addSeparator()
-            ask_ai = menu.addAction("Ask AI about this")
-            ask_ai.setIcon(studio_icon("analysis"))
-            ask_ai.triggered.connect(
-                lambda checked=False, k=str(kind), v=value:
-                self._ask_ai_about_tree_item(k, v)
-            )
+            self._append_tree_ai_action(menu, str(kind), value)
             menu.exec(self.tree.viewport().mapToGlobal(position))
 
         if kind == "model_root":
@@ -12274,12 +12293,7 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "materials_root":
-            create_action = menu.addAction("New Material...")
-            create_action.triggered.connect(self._create_material)
-            library_action = menu.addAction(
-                "Insert from Material Library..."
-            )
-            library_action.triggered.connect(self._show_material_library)
+            self._populate_materials_root_context_menu(menu)
             exec_menu()
             return
 
