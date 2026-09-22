@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 
 from .model import SHELL_ELEMENT_TYPES
 from .project import ProjectDatabase, SHELL_SECTION_TYPES
@@ -18,12 +19,15 @@ class ShellMeshSpec:
     no_eas: bool = False
     drilling_stab: float | None = None
     drilling_nl: bool = False
+    reuse_existing_nodes: bool = True
+    merge_tolerance: float | None = None
     group: str = "shell"
 
 
 @dataclass(slots=True)
 class ShellMeshBuildResult:
     node_tags: list[int] = field(default_factory=list)
+    reused_node_tags: list[int] = field(default_factory=list)
     element_tags: list[int] = field(default_factory=list)
     grid: list[list[int]] = field(default_factory=list)
 
@@ -43,6 +47,75 @@ def _bilinear_point(
         + (1.0 - u) * v * p4[index]
         for index in range(3)
     )
+
+
+def _mesh_merge_tolerance(
+    project: ProjectDatabase,
+    requested: float | None,
+) -> float:
+    if requested is not None:
+        value = float(requested)
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(
+                "Shell mesh merge tolerance must be a finite positive value."
+            )
+        return value
+    if not project.model.nodes:
+        return 1.0e-9
+    xs = [float(node.xyz[0]) for node in project.model.nodes.values()]
+    ys = [float(node.xyz[1]) for node in project.model.nodes.values()]
+    zs = [float(node.xyz[2]) for node in project.model.nodes.values()]
+    span = max(
+        max(xs) - min(xs),
+        max(ys) - min(ys),
+        max(zs) - min(zs),
+        1.0,
+    )
+    return 1.0e-9 * span
+
+
+def _node_spatial_key(
+    xyz: tuple[float, float, float],
+    tolerance: float,
+) -> tuple[int, int, int]:
+    return tuple(
+        int(round(float(value) / tolerance))
+        for value in xyz
+    )
+
+
+def _nearby_existing_node(
+    xyz: tuple[float, float, float],
+    *,
+    project: ProjectDatabase,
+    buckets: dict[tuple[int, int, int], list[int]],
+    tolerance: float,
+) -> int | None:
+    base = _node_spatial_key(xyz, tolerance)
+    tolerance2 = tolerance * tolerance
+    best: tuple[float, int] | None = None
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                for tag in buckets.get(
+                    (base[0] + dx, base[1] + dy, base[2] + dz),
+                    (),
+                ):
+                    node = project.model.nodes.get(tag)
+                    if node is None:
+                        continue
+                    distance2 = sum(
+                        (
+                            float(node.xyz[index])
+                            - float(xyz[index])
+                        ) ** 2
+                        for index in range(3)
+                    )
+                    if distance2 <= tolerance2 and (
+                        best is None or distance2 < best[0]
+                    ):
+                        best = (distance2, int(tag))
+    return None if best is None else best[1]
 
 
 def build_shell_mesh(
@@ -107,6 +180,16 @@ def build_shell_mesh(
     next_node = project.model.next_node_tag()
     grid: list[list[int]] = []
     created_nodes: list[int] = []
+    reused_nodes: set[int] = set()
+    merge_tolerance = _mesh_merge_tolerance(
+        project,
+        spec.merge_tolerance,
+    )
+    node_buckets: dict[tuple[int, int, int], list[int]] = {}
+    if spec.reuse_existing_nodes:
+        for tag, node in project.model.nodes.items():
+            key = _node_spatial_key(node.xyz, merge_tolerance)
+            node_buckets.setdefault(key, []).append(int(tag))
 
     for j in range(nv + 1):
         row: list[int] = []
@@ -118,11 +201,27 @@ def build_shell_mesh(
 
             u = i / nu
             xyz = _bilinear_point(p1, p2, p3, p4, u, v)
+            existing_tag = None
+            if spec.reuse_existing_nodes:
+                existing_tag = _nearby_existing_node(
+                    xyz,
+                    project=project,
+                    buckets=node_buckets,
+                    tolerance=merge_tolerance,
+                )
+            if existing_tag is not None:
+                row.append(existing_tag)
+                reused_nodes.add(existing_tag)
+                continue
+
             while next_node in project.model.nodes:
                 next_node += 1
             project.model.add_node(next_node, *xyz)
             row.append(next_node)
             created_nodes.append(next_node)
+            if spec.reuse_existing_nodes:
+                key = _node_spatial_key(xyz, merge_tolerance)
+                node_buckets.setdefault(key, []).append(next_node)
             next_node += 1
         grid.append(row)
 
@@ -189,6 +288,7 @@ def build_shell_mesh(
 
     return ShellMeshBuildResult(
         node_tags=created_nodes,
+        reused_node_tags=sorted(reused_nodes),
         element_tags=created_elements,
         grid=grid,
     )
