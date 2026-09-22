@@ -857,23 +857,7 @@ class MaterialDialog(QDialog):
             return f"{base} [rad]:"
         if kind == "strain":
             return f"{base} [strain]:"
-        if material_type == "MinMax":
-            self._add_base_material_selector(material_type)
-            self._add_group(
-                "Failure strain limits",
-                material_type,
-                ("min", "max"),
-            )
-        elif material_type == "Fatigue":
-            self._add_base_material_selector(material_type)
-            self._add_group(
-                "Coffin-Manson fatigue / global limits",
-                material_type,
-                ("E0", "m", "min", "max"),
-            )
-        elif material_type in {"Parallel", "Series"}:
-            self._add_composite_selector(material_type)
-        elif material_type == "Hysteretic":
+        if material_type == "Hysteretic":
             if key.startswith("s"):
                 return f"{key} response:"
             if key.startswith("e"):
@@ -1243,7 +1227,23 @@ class MaterialDialog(QDialog):
     def _rebuild_parameters(self, material_type: str) -> None:
         self._clear_parameter_form()
 
-        if material_type == "Hardening":
+        if material_type == "MinMax":
+            self._add_base_material_selector(material_type)
+            self._add_group(
+                "Failure strain limits",
+                material_type,
+                ("min", "max"),
+            )
+        elif material_type == "Fatigue":
+            self._add_base_material_selector(material_type)
+            self._add_group(
+                "Coffin-Manson fatigue / global limits",
+                material_type,
+                ("E0", "m", "min", "max"),
+            )
+        elif material_type in {"Parallel", "Series"}:
+            self._add_composite_selector(material_type)
+        elif material_type == "Hardening":
             self._add_group(
                 "Elastic and yield",
                 material_type,
