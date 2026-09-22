@@ -1576,7 +1576,7 @@ def conform_line_network(
     *,
     mesh: bool = True,
 ) -> LineNetworkConformResult:
-    """Split selected Lines at crossings/T-junctions and create a conforming FE network."""
+    """Unify endpoint topology, split crossings/T-junctions, and create a conforming FE network."""
 
     tags = sorted({
         int(tag)
@@ -1596,21 +1596,7 @@ def conform_line_network(
         return LineNetworkConformResult()
 
     intersections = line_geometry_intersections(project, tags)
-    interior_by_line: dict[int, list[tuple[float, tuple[float, float, float]]]] = {
-        tag: [] for tag in tags
-    }
     endpoint_tol = 1.0e-8
-    for intersection in intersections:
-        left_tag, right_tag = intersection.line_tags
-        left_parameter, right_parameter = intersection.parameters
-        if endpoint_tol < left_parameter < 1.0 - endpoint_tol:
-            interior_by_line[left_tag].append(
-                (left_parameter, intersection.point)
-            )
-        if endpoint_tol < right_parameter < 1.0 - endpoint_tol:
-            interior_by_line[right_tag].append(
-                (right_parameter, intersection.point)
-            )
 
     states = {
         tag: inspect_line_mesh_state(project, tag)
@@ -1672,31 +1658,61 @@ def conform_line_network(
         }
         canonical_points: list[tuple[tuple[float, float, float], int]] = []
 
-        for tag in tags:
-            for parameter, xyz in sorted(interior_by_line[tag]):
-                point_tag = None
-                for existing_xyz, existing_tag in canonical_points:
-                    if _distance(existing_xyz, xyz) <= tolerance:
-                        point_tag = existing_tag
-                        break
-                if point_tag is None:
-                    point_tag = _find_geometry_point_at(
-                        project,
-                        xyz,
-                        tolerance,
+        for intersection in intersections:
+            left_tag, right_tag = intersection.line_tags
+            left_parameter, right_parameter = intersection.parameters
+            endpoint_point_tags: list[int] = []
+
+            for line_tag, parameter in (
+                (left_tag, left_parameter),
+                (right_tag, right_parameter),
+            ):
+                line = project.lines[line_tag]
+                if parameter <= endpoint_tol:
+                    endpoint_point_tags.append(int(line.point_i))
+                elif parameter >= 1.0 - endpoint_tol:
+                    endpoint_point_tags.append(int(line.point_j))
+
+            point_tag = None
+            for existing_xyz, existing_tag in canonical_points:
+                if _distance(existing_xyz, intersection.point) <= tolerance:
+                    point_tag = existing_tag
+                    break
+            if point_tag is None and endpoint_point_tags:
+                point_tag = min(endpoint_point_tags)
+            if point_tag is None:
+                point_tag = _find_geometry_point_at(
+                    project,
+                    intersection.point,
+                    tolerance,
+                )
+            if point_tag is None:
+                point_tag = project.next_point_tag()
+                project.add_point(
+                    PointGeometryData(
+                        point_tag,
+                        f"Line intersection {point_tag}",
+                        intersection.point,
                     )
-                if point_tag is None:
-                    point_tag = project.next_point_tag()
-                    project.add_point(
-                        PointGeometryData(
-                            point_tag,
-                            f"Line intersection {point_tag}",
-                            xyz,
-                        )
+                )
+                created_point_tags.append(point_tag)
+            canonical_points.append((intersection.point, point_tag))
+
+            for line_tag, parameter in (
+                (left_tag, left_parameter),
+                (right_tag, right_parameter),
+            ):
+                line = project.lines[line_tag]
+                if endpoint_tol < parameter < 1.0 - endpoint_tol:
+                    split_definitions[line_tag].append(
+                        (parameter, point_tag)
                     )
-                    created_point_tags.append(point_tag)
-                canonical_points.append((xyz, point_tag))
-                split_definitions[tag].append((parameter, point_tag))
+                    continue
+                if parameter <= endpoint_tol:
+                    line.point_i = point_tag
+                elif parameter >= 1.0 - endpoint_tol:
+                    line.point_j = point_tag
+                project._validate_line_geometry(line)
 
         for tag in tags:
             if split_definitions[tag]:
