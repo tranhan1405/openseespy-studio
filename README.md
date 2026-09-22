@@ -253,15 +253,22 @@ For Quick 1-D Column specimens, SARE can additionally capture and separate:
 
 ### Section-to-hinge and cyclic calibration
 
-SARE keeps two research workflows deliberately separate:
+SARE keeps the research path explicit:
 
-1. **Hinge Backbone** converts researcher-confirmed characteristic points from
+1. **Moment-Curvature** runs an isolated OpenSees zeroLengthSection section
+   test from an existing Section. The wizard asks only for Section, bending
+   axis, axial load, maximum curvature and increment count. Temporary nodes,
+   load patterns and Static DisplacementControl objects are never inserted
+   into the user's structural model. The completed Job opens directly in
+   **Result > Moment-Curvature**.
+2. **Hinge Backbone** converts researcher-confirmed characteristic points from
    a moment-rotation curve directly, or from moment-curvature using the
    explicit assumption theta = kappa * L_eq, into a symmetric OpenSees
-   Hysteretic moment-rotation material. The source type and conversion
-   assumption are stored with the material. SARE does not infer cracking,
-   yield, ultimate, plastic-hinge length, pinching or deterioration silently.
-2. **Cyclic Calibration** compares a complete model response against
+   Hysteretic moment-rotation material. Moment-Curvature results can open this
+   builder directly with their SARE source metadata prefilled. SARE does not
+   infer cracking, yield, ultimate, plastic-hinge length, pinching or
+   deterioration silently.
+3. **Cyclic Calibration** compares a complete model response against
    experimental cyclic data and varies selected material parameters. This is
    the appropriate stage for fitting hysteretic pinching/degradation behavior.
 
