@@ -268,7 +268,9 @@ def test_line_mesh_ui_exposes_preview_remesh_delete_audit_and_fe_bridge():
     properties = inspect.getsource(MainWindow._show_line_geometry_properties)
     viewport = inspect.getsource(ModelViewport._render_line_mesh_preview)
 
-    assert "Edit Line / Mesh Settings..." in context
+    assert "Edit Line Geometry..." in context
+    assert "Configure Line Mesh / FE Recipe..." in context
+    assert 'if kind == "line_mesh_recipe"' in context
     assert "Preview Line Mesh" in context
     assert "Remesh Line" in context
     assert "Delete Generated Line Mesh" in context
