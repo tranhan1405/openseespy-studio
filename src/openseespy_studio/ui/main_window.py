@@ -117,6 +117,7 @@ from .geometry_dialogs import (
     VectorDialog,
 )
 from .history import ProjectSnapshotCommand
+from .hinge_backbone_dialog import HingeBackboneDialog
 from .import_report_dialog import ImportReportDialog
 from .load_dialogs import ElementLoadDialog, GroundMotionDialog, LoadPatternDialog, MassDialog, NodalLoadDialog, PrescribedDisplacementDialog, TimeSeriesDialog
 from .material_dialog import MaterialDialog
@@ -2267,11 +2268,21 @@ class MainWindow(QMainWindow):
         self._make_action("check_model", "Check Model", "analysis", self._check_model, "Validate the model before analysis")
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action(
+            "hinge_backbone",
+            "Hinge Backbone...",
+            "analysis",
+            self._open_hinge_backbone,
+            (
+                "Convert researcher-identified M-theta or M-kappa backbone "
+                "points into a traceable Hysteretic hinge material"
+            ),
+        )
+        self._make_action(
             "calibration",
-            "Calibration...",
+            "Cyclic Calibration...",
             "analysis",
             self._open_calibration,
-            "Run a grid parameter study against experimental cyclic data",
+            "Calibrate model parameters against experimental cyclic data",
         )
         self._make_action(
             "plot",
@@ -2446,7 +2457,9 @@ class MainWindow(QMainWindow):
         menus["Analysis"].addSeparator()
         menus["Analysis"].addAction(self.actions["run"])
         menus["Analysis"].addSeparator()
-        menus["Analysis"].addAction(self.actions["calibration"])
+        research_menu = menus["Analysis"].addMenu("Research Workflows")
+        research_menu.addAction(self.actions["hinge_backbone"])
+        research_menu.addAction(self.actions["calibration"])
 
         menus["Results"].addAction(self.actions["plot"])
 
@@ -2855,8 +2868,8 @@ class MainWindow(QMainWindow):
         add_group(
             analysis_page,
             "Research",
-            large=("calibration",),
-            small=("ai_assistant",),
+            large=("hinge_backbone",),
+            small=("calibration", "ai_assistant"),
         )
         add_group(
             analysis_page,
@@ -12674,6 +12687,36 @@ class MainWindow(QMainWindow):
             )
             return
         self._show_model_check(issues, allow_run=False)
+
+    def _open_hinge_backbone(self) -> None:
+        dialog = HingeBackboneDialog(
+            next_tag=self.project.next_material_tag(),
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            material = dialog.material_data()
+            self.project.add_material(material)
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Hinge Backbone Builder",
+                str(exc),
+            )
+            return
+
+        self._refresh_project_metadata(
+            f"Created hinge-backbone Hysteretic material {material.tag}"
+        )
+        self._show_material_properties(material.tag)
+        self._record_project_change(
+            f"Create hinge backbone material {material.tag}",
+            before,
+        )
 
     def _open_calibration(self) -> None:
         process = self._calibration_process
