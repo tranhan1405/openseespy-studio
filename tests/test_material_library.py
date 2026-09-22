@@ -24,7 +24,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 183
+    assert len(records) == 184
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -222,7 +222,7 @@ def test_moodley_2026_records_encode_model_applicability():
     )
 
 
-def test_verified_library_reaches_one_hundred_eighty_three_with_expected_source_counts():
+def test_verified_library_reaches_one_hundred_eighty_four_with_expected_source_counts():
     records = load_verified_material_library()
     prefixes = {
         "carreno-2020-": 2,
@@ -249,16 +249,44 @@ def test_verified_library_reaches_one_hundred_eighty_three_with_expected_source_
         "seo-2013-": 1,
         "cheng-2019-": 1,
         "megalooikonomou-2012-": 1,
+        "vaiana-2018-": 1,
     }
 
-    assert len(records) == 183
-    assert len({record.id for record in records}) == 183
+    assert len(records) == 184
+    assert len({record.id for record in records}) == 184
     for prefix, expected in prefixes.items():
         assert sum(
             record.id.startswith(prefix)
             for record in records
         ) == expected
 
+
+
+
+def test_vaiana_2018_hysteretic_smooth_reference_is_exact():
+    record = _record("vaiana-2018-hysteretic-smooth-reference-d")
+
+    assert record.model == "HystereticSmooth"
+    assert record.parameters_si == {
+        "ka": 5.0,
+        "kb": 0.5,
+        "fbar": 0.45,
+        "beta": -1.0,
+    }
+    assert record.doi == "10.1007/s11071-018-4282-2"
+    assert "line (d)" in str(
+        record.parameter_evidence.get("location", "")
+    )
+
+    material = material_from_library_record(record, tag=61)
+    command = material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+    assert command == (
+        "ops.uniaxialMaterial('HystereticSmooth', "
+        "61, 5, 0.5, 0.45, -1)"
+    )
 
 
 def test_delgiudice_2022_adds_traceable_steel02_and_concrete01_sets():
