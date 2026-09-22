@@ -2312,7 +2312,7 @@ class MainWindow(QMainWindow):
         ):
             self._make_action(
                 key, label, icon,
-                lambda checked=False, v=view: self.viewport.set_view(v),
+                lambda checked=False, v=view: self._set_view_from_ui(v),
                 f"{label} view",
             )
 
@@ -5337,6 +5337,51 @@ class MainWindow(QMainWindow):
     def _active_geometry_sketch_plane(self) -> str:
         view = self.viewport.current_view().lower()
         return view if view in {"xy", "xz", "yz"} else "xy"
+
+    def _geometry_sketch_tool_active(self) -> bool:
+        return bool(
+            self.viewport.interaction_tool() == "geometry_sketch"
+            and (
+                (
+                    self.actions.get("line_geometry_pick") is not None
+                    and self.actions["line_geometry_pick"].isChecked()
+                )
+                or (
+                    self.actions.get("surface_geometry_pick") is not None
+                    and self.actions["surface_geometry_pick"].isChecked()
+                )
+            )
+        )
+
+    def _reset_active_geometry_sketch_anchor(self) -> None:
+        self._geometry_line_point_tags = []
+        self._geometry_surface_point_tags = []
+        self.viewport.clear_geometry_pick_preview(render=False)
+        self.viewport.clear_geometry_sketch_preview(render=False)
+        self._refresh_geometry_sketch_snap_cache()
+
+    def _set_view_from_ui(self, view: str) -> None:
+        target = str(view).strip().lower()
+        sketch_active = self._geometry_sketch_tool_active()
+        self.viewport.set_view(target)
+
+        if not sketch_active:
+            return
+
+        if target in {"xy", "xz", "yz"}:
+            self._reset_active_geometry_sketch_anchor()
+            self.viewport.set_geometry_sketch_plane(target, 0.0)
+            self.viewport.set_interaction_tool("geometry_sketch")
+            self.status_message.setText(
+                f"Sketch plane changed to {target.upper()} · "
+                "current chain reset · click first point"
+            )
+            return
+
+        plane, offset = self.viewport.geometry_sketch_plane()
+        self.status_message.setText(
+            f"ISO view · sketch remains {plane.upper()} @ {offset:g}"
+        )
 
     def _refresh_geometry_sketch_snap_cache(self) -> None:
         try:
@@ -13128,10 +13173,27 @@ class MainWindow(QMainWindow):
         )
 
     def _apply_project_snapshot(self, snapshot: dict) -> None:
+        sketch_active = self._geometry_sketch_tool_active()
         self.project = ProjectDatabase.from_dict(snapshot)
         self.model = self.project.model
         self.selection.clear()
-        self._refresh_all()
+
+        if sketch_active:
+            self._geometry_line_point_tags = []
+            self._geometry_surface_point_tags = []
+            self.viewport.clear_geometry_pick_preview(render=False)
+            self.viewport.clear_geometry_sketch_preview(render=False)
+
+        self._refresh_all(reset_camera=not sketch_active)
+
+        if sketch_active:
+            self._refresh_geometry_sketch_snap_cache()
+            self.viewport.set_display_domain("geometry")
+            self.viewport.set_interaction_tool("geometry_sketch")
+            self.status_message.setText(
+                "Undo/Redo applied · current sketch chain reset · "
+                "click first point"
+            )
 
     def _recent_project_paths(self) -> list[str]:
         settings = QSettings(LEGACY_SETTINGS_ORGANIZATION, LEGACY_SETTINGS_APPLICATION)
