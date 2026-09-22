@@ -9868,16 +9868,18 @@ class MainWindow(QMainWindow):
 
         if section.section_type in SHELL_SECTION_TYPES:
             p = section.parameters
-            self.properties_panel.set_properties(
-                "Shell Section",
-                [
-                    ("Tag", section.tag),
-                    (
-                        "Name",
-                        section.name,
-                        {"id": "name", "editable": True, "kind": "text"},
-                    ),
-                    ("Type", "ElasticMembranePlate"),
+            rows = [
+                ("Tag", section.tag),
+                (
+                    "Name",
+                    section.name,
+                    {"id": "name", "editable": True, "kind": "text"},
+                ),
+                ("Type", section.section_type),
+            ]
+
+            if section.section_type == "ElasticMembranePlate":
+                rows.extend([
                     ("OpenSees", "ElasticMembranePlateSection"),
                     (
                         f"E [{stress_unit}]",
@@ -9924,7 +9926,91 @@ class MainWindow(QMainWindow):
                             "kind": "float",
                         },
                     ),
-                ],
+                ])
+            elif section.section_type == "PlateFiber":
+                material = (
+                    self.project.nd_materials.get(
+                        int(section.nd_material_tag)
+                    )
+                    if section.nd_material_tag is not None
+                    else None
+                )
+                rows.extend([
+                    ("OpenSees", "PlateFiber"),
+                    (
+                        "nD Material",
+                        (
+                            f"{section.nd_material_tag} - {material.name}"
+                            if material is not None
+                            else f"{section.nd_material_tag} (missing)"
+                        ),
+                    ),
+                    (
+                        f"Thickness h [{unit_system.length}]",
+                        f"{p['h']:g}",
+                        {
+                            "id": "parameter:h",
+                            "editable": True,
+                            "kind": "float",
+                        },
+                    ),
+                    (
+                        "Material model",
+                        material.material_type if material is not None else "-",
+                    ),
+                ])
+                if material is not None:
+                    rows.extend([
+                        (
+                            f"Material E [{stress_unit}]",
+                            f"{unit_system.engineering_stress_from_pa(material.parameters['E']):g}",
+                        ),
+                        (
+                            "Material ν",
+                            f"{material.parameters['nu']:g}",
+                        ),
+                        (
+                            f"Material ρ [{unit_system.engineering_density_label}]",
+                            f"{unit_system.engineering_density_from_kg_per_m3(material.parameters['rho']):g}",
+                        ),
+                    ])
+            else:
+                rows.extend([
+                    ("OpenSees", "LayeredShell"),
+                    ("Layers", len(section.shell_layers)),
+                    (
+                        f"Total thickness [{unit_system.length}]",
+                        f"{section.shell_total_thickness():g}",
+                    ),
+                ])
+                for index, layer in enumerate(
+                    section.shell_layers,
+                    start=1,
+                ):
+                    material = self.project.nd_materials.get(
+                        int(layer.material_tag)
+                    )
+                    rows.append((
+                        f"Layer {index}",
+                        (
+                            f"mat {layer.material_tag}"
+                            + (
+                                f" - {material.name}"
+                                if material is not None
+                                else " (missing)"
+                            )
+                            + f" · h={layer.thickness:g} "
+                            f"{unit_system.length}"
+                        ),
+                    ))
+
+            rows.append((
+                "Edit definition",
+                "Double-click or right-click → Edit...",
+            ))
+            self.properties_panel.set_properties(
+                "Shell Section",
+                rows,
                 context={"kind": "section", "tag": int(tag)},
             )
             return
