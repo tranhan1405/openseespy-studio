@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 40
+PROJECT_FORMAT_VERSION = 41
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -2780,6 +2780,7 @@ class LineGeometryData:
     mesh_mode: str = "divisions"
     divisions: int = 1
     target_size: float | None = None
+    bias: float = 1.0
     reuse_existing_nodes: bool = True
     element_family: str = "Frame"
     element_type: str = "elasticBeamColumn"
@@ -2793,6 +2794,7 @@ class LineGeometryData:
     consistent_mass: bool = False
     do_rayleigh: bool = False
     generated_node_tags: list[int] = field(default_factory=list)
+    owned_node_tags: list[int] = field(default_factory=list)
     generated_element_tags: list[int] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -2822,6 +2824,11 @@ class LineGeometryData:
                 raise ValueError(
                     "Line target element size must be finite and positive."
                 )
+        self.bias = float(self.bias)
+        if not math.isfinite(self.bias) or self.bias <= 0.0:
+            raise ValueError(
+                "Line mesh bias must be finite and positive."
+            )
 
         self.reuse_existing_nodes = _strict_bool(
             self.reuse_existing_nodes,
@@ -2877,9 +2884,22 @@ class LineGeometryData:
             self.do_rayleigh,
             "Line Rayleigh flag",
         )
-        self.generated_node_tags = sorted({
-            _strict_int(tag, "Line generated node tag")
-            for tag in self.generated_node_tags
+        ordered_generated_nodes: list[int] = []
+        seen_generated_nodes: set[int] = set()
+        for tag in self.generated_node_tags:
+            node_tag = _strict_int(tag, "Line generated node tag")
+            if node_tag in seen_generated_nodes:
+                continue
+            seen_generated_nodes.add(node_tag)
+            ordered_generated_nodes.append(node_tag)
+        self.generated_node_tags = ordered_generated_nodes
+        self.owned_node_tags = sorted({
+            _strict_int(tag, "Line owned node tag")
+            for tag in (
+                self.owned_node_tags
+                if self.owned_node_tags
+                else self.generated_node_tags
+            )
         })
         self.generated_element_tags = sorted({
             _strict_int(tag, "Line generated element tag")
@@ -2895,6 +2915,7 @@ class LineGeometryData:
             "mesh_mode": self.mesh_mode,
             "divisions": self.divisions,
             "target_size": self.target_size,
+            "bias": self.bias,
             "reuse_existing_nodes": self.reuse_existing_nodes,
             "element_family": self.element_family,
             "element_type": self.element_type,
@@ -2908,6 +2929,7 @@ class LineGeometryData:
             "consistent_mass": self.consistent_mass,
             "do_rayleigh": self.do_rayleigh,
             "generated_node_tags": list(self.generated_node_tags),
+            "owned_node_tags": list(self.owned_node_tags),
             "generated_element_tags": list(self.generated_element_tags),
         }
 
@@ -2921,6 +2943,7 @@ class LineGeometryData:
             mesh_mode=str(data.get("mesh_mode", "divisions")),
             divisions=data.get("divisions", 1),
             target_size=data.get("target_size"),
+            bias=data.get("bias", 1.0),
             reuse_existing_nodes=data.get("reuse_existing_nodes", True),
             element_family=str(data.get("element_family", "Frame")),
             element_type=str(
@@ -2936,6 +2959,12 @@ class LineGeometryData:
             consistent_mass=data.get("consistent_mass", False),
             do_rayleigh=data.get("do_rayleigh", False),
             generated_node_tags=list(data.get("generated_node_tags", [])),
+            owned_node_tags=list(
+                data.get(
+                    "owned_node_tags",
+                    data.get("generated_node_tags", []),
+                )
+            ),
             generated_element_tags=list(
                 data.get("generated_element_tags", [])
             ),
