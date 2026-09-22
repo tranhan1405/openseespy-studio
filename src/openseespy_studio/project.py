@@ -2432,6 +2432,8 @@ SOLUTION_RESULT_TYPES = {
     "NodalDisplacement",
     "NodalReaction",
     "MemberForce",
+    "ShellForce",
+    "ShellDeformation",
     "FiberStress",
     "FiberStrain",
     "HingeState",
