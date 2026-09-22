@@ -94,6 +94,7 @@ from ..result_catalog import (
 )
 from ..shell_mesh import build_shell_mesh
 from ..surface_mesher import mesh_surface_geometry
+from ..line_mesher import mesh_line_geometry
 from ..section_response import section_response_sources
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, ProjectDatabase, RecorderData, SectionData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
@@ -138,6 +139,7 @@ from .recorder_dialog import RecorderDialog
 from .section_dialog import SectionDialog
 from .shell_dialog import NDMaterialDialog, ShellElementDialog, ShellMeshDialog, ShellSectionDialog
 from .surface_dialog import SurfaceGeometryDialog
+from .line_geometry_dialog import LineGeometryDialog, PointGeometryDialog
 from .transformation_dialog import TransformationDialog
 from .test_column_dialog import TestColumnWizard
 from .icons import studio_icon
@@ -2016,6 +2018,20 @@ class MainWindow(QMainWindow):
             "Create a Truss element by entering nodes, area, and material",
         )
         self._make_action(
+            "point_geometry",
+            "Point...",
+            "node",
+            self._create_point_geometry,
+            "Create reusable preprocessing Point geometry",
+        )
+        self._make_action(
+            "line_geometry",
+            "Line...",
+            "element",
+            self._create_line_geometry,
+            "Create reusable Line geometry and mesh it into Frame/Truss elements",
+        )
+        self._make_action(
             "surface_geometry",
             "Surface...",
             "grid",
@@ -2871,8 +2887,10 @@ class MainWindow(QMainWindow):
             small=(
                 "column_1d",
                 "grid",
-                "node",
+                "point_geometry",
+                "line_geometry",
                 "surface_geometry",
+                "node",
                 "extrude",
             ),
             widgets=(frame_button, truss_button),
@@ -3853,6 +3871,20 @@ class MainWindow(QMainWindow):
         geometry.setExpanded(True)
         root.addChild(geometry)
 
+        points = QTreeWidgetItem([
+            f"Points ({len(self.project.points)})"
+        ])
+        points.setIcon(0, studio_icon("node"))
+        points.setData(0, Qt.UserRole, ("points_root", None))
+        geometry.addChild(points)
+
+        lines = QTreeWidgetItem([
+            f"Lines ({len(self.project.lines)})"
+        ])
+        lines.setIcon(0, studio_icon("element"))
+        lines.setData(0, Qt.UserRole, ("lines_root", None))
+        geometry.addChild(lines)
+
         surfaces = QTreeWidgetItem([
             f"Surfaces ({len(self.project.surfaces)})"
         ])
@@ -3914,6 +3946,36 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("node", tag))
             nodes.addChild(item)
             self._tree_node_items[tag] = item
+
+        for tag in sorted(self.project.points):
+            point = self.project.points[tag]
+            item = QTreeWidgetItem([
+                f"Point {tag} · {point.name}"
+            ])
+            item.setIcon(0, studio_icon("node"))
+            item.setData(0, Qt.UserRole, ("point_geometry", tag))
+            points.addChild(item)
+
+        for tag in sorted(self.project.lines):
+            line = self.project.lines[tag]
+            live_elements = [
+                int(element_tag)
+                for element_tag in line.generated_element_tags
+                if int(element_tag) in self.model.elements
+            ]
+            if live_elements:
+                status = (
+                    f"{line.divisions} div · "
+                    f"{len(live_elements)} {line.element_family} E"
+                )
+            else:
+                status = "Unmeshed"
+            item = QTreeWidgetItem([
+                f"Line {tag} · {line.name} [{status}]"
+            ])
+            item.setIcon(0, studio_icon("element"))
+            item.setData(0, Qt.UserRole, ("line_geometry", tag))
+            lines.addChild(item)
 
         for tag in sorted(self.project.surfaces):
             surface = self.project.surfaces[tag]
@@ -4485,6 +4547,8 @@ class MainWindow(QMainWindow):
     def _tree_selection_changed(self) -> None:
         nodes: set[int] = set()
         elements: set[int] = set()
+        point_geometry_tag: int | None = None
+        line_geometry_tag: int | None = None
         surface_geometry_tag: int | None = None
         material_tag: int | None = None
         nd_material_tag: int | None = None
@@ -4526,6 +4590,17 @@ class MainWindow(QMainWindow):
                 if selection_set is not None:
                     nodes.update(selection_set.node_tags)
                     elements.update(selection_set.element_tags)
+            elif kind == "point_geometry":
+                point_geometry_tag = int(tag)
+            elif kind == "line_geometry":
+                line_geometry_tag = int(tag)
+                line = self.project.lines.get(int(tag))
+                if line is not None:
+                    elements.update(
+                        int(element_tag)
+                        for element_tag in line.generated_element_tags
+                        if int(element_tag) in self.model.elements
+                    )
             elif kind == "surface_geometry":
                 surface_geometry_tag = int(tag)
                 surface = self.project.surfaces.get(int(tag))
@@ -4611,7 +4686,11 @@ class MainWindow(QMainWindow):
                 elements=elements,
             )
 
-        if surface_geometry_tag is not None:
+        if point_geometry_tag is not None:
+            self._show_point_geometry_properties(point_geometry_tag)
+        elif line_geometry_tag is not None:
+            self._show_line_geometry_properties(line_geometry_tag)
+        elif surface_geometry_tag is not None:
             self._show_surface_geometry_properties(surface_geometry_tag)
         elif material_tag is not None:
             self._show_material_properties(material_tag)
@@ -10053,6 +10132,325 @@ class MainWindow(QMainWindow):
         )
 
 
+    def _create_point_geometry(self) -> int | None:
+        dialog = PointGeometryDialog(
+            next_tag=self.project.next_point_tag(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return None
+        before = self.project.to_dict()
+        try:
+            point = dialog.data()
+            self.project.add_point(point)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "Create Geometry Point", str(exc))
+            return None
+        self._refresh_all(f"Created Geometry Point {point.tag}")
+        self._show_point_geometry_properties(point.tag)
+        self._record_project_change(
+            f"Create Geometry Point {point.tag}",
+            before,
+        )
+        return int(point.tag)
+
+    def _edit_point_geometry(self, tag: int) -> None:
+        point = self.project.points.get(int(tag))
+        if point is None:
+            return
+        meshed_users = [
+            line.tag
+            for line in self.project.lines.values()
+            if int(tag) in {line.point_i, line.point_j}
+            and any(
+                element_tag in self.model.elements
+                for element_tag in line.generated_element_tags
+            )
+        ]
+        if meshed_users:
+            QMessageBox.information(
+                self,
+                "Edit Geometry Point",
+                "This Point is used by meshed Line(s): "
+                + ", ".join(map(str, sorted(meshed_users)))
+                + ". Delete the generated FE elements before moving it.",
+            )
+            return
+        dialog = PointGeometryDialog(
+            next_tag=point.tag,
+            point=point,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated = dialog.data()
+            self.project.update_point(tag, updated)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "Geometry Point", str(exc))
+            return
+        self._refresh_all(f"Updated Geometry Point {updated.tag}")
+        self._show_point_geometry_properties(updated.tag)
+        self._record_project_change(
+            f"Edit Geometry Point {tag}",
+            before,
+        )
+
+    def _delete_point_geometry(self, tag: int) -> None:
+        point = self.project.points.get(int(tag))
+        if point is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete Geometry Point",
+            f"Delete Geometry Point {tag} ({point.name})?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        before = self.project.to_dict()
+        try:
+            self.project.remove_point(tag)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Delete Geometry Point", str(exc))
+            return
+        self._refresh_all(f"Deleted Geometry Point {tag}")
+        self._record_project_change(
+            f"Delete Geometry Point {tag}",
+            before,
+        )
+
+    def _show_point_geometry_properties(self, tag: int) -> None:
+        point = self.project.points.get(int(tag))
+        if point is None:
+            return
+        users = sorted(
+            line.tag
+            for line in self.project.lines.values()
+            if int(tag) in {line.point_i, line.point_j}
+        )
+        self.properties_panel.set_properties(
+            "Geometry Point",
+            [
+                ("Tag", point.tag),
+                ("Name", point.name),
+                (
+                    "Coordinates",
+                    ", ".join(f"{value:g}" for value in point.xyz),
+                ),
+                (
+                    "Used by Lines",
+                    ", ".join(map(str, users)) if users else "-",
+                ),
+            ],
+        )
+
+    def _create_line_geometry(self) -> int | None:
+        if len(self.project.points) < 2:
+            QMessageBox.information(
+                self,
+                "New Geometry Line",
+                "Create at least two Geometry Points before creating a Line.",
+            )
+            return None
+
+        dialog = LineGeometryDialog(
+            next_tag=self.project.next_line_tag(),
+            points=self.project.points,
+            sections=self.project.sections,
+            transformations=self.project.transformations,
+            materials=self.project.materials,
+            parent=self,
+        )
+        if not dialog.exec():
+            return None
+
+        before = self.project.to_dict()
+        try:
+            line = dialog.data()
+            self.project.add_line(line)
+            result = mesh_line_geometry(self.project, line.tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Create Geometry Line", str(exc))
+            return None
+
+        self.model = self.project.model
+        self._refresh_all(
+            f"Created Line {line.tag} · {result.divisions} division(s) · "
+            f"{len(result.element_tags)} {line.element_family} element(s) · "
+            f"{len(result.created_node_tags)} new node(s)"
+        )
+        self.selection.set_selection(elements=set(result.element_tags))
+        self._show_line_geometry_properties(line.tag)
+        self._record_project_change(
+            f"Create Geometry Line {line.tag}",
+            before,
+        )
+        return int(line.tag)
+
+    def _edit_line_geometry(self, tag: int) -> None:
+        line = self.project.lines.get(int(tag))
+        if line is None:
+            return
+        if any(
+            element_tag in self.model.elements
+            for element_tag in line.generated_element_tags
+        ):
+            QMessageBox.information(
+                self,
+                "Edit Geometry Line",
+                "This Line already has generated FE elements. Delete those "
+                "FE elements before editing the Line geometry or mesh recipe.",
+            )
+            return
+
+        dialog = LineGeometryDialog(
+            next_tag=line.tag,
+            points=self.project.points,
+            sections=self.project.sections,
+            transformations=self.project.transformations,
+            materials=self.project.materials,
+            line=line,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated = dialog.data()
+            self.project.update_line(tag, updated)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "Geometry Line", str(exc))
+            return
+        self._refresh_all(f"Updated Geometry Line {updated.tag}")
+        self._show_line_geometry_properties(updated.tag)
+        self._record_project_change(
+            f"Edit Geometry Line {tag}",
+            before,
+        )
+
+    def _mesh_line_geometry(self, tag: int) -> None:
+        line = self.project.lines.get(int(tag))
+        if line is None:
+            return
+        before = self.project.to_dict()
+        try:
+            result = mesh_line_geometry(self.project, tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Mesh Geometry Line", str(exc))
+            return
+        self.model = self.project.model
+        self._refresh_all(
+            f"Meshed Line {tag} · {result.divisions} division(s) · "
+            f"{len(result.element_tags)} element(s) · "
+            f"{len(result.created_node_tags)} new node(s) · "
+            f"{len(result.reused_node_tags)} reused node(s)"
+        )
+        self.selection.set_selection(elements=set(result.element_tags))
+        self._record_project_change(
+            f"Mesh Geometry Line {tag}",
+            before,
+        )
+
+    def _delete_line_geometry(self, tag: int) -> None:
+        line = self.project.lines.get(int(tag))
+        if line is None:
+            return
+        live_mesh = [
+            element_tag
+            for element_tag in line.generated_element_tags
+            if element_tag in self.model.elements
+        ]
+        message = f"Delete Geometry Line {tag} ({line.name})?"
+        if live_mesh:
+            message += (
+                "\n\nGenerated FE elements will be kept as ordinary "
+                "FE elements; only the reusable Line geometry is removed."
+            )
+        answer = QMessageBox.question(
+            self,
+            "Delete Geometry Line",
+            message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        before = self.project.to_dict()
+        self.project.remove_line(tag)
+        self._refresh_all(f"Deleted Geometry Line {tag}")
+        self._record_project_change(
+            f"Delete Geometry Line {tag}",
+            before,
+        )
+
+    def _show_line_geometry_properties(self, tag: int) -> None:
+        line = self.project.lines.get(int(tag))
+        if line is None:
+            return
+        point_i = self.project.points.get(line.point_i)
+        point_j = self.project.points.get(line.point_j)
+        live_elements = [
+            element_tag
+            for element_tag in line.generated_element_tags
+            if element_tag in self.model.elements
+        ]
+        recipe = line.element_type
+        if line.element_family == "Frame":
+            recipe += (
+                f" · Section {line.section_tag} · "
+                f"Transformation {line.transformation_tag}"
+            )
+        else:
+            recipe += (
+                f" · Material {line.material_tag} · A={line.area:g}"
+            )
+        sizing = (
+            f"Target size {line.target_size:g}"
+            if line.mesh_mode == "target_size"
+            and line.target_size is not None
+            else f"{line.divisions} division(s)"
+        )
+        self.properties_panel.set_properties(
+            "Geometry Line",
+            [
+                ("Tag", line.tag),
+                ("Name", line.name),
+                (
+                    "Start Point",
+                    f"{line.point_i} - {point_i.name}"
+                    if point_i is not None else f"{line.point_i} (missing)",
+                ),
+                (
+                    "End Point",
+                    f"{line.point_j} - {point_j.name}"
+                    if point_j is not None else f"{line.point_j} (missing)",
+                ),
+                ("FE family", line.element_family),
+                ("FE recipe", recipe),
+                ("Mesh sizing", sizing),
+                (
+                    "Reuse coincident nodes",
+                    "Yes" if line.reuse_existing_nodes else "No",
+                ),
+                (
+                    "Mesh status",
+                    (
+                        f"Meshed · {len(live_elements)} element(s)"
+                        if live_elements else "Unmeshed"
+                    ),
+                ),
+            ],
+        )
+
     def _create_surface_geometry(self) -> int | None:
         if not self._ensure_prerequisite(
             title="New Surface",
@@ -14313,6 +14711,10 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "geometry_root":
+            point_action = menu.addAction("New Point...")
+            point_action.triggered.connect(self._create_point_geometry)
+            line_action = menu.addAction("New Line...")
+            line_action.triggered.connect(self._create_line_geometry)
             surface_action = menu.addAction("New Surface...")
             surface_action.triggered.connect(self._create_surface_geometry)
             menu.addSeparator()
@@ -14349,6 +14751,74 @@ class MainWindow(QMainWindow):
             select_all.triggered.connect(self._select_all_tree_nodes)
             menu.addSeparator()
             menu.addAction(self.actions["show_node_numbers"])
+            exec_menu()
+            return
+
+        if kind == "points_root":
+            create = menu.addAction("New Point...")
+            create.triggered.connect(self._create_point_geometry)
+            exec_menu()
+            return
+
+        if kind == "lines_root":
+            create = menu.addAction("New Line...")
+            create.triggered.connect(self._create_line_geometry)
+            exec_menu()
+            return
+
+        if kind == "point_geometry":
+            tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda checked=False, t=tag:
+                self._show_point_geometry_properties(t)
+            )
+            edit = menu.addAction("Edit Point...")
+            edit.triggered.connect(
+                lambda checked=False, t=tag:
+                self._edit_point_geometry(t)
+            )
+            menu.addSeparator()
+            delete = menu.addAction("Delete Point")
+            delete.triggered.connect(
+                lambda checked=False, t=tag:
+                self._delete_point_geometry(t)
+            )
+            exec_menu()
+            return
+
+        if kind == "line_geometry":
+            tag = int(value)
+            line = self.project.lines.get(tag)
+            if line is None:
+                return
+            live_mesh = any(
+                element_tag in self.model.elements
+                for element_tag in line.generated_element_tags
+            )
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda checked=False, t=tag:
+                self._show_line_geometry_properties(t)
+            )
+            edit = menu.addAction("Edit Line...")
+            edit.setEnabled(not live_mesh)
+            edit.triggered.connect(
+                lambda checked=False, t=tag:
+                self._edit_line_geometry(t)
+            )
+            mesh = menu.addAction("Generate Line Mesh...")
+            mesh.setEnabled(not live_mesh)
+            mesh.triggered.connect(
+                lambda checked=False, t=tag:
+                self._mesh_line_geometry(t)
+            )
+            menu.addSeparator()
+            delete = menu.addAction("Delete Line")
+            delete.triggered.connect(
+                lambda checked=False, t=tag:
+                self._delete_line_geometry(t)
+            )
             exec_menu()
             return
 
