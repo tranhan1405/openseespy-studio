@@ -822,6 +822,115 @@ def test_trim_extend_splits_target_and_shares_topology():
     assert len(junction_nodes) == 1
 
 
+def test_explicit_trim_never_silently_extends():
+    project = _frame_project(length=3.0)
+    project.add_point(PointGeometryData(3, "C", (5.0, -2.0, 0.0)))
+    project.add_point(PointGeometryData(4, "D", (5.0, 2.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Subject",
+            1,
+            2,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "Boundary",
+            3,
+            4,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+
+    with pytest.raises(ValueError, match="would EXTEND"):
+        trim_extend_line_to_line(
+            project,
+            1,
+            2,
+            endpoint="j",
+            operation="trim",
+        )
+
+    assert project.lines[1].point_j == 2
+
+
+def test_explicit_extend_never_silently_trims():
+    project = _frame_project(length=10.0)
+    project.add_point(PointGeometryData(3, "C", (5.0, -2.0, 0.0)))
+    project.add_point(PointGeometryData(4, "D", (5.0, 2.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Subject",
+            1,
+            2,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "Boundary",
+            3,
+            4,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+
+    with pytest.raises(ValueError, match="would TRIM"):
+        trim_extend_line_to_line(
+            project,
+            1,
+            2,
+            endpoint="j",
+            operation="extend",
+        )
+
+    assert project.lines[1].point_j == 2
+
+
+def test_trim_extend_rejects_noop_endpoint_on_boundary():
+    project = _frame_project(length=3.0)
+    project.add_point(PointGeometryData(3, "C", (3.0, -2.0, 0.0)))
+    project.add_point(PointGeometryData(4, "D", (3.0, 2.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Subject",
+            1,
+            2,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+    project.add_line(
+        LineGeometryData(
+            2,
+            "Boundary",
+            3,
+            4,
+            section_tag=1,
+            transformation_tag=1,
+        )
+    )
+
+    with pytest.raises(ValueError, match="already lies"):
+        trim_extend_line_to_line(
+            project,
+            1,
+            2,
+            endpoint="j",
+            operation="auto",
+        )
+
+
 def test_trim_extend_rejects_wrong_extension_endpoint():
     project = _frame_project(length=3.0)
     project.add_point(PointGeometryData(3, "C", (5.0, -2.0, 0.0)))
@@ -1280,6 +1389,9 @@ def test_geometry_ribbon_tab_groups_spaceclaim_style_tools():
     assert '"Sketch"' in ribbon
     assert '"Work Plane"' in ribbon
     assert '"geometry_trim_pick"' in ribbon
+    assert '"geometry_extend_pick"' in ribbon
+    assert '"geometry_split"' in ribbon
+    assert '"geometry_join"' in ribbon
     assert '"geometry_snap"' in ribbon
     assert '"geometry_grid"' in ribbon
 
@@ -1303,21 +1415,30 @@ def test_geometry_lines_are_pickable_hoverable_and_tree_selectable():
     assert "_tree_line_items" in selection
 
 
-def test_geometry_trim_tool_is_two_click_nearest_endpoint_workflow():
+def test_geometry_trim_and_extend_are_strict_click_side_workflows():
     activate = inspect.getsource(
-        MainWindow._activate_geometry_trim_tool
+        MainWindow._activate_geometry_line_target_tool
+    )
+    trim = inspect.getsource(MainWindow._activate_geometry_trim_tool)
+    extend = inspect.getsource(MainWindow._activate_geometry_extend_tool)
+    endpoint = inspect.getsource(
+        MainWindow._geometry_line_endpoint_from_click
     )
     handle = inspect.getsource(
         MainWindow._handle_geometry_trim_click
     )
     click = inspect.getsource(MainWindow._viewport_entity_clicked)
 
-    assert "click the Geometry Line to trim" in activate
-    assert "_geometry_trim_subject_tag" in handle
+    assert "click the side of the Geometry Line" in activate
+    assert '_activate_geometry_line_target_tool("trim"' in trim
+    assert '_activate_geometry_line_target_tool("extend"' in extend
+    assert "_world_to_qt" in endpoint
+    assert "_geometry_trim_endpoint" in handle
     assert "trim_extend_line_to_line" in handle
-    assert 'endpoint="nearest"' in handle
+    assert "operation=operation" in handle
     assert "geometry_trim_pick" in click
-    assert "_handle_geometry_trim_click" in click
+    assert "geometry_extend_pick" in click
+    assert "_handle_geometry_trim_click(payload)" in click
 
 
 def test_geometry_snap_has_orthogonal_inference_and_toggle():

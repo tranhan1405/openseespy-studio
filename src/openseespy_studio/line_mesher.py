@@ -1852,9 +1852,14 @@ def trim_extend_line_to_line(
     target_line_tag: int,
     *,
     endpoint: str = "nearest",
+    operation: str = "auto",
     remesh: bool = True,
 ) -> LineTrimExtendResult:
     """Trim or extend one Geometry Line to a finite target Line.
+
+    operation may be "trim", "extend", or "auto". Explicit modes are strict
+    so a CAD command never performs the opposite edit silently. "auto"
+    preserves the previous API behavior for programmatic/context-menu use.
 
     The subject endpoint is reassigned to shared Geometry topology. If the
     intersection lies inside the target Line, the target is split so the
@@ -1893,6 +1898,13 @@ def trim_extend_line_to_line(
     endpoint_key = str(endpoint).strip().lower()
     if endpoint_key not in {"nearest", "i", "j"}:
         raise ValueError("Trim/extend endpoint must be 'nearest', 'i', or 'j'.")
+
+    requested_operation = str(operation).strip().lower()
+    if requested_operation not in {"auto", "trim", "extend"}:
+        raise ValueError(
+            "Trim/extend operation must be 'auto', 'trim', or 'extend'."
+        )
+
     if endpoint_key == "nearest":
         endpoint_key = (
             "i"
@@ -1901,31 +1913,56 @@ def trim_extend_line_to_line(
         )
 
     if endpoint_key == "i":
+        if _distance(a, point) <= tolerance:
+            raise ValueError(
+                "Point I already lies on the target Line; no trim/extend "
+                "operation is required."
+            )
         if _distance(b, point) <= tolerance:
             raise ValueError("Trim/extend would collapse the subject Line.")
         if subject_parameter > 1.0 + parameter_tol:
             raise ValueError(
-                "The intersection lies beyond Point J. Modify Point J or use "
-                "the nearest-endpoint option."
+                "The intersection lies beyond Point J. Modify Point J or "
+                "select the Point J side."
             )
-        operation = (
+        resolved_operation = (
             "extend"
             if subject_parameter < 0.0
             else "trim"
         )
     else:
+        if _distance(b, point) <= tolerance:
+            raise ValueError(
+                "Point J already lies on the target Line; no trim/extend "
+                "operation is required."
+            )
         if _distance(a, point) <= tolerance:
             raise ValueError("Trim/extend would collapse the subject Line.")
         if subject_parameter < -parameter_tol:
             raise ValueError(
-                "The intersection lies beyond Point I. Modify Point I or use "
-                "the nearest-endpoint option."
+                "The intersection lies beyond Point I. Modify Point I or "
+                "select the Point I side."
             )
-        operation = (
+        resolved_operation = (
             "extend"
             if subject_parameter > 1.0
             else "trim"
         )
+
+    if (
+        requested_operation != "auto"
+        and resolved_operation != requested_operation
+    ):
+        if requested_operation == "trim":
+            raise ValueError(
+                "This boundary lies outside the selected Line endpoint, so "
+                "the edit would EXTEND the Line. Use Extend instead."
+            )
+        raise ValueError(
+            "This boundary lies inside the selected Line, so the edit would "
+            "TRIM the Line. Use Trim instead."
+        )
+    operation = resolved_operation
 
     subject_state = inspect_line_mesh_state(project, subject_tag)
     target_state = inspect_line_mesh_state(project, target_tag)
