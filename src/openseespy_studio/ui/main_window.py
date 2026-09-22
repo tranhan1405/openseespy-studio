@@ -10027,32 +10027,60 @@ class MainWindow(QMainWindow):
 
 
     def _create_surface_geometry(self) -> int | None:
+        if not self._ensure_prerequisite(
+            title="New Surface",
+            message=(
+                "A Surface requires a shell-compatible Section. "
+                "Create one now?"
+            ),
+            action_label="Create Shell Section Now...",
+            available=lambda: bool(self._shell_sections()),
+            creator=self._create_shell_section,
+        ):
+            return None
+
         dialog = SurfaceGeometryDialog(
             next_tag=self.project.next_surface_tag(),
             sections=self._shell_sections(),
             parent=self,
         )
         if not dialog.exec():
-            return
+            return None
+
         before = self.project.to_dict()
         try:
             surface = dialog.data()
             self.project.add_surface(surface)
+            result = mesh_surface_geometry(
+                self.project,
+                surface.tag,
+            )
         except (TypeError, ValueError) as exc:
-            QMessageBox.warning(self, "Surface Geometry", str(exc))
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(self, "Create Surface", str(exc))
             return None
-        self._refresh_all(f"Created surface geometry {surface.tag}")
+
+        self.model = self.project.model
+        self._refresh_all(
+            f"Created Surface {surface.tag} · "
+            f"{result.divisions_u}×{result.divisions_v} · "
+            f"{len(result.element_tags)} Shell element(s) · "
+            f"{len(result.created_node_tags)} new node(s)"
+        )
+        self.selection.set_selection(
+            elements=set(result.element_tags),
+        )
         self._show_surface_geometry_properties(surface.tag)
         self._record_project_change(
-            f"Create surface geometry {surface.tag}",
+            f"Create Surface {surface.tag}",
             before,
         )
         return int(surface.tag)
 
     def _create_surface_geometry_and_mesh(self) -> None:
-        tag = self._create_surface_geometry()
-        if tag is not None:
-            self._mesh_surface_geometry(tag)
+        self._create_surface_geometry()
 
     def _edit_surface_geometry(self, tag: int) -> None:
         surface = self.project.surfaces.get(int(tag))
