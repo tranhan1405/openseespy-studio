@@ -1157,6 +1157,10 @@ class ModelViewport(QWidget):
                                     "plane": self._geometry_sketch_plane,
                                 }
                             )
+                        else:
+                            self._invalidate_geometry_sketch_cursor_preview(
+                                render=True
+                            )
                     return False
                 self._schedule_hover_from_qt(event)
                 return False
@@ -1260,6 +1264,12 @@ class ModelViewport(QWidget):
                         {"kind": entity[0], "tag": entity[1]}
                     )
                 return True
+
+        elif event_type == QEvent.Leave:
+            if self._interaction_tool == "geometry_sketch":
+                self._invalidate_geometry_sketch_cursor_preview(render=True)
+            self._pending_hover_vtk_pos = None
+            return False
 
         elif event_type == QEvent.Wheel:
             self._wheel_zoom(event.angleDelta().y())
@@ -2258,6 +2268,8 @@ class ModelViewport(QWidget):
         self._surfaces = dict(surfaces or {})
         self._points = dict(points or {})
         self._lines = dict(lines or {})
+        self._selected_geometry_lines.intersection_update(self._lines)
+        self._selected_geometry_surfaces.intersection_update(self._surfaces)
         self._hidden_nodes.clear()
         self._hidden_elements.clear()
         self._isolate_active = False
