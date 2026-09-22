@@ -2844,10 +2844,83 @@ class ModelViewport(QWidget):
         axis_length = max(self._model_span() * 0.075, 0.10)
         y_records = []
         z_records = []
+        shell_x_records = []
+        shell_y_records = []
+        shell_n_records = []
 
         for tag in sorted(self._visible_element_tags()):
             element = self._model.elements.get(tag)
-            if element is None or element.transf_tag is None:
+            if element is None:
+                continue
+
+            if element.element_type in SHELL_ELEMENT_TYPES:
+                shell_nodes = [
+                    self._model.nodes.get(node_tag)
+                    for node_tag in element.node_tags()
+                ]
+                if any(node is None for node in shell_nodes):
+                    continue
+                points = np.asarray(
+                    [node.xyz for node in shell_nodes],
+                    dtype=float,
+                )
+                center = np.mean(points, axis=0)
+                normal = np.zeros(3, dtype=float)
+                for index in range(4):
+                    current = points[index]
+                    following = points[(index + 1) % 4]
+                    normal += np.asarray(
+                        [
+                            (current[1] - following[1])
+                            * (current[2] + following[2]),
+                            (current[2] - following[2])
+                            * (current[0] + following[0]),
+                            (current[0] - following[0])
+                            * (current[1] + following[1]),
+                        ],
+                        dtype=float,
+                    )
+                normal_norm = float(np.linalg.norm(normal))
+                if normal_norm <= 1.0e-12:
+                    continue
+                normal /= normal_norm
+
+                if element.shell_local_x is not None:
+                    local_x = np.asarray(
+                        element.shell_local_x,
+                        dtype=float,
+                    )
+                else:
+                    local_x = points[1] - points[0]
+                local_x = local_x - np.dot(local_x, normal) * normal
+                local_x_norm = float(np.linalg.norm(local_x))
+                if local_x_norm <= 1.0e-12:
+                    local_x = points[3] - points[0]
+                    local_x = (
+                        local_x - np.dot(local_x, normal) * normal
+                    )
+                    local_x_norm = float(np.linalg.norm(local_x))
+                if local_x_norm <= 1.0e-12:
+                    continue
+                local_x /= local_x_norm
+                local_y = np.cross(normal, local_x)
+                local_y_norm = float(np.linalg.norm(local_y))
+                if local_y_norm <= 1.0e-12:
+                    continue
+                local_y /= local_y_norm
+
+                shell_x_records.append(
+                    (center, local_x, axis_length)
+                )
+                shell_y_records.append(
+                    (center, local_y, axis_length)
+                )
+                shell_n_records.append(
+                    (center, normal, axis_length)
+                )
+                continue
+
+            if element.transf_tag is None:
                 continue
             transformation = self._transformations.get(element.transf_tag)
             if transformation is None:
@@ -2897,6 +2970,40 @@ class ModelViewport(QWidget):
                 name="display-section-axis-z",
                 color="#4169e1",
                 line_width=2,
+                render_lines_as_tubes=False,
+                pickable=False,
+                render=False,
+            )
+
+        shell_x_mesh = self._batched_axis_line_mesh(shell_x_records)
+        if shell_x_mesh is not None:
+            self.plotter.add_mesh(
+                shell_x_mesh,
+                name="display-shell-axis-x",
+                color="#c0392b",
+                line_width=2,
+                render_lines_as_tubes=False,
+                pickable=False,
+                render=False,
+            )
+        shell_y_mesh = self._batched_axis_line_mesh(shell_y_records)
+        if shell_y_mesh is not None:
+            self.plotter.add_mesh(
+                shell_y_mesh,
+                name="display-shell-axis-y",
+                color="#2e8b57",
+                line_width=2,
+                render_lines_as_tubes=False,
+                pickable=False,
+                render=False,
+            )
+        shell_n_mesh = self._batched_axis_line_mesh(shell_n_records)
+        if shell_n_mesh is not None:
+            self.plotter.add_mesh(
+                shell_n_mesh,
+                name="display-shell-axis-normal",
+                color="#4169e1",
+                line_width=3,
                 render_lines_as_tubes=False,
                 pickable=False,
                 render=False,
@@ -3114,6 +3221,9 @@ class ModelViewport(QWidget):
                 "display-section-axis-y",
                 "display-section-axis-z",
                 "display-section-axis-labels",
+                "display-shell-axis-x",
+                "display-shell-axis-y",
+                "display-shell-axis-normal",
             ),
             "load_values": (
                 "display-nodal-load-labels",
