@@ -305,6 +305,13 @@ def material_to_openseespy(
             f"ops.uniaxialMaterial('Hysteretic', {material.tag}, {args})"
         )
 
+    if material.material_type == "RambergOsgoodSteel":
+        return (
+            "ops.uniaxialMaterial('RambergOsgoodSteel', "
+            f"{material.tag}, {stress(p['fy']):g}, "
+            f"{stress(p['E0']):g}, {p['a']:g}, {p['n']:g})"
+        )
+
     if material.material_type == "HystereticSmooth":
         return (
             "ops.uniaxialMaterial('HystereticSmooth', "
