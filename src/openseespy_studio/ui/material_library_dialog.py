@@ -257,9 +257,15 @@ class MaterialLibraryDialog(QDialog):
 
             item = QTreeWidgetItem([record.preset_name])
             item.setData(0, Qt.ItemDataRole.UserRole, record.id)
+            runtime_label = (
+                "executable"
+                if record.is_runtime_supported
+                else "reference only · not executable in stock OpenSeesPy"
+            )
             item.setToolTip(
                 0,
-                f"{record.model} · verified source · DOI {record.doi}",
+                f"{record.model} · verified source · {runtime_label} · "
+                f"DOI {record.doi}",
             )
             model_item.addChild(item)
 
@@ -367,7 +373,15 @@ class MaterialLibraryDialog(QDialog):
         key: str,
         value: float,
     ) -> tuple[float, str]:
+        if not record.is_runtime_supported:
+            self.add_button.setEnabled(False)
+            return
         if record.model in {"Fatigue", "MinMax"}:
+            kind = MATERIAL_PARAMETER_KINDS.get(
+                record.model,
+                {},
+            ).get(key, "raw")
+        elif not record.is_runtime_supported:
             kind = MATERIAL_PARAMETER_KINDS.get(
                 record.model,
                 {},
@@ -412,9 +426,15 @@ class MaterialLibraryDialog(QDialog):
         self.heading.setText(
             f"{record.grade}  →  {record.model}"
         )
+        runtime_text = (
+            "Executable in supported stock OpenSeesPy"
+            if record.is_runtime_supported
+            else "REFERENCE ONLY · not executable in stock OpenSeesPy"
+        )
         self.summary.setText(
             f"{record.material} · {record.standard} · "
-            f"Verified parameter set: {record.preset_name}"
+            f"Verified parameter set: {record.preset_name}\n"
+            f"Runtime: {runtime_text}"
         )
 
         rows = list(record.parameters_si.items())
@@ -464,8 +484,19 @@ class MaterialLibraryDialog(QDialog):
         limitations = "\n".join(
             f"• {item}" for item in record.limitations
         )
+        runtime_note = (
+            ""
+            if record.is_runtime_supported
+            else (
+                "Runtime support\n"
+                "⚠ Reference only — Insert into Project is disabled.\n"
+                + record.runtime_note
+                + "\n\n"
+            )
+        )
         self.scope.setText(
-            "Applicability\n"
+            runtime_note
+            + "Applicability\n"
             + applicability
             + "\n\nLimitations\n"
             + limitations
