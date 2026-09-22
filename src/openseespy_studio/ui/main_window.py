@@ -145,10 +145,11 @@ from ..line_mesher import (
     remesh_line_batch,
     remesh_line_geometry,
     reverse_line_geometry,
+    split_line_geometry_at_point,
     trim_extend_line_to_line,
 )
 from ..section_response import section_response_sources
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LineGeometryData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
     build_worker_pythonpath,
     opensees_material_requires_runtime_probe,
@@ -1618,6 +1619,7 @@ class MainWindow(QMainWindow):
         self._truss_first_node_tag: int | None = None
         self._geometry_line_point_tags: list[int] = []
         self._geometry_surface_point_tags: list[int] = []
+        self._geometry_sketch_intersections = []
         self._job_ui_timer = QTimer(self)
         self._job_ui_timer.setInterval(1000)
         self._job_ui_timer.timeout.connect(self._refresh_running_job_ui)
@@ -2105,10 +2107,10 @@ class MainWindow(QMainWindow):
         )
         self._make_action(
             "line_geometry_pick",
-            "Create by Picking",
+            "Draw Polyline",
             "element",
             self._activate_geometry_line_pick_tool,
-            "Click two Geometry Points to create and mesh a Line",
+            "Draw continuous Geometry Lines on the active sketch plane with snapping",
             checkable=True,
         )
         self._make_action(
@@ -2116,14 +2118,14 @@ class MainWindow(QMainWindow):
             "Create by Input...",
             "element",
             self._create_line_geometry,
-            "Create reusable Line geometry and mesh it into Frame/Truss elements",
+            "Create reusable Line geometry by coordinate/topology input",
         )
         self._make_action(
             "surface_geometry_pick",
-            "Create by Picking",
+            "Draw Rectangle",
             "grid",
             self._activate_geometry_surface_pick_tool,
-            "Click four Geometry Points around the boundary to create and mesh a Surface",
+            "Draw a rectangular Geometry Surface by two diagonal clicks on the active sketch plane",
             checkable=True,
         )
         self._make_action(
@@ -5037,6 +5039,12 @@ class MainWindow(QMainWindow):
         self.viewport.entity_double_clicked.connect(self._viewport_entity_double_clicked)
         self.viewport.context_requested.connect(self._show_viewport_context_menu)
         self.viewport.box_selected.connect(self._viewport_box_selected)
+        self.viewport.geometry_sketch_moved.connect(
+            self._viewport_geometry_sketch_moved
+        )
+        self.viewport.geometry_sketch_finished.connect(
+            self._finish_geometry_sketch
+        )
         self.viewport.set_selection_filter(self.selection.filter)
 
     def _install_shortcuts(self) -> None:
