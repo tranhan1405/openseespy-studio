@@ -1486,3 +1486,110 @@ def test_shell_mesh_creation_status_reports_actual_conformity_and_reuse():
     assert "result.conformed_v" in source
     assert "U conformed" in source
     assert "V conformed" in source
+
+
+def _stitchable_shell_project() -> ProjectDatabase:
+    model = StructuralModel("shell-stitch", ndm=3, ndf=6)
+    coordinates = {
+        1: (0.0, 0.0, 0.0),
+        2: (1.0, 0.0, 0.0),
+        3: (1.0, 1.0, 0.0),
+        4: (0.0, 1.0, 0.0),
+        5: (1.0, 0.0, 0.0),
+        6: (2.0, 0.0, 0.0),
+        7: (2.0, 1.0, 0.0),
+        8: (1.0, 1.0, 0.0),
+    }
+    for tag, xyz in coordinates.items():
+        model.add_node(tag, *xyz)
+    model.add_element(
+        10, 1, 2,
+        element_type="ASDShellQ4",
+        section_tag=7,
+        group="shell",
+        k=3,
+        l=4,
+    )
+    model.add_element(
+        20, 5, 6,
+        element_type="ASDShellQ4",
+        section_tag=7,
+        group="shell",
+        k=7,
+        l=8,
+    )
+    project = ProjectDatabase(name="shell-stitch", model=model)
+    project.add_section(_shell_section())
+    return project
+
+
+def test_project_finds_coincident_shell_node_groups():
+    project = _stitchable_shell_project()
+
+    groups = project.coincident_shell_node_groups()
+
+    assert groups == [[2, 5], [3, 8]]
+
+
+def test_project_stitches_coincident_shell_nodes_and_removes_connectivity_warning():
+    project = _stitchable_shell_project()
+
+    result = project.stitch_coincident_shell_nodes()
+
+    assert result["merged_nodes"] == [5, 8]
+    assert result["kept_nodes"] == [2, 3]
+    assert result["remapped_elements"] == [20]
+    assert 5 not in project.model.nodes
+    assert 8 not in project.model.nodes
+    assert project.model.elements[20].node_tags() == (2, 6, 7, 3)
+    assert project.coincident_shell_node_groups() == []
+    assert not [
+        issue for issue in validate_project(project)
+        if issue.category == "Shell connectivity"
+    ]
+
+
+def test_shell_stitch_rejects_incompatible_support_state():
+    project = _stitchable_shell_project()
+    project.model.set_fixity(5, (1, 1, 1, 1, 1, 1))
+
+    with pytest.raises(ValueError, match=r"support/fixity states differ"):
+        project.stitch_coincident_shell_nodes()
+
+    assert 5 in project.model.nodes
+    assert project.model.elements[20].node_tags() == (5, 6, 7, 8)
+
+
+def test_shell_stitch_rejects_removed_node_with_node_recorder_reference():
+    project = _stitchable_shell_project()
+    project.recorders[1] = RecorderData(
+        tag=1,
+        name="Seam node",
+        recorder_type="Node",
+        target_tags=[5],
+        response="disp",
+        dofs=[1],
+    )
+
+    with pytest.raises(ValueError, match=r"node recorder"):
+        project.stitch_coincident_shell_nodes()
+
+    assert 5 in project.model.nodes
+    assert project.model.elements[20].node_tags() == (5, 6, 7, 8)
+
+
+def test_shell_stitch_ui_and_model_check_repair_route_are_exposed():
+    method_source = inspect.getsource(
+        MainWindow._stitch_coincident_shell_nodes
+    )
+    tree_source = inspect.getsource(MainWindow._show_tree_context_menu)
+    viewport_source = inspect.getsource(
+        MainWindow._show_viewport_context_menu
+    )
+    validation_source = inspect.getsource(validate_project)
+
+    assert "coincident_shell_node_groups" in method_source
+    assert "stitch_coincident_shell_nodes" in method_source
+    assert "Stitch Coincident Shell Nodes" in tree_source
+    assert "Stitch Coincident Shell Nodes" in viewport_source
+    assert "Stitch Coincident" in validation_source
