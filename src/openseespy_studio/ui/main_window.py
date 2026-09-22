@@ -11332,88 +11332,155 @@ class MainWindow(QMainWindow):
             rows,
         )
 
-    def _delete_surface_mesh(self, tag: int) -> None:
-        surface = self.project.surfaces.get(int(tag))
-        if surface is None:
+    def _delete_surface_meshes(self, surface_tags) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self.project.surfaces
+        })
+        if not tags:
             return
+
         before = self.project.to_dict()
+        removed_elements = 0
+        removed_nodes = 0
+        kept_nodes = 0
         try:
-            result = delete_surface_mesh(self.project, tag)
+            for tag in tags:
+                result = delete_surface_mesh(self.project, tag)
+                removed_elements += len(result.removed_element_tags)
+                removed_nodes += len(result.removed_node_tags)
+                kept_nodes += len(result.kept_node_tags)
         except ValueError as exc:
-            QMessageBox.warning(self, "Delete Surface Mesh", str(exc))
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Delete Surface Meshes",
+                str(exc),
+            )
             return
+
         self.model = self.project.model
         self._refresh_all(
-            f"Deleted Surface {tag} mesh · "
-            f"{len(result.removed_element_tags)} element(s) · "
-            f"{len(result.removed_node_tags)} orphan node(s) removed · "
-            f"{len(result.kept_node_tags)} referenced node(s) kept"
+            f"Deleted mesh for {len(tags)} Surface(s) · "
+            f"{removed_elements} element(s) · "
+            f"{removed_nodes} orphan node(s) removed · "
+            f"{kept_nodes} referenced node(s) kept"
         )
         self.viewport.set_display_domain("geometry")
-        self._show_surface_geometry_properties(tag)
         self._record_project_change(
-            f"Delete Surface {tag} mesh",
+            f"Delete mesh for {len(tags)} Surface(s)",
+            before,
+        )
+
+    def _delete_surface_mesh(self, tag: int) -> None:
+        self._delete_surface_meshes([tag])
+        if int(tag) in self.project.surfaces:
+            self._show_surface_geometry_properties(int(tag))
+
+    def _remesh_surface_geometries(self, surface_tags) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self.project.surfaces
+        })
+        if not tags:
+            return
+
+        before = self.project.to_dict()
+        element_count = 0
+        try:
+            for tag in tags:
+                surface = self.project.surfaces[tag]
+                has_mesh = any(
+                    int(element_tag) in self.model.elements
+                    for element_tag in surface.generated_element_tags
+                )
+                result = (
+                    remesh_surface_geometry(self.project, tag).mesh
+                    if has_mesh
+                    else mesh_surface_geometry(self.project, tag)
+                )
+                element_count += len(result.element_tags)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
+            QMessageBox.warning(
+                self,
+                "Remesh Surfaces",
+                str(exc),
+            )
+            return
+
+        self.model = self.project.model
+        self._refresh_all(
+            f"Meshed/remeshed {len(tags)} Surface(s) · "
+            f"{element_count} Shell element(s)"
+        )
+        self.viewport.set_display_domain("geometry")
+        self._record_project_change(
+            f"Mesh/remesh {len(tags)} Surface(s)",
             before,
         )
 
     def _remesh_surface_geometry(self, tag: int) -> None:
-        surface = self.project.surfaces.get(int(tag))
-        if surface is None:
+        self._remesh_surface_geometries([tag])
+        if int(tag) in self.project.surfaces:
+            self._show_surface_geometry_properties(int(tag))
+
+    def _flip_surface_normals(self, surface_tags) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self.project.surfaces
+        })
+        if not tags:
             return
+
         before = self.project.to_dict()
+        remeshed = 0
         try:
-            result = remesh_surface_geometry(self.project, tag)
+            for tag in tags:
+                result = flip_surface_orientation(
+                    self.project,
+                    tag,
+                    remesh_if_meshed=True,
+                )
+                if result is not None:
+                    remeshed += len(result.element_tags)
         except ValueError as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
             self._refresh_all()
-            QMessageBox.warning(self, "Remesh Surface", str(exc))
+            QMessageBox.warning(
+                self,
+                "Flip Surface Normals",
+                str(exc),
+            )
             return
+
         self.model = self.project.model
         self._refresh_all(
-            f"Remeshed Surface {tag} · "
-            f"{result.mesh.divisions_u}×{result.mesh.divisions_v} · "
-            f"{len(result.mesh.element_tags)} Shell element(s)"
+            f"Flipped normal for {len(tags)} Surface(s)"
+            + (
+                f" · remeshed {remeshed} Shell element(s)"
+                if remeshed else ""
+            )
         )
         self.viewport.set_display_domain("geometry")
-        self._show_surface_geometry_properties(tag)
+        self.viewport.show_surface_orientation(tags)
         self._record_project_change(
-            f"Remesh Surface {tag}",
+            f"Flip normal for {len(tags)} Surface(s)",
             before,
         )
 
     def _flip_surface_normal(self, tag: int) -> None:
-        surface = self.project.surfaces.get(int(tag))
-        if surface is None:
-            return
-        before = self.project.to_dict()
-        try:
-            mesh = flip_surface_orientation(
-                self.project,
-                tag,
-                remesh_if_meshed=True,
-            )
-        except ValueError as exc:
-            self.project = ProjectDatabase.from_dict(before)
-            self.model = self.project.model
-            self._refresh_all()
-            QMessageBox.warning(self, "Flip Surface Normal", str(exc))
-            return
-        self.model = self.project.model
-        suffix = (
-            f" · remeshed {len(mesh.element_tags)} Shell element(s)"
-            if mesh is not None
-            else ""
-        )
-        self._refresh_all(
-            f"Flipped Surface {tag} normal{suffix}"
-        )
-        self.viewport.set_display_domain("geometry")
-        self._show_surface_geometry_properties(tag)
-        self._record_project_change(
-            f"Flip Surface {tag} normal",
-            before,
-        )
+        self._flip_surface_normals([tag])
+        if int(tag) in self.project.surfaces:
+            self._show_surface_geometry_properties(int(tag))
 
     def _frame_sections(self) -> dict[int, SectionData]:
         return {
