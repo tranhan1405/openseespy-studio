@@ -744,11 +744,7 @@ class ShellElementDialog(QDialog):
         self.formulation.currentTextChanged.connect(
             self._sync_formulation
         )
-        self.mesh_mode.currentIndexChanged.connect(
-            self._sync_mesh_sizing
-        )
         self._sync_formulation()
-        self._sync_mesh_sizing()
 
         note = QLabel(
             "Node ordering must follow the shell boundary consistently "
@@ -1004,7 +1000,11 @@ class ShellMeshDialog(QDialog):
         self.formulation.currentTextChanged.connect(
             self._sync_formulation
         )
+        self.mesh_mode.currentIndexChanged.connect(
+            self._sync_mesh_sizing
+        )
         self._sync_formulation()
+        self._sync_mesh_sizing()
 
         note = QLabel(
             "Corners must be ordered around the boundary. SARE uses bilinear "
