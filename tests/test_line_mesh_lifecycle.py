@@ -2431,6 +2431,128 @@ def test_geometry_sketch_has_live_preview_and_right_click_finish():
     assert "_geometry_sketch_preview" in preview
     assert "geometry_sketch_finished.emit()" in event_filter
 
+def test_geometry_rectangle_first_corner_is_transient_until_commit():
+    source = inspect.getsource(
+        MainWindow._handle_geometry_rectangle_sketch_click
+    )
+    first_phase = source.split(
+        "anchor_snap = self._geometry_surface_anchor_snap",
+        1,
+    )[0]
+
+    assert "_geometry_surface_anchor_snap = dict(snap)" in first_phase
+    assert "_materialize_geometry_sketch_point" not in first_phase
+    assert "_record_project_change" not in first_phase
+
+
+def test_geometry_rectangle_cancel_and_view_reset_clear_transient_anchor():
+    leave = inspect.getsource(MainWindow._leave_geometry_surface_pick_mode)
+    reset = inspect.getsource(
+        MainWindow._reset_active_geometry_sketch_anchor
+    )
+
+    assert "_geometry_surface_anchor_snap = None" in leave
+    assert "_geometry_surface_anchor_snap = None" in reset
+
+
+def test_geometry_rectangle_side_corners_materialize_shared_topology():
+    source = inspect.getsource(
+        MainWindow._handle_geometry_rectangle_sketch_click
+    )
+
+    assert "enumerate(corners[1:], start=1)" in source
+    assert "_find_geometry_point_near(xyz)" in source
+    assert "_materialize_geometry_sketch_point" in source
+    assert "corner_tags.append(int(tag))" in source
+
+
+def test_geometry_rectangle_reuses_existing_surface_boundary():
+    helper = inspect.getsource(
+        MainWindow._existing_geometry_surface_from_corners
+    )
+    source = inspect.getsource(
+        MainWindow._handle_geometry_rectangle_sketch_click
+    )
+
+    assert "tuple(reversed(tags))" in helper
+    assert "existing in variants" in helper
+    assert "_existing_geometry_surface_from_corners" in source
+    assert "surface_created = existing_surface is None" in source
+    assert "already exists" in source
+
+
+def test_geometry_rectangle_preview_uses_transient_anchor_snap():
+    moved = inspect.getsource(
+        MainWindow._viewport_geometry_sketch_moved
+    )
+
+    assert "_geometry_surface_anchor_snap is not None" in moved
+    assert '_geometry_surface_anchor_snap["xyz"]' in moved
+    assert "_rectangle_corners_from_diagonal" in moved
+    assert "closed=True" in moved
+
+
+def test_geometry_iso_sketch_keeps_active_workplane_and_offset():
+    active = inspect.getsource(MainWindow._active_geometry_sketch_plane)
+    line = inspect.getsource(MainWindow._activate_geometry_line_pick_tool)
+    surface = inspect.getsource(
+        MainWindow._activate_geometry_surface_pick_tool
+    )
+
+    assert "self.viewport.geometry_sketch_plane()" in active
+    assert 'view in {"xy", "xz", "yz"}' in active
+    for source in (line, surface):
+        assert "current_plane, current_offset" in source
+        assert 'current_view().lower() == "iso"' in source
+        assert "plane_offset" in source
+        assert "set_geometry_sketch_plane(plane, plane_offset)" in source
+
+
+def test_geometry_trim_side_pick_rejects_nonfinite_screen_and_world():
+    source = inspect.getsource(
+        MainWindow._geometry_line_endpoint_from_click
+    )
+
+    assert "math.isfinite(sx)" in source
+    assert "math.isfinite(sy)" in source
+    assert "geometry_world_to_screen" in source
+    assert "Non-finite projected endpoint" in source
+    assert "len(xyz) != 3" in source
+    assert "math.isfinite(value) for value in xyz" in source
+
+
+def test_geometry_trim_and_batch_refresh_preserve_camera():
+    single = inspect.getsource(MainWindow._handle_geometry_trim_click)
+    batch = inspect.getsource(
+        MainWindow._handle_geometry_batch_target_click
+    )
+
+    assert single.count("reset_camera=False") >= 2
+    assert batch.count("reset_camera=False") >= 2
+
+
+def test_geometry_redraw_prunes_deleted_geometry_selection_refs():
+    source = inspect.getsource(ModelViewport.draw_model)
+
+    assert (
+        "_selected_geometry_lines.intersection_update(self._lines)"
+        in source
+    )
+    assert (
+        "_selected_geometry_surfaces.intersection_update(self._surfaces)"
+        in source
+    )
+
+
+def test_geometry_invalid_workplane_and_leave_clear_sketch_ghost_preview():
+    source = inspect.getsource(ModelViewport.eventFilter)
+
+    assert "world = self.geometry_workplane_point(*vtk_pos)" in source
+    assert "_invalidate_geometry_sketch_cursor_preview" in source
+    assert "event_type == QEvent.Leave" in source
+    assert "_pending_hover_vtk_pos = None" in source
+
+
 def test_geometry_ribbon_tab_groups_spaceclaim_style_tools():
     ribbon = inspect.getsource(MainWindow._build_actions_and_ribbon)
 
