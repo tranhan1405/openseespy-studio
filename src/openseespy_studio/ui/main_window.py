@@ -6338,6 +6338,45 @@ class MainWindow(QMainWindow):
                 best = (distance2, int(tag))
         return None if best is None else best[1]
 
+    def _geometry_lines_containing_interior_point(
+        self,
+        xyz,
+    ) -> list[int]:
+        point = tuple(float(value) for value in xyz)
+        tolerance = self._geometry_sketch_tolerance()
+        tags: list[int] = []
+        for tag, line in self.project.lines.items():
+            point_i = self.project.points.get(int(line.point_i))
+            point_j = self.project.points.get(int(line.point_j))
+            if point_i is None or point_j is None:
+                continue
+            a = tuple(float(value) for value in point_i.xyz)
+            b = tuple(float(value) for value in point_j.xyz)
+            direction = tuple(
+                b[axis] - a[axis]
+                for axis in range(3)
+            )
+            length2 = sum(value * value for value in direction)
+            if length2 <= 1.0e-24:
+                continue
+            parameter = sum(
+                (point[axis] - a[axis]) * direction[axis]
+                for axis in range(3)
+            ) / length2
+            if not 1.0e-8 < parameter < 1.0 - 1.0e-8:
+                continue
+            projected = tuple(
+                a[axis] + parameter * direction[axis]
+                for axis in range(3)
+            )
+            distance2 = sum(
+                (projected[axis] - point[axis]) ** 2
+                for axis in range(3)
+            )
+            if distance2 <= tolerance * tolerance:
+                tags.append(int(tag))
+        return sorted(tags)
+
     def _materialize_geometry_sketch_point(
         self,
         snap: dict[str, object],
@@ -6362,16 +6401,24 @@ class MainWindow(QMainWindow):
         else:
             point_tag = int(near)
 
-        for line_tag in snap.get("line_tags", ()):
-            if int(line_tag) not in self.project.lines:
-                continue
-            split_line_geometry_at_point(
-                self.project,
-                int(line_tag),
-                xyz,
-                remesh=True,
-            )
-            changed = True
+        if snap.get("line_tags"):
+            # Snap payload line tags can become stale when another snapped
+            # point is materialized first. Re-resolve topology from geometry
+            # after every split so multiple points on the same source Line
+            # and multi-Line intersections remain safe.
+            while True:
+                interior_tags = (
+                    self._geometry_lines_containing_interior_point(xyz)
+                )
+                if not interior_tags:
+                    break
+                split_line_geometry_at_point(
+                    self.project,
+                    interior_tags[0],
+                    xyz,
+                    remesh=True,
+                )
+                changed = True
         return point_tag, changed
 
     def _existing_geometry_line_between(
@@ -6458,44 +6505,6 @@ class MainWindow(QMainWindow):
             self.viewport.set_geometry_sketch_plane_offset_from_point(
                 anchor_xyz
             )
-
-            # Midpoint/intersection snaps change existing topology. Commit
-            # those immediately so the snap cache is rebuilt before P2.
-            # Free/endpoint anchors remain transient until a real segment is
-            # created, avoiding orphan Points when the user cancels after P1.
-            if snap.get("line_tags"):
-                before = self.project.to_dict()
-                try:
-                    point_tag, changed = (
-                        self._materialize_geometry_sketch_point(snap)
-                    )
-                except (TypeError, ValueError) as exc:
-                    self.project = ProjectDatabase.from_dict(before)
-                    self.model = self.project.model
-                    self._refresh_all(reset_camera=False)
-                    self.status_message.setText(str(exc))
-                    return
-                self._geometry_line_point_tags = [point_tag]
-                self._refresh_geometry_sketch_snap_cache()
-                if changed:
-                    self.model = self.project.model
-                    self._refresh_all(
-                        f"Sketch topology anchor Point {point_tag}",
-                        reset_camera=False,
-                    )
-                    self._record_project_change(
-                        f"Sketch topology Point {point_tag}",
-                        before,
-                    )
-                point = self.project.points[point_tag]
-                self.viewport.show_geometry_sketch_preview([point.xyz])
-                plane, offset = self.viewport.geometry_sketch_plane()
-                self.status_message.setText(
-                    f"Polyline anchor P{point_tag} · "
-                    f"{plane.upper()} @ {offset:g} · click next point"
-                )
-                return
-
             self._geometry_line_anchor_snap = dict(snap)
             self.viewport.show_geometry_sketch_preview([anchor_xyz])
             plane, offset = self.viewport.geometry_sketch_plane()
@@ -6504,6 +6513,7 @@ class MainWindow(QMainWindow):
                 "click next point"
             )
             return
+
 
         if (
             not self._geometry_line_point_tags
