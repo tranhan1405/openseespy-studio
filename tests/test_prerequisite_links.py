@@ -4,6 +4,7 @@ import inspect
 from types import SimpleNamespace
 
 from openseespy_studio.ui.main_window import MainWindow
+from openseespy_studio.ui.recorder_dialog import RecorderDialog
 
 
 class _PrerequisiteHolder:
@@ -300,4 +301,59 @@ def test_sixth_prerequisite_link_batch():
     assert "activate.setEnabled(job is not None)" in tree_source
     assert "plot_menu.setEnabled(job is not None)" in tree_source
     assert "export.setEnabled(job is not None)" in tree_source
+
+
+def test_seventh_prerequisite_link_batch():
+    recorder_source = inspect.getsource(MainWindow._recorder_target_creator)
+
+    # 1-4: each Recorder type can create/link its own required target.
+    recorder_cases = {
+        "Node": "_ensure_node_count",
+        "Element": "_create_frame",
+        "Section": "_ensure_nonlinear_beam_target",
+        "Fiber": "_ensure_fiber_beam_target",
+    }
+    for recorder_type, marker in recorder_cases.items():
+        assert f'kind == "{recorder_type}"' in recorder_source
+        assert marker in recorder_source
+
+    create_recorder_source = inspect.getsource(MainWindow._create_recorder)
+    assert "target_creator=self._recorder_target_creator" in create_recorder_source
+    recorder_dialog_source = inspect.getsource(RecorderDialog.__init__)
+    assert "Create / Link Target..." in recorder_dialog_source
+    assert "self._create_or_link_target" in recorder_dialog_source
+
+    result_source = inspect.getsource(
+        MainWindow._prepare_solution_result_prerequisites
+    )
+
+    # 5: Member Force -> Frame.
+    assert 'kind == "MemberForce"' in result_source
+    assert 'action_label="Create Frame Now..."' in result_source
+
+    # 6: Section Response -> zeroLengthSection/nonlinear beam target.
+    assert 'kind == "SectionResponse"' in result_source
+    assert "section_response_sources" in result_source
+    assert "_ensure_nonlinear_beam_target" in result_source
+
+    # 7-9: fiber-derived results -> Fiber-section nonlinear beam.
+    for result_type in ("FiberStress", "FiberStrain", "HingeState"):
+        assert f'"{result_type}"' in result_source
+    assert "_ensure_fiber_beam_target" in result_source
+
+    # 10: Specimen Response -> Quick 1D Column / Test Specimen.
+    assert 'kind == "SpecimenResponse"' in result_source
+    assert "_show_test_column_wizard" in result_source
+    assert 'action_label="Create 1D Column Now..."' in result_source
+
+    insert_source = inspect.getsource(MainWindow._insert_solution_result)
+    assert "_prepare_solution_result_prerequisites" in insert_source
+
+    fiber_source = inspect.getsource(MainWindow._ensure_fiber_beam_target)
+    assert "_create_fiber_beam_prerequisite" in fiber_source
+
+    # Section Response must remain visible even when its prerequisite target
+    # does not exist yet, otherwise the user cannot reach the creation route.
+    tree_source = inspect.getsource(MainWindow._show_tree_context_menu)
+    assert "section_response_available=True" in tree_source
 
