@@ -3119,7 +3119,7 @@ class MainWindow(QMainWindow):
         geometry_surface_button.setDefaultAction(
             self.actions["surface_geometry_pick"]
         )
-        geometry_surface_button.setText("Surface")
+        geometry_surface_button.setText("Rectangle")
         geometry_surface_button.setIcon(
             self.actions["surface_geometry_pick"].icon()
         )
@@ -3156,15 +3156,41 @@ class MainWindow(QMainWindow):
         home.finish()
         self.ribbon_tabs.addTab(home, "Home")
 
+        geometry_plan_view_button = QToolButton()
+        geometry_plan_view_button.setObjectName("RibbonLargeButton")
+        geometry_plan_view_button.setDefaultAction(self.actions["xy"])
+        geometry_plan_view_button.setText("Plan View")
+        geometry_plan_view_button.setIcon(self.actions["xy"].icon())
+        geometry_plan_view_button.setIconSize(QSize(28, 28))
+        geometry_plan_view_button.setToolButtonStyle(
+            Qt.ToolButtonTextUnderIcon
+        )
+        geometry_plan_view_button.setPopupMode(
+            QToolButton.MenuButtonPopup
+        )
+        geometry_plan_view_button.setAutoRaise(True)
+        geometry_plan_view_popup = QMenu(geometry_plan_view_button)
+        geometry_plan_view_popup.addAction(self.actions["xy"])
+        geometry_plan_view_popup.addAction(self.actions["xz"])
+        geometry_plan_view_popup.addAction(self.actions["yz"])
+        geometry_plan_view_popup.addSeparator()
+        geometry_plan_view_popup.addAction(self.actions["iso"])
+        geometry_plan_view_button.setMenu(geometry_plan_view_popup)
+        geometry_plan_view_button.setToolTip(
+            "Orient the active sketch to XY, XZ, or YZ. "
+            "Sketch tools use the current orthographic view as their plane."
+        )
+
         geometry_page = RibbonPage()
         add_group(
             geometry_page,
-            "Draw",
-            small=(
-                "point_geometry",
-                "line_geometry",
-                "surface_geometry",
-            ),
+            "Orient",
+            widgets=(geometry_plan_view_button,),
+        )
+        add_group(
+            geometry_page,
+            "Create",
+            small=("point_geometry",),
             widgets=(
                 geometry_line_button,
                 geometry_surface_button,
@@ -3176,14 +3202,8 @@ class MainWindow(QMainWindow):
             large=("geometry_trim_pick", "geometry_extend_pick"),
             small=(
                 "geometry_split",
-                "geometry_join",
                 "geometry_split_by_line",
-            ),
-        )
-        add_group(
-            geometry_page,
-            "Corner & Batch",
-            small=(
+                "geometry_join",
                 "geometry_fillet",
                 "geometry_chamfer",
                 "geometry_trim_multiple",
@@ -3192,28 +3212,21 @@ class MainWindow(QMainWindow):
         )
         add_group(
             geometry_page,
-            "Sketch",
+            "Sketch Aids",
             small=(
                 "geometry_snap",
                 "geometry_grid",
-                "surface_mesh_overlay",
             ),
         )
         add_group(
             geometry_page,
-            "Work Plane",
-            large=("iso",),
-            small=("xy", "xz", "yz"),
-        )
-        add_group(
-            geometry_page,
-            "Generators",
-            small=("column_1d", "frame_2d", "grid"),
+            "Mesh Preview",
+            small=("surface_mesh_overlay",),
         )
         geometry_page.finish()
         geometry_index = self.ribbon_tabs.addTab(
             geometry_page,
-            "Geometry",
+            "Sketch",
         )
         self.ribbon_tabs.tabBar().setTabTextColor(
             geometry_index,
