@@ -28,6 +28,8 @@ def test_dialog_keeps_section_to_hinge_steps_separate():
     )
     try:
         assert dialog.windowTitle() == "Hinge Backbone Builder"
+        assert dialog.scroll.widgetResizable() is True
+        assert dialog.scroll.widget() is not None
         assert dialog.tag.value() == 12
         assert dialog.source_kind.findData("response_2000") >= 0
         assert dialog.basis.findData("moment_rotation") >= 0
