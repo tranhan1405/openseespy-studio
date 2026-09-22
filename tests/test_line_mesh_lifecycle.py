@@ -2142,6 +2142,14 @@ def test_geometry_view_change_cannot_leave_sketch_on_edge_on_old_plane():
     assert 'set_interaction_tool("geometry_sketch")' in view_action
 
 
+def test_geometry_tree_switch_to_fe_domain_exits_active_sketch():
+    tree_change = inspect.getsource(MainWindow._tree_selection_changed)
+
+    assert "not geometry_mode and self._geometry_sketch_tool_active()" in tree_change
+    assert "self._activate_select_tool()" in tree_change
+    assert '"geometry" if geometry_mode else "fe"' in tree_change
+
+
 def test_geometry_double_click_finishes_sketch_instead_of_editing_entity():
     event_filter = inspect.getsource(ModelViewport.eventFilter)
     marker = (
