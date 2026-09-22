@@ -175,21 +175,28 @@ def test_adjacent_geometry_surfaces_reuse_conforming_shared_edge_nodes():
     assert len(shared_midpoints) == 1
 
 
-def test_surface_geometry_ui_routes_keep_geometry_separate_from_shell_elements():
+def test_surface_ui_treats_surface_as_mesh_owner():
     dialog_source = inspect.getsource(SurfaceGeometryDialog)
     tree_source = inspect.getsource(MainWindow._refresh_tree)
     context_source = inspect.getsource(MainWindow._show_tree_context_menu)
     create_source = inspect.getsource(MainWindow._create_surface_geometry)
-    mesh_source = inspect.getsource(MainWindow._mesh_surface_geometry)
 
     assert "Rectangle" in dialog_source
     assert "Quad" in dialog_source
-    assert "Geometry is stored independently" in dialog_source
+    assert "A Surface owns its mapped Shell mesh" in dialog_source
+    assert "Create Surface + Mesh" in dialog_source
+    assert "Surface requires a Shell Section" in dialog_source
+
     assert "surface_geometry" in tree_source
-    assert "New Surface Geometry..." in context_source
-    assert "Mesh Surface Geometry..." in context_source
+    assert "surface_owned_elements" in tree_source
+    assert "Shell Elements (" in tree_source
+    assert "Mesh (" in tree_source
+
+    assert "New Surface..." in context_source
+    assert "Generate Surface Mesh..." in context_source
     assert "add_surface" in create_source
-    assert "mesh_surface_geometry" in mesh_source
+    assert "mesh_surface_geometry" in create_source
+    assert "ProjectDatabase.from_dict(before)" in create_source
 
 
 def test_surface_geometry_is_primary_shell_preprocessing_route():
@@ -199,19 +206,19 @@ def test_surface_geometry_is_primary_shell_preprocessing_route():
     direct_source = inspect.getsource(MainWindow._create_shell)
 
     assert '"surface_geometry"' in build_source
-    assert '"Surface Geometry..."' in build_source
+    assert '"Surface..."' in build_source
     assert 'actions["shell_mesh"]' not in build_source
     assert '"shell_input"' in build_source
     assert '"Direct Shell Element..."' in build_source
 
-    assert "Surface Geometry (" in tree_source
+    assert "Surfaces (" in tree_source
     assert "geometry /" not in tree_source
 
     assert "Legacy:" not in context_source
     assert "New Shell / Surface..." not in context_source
     assert "Mesh Shell Surface..." not in context_source
     assert "New Direct Shell Element..." in context_source
-    assert "New Surface Geometry..." in context_source
+    assert "New Surface..." in context_source
 
     pressure_source = inspect.getsource(
         MainWindow._create_shell_pressure
@@ -245,3 +252,15 @@ def test_unmeshed_surface_geometry_is_rendered_in_viewport():
     assert "self.project.surfaces" in refresh_source
     assert 'kind == "surface_geometry"' in tree_selection_source
     assert "_show_surface_geometry_properties" in tree_selection_source
+
+
+def test_new_surface_creation_is_atomic_create_and_mesh_workflow():
+    create_source = inspect.getsource(MainWindow._create_surface_geometry)
+
+    assert "_ensure_prerequisite" in create_source
+    assert "Create Shell Section Now..." in create_source
+    assert "self.project.add_surface(surface)" in create_source
+    assert "mesh_surface_geometry(" in create_source
+    assert "ProjectDatabase.from_dict(before)" in create_source
+    assert "result.element_tags" in create_source
+    assert "result.created_node_tags" in create_source
