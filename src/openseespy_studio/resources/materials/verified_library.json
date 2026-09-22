@@ -16536,6 +16536,180 @@
         "parameter_location_identified": true,
         "units_checked": true
       }
+    },
+    {
+      "id": "yao-2021-600c-natural-ramberg-osgood",
+      "family": "Fire-Exposed Reinforcing Steel",
+      "material": "600 MPa high-strength seismic reinforcing steel after heating and cooling",
+      "grade": "600 MPa seismic rebar · 600 °C · natural cooling",
+      "standard": "Post-fire Ramberg–Osgood calibration",
+      "model": "RambergOsgoodSteel",
+      "preset_name": "Yao et al. (2021) · 600°C natural cooling",
+      "parameters_si": {
+        "fy": 631720000,
+        "E0": 196000000000,
+        "a": 0.0075741938775510205,
+        "n": 9.82
+      },
+      "verified_parameters": [
+        "fy",
+        "E0",
+        "a",
+        "n"
+      ],
+      "applicability": [
+        "600 MPa high-strength seismic reinforcing steel",
+        "Residual monotonic stress-strain response after heating to 600 °C",
+        "Natural/air cooling",
+        "OpenSees RambergOsgoodSteel"
+      ],
+      "limitations": [
+        "Post-fire residual material calibration; not an ambient-temperature generic rebar preset.",
+        "The journal reports the Ramberg–Osgood coefficient α in the normalized form α·(fy/E)·(σ/fy)^n, whereas OpenSees source code expects the direct strain coefficient a·(σ/fy)^n.",
+        "SARE therefore stores the mathematically equivalent OpenSees coefficient a = α·fy/E = 0.007574193878; no curve fitting or additional assumption is introduced."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Residual Mechanical Properties and Constitutive Model of High-Strength Seismic Steel Bars through Different Cooling Rates",
+        "authors": "Xianhua Yao; Peiqiao Qin; Junfeng Guan; Lielie Li; Min Zhang; Yongwei Gao",
+        "journal": "Materials",
+        "volume_issue": "14(2)",
+        "article": "469",
+        "year": 2021,
+        "doi": "10.3390/ma14020469"
+      },
+      "parameter_evidence": {
+        "type": "journal_table_and_opensees_source_mapping",
+        "title": "Residual Mechanical Properties and Constitutive Model of High-Strength Seismic Steel Bars through Different Cooling Rates",
+        "author": "Xianhua Yao; Peiqiao Qin; Junfeng Guan; Lielie Li; Min Zhang; Yongwei Gao",
+        "institution": "Materials / OpenSees",
+        "year": 2021,
+        "location": "Table 7 — 600 °C row: E=196 GPa, yield strength=631.72 MPa, α=2.35, n=9.82; OpenSees RambergOsgoodSteel.cpp setTrialStrain equation defines the direct coefficient a",
+        "url": "https://doi.org/10.3390/ma14020469",
+        "relationship": "The paper uses ε=σ/E + α·(fy/E)·(σ/fy)^n. The OpenSees implementation uses ε=σ/E + a·(σ/fy)^n. Therefore a=α·fy/E=0.00757419387755 is an exact algebraic parameter transformation from the published table, while fy, E0 and n are copied directly."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "yao-2021-600c-furnace-ramberg-osgood",
+      "family": "Fire-Exposed Reinforcing Steel",
+      "material": "600 MPa high-strength seismic reinforcing steel after heating and cooling",
+      "grade": "600 MPa seismic rebar · 600 °C · furnace cooling",
+      "standard": "Post-fire Ramberg–Osgood calibration",
+      "model": "RambergOsgoodSteel",
+      "preset_name": "Yao et al. (2021) · 600°C furnace cooling",
+      "parameters_si": {
+        "fy": 621050000,
+        "E0": 210000000000,
+        "a": 0.006062630952380952,
+        "n": 9.65
+      },
+      "verified_parameters": [
+        "fy",
+        "E0",
+        "a",
+        "n"
+      ],
+      "applicability": [
+        "600 MPa high-strength seismic reinforcing steel",
+        "Residual monotonic stress-strain response after heating to 600 °C",
+        "Furnace cooling",
+        "OpenSees RambergOsgoodSteel"
+      ],
+      "limitations": [
+        "Post-fire residual material calibration; not an ambient-temperature generic rebar preset.",
+        "The journal reports the Ramberg–Osgood coefficient α in the normalized form α·(fy/E)·(σ/fy)^n, whereas OpenSees source code expects the direct strain coefficient a·(σ/fy)^n.",
+        "SARE therefore stores the mathematically equivalent OpenSees coefficient a = α·fy/E = 0.006062630952; no curve fitting or additional assumption is introduced."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Residual Mechanical Properties and Constitutive Model of High-Strength Seismic Steel Bars through Different Cooling Rates",
+        "authors": "Xianhua Yao; Peiqiao Qin; Junfeng Guan; Lielie Li; Min Zhang; Yongwei Gao",
+        "journal": "Materials",
+        "volume_issue": "14(2)",
+        "article": "469",
+        "year": 2021,
+        "doi": "10.3390/ma14020469"
+      },
+      "parameter_evidence": {
+        "type": "journal_table_and_opensees_source_mapping",
+        "title": "Residual Mechanical Properties and Constitutive Model of High-Strength Seismic Steel Bars through Different Cooling Rates",
+        "author": "Xianhua Yao; Peiqiao Qin; Junfeng Guan; Lielie Li; Min Zhang; Yongwei Gao",
+        "institution": "Materials / OpenSees",
+        "year": 2021,
+        "location": "Table 8 — 600 °C row: E=210 GPa, yield strength=621.05 MPa, α=2.05, n=9.65; OpenSees RambergOsgoodSteel.cpp setTrialStrain equation defines the direct coefficient a",
+        "url": "https://doi.org/10.3390/ma14020469",
+        "relationship": "The paper uses ε=σ/E + α·(fy/E)·(σ/fy)^n. The OpenSees implementation uses ε=σ/E + a·(σ/fy)^n. Therefore a=α·fy/E=0.00606263095238 is an exact algebraic parameter transformation from the published table, while fy, E0 and n are copied directly."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "yao-2021-600c-water-ramberg-osgood",
+      "family": "Fire-Exposed Reinforcing Steel",
+      "material": "600 MPa high-strength seismic reinforcing steel after heating and cooling",
+      "grade": "600 MPa seismic rebar · 600 °C · water cooling",
+      "standard": "Post-fire Ramberg–Osgood calibration",
+      "model": "RambergOsgoodSteel",
+      "preset_name": "Yao et al. (2021) · 600°C water cooling",
+      "parameters_si": {
+        "fy": 632610000,
+        "E0": 200000000000,
+        "a": 0.005756751,
+        "n": 10.82
+      },
+      "verified_parameters": [
+        "fy",
+        "E0",
+        "a",
+        "n"
+      ],
+      "applicability": [
+        "600 MPa high-strength seismic reinforcing steel",
+        "Residual monotonic stress-strain response after heating to 600 °C",
+        "Water cooling",
+        "OpenSees RambergOsgoodSteel"
+      ],
+      "limitations": [
+        "Post-fire residual material calibration; not an ambient-temperature generic rebar preset.",
+        "The journal reports the Ramberg–Osgood coefficient α in the normalized form α·(fy/E)·(σ/fy)^n, whereas OpenSees source code expects the direct strain coefficient a·(σ/fy)^n.",
+        "SARE therefore stores the mathematically equivalent OpenSees coefficient a = α·fy/E = 0.005756751000; no curve fitting or additional assumption is introduced."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Residual Mechanical Properties and Constitutive Model of High-Strength Seismic Steel Bars through Different Cooling Rates",
+        "authors": "Xianhua Yao; Peiqiao Qin; Junfeng Guan; Lielie Li; Min Zhang; Yongwei Gao",
+        "journal": "Materials",
+        "volume_issue": "14(2)",
+        "article": "469",
+        "year": 2021,
+        "doi": "10.3390/ma14020469"
+      },
+      "parameter_evidence": {
+        "type": "journal_table_and_opensees_source_mapping",
+        "title": "Residual Mechanical Properties and Constitutive Model of High-Strength Seismic Steel Bars through Different Cooling Rates",
+        "author": "Xianhua Yao; Peiqiao Qin; Junfeng Guan; Lielie Li; Min Zhang; Yongwei Gao",
+        "institution": "Materials / OpenSees",
+        "year": 2021,
+        "location": "Table 9 — 600 °C row: E=200 GPa, yield strength=632.61 MPa, α=1.82, n=10.82; OpenSees RambergOsgoodSteel.cpp setTrialStrain equation defines the direct coefficient a",
+        "url": "https://doi.org/10.3390/ma14020469",
+        "relationship": "The paper uses ε=σ/E + α·(fy/E)·(σ/fy)^n. The OpenSees implementation uses ε=σ/E + a·(σ/fy)^n. Therefore a=α·fy/E=0.00575675100000 is an exact algebraic parameter transformation from the published table, while fy, E0 and n are copied directly."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
     }
   ]
 }
