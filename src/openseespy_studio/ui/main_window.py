@@ -2064,6 +2064,14 @@ class MainWindow(QMainWindow):
             "Create reusable Rectangle or Quad surface geometry for Shell meshing",
         )
         self._make_action(
+            "surface_mesh_overlay",
+            "Shell Mesh Overlay",
+            "grid",
+            self._toggle_surface_mesh_overlay,
+            "Show generated Shell FE mesh as a non-pickable overlay in Geometry mode",
+            checkable=True,
+        )
+        self._make_action(
             "shell_input",
             "Direct Shell Element...",
             "element",
@@ -2960,6 +2968,7 @@ class MainWindow(QMainWindow):
             "Geometry",
             small=(
                 "point_geometry",
+                "surface_mesh_overlay",
                 "column_1d",
                 "frame_2d",
                 "grid",
@@ -4634,6 +4643,7 @@ class MainWindow(QMainWindow):
         point_geometry_tag: int | None = None
         line_geometry_tag: int | None = None
         surface_geometry_tag: int | None = None
+        surface_geometry_tags: set[int] = set()
         material_tag: int | None = None
         nd_material_tag: int | None = None
         section_tag: int | None = None
@@ -4680,6 +4690,7 @@ class MainWindow(QMainWindow):
                 line_geometry_tag = int(tag)
             elif kind == "surface_geometry":
                 surface_geometry_tag = int(tag)
+                surface_geometry_tags.add(int(tag))
             elif kind == "material":
                 material_tag = int(tag)
             elif kind == "nd_material":
@@ -4748,6 +4759,12 @@ class MainWindow(QMainWindow):
         self.viewport.set_display_domain(
             "geometry" if geometry_mode else "fe"
         )
+        if geometry_mode and surface_geometry_tags:
+            self.viewport.show_surface_orientation(
+                surface_geometry_tags
+            )
+        else:
+            self.viewport.clear_surface_orientation(render=False)
 
         self._sync_ribbon_context(selected_payload_kinds)
 
@@ -7739,6 +7756,17 @@ class MainWindow(QMainWindow):
         self.properties_panel.set_properties(
             "Prescribed Displacement",
             rows,
+        )
+
+    def _toggle_surface_mesh_overlay(
+        self,
+        checked: bool,
+    ) -> None:
+        self.viewport.set_display_domain("geometry")
+        self.viewport.set_geometry_mesh_overlay_visible(bool(checked))
+        self.status_message.setText(
+            "Geometry Shell mesh overlay "
+            + ("shown" if checked else "hidden")
         )
 
     def _create_shell_pressure(self) -> None:
