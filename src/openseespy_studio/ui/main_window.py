@@ -4918,14 +4918,14 @@ class MainWindow(QMainWindow):
         mass_root.addChild(masses_root)
         for tag in sorted(mass_nodes):
             item = QTreeWidgetItem([f"Node {tag}"])
-            item.setIcon(0, studio_icon("mass"))
+            item.setIcon(0, studio_icon("nodal-mass-item"))
             item.setData(0, Qt.UserRole, ("nodal_mass", tag))
             masses_root.addChild(item)
 
         element_masses_root = QTreeWidgetItem([
             f"Element Mass ({len(mass_elements)})"
         ])
-        element_masses_root.setIcon(0, studio_icon("mass"))
+        element_masses_root.setIcon(0, studio_icon("element-masses-root"))
         element_masses_root.setData(
             0,
             Qt.UserRole,
@@ -4938,14 +4938,14 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"Element {tag}  ρL={element.mass_per_length:g}"
             ])
-            item.setIcon(0, studio_icon("mass"))
+            item.setIcon(0, studio_icon("element-mass-item"))
             item.setData(0, Qt.UserRole, ("element_mass", tag))
             element_masses_root.addChild(item)
 
         mass_sources_root = QTreeWidgetItem([
             f"Mass Sources ({len(self.project.mass_sources)})"
         ])
-        mass_sources_root.setIcon(0, studio_icon("mass-source"))
+        mass_sources_root.setIcon(0, studio_icon("mass-sources-root"))
         mass_sources_root.setData(
             0,
             Qt.UserRole,
@@ -4958,7 +4958,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{source.name} [{tag}]"
             ])
-            item.setIcon(0, studio_icon("mass-source"))
+            item.setIcon(0, studio_icon("mass-source-item"))
             item.setData(0, Qt.UserRole, ("mass_source", tag))
             mass_sources_root.addChild(item)
 
@@ -4982,7 +4982,7 @@ class MainWindow(QMainWindow):
                 f"({len(selection_set.node_tags)}N / "
                 f"{len(selection_set.element_tags)}E)"
             ])
-            item.setIcon(0, studio_icon("select"))
+            item.setIcon(0, studio_icon("named-selection-item"))
             item.setData(0, Qt.UserRole, ("set", name))
             named_sets.addChild(item)
 
@@ -4999,7 +4999,7 @@ class MainWindow(QMainWindow):
         materials_root = QTreeWidgetItem([
             f"Materials ({len(self.project.materials)})"
         ])
-        materials_root.setIcon(0, studio_icon("uniaxial-material"))
+        materials_root.setIcon(0, studio_icon("materials-root"))
         materials_root.setData(0, Qt.UserRole, ("materials_root", None))
         materials_root.setExpanded(True)
         properties_root.addChild(materials_root)
@@ -5009,14 +5009,14 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{material.material_type} [{tag}]  {material.name}"
             ])
-            item.setIcon(0, studio_icon("uniaxial-material"))
+            item.setIcon(0, studio_icon("material-item"))
             item.setData(0, Qt.UserRole, ("material", tag))
             materials_root.addChild(item)
 
         nd_materials_root = QTreeWidgetItem([
             f"nD Materials ({len(self.project.nd_materials)})"
         ])
-        nd_materials_root.setIcon(0, studio_icon("nd-material"))
+        nd_materials_root.setIcon(0, studio_icon("nd-materials-root"))
         nd_materials_root.setData(
             0,
             Qt.UserRole,
@@ -5030,7 +5030,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{material.material_type} [{tag}]  {material.name}"
             ])
-            item.setIcon(0, studio_icon("nd-material"))
+            item.setIcon(0, studio_icon("nd-material-item"))
             item.setData(0, Qt.UserRole, ("nd_material", tag))
             nd_materials_root.addChild(item)
 
@@ -5074,7 +5074,7 @@ class MainWindow(QMainWindow):
                 f"{transformation.transformation_type} [{tag}]  "
                 f"{transformation.name}"
             ])
-            item.setIcon(0, studio_icon("transform"))
+            item.setIcon(0, studio_icon("transformation-item"))
             item.setData(0, Qt.UserRole, ("transformation", tag))
             transformations_root.addChild(item)
 
@@ -5166,7 +5166,7 @@ class MainWindow(QMainWindow):
         series_root = QTreeWidgetItem([
             f"Time Series ({len(standalone_series)})"
         ])
-        series_root.setIcon(0, studio_icon("time-series"))
+        series_root.setIcon(0, studio_icon("time-series-root"))
         series_root.setData(0, Qt.UserRole, ("time_series_root", None))
         series_root.setExpanded(True)
         loading_root.addChild(series_root)
@@ -5175,14 +5175,14 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{series.series_type} [{tag}]  {series.name}"
             ])
-            item.setIcon(0, studio_icon("time-series"))
+            item.setIcon(0, studio_icon("time-series-item"))
             item.setData(0, Qt.UserRole, ("time_series", tag))
             series_root.addChild(item)
 
         patterns_root = QTreeWidgetItem([
             f"Load Patterns ({len(plain_patterns)})"
         ])
-        patterns_root.setIcon(0, studio_icon("load-pattern"))
+        patterns_root.setIcon(0, studio_icon("load-patterns-root"))
         patterns_root.setData(0, Qt.UserRole, ("load_patterns_root", None))
         patterns_root.setExpanded(True)
         loading_root.addChild(patterns_root)
@@ -5191,7 +5191,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"Plain [{tag}]  {pattern.name}"
             ])
-            item.setIcon(0, studio_icon("load-pattern"))
+            item.setIcon(0, studio_icon("load-pattern-item"))
             item.setData(0, Qt.UserRole, ("load_pattern", tag))
             item.setExpanded(True)
             patterns_root.addChild(item)
@@ -5255,7 +5255,7 @@ class MainWindow(QMainWindow):
         ground_motions_root = QTreeWidgetItem([
             f"Ground Motions ({len(ground_motion_patterns)})"
         ])
-        ground_motions_root.setIcon(0, studio_icon("ground-motion"))
+        ground_motions_root.setIcon(0, studio_icon("ground-motions-root"))
         ground_motions_root.setData(
             0,
             Qt.UserRole,
@@ -5281,7 +5281,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{pattern.name} [{tag}] · {axis} · {points} pts"
             ])
-            item.setIcon(0, studio_icon("ground-motion"))
+            item.setIcon(0, studio_icon("ground-motion-item"))
             item.setData(0, Qt.UserRole, ("ground_motion", tag))
             ground_motions_root.addChild(item)
 
@@ -5478,7 +5478,7 @@ class MainWindow(QMainWindow):
         root.addChild(analysis)
 
         results = QTreeWidgetItem([f"Results / Jobs ({len(self._jobs)})"])
-        results.setIcon(0, studio_icon("jobs"))
+        results.setIcon(0, studio_icon("jobs-root"))
         results.setData(0, Qt.UserRole, ("jobs_root", None))
         results.setExpanded(True)
         for job_id in sorted(self._jobs, reverse=True):
@@ -5487,7 +5487,7 @@ class MainWindow(QMainWindow):
                 f"Job {job_id} · {job.analysis_name} "
                 f"({job.analysis_type}) · {job.status}"
             ])
-            item.setIcon(0, studio_icon("job"))
+            item.setIcon(0, studio_icon("job-item"))
             item.setData(0, Qt.UserRole, ("job", job_id))
             item.setExpanded(True)
             results.addChild(item)
@@ -24970,7 +24970,7 @@ class MainWindow(QMainWindow):
         if actions and not actions[-1].isSeparator():
             menu.addSeparator()
         ask_ai = menu.addAction("Ask AI about this")
-        ask_ai.setIcon(studio_icon("analysis"))
+        ask_ai.setIcon(studio_icon("ask-ai-tree"))
         ask_ai.triggered.connect(
             lambda checked=False, k=str(kind), v=value:
             self._ask_ai_about_tree_item(k, v)
