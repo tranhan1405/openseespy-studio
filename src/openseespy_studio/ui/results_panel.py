@@ -994,6 +994,10 @@ class ResultsPanel(QWidget):
         self._motion_timer.timeout.connect(self._advance_motion)
         self._motion_info = None
         self._motion_frame_index = 0
+        # Playback is rendered at a fixed, UI-friendly cadence. Faster
+        # playback advances multiple analysis frames per tick instead of
+        # forcing VTK to redraw at progressively higher frame rates.
+        self._motion_frame_accumulator = 0.0
         self._calibration_rows: list[dict[str, Any]] = []
         self._cyclic_experiment_dataset: dict[str, Any] = {}
         self._cyclic_experiment_path = ""
@@ -2907,6 +2911,10 @@ class ResultsPanel(QWidget):
         ):
             self.motion_speed.addItem(label, speed)
         self.motion_speed.setCurrentIndex(2)
+        self.motion_speed.setToolTip(
+            "Playback speed. Rendering stays near 25 FPS; faster settings "
+            "skip intermediate result frames to keep the viewport responsive."
+        )
         self.motion_speed.currentIndexChanged.connect(
             self._update_motion_timer
         )
@@ -2974,6 +2982,10 @@ class ResultsPanel(QWidget):
             self.frame_speed.addItem(label, speed)
         self.frame_speed.setCurrentIndex(
             max(0, self.motion_speed.currentIndex())
+        )
+        self.frame_speed.setToolTip(
+            "Playback speed. Rendering stays near 25 FPS; faster settings "
+            "skip intermediate result frames to keep the viewport responsive."
         )
         self.frame_speed.currentIndexChanged.connect(
             self._frame_speed_changed
@@ -3061,6 +3073,7 @@ class ResultsPanel(QWidget):
     def _refresh_motion_controls(self) -> None:
         self._motion_timer.stop()
         self._set_play_buttons(False)
+        self._motion_frame_accumulator = 0.0
 
         analysis = (
             self._result.get("analysis", {})
@@ -3151,6 +3164,7 @@ class ResultsPanel(QWidget):
 
     def _motion_source_changed(self, *_args) -> None:
         self._motion_frame_index = 0
+        self._motion_frame_accumulator = 0.0
         self._motion_info = motion_info(
             self._result,
             mode=self._motion_selected_mode(),
@@ -3210,26 +3224,25 @@ class ResultsPanel(QWidget):
                 self.frame_speed.blockSignals(True)
                 self.frame_speed.setCurrentIndex(index)
                 self.frame_speed.blockSignals(False)
-        if not self._motion_timer.isActive():
-            return
+        # Keep VTK redraws at a predictable ~25 FPS. Playback speed is
+        # represented by frame advancement, not by asking the GUI to repaint
+        # at 60+ FPS where large contour meshes become CPU/GPU bound.
+        self._motion_timer.setInterval(40)
+
+    def _motion_frames_per_tick(self) -> float:
         speed = max(0.01, self._motion_speed_value())
-        interval = max(16, int(round(40.0 / speed)))
         if (
             self._motion_info is not None
             and self._motion_info.transient_dt is not None
         ):
             dt = float(self._motion_info.transient_dt)
-            if dt > 0.0 and dt / speed > 0.04:
-                interval = max(
-                    16,
-                    int(round(1000.0 * dt / speed)),
-                )
-            else:
-                interval = 40
-        self._motion_timer.setInterval(interval)
+            if dt > 0.0:
+                return max(0.0, 0.04 * speed / dt)
+        return speed
 
     def stop_motion(self) -> None:
         self._motion_timer.stop()
+        self._motion_frame_accumulator = 0.0
         self._set_play_buttons(False)
         self._sync_motion_markers(None)
 
@@ -3241,22 +3254,13 @@ class ResultsPanel(QWidget):
             ):
                 self._set_play_buttons(False)
                 return
+            self._motion_frame_accumulator = 0.0
             self._set_play_buttons(True)
-            speed = max(0.01, self._motion_speed_value())
-            interval = max(16, int(round(40.0 / speed)))
-            if self._motion_info.transient_dt is not None:
-                dt = float(self._motion_info.transient_dt)
-                if dt > 0.0 and dt / speed > 0.04:
-                    interval = max(
-                        16,
-                        int(round(1000.0 * dt / speed)),
-                    )
-                else:
-                    interval = 40
-            self._motion_timer.setInterval(interval)
+            self._motion_timer.setInterval(40)
             self._motion_timer.start()
         else:
             self._motion_timer.stop()
+            self._motion_frame_accumulator = 0.0
             self._set_play_buttons(False)
             # Re-emit the resting frame so expensive annotations such as
             # contour extrema labels can be restored after fast playback.
@@ -3269,13 +3273,14 @@ class ResultsPanel(QWidget):
         if count <= 0:
             return
 
-        increment = 1
-        dt = self._motion_info.transient_dt
-        speed = max(0.01, self._motion_speed_value())
-        if dt is not None and dt > 0.0:
-            desired = 0.04 * speed
-            if desired >= dt:
-                increment = max(1, int(round(desired / dt)))
+        # Fractional accumulation keeps 0.25x/0.5x and transient playback
+        # faithful without raising the render frequency. At >1x we skip
+        # intermediate result frames while the viewport remains near 25 FPS.
+        self._motion_frame_accumulator += self._motion_frames_per_tick()
+        increment = int(self._motion_frame_accumulator)
+        if increment <= 0:
+            return
+        self._motion_frame_accumulator -= float(increment)
 
         target = self._motion_frame_index + increment
         if target >= count:
@@ -3284,6 +3289,7 @@ class ResultsPanel(QWidget):
             else:
                 target = count - 1
                 self._motion_timer.stop()
+                self._motion_frame_accumulator = 0.0
                 self._set_play_buttons(False)
         self._set_motion_index(target)
 
