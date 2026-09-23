@@ -214,8 +214,6 @@ def test_fourth_prerequisite_link_batch():
     expected = {
         "_create_mass_source": "_offer_structural_model_creator",
         "_create_named_selection": "_ensure_node_count",
-        "_load_analysis_result": "_offer_result_analysis_run",
-        "_evaluate_all_solution_results": "_offer_result_analysis_run",
         "_show_plot_menu": "_offer_result_analysis_run",
         "_export_active_job_results": "_offer_result_analysis_run",
         "_create_analysis_template": "_ensure_first_mode_modal_prerequisite",
@@ -223,6 +221,15 @@ def test_fourth_prerequisite_link_batch():
     for method_name, marker in expected.items():
         source = inspect.getsource(getattr(MainWindow, method_name))
         assert marker in source
+
+    # Persistent Solution Results deliberately separate post-processing from
+    # solving: Evaluate never launches OpenSees implicitly.
+    for method_name in (
+        "_load_analysis_result",
+        "_evaluate_all_solution_results",
+    ):
+        source = inspect.getsource(getattr(MainWindow, method_name))
+        assert "_offer_result_analysis_run" not in source
 
     tree_source = inspect.getsource(MainWindow._show_tree_context_menu)
     assert (
