@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import bisect
 import csv
 import math
 import time
@@ -2954,10 +2955,54 @@ class ResultsPanel(QWidget):
 
     def _build_frame_bar(self, root: QVBoxLayout) -> None:
         self.frame_bar = QWidget()
-        row = QHBoxLayout(self.frame_bar)
-        row.setContentsMargins(2, 2, 2, 2)
-        row.setSpacing(4)
+        frame_layout = QVBoxLayout(self.frame_bar)
+        frame_layout.setContentsMargins(2, 2, 2, 2)
+        frame_layout.setSpacing(3)
 
+        time_row = QHBoxLayout()
+        time_row.setContentsMargins(0, 0, 0, 0)
+        time_row.setSpacing(4)
+        self.result_time_label = QLabel("Time:")
+        time_row.addWidget(self.result_time_label)
+        self.result_time_mode = QComboBox()
+        self.result_time_mode.addItem("Last", "last")
+        self.result_time_mode.addItem("First / 0 s", "first")
+        self.result_time_mode.addItem("User Defined...", "user")
+        self.result_time_mode.setFixedWidth(126)
+        self.result_time_mode.setToolTip(
+            "Choose which transient result time is displayed in tables and "
+            "contours. User Defined snaps to the nearest recorded time."
+        )
+        self.result_time_mode.currentIndexChanged.connect(
+            self._result_time_mode_changed
+        )
+        time_row.addWidget(self.result_time_mode)
+
+        self.result_time_value = QDoubleSpinBox()
+        self.result_time_value.setDecimals(6)
+        self.result_time_value.setRange(0.0, 0.0)
+        self.result_time_value.setSuffix(" s")
+        self.result_time_value.setFixedWidth(118)
+        self.result_time_value.setKeyboardTracking(False)
+        self.result_time_value.setToolTip(
+            "Requested transient time. SARE displays the nearest recorded "
+            "result frame."
+        )
+        self.result_time_value.valueChanged.connect(
+            self._result_time_value_changed
+        )
+        self.result_time_value.hide()
+        time_row.addWidget(self.result_time_value)
+
+        self.result_time_actual = QLabel("t = -")
+        self.result_time_actual.setMinimumWidth(105)
+        time_row.addWidget(self.result_time_actual)
+        time_row.addStretch(1)
+        frame_layout.addLayout(time_row)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
         row.addWidget(QLabel("Frame:"))
         previous = QPushButton("◀")
         previous.setToolTip("Previous result frame")
@@ -3009,6 +3054,7 @@ class ResultsPanel(QWidget):
 
         self.frame_counter = QLabel("0 / 0")
         row.addWidget(self.frame_counter)
+        frame_layout.addLayout(row)
 
         self.frame_bar.hide()
         root.addWidget(self.frame_bar, 0)
@@ -3101,8 +3147,103 @@ class ResultsPanel(QWidget):
             and int(self._motion_info.frame_count) > 0
         )
 
+    def _nearest_transient_time_index(self, requested: float) -> int:
+        times = self._transient_time_values()
+        if not times:
+            return 0
+        value = float(requested)
+        position = bisect.bisect_left(times, value)
+        if position <= 0:
+            return 0
+        if position >= len(times):
+            return len(times) - 1
+        before = float(times[position - 1])
+        after = float(times[position])
+        return (
+            position
+            if abs(after - value) < abs(value - before)
+            else position - 1
+        )
+
+    def _configure_result_time_selector(self) -> None:
+        if not hasattr(self, "result_time_mode"):
+            return
+        times = self._transient_time_values()
+        enabled = bool(times)
+        for widget in (
+            self.result_time_label,
+            self.result_time_mode,
+            self.result_time_actual,
+        ):
+            widget.setVisible(enabled)
+        if not enabled:
+            self.result_time_value.hide()
+            return
+
+        self.result_time_mode.blockSignals(True)
+        try:
+            self.result_time_mode.setCurrentIndex(
+                max(0, self.result_time_mode.findData("last"))
+            )
+        finally:
+            self.result_time_mode.blockSignals(False)
+
+        low = float(times[0])
+        high = float(times[-1])
+        step = (
+            max((high - low) / 100.0, 1.0e-6)
+            if high > low
+            else 1.0e-6
+        )
+        self.result_time_value.blockSignals(True)
+        try:
+            self.result_time_value.setRange(low, high)
+            self.result_time_value.setSingleStep(step)
+            self.result_time_value.setValue(high)
+        finally:
+            self.result_time_value.blockSignals(False)
+        self.result_time_value.hide()
+        self._update_result_time_indicator()
+
+    def _update_result_time_indicator(self) -> None:
+        if not hasattr(self, "result_time_actual"):
+            return
+        times = self._transient_time_values()
+        index = int(self._motion_frame_index)
+        if not times or not (0 <= index < len(times)):
+            self.result_time_actual.setText("t = -")
+            return
+        self.result_time_actual.setText(
+            f"t = {float(times[index]):.6g} s"
+        )
+
+    def _result_time_mode_changed(self, _index: int) -> None:
+        times = self._transient_time_values()
+        if not times:
+            return
+        mode = str(self.result_time_mode.currentData() or "last")
+        user_defined = mode == "user"
+        self.result_time_value.setVisible(user_defined)
+        if mode == "last":
+            target = len(times) - 1
+        elif mode == "first":
+            target = 0
+        else:
+            target = self._nearest_transient_time_index(
+                self.result_time_value.value()
+            )
+        self._set_motion_index(target, refresh_tables=True)
+        self._sync_transient_playback_clock_to_frame()
+
+    def _result_time_value_changed(self, value: float) -> None:
+        if str(self.result_time_mode.currentData() or "") != "user":
+            return
+        target = self._nearest_transient_time_index(float(value))
+        self._set_motion_index(target, refresh_tables=True)
+        self._sync_transient_playback_clock_to_frame()
+
     def _frame_slider_changed(self, value: int) -> None:
-        self._set_motion_index(int(value))
+        self._set_motion_index(int(value), refresh_tables=True)
         self._sync_transient_playback_clock_to_frame()
 
     def _select_frame_from_plot(self, index: int) -> None:
@@ -3188,6 +3329,7 @@ class ResultsPanel(QWidget):
         )
         self._motion_frame_index = default_index
         self._rebuild_playback_frame_indices()
+        self._configure_result_time_selector()
         for slider in (self.motion_slider, self.frame_slider):
             slider.blockSignals(True)
             slider.setRange(0, max(0, count - 1))
@@ -3244,6 +3386,7 @@ class ResultsPanel(QWidget):
         )
         count = int(self._motion_info.frame_count)
         self._rebuild_playback_frame_indices()
+        self._configure_result_time_selector()
         for slider in (self.motion_slider, self.frame_slider):
             slider.blockSignals(True)
             slider.setRange(0, max(0, count - 1))
@@ -3253,10 +3396,21 @@ class ResultsPanel(QWidget):
         self._emit_current_motion_frame()
 
     def _motion_slider_changed(self, value: int) -> None:
-        self._set_motion_index(int(value))
+        self._set_motion_index(int(value), refresh_tables=True)
         self._sync_transient_playback_clock_to_frame()
 
-    def _set_motion_index(self, index: int) -> None:
+    def _refresh_frame_dependent_tables(self) -> None:
+        if not hasattr(self, "node_table"):
+            return
+        self._node_table_display_key = None
+        self._populate_node_table()
+
+    def _set_motion_index(
+        self,
+        index: int,
+        *,
+        refresh_tables: bool = True,
+    ) -> None:
         if self._motion_info is None:
             return
         count = int(self._motion_info.frame_count)
@@ -3277,6 +3431,9 @@ class ResultsPanel(QWidget):
             slider.blockSignals(True)
             slider.setValue(target)
             slider.blockSignals(False)
+        self._update_result_time_indicator()
+        if refresh_tables:
+            self._refresh_frame_dependent_tables()
         self._emit_current_motion_frame()
 
     def _step_motion(self, delta: int) -> None:
@@ -3379,6 +3536,7 @@ class ResultsPanel(QWidget):
             self._motion_playback_time = None
             self._motion_wall_clock = None
             self._set_play_buttons(False)
+            self._refresh_frame_dependent_tables()
             # Re-emit the resting frame so expensive annotations such as
             # contour extrema labels can be restored after fast playback.
             self._emit_current_motion_frame()
@@ -3431,7 +3589,9 @@ class ResultsPanel(QWidget):
             self._playback_sample_cursor = cursor
             target = int(samples[cursor])
             if target != self._motion_frame_index:
-                self._set_motion_index(target)
+                self._set_motion_index(target, refresh_tables=False)
+            if not self._motion_timer.isActive():
+                self._refresh_frame_dependent_tables()
             return
 
         # Static/modal histories do not have a physical time axis. Advance
@@ -3464,7 +3624,9 @@ class ResultsPanel(QWidget):
                     self._motion_timer.stop()
                     self._motion_frame_accumulator = 0.0
                     self._set_play_buttons(False)
-        self._set_motion_index(target)
+        self._set_motion_index(target, refresh_tables=False)
+        if not self._motion_timer.isActive():
+            self._refresh_frame_dependent_tables()
 
     def _sync_motion_markers(self, index: int | None) -> None:
         self.history_plot.set_marker(index)
@@ -5210,6 +5372,7 @@ class ResultsPanel(QWidget):
         self._update_mode_summary()
 
         self._populate_convergence_dashboard()
+        self._refresh_motion_controls()
         self._populate_node_table()
         self._populate_element_table()
         self._populate_shell_results()
@@ -5224,7 +5387,6 @@ class ResultsPanel(QWidget):
         self._update_cyclic_plot()
         self._populate_specimen_response()
         self._update_history_plot()
-        self._refresh_motion_controls()
         return True
 
     def _populate_convergence_dashboard(self) -> None:
@@ -5506,7 +5668,20 @@ class ResultsPanel(QWidget):
 
     def _populate_node_table(self) -> None:
         displacement = self.node_quantity.currentText() == "Displacement"
-        display_key = "Displacement" if displacement else "Reaction"
+        quantity_key = "Displacement" if displacement else "Reaction"
+        history_key = "disp" if displacement else "reaction"
+
+        transient_times = self._transient_time_values()
+        frame_index = (
+            max(0, min(int(self._motion_frame_index), len(transient_times) - 1))
+            if transient_times
+            else None
+        )
+        display_key = (
+            f"{quantity_key}:frame:{frame_index}"
+            if frame_index is not None
+            else f"{quantity_key}:final"
+        )
         if self._node_table_display_key == display_key:
             return
 
@@ -5515,25 +5690,71 @@ class ResultsPanel(QWidget):
             if displacement
             else ["Node", "FX", "FY", "FZ", "MX", "MY", "MZ"]
         )
-        rows = self._node_table_cache.get(display_key)
-        if rows is None:
-            final = self._result.get("final", {})
-            key = "node_displacements" if displacement else "node_reactions"
-            data = final.get(key, {}) if isinstance(final, dict) else {}
-            if not isinstance(data, dict):
-                data = {}
-            rows = []
-            for tag in sorted(data, key=lambda value: int(value)):
-                values = list(data[tag])
-                while len(values) < 6:
-                    values.append(0.0)
-                rows.append(
-                    (
-                        str(tag),
-                        *(f"{float(value):.6g}" for value in values[:6]),
+
+        rows: list[tuple[str, ...]] = []
+        if frame_index is not None:
+            history = self._result.get("history", {})
+            nodes = (
+                history.get("nodes", {})
+                if isinstance(history, dict)
+                else {}
+            )
+            if isinstance(nodes, dict):
+                for tag in sorted(nodes, key=lambda value: int(value)):
+                    node_data = nodes.get(tag, {})
+                    if not isinstance(node_data, dict):
+                        continue
+                    frame_rows = node_data.get(history_key, [])
+                    if (
+                        not isinstance(frame_rows, list)
+                        or frame_index >= len(frame_rows)
+                    ):
+                        continue
+                    raw_values = frame_rows[frame_index]
+                    if not isinstance(raw_values, (list, tuple)):
+                        continue
+                    values = list(raw_values)
+                    while len(values) < 6:
+                        values.append(0.0)
+                    rows.append(
+                        (
+                            str(tag),
+                            *(
+                                f"{float(value):.6g}"
+                                for value in values[:6]
+                            ),
+                        )
                     )
+        else:
+            rows = self._node_table_cache.get(display_key, [])
+            if not rows:
+                final = self._result.get("final", {})
+                key = (
+                    "node_displacements"
+                    if displacement
+                    else "node_reactions"
                 )
-            self._node_table_cache[display_key] = rows
+                data = (
+                    final.get(key, {})
+                    if isinstance(final, dict)
+                    else {}
+                )
+                if not isinstance(data, dict):
+                    data = {}
+                for tag in sorted(data, key=lambda value: int(value)):
+                    values = list(data[tag])
+                    while len(values) < 6:
+                        values.append(0.0)
+                    rows.append(
+                        (
+                            str(tag),
+                            *(
+                                f"{float(value):.6g}"
+                                for value in values[:6]
+                            ),
+                        )
+                    )
+                self._node_table_cache[display_key] = rows
 
         self.node_table.setUpdatesEnabled(False)
         try:
