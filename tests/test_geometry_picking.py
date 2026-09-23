@@ -93,20 +93,23 @@ def test_main_window_has_line_and_surface_geometry_pick_workflows():
 
     assert '"line_geometry_pick"' in actions
     assert '"surface_geometry_pick"' in actions
-    assert "_create_line_geometry_from_points" in click
-    assert "_create_surface_geometry_from_points" in click
-    assert 'kind != "geometry_point"' in click
+    assert "_handle_geometry_line_sketch_click" in click
+    assert "_handle_geometry_rectangle_sketch_click" in click
     assert 'set_display_domain("geometry")' in line_tool
     assert 'set_display_domain("geometry")' in surface_tool
 
 
-def test_surface_pick_collects_four_distinct_geometry_points():
-    source = inspect.getsource(MainWindow._viewport_entity_clicked)
+def test_surface_pick_uses_rectangle_sketch_state_machine():
+    click = inspect.getsource(MainWindow._viewport_entity_clicked)
+    handler = inspect.getsource(
+        MainWindow._handle_geometry_rectangle_sketch_click
+    )
 
-    assert "self._geometry_surface_point_tags.append(point_tag)" in source
-    assert "if point_tag in self._geometry_surface_point_tags" in source
-    assert "if count < 4" in source
-    assert "closed=(count == 4)" in source
+    assert "_handle_geometry_rectangle_sketch_click" in click
+    assert "_geometry_surface_anchor_snap" in handler
+    assert "_rectangle_corners_from_diagonal" in handler
+    assert "_materialize_geometry_sketch_point" in handler
+    assert "_existing_geometry_surface_from_corners" in handler
 
 def test_geometry_grid_snap_rounds_to_nearest_visible_intersection():
     class StubViewport:
