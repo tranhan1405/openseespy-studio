@@ -48,6 +48,7 @@ class OpenSeesImportResult:
     issues: list[ImportIssue] = field(default_factory=list)
     imported_counts: dict[str, int] = field(default_factory=dict)
     source_name: str = ""
+    linked_files: list[str] = field(default_factory=list)
 
     @property
     def error_count(self) -> int:
@@ -65,10 +66,160 @@ class OpenSeesImportResult:
     def imported_total(self) -> int:
         return sum(self.imported_counts.values())
 
+    @property
+    def detection_groups(self) -> list[tuple[str, str]]:
+        """Compact summary of objects actually reconstructed by the importer."""
+        project = self.project
+        groups: list[tuple[str, str]] = []
+
+        def joined(parts: list[str]) -> str:
+            return " · ".join(part for part in parts if part)
+
+        model_parts: list[str] = []
+        node_count = len(project.model.nodes)
+        element_count = len(project.model.elements) + len(project.connections)
+        support_count = int(self.imported_counts.get("Supports", 0) or 0)
+        mass_count = int(self.imported_counts.get("Mass assignments", 0) or 0)
+        if node_count:
+            model_parts.append(f"{node_count} Nodes")
+        if element_count:
+            model_parts.append(f"{element_count} Elements")
+        if support_count:
+            model_parts.append(f"{support_count} Supports")
+        if mass_count:
+            model_parts.append(f"{mass_count} Mass assignments")
+        if model_parts:
+            groups.append(("Model", joined(model_parts)))
+
+        property_parts: list[str] = []
+        material_count = len(project.materials) + len(project.nd_materials)
+        if material_count:
+            property_parts.append(f"{material_count} Materials")
+        if project.sections:
+            property_parts.append(f"{len(project.sections)} Sections")
+        if project.transformations:
+            property_parts.append(
+                f"{len(project.transformations)} Transformations"
+            )
+        if property_parts:
+            groups.append(("Properties", joined(property_parts)))
+
+        load_parts: list[str] = []
+        path_series = [
+            series
+            for series in project.time_series.values()
+            if str(series.series_type) == "Path"
+        ]
+        if path_series:
+            data_files = [
+                name
+                for name in self.linked_files
+                if Path(name).suffix.lower() != ".py"
+            ]
+            path_text = f"{len(path_series)} Path Time Series"
+            if len(path_series) == 1 and len(data_files) == 1:
+                path_text += f" → {data_files[0]}"
+            load_parts.append(path_text)
+
+        uniform_patterns = [
+            pattern
+            for pattern in project.load_patterns.values()
+            if str(pattern.pattern_type) == "UniformExcitation"
+        ]
+        if uniform_patterns:
+            load_parts.append(
+                f"{len(uniform_patterns)} UniformExcitation Pattern"
+                + ("s" if len(uniform_patterns) != 1 else "")
+            )
+        plain_patterns = [
+            pattern
+            for pattern in project.load_patterns.values()
+            if str(pattern.pattern_type) == "Plain"
+        ]
+        if plain_patterns:
+            load_parts.append(
+                f"{len(plain_patterns)} Plain Pattern"
+                + ("s" if len(plain_patterns) != 1 else "")
+            )
+        if project.nodal_loads:
+            load_parts.append(f"{len(project.nodal_loads)} Nodal Loads")
+        if project.element_loads:
+            load_parts.append(f"{len(project.element_loads)} Element Loads")
+        if project.prescribed_displacements:
+            load_parts.append(
+                f"{len(project.prescribed_displacements)} Prescribed Displacements"
+            )
+        if load_parts:
+            groups.append(("Loads", joined(load_parts)))
+
+        analysis_parts: list[str] = []
+        analyses = list(project.analyses.values())
+        if analyses:
+            active = project.analyses.get(project.active_analysis_tag)
+            analysis = active if active is not None else analyses[-1]
+            analysis_type = str(analysis.analysis_type or "").strip()
+            integrator = str(analysis.integrator or "").strip()
+            if analysis_type:
+                analysis_parts.append(f"{analysis_type} Analysis")
+            if integrator and integrator.lower() not in {"auto", "none"}:
+                analysis_parts.append(f"{integrator} Integrator")
+            if len(analyses) > 1:
+                analysis_parts.append(f"{len(analyses)} Analysis stages")
+        if analysis_parts:
+            groups.append(("Analysis", joined(analysis_parts)))
+
+        output_parts: list[str] = []
+        if project.recorders:
+            output_parts.append(f"{len(project.recorders)} Recorders")
+        probe_count = int(self.imported_counts.get("Node probes", 0) or 0)
+        if probe_count:
+            output_parts.append(f"{probe_count} Node Probes")
+        if output_parts:
+            groups.append(("Output", joined(output_parts)))
+
+        return groups
+
 
 @dataclass(slots=True)
 class _SafeModuleNamespace:
     values: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class _UnknownValue:
+    label: str
+
+    def __repr__(self) -> str:
+        return f"<unresolved {self.label}>"
+
+
+@dataclass(frozen=True, slots=True)
+class _SafeNumericVector:
+    """Small numpy-like numeric vector for safe symbolic import only."""
+
+    values: tuple[float, ...]
+
+    def __iter__(self):
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+    def __getitem__(self, index):
+        return self.values[index]
+
+    def __neg__(self):
+        return _SafeNumericVector(tuple(-value for value in self.values))
+
+    def __mul__(self, scalar):
+        if isinstance(scalar, (int, float)):
+            return _SafeNumericVector(
+                tuple(float(scalar) * value for value in self.values)
+            )
+        return NotImplemented
+
+    def __rmul__(self, scalar):
+        return self.__mul__(scalar)
 
 
 class _Unresolved(Exception):
@@ -121,6 +272,12 @@ class _SafeEvaluator:
 
     @staticmethod
     def _binary(op: ast.operator, left: Any, right: Any) -> Any:
+        if isinstance(left, _UnknownValue) or isinstance(right, _UnknownValue):
+            label = (
+                left.label if isinstance(left, _UnknownValue)
+                else right.label
+            )
+            return _UnknownValue(label)
         if isinstance(op, ast.Add):
             return left + right
         if isinstance(op, ast.Sub):
@@ -188,6 +345,8 @@ class _SafeEvaluator:
             )
         if isinstance(node, ast.UnaryOp):
             value = self.eval(node.operand)
+            if isinstance(value, _UnknownValue):
+                return value
             if isinstance(node.op, ast.UAdd):
                 return +value
             if isinstance(node.op, ast.USub):
@@ -219,8 +378,12 @@ class _SafeEvaluator:
             raise _Unresolved(type(node.op).__name__)
         if isinstance(node, ast.Compare):
             left = self.eval(node.left)
+            if isinstance(left, _UnknownValue):
+                raise _Unresolved(left.label)
             for op, comparator in zip(node.ops, node.comparators):
                 right = self.eval(comparator)
+                if isinstance(right, _UnknownValue):
+                    raise _Unresolved(right.label)
                 if not self._compare(op, left, right):
                     return False
                 left = right
@@ -229,10 +392,17 @@ class _SafeEvaluator:
             branch = node.body if self.eval(node.test) else node.orelse
             return self.eval(branch)
         if isinstance(node, ast.Subscript):
-            return self.eval(node.value)[self.eval(node.slice)]
+            value = self.eval(node.value)
+            if isinstance(value, _UnknownValue):
+                return value
+            return value[self.eval(node.slice)]
         if isinstance(node, ast.Attribute):
             if isinstance(node.value, ast.Name):
                 namespace = self.env.get(node.value.id)
+                if isinstance(namespace, _UnknownValue):
+                    return _UnknownValue(
+                        f"{namespace.label}.{node.attr}"
+                    )
                 if isinstance(namespace, _SafeModuleNamespace):
                     if node.attr in namespace.values:
                         return namespace.values[node.attr]
@@ -246,6 +416,23 @@ class _SafeEvaluator:
             ):
                 return getattr(math, node.attr)
         if isinstance(node, ast.Call):
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in {"np", "numpy"}
+                and node.func.attr in {"array", "asarray"}
+                and len(node.args) == 1
+                and not node.keywords
+            ):
+                raw = self.eval(node.args[0])
+                if isinstance(raw, _UnknownValue):
+                    return raw
+                try:
+                    return _SafeNumericVector(
+                        tuple(float(value) for value in raw)
+                    )
+                except (TypeError, ValueError):
+                    raise _Unresolved("numpy numeric array")
             if (
                 isinstance(node.func, ast.Attribute)
                 and isinstance(node.func.value, ast.Name)
@@ -266,15 +453,32 @@ class _SafeEvaluator:
                 if name in self.SAFE_CALLS:
                     if any(keyword.arg is None for keyword in node.keywords):
                         raise _Unresolved("**kwargs")
-                    fn = self.SAFE_CALLS[name]
-                    return fn(
-                        *(self.eval(arg) for arg in node.args),
-                        **{
-                            keyword.arg: self.eval(keyword.value)
-                            for keyword in node.keywords
-                            if keyword.arg is not None
-                        },
+                    positional = [self.eval(arg) for arg in node.args]
+                    keyword_values = {
+                        keyword.arg: self.eval(keyword.value)
+                        for keyword in node.keywords
+                        if keyword.arg is not None
+                    }
+                    unknown = next(
+                        (
+                            value
+                            for value in [
+                                *positional,
+                                *keyword_values.values(),
+                            ]
+                            if isinstance(value, _UnknownValue)
+                        ),
+                        None,
                     )
+                    if unknown is not None:
+                        if name in {
+                            "list", "tuple", "sum", "sorted",
+                            "min", "max", "len", "abs",
+                        }:
+                            return _UnknownValue(unknown.label)
+                        raise _Unresolved(unknown.label)
+                    fn = self.SAFE_CALLS[name]
+                    return fn(*positional, **keyword_values)
                 if self.call_handler is not None:
                     return self.call_handler(node)
         raise _Unresolved(type(node).__name__)
@@ -335,6 +539,7 @@ class _Importer:
         self._imported_local_modules: set[Path] = set()
         self._local_module_exports: dict[Path, dict[str, Any]] = {}
         self._virtual_path_series: dict[Path, list[float]] = {}
+        self._loaded_data_files: set[Path] = set()
         if self.source_path is not None:
             self._imported_local_modules.add(self.source_path)
         self.units = UnitSystem.from_mapping(units)
@@ -351,6 +556,8 @@ class _Importer:
             "__name__": "__main__",
         }
         self.functions: dict[str, ast.FunctionDef] = {}
+        self.constant_classes: dict[str, _SafeModuleNamespace] = {}
+        self._executed_model_functions: set[str] = set()
         self.runtime_only_names: set[str] = set()
         self._call_depth = 0
         self._statement_steps = 0
@@ -364,6 +571,8 @@ class _Importer:
         self.analysis_metadata: dict[str, Any] = {}
         self.analysis_events: list[dict[str, Any]] = []
         self._deferred_modal_frequencies: dict[str, dict[str, Any]] = {}
+        self._deferred_eigen_results: dict[str, dict[str, Any]] = {}
+        self._deferred_rayleigh_coefficients: dict[str, dict[str, Any]] = {}
         self._load_const_event_index: int | None = None
         self._pending_node_probes: set[tuple[str, int, int]] = set()
         self._next_constraint = 1
@@ -1347,13 +1556,39 @@ class _Importer:
         tag = self._next_constraint
         self._next_constraint += 1
         if command == "equalDOF":
+            retained = int(args[0])
+            constrained = int(args[1])
+            dofs = tuple(int(value) for value in args[2:])
+            retained_node = self.project.model.nodes.get(retained)
+            constrained_node = self.project.model.nodes.get(constrained)
+            if (
+                retained_node is not None
+                and constrained_node is not None
+                and dofs
+                and all(
+                    dof <= len(retained_node.fixity)
+                    and dof <= len(constrained_node.fixity)
+                    and bool(retained_node.fixity[dof - 1])
+                    and bool(constrained_node.fixity[dof - 1])
+                    for dof in dofs
+                )
+            ):
+                self.issue(
+                    "WARNING",
+                    None,
+                    "equalDOF",
+                    f"Skipped redundant equalDOF {retained}->{constrained} "
+                    f"for DOF(s) {', '.join(map(str, dofs))}: both nodes are "
+                    "already fixed in those DOFs.",
+                )
+                return
             item = ConstraintData(
                 tag,
                 f"Imported equalDOF {tag}",
                 "equalDOF",
-                int(args[0]),
-                [int(args[1])],
-                dofs=tuple(int(value) for value in args[2:]),
+                retained,
+                [constrained],
+                dofs=dofs,
             )
         elif command == "rigidLink":
             item = ConstraintData(
@@ -1422,6 +1657,7 @@ class _Importer:
 
         try:
             text = data_path.read_text(encoding="utf-8-sig")
+            self._loaded_data_files.add(data_path)
         except OSError as exc:
             self.issue(
                 "ERROR",
@@ -1535,6 +1771,17 @@ class _Importer:
                 raise ValueError(
                     "UniformExcitation requires an -accel timeSeries tag"
                 )
+            if int(accel_tag) not in self.project.time_series:
+                self.issue(
+                    "WARNING",
+                    node,
+                    "UniformExcitation",
+                    f"Ground-motion time series {int(accel_tag)} could not be "
+                    "reconstructed; imported the structural model and analysis "
+                    "without this excitation. Assign/select the record in Studio.",
+                )
+                self.current_pattern = None
+                return
             item = LoadPatternData(
                 tag,
                 f"Imported UniformExcitation {tag}",
@@ -2016,10 +2263,38 @@ class _Importer:
     def _recognize_eigen_frequency_assignment(self, stmt: ast.Assign) -> bool:
         if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
             return False
-
+        target_name = stmt.targets[0].id
         value = stmt.value
-        subscript: ast.Subscript | None = None
 
+        if isinstance(value, ast.Call) and self.command_name(value) == "eigen":
+            try:
+                args = self.call_args(value)
+            except _Unresolved:
+                return False
+            if not args:
+                return False
+            try:
+                num_modes = int(args[-1])
+            except (TypeError, ValueError):
+                return False
+            solver = (
+                str(args[0])
+                if len(args) > 1 and isinstance(args[0], str)
+                else "-genBandArpack"
+            )
+            self._deferred_eigen_results[target_name] = {
+                "solver": solver,
+                "num_modes": num_modes,
+            }
+            self.env[target_name] = _UnknownValue(
+                f"runtime eigenvalues {target_name}"
+            )
+            self.analysis_state["modal"] = True
+            self.analysis_state["num_modes"] = num_modes
+            self.analysis_state["eigen_solver"] = solver
+            return True
+
+        subscript: ast.Subscript | None = None
         if (
             isinstance(value, ast.BinOp)
             and isinstance(value.op, ast.Pow)
@@ -2040,16 +2315,36 @@ class _Importer:
         ):
             subscript = value.args[0]
 
-        if subscript is None or not isinstance(subscript.value, ast.Call):
-            return False
-        if self.command_name(subscript.value) != "eigen":
+        if subscript is None:
             return False
 
-        try:
-            args = self.call_args(subscript.value)
-        except _Unresolved:
-            return False
-        if not args:
+        spec: dict[str, Any] | None = None
+        if isinstance(subscript.value, ast.Call):
+            if self.command_name(subscript.value) != "eigen":
+                return False
+            try:
+                args = self.call_args(subscript.value)
+            except _Unresolved:
+                return False
+            if not args:
+                return False
+            try:
+                num_modes = int(args[-1])
+            except (TypeError, ValueError):
+                return False
+            spec = {
+                "solver": (
+                    str(args[0])
+                    if len(args) > 1 and isinstance(args[0], str)
+                    else "-genBandArpack"
+                ),
+                "num_modes": num_modes,
+            }
+        elif isinstance(subscript.value, ast.Name):
+            spec = self._deferred_eigen_results.get(subscript.value.id)
+            if spec is None:
+                return False
+        else:
             return False
 
         index_node = subscript.slice
@@ -2057,28 +2352,108 @@ class _Importer:
             return False
         try:
             index = int(index_node.value)
-            num_modes = int(args[-1])
-        except (TypeError, ValueError):
+            num_modes = int(spec["num_modes"])
+        except (TypeError, ValueError, KeyError):
             return False
         if index < 0 or index >= num_modes:
             return False
 
-        solver = (
-            str(args[0])
-            if len(args) > 1 and isinstance(args[0], str)
-            else "-genBandArpack"
-        )
-        self._deferred_modal_frequencies[stmt.targets[0].id] = {
+        frequency_spec = {
             "mode": index + 1,
-            "solver": solver,
+            "solver": str(spec["solver"]),
             "num_modes": num_modes,
         }
+        self._deferred_modal_frequencies[target_name] = frequency_spec
+        self.env[target_name] = _UnknownValue(
+            f"runtime modal frequency {target_name}"
+        )
+        return True
+
+    def _recognize_rayleigh_coefficient_assignment(
+        self,
+        stmt: ast.Assign,
+    ) -> bool:
+        if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
+            return False
+        value = stmt.value
+        if (
+            not isinstance(value, ast.BinOp)
+            or not isinstance(value.op, ast.Div)
+            or not isinstance(value.right, ast.Name)
+        ):
+            return False
+        spec = self._deferred_modal_frequencies.get(value.right.id)
+        if spec is None:
+            return False
+        try:
+            numerator = float(self.eval.eval(value.left))
+        except (_Unresolved, TypeError, ValueError):
+            return False
+        if not math.isfinite(numerator) or numerator <= 0.0:
+            return False
+
+        target_name = stmt.targets[0].id
+        self._deferred_rayleigh_coefficients[target_name] = {
+            "damping_ratio": numerator / 2.0,
+            "mode": int(spec["mode"]),
+            "solver": str(spec["solver"]),
+        }
+        self.env[target_name] = _UnknownValue(
+            f"runtime Rayleigh coefficient {target_name}"
+        )
         return True
 
     def _recognize_single_mode_rayleigh(self, node: ast.Call) -> bool:
         if len(node.args) != 4:
             return False
 
+        model_by_index = {
+            1: "SingleModeCurrentStiffness",
+            2: "SingleModeInitialStiffness",
+            3: "SingleModeCommittedStiffness",
+        }
+
+        for coefficient_index in (1, 2, 3):
+            coefficient_arg = node.args[coefficient_index]
+            if not isinstance(coefficient_arg, ast.Name):
+                continue
+            coefficient_spec = self._deferred_rayleigh_coefficients.get(
+                coefficient_arg.id
+            )
+            if coefficient_spec is None:
+                continue
+
+            other_indices = [
+                index for index in range(4)
+                if index != coefficient_index
+            ]
+            try:
+                others = [
+                    float(self.eval.eval(node.args[index]))
+                    for index in other_indices
+                ]
+            except (_Unresolved, TypeError, ValueError):
+                continue
+            if any(abs(value) > 1.0e-15 for value in others):
+                continue
+
+            self.analysis_state["rayleigh_model"] = model_by_index[
+                coefficient_index
+            ]
+            self.analysis_state["rayleigh_damping_ratio"] = float(
+                coefficient_spec["damping_ratio"]
+            )
+            self.analysis_state["rayleigh_mode_i"] = int(
+                coefficient_spec["mode"]
+            )
+            self.analysis_state["eigen_solver"] = str(
+                coefficient_spec["solver"]
+            )
+            self.count("Rayleigh damping")
+            return True
+
+        # Backward-compatible direct expression:
+        # rayleigh(0, 0, 0, 2*zeta/omega_i)
         try:
             first_three = [float(self.eval.eval(arg)) for arg in node.args[:3]]
         except (_Unresolved, TypeError, ValueError):
@@ -2194,13 +2569,250 @@ class _Importer:
             return result
         return set()
 
+    def _constant_class_namespace(
+        self,
+        stmt: ast.ClassDef,
+    ) -> _SafeModuleNamespace | None:
+        """Recover classes that are only used as simple constant namespaces."""
+        init = next(
+            (
+                child
+                for child in stmt.body
+                if isinstance(child, ast.FunctionDef)
+                and child.name == "__init__"
+            ),
+            None,
+        )
+        if init is None:
+            return None
+        arguments = [*init.args.posonlyargs, *init.args.args]
+        if (
+            len(arguments) != 1
+            or arguments[0].arg != "self"
+            or init.args.vararg is not None
+            or init.args.kwarg is not None
+            or init.args.kwonlyargs
+        ):
+            return None
+
+        values: dict[str, Any] = {}
+        for child in init.body:
+            if isinstance(child, ast.Pass):
+                continue
+            if (
+                not isinstance(child, ast.Assign)
+                or len(child.targets) != 1
+                or not isinstance(child.targets[0], ast.Attribute)
+                or not isinstance(child.targets[0].value, ast.Name)
+                or child.targets[0].value.id != "self"
+            ):
+                return None
+            try:
+                value = self.eval.eval(child.value)
+            except _Unresolved:
+                return None
+            if not self._safe_module_export_value(value):
+                return None
+            values[child.targets[0].attr] = value
+        return _SafeModuleNamespace(values) if values else None
+
+    def _function_contains_opensees_model(
+        self,
+        function: ast.FunctionDef,
+    ) -> bool:
+        # Only functions that establish/reset the OpenSees model are treated
+        # as alternative whole-model variants. Helper functions that merely
+        # add nodes/elements/materials may be called repeatedly by legitimate
+        # model generators (e.g. portal-frame bay/story helpers).
+        return any(
+            isinstance(child, ast.Call)
+            and self.command_name(child) == "model"
+            for child in ast.walk(function)
+        )
+
+    @staticmethod
+    def _assigned_names_in_block(statements: list[ast.stmt]) -> set[str]:
+        names: set[str] = set()
+        for statement in statements:
+            for child in ast.walk(statement):
+                if not isinstance(child, ast.Assign):
+                    continue
+                for target in child.targets:
+                    names.update(_Importer._simple_target_names(target))
+        return names
+
+    def _recognize_local_numeric_signal_if(self, stmt: ast.If) -> bool:
+        """Safely recover local exists/open motion-loader blocks."""
+        test = stmt.test
+        if (
+            not isinstance(test, ast.Call)
+            or len(test.args) != 1
+            or test.keywords
+        ):
+            return False
+
+        is_exists = (
+            isinstance(test.func, ast.Name)
+            and test.func.id == "exists"
+        ) or (
+            isinstance(test.func, ast.Attribute)
+            and test.func.attr == "exists"
+        )
+        if not is_exists:
+            return False
+
+        try:
+            file_value = self.eval.eval(test.args[0])
+        except _Unresolved:
+            return False
+
+        body_names = self._assigned_names_in_block(stmt.body)
+        else_names = self._assigned_names_in_block(stmt.orelse)
+        candidates = body_names & else_names
+        if not candidates:
+            return False
+        preferred = sorted(
+            candidates,
+            key=lambda name: (
+                0
+                if any(
+                    token in name.lower()
+                    for token in ("motion", "accel", "signal", "record")
+                )
+                else 1,
+                name.lower(),
+            ),
+        )
+        target_name = preferred[0]
+
+        path = self._resolve_safe_source_relative_path(
+            stmt,
+            file_value,
+            "local ground-motion file",
+        )
+        if path is None:
+            return True
+
+        if not path.is_file():
+            self.env[target_name] = _UnknownValue(
+                f"missing local ground-motion file {path.name}"
+            )
+            self.issue(
+                "WARNING",
+                stmt,
+                "local ground-motion file",
+                f"{path.name} was not found beside the imported script. "
+                "The network/download fallback is intentionally not executed "
+                "during safe import; assign the motion file in Studio to "
+                "complete the excitation.",
+            )
+            return True
+
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except OSError as exc:
+            self.issue(
+                "ERROR",
+                stmt,
+                "local ground-motion file",
+                f"Could not read {path.name}: {exc}",
+            )
+            return True
+
+        values: list[float] = []
+        for line in text.splitlines():
+            body = line.split("#", 1)[0].replace(",", " ")
+            for token in body.split():
+                try:
+                    values.append(float(token))
+                except ValueError:
+                    continue
+        if not values:
+            self.issue(
+                "ERROR",
+                stmt,
+                "local ground-motion file",
+                f"{path.name} contains no numeric samples.",
+            )
+            return True
+
+        self.env[target_name] = values
+        self._loaded_data_files.add(path)
+        self.count("Ground-motion records")
+        return True
+
+    def _recognize_external_signal_assignment(
+        self,
+        stmt: ast.Assign,
+    ) -> bool:
+        """Retain eqsig AccSignal dt without importing/executing eqsig."""
+        if (
+            len(stmt.targets) != 1
+            or not isinstance(stmt.targets[0], ast.Name)
+            or not isinstance(stmt.value, ast.Call)
+            or not isinstance(stmt.value.func, ast.Attribute)
+            or not isinstance(stmt.value.func.value, ast.Name)
+            or stmt.value.func.value.id != "eqsig"
+            or stmt.value.func.attr != "AccSignal"
+            or len(stmt.value.args) < 2
+        ):
+            return False
+        try:
+            dt = float(self.eval.eval(stmt.value.args[1]))
+        except (_Unresolved, TypeError, ValueError, OverflowError):
+            return False
+        try:
+            values = self.eval.eval(stmt.value.args[0])
+        except _Unresolved:
+            values = _UnknownValue("eqsig.AccSignal.values")
+        if isinstance(values, (list, tuple)):
+            try:
+                values = _SafeNumericVector(
+                    tuple(float(value) for value in values)
+                )
+            except (TypeError, ValueError):
+                values = _UnknownValue("eqsig.AccSignal.values")
+        self.env[stmt.targets[0].id] = _SafeModuleNamespace({
+            "values": values,
+            "dt": dt,
+        })
+        if isinstance(values, _UnknownValue):
+            self.issue(
+                "WARNING",
+                stmt,
+                "eqsig.AccSignal",
+                "Ground-motion samples are external/unresolved; retained the "
+                "signal dt so structural model reconstruction can continue.",
+            )
+        self.count("External signal proxies")
+        return True
+
     def _call_custom_function(self, call: ast.Call) -> Any:
         if not isinstance(call.func, ast.Name):
             raise _Unresolved("custom call target")
         name = call.func.id
+        constant_namespace = self.constant_classes.get(name)
+        if constant_namespace is not None:
+            if call.args or call.keywords:
+                raise _Unresolved(
+                    f"constant namespace {name} does not accept arguments"
+                )
+            return constant_namespace
+
         function = self.functions.get(name)
         if function is None:
             raise _Unresolved(name)
+
+        is_model_builder = self._function_contains_opensees_model(function)
+        if is_model_builder and name in self._executed_model_functions:
+            self.issue(
+                "WARNING",
+                call,
+                "repeated model builder",
+                f"Skipped repeated call to {name}(); Studio imports the first "
+                "structural variant from comparison/parameter-study scripts.",
+            )
+            return _UnknownValue(f"{name}() repeated result")
         if self._call_depth >= self.MAX_CALL_DEPTH:
             raise _Unresolved(
                 f"function call depth exceeds {self.MAX_CALL_DEPTH}"
@@ -2257,6 +2869,8 @@ class _Importer:
 
         saved_env = dict(self.env)
         self._call_depth += 1
+        if is_model_builder:
+            self._executed_model_functions.add(name)
         self.env.update(bindings)
         try:
             try:
@@ -2278,6 +2892,15 @@ class _Importer:
                 if isinstance(data, dict):
                     self.analysis_metadata = dict(data)
             return
+        if isinstance(target, ast.Subscript):
+            container = self.eval.eval(target.value)
+            if isinstance(container, _UnknownValue):
+                raise _Unresolved(container.label)
+            key = self.eval.eval(target.slice)
+            if isinstance(container, (dict, list)):
+                container[key] = value
+                return
+            raise _Unresolved("subscript assignment target")
         if (
             isinstance(target, (ast.Tuple, ast.List))
             and isinstance(value, (tuple, list))
@@ -2435,6 +3058,7 @@ class _Importer:
             return None
         try:
             lines = path.read_text(encoding="utf-8-sig").splitlines()
+            self._loaded_data_files.add(path)
         except OSError as exc:
             self.issue(
                 "ERROR",
@@ -2733,12 +3357,23 @@ class _Importer:
                 final_time = candidate
                 break
         if final_time is None:
-            return False
-
-        total_steps = max(
-            1,
-            int(math.ceil(final_time / analysis_dt - 1.0e-12)),
-        )
+            total_steps = max(
+                1,
+                int(self.analysis_state.get("steps", 1) or 1),
+            )
+            self.issue(
+                "WARNING",
+                stmt,
+                "Transient duration",
+                "Transient analysis loop was recognized, but its final time "
+                "depends on unresolved external motion data. Imported a "
+                "placeholder step count; update duration/record before solving.",
+            )
+        else:
+            total_steps = max(
+                1,
+                int(math.ceil(final_time / analysis_dt - 1.0e-12)),
+            )
         has_initial_tangent_recovery = any(
             isinstance(child, ast.Call)
             and self.command_name(child) == "algorithm"
@@ -2920,7 +3555,11 @@ class _Importer:
         if isinstance(stmt, ast.Assign):
             if self._recognize_peer_read_record_assignment(stmt):
                 return
+            if self._recognize_external_signal_assignment(stmt):
+                return
             if self._recognize_eigen_frequency_assignment(stmt):
+                return
+            if self._recognize_rayleigh_coefficient_assignment(stmt):
                 return
             probe_recovered = self._recognize_node_probe_calls(stmt.value)
             runtime_calls = self._runtime_calls_in(stmt.value)
@@ -3045,6 +3684,8 @@ class _Importer:
             return
 
         if isinstance(stmt, ast.If):
+            if self._recognize_local_numeric_signal_if(stmt):
+                return
             # SARE-generated scripts contain runtime-only _studio_* control
             # flow. Metadata already reconstructs those analyses, so preserve
             # the existing behavior and do not symbolically execute it.
@@ -3181,13 +3822,29 @@ class _Importer:
         if isinstance(stmt, ast.Pass):
             return
 
-        if isinstance(stmt, (ast.AsyncFunctionDef, ast.ClassDef)):
+        if isinstance(stmt, ast.ClassDef):
+            namespace = self._constant_class_namespace(stmt)
+            if namespace is not None:
+                self.constant_classes[stmt.name] = namespace
+                self.count("Constant namespaces")
+                return
+            if not stmt.name.startswith("_studio_"):
+                self.issue(
+                    "UNSUPPORTED",
+                    stmt,
+                    "definition",
+                    "Only simple constant-only classes are reconstructed in "
+                    "safe import mode.",
+                )
+            return
+
+        if isinstance(stmt, ast.AsyncFunctionDef):
             if not getattr(stmt, "name", "").startswith("_studio_"):
                 self.issue(
                     "UNSUPPORTED",
                     stmt,
                     "definition",
-                    "Async functions and classes are not executed in safe import mode.",
+                    "Async functions are not executed in safe import mode.",
                 )
             return
 
@@ -3351,10 +4008,13 @@ class _Importer:
                 or analysis_type_hint.lower() == "pushover"
             ):
                 analysis_type = "Pushover"
+            elif state.get("analysis_kind") == "Transient":
+                # eigen() is often called only to calibrate Rayleigh damping
+                # before a transient analysis; it must not reclassify the
+                # whole analysis as Modal.
+                analysis_type = "Transient"
             elif state.get("modal"):
                 analysis_type = "Modal"
-            elif state.get("analysis_kind") == "Transient":
-                analysis_type = "Transient"
             elif state.get("integrator") == "DisplacementControl":
                 analysis_type = (
                     "Static"
@@ -3634,6 +4294,25 @@ class _Importer:
                 f"Analysis settings were only partially recoverable: {exc}",
             )
 
+    def linked_file_names(self) -> list[str]:
+        """Return files actually read in addition to the primary source."""
+        paths = set(self._imported_local_modules)
+        paths.update(self._loaded_data_files)
+        if self.source_path is not None:
+            paths.discard(self.source_path)
+
+        names: list[str] = []
+        for path in sorted(paths, key=lambda item: str(item).lower()):
+            if self.source_dir is not None:
+                try:
+                    name = str(path.relative_to(self.source_dir))
+                except ValueError:
+                    name = path.name
+            else:
+                name = path.name
+            names.append(name.replace("\\", "/"))
+        return names
+
     def run(self) -> OpenSeesImportResult:
         try:
             tree = ast.parse(self.source, filename=self.source_name or "<import>")
@@ -3643,7 +4322,11 @@ class _Importer:
                 f"Line {exc.lineno}: {exc.msg}",
             )
             return OpenSeesImportResult(
-                self.project, self.issues, self.counts, self.source_name
+                self.project,
+                self.issues,
+                self.counts,
+                self.source_name,
+                self.linked_file_names(),
             )
 
         for stmt in tree.body:
@@ -3663,6 +4346,7 @@ class _Importer:
             self.issues,
             self.counts,
             self.source_name,
+            self.linked_file_names(),
         )
 
 

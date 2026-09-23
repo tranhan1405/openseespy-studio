@@ -383,6 +383,11 @@ pattern('UniformExcitation', 2, 1, '-accel', 2)
     assert series.dt == 0.005
     assert series.factor == 386.0
     assert series.values == [0.0, 0.10, -0.20, 3.0e-2]
+    assert result.source_name == "cantilever_eq.py"
+    assert result.linked_files == ["A10000.dat"]
+    detection = dict(result.detection_groups)
+    assert "1 Path Time Series → A10000.dat" in detection["Loads"]
+    assert "1 UniformExcitation Pattern" in detection["Loads"]
 
     pattern = result.project.load_patterns[2]
     assert pattern.pattern_type == "UniformExcitation"
@@ -541,6 +546,8 @@ mass(3, m, m, 0.0)
 
     assert result.error_count == 0
     assert result.project.model.nodes[3].mass[:3] == (5.0, 5.0, 0.0)
+    assert result.source_name == "earthquake.py"
+    assert result.linked_files == ["RCFrameGravity.py"]
     assert not any(
         issue.construct == "assignment"
         and issue.line == 5
@@ -588,6 +595,11 @@ timeSeries('Path', 2, '-filePath', record+'.dat', '-dt', dt, '-factor', 386.4)
     assert series.factor == 386.4
     assert series.values == [0.10, -0.20, 0.30, 0.00]
     assert result.imported_counts["Ground-motion records"] == 1
+    assert result.source_name == "earthquake.py"
+    assert result.linked_files == ["elCentro.at2", "ReadRecord.py"]
+    assert "elCentro.dat" not in result.linked_files
+    detection = dict(result.detection_groups)
+    assert "1 Path Time Series → elCentro.at2" in detection["Loads"]
 
 
 def test_importer_recovers_bounded_transient_loop_and_direct_rayleigh(tmp_path):
@@ -671,6 +683,9 @@ while ok == 0 and tCurrent < tFinal:
     assert analysis.rayleigh_beta_k == 0.0
     assert analysis.rayleigh_beta_k_init == 0.0
     assert analysis.rayleigh_beta_k_comm == 0.000625
+    detection = dict(result.detection_groups)
+    assert "Transient Analysis" in detection["Analysis"]
+    assert "Newmark Integrator" in detection["Analysis"]
 
     generated = to_openseespy(
         result.project.model,
@@ -745,3 +760,190 @@ reaction_x = nodeReaction(1, 1)
     assert reaction.settings["node"] == 1
     assert reaction.settings["dof"] == 1
     assert result.imported_counts["Node probes"] == 2
+
+
+def test_importer_recovers_function_wrapped_nonlinear_sdof_transient(tmp_path):
+    motion_path = tmp_path / "test_motion_dt0p01.txt"
+    motion_path.write_text(
+        "0.10\n-0.20\n0.30\n0.00\n",
+        encoding="utf-8",
+    )
+    source_path = tmp_path / "nonlinear_sdof.py"
+    source = r"""
+import requests
+import eqsig
+import numpy as np
+from os.path import exists
+import openseespy.opensees as op
+
+class opensees_constants:
+    def __init__(self):
+        self.FREE = 0
+        self.FIXED = 1
+        self.X = 1
+        self.Y = 2
+        self.ROTZ = 3
+
+opc = opensees_constants()
+
+def get_inelastic_response(
+    mass, k_spring, f_yield, motion, dt,
+    xi=0.05, r_post=0.0,
+):
+    op.wipe()
+    op.model('basic', '-ndm', 2, '-ndf', 3)
+    bot_node = 1
+    top_node = 2
+    op.node(bot_node, 0.0, 0.0)
+    op.node(top_node, 0.0, 0.0)
+    op.fix(top_node, opc.FREE, opc.FIXED, opc.FIXED)
+    op.fix(bot_node, opc.FIXED, opc.FIXED, opc.FIXED)
+    op.equalDOF(1, 2, *[2, 3])
+    op.mass(top_node, mass, 0.0, 0.0)
+    bilinear_mat_tag = 1
+    op.uniaxialMaterial(
+        'Steel01', bilinear_mat_tag,
+        f_yield, k_spring, r_post,
+    )
+    op.element(
+        'zeroLength', 1, bot_node, top_node,
+        '-mat', bilinear_mat_tag, '-dir', 1,
+        '-doRayleigh', 1,
+    )
+    values = list(-1 * motion)
+    op.timeSeries('Path', 1, '-dt', dt, '-values', *values)
+    op.pattern('UniformExcitation', 1, opc.X, '-accel', 1)
+
+    eigen_1 = op.eigen('-fullGenLapack', 1)
+    angular_freq = eigen_1[0] ** 0.5
+    alpha_m = 0.0
+    beta_k = 2 * xi / angular_freq
+    beta_k_comm = 0.0
+    beta_k_init = 0.0
+    op.rayleigh(alpha_m, beta_k, beta_k_init, beta_k_comm)
+
+    op.wipeAnalysis()
+    op.algorithm('Newton')
+    op.system('SparseGeneral')
+    op.numberer('RCM')
+    op.constraints('Transformation')
+    op.integrator('Newmark', 0.5, 0.25)
+    op.analysis('Transient')
+    op.test('EnergyIncr', 1.0e-10, 10, 0, 2)
+
+    analysis_time = (len(values) - 1) * dt
+    analysis_dt = 0.001
+    outputs = {
+        "time": [],
+        "rel_disp": [],
+        "rel_accel": [],
+        "rel_vel": [],
+        "force": [],
+    }
+    while op.getTime() < analysis_time:
+        curr_time = op.getTime()
+        op.analyze(1, analysis_dt)
+        outputs["time"].append(curr_time)
+        outputs["rel_disp"].append(op.nodeDisp(top_node, 1))
+        outputs["rel_vel"].append(op.nodeVel(top_node, 1))
+        outputs["rel_accel"].append(op.nodeAccel(top_node, 1))
+        op.reactions()
+        outputs["force"].append(-op.nodeReaction(bot_node, 1))
+    return outputs
+
+def show_single_comparison(acc_signal):
+    rec = acc_signal.values
+    motion_step = acc_signal.dt
+    period = 1.0
+    xi = 0.05
+    mass = 1.0
+    f_yield = 1.5
+    r_post = 0.0
+    k_spring = 4 * np.pi ** 2 * mass / period ** 2
+    return get_inelastic_response(
+        mass, k_spring, f_yield,
+        motion=rec, dt=motion_step,
+        xi=xi, r_post=r_post,
+    )
+
+if __name__ == '__main__':
+    if exists('test_motion_dt0p01.txt'):
+        with open('test_motion_dt0p01.txt', 'r') as filestream:
+            eq_motion = [
+                float(item.strip())
+                for item in filestream
+                if item.strip() != ''
+            ]
+    else:
+        response = requests.get('https://example.invalid/motion.txt')
+        eq_motion = [
+            float(item.strip())
+            for item in response.text.split('\n')
+            if item.strip() != ''
+        ]
+
+    eq_motion_dt = 0.01
+    acc_signal = eqsig.AccSignal(eq_motion, eq_motion_dt)
+    show_single_comparison(acc_signal)
+"""
+    source_path.write_text(source, encoding="utf-8")
+
+    result = import_openseespy_source(
+        source,
+        source_name=source_path.name,
+        source_path=source_path,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    assert result.unsupported_count == 0
+    assert set(result.project.model.nodes) == {1, 2}
+    assert result.project.model.nodes[2].mass[:3] == (1.0, 0.0, 0.0)
+    assert result.project.materials[1].material_type == "Steel01"
+    assert 1 in result.project.connections
+    connection = result.project.connections[1]
+    assert connection.connection_type == "zeroLength"
+    assert connection.materials_by_dof == {1: 1}
+
+    series = result.project.time_series[1]
+    assert series.series_type == "Path"
+    assert series.dt == 0.01
+    assert series.values == [-0.10, 0.20, -0.30, 0.0]
+    pattern = result.project.load_patterns[1]
+    assert pattern.pattern_type == "UniformExcitation"
+    assert pattern.direction == 1
+
+    analysis = next(iter(result.project.analyses.values()))
+    assert analysis.analysis_type == "Transient"
+    assert analysis.integrator == "Newmark"
+    assert analysis.gamma == 0.5
+    assert analysis.beta == 0.25
+    assert analysis.dt == 0.001
+    assert analysis.steps == 30
+    assert analysis.rayleigh_model == "SingleModeCurrentStiffness"
+    assert analysis.rayleigh_damping_ratio == 0.05
+    assert analysis.rayleigh_mode_i == 1
+    assert analysis.eigen_solver == "-fullGenLapack"
+
+    assert result.imported_counts["Node probes"] == 4
+    assert "test_motion_dt0p01.txt" in result.linked_files
+
+    generated = to_openseespy(
+        result.project.model,
+        result.project.materials,
+        result.project.sections,
+        result.project.transformations,
+        result.project.constraints,
+        result.project.connections,
+        result.project.time_series,
+        result.project.load_patterns,
+        result.project.nodal_loads,
+        result.project.analyses,
+        result.project.active_analysis_tag,
+        result.project.element_loads,
+        result.project.prescribed_displacements,
+        result.project.recorders,
+        result.project.units,
+    )
+    assert "_studio_beta_k = 2.0 * _studio_zeta / _studio_omega_i" in generated
+    assert "ops.rayleigh(0.0, _studio_beta_k, 0.0, 0.0)" in generated

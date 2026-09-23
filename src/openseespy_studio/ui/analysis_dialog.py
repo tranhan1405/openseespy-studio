@@ -237,6 +237,14 @@ class AnalysisDialog(QDialog):
         self.damping_model=QComboBox()
         self.damping_model.addItem("Two-mode mass + stiffness", "TwoMode")
         self.damping_model.addItem(
+            "Single-mode current stiffness",
+            "SingleModeCurrentStiffness",
+        )
+        self.damping_model.addItem(
+            "Single-mode initial stiffness",
+            "SingleModeInitialStiffness",
+        )
+        self.damping_model.addItem(
             "Single-mode committed stiffness",
             "SingleModeCommittedStiffness",
         )
@@ -251,9 +259,9 @@ class AnalysisDialog(QDialog):
         )
         self.damping_model.setToolTip(
             "Two-mode uses mass + current-stiffness Rayleigh damping. "
-            "Single-mode committed stiffness reproduces scripts of the form "
-            "rayleigh(0, 0, 0, 2*zeta/omega_i). Direct coefficients preserve "
-            "rayleigh(alphaM, betaK, betaKinit, betaKcomm) exactly."
+            "Single-mode variants reproduce betaK, betaKinit, or betaKcomm "
+            "coefficients calibrated as 2*zeta/omega_i. Direct coefficients "
+            "preserve rayleigh(alphaM, betaK, betaKinit, betaKcomm) exactly."
         )
         self.rayleigh_alpha_m=fs(
             analysis.rayleigh_alpha_m if analysis else 0.0,

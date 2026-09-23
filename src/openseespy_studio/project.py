@@ -2469,6 +2469,8 @@ class AnalysisSettingsData:
             raise ValueError("Rayleigh damping ratio must be in [0, 1).")
         if self.rayleigh_model not in {
             "TwoMode",
+            "SingleModeCurrentStiffness",
+            "SingleModeInitialStiffness",
             "SingleModeCommittedStiffness",
             "DirectCoefficients",
         }:
@@ -2483,7 +2485,11 @@ class AnalysisSettingsData:
         if (
             self.analysis_type == "Transient"
             and self.rayleigh_damping_ratio > 0.0
-            and self.rayleigh_model == "SingleModeCommittedStiffness"
+            and self.rayleigh_model in {
+                "SingleModeCurrentStiffness",
+                "SingleModeInitialStiffness",
+                "SingleModeCommittedStiffness",
+            }
             and self.rayleigh_mode_i < 1
         ):
             raise ValueError("Rayleigh damping mode i must be positive.")
@@ -2693,6 +2699,9 @@ SOLUTION_RESULT_TYPES = {
     "ForceDisplacement",
     "PushoverCurve",
     "CyclicHysteresis",
+    "CyclicBackbone",
+    "CyclicReversalMetrics",
+    "CyclicCycleMetrics",
     "TimeHistory",
     "ModeShape",
     "Motion",

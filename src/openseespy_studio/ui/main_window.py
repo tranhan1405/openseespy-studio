@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLayout,
     QLineEdit,
     QMainWindow,
     QMessageBox,
@@ -86,6 +87,10 @@ from ..model import (
 )
 from ..mass_source import apply_mass_source, evaluate_mass_source
 from ..moment_curvature import build_moment_curvature_project
+from ..motion import (
+    nodal_history_contour_range,
+    result_frame_payload,
+)
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
 from ..test_column import build_test_column
 from ..result_catalog import (
@@ -153,6 +158,10 @@ from ..line_mesher import (
     trim_extend_lines_to_line,
 )
 from ..section_response import section_response_sources
+from ..solution_status import (
+    classify_solution_result_status,
+    solver_input_signature,
+)
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LineGeometryData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SketchPlaneData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
     build_worker_pythonpath,
@@ -1042,13 +1051,41 @@ class PropertiesPanel(QWidget):
         self._property_context: dict[str, object] = {}
         self._building_property_grid = False
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 6)
-        layout.setSpacing(3)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(6, 4, 6, 6)
+        root_layout.setSpacing(3)
 
         self.entity_label = QLabel("Node")
         self.entity_label.setObjectName("PanelTitle")
-        layout.addWidget(self.entity_label)
+        root_layout.addWidget(self.entity_label)
+
+        self.properties_scroll = QScrollArea()
+        self.properties_scroll.setWidgetResizable(True)
+        self.properties_scroll.setFrameShape(QFrame.NoFrame)
+        self.properties_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarAlwaysOff
+        )
+        self.properties_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded
+        )
+
+        # QScrollArea only scrolls when its child cannot shrink to the
+        # viewport.  Keep the Properties body at least at its content-driven
+        # size hint so long result forms (Contour, Scope, Display, etc.)
+        # produce a real vertical overflow instead of being compressed.
+        self.properties_body = QWidget()
+        self.properties_body.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Minimum,
+        )
+        layout = QVBoxLayout(self.properties_body)
+        layout.setSizeConstraint(
+            QLayout.SizeConstraint.SetMinAndMaxSize
+        )
+        layout.setContentsMargins(0, 0, 2, 0)
+        layout.setSpacing(3)
+        self.properties_scroll.setWidget(self.properties_body)
+        root_layout.addWidget(self.properties_scroll, 1)
 
         self.table = QTableWidget(0, 2)
         self.table.horizontalHeader().hide()
@@ -1104,7 +1141,14 @@ class PropertiesPanel(QWidget):
         self.cyclic_protocol_view.hide()
 
         self.result_editor = QWidget()
+        self.result_editor.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Minimum,
+        )
         result_layout = QVBoxLayout(self.result_editor)
+        result_layout.setSizeConstraint(
+            QLayout.SizeConstraint.SetMinAndMaxSize
+        )
         result_layout.setContentsMargins(0, 0, 0, 0)
         result_layout.setSpacing(5)
 
@@ -1114,6 +1158,8 @@ class PropertiesPanel(QWidget):
         self.result_analysis.setReadOnly(True)
         self.result_type = QLineEdit()
         self.result_type.setReadOnly(True)
+        self.result_status = QLabel("-")
+        self.result_status.setWordWrap(True)
         self.result_data_source = QComboBox()
         self.result_data_source.addItem("Latest Job", "latest")
         self.result_frame = QComboBox()
@@ -1179,10 +1225,53 @@ class PropertiesPanel(QWidget):
         self.result_fiber_section = QSpinBox()
         self.result_fiber_section.setRange(1, 100000)
 
+        self.result_contour_range = QComboBox()
+        self.result_contour_range.addItem("Auto (Current Frame)", "auto")
+        self.result_contour_range.addItem(
+            "Global Animation",
+            "global",
+        )
+        self.result_contour_range.addItem("User Defined", "user")
+        self.result_contour_min = QDoubleSpinBox()
+        self.result_contour_min.setRange(-1.0e30, 1.0e30)
+        self.result_contour_min.setDecimals(8)
+        self.result_contour_max = QDoubleSpinBox()
+        self.result_contour_max.setRange(-1.0e30, 1.0e30)
+        self.result_contour_max.setDecimals(8)
+        self.result_contour_symmetric = QCheckBox("Symmetric about zero")
+        self.result_contour_bands = QSpinBox()
+        self.result_contour_bands.setRange(3, 64)
+        self.result_contour_bands.setValue(11)
+        self.result_contour_palette = QComboBox()
+        self.result_contour_palette.addItem("Auto", "auto")
+        self.result_contour_palette.addItem("Sequential", "sequential")
+        self.result_contour_palette.addItem("Diverging", "diverging")
+        self.result_contour_show_min = QCheckBox("Show minimum")
+        self.result_contour_show_min.setChecked(True)
+        self.result_contour_show_max = QCheckBox("Show maximum")
+        self.result_contour_show_max.setChecked(True)
+        self.result_contour_deformed = QCheckBox(
+            "Contour on deformed geometry"
+        )
+        self.result_contour_deformation_scale = QDoubleSpinBox()
+        self.result_contour_deformation_scale.setRange(0.0, 1.0e9)
+        self.result_contour_deformation_scale.setDecimals(5)
+        self.result_contour_deformation_scale.setValue(1.0)
+        self.result_contour_range.currentIndexChanged.connect(
+            self._update_contour_editor_state
+        )
+        self.result_component.currentTextChanged.connect(
+            self._update_contour_editor_state
+        )
+        self.result_contour_deformed.toggled.connect(
+            self._update_contour_editor_state
+        )
+
         rows = (
             ("Name", self.result_name),
             ("Analysis", self.result_analysis),
             ("Result Type", self.result_type),
+            ("Status", self.result_status),
             ("Data Source", self.result_data_source),
             ("Frame", self.result_frame),
             ("Node Scope", self.result_node_scope),
@@ -1198,6 +1287,16 @@ class PropertiesPanel(QWidget):
             ("History Quantity", self.result_history_quantity),
             ("History DOF", self.result_history_dof),
             ("Section / IP", self.result_fiber_section),
+            ("Contour Range", self.result_contour_range),
+            ("Contour Min", self.result_contour_min),
+            ("Contour Max", self.result_contour_max),
+            ("Symmetric", self.result_contour_symmetric),
+            ("Contour Bands", self.result_contour_bands),
+            ("Palette", self.result_contour_palette),
+            ("Minimum Marker", self.result_contour_show_min),
+            ("Maximum Marker", self.result_contour_show_max),
+            ("Deformed Geometry", self.result_contour_deformed),
+            ("Deformation Scale", self.result_contour_deformation_scale),
         )
         for label, widget in rows:
             self.result_form.addRow(label + ":", widget)
@@ -1239,6 +1338,30 @@ class PropertiesPanel(QWidget):
             self.result_history_quantity,
             self.result_history_dof,
             self.result_fiber_section,
+            self.result_contour_range,
+            self.result_contour_min,
+            self.result_contour_max,
+            self.result_contour_symmetric,
+            self.result_contour_bands,
+            self.result_contour_palette,
+            self.result_contour_show_min,
+            self.result_contour_show_max,
+            self.result_contour_deformed,
+            self.result_contour_deformation_scale,
+        )
+
+    def _update_contour_editor_state(self, *_args) -> None:
+        user_range = (
+            str(self.result_contour_range.currentData() or "auto") == "user"
+        )
+        self.result_contour_min.setEnabled(user_range)
+        self.result_contour_max.setEnabled(user_range)
+        magnitude = self.result_component.currentText().startswith("|")
+        self.result_contour_symmetric.setEnabled(not magnitude)
+        if magnitude:
+            self.result_contour_symmetric.setChecked(False)
+        self.result_contour_deformation_scale.setEnabled(
+            self.result_contour_deformed.isChecked()
         )
 
     def _set_form_row_visible(self, widget: QWidget, visible: bool) -> None:
@@ -1393,6 +1516,9 @@ class PropertiesPanel(QWidget):
         result: SolutionResultData,
         *,
         analysis_name: str,
+        status_text: str = "",
+        status_tooltip: str = "",
+        can_evaluate: bool = True,
     ) -> None:
         self._solution_result_tag = int(result.tag)
         self.table.hide()
@@ -1404,6 +1530,9 @@ class PropertiesPanel(QWidget):
         self.result_name.setText(result.name)
         self.result_analysis.setText(str(analysis_name))
         self.result_type.setText(result.result_type)
+        self.result_status.setText(str(status_text or "-"))
+        self.result_status.setToolTip(str(status_tooltip or ""))
+        self.result_evaluate_button.setEnabled(bool(can_evaluate))
         self.result_node_scope.setText(
             ", ".join(map(str, result.node_scope))
         )
@@ -1576,6 +1705,71 @@ class PropertiesPanel(QWidget):
                 max(1, int(options.get("section", 1)))
             )
 
+        if kind in {
+            "NodalDisplacement",
+            "NodalReaction",
+            "ShellForce",
+            "ShellDeformation",
+        }:
+            for widget in (
+                self.result_contour_range,
+                self.result_contour_min,
+                self.result_contour_max,
+                self.result_contour_symmetric,
+                self.result_contour_bands,
+                self.result_contour_palette,
+                self.result_contour_show_min,
+                self.result_contour_show_max,
+                self.result_contour_deformed,
+                self.result_contour_deformation_scale,
+            ):
+                self._set_form_row_visible(widget, True)
+
+            index = self.result_contour_range.findData(
+                str(options.get("contour_range_mode", "auto"))
+            )
+            self.result_contour_range.setCurrentIndex(
+                index if index >= 0 else 0
+            )
+            self.result_contour_min.setValue(
+                float(options.get("contour_min", 0.0) or 0.0)
+            )
+            self.result_contour_max.setValue(
+                float(options.get("contour_max", 1.0) or 1.0)
+            )
+            signed = not self.result_component.currentText().startswith("|")
+            self.result_contour_symmetric.setChecked(
+                signed and bool(options.get("contour_symmetric", True))
+            )
+            self.result_contour_bands.setValue(
+                max(3, min(64, int(options.get("contour_bands", 11))))
+            )
+            index = self.result_contour_palette.findData(
+                str(options.get("contour_palette", "auto"))
+            )
+            self.result_contour_palette.setCurrentIndex(
+                index if index >= 0 else 0
+            )
+            self.result_contour_show_min.setChecked(
+                bool(options.get("contour_show_min", True))
+            )
+            self.result_contour_show_max.setChecked(
+                bool(options.get("contour_show_max", True))
+            )
+            self.result_contour_deformed.setChecked(
+                bool(options.get("contour_deformed_geometry", False))
+            )
+            try:
+                deformation_scale = float(
+                    options.get("contour_deformation_scale", 1.0)
+                )
+            except (TypeError, ValueError):
+                deformation_scale = 1.0
+            self.result_contour_deformation_scale.setValue(
+                max(0.0, deformation_scale)
+            )
+            self._update_contour_editor_state()
+
     def set_solution_scope(
         self,
         nodes: set[int],
@@ -1638,6 +1832,32 @@ class PropertiesPanel(QWidget):
             )
         if kind == "SectionResponse":
             settings["section"] = self.result_fiber_section.value()
+        if kind in {
+            "NodalDisplacement",
+            "NodalReaction",
+            "ShellForce",
+            "ShellDeformation",
+        }:
+            settings.update({
+                "contour_range_mode": str(
+                    self.result_contour_range.currentData() or "auto"
+                ),
+                "contour_min": self.result_contour_min.value(),
+                "contour_max": self.result_contour_max.value(),
+                "contour_symmetric": self.result_contour_symmetric.isChecked(),
+                "contour_bands": self.result_contour_bands.value(),
+                "contour_palette": str(
+                    self.result_contour_palette.currentData() or "auto"
+                ),
+                "contour_show_min": self.result_contour_show_min.isChecked(),
+                "contour_show_max": self.result_contour_show_max.isChecked(),
+                "contour_deformed_geometry": (
+                    self.result_contour_deformed.isChecked()
+                ),
+                "contour_deformation_scale": (
+                    self.result_contour_deformation_scale.value()
+                ),
+            })
 
         return {
             "name": self.result_name.text().strip(),
@@ -2073,6 +2293,9 @@ class MainWindow(QMainWindow):
         )
         self.results_panel.motion_frame_requested.connect(
             self._show_motion_frame_result
+        )
+        self.results_panel.result_frame_requested.connect(
+            self._show_linked_result_frame
         )
         self.results_panel.member_force_requested.connect(
             self._show_member_force_result
@@ -3033,6 +3256,39 @@ class MainWindow(QMainWindow):
             action.setProperty("resultDisplayMode", mode)
             action.setEnabled(False)
         self.actions["result_deformed"].setChecked(True)
+
+        self._make_action(
+            "result_show_grid",
+            "Grid",
+            "grid",
+            self._toggle_result_grid,
+            "Show or hide the active viewport grid while reviewing results",
+            checkable=True,
+        )
+        self.actions["result_show_grid"].setChecked(True)
+
+        for key, label, setting in (
+            ("result_show_min", "Min", "contour_show_min"),
+            ("result_show_max", "Max", "contour_show_max"),
+        ):
+            action = self._make_action(
+                key,
+                label,
+                "plot",
+                lambda checked=False, value=setting: (
+                    self._set_result_extrema_visibility(value, checked)
+                ),
+                (
+                    "Show the minimum contour marker when animation is paused"
+                    if setting == "contour_show_min"
+                    else "Show the maximum contour marker when animation is paused"
+                ),
+                checkable=True,
+            )
+            action.setProperty("contourSetting", setting)
+            action.setChecked(True)
+            action.setEnabled(False)
+
         self._make_action(
             "fit_result",
             "Fit Result",
@@ -3058,6 +3314,12 @@ class MainWindow(QMainWindow):
             self.actions["result_deformed"],
             self.actions["result_both"],
             self.actions["result_undeformed"],
+        ])
+        result_display_menu.addSeparator()
+        result_display_menu.addAction(self.actions["result_show_grid"])
+        result_display_menu.addActions([
+            self.actions["result_show_min"],
+            self.actions["result_show_max"],
         ])
         menus["Results"].addAction(self.actions["fit_result"])
         menus["Results"].addAction(self.actions["clear_result"])
@@ -3511,6 +3773,44 @@ class MainWindow(QMainWindow):
             self._apply_result_ribbon_scale
         )
 
+        self.result_frame_count_ribbon = QComboBox()
+        self.result_frame_count_ribbon.setFixedWidth(112)
+        for label, value in (
+            ("5 Frames", 5),
+            ("10 Frames", 10),
+            ("20 Frames", 20),
+            ("30 Frames", 30),
+            ("50 Frames", 50),
+            ("100 Frames", 100),
+            ("User Defined...", "user"),
+        ):
+            self.result_frame_count_ribbon.addItem(label, value)
+        self.result_frame_count_ribbon.setCurrentIndex(
+            self.result_frame_count_ribbon.findData(20)
+        )
+        self.result_frame_count_ribbon.setToolTip(
+            "Choose the number of evenly sampled result frames used during "
+            "playback. Select User Defined for a custom value from 5 to 100."
+        )
+        self.result_frame_count_ribbon.setEnabled(False)
+        self.result_frame_count_ribbon.currentIndexChanged.connect(
+            self._apply_result_animation_frame_choice
+        )
+
+        self.result_frame_custom_ribbon = QSpinBox()
+        self.result_frame_custom_ribbon.setRange(5, 100)
+        self.result_frame_custom_ribbon.setValue(20)
+        self.result_frame_custom_ribbon.setSuffix(" frames")
+        self.result_frame_custom_ribbon.setFixedWidth(104)
+        self.result_frame_custom_ribbon.setToolTip(
+            "User-defined animation frame count (5-100)."
+        )
+        self.result_frame_custom_ribbon.setEnabled(False)
+        self.result_frame_custom_ribbon.setVisible(False)
+        self.result_frame_custom_ribbon.valueChanged.connect(
+            self._apply_result_animation_custom_frame_limit
+        )
+
         result_page = RibbonPage()
         add_group(
             result_page,
@@ -3536,9 +3836,22 @@ class MainWindow(QMainWindow):
         )
         add_group(
             result_page,
+            "Contour",
+            small=("result_show_min", "result_show_max"),
+        )
+        add_group(
+            result_page,
+            "Animation",
+            widgets=(
+                self.result_frame_count_ribbon,
+                self.result_frame_custom_ribbon,
+            ),
+        )
+        add_group(
+            result_page,
             "View",
             large=("fit_result",),
-            small=("iso", "xy", "xz", "yz"),
+            small=("result_show_grid", "iso", "xy", "xz", "yz"),
         )
         result_page.finish()
         result_index = self.ribbon_tabs.addTab(result_page, "Result")
@@ -3765,6 +4078,189 @@ class MainWindow(QMainWindow):
         if fit is not None:
             fit.setEnabled(bool(self._last_result))
 
+    def _toggle_result_grid(self, checked: bool) -> None:
+        visible = bool(checked)
+        self.viewport.set_geometry_sketch_grid_visible(visible)
+        geometry_grid = self.actions.get("geometry_grid")
+        if geometry_grid is not None:
+            geometry_grid.blockSignals(True)
+            geometry_grid.setChecked(visible)
+            geometry_grid.blockSignals(False)
+        self.status_message.setText(
+            "Result grid " + ("shown" if visible else "hidden")
+        )
+
+    def _sync_result_grid_control(self) -> None:
+        action = self.actions.get("result_show_grid")
+        if action is None:
+            return
+        visible = self.viewport.geometry_sketch_grid_visible()
+        action.blockSignals(True)
+        action.setChecked(bool(visible))
+        action.blockSignals(False)
+
+    def _set_result_contour_controls_enabled(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        for key in ("result_show_min", "result_show_max"):
+            action = self.actions.get(key)
+            if action is not None:
+                action.setEnabled(enabled)
+
+    def _sync_result_contour_ribbon_controls(
+        self,
+        result_type: str,
+        options: dict[str, object],
+    ) -> None:
+        active = str(result_type) in {
+            "NodalDisplacement",
+            "NodalReaction",
+            "ShellForce",
+            "ShellDeformation",
+        }
+        self._set_result_contour_controls_enabled(active)
+        for key, setting in (
+            ("result_show_min", "contour_show_min"),
+            ("result_show_max", "contour_show_max"),
+        ):
+            action = self.actions.get(key)
+            if action is None:
+                continue
+            action.blockSignals(True)
+            action.setChecked(bool(options.get(setting, True)))
+            action.blockSignals(False)
+
+    def _apply_result_animation_frame_choice(self, _index: int) -> None:
+        if not hasattr(self, "result_frame_count_ribbon"):
+            return
+        raw = self.result_frame_count_ribbon.currentData()
+        user_defined = str(raw) == "user"
+        if hasattr(self, "result_frame_custom_ribbon"):
+            self.result_frame_custom_ribbon.setVisible(user_defined)
+            self.result_frame_custom_ribbon.setEnabled(
+                user_defined and self.result_frame_count_ribbon.isEnabled()
+            )
+        if user_defined:
+            limit = int(self.result_frame_custom_ribbon.value())
+        else:
+            try:
+                limit = int(raw)
+            except (TypeError, ValueError):
+                limit = 20
+        limit = max(5, min(100, limit))
+        self.results_panel.set_playback_frame_limit(limit)
+        self.status_message.setText(
+            f"Result animation: {limit} sampled frames"
+        )
+
+    def _apply_result_animation_custom_frame_limit(self, value: int) -> None:
+        if not hasattr(self, "result_frame_count_ribbon"):
+            return
+        if str(self.result_frame_count_ribbon.currentData()) != "user":
+            return
+        limit = max(5, min(100, int(value)))
+        self.results_panel.set_playback_frame_limit(limit)
+        self.status_message.setText(
+            f"Result animation: {limit} sampled frames (User Defined)"
+        )
+
+    def _redraw_active_contour_result(self) -> None:
+        if not self._last_result:
+            return
+        result_type = str(
+            getattr(self, "_active_linked_result_type", "") or ""
+        )
+        options = dict(
+            getattr(self, "_active_linked_result_options", {}) or {}
+        )
+        nodes = set(
+            getattr(self, "_active_linked_node_scope", set()) or set()
+        )
+        elements = set(
+            getattr(self, "_active_linked_element_scope", set()) or set()
+        )
+        if result_type in {"NodalDisplacement", "NodalReaction"}:
+            if self.results_panel.has_result_frames():
+                self._show_linked_result_frame(
+                    self.results_panel.current_frame_index(),
+                    "",
+                )
+            else:
+                quantity = (
+                    "Reaction"
+                    if result_type == "NodalReaction"
+                    else "Displacement"
+                )
+                component = str(
+                    options.get(
+                        "component",
+                        "FX" if quantity == "Reaction" else "|U|",
+                    )
+                )
+                self.viewport.show_node_contour(
+                    self._last_result,
+                    quantity,
+                    component,
+                    node_tags=nodes or None,
+                    element_tags=elements or None,
+                    cache_key=self._last_result_cache_key,
+                    contour_options=options,
+                )
+        elif result_type == "ShellForce":
+            self.viewport.show_shell_force_contour(
+                self._last_result,
+                str(options.get("component", "Nxx")),
+                element_tags=elements or None,
+                cache_key=self._last_result_cache_key,
+                contour_options=options,
+            )
+        elif result_type == "ShellDeformation":
+            self.viewport.show_shell_deformation_contour(
+                self._last_result,
+                str(options.get("component", "Exx")),
+                element_tags=elements or None,
+                cache_key=self._last_result_cache_key,
+                contour_options=options,
+            )
+
+    def _set_result_extrema_visibility(
+        self,
+        setting: str,
+        checked: bool,
+    ) -> None:
+        result_type = str(
+            getattr(self, "_active_linked_result_type", "") or ""
+        )
+        if result_type not in {
+            "NodalDisplacement",
+            "NodalReaction",
+            "ShellForce",
+            "ShellDeformation",
+        }:
+            self._set_result_contour_controls_enabled(False)
+            return
+        setting = str(setting)
+        if setting not in {"contour_show_min", "contour_show_max"}:
+            return
+        options = dict(
+            getattr(self, "_active_linked_result_options", {}) or {}
+        )
+        options[setting] = bool(checked)
+        self._active_linked_result_options = options
+
+        checkbox = (
+            self.properties_panel.result_contour_show_min
+            if setting == "contour_show_min"
+            else self.properties_panel.result_contour_show_max
+        )
+        checkbox.blockSignals(True)
+        checkbox.setChecked(bool(checked))
+        checkbox.blockSignals(False)
+
+        # Playback intentionally suppresses both extrema actors for
+        # responsiveness. The selected display state is restored on pause.
+        if not self.results_panel.is_motion_playing():
+            self._redraw_active_contour_result()
+
     def _sync_result_ribbon_controls(
         self,
         kind: str,
@@ -3901,8 +4397,17 @@ class MainWindow(QMainWindow):
         if hasattr(self, "results_panel"):
             self.results_panel.stop_motion()
         self.viewport.clear_result_overlay()
+        self._active_linked_result_type = None
+        self._active_linked_result_options = {}
+        self._active_linked_node_scope = set()
+        self._active_linked_element_scope = set()
         self._active_result_display_kind = None
         self._set_result_display_controls_enabled(False)
+        self._set_result_contour_controls_enabled(False)
+        if hasattr(self, "result_frame_count_ribbon"):
+            self.result_frame_count_ribbon.setEnabled(False)
+        if hasattr(self, "result_frame_custom_ribbon"):
+            self.result_frame_custom_ribbon.setEnabled(False)
         fit_action = self.actions.get("fit_result")
         if fit_action is not None:
             fit_action.setEnabled(bool(self._last_result))
@@ -5326,8 +5831,12 @@ class MainWindow(QMainWindow):
             solution.addChild(probes_root)
 
             for result in probes:
-                result_item = QTreeWidgetItem([result.name])
+                result_status = self._solution_result_status(result)
+                result_item = QTreeWidgetItem([
+                    f"{result_status.symbol} {result.name}"
+                ])
                 result_item.setIcon(0, studio_icon("results"))
+                result_item.setToolTip(0, result_status.tooltip)
                 result_item.setData(
                     0,
                     Qt.UserRole,
@@ -5336,8 +5845,12 @@ class MainWindow(QMainWindow):
                 probes_root.addChild(result_item)
 
             for result in regular_results:
-                result_item = QTreeWidgetItem([result.name])
+                result_status = self._solution_result_status(result)
+                result_item = QTreeWidgetItem([
+                    f"{result_status.symbol} {result.name}"
+                ])
                 result_item.setIcon(0, studio_icon("results"))
+                result_item.setToolTip(0, result_status.tooltip)
                 result_item.setData(
                     0,
                     Qt.UserRole,
@@ -20926,9 +21439,46 @@ class MainWindow(QMainWindow):
         target = int(analysis_tag)
         for job_id in sorted(self._jobs, reverse=True):
             job = self._jobs[job_id]
-            if job.analysis_tag == target and job.results:
+            if (
+                job.analysis_tag == target
+                and str(job.status) == "Completed"
+                and bool(job.results)
+            ):
                 return job
         return None
+
+    def _latest_job_attempt_for_analysis(
+        self,
+        analysis_tag: int,
+    ) -> JobRecord | None:
+        target = int(analysis_tag)
+        for job_id in sorted(self._jobs, reverse=True):
+            job = self._jobs[job_id]
+            if job.analysis_tag == target:
+                return job
+        return None
+
+    def _analysis_solver_signature(self, analysis_tag: int) -> str:
+        return solver_input_signature(
+            self.project.to_dict(),
+            analysis_tag=int(analysis_tag),
+        )
+
+    def _solution_result_status(self, result: SolutionResultData):
+        latest = self._latest_job_attempt_for_analysis(result.analysis_tag)
+        return classify_solution_result_status(
+            has_job=latest is not None,
+            job_status=(latest.status if latest is not None else ""),
+            has_results=bool(latest.results) if latest is not None else False,
+            job_signature=(
+                str(getattr(latest, "project_signature", "") or "")
+                if latest is not None
+                else ""
+            ),
+            current_signature=self._analysis_solver_signature(
+                result.analysis_tag
+            ),
+        )
 
     @staticmethod
     def _node_probe_component_labels(quantity: str) -> tuple[str, ...]:
@@ -21141,10 +21691,17 @@ class MainWindow(QMainWindow):
         )
         self._refresh_tree()
         self._show_solution_result_properties(result.tag)
-        self._evaluate_solution_result(result.tag)
-        self.status_message.setText(
-            f"Inserted result: {result.name}"
-        )
+        status = self._solution_result_status(result)
+        if status.code == "up_to_date":
+            if self._evaluate_solution_result(result.tag):
+                self.status_message.setText(
+                    f"Inserted and displayed result: {result.name}"
+                )
+        else:
+            self.status_message.setText(
+                f"Inserted result: {result.name} · {status.label}. "
+                f"{status.action}"
+            )
 
     def _delete_solution_result(self, tag: int) -> None:
         result = self.project.solution_results.get(int(tag))
@@ -21300,6 +21857,7 @@ class MainWindow(QMainWindow):
             return
         self._active_solution_result_tag = int(tag)
         analysis = self.project.analyses.get(result.analysis_tag)
+        status = self._solution_result_status(result)
         self.properties_panel.set_solution_result(
             result,
             analysis_name=(
@@ -21307,6 +21865,9 @@ class MainWindow(QMainWindow):
                 if analysis is not None
                 else f"Analysis {result.analysis_tag}"
             ),
+            status_text=f"{status.symbol} {status.label}",
+            status_tooltip=status.tooltip,
+            can_evaluate=status.code == "up_to_date",
         )
         if (
             result.result_type == "TimeHistory"
@@ -21401,10 +21962,18 @@ class MainWindow(QMainWindow):
             before,
         )
         self._refresh_tree()
-        self._show_solution_result_properties(updated.tag)
-        self.status_message.setText(
-            f"Updated result: {updated.name}"
-        )
+        status = self._solution_result_status(updated)
+        if status.code == "up_to_date":
+            if self._evaluate_solution_result(updated.tag):
+                self.status_message.setText(
+                    f"Updated and displayed result: {updated.name}"
+                )
+        else:
+            self._show_solution_result_properties(updated.tag)
+            self.status_message.setText(
+                f"Updated result: {updated.name} · {status.label}. "
+                f"{status.action}"
+            )
 
     def _evaluate_solution_result_details(
         self,
@@ -21528,10 +22097,6 @@ class MainWindow(QMainWindow):
     ) -> dict[str, object] | None:
         job = self._latest_job_for_analysis(analysis_tag)
         if job is None:
-            self._offer_result_analysis_run(
-                title="Evaluate Result",
-                analysis_tag=analysis_tag,
-            )
             return None
         result = dict(job.results)
         self._last_result = result
@@ -21551,13 +22116,27 @@ class MainWindow(QMainWindow):
             self.results_dock.show()
             self.results_dock.raise_()
 
-    def _evaluate_solution_result(self, tag: int) -> None:
+    def _evaluate_solution_result(self, tag: int) -> bool:
         result_object = self.project.solution_results.get(int(tag))
         if result_object is None:
-            return
+            return False
+
+        status = self._solution_result_status(result_object)
+        if status.code != "up_to_date":
+            self.status_message.setText(
+                f"{result_object.name}: {status.label}. {status.action}"
+            )
+            self._show_solution_result_properties(result_object.tag)
+            return False
+
         result = self._load_analysis_result(result_object.analysis_tag)
         if result is None:
-            return
+            self.status_message.setText(
+                f"{result_object.name}: result data is unavailable. "
+                "Use Run Analysis / Re-run Analysis."
+            )
+            self._show_solution_result_properties(result_object.tag)
+            return False
 
         source_job = self._latest_job_for_analysis(
             result_object.analysis_tag
@@ -21579,6 +22158,7 @@ class MainWindow(QMainWindow):
             f"Evaluated result: {result_object.name}"
         )
         self._show_solution_result_properties(result_object.tag)
+        return True
 
     def _evaluate_all_solution_results(self, analysis_tag: int) -> None:
         objects = self.project.solution_results_for_analysis(analysis_tag)
@@ -21587,16 +22167,20 @@ class MainWindow(QMainWindow):
                 "There are no result requests to evaluate."
             )
             return
-        if self._latest_job_for_analysis(analysis_tag) is None:
-            self._offer_result_analysis_run(
-                title="Evaluate All Results",
-                analysis_tag=analysis_tag,
+        status = self._solution_result_status(objects[0])
+        if status.code != "up_to_date":
+            self.status_message.setText(
+                f"Cannot evaluate result requests: {status.label}. "
+                f"{status.action}"
             )
             return
-        for result in objects:
-            self._evaluate_solution_result(result.tag)
+        evaluated = sum(
+            1
+            for result in objects
+            if self._evaluate_solution_result(result.tag)
+        )
         self.status_message.setText(
-            f"Evaluated {len(objects)} result request(s)"
+            f"Evaluated {evaluated} result request(s)"
         )
 
     def _delete_analysis(self, tag: int) -> None:
@@ -22822,6 +23406,40 @@ class MainWindow(QMainWindow):
         )
         menu.exec(QCursor.pos())
 
+    def _prepare_contour_animation_options(
+        self,
+        payload: dict[str, object],
+        result_type: str,
+        options: dict[str, object],
+        node_scope: set[int],
+    ) -> dict[str, object]:
+        prepared = dict(options)
+        if (
+            result_type in {"NodalDisplacement", "NodalReaction"}
+            and str(prepared.get("contour_range_mode", "auto")) == "global"
+        ):
+            quantity = (
+                "Reaction"
+                if result_type == "NodalReaction"
+                else "Displacement"
+            )
+            component = str(
+                prepared.get(
+                    "component",
+                    "FX" if quantity == "Reaction" else "|U|",
+                )
+            )
+            limits = nodal_history_contour_range(
+                payload,
+                quantity,
+                component,
+                node_tags=node_scope or None,
+            )
+            if limits is not None:
+                prepared["contour_global_min"] = float(limits[0])
+                prepared["contour_global_max"] = float(limits[1])
+        return prepared
+
     def _render_result_data(
         self,
         result: dict[str, object],
@@ -22841,19 +23459,48 @@ class MainWindow(QMainWindow):
         options = dict(settings or {})
         nodes = set(node_scope or ())
         elements = set(element_scope or ())
+        options = self._prepare_contour_animation_options(
+            payload,
+            str(result_type),
+            options,
+            nodes,
+        )
         options["_node_scope"] = sorted(nodes)
         options["_element_scope"] = sorted(elements)
 
+        self._active_linked_result_type = str(result_type)
+        self._active_linked_result_options = dict(options)
+        self._active_linked_node_scope = set(nodes)
+        self._active_linked_element_scope = set(elements)
+
         self._last_result = payload
         self._last_result_cache_key = result_cache_key
+        self.results_panel.set_linked_contour_active(
+            result_type in {"NodalDisplacement", "NodalReaction"}
+        )
         fit_action = self.actions.get("fit_result")
         if fit_action is not None:
             fit_action.setEnabled(True)
+        self._sync_result_grid_control()
         self.results_panel.set_result(
             payload,
             cache_key=result_cache_key,
         )
         self.results_panel.show_solution_result(result_type, options)
+        self._sync_result_contour_ribbon_controls(
+            str(result_type),
+            options,
+        )
+        if hasattr(self, "result_frame_count_ribbon"):
+            frame_controls_enabled = self.results_panel.has_result_frames()
+            self.result_frame_count_ribbon.setEnabled(frame_controls_enabled)
+            if hasattr(self, "result_frame_custom_ribbon"):
+                self.result_frame_custom_ribbon.setEnabled(
+                    frame_controls_enabled
+                    and str(
+                        self.result_frame_count_ribbon.currentData()
+                    ) == "user"
+                )
         if result_type == "DeformedShape":
             self._sync_result_ribbon_controls(
                 "deformation",
@@ -22915,7 +23562,13 @@ class MainWindow(QMainWindow):
                 node_tags=nodes or None,
                 element_tags=elements or None,
                 cache_key=result_cache_key,
+                contour_options=options,
             )
+            if self.results_panel.has_result_frames():
+                self._show_linked_result_frame(
+                    self.results_panel.current_frame_index(),
+                    "",
+                )
         elif result_type == "MemberForce":
             self.viewport.show_member_force_diagram(
                 payload,
@@ -22931,6 +23584,7 @@ class MainWindow(QMainWindow):
                 str(options.get("component", "Nxx")),
                 element_tags=elements or None,
                 cache_key=result_cache_key,
+                contour_options=options,
             )
         elif result_type == "ShellDeformation":
             self.viewport.show_shell_deformation_contour(
@@ -22938,6 +23592,7 @@ class MainWindow(QMainWindow):
                 str(options.get("component", "Exx")),
                 element_tags=elements or None,
                 cache_key=result_cache_key,
+                contour_options=options,
             )
         elif result_type == "HingeState":
             self.viewport.show_hinge_states(
@@ -26960,7 +27615,11 @@ class MainWindow(QMainWindow):
                     else None
                 )
             )
-            run_analysis = menu.addAction("Run Analysis Again")
+            run_analysis = menu.addAction(
+                "Re-run Analysis..."
+                if latest_analysis_job is not None
+                else "Run Analysis..."
+            )
             run_analysis.setEnabled(can_run_analysis)
             run_analysis.triggered.connect(
                 lambda checked=False, tag=analysis_tag:
@@ -26968,8 +27627,14 @@ class MainWindow(QMainWindow):
             )
 
             menu.addSeparator()
-            evaluate_all = menu.addAction("Evaluate All Result Requests")
-            evaluate_all.setEnabled(bool(result_objects))
+            evaluate_all = menu.addAction("Evaluate All Results")
+            evaluate_all.setEnabled(
+                bool(result_objects)
+                and any(
+                    self._solution_result_status(result).code == "up_to_date"
+                    for result in result_objects
+                )
+            )
             evaluate_all.triggered.connect(
                 lambda: self._evaluate_all_solution_results(analysis_tag)
             )
@@ -27022,7 +27687,14 @@ class MainWindow(QMainWindow):
             tag = int(value)
             result_object = self.project.solution_results.get(tag)
             result_job = (
-                self._latest_job_for_analysis(result_object.analysis_tag)
+                self._latest_job_attempt_for_analysis(
+                    result_object.analysis_tag
+                )
+                if result_object is not None
+                else None
+            )
+            result_status = (
+                self._solution_result_status(result_object)
                 if result_object is not None
                 else None
             )
@@ -27049,9 +27721,30 @@ class MainWindow(QMainWindow):
                 lambda: self._show_solution_result_properties(tag)
             )
             evaluate = menu.addAction("Evaluate")
-            evaluate.setEnabled(result_job is not None)
+            evaluate.setEnabled(
+                result_status is not None
+                and result_status.code == "up_to_date"
+            )
             evaluate.triggered.connect(
                 lambda: self._evaluate_solution_result(tag)
+            )
+            run_analysis = menu.addAction(
+                "Re-run Analysis..."
+                if result_job is not None
+                else "Run Analysis..."
+            )
+            run_analysis.setEnabled(result_object is not None)
+            run_analysis.triggered.connect(
+                lambda checked=False,
+                analysis_tag=(
+                    result_object.analysis_tag
+                    if result_object is not None
+                    else None
+                ): (
+                    self._run_analysis_from_tree(int(analysis_tag))
+                    if analysis_tag is not None
+                    else None
+                )
             )
             clear_display = menu.addAction("Clear Result Display")
             clear_display.triggered.connect(self._clear_result_display)
@@ -29828,6 +30521,10 @@ class MainWindow(QMainWindow):
             job = JobRecord(
                 job_id=self._job_counter,
                 analysis_tag=analysis_tag,
+                project_signature=solver_input_signature(
+                    case_project.to_dict(),
+                    analysis_tag=analysis_tag,
+                ),
                 analysis_name=(
                     f"{analysis.name} · Calibration R"
                     f"{int(row.get('round', 1) or 1)} C{case_id}"
@@ -30148,6 +30845,7 @@ class MainWindow(QMainWindow):
             analysis_tag=settings.tag,
             analysis_name=settings.name,
             analysis_type=settings.analysis_type,
+            project_signature=self._analysis_solver_signature(settings.tag),
         )
         job.start()
         if settings.analysis_type == "Modal":
@@ -31079,6 +31777,12 @@ class MainWindow(QMainWindow):
         if not isinstance(vectors, dict) or not vectors:
             self.status_message.setText("No motion frame data available")
             return
+        if getattr(
+            self,
+            "_active_linked_result_type",
+            None,
+        ) in {"NodalDisplacement", "NodalReaction"}:
+            return
         self.viewport.show_motion_frame(
             vectors,
             scale=float(scale),
@@ -31086,6 +31790,92 @@ class MainWindow(QMainWindow):
             reference_magnitude=float(reference_magnitude),
         )
         self.status_message.setText(str(label))
+
+    def _show_linked_result_frame(
+        self,
+        index: int,
+        label: str,
+    ) -> None:
+        result_type = getattr(
+            self,
+            "_active_linked_result_type",
+            None,
+        )
+        if result_type not in {"NodalDisplacement", "NodalReaction"}:
+            return
+        if not self._last_result:
+            return
+
+        options = dict(
+            getattr(self, "_active_linked_result_options", {}) or {}
+        )
+        frame_payload = result_frame_payload(
+            self._last_result,
+            int(index),
+            include_displacements=(
+                result_type == "NodalDisplacement"
+                or bool(options.get("contour_deformed_geometry", False))
+            ),
+            include_reactions=(result_type == "NodalReaction"),
+        )
+        if self.results_panel.is_motion_playing():
+            # Keep playback lightweight. The scalar extrema are still
+            # computed for the contour itself, but expensive VTK extrema
+            # label actors are restored only when playback pauses.
+            options["_fast_animation"] = True
+            options["contour_show_min"] = False
+            options["contour_show_max"] = False
+        nodes = set(
+            getattr(self, "_active_linked_node_scope", set()) or set()
+        )
+        elements = set(
+            getattr(self, "_active_linked_element_scope", set()) or set()
+        )
+        quantity = (
+            "Reaction"
+            if result_type == "NodalReaction"
+            else "Displacement"
+        )
+        component = str(
+            options.get(
+                "component",
+                "FX" if quantity == "Reaction" else "|U|",
+            )
+        )
+        final = frame_payload.get("final", {})
+        response_key = (
+            "node_reactions"
+            if quantity == "Reaction"
+            else "node_displacements"
+        )
+        responses = (
+            final.get(response_key, {})
+            if isinstance(final, dict)
+            else {}
+        )
+        if not isinstance(responses, dict) or not responses:
+            self.status_message.setText(
+                f"{quantity} contour has no recorded data at this frame."
+            )
+            return
+
+        self.viewport.show_node_contour(
+            frame_payload,
+            quantity,
+            component,
+            node_tags=nodes or None,
+            element_tags=elements or None,
+            cache_key=(
+                "linked-frame",
+                self._last_result_cache_key,
+                int(index),
+            ),
+            contour_options=options,
+        )
+        prefix = f"{label} · " if label else ""
+        self.status_message.setText(
+            f"{prefix}{quantity} {component} contour"
+        )
 
     def _show_node_contour_result(
         self,

@@ -39,6 +39,11 @@ from ..model import (
     classify_fixity,
     shell_surface_geometry,
 )
+from ..contour import (
+    contour_colormap,
+    contour_display_options,
+    resolve_contour_range,
+)
 from ..postprocess import component_end_resultants, nodal_result_scalar
 from ..shell_quality import shell_element_quality_from_model
 from ..surface_mesher import surface_mesh_preview_segments
@@ -192,6 +197,7 @@ class ModelViewport(QWidget):
             list[tuple[object, dict[str, object]]],
         ] = OrderedDict()
         self._result_view_cache_limit = 18
+        self._node_contour_animation_state: dict[str, object] | None = None
         self._motion_element_mesh = None
         self._motion_node_mesh = None
         self._motion_element_node_tags: list[int] = []
@@ -487,6 +493,9 @@ class ModelViewport(QWidget):
         ):
             self._render_geometry_sketch_grid()
         self.plotter.render()
+
+    def geometry_sketch_grid_visible(self) -> bool:
+        return bool(self._geometry_sketch_grid_visible)
 
     def set_geometry_sketch_plane_offset_from_point(self, xyz) -> None:
         raw_point = tuple(float(value) for value in xyz)
@@ -4020,6 +4029,7 @@ class ModelViewport(QWidget):
         self._result_view_cache.clear()
         self._active_result_view_key = None
         self._result_overlay_active = False
+        self._node_contour_animation_state = None
         self.plotter.clear()
         self._measurement_actor_names.clear()
         self._measurement_counter = 0
@@ -6132,7 +6142,14 @@ class ModelViewport(QWidget):
             "result-force-labels",
             "result-contour",
             "result-contour-nodes",
+            "result-contour-extrema",
+            "result-contour-extrema-labels",
+            "result-contour-minimum",
+            "result-contour-minimum-labels",
+            "result-contour-maximum",
+            "result-contour-maximum-labels",
             "result-shell-contour",
+            "result-shell-deformation-contour",
             "result-hinge-members",
             "result-hinge-points",
             "motion-overlay",
@@ -6143,6 +6160,7 @@ class ModelViewport(QWidget):
             self._remove_overlay(name)
         self._result_overlay_active = False
         self._active_result_view_key = None
+        self._node_contour_animation_state = None
         self._motion_element_mesh = None
         self._motion_node_mesh = None
         self._motion_element_node_tags = []
@@ -6151,6 +6169,66 @@ class ModelViewport(QWidget):
         self.set_undeformed_model_visible(True, render=False)
         if render:
             self.plotter.render()
+
+    def _show_contour_extrema(
+        self,
+        positions: list[tuple[float, float, float]],
+        labels: list[str],
+    ) -> None:
+        if not positions or not labels:
+            return
+
+        # White extrema text disappears on the light viewport background.
+        # Give MIN and MAX independent, saturated colors so they remain easy
+        # to identify without depending on the active contour palette.
+        groups = {
+            "minimum": {
+                "positions": [],
+                "labels": [],
+                "color": "#6a1b9a",
+            },
+            "maximum": {
+                "positions": [],
+                "labels": [],
+                "color": "#d50000",
+            },
+        }
+        for position, label in zip(positions, labels):
+            key = (
+                "maximum"
+                if str(label).lstrip().upper().startswith("MAX")
+                else "minimum"
+            )
+            groups[key]["positions"].append(position)
+            groups[key]["labels"].append(str(label))
+
+        for key, payload in groups.items():
+            group_positions = payload["positions"]
+            group_labels = payload["labels"]
+            if not group_positions:
+                continue
+            color = str(payload["color"])
+            points = pv.PolyData(
+                np.asarray(group_positions, dtype=float)
+            )
+            self.plotter.add_mesh(
+                points,
+                name=f"result-contour-{key}",
+                render_points_as_spheres=True,
+                point_size=15,
+                color=color,
+                pickable=False,
+                show_scalar_bar=False,
+                render=False,
+            )
+            self._add_annotation_labels(
+                group_positions,
+                group_labels,
+                name=f"result-contour-{key}-labels",
+                text_color=color,
+                font_size=11,
+                always_visible=True,
+            )
 
     @staticmethod
     def _result_scope_key(tags: set[int] | None) -> tuple[int, ...]:
@@ -6561,12 +6639,14 @@ class ModelViewport(QWidget):
         *,
         element_tags: set[int] | None = None,
         cache_key: object | None = None,
+        contour_options: dict[str, object] | None = None,
     ) -> None:
         """Show averaged shell generalized strains/curvatures as contours."""
         if self._model is None:
             return
 
         component = str(component)
+        display = contour_display_options(contour_options)
         component_index = {
             "Exx": 0,
             "Eyy": 1,
@@ -6642,8 +6722,13 @@ class ModelViewport(QWidget):
             "shell-deformation",
             component,
             self._result_scope_key(set(tags)),
+            display.cache_key(),
         )
-        if self._show_cached_result_view(view_key):
+        if (
+            not display.show_minimum
+            and not display.show_maximum
+            and self._show_cached_result_view(view_key)
+        ):
             return
 
         mesh = self._batched_shell_mesh(self._model, tags)
@@ -6654,12 +6739,46 @@ class ModelViewport(QWidget):
         scalar_name = "shell_deformation"
         mesh.cell_data[scalar_name] = np.asarray(values, dtype=float)
 
-        max_abs = max(abs(value) for value in values)
-        clim = (
-            (-max_abs, max_abs)
-            if max_abs > 1.0e-15
-            else None
-        )
+        if display.deformed_geometry:
+            vectors = final.get("node_displacements", {})
+            if isinstance(vectors, dict) and vectors:
+                deformed_points: list[tuple[float, float, float]] = []
+                for tag in tags:
+                    element = self._model.elements.get(tag)
+                    if element is None:
+                        continue
+                    for node_tag in element.node_tags():
+                        node = self._model.nodes.get(node_tag)
+                        if node is None:
+                            continue
+                        raw = vectors.get(
+                            str(node_tag),
+                            vectors.get(node_tag, ()),
+                        )
+                        values_u = (
+                            list(raw)
+                            if isinstance(raw, (list, tuple))
+                            else []
+                        )
+                        while len(values_u) < 3:
+                            values_u.append(0.0)
+                        deformed_points.append((
+                            node.xyz[0]
+                            + display.deformation_scale * float(values_u[0]),
+                            node.xyz[1]
+                            + display.deformation_scale * float(values_u[1]),
+                            node.xyz[2]
+                            + (
+                                display.deformation_scale
+                                * float(values_u[2])
+                                if self._model.ndm == 3
+                                else 0.0
+                            ),
+                        ))
+                if len(deformed_points) == mesh.n_points:
+                    mesh.points = np.asarray(deformed_points, dtype=float)
+
+        clim = resolve_contour_range(values, display)
         length_unit = str(self._units.get("length", "")).strip()
         unit_text = (
             f"1/{length_unit}"
@@ -6677,7 +6796,8 @@ class ModelViewport(QWidget):
             "name": "result-shell-deformation-contour",
             "scalars": scalar_name,
             "preference": "cell",
-            "cmap": "coolwarm",
+            "cmap": contour_colormap(display),
+            "n_colors": display.bands,
             "show_edges": True,
             "edge_color": "#263746",
             "line_width": 1,
@@ -6693,6 +6813,25 @@ class ModelViewport(QWidget):
             **kwargs,
             render=False,
         )
+        centers = mesh.cell_centers().points
+        extrema_positions: list[tuple[float, float, float]] = []
+        extrema_labels: list[str] = []
+        if display.show_minimum and values:
+            index = min(range(len(values)), key=lambda item: values[item])
+            extrema_positions.append(tuple(map(float, centers[index])))
+            extrema_labels.append(
+                f"MIN {values[index]:.5g} · E{tags[index]}"
+            )
+        if display.show_maximum and values:
+            index = max(range(len(values)), key=lambda item: values[item])
+            position = tuple(map(float, centers[index]))
+            if not extrema_positions or position != extrema_positions[-1]:
+                extrema_positions.append(position)
+                extrema_labels.append(
+                    f"MAX {values[index]:.5g} · E{tags[index]}"
+                )
+        self._show_contour_extrema(extrema_positions, extrema_labels)
+
         self._remember_result_view(
             view_key,
             [(mesh, kwargs)],
@@ -6707,12 +6846,14 @@ class ModelViewport(QWidget):
         *,
         element_tags: set[int] | None = None,
         cache_key: object | None = None,
+        contour_options: dict[str, object] | None = None,
     ) -> None:
         """Show averaged shell section resultants as a surface contour."""
         if self._model is None:
             return
 
         component = str(component)
+        display = contour_display_options(contour_options)
         component_index = {
             "Nxx": 0,
             "Nyy": 1,
@@ -6788,8 +6929,13 @@ class ModelViewport(QWidget):
             "shell-force",
             component,
             self._result_scope_key(set(tags)),
+            display.cache_key(),
         )
-        if self._show_cached_result_view(view_key):
+        if (
+            not display.show_minimum
+            and not display.show_maximum
+            and self._show_cached_result_view(view_key)
+        ):
             return
 
         mesh = self._batched_shell_mesh(self._model, tags)
@@ -6800,12 +6946,46 @@ class ModelViewport(QWidget):
         scalar_name = "shell_resultant"
         mesh.cell_data[scalar_name] = np.asarray(values, dtype=float)
 
-        max_abs = max(abs(value) for value in values)
-        clim = (
-            (-max_abs, max_abs)
-            if max_abs > 1.0e-15
-            else None
-        )
+        if display.deformed_geometry:
+            vectors = final.get("node_displacements", {})
+            if isinstance(vectors, dict) and vectors:
+                deformed_points: list[tuple[float, float, float]] = []
+                for tag in tags:
+                    element = self._model.elements.get(tag)
+                    if element is None:
+                        continue
+                    for node_tag in element.node_tags():
+                        node = self._model.nodes.get(node_tag)
+                        if node is None:
+                            continue
+                        raw = vectors.get(
+                            str(node_tag),
+                            vectors.get(node_tag, ()),
+                        )
+                        values_u = (
+                            list(raw)
+                            if isinstance(raw, (list, tuple))
+                            else []
+                        )
+                        while len(values_u) < 3:
+                            values_u.append(0.0)
+                        deformed_points.append((
+                            node.xyz[0]
+                            + display.deformation_scale * float(values_u[0]),
+                            node.xyz[1]
+                            + display.deformation_scale * float(values_u[1]),
+                            node.xyz[2]
+                            + (
+                                display.deformation_scale
+                                * float(values_u[2])
+                                if self._model.ndm == 3
+                                else 0.0
+                            ),
+                        ))
+                if len(deformed_points) == mesh.n_points:
+                    mesh.points = np.asarray(deformed_points, dtype=float)
+
+        clim = resolve_contour_range(values, display)
         force_unit = str(self._units.get("force", "")).strip()
         length_unit = str(self._units.get("length", "")).strip()
         if component.startswith("M"):
@@ -6831,7 +7011,8 @@ class ModelViewport(QWidget):
             "name": "result-shell-contour",
             "scalars": scalar_name,
             "preference": "cell",
-            "cmap": "coolwarm",
+            "cmap": contour_colormap(display),
+            "n_colors": display.bands,
             "show_edges": True,
             "edge_color": "#263746",
             "line_width": 1,
@@ -6847,6 +7028,25 @@ class ModelViewport(QWidget):
             **kwargs,
             render=False,
         )
+        centers = mesh.cell_centers().points
+        extrema_positions: list[tuple[float, float, float]] = []
+        extrema_labels: list[str] = []
+        if display.show_minimum and values:
+            index = min(range(len(values)), key=lambda item: values[item])
+            extrema_positions.append(tuple(map(float, centers[index])))
+            extrema_labels.append(
+                f"MIN {values[index]:.5g} · E{tags[index]}"
+            )
+        if display.show_maximum and values:
+            index = max(range(len(values)), key=lambda item: values[item])
+            position = tuple(map(float, centers[index]))
+            if not extrema_positions or position != extrema_positions[-1]:
+                extrema_positions.append(position)
+                extrema_labels.append(
+                    f"MAX {values[index]:.5g} · E{tags[index]}"
+                )
+        self._show_contour_extrema(extrema_positions, extrema_labels)
+
         self._remember_result_view(
             view_key,
             [(mesh, kwargs)],
@@ -6863,6 +7063,7 @@ class ModelViewport(QWidget):
         node_tags: set[int] | None = None,
         element_tags: set[int] | None = None,
         cache_key: object | None = None,
+        contour_options: dict[str, object] | None = None,
     ) -> None:
         """Show a nodal displacement or reaction scalar on the frame mesh."""
         if self._model is None:
@@ -6870,6 +7071,11 @@ class ModelViewport(QWidget):
 
         quantity = str(quantity)
         component = str(component)
+        magnitude = component.startswith("|")
+        display = contour_display_options(
+            contour_options,
+            magnitude=magnitude,
+        )
         view_key = self._result_view_key(
             cache_key,
             "node-contour",
@@ -6877,6 +7083,7 @@ class ModelViewport(QWidget):
             component,
             self._result_scope_key(node_tags),
             self._result_scope_key(element_tags),
+            display.cache_key(),
         )
         # Member-force views include sparse numeric labels. Rebuild this
         # lightweight overlay so labels stay in sync with the active result,
@@ -6905,9 +7112,39 @@ class ModelViewport(QWidget):
             except ValueError:
                 return None
 
+        displacement_data = final.get("node_displacements", {})
+        if not isinstance(displacement_data, dict):
+            displacement_data = {}
+
+        def displayed_point(tag: int) -> tuple[float, float, float]:
+            node = self._model.nodes[tag]
+            if not display.deformed_geometry:
+                return tuple(map(float, node.xyz))
+            raw = displacement_data.get(
+                str(tag),
+                displacement_data.get(tag, ()),
+            )
+            values_u = list(raw) if isinstance(raw, (list, tuple)) else []
+            while len(values_u) < 3:
+                values_u.append(0.0)
+            return (
+                node.xyz[0] + display.deformation_scale * float(values_u[0]),
+                node.xyz[1] + display.deformation_scale * float(values_u[1]),
+                node.xyz[2]
+                + (
+                    display.deformation_scale * float(values_u[2])
+                    if self._model.ndm == 3
+                    else 0.0
+                ),
+            )
+
         points: list[tuple[float, float, float]] = []
         lines: list[int] = []
         scalars: list[float] = []
+        line_node_tags: list[int] = []
+        node_points: list[tuple[float, float, float]] = []
+        node_scalars: list[float] = []
+        node_point_tags: list[int] = []
 
         visible_elements = set(self._visible_element_tags())
         if element_tags:
@@ -6922,6 +7159,112 @@ class ModelViewport(QWidget):
                 )
             }
 
+        visible_nodes = set(self._visible_node_tags())
+        if node_tags:
+            visible_nodes.intersection_update(node_tags)
+        elif element_tags:
+            scoped_nodes: set[int] = set()
+            for element_tag in element_tags:
+                element = self._model.elements.get(element_tag)
+                if element is not None:
+                    scoped_nodes.update((element.i, element.j))
+            visible_nodes.intersection_update(scoped_nodes)
+
+        fast_animation = bool(
+            (contour_options or {}).get("_fast_animation", False)
+        )
+        animation_key = (
+            quantity,
+            component,
+            self._result_scope_key(visible_elements),
+            self._result_scope_key(visible_nodes),
+            display.cache_key(),
+        )
+        animation_state = self._node_contour_animation_state
+        if (
+            fast_animation
+            and isinstance(animation_state, dict)
+            and animation_state.get("key") == animation_key
+        ):
+            # The first playback frame creates the VTK topology. Subsequent
+            # frames update only scalar arrays (and coordinates only when the
+            # contour explicitly follows the deformed shape). This avoids
+            # rebuilding connectivity, sorting scopes, recalculating an
+            # unused auto range, or recreating actors on every timer tick.
+            line_mesh = animation_state.get("line_mesh")
+            node_mesh = animation_state.get("node_mesh")
+            cached_line_tags = animation_state.get("line_node_tags", ())
+            cached_node_tags = animation_state.get("node_point_tags", ())
+            try:
+                if line_mesh is not None:
+                    if (
+                        not isinstance(cached_line_tags, (list, tuple))
+                        or int(line_mesh.n_points) != len(cached_line_tags)
+                    ):
+                        raise ValueError("line contour topology changed")
+                    line_values: list[float] = []
+                    line_points = [] if display.deformed_geometry else None
+                    for raw_tag in cached_line_tags:
+                        tag = int(raw_tag)
+                        value = value_for(tag)
+                        if value is None:
+                            raise ValueError("line contour response changed")
+                        line_values.append(float(value))
+                        if line_points is not None:
+                            line_points.append(displayed_point(tag))
+                    if line_points is not None:
+                        line_mesh.points[:] = np.asarray(
+                            line_points,
+                            dtype=float,
+                        )
+                    line_mesh.point_data["nodal_result"][:] = np.asarray(
+                        line_values,
+                        dtype=float,
+                    )
+                    line_mesh.Modified()
+                elif cached_line_tags:
+                    raise ValueError("line contour topology changed")
+
+                if node_mesh is not None:
+                    if (
+                        not isinstance(cached_node_tags, (list, tuple))
+                        or int(node_mesh.n_points) != len(cached_node_tags)
+                    ):
+                        raise ValueError("node contour topology changed")
+                    current_node_values: list[float] = []
+                    current_node_points = (
+                        [] if display.deformed_geometry else None
+                    )
+                    for raw_tag in cached_node_tags:
+                        tag = int(raw_tag)
+                        value = value_for(tag)
+                        if value is None:
+                            raise ValueError("node contour response changed")
+                        current_node_values.append(float(value))
+                        if current_node_points is not None:
+                            current_node_points.append(displayed_point(tag))
+                    if current_node_points is not None:
+                        node_mesh.points[:] = np.asarray(
+                            current_node_points,
+                            dtype=float,
+                        )
+                    node_mesh.point_data["nodal_result"][:] = np.asarray(
+                        current_node_values,
+                        dtype=float,
+                    )
+                    node_mesh.Modified()
+                elif cached_node_tags:
+                    raise ValueError("node contour topology changed")
+
+                self._result_overlay_active = True
+                self._active_result_view_key = None
+                self.plotter.render()
+                return
+            except (AttributeError, KeyError, TypeError, ValueError):
+                # Fall through to a full rebuild if a recorder changes
+                # topology or a frame unexpectedly lacks a required response.
+                pass
+
         for tag in sorted(visible_elements):
             element = self._model.elements.get(tag)
             if element is None:
@@ -6935,43 +7278,38 @@ class ModelViewport(QWidget):
             if node_i is None or node_j is None:
                 continue
             index = len(points)
-            points.extend((node_i.xyz, node_j.xyz))
+            points.extend((
+                displayed_point(element.i),
+                displayed_point(element.j),
+            ))
             scalars.extend((float(value_i), float(value_j)))
+            line_node_tags.extend((int(element.i), int(element.j)))
             lines.extend((2, index, index + 1))
-
-        node_points: list[tuple[float, float, float]] = []
-        node_scalars: list[float] = []
-        visible_nodes = set(self._visible_node_tags())
-        if node_tags:
-            visible_nodes.intersection_update(node_tags)
-        elif element_tags:
-            scoped_nodes: set[int] = set()
-            for element_tag in element_tags:
-                element = self._model.elements.get(element_tag)
-                if element is not None:
-                    scoped_nodes.update((element.i, element.j))
-            visible_nodes.intersection_update(scoped_nodes)
 
         for tag in sorted(visible_nodes):
             node = self._model.nodes.get(tag)
             value = value_for(tag)
             if node is None or value is None:
                 continue
-            node_points.append(node.xyz)
+            node_points.append(displayed_point(tag))
             node_scalars.append(float(value))
+            node_point_tags.append(int(tag))
 
         if not points and not node_points:
             self.clear_result_overlay()
             return
 
+        # During playback the active mesh keeps the range established on the
+        # first fast frame. Recomputing Auto min/max here would not update the
+        # existing VTK mapper anyway, and a changing legend makes animations
+        # visually misleading. Exact extrema/range are restored on pause.
         all_values = scalars + node_scalars
-        magnitude = component.startswith("|")
-        cmap = "turbo" if magnitude else "coolwarm"
-        clim = None
-        if not magnitude and all_values:
-            max_abs = max(abs(value) for value in all_values)
-            if max_abs > 1.0e-15:
-                clim = (-max_abs, max_abs)
+        cmap = contour_colormap(display, magnitude=magnitude)
+        clim = resolve_contour_range(
+            all_values,
+            display,
+            magnitude=magnitude,
+        )
 
         self.clear_result_overlay(render=False)
         entries: list[tuple[object, dict[str, object]]] = []
@@ -6989,6 +7327,7 @@ class ModelViewport(QWidget):
                 "name": "result-contour",
                 "scalars": scalar_name,
                 "cmap": cmap,
+                "n_colors": display.bands,
                 "line_width": 7,
                 "render_lines_as_tubes": True,
                 "pickable": False,
@@ -7012,6 +7351,7 @@ class ModelViewport(QWidget):
                 "name": "result-contour-nodes",
                 "scalars": scalar_name,
                 "cmap": cmap,
+                "n_colors": display.bands,
                 "render_points_as_spheres": True,
                 "point_size": 9,
                 "pickable": False,
@@ -7026,7 +7366,47 @@ class ModelViewport(QWidget):
             cache_kwargs.pop("render", None)
             entries.append((node_mesh, cache_kwargs))
 
-        self._remember_result_view(view_key, entries)
+        extrema_positions: list[tuple[float, float, float]] = []
+        extrema_labels: list[str] = []
+        if display.show_minimum and node_scalars:
+            index = min(
+                range(len(node_scalars)),
+                key=lambda item: node_scalars[item],
+            )
+            extrema_positions.append(node_points[index])
+            extrema_labels.append(
+                f"MIN {node_scalars[index]:.5g} · N{node_point_tags[index]}"
+            )
+        if display.show_maximum and node_scalars:
+            index = max(
+                range(len(node_scalars)),
+                key=lambda item: node_scalars[item],
+            )
+            if not extrema_positions or node_points[index] != extrema_positions[-1]:
+                extrema_positions.append(node_points[index])
+                extrema_labels.append(
+                    f"MAX {node_scalars[index]:.5g} · N{node_point_tags[index]}"
+                )
+        self._show_contour_extrema(extrema_positions, extrema_labels)
+
+        if fast_animation:
+            self._node_contour_animation_state = {
+                "key": animation_key,
+                "line_mesh": (
+                    entries[0][0]
+                    if points and entries
+                    else None
+                ),
+                "node_mesh": (
+                    entries[-1][0]
+                    if node_points and entries
+                    else None
+                ),
+                "line_node_tags": tuple(line_node_tags),
+                "node_point_tags": tuple(node_point_tags),
+            }
+        else:
+            self._remember_result_view(view_key, entries)
         self._result_overlay_active = True
         self.plotter.render()
 

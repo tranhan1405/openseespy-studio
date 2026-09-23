@@ -24,18 +24,45 @@ class ImportReportDialog(QDialog):
 
         root = QVBoxLayout(self)
 
-        counts = ", ".join(
-            f"{name}: {value}"
-            for name, value in sorted(result.imported_counts.items())
-            if value
-        ) or "No supported model objects were recovered."
+        detection_lines = [
+            f"<b>✓ {group}</b>&nbsp;&nbsp;{detail}"
+            for group, detail in result.detection_groups
+        ]
+        if result.warning_count:
+            detection_lines.append(
+                f"<span style='color:#a15c00'><b>⚠ Review</b>&nbsp;&nbsp;"
+                f"{result.warning_count} warning"
+                f"{'s' if result.warning_count != 1 else ''}</span>"
+            )
+        if result.unsupported_count:
+            detection_lines.append(
+                f"<span style='color:#5b4b8a'><b>✕ Unsupported</b>&nbsp;&nbsp;"
+                f"{result.unsupported_count} command"
+                f"{'s' if result.unsupported_count != 1 else ''}</span>"
+            )
+        if result.error_count:
+            detection_lines.append(
+                f"<span style='color:#b42318'><b>✕ Errors</b>&nbsp;&nbsp;"
+                f"{result.error_count}</span>"
+            )
+        detection = (
+            "<br>".join(detection_lines)
+            if detection_lines
+            else "No supported model objects were recovered."
+        )
 
+        linked = (
+            "<br>".join(
+                f"&nbsp;&nbsp;• {name}"
+                for name in result.linked_files
+            )
+            if result.linked_files
+            else "&nbsp;&nbsp;None"
+        )
         summary = QLabel(
-            f"<b>{result.source_name}</b><br>"
-            f"{counts}<br><br>"
-            f"Errors: {result.error_count} &nbsp;&nbsp; "
-            f"Warnings: {result.warning_count} &nbsp;&nbsp; "
-            f"Unsupported: {result.unsupported_count}"
+            f"<b>Source file:</b> {result.source_name}<br>"
+            f"<b>Linked files read:</b><br>{linked}<br><br>"
+            f"<b>Import Detection</b><br>{detection}"
         )
         summary.setWordWrap(True)
         root.addWidget(summary)

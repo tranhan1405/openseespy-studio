@@ -90,7 +90,10 @@ def result_choices_for_analysis(
                 label,
                 "NodalDisplacement",
                 label,
-                {"component": component},
+                {
+                    "component": component,
+                    "contour_range_mode": "global",
+                },
             )
         )
 
@@ -101,7 +104,10 @@ def result_choices_for_analysis(
                 f"Reaction {component}",
                 "NodalReaction",
                 f"Reaction {component}",
-                {"component": component},
+                {
+                    "component": component,
+                    "contour_range_mode": "global",
+                },
             )
         )
 
@@ -218,22 +224,50 @@ def result_choices_for_analysis(
     if kind == "Pushover":
         choices.append(
             ResultChoice(
-                "Charts / History",
+                "Nonlinear Results",
                 "Pushover Capacity Curve",
                 "PushoverCurve",
                 "Pushover Capacity Curve",
                 {},
             )
         )
-    if kind == "Cyclic":
-        choices.append(
-            ResultChoice(
-                "Charts / History",
-                "Cyclic Hysteresis",
-                "CyclicHysteresis",
-                "Cyclic Hysteresis",
-                {},
-            )
+
+    # Cyclic-response post-processing is capability-based rather than tied
+    # only to the dedicated Cyclic integrator. A Transient analysis may be
+    # driven by a manually defined cyclic loading protocol and still produce
+    # a valid force-displacement loop, reversals and dissipated-energy data.
+    if kind in {"Cyclic", "Transient"}:
+        choices.extend(
+            [
+                ResultChoice(
+                    "Nonlinear Results",
+                    "Hysteretic Force–Displacement",
+                    "CyclicHysteresis",
+                    "Hysteretic Force–Displacement",
+                    {},
+                ),
+                ResultChoice(
+                    "Nonlinear Results",
+                    "Backbone / Envelope",
+                    "CyclicBackbone",
+                    "Cyclic Backbone / Envelope",
+                    {},
+                ),
+                ResultChoice(
+                    "Nonlinear Results",
+                    "Reversal Metrics",
+                    "CyclicReversalMetrics",
+                    "Cyclic Reversal Metrics",
+                    {},
+                ),
+                ResultChoice(
+                    "Nonlinear Results",
+                    "Cycle Energy & Degradation",
+                    "CyclicCycleMetrics",
+                    "Cycle Energy & Degradation",
+                    {},
+                ),
+            ]
         )
     choices.append(
         ResultChoice(

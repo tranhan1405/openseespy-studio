@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import bisect
 import csv
 import math
+import time
 from typing import Any
 
 from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Signal
@@ -88,6 +90,8 @@ from ..postprocess import (
 
 
 class TimeHistoryPlot(QWidget):
+    point_selected = Signal(int)
+
     def __init__(
         self,
         parent=None,
@@ -102,6 +106,7 @@ class TimeHistoryPlot(QWidget):
         self._overlay_label = ""
         self._empty_message = str(empty_message)
         self._marker_index: int | None = None
+        self._screen_points: list[tuple[float, float, int]] = []
         self.setMinimumHeight(140)
 
     def set_series(self, x: list[float], y: list[float]) -> None:
@@ -140,6 +145,7 @@ class TimeHistoryPlot(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.fillRect(self.rect(), QColor("#ffffff"))
 
+        self._screen_points = []
         if len(self._x) < 2 or len(self._y) < 2:
             painter.setPen(QColor("#718195"))
             painter.drawText(self.rect(), Qt.AlignCenter, self._empty_message)
@@ -176,6 +182,16 @@ class TimeHistoryPlot(QWidget):
             py = bottom - (y - ymin) / (ymax - ymin) * (bottom - top)
             return QPointF(px, py)
 
+        self._screen_points = [
+            (
+                float(mapped.x()),
+                float(mapped.y()),
+                index,
+            )
+            for index, (x, y) in enumerate(zip(self._x, self._y))
+            for mapped in (point(x, y),)
+        ]
+
         painter.setPen(QPen(QColor("#2f80ed"), 2))
         previous = point(self._x[0], self._y[0])
         for x, y in zip(self._x[1:], self._y[1:]):
@@ -211,6 +227,13 @@ class TimeHistoryPlot(QWidget):
                 self._x[marker_index],
                 self._y[marker_index],
             )
+            cursor_pen = QPen(QColor("#c62828"), 1)
+            cursor_pen.setStyle(Qt.DashLine)
+            painter.setPen(cursor_pen)
+            painter.drawLine(
+                QPointF(marker.x(), float(top)),
+                QPointF(marker.x(), float(bottom)),
+            )
             painter.setPen(QPen(QColor("#c62828"), 2))
             painter.setBrush(QColor("#ffffff"))
             painter.drawEllipse(marker, 5.0, 5.0)
@@ -220,6 +243,29 @@ class TimeHistoryPlot(QWidget):
         painter.drawText(4, bottom, f"{ymin:.3g}")
         painter.drawText(left, self.height() - 7, f"{xmin:.3g}")
         painter.drawText(right - 35, self.height() - 7, f"{xmax:.3g}")
+
+    def mousePressEvent(self, event) -> None:
+        if (
+            event.button() == Qt.LeftButton
+            and self._screen_points
+        ):
+            position = event.position()
+            nearest = min(
+                self._screen_points,
+                key=lambda item: (
+                    (item[0] - float(position.x())) ** 2
+                    + (item[1] - float(position.y())) ** 2
+                ),
+            )
+            distance_sq = (
+                (nearest[0] - float(position.x())) ** 2
+                + (nearest[1] - float(position.y())) ** 2
+            )
+            if distance_sq <= 35.0 ** 2:
+                self.point_selected.emit(int(nearest[2]))
+                event.accept()
+                return
+        super().mousePressEvent(event)
 
 
 class CalibrationParetoPlot(QWidget):
@@ -910,6 +956,7 @@ class ResultsPanel(QWidget):
     deformation_requested = Signal(float, str, str, bool)
     mode_shape_requested = Signal(int, float, str, str, bool)
     motion_frame_requested = Signal(object, float, bool, float, str)
+    result_frame_requested = Signal(int, str)
     clear_overlay_requested = Signal()
     member_force_requested = Signal(str, float)
     node_contour_requested = Signal(str, str)
@@ -949,6 +996,15 @@ class ResultsPanel(QWidget):
         self._motion_timer.timeout.connect(self._advance_motion)
         self._motion_info = None
         self._motion_frame_index = 0
+        # Playback is rendered at a fixed, UI-friendly cadence. Faster
+        # playback advances multiple analysis frames per tick instead of
+        # forcing VTK to redraw at progressively higher frame rates.
+        self._motion_frame_accumulator = 0.0
+        self._motion_playback_time: float | None = None
+        self._motion_wall_clock: float | None = None
+        self._playback_frame_limit = 20
+        self._playback_frame_indices: list[int] = []
+        self._playback_sample_cursor = 0
         self._calibration_rows: list[dict[str, Any]] = []
         self._cyclic_experiment_dataset: dict[str, Any] = {}
         self._cyclic_experiment_path = ""
@@ -995,6 +1051,7 @@ class ResultsPanel(QWidget):
         self._build_calibration_tab()
         self._build_history_tab()
         self._build_motion_tab()
+        self._build_frame_bar(root)
 
         # QTabWidget normally derives its minimum from every hidden page.
         # Results pages contain wide tables, so without relaxing these hints
@@ -1231,8 +1288,32 @@ class ResultsPanel(QWidget):
         if kind == "PushoverCurve":
             self._select_tab("Pushover Curve")
             return
-        if kind == "CyclicHysteresis":
-            self._select_tab("Cyclic Hysteresis")
+        if kind in {
+            "CyclicHysteresis",
+            "CyclicBackbone",
+            "CyclicReversalMetrics",
+            "CyclicCycleMetrics",
+        }:
+            view = (
+                "backbone"
+                if kind == "CyclicBackbone"
+                else "hysteresis"
+            )
+            if hasattr(self, "cyclic_compare_view"):
+                index = self.cyclic_compare_view.findData(view)
+                if index >= 0:
+                    self.cyclic_compare_view.setCurrentIndex(index)
+
+            detail_index = {
+                "CyclicHysteresis": 0,
+                "CyclicBackbone": 0,
+                "CyclicReversalMetrics": 2,
+                "CyclicCycleMetrics": 3,
+            }[kind]
+            if hasattr(self, "cyclic_detail_tabs"):
+                self.cyclic_detail_tabs.setCurrentIndex(detail_index)
+
+            self._select_tab("Nonlinear Response")
             return
         if kind == "SpecimenResponse":
             self._select_tab("Specimen Response")
@@ -2515,6 +2596,9 @@ class ResultsPanel(QWidget):
         self.pushover_plot = TimeHistoryPlot(
             empty_message="No pushover capacity-curve data"
         )
+        self.pushover_plot.point_selected.connect(
+            self._select_frame_from_plot
+        )
         layout.addWidget(self.pushover_plot, 1)
         self.tabs.addTab(page, "Pushover Curve")
 
@@ -2527,8 +2611,8 @@ class ResultsPanel(QWidget):
         # Keep the essential cyclic summary visible regardless of which
         # detail page is active.
         self.cyclic_info = QLabel(
-            "Run a Cyclic analysis to plot applied base shear versus "
-            "control displacement."
+            "Select a result with displacement and base-reaction history to "
+            "inspect nonlinear force-displacement response."
         )
         self.cyclic_info.setWordWrap(True)
         layout.addWidget(self.cyclic_info)
@@ -2566,6 +2650,9 @@ class ResultsPanel(QWidget):
 
         self.cyclic_plot = TimeHistoryPlot(
             empty_message="No cyclic hysteresis data"
+        )
+        self.cyclic_plot.point_selected.connect(
+            self._select_frame_from_plot
         )
         self.cyclic_plot.setMinimumHeight(220)
         curve_layout.addWidget(self.cyclic_plot, 1)
@@ -2763,7 +2850,7 @@ class ResultsPanel(QWidget):
 
         self.cyclic_detail_tabs.addTab(cycle_page, "Cycles")
 
-        self.tabs.addTab(page, "Cyclic Hysteresis")
+        self.tabs.addTab(page, "Nonlinear Response")
 
     def _build_motion_tab(self) -> None:
         page = QWidget()
@@ -2831,6 +2918,10 @@ class ResultsPanel(QWidget):
         ):
             self.motion_speed.addItem(label, speed)
         self.motion_speed.setCurrentIndex(2)
+        self.motion_speed.setToolTip(
+            "Playback speed. Rendering stays near 25 FPS; faster settings "
+            "skip intermediate result frames to keep the viewport responsive."
+        )
         self.motion_speed.currentIndexChanged.connect(
             self._update_motion_timer
         )
@@ -2862,6 +2953,328 @@ class ResultsPanel(QWidget):
 
         self.tabs.addTab(page, "Motion")
 
+    def _build_frame_bar(self, root: QVBoxLayout) -> None:
+        self.frame_bar = QWidget()
+        frame_layout = QVBoxLayout(self.frame_bar)
+        frame_layout.setContentsMargins(2, 2, 2, 2)
+        frame_layout.setSpacing(3)
+
+        time_row = QHBoxLayout()
+        time_row.setContentsMargins(0, 0, 0, 0)
+        time_row.setSpacing(4)
+        self.result_time_label = QLabel("Time:")
+        time_row.addWidget(self.result_time_label)
+        self.result_time_mode = QComboBox()
+        self.result_time_mode.addItem("Last", "last")
+        self.result_time_mode.addItem("First / 0 s", "first")
+        self.result_time_mode.addItem("User Defined...", "user")
+        self.result_time_mode.setFixedWidth(126)
+        self.result_time_mode.setToolTip(
+            "Choose which transient result time is displayed in tables and "
+            "contours. User Defined snaps to the nearest recorded time."
+        )
+        self.result_time_mode.currentIndexChanged.connect(
+            self._result_time_mode_changed
+        )
+        time_row.addWidget(self.result_time_mode)
+
+        self.result_time_value = QDoubleSpinBox()
+        self.result_time_value.setDecimals(6)
+        self.result_time_value.setRange(0.0, 0.0)
+        self.result_time_value.setSuffix(" s")
+        self.result_time_value.setFixedWidth(118)
+        self.result_time_value.setKeyboardTracking(False)
+        self.result_time_value.setToolTip(
+            "Requested transient time. SARE displays the nearest recorded "
+            "result frame."
+        )
+        self.result_time_value.valueChanged.connect(
+            self._result_time_value_changed
+        )
+        self.result_time_value.hide()
+        time_row.addWidget(self.result_time_value)
+
+        self.result_time_actual = QLabel("t = -")
+        self.result_time_actual.setMinimumWidth(105)
+        time_row.addWidget(self.result_time_actual)
+        time_row.addStretch(1)
+        frame_layout.addLayout(time_row)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        row.addWidget(QLabel("Frame:"))
+        previous = QPushButton("◀")
+        previous.setToolTip("Previous result frame")
+        previous.clicked.connect(lambda: self._step_motion(-1))
+        row.addWidget(previous)
+
+        self.frame_play = QPushButton("▶ Play")
+        self.frame_play.setCheckable(True)
+        self.frame_play.toggled.connect(self._toggle_motion_playback)
+        row.addWidget(self.frame_play)
+
+        next_button = QPushButton("▶")
+        next_button.setToolTip("Next result frame")
+        next_button.clicked.connect(lambda: self._step_motion(1))
+        row.addWidget(next_button)
+
+        row.addWidget(QLabel("Speed:"))
+        self.frame_speed = QComboBox()
+        for label, speed in (
+            ("0.25×", 0.25),
+            ("0.5×", 0.5),
+            ("1×", 1.0),
+            ("2×", 2.0),
+            ("4×", 4.0),
+            ("8×", 8.0),
+            ("16×", 16.0),
+        ):
+            self.frame_speed.addItem(label, speed)
+        self.frame_speed.setCurrentIndex(
+            max(0, self.motion_speed.currentIndex())
+        )
+        self.frame_speed.setToolTip(
+            "Playback speed. Rendering stays near 25 FPS; faster settings "
+            "skip intermediate result frames to keep the viewport responsive."
+        )
+        self.frame_speed.currentIndexChanged.connect(
+            self._frame_speed_changed
+        )
+        row.addWidget(self.frame_speed)
+
+        self.frame_slider = QSlider(Qt.Horizontal)
+        self.frame_slider.setRange(0, 0)
+        self.frame_slider.valueChanged.connect(self._frame_slider_changed)
+        row.addWidget(self.frame_slider, 1)
+
+        self.frame_coordinate = QLabel("Frame -")
+        self.frame_coordinate.setMinimumWidth(125)
+        row.addWidget(self.frame_coordinate)
+
+        self.frame_counter = QLabel("0 / 0")
+        row.addWidget(self.frame_counter)
+        frame_layout.addLayout(row)
+
+        self.frame_bar.hide()
+        root.addWidget(self.frame_bar, 0)
+
+    def current_frame_index(self) -> int:
+        return int(self._motion_frame_index)
+
+    def playback_frame_limit(self) -> int:
+        return int(self._playback_frame_limit)
+
+    def _rebuild_playback_frame_indices(self) -> None:
+        count = (
+            int(self._motion_info.frame_count)
+            if self._motion_info is not None
+            else 0
+        )
+        limit = max(5, min(100, int(self._playback_frame_limit)))
+        if count <= 0:
+            self._playback_frame_indices = []
+            self._playback_sample_cursor = 0
+            return
+        if count <= limit:
+            indices = list(range(count))
+        else:
+            times = self._transient_time_values()
+            if len(times) == count and times[-1] > times[0]:
+                # Sample transient histories uniformly in physical time, not
+                # uniformly in recorder-row index. This preserves sensible
+                # animation spacing when the analysis uses variable time steps.
+                indices = []
+                cursor = 0
+                duration = float(times[-1] - times[0])
+                for sample in range(limit):
+                    target_time = (
+                        float(times[0])
+                        + duration * sample / float(limit - 1)
+                    )
+                    while (
+                        cursor + 1 < count
+                        and abs(float(times[cursor + 1]) - target_time)
+                        <= abs(float(times[cursor]) - target_time)
+                    ):
+                        cursor += 1
+                    indices.append(cursor)
+            else:
+                indices = [
+                    int(round(index * (count - 1) / (limit - 1)))
+                    for index in range(limit)
+                ]
+            # Rounding / variable-step histories can select the same recorder
+            # row more than once. Keep a strictly advancing sample sequence.
+            indices = list(dict.fromkeys(indices))
+            if indices[0] != 0:
+                indices.insert(0, 0)
+            if indices[-1] != count - 1:
+                indices.append(count - 1)
+        self._playback_frame_indices = indices
+        if not indices:
+            self._playback_sample_cursor = 0
+            return
+        current = int(self._motion_frame_index)
+        self._playback_sample_cursor = min(
+            range(len(indices)),
+            key=lambda item: abs(indices[item] - current),
+        )
+
+    def set_playback_frame_limit(self, limit: int) -> None:
+        self._playback_frame_limit = max(5, min(100, int(limit)))
+        self._motion_frame_accumulator = 0.0
+        self._rebuild_playback_frame_indices()
+
+    def set_linked_contour_active(self, active: bool) -> None:
+        self._linked_contour_active = bool(active)
+
+    def is_motion_playing(self) -> bool:
+        return bool(self._motion_timer.isActive())
+
+    def _frame_speed_changed(self, index: int) -> None:
+        if not hasattr(self, "motion_speed"):
+            return
+        if self.motion_speed.currentIndex() != int(index):
+            self.motion_speed.blockSignals(True)
+            self.motion_speed.setCurrentIndex(int(index))
+            self.motion_speed.blockSignals(False)
+        self._update_motion_timer()
+
+    def has_result_frames(self) -> bool:
+        return bool(
+            self._motion_info is not None
+            and int(self._motion_info.frame_count) > 0
+        )
+
+    def _nearest_transient_time_index(self, requested: float) -> int:
+        times = self._transient_time_values()
+        if not times:
+            return 0
+        value = float(requested)
+        position = bisect.bisect_left(times, value)
+        if position <= 0:
+            return 0
+        if position >= len(times):
+            return len(times) - 1
+        before = float(times[position - 1])
+        after = float(times[position])
+        return (
+            position
+            if abs(after - value) < abs(value - before)
+            else position - 1
+        )
+
+    def _configure_result_time_selector(self) -> None:
+        if not hasattr(self, "result_time_mode"):
+            return
+        times = self._transient_time_values()
+        enabled = bool(times)
+        for widget in (
+            self.result_time_label,
+            self.result_time_mode,
+            self.result_time_actual,
+        ):
+            widget.setVisible(enabled)
+        if not enabled:
+            self.result_time_value.hide()
+            return
+
+        self.result_time_mode.blockSignals(True)
+        try:
+            self.result_time_mode.setCurrentIndex(
+                max(0, self.result_time_mode.findData("last"))
+            )
+        finally:
+            self.result_time_mode.blockSignals(False)
+
+        low = float(times[0])
+        high = float(times[-1])
+        step = (
+            max((high - low) / 100.0, 1.0e-6)
+            if high > low
+            else 1.0e-6
+        )
+        self.result_time_value.blockSignals(True)
+        try:
+            self.result_time_value.setRange(low, high)
+            self.result_time_value.setSingleStep(step)
+            self.result_time_value.setValue(high)
+        finally:
+            self.result_time_value.blockSignals(False)
+        self.result_time_value.hide()
+        self._update_result_time_indicator()
+
+    def _update_result_time_indicator(self) -> None:
+        if not hasattr(self, "result_time_actual"):
+            return
+        times = self._transient_time_values()
+        index = int(self._motion_frame_index)
+        if not times or not (0 <= index < len(times)):
+            self.result_time_actual.setText("t = -")
+            return
+        self.result_time_actual.setText(
+            f"t = {float(times[index]):.6g} s"
+        )
+
+    def _result_time_mode_changed(self, _index: int) -> None:
+        times = self._transient_time_values()
+        if not times:
+            return
+        mode = str(self.result_time_mode.currentData() or "last")
+        user_defined = mode == "user"
+        self.result_time_value.setVisible(user_defined)
+        if mode == "last":
+            target = len(times) - 1
+        elif mode == "first":
+            target = 0
+        else:
+            target = self._nearest_transient_time_index(
+                self.result_time_value.value()
+            )
+        self._set_motion_index(target, refresh_tables=True)
+        self._sync_transient_playback_clock_to_frame()
+
+    def _result_time_value_changed(self, value: float) -> None:
+        if str(self.result_time_mode.currentData() or "") != "user":
+            return
+        target = self._nearest_transient_time_index(float(value))
+        self._set_motion_index(target, refresh_tables=True)
+        self._sync_transient_playback_clock_to_frame()
+
+    def _frame_slider_changed(self, value: int) -> None:
+        self._set_motion_index(int(value), refresh_tables=True)
+        self._sync_transient_playback_clock_to_frame()
+
+    def _select_frame_from_plot(self, index: int) -> None:
+        if self._motion_info is None:
+            return
+        target = int(index)
+        sender = self.sender()
+        if sender is getattr(self, "cyclic_plot", None):
+            if (
+                str(self.cyclic_compare_view.currentData() or "hysteresis")
+                != "hysteresis"
+            ):
+                return
+            # Cyclic hysteresis prepends the undeformed origin.
+            target = max(0, target - 1)
+        count = int(self._motion_info.frame_count)
+        if 0 <= target < count:
+            self._set_motion_index(target)
+
+    def _set_play_buttons(self, checked: bool) -> None:
+        for button in (
+            getattr(self, "motion_play", None),
+            getattr(self, "frame_play", None),
+        ):
+            if button is None:
+                continue
+            button.blockSignals(True)
+            button.setChecked(bool(checked))
+            button.setText("❚❚ Pause" if checked else "▶ Play")
+            button.blockSignals(False)
+
     def _motion_selected_mode(self) -> int | None:
         data = self.motion_source.currentData()
         try:
@@ -2871,10 +3284,8 @@ class ResultsPanel(QWidget):
 
     def _refresh_motion_controls(self) -> None:
         self._motion_timer.stop()
-        self.motion_play.blockSignals(True)
-        self.motion_play.setChecked(False)
-        self.motion_play.setText("▶ Play")
-        self.motion_play.blockSignals(False)
+        self._set_play_buttons(False)
+        self._motion_frame_accumulator = 0.0
 
         analysis = (
             self._result.get("analysis", {})
@@ -2905,23 +3316,39 @@ class ResultsPanel(QWidget):
             )
         self.motion_source.blockSignals(False)
 
-        self._motion_frame_index = 0
         self._motion_info = motion_info(
             self._result,
             mode=self._motion_selected_mode(),
             scan_reference=False,
         )
         count = int(self._motion_info.frame_count)
-        self.motion_slider.blockSignals(True)
-        self.motion_slider.setRange(0, max(0, count - 1))
-        self.motion_slider.setValue(0)
-        self.motion_slider.blockSignals(False)
-        self.motion_counter.setText(
-            f"{1 if count else 0} / {count}"
+        default_index = (
+            0
+            if self._motion_info.kind == "Modal"
+            else max(0, count - 1)
+        )
+        self._motion_frame_index = default_index
+        self._rebuild_playback_frame_indices()
+        self._configure_result_time_selector()
+        for slider in (self.motion_slider, self.frame_slider):
+            slider.blockSignals(True)
+            slider.setRange(0, max(0, count - 1))
+            slider.setValue(default_index)
+            slider.blockSignals(False)
+        counter = (
+            f"{default_index + 1 if count else 0} / {count}"
+        )
+        self.motion_counter.setText(counter)
+        self.frame_counter.setText(counter)
+        self.frame_coordinate.setText(
+            "Final frame" if count and default_index == count - 1 else "Frame"
         )
         enabled = count > 0
         self.motion_play.setEnabled(enabled)
         self.motion_slider.setEnabled(enabled)
+        self.frame_play.setEnabled(enabled)
+        self.frame_slider.setEnabled(enabled)
+        self.frame_bar.setVisible(enabled)
         self.motion_source.setEnabled(
             analysis_type == "Modal"
             and self.motion_source.count() > 1
@@ -2935,27 +3362,55 @@ class ResultsPanel(QWidget):
                 "available for motion playback."
             )
         )
-        self._sync_motion_markers(None)
+        if count > 0:
+            frame = motion_frame(
+                self._result,
+                default_index,
+                mode=self._motion_selected_mode(),
+                info=self._motion_info,
+            )
+            self.frame_coordinate.setText(frame.label)
+        self._sync_motion_markers(
+            None
+            if self._motion_info.kind == "Modal"
+            else (default_index if count > 0 else None)
+        )
 
     def _motion_source_changed(self, *_args) -> None:
         self._motion_frame_index = 0
+        self._motion_frame_accumulator = 0.0
         self._motion_info = motion_info(
             self._result,
             mode=self._motion_selected_mode(),
             scan_reference=False,
         )
         count = int(self._motion_info.frame_count)
-        self.motion_slider.blockSignals(True)
-        self.motion_slider.setRange(0, max(0, count - 1))
-        self.motion_slider.setValue(0)
-        self.motion_slider.blockSignals(False)
+        self._rebuild_playback_frame_indices()
+        self._configure_result_time_selector()
+        for slider in (self.motion_slider, self.frame_slider):
+            slider.blockSignals(True)
+            slider.setRange(0, max(0, count - 1))
+            slider.setValue(0)
+            slider.blockSignals(False)
+        self.frame_bar.setVisible(count > 0)
         self._emit_current_motion_frame()
 
     def _motion_slider_changed(self, value: int) -> None:
-        self._motion_frame_index = int(value)
-        self._emit_current_motion_frame()
+        self._set_motion_index(int(value), refresh_tables=True)
+        self._sync_transient_playback_clock_to_frame()
 
-    def _set_motion_index(self, index: int) -> None:
+    def _refresh_frame_dependent_tables(self) -> None:
+        if not hasattr(self, "node_table"):
+            return
+        self._node_table_display_key = None
+        self._populate_node_table()
+
+    def _set_motion_index(
+        self,
+        index: int,
+        *,
+        refresh_tables: bool = True,
+    ) -> None:
         if self._motion_info is None:
             return
         count = int(self._motion_info.frame_count)
@@ -2963,10 +3418,23 @@ class ResultsPanel(QWidget):
             return
         target = max(0, min(int(index), count - 1))
         self._motion_frame_index = target
-        if self.motion_slider.value() != target:
-            self.motion_slider.setValue(target)
-        else:
-            self._emit_current_motion_frame()
+        if self._playback_frame_indices:
+            self._playback_sample_cursor = min(
+                range(len(self._playback_frame_indices)),
+                key=lambda item: abs(
+                    self._playback_frame_indices[item] - target
+                ),
+            )
+        for slider in (self.motion_slider, self.frame_slider):
+            if slider.value() == target:
+                continue
+            slider.blockSignals(True)
+            slider.setValue(target)
+            slider.blockSignals(False)
+        self._update_result_time_indicator()
+        if refresh_tables:
+            self._refresh_frame_dependent_tables()
+        self._emit_current_motion_frame()
 
     def _step_motion(self, delta: int) -> None:
         if self._motion_info is None:
@@ -2987,32 +3455,66 @@ class ResultsPanel(QWidget):
         except (TypeError, ValueError):
             return 1.0
 
+    def _transient_time_values(self) -> list[float]:
+        if self._motion_info is None or self._motion_info.kind != "Transient":
+            return []
+        history = (
+            self._result.get("history", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        raw = history.get("time", []) if isinstance(history, dict) else []
+        if not isinstance(raw, list):
+            return []
+        values: list[float] = []
+        for value in raw[: int(self._motion_info.frame_count)]:
+            try:
+                number = float(value)
+            except (TypeError, ValueError, OverflowError):
+                return []
+            if not math.isfinite(number):
+                return []
+            values.append(number)
+        if len(values) < 2:
+            return []
+        if any(values[index] <= values[index - 1] for index in range(1, len(values))):
+            return []
+        return values
+
+    def _sync_transient_playback_clock_to_frame(self) -> None:
+        times = self._transient_time_values()
+        index = int(self._motion_frame_index)
+        self._motion_playback_time = (
+            float(times[index])
+            if times and 0 <= index < len(times)
+            else None
+        )
+        self._motion_wall_clock = time.monotonic()
+
     def _update_motion_timer(self, *_args) -> None:
-        if not self._motion_timer.isActive():
-            return
+        if hasattr(self, "frame_speed"):
+            index = self.motion_speed.currentIndex()
+            if self.frame_speed.currentIndex() != index:
+                self.frame_speed.blockSignals(True)
+                self.frame_speed.setCurrentIndex(index)
+                self.frame_speed.blockSignals(False)
+        # Keep VTK redraws at a predictable ~25 FPS. Playback speed is
+        # represented by frame advancement, not by asking the GUI to repaint
+        # at 60+ FPS where large contour meshes become CPU/GPU bound.
+        self._motion_timer.setInterval(40)
+
+    def _motion_frames_per_tick(self) -> float:
         speed = max(0.01, self._motion_speed_value())
-        interval = max(16, int(round(40.0 / speed)))
-        if (
-            self._motion_info is not None
-            and self._motion_info.transient_dt is not None
-        ):
-            dt = float(self._motion_info.transient_dt)
-            if dt > 0.0 and dt / speed > 0.04:
-                interval = max(
-                    16,
-                    int(round(1000.0 * dt / speed)),
-                )
-            else:
-                interval = 40
-        self._motion_timer.setInterval(interval)
+        # Playback advances through the user-selected evenly sampled frame
+        # set. The UI constrains this to 5-100 frames for responsive contours.
+        return speed
 
     def stop_motion(self) -> None:
         self._motion_timer.stop()
-        if hasattr(self, "motion_play"):
-            self.motion_play.blockSignals(True)
-            self.motion_play.setChecked(False)
-            self.motion_play.setText("▶ Play")
-            self.motion_play.blockSignals(False)
+        self._motion_frame_accumulator = 0.0
+        self._motion_playback_time = None
+        self._motion_wall_clock = None
+        self._set_play_buttons(False)
         self._sync_motion_markers(None)
 
     def _toggle_motion_playback(self, checked: bool) -> None:
@@ -3021,27 +3523,23 @@ class ResultsPanel(QWidget):
                 self._motion_info is None
                 or self._motion_info.frame_count <= 0
             ):
-                self.motion_play.blockSignals(True)
-                self.motion_play.setChecked(False)
-                self.motion_play.blockSignals(False)
+                self._set_play_buttons(False)
                 return
-            self.motion_play.setText("❚❚ Pause")
-            speed = max(0.01, self._motion_speed_value())
-            interval = max(16, int(round(40.0 / speed)))
-            if self._motion_info.transient_dt is not None:
-                dt = float(self._motion_info.transient_dt)
-                if dt > 0.0 and dt / speed > 0.04:
-                    interval = max(
-                        16,
-                        int(round(1000.0 * dt / speed)),
-                    )
-                else:
-                    interval = 40
-            self._motion_timer.setInterval(interval)
+            self._motion_frame_accumulator = 0.0
+            self._sync_transient_playback_clock_to_frame()
+            self._set_play_buttons(True)
+            self._motion_timer.setInterval(40)
             self._motion_timer.start()
         else:
             self._motion_timer.stop()
-            self.motion_play.setText("▶ Play")
+            self._motion_frame_accumulator = 0.0
+            self._motion_playback_time = None
+            self._motion_wall_clock = None
+            self._set_play_buttons(False)
+            self._refresh_frame_dependent_tables()
+            # Re-emit the resting frame so expensive annotations such as
+            # contour extrema labels can be restored after fast playback.
+            self._emit_current_motion_frame()
 
     def _advance_motion(self) -> None:
         if self._motion_info is None:
@@ -3050,35 +3548,115 @@ class ResultsPanel(QWidget):
         if count <= 0:
             return
 
-        increment = 1
-        dt = self._motion_info.transient_dt
-        speed = max(0.01, self._motion_speed_value())
-        if dt is not None and dt > 0.0:
-            desired = 0.04 * speed
-            if desired >= dt:
-                increment = max(1, int(round(desired / dt)))
+        samples = self._playback_frame_indices
+        transient_times = self._transient_time_values()
+        if samples and transient_times:
+            now = time.monotonic()
+            if self._motion_wall_clock is None:
+                self._motion_wall_clock = now
+            if self._motion_playback_time is None:
+                index = max(0, min(self._motion_frame_index, len(transient_times) - 1))
+                self._motion_playback_time = float(transient_times[index])
 
-        target = self._motion_frame_index + increment
-        if target >= count:
-            if self.motion_loop.isChecked():
-                target %= count
-            else:
-                target = count - 1
-                self.motion_play.setChecked(False)
-        self._set_motion_index(target)
+            elapsed = max(0.0, now - float(self._motion_wall_clock))
+            self._motion_wall_clock = now
+            self._motion_playback_time += (
+                elapsed * max(0.01, self._motion_speed_value())
+            )
+
+            start_time = float(transient_times[samples[0]])
+            end_time = float(transient_times[samples[-1]])
+            duration = end_time - start_time
+            if self._motion_playback_time > end_time:
+                if self.motion_loop.isChecked() and duration > 0.0:
+                    self._motion_playback_time = (
+                        start_time
+                        + (self._motion_playback_time - start_time) % duration
+                    )
+                else:
+                    self._motion_playback_time = end_time
+                    self._motion_timer.stop()
+                    self._motion_frame_accumulator = 0.0
+                    self._set_play_buttons(False)
+
+            target_time = float(self._motion_playback_time)
+            cursor = 0
+            for sample_index, frame_index in enumerate(samples):
+                if float(transient_times[frame_index]) <= target_time:
+                    cursor = sample_index
+                else:
+                    break
+            self._playback_sample_cursor = cursor
+            target = int(samples[cursor])
+            if target != self._motion_frame_index:
+                self._set_motion_index(target, refresh_tables=False)
+            if not self._motion_timer.isActive():
+                self._refresh_frame_dependent_tables()
+            return
+
+        # Static/modal histories do not have a physical time axis. Advance
+        # through the sampled frames while rendering at the fixed UI cadence.
+        self._motion_frame_accumulator += self._motion_frames_per_tick()
+        increment = int(self._motion_frame_accumulator)
+        if increment <= 0:
+            return
+        self._motion_frame_accumulator -= float(increment)
+
+        if samples:
+            cursor = self._playback_sample_cursor + increment
+            if cursor >= len(samples):
+                if self.motion_loop.isChecked():
+                    cursor %= len(samples)
+                else:
+                    cursor = len(samples) - 1
+                    self._motion_timer.stop()
+                    self._motion_frame_accumulator = 0.0
+                    self._set_play_buttons(False)
+            self._playback_sample_cursor = cursor
+            target = int(samples[cursor])
+        else:
+            target = self._motion_frame_index + increment
+            if target >= count:
+                if self.motion_loop.isChecked():
+                    target %= count
+                else:
+                    target = count - 1
+                    self._motion_timer.stop()
+                    self._motion_frame_accumulator = 0.0
+                    self._set_play_buttons(False)
+        self._set_motion_index(target, refresh_tables=False)
+        if not self._motion_timer.isActive():
+            self._refresh_frame_dependent_tables()
 
     def _sync_motion_markers(self, index: int | None) -> None:
         self.history_plot.set_marker(index)
         self.pushover_plot.set_marker(index)
-        self.cyclic_plot.set_marker(index)
+        if (
+            index is not None
+            and str(self.cyclic_compare_view.currentData() or "hysteresis")
+            == "hysteresis"
+        ):
+            self.cyclic_plot.set_marker(int(index) + 1)
+        else:
+            self.cyclic_plot.set_marker(None)
 
     def _emit_current_motion_frame(self, *_args) -> None:
         if not hasattr(self, "motion_info_label"):
             return
         mode = self._motion_selected_mode()
-        if (
-            self._motion_info is None
-            or self._motion_info.reference_magnitude is None
+        if self._motion_info is None:
+            self._motion_info = motion_info(
+                self._result,
+                mode=mode,
+                scan_reference=not bool(
+                    getattr(self, "_linked_contour_active", False)
+                ),
+            )
+        elif (
+            self._motion_info.reference_magnitude is None
+            and not bool(
+                getattr(self, "_linked_contour_active", False)
+            )
         ):
             self._motion_info = motion_info(
                 self._result,
@@ -3099,16 +3677,61 @@ class ResultsPanel(QWidget):
             0,
             min(self._motion_frame_index, count - 1),
         )
+        if (
+            bool(getattr(self, "_linked_contour_active", False))
+            and self._motion_info.kind != "Modal"
+        ):
+            frame_index = int(self._motion_frame_index)
+            history = (
+                self._result.get("history", {})
+                if isinstance(self._result, dict)
+                else {}
+            )
+            times = (
+                history.get("time", [])
+                if isinstance(history, dict)
+                else []
+            )
+            coordinate = None
+            if isinstance(times, list) and frame_index < len(times):
+                try:
+                    coordinate = float(times[frame_index])
+                except (TypeError, ValueError, OverflowError):
+                    coordinate = None
+
+            if self._motion_info.kind == "Transient" and coordinate is not None:
+                label = (
+                    f"Frame {frame_index + 1}/{count} · "
+                    f"t = {coordinate:.6g} s"
+                )
+            elif coordinate is not None:
+                label = (
+                    f"Step {frame_index + 1}/{count} · "
+                    f"coordinate = {coordinate:.6g}"
+                )
+            else:
+                label = f"Step {frame_index + 1}/{count}"
+
+            counter = f"{frame_index + 1} / {count}"
+            self.motion_counter.setText(counter)
+            self.frame_counter.setText(counter)
+            self.motion_info_label.setText(label)
+            self.frame_coordinate.setText(label)
+            self._sync_motion_markers(frame_index)
+            self.result_frame_requested.emit(frame_index, label)
+            return
+
         frame = motion_frame(
             self._result,
             self._motion_frame_index,
             mode=mode,
             info=self._motion_info,
         )
-        self.motion_counter.setText(
-            f"{frame.index + 1} / {frame.frame_count}"
-        )
+        counter = f"{frame.index + 1} / {frame.frame_count}"
+        self.motion_counter.setText(counter)
+        self.frame_counter.setText(counter)
         self.motion_info_label.setText(frame.label)
+        self.frame_coordinate.setText(frame.label)
         self._sync_motion_markers(
             None if self._motion_info.kind == "Modal" else frame.index
         )
@@ -3119,6 +3742,7 @@ class ResultsPanel(QWidget):
             float(self._motion_info.reference_magnitude or 0.0),
             frame.label,
         )
+        self.result_frame_requested.emit(int(frame.index), str(frame.label))
 
     def _build_specimen_tab(self) -> None:
         page = QWidget()
@@ -4009,6 +4633,9 @@ class ResultsPanel(QWidget):
         layout.addWidget(self.history_label)
 
         self.history_plot = TimeHistoryPlot()
+        self.history_plot.point_selected.connect(
+            self._select_frame_from_plot
+        )
         layout.addWidget(self.history_plot, 1)
         self.tabs.addTab(page, "Time History")
         self._update_history_controls()
@@ -4745,6 +5372,7 @@ class ResultsPanel(QWidget):
         self._update_mode_summary()
 
         self._populate_convergence_dashboard()
+        self._refresh_motion_controls()
         self._populate_node_table()
         self._populate_element_table()
         self._populate_shell_results()
@@ -4759,7 +5387,6 @@ class ResultsPanel(QWidget):
         self._update_cyclic_plot()
         self._populate_specimen_response()
         self._update_history_plot()
-        self._refresh_motion_controls()
         return True
 
     def _populate_convergence_dashboard(self) -> None:
@@ -5041,7 +5668,20 @@ class ResultsPanel(QWidget):
 
     def _populate_node_table(self) -> None:
         displacement = self.node_quantity.currentText() == "Displacement"
-        display_key = "Displacement" if displacement else "Reaction"
+        quantity_key = "Displacement" if displacement else "Reaction"
+        history_key = "disp" if displacement else "reaction"
+
+        transient_times = self._transient_time_values()
+        frame_index = (
+            max(0, min(int(self._motion_frame_index), len(transient_times) - 1))
+            if transient_times
+            else None
+        )
+        display_key = (
+            f"{quantity_key}:frame:{frame_index}"
+            if frame_index is not None
+            else f"{quantity_key}:final"
+        )
         if self._node_table_display_key == display_key:
             return
 
@@ -5050,25 +5690,71 @@ class ResultsPanel(QWidget):
             if displacement
             else ["Node", "FX", "FY", "FZ", "MX", "MY", "MZ"]
         )
-        rows = self._node_table_cache.get(display_key)
-        if rows is None:
-            final = self._result.get("final", {})
-            key = "node_displacements" if displacement else "node_reactions"
-            data = final.get(key, {}) if isinstance(final, dict) else {}
-            if not isinstance(data, dict):
-                data = {}
-            rows = []
-            for tag in sorted(data, key=lambda value: int(value)):
-                values = list(data[tag])
-                while len(values) < 6:
-                    values.append(0.0)
-                rows.append(
-                    (
-                        str(tag),
-                        *(f"{float(value):.6g}" for value in values[:6]),
+
+        rows: list[tuple[str, ...]] = []
+        if frame_index is not None:
+            history = self._result.get("history", {})
+            nodes = (
+                history.get("nodes", {})
+                if isinstance(history, dict)
+                else {}
+            )
+            if isinstance(nodes, dict):
+                for tag in sorted(nodes, key=lambda value: int(value)):
+                    node_data = nodes.get(tag, {})
+                    if not isinstance(node_data, dict):
+                        continue
+                    frame_rows = node_data.get(history_key, [])
+                    if (
+                        not isinstance(frame_rows, list)
+                        or frame_index >= len(frame_rows)
+                    ):
+                        continue
+                    raw_values = frame_rows[frame_index]
+                    if not isinstance(raw_values, (list, tuple)):
+                        continue
+                    values = list(raw_values)
+                    while len(values) < 6:
+                        values.append(0.0)
+                    rows.append(
+                        (
+                            str(tag),
+                            *(
+                                f"{float(value):.6g}"
+                                for value in values[:6]
+                            ),
+                        )
                     )
+        else:
+            rows = self._node_table_cache.get(display_key, [])
+            if not rows:
+                final = self._result.get("final", {})
+                key = (
+                    "node_displacements"
+                    if displacement
+                    else "node_reactions"
                 )
-            self._node_table_cache[display_key] = rows
+                data = (
+                    final.get(key, {})
+                    if isinstance(final, dict)
+                    else {}
+                )
+                if not isinstance(data, dict):
+                    data = {}
+                for tag in sorted(data, key=lambda value: int(value)):
+                    values = list(data[tag])
+                    while len(values) < 6:
+                        values.append(0.0)
+                    rows.append(
+                        (
+                            str(tag),
+                            *(
+                                f"{float(value):.6g}"
+                                for value in values[:6]
+                            ),
+                        )
+                    )
+                self._node_table_cache[display_key] = rows
 
         self.node_table.setUpdatesEnabled(False)
         try:
@@ -6797,15 +7483,11 @@ class ResultsPanel(QWidget):
                 if isinstance(analysis, dict)
                 else ""
             )
-            if analysis_type == "Cyclic":
-                self.cyclic_info.setText(
-                    "Cyclic result is present, but no complete "
-                    "control-displacement/base-shear history is available."
-                )
-            else:
-                self.cyclic_info.setText(
-                    "Run or select a Cyclic analysis to view hysteresis."
-                )
+            self.cyclic_info.setText(
+                f"{analysis_type or 'Analysis'} result does not contain a "
+                "complete displacement/base-reaction history for nonlinear "
+                "force-displacement post-processing."
+            )
             self.cyclic_metrics.setText(
                 "Peak |u|: -   +Vpeak: -   -Vpeak: -   "
                 "Hysteretic energy: -   Closed cycles: -"
@@ -6817,7 +7499,7 @@ class ResultsPanel(QWidget):
             self.cyclic_reversal_table.setRowCount(0)
             self.cyclic_cycle_table.setRowCount(0)
             self.cyclic_research_info.setText(
-                "No cyclic reversal research data is available."
+                "No reversal-based nonlinear response data is available."
             )
             return
 

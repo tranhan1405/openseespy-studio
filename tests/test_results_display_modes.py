@@ -384,7 +384,7 @@ def test_cyclic_tab_shows_synchronized_column_reversal_and_cycle_metrics(qapp):
         panel.show_solution_result("CyclicHysteresis")
         qapp.processEvents()
 
-        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Cyclic Hysteresis"
+        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Nonlinear Response"
         assert panel.cyclic_reversal_table.columnCount() == 20
         assert panel.cyclic_reversal_table.rowCount() == 3
         assert panel.cyclic_cycle_table.rowCount() == 1
@@ -805,6 +805,151 @@ def test_clear_all_resets_dense_result_state(qapp):
         assert panel.motion_slider.maximum() == 0
         assert panel.motion_counter.text() == "0 / 0"
         assert not panel.motion_play.isEnabled()
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+def test_specialized_cyclic_result_objects_focus_existing_views(qapp):
+    panel = ResultsPanel()
+    try:
+        panel.show_solution_result("CyclicHysteresis")
+        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Nonlinear Response"
+        assert panel.cyclic_compare_view.currentData() == "hysteresis"
+        assert panel.cyclic_detail_tabs.currentIndex() == 0
+
+        panel.show_solution_result("CyclicBackbone")
+        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Nonlinear Response"
+        assert panel.cyclic_compare_view.currentData() == "backbone"
+        assert panel.cyclic_detail_tabs.currentIndex() == 0
+
+        panel.show_solution_result("CyclicReversalMetrics")
+        assert panel.cyclic_compare_view.currentData() == "hysteresis"
+        assert panel.cyclic_detail_tabs.tabText(
+            panel.cyclic_detail_tabs.currentIndex()
+        ) == "Reversals"
+
+        panel.show_solution_result("CyclicCycleMetrics")
+        assert panel.cyclic_detail_tabs.tabText(
+            panel.cyclic_detail_tabs.currentIndex()
+        ) == "Cycles"
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+
+def test_linked_frame_bar_tracks_motion_and_graph_markers(qapp):
+    panel = ResultsPanel()
+    result = {
+        "analysis": {"type": "Transient"},
+        "history": {
+            "time": [0.0, 0.1, 0.2],
+            "nodes": {
+                "1": {
+                    "disp": [
+                        [0.0, 0.0, 0.0],
+                        [0.1, 0.0, 0.0],
+                        [0.2, 0.0, 0.0],
+                    ],
+                    "reaction": [
+                        [0.0, 0.0, 0.0],
+                        [1.0, 0.0, 0.0],
+                        [2.0, 0.0, 0.0],
+                    ],
+                }
+            },
+        },
+        "final": {
+            "node_displacements": {"1": [0.2, 0.0, 0.0]},
+        },
+        "convergence": {"steps": []},
+        "modes": {},
+    }
+    captured: list[tuple[int, str]] = []
+    panel.result_frame_requested.connect(
+        lambda index, label: captured.append((int(index), str(label)))
+    )
+    try:
+        panel.set_result(result)
+        qapp.processEvents()
+
+        assert panel.has_result_frames()
+        assert not panel.frame_bar.isHidden()
+        assert panel.current_frame_index() == 2
+        assert panel.frame_slider.value() == 2
+        assert panel.motion_slider.value() == 2
+
+        panel._set_motion_index(1)
+        qapp.processEvents()
+
+        assert panel.current_frame_index() == 1
+        assert panel.frame_slider.value() == 1
+        assert panel.motion_slider.value() == 1
+        assert panel.history_plot._marker_index == 1
+        assert captured[-1][0] == 1
+        assert "t = 0.1 s" in captured[-1][1]
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+def test_shared_frame_bar_exposes_synced_playback_speed(qapp):
+    panel = ResultsPanel()
+    try:
+        assert panel.frame_speed.currentData() == pytest.approx(1.0)
+        index = panel.frame_speed.findData(4.0)
+        assert index >= 0
+        panel.frame_speed.setCurrentIndex(index)
+        qapp.processEvents()
+        assert panel.motion_speed.currentData() == pytest.approx(4.0)
+
+        index = panel.motion_speed.findData(0.5)
+        assert index >= 0
+        panel.motion_speed.setCurrentIndex(index)
+        qapp.processEvents()
+        assert panel.frame_speed.currentData() == pytest.approx(0.5)
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+def test_linked_contour_frame_emit_skips_duplicate_motion_vectors(qapp):
+    panel = ResultsPanel()
+    result = {
+        "analysis": {"type": "Transient"},
+        "history": {
+            "time": [0.0, 0.1],
+            "nodes": {
+                "1": {
+                    "disp": [[0.0, 0.0, 0.0], [0.1, 0.0, 0.0]],
+                    "reaction": [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                }
+            },
+        },
+        "final": {"node_displacements": {"1": [0.1, 0.0, 0.0]}},
+        "convergence": {"steps": []},
+        "modes": {},
+    }
+    motion_calls = []
+    result_calls = []
+    panel.motion_frame_requested.connect(
+        lambda *args: motion_calls.append(args)
+    )
+    panel.result_frame_requested.connect(
+        lambda *args: result_calls.append(args)
+    )
+    try:
+        panel.set_linked_contour_active(True)
+        panel.set_result(result)
+        panel._set_motion_index(1)
+        qapp.processEvents()
+
+        assert result_calls
+        assert result_calls[-1][0] == 1
+        assert not motion_calls
+        assert "t = 0.1 s" in result_calls[-1][1]
     finally:
         panel.close()
         panel.deleteLater()

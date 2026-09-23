@@ -41,28 +41,71 @@ def test_pushover_catalog_includes_capacity_curve_and_common_results():
     assert "Convergence" in types
     assert "PushoverCurve" in types
     assert "CyclicHysteresis" not in types
+    choices = result_choices_for_analysis("Pushover")
+    capacity = next(
+        choice for choice in choices
+        if choice.result_type == "PushoverCurve"
+    )
+    assert capacity.category == "Nonlinear Results"
 
 
 def test_cyclic_catalog_includes_hysteresis_not_pushover_curve():
-    types = _types("Cyclic")
+    choices = result_choices_for_analysis("Cyclic")
+    types = {choice.result_type for choice in choices}
 
     assert "CyclicHysteresis" in types
+    assert "CyclicBackbone" in types
+    assert "CyclicReversalMetrics" in types
+    assert "CyclicCycleMetrics" in types
     assert "SpecimenResponse" in types
     assert "PushoverCurve" not in types
     assert "TimeHistory" in types
     assert "ForceDisplacement" in types
 
+    nonlinear = {
+        choice.result_type: choice
+        for choice in choices
+        if choice.result_type.startswith("Cyclic")
+    }
+    assert nonlinear["CyclicHysteresis"].category == "Nonlinear Results"
+    assert (
+        nonlinear["CyclicHysteresis"].label
+        == "Hysteretic Force–Displacement"
+    )
+    assert nonlinear["CyclicBackbone"].label == "Backbone / Envelope"
+    assert (
+        nonlinear["CyclicCycleMetrics"].label
+        == "Cycle Energy & Degradation"
+    )
 
-def test_static_and_transient_catalogs_exclude_specialized_curves():
-    for analysis_type in ("Static", "Transient"):
-        types = _types(analysis_type)
-        assert "PushoverCurve" not in types
-        assert "CyclicHysteresis" not in types
-        assert "TimeHistory" in types
-        assert "ForceDisplacement" in types
-        assert "SpecimenResponse" in types
-        assert "Motion" in types
-        assert "Convergence" in types
+
+def test_static_catalog_excludes_cyclic_response_metrics():
+    types = _types("Static")
+    assert "PushoverCurve" not in types
+    assert "CyclicHysteresis" not in types
+    assert "TimeHistory" in types
+    assert "ForceDisplacement" in types
+    assert "SpecimenResponse" in types
+    assert "Motion" in types
+    assert "Convergence" in types
+
+
+def test_transient_catalog_exposes_capability_based_cyclic_response_metrics():
+    choices = result_choices_for_analysis("Transient")
+    types = {choice.result_type for choice in choices}
+
+    assert "PushoverCurve" not in types
+    assert "CyclicHysteresis" in types
+    assert "CyclicBackbone" in types
+    assert "CyclicReversalMetrics" in types
+    assert "CyclicCycleMetrics" in types
+    assert all(
+        choice.category == "Nonlinear Results"
+        for choice in choices
+        if choice.result_type.startswith("Cyclic")
+    )
+    assert "TimeHistory" in types
+    assert "ForceDisplacement" in types
 
 
 
@@ -132,3 +175,18 @@ def test_force_displacement_catalog_default_uses_base_shear():
     assert item.category == "Charts / History"
     assert item.label == "Force–Displacement"
     assert item.settings["force_source"] == "Base shear"
+
+def test_nodal_results_default_to_global_animation_contour_range():
+    for analysis_kind in ("Static", "Transient", "Cyclic", "Pushover"):
+        choices = result_choices_for_analysis(analysis_kind)
+        nodal = [
+            choice
+            for choice in choices
+            if choice.result_type in {"NodalDisplacement", "NodalReaction"}
+        ]
+        assert nodal
+        assert all(
+            choice.settings.get("contour_range_mode") == "global"
+            for choice in nodal
+        )
+

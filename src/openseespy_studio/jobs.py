@@ -11,6 +11,7 @@ class JobRecord:
     analysis_tag: int | None
     analysis_name: str
     analysis_type: str
+    project_signature: str = ""
     status: str = "Queued"
     started_at: float | None = None
     finished_at: float | None = None

@@ -409,6 +409,51 @@ def test_cyclic_hysteresis_curve_uses_control_displacement_and_applied_shear():
     assert dof == 1
 
 
+def test_transient_hysteresis_uses_recorded_node_and_base_reactions():
+    result = {
+        "analysis": {"type": "Transient"},
+        "history": {
+            "time": [0.0, 0.1, 0.2, 0.3, 0.4],
+            "nodes": {
+                "1": {
+                    "disp": [
+                        [0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0],
+                    ]
+                },
+                "9": {
+                    "disp": [
+                        [0.0, 0.0, 0.0],
+                        [0.01, 0.0, 0.0],
+                        [-0.01, 0.0, 0.0],
+                        [0.008, 0.0, 0.0],
+                        [0.0, 0.0, 0.0],
+                    ]
+                },
+            },
+            "base_reactions": [
+                [0.0, 0.0, 0.0],
+                [-10.0, 0.0, 0.0],
+                [9.0, 0.0, 0.0],
+                [-8.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ],
+        },
+    }
+
+    x, y, node, dof = cyclic_hysteresis_curve(result)
+
+    assert node == 9
+    assert dof == 1
+    assert x == [0.0, 0.01, -0.01, 0.008, 0.0]
+    assert y == [0.0, 10.0, -9.0, 8.0, -0.0]
+    metrics = cyclic_hysteresis_metrics(x, y)
+    assert len(metrics["reversals"]) >= 2
+
+
 def test_cyclic_reversals_and_closed_path_energy():
     x = [0.0, 1.0, 2.0, 1.0, 0.0, -1.0, 0.0]
     y = [0.0, 2.0, 4.0, 1.0, 0.0, -1.0, 0.0]
