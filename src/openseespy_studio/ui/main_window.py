@@ -9246,6 +9246,67 @@ class MainWindow(QMainWindow):
         box.exec()
         return box.clickedButton() is create_button
 
+    def _capture_created_dependency(
+        self,
+        mapping_getter,
+        creator,
+    ):
+        before = set(mapping_getter())
+        creator()
+        mapping = mapping_getter()
+        created = sorted(set(mapping) - before)
+        if not created:
+            return None
+        return mapping[created[-1]]
+
+    def _create_material_dependency(self):
+        return self._capture_created_dependency(
+            lambda: self.project.materials,
+            self._create_material,
+        )
+
+    def _create_section_dependency(self):
+        return self._capture_created_dependency(
+            lambda: self.project.sections,
+            self._create_section,
+        )
+
+    def _create_frame_section_dependency(self):
+        return self._capture_created_dependency(
+            self._frame_sections,
+            self._create_section,
+        )
+
+    def _create_shell_section_dependency(self):
+        return self._capture_created_dependency(
+            self._shell_sections,
+            self._create_shell_section,
+        )
+
+    def _create_transformation_dependency(self):
+        return self._capture_created_dependency(
+            lambda: self.project.transformations,
+            self._create_transformation,
+        )
+
+    def _create_time_series_dependency(self):
+        return self._capture_created_dependency(
+            lambda: self.project.time_series,
+            self._create_time_series,
+        )
+
+    def _create_plain_pattern_dependency(self):
+        return self._capture_created_dependency(
+            self._plain_load_patterns,
+            self._create_load_pattern,
+        )
+
+    def _create_analysis_dependency(self):
+        return self._capture_created_dependency(
+            self._compatible_surface_result_analyses,
+            lambda: self._create_analysis_of_type("Static"),
+        )
+
     def _ensure_prerequisite(
         self,
         *,
@@ -9759,6 +9820,7 @@ class MainWindow(QMainWindow):
             self.project.time_series,
             next_tag=self.project.next_load_pattern_tag(),
             allow_uniform_excitation=False,
+            new_time_series_callback=self._create_time_series_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -9782,6 +9844,7 @@ class MainWindow(QMainWindow):
             self.project.time_series,
             pattern=pattern,
             allow_uniform_excitation=False,
+            new_time_series_callback=self._create_time_series_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -10100,6 +10163,7 @@ class MainWindow(QMainWindow):
             next_tag=self.project.next_nodal_load_tag(),
             node_tag=node_tag,
             units=self.project.units,
+            new_pattern_callback=self._create_plain_pattern_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -10175,6 +10239,7 @@ class MainWindow(QMainWindow):
                 if load.load_type == "SurfacePressure"
                 else {"Uniform", "Point", "SelfWeight"}
             ),
+            new_pattern_callback=self._create_plain_pattern_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -10245,6 +10310,7 @@ class MainWindow(QMainWindow):
             node_tag=node_tag,
             ndf=self.model.ndf,
             units=self.project.units,
+            new_pattern_callback=self._create_plain_pattern_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -10307,6 +10373,7 @@ class MainWindow(QMainWindow):
             displacement=displacement,
             ndf=self.model.ndf,
             units=self.project.units,
+            new_pattern_callback=self._create_plain_pattern_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -11340,6 +11407,7 @@ class MainWindow(QMainWindow):
             edge_load=editing,
             next_tag=self.project.next_surface_edge_load_tag(),
             units=self.project.units,
+            new_pattern_callback=self._create_plain_pattern_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -11620,6 +11688,7 @@ class MainWindow(QMainWindow):
             pressure=editing,
             next_tag=self.project.next_surface_pressure_tag(),
             units=self.project.units,
+            new_pattern_callback=self._create_plain_pattern_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -12125,6 +12194,7 @@ class MainWindow(QMainWindow):
             ),
             result=editing,
             next_tag=self.project.next_solution_result_tag(),
+            new_analysis_callback=self._create_analysis_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -12331,6 +12401,7 @@ class MainWindow(QMainWindow):
             element_tag=selected[0],
             units=self.project.units,
             allowed_load_types={"SurfacePressure"},
+            new_pattern_callback=self._create_plain_pattern_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -12454,6 +12525,7 @@ class MainWindow(QMainWindow):
             element_tag=selected[0],
             units=self.project.units,
             allowed_load_types={"Uniform", "Point", "SelfWeight"},
+            new_pattern_callback=self._create_plain_pattern_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -12543,6 +12615,7 @@ class MainWindow(QMainWindow):
             plain,
             load=load,
             units=self.project.units,
+            new_pattern_callback=self._create_plain_pattern_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -13531,6 +13604,7 @@ class MainWindow(QMainWindow):
             nodes=self.model.nodes,
             sections=self.project.sections,
             initial_nodes=selected_nodes[:4],
+            new_section_callback=self._create_shell_section_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -13617,6 +13691,7 @@ class MainWindow(QMainWindow):
             nodes=self.model.nodes,
             sections=self.project.sections,
             initial_nodes=selected_nodes[:4],
+            new_section_callback=self._create_shell_section_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -13683,6 +13758,7 @@ class MainWindow(QMainWindow):
             nodes=self.model.nodes,
             sections=self.project.sections,
             element=element,
+            new_section_callback=self._create_shell_section_dependency,
             parent=self,
         )
         dialog.tag.setEnabled(False)
@@ -15297,6 +15373,9 @@ class MainWindow(QMainWindow):
             initial_point_i=point_i,
             initial_point_j=point_j,
             mode="geometry",
+            new_section_callback=self._create_frame_section_dependency,
+            new_transformation_callback=self._create_transformation_dependency,
+            new_material_callback=self._create_material_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -15341,6 +15420,9 @@ class MainWindow(QMainWindow):
             materials=self.project.materials,
             line=line,
             mode="geometry",
+            new_section_callback=self._create_frame_section_dependency,
+            new_transformation_callback=self._create_transformation_dependency,
+            new_material_callback=self._create_material_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -15399,6 +15481,9 @@ class MainWindow(QMainWindow):
             materials=self.project.materials,
             line=line,
             mode="mesh",
+            new_section_callback=self._create_frame_section_dependency,
+            new_transformation_callback=self._create_transformation_dependency,
+            new_material_callback=self._create_material_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -16677,6 +16762,7 @@ class MainWindow(QMainWindow):
             ),
             preview_callback=None,
             mode="geometry",
+            new_section_callback=self._create_shell_section_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -16727,6 +16813,7 @@ class MainWindow(QMainWindow):
             surface=surface,
             preview_callback=None,
             mode="geometry",
+            new_section_callback=self._create_shell_section_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -16792,6 +16879,7 @@ class MainWindow(QMainWindow):
                 self.viewport.show_surface_mesh_definition_preview
             ),
             mode="mesh",
+            new_section_callback=self._create_shell_section_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -19264,6 +19352,7 @@ class MainWindow(QMainWindow):
             analysis_type=analysis_type,
             ndf=self.model.ndf,
             plain_patterns=self._plain_pattern_choices(),
+            new_plain_pattern_callback=self._create_plain_pattern_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -19316,6 +19405,7 @@ class MainWindow(QMainWindow):
             analysis=settings,
             ndf=self.model.ndf,
             plain_patterns=self._plain_pattern_choices(),
+            new_plain_pattern_callback=self._create_plain_pattern_dependency,
             parent=self,
         )
         if not dialog.exec():
