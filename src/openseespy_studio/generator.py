@@ -1492,75 +1492,115 @@ def analysis_to_openseespy(
         settings.analysis_type == "Transient"
         and settings.rayleigh_damping_ratio > 0.0
     ):
-        max_mode = max(
-            settings.rayleigh_mode_i,
-            settings.rayleigh_mode_j,
-        )
-        lines.extend([
-            "# Rayleigh damping from two modal frequencies",
-            (
-                f"_studio_damping_eigs = ops.eigen("
-                f"{settings.eigen_solver!r}, {max_mode})"
-            ),
-            "if not isinstance(_studio_damping_eigs, (list, tuple)):",
-            "    _studio_damping_eigs = [_studio_damping_eigs]",
-            (
-                f"if len(_studio_damping_eigs) < {max_mode}:"
-            ),
-            (
-                "    raise RuntimeError("
-                f"'Rayleigh damping requested mode {max_mode}, but OpenSees '"
-                "f'returned only {len(_studio_damping_eigs)} eigenvalue(s). '"
-                "'Reduce the damping mode numbers or fix the model mass/stiffness.'"
-                ")"
-            ),
-            (
-                f"_studio_lambda_i = float(_studio_damping_eigs["
-                f"{settings.rayleigh_mode_i - 1}])"
-            ),
-            (
-                f"_studio_lambda_j = float(_studio_damping_eigs["
-                f"{settings.rayleigh_mode_j - 1}])"
-            ),
-            (
-                "if (not math.isfinite(_studio_lambda_i)) or "
-                "_studio_lambda_i <= 0.0:"
-            ),
-            (
-                "    raise RuntimeError("
-                f"'Rayleigh damping mode {settings.rayleigh_mode_i} returned an '"
-                "f'invalid eigenvalue ({_studio_lambda_i!r}); expected a finite, '"
-                "'positive value. Check constraints, mass, and stiffness.'"
-                ")"
-            ),
-            (
-                "if (not math.isfinite(_studio_lambda_j)) or "
-                "_studio_lambda_j <= 0.0:"
-            ),
-            (
-                "    raise RuntimeError("
-                f"'Rayleigh damping mode {settings.rayleigh_mode_j} returned an '"
-                "f'invalid eigenvalue ({_studio_lambda_j!r}); expected a finite, '"
-                "'positive value. Check constraints, mass, and stiffness.'"
-                ")"
-            ),
-            "_studio_omega_i = math.sqrt(_studio_lambda_i)",
-            "_studio_omega_j = math.sqrt(_studio_lambda_j)",
-            (
-                f"_studio_zeta = {settings.rayleigh_damping_ratio:g}"
-            ),
-            (
-                "_studio_beta_k = "
-                "2.0 * _studio_zeta / "
-                "(_studio_omega_i + _studio_omega_j)"
-            ),
-            (
-                "_studio_alpha_m = "
-                "_studio_beta_k * _studio_omega_i * _studio_omega_j"
-            ),
-            "ops.rayleigh(_studio_alpha_m, 0.0, 0.0, _studio_beta_k)",
-            "",
-        ])
+        if settings.rayleigh_model == "SingleModeCommittedStiffness":
+            max_mode = settings.rayleigh_mode_i
+            lines.extend([
+                "# Rayleigh damping: committed-stiffness proportional, calibrated to one mode",
+                (
+                    f"_studio_damping_eigs = ops.eigen("
+                    f"{settings.eigen_solver!r}, {max_mode})"
+                ),
+                "if not isinstance(_studio_damping_eigs, (list, tuple)):",
+                "    _studio_damping_eigs = [_studio_damping_eigs]",
+                f"if len(_studio_damping_eigs) < {max_mode}:",
+                (
+                    "    raise RuntimeError("
+                    f"'Rayleigh damping requested mode {max_mode}, but OpenSees '"
+                    "f'returned only {len(_studio_damping_eigs)} eigenvalue(s). '"
+                    "'Reduce the damping mode number or fix the model mass/stiffness.'"
+                    ")"
+                ),
+                (
+                    f"_studio_lambda_i = float(_studio_damping_eigs["
+                    f"{settings.rayleigh_mode_i - 1}])"
+                ),
+                (
+                    "if (not math.isfinite(_studio_lambda_i)) or "
+                    "_studio_lambda_i <= 0.0:"
+                ),
+                (
+                    "    raise RuntimeError("
+                    f"'Rayleigh damping mode {settings.rayleigh_mode_i} returned an '"
+                    "f'invalid eigenvalue ({_studio_lambda_i!r}); expected a finite, '"
+                    "'positive value. Check constraints, mass, and stiffness.'"
+                    ")"
+                ),
+                "_studio_omega_i = math.sqrt(_studio_lambda_i)",
+                f"_studio_zeta = {settings.rayleigh_damping_ratio:g}",
+                "_studio_beta_k_comm = 2.0 * _studio_zeta / _studio_omega_i",
+                "ops.rayleigh(0.0, 0.0, 0.0, _studio_beta_k_comm)",
+                "",
+            ])
+        else:
+            max_mode = max(
+                settings.rayleigh_mode_i,
+                settings.rayleigh_mode_j,
+            )
+            lines.extend([
+                "# Rayleigh damping from two modal frequencies",
+                (
+                    f"_studio_damping_eigs = ops.eigen("
+                    f"{settings.eigen_solver!r}, {max_mode})"
+                ),
+                "if not isinstance(_studio_damping_eigs, (list, tuple)):",
+                "    _studio_damping_eigs = [_studio_damping_eigs]",
+                (
+                    f"if len(_studio_damping_eigs) < {max_mode}:"
+                ),
+                (
+                    "    raise RuntimeError("
+                    f"'Rayleigh damping requested mode {max_mode}, but OpenSees '"
+                    "f'returned only {len(_studio_damping_eigs)} eigenvalue(s). '"
+                    "'Reduce the damping mode numbers or fix the model mass/stiffness.'"
+                    ")"
+                ),
+                (
+                    f"_studio_lambda_i = float(_studio_damping_eigs["
+                    f"{settings.rayleigh_mode_i - 1}])"
+                ),
+                (
+                    f"_studio_lambda_j = float(_studio_damping_eigs["
+                    f"{settings.rayleigh_mode_j - 1}])"
+                ),
+                (
+                    "if (not math.isfinite(_studio_lambda_i)) or "
+                    "_studio_lambda_i <= 0.0:"
+                ),
+                (
+                    "    raise RuntimeError("
+                    f"'Rayleigh damping mode {settings.rayleigh_mode_i} returned an '"
+                    "f'invalid eigenvalue ({_studio_lambda_i!r}); expected a finite, '"
+                    "'positive value. Check constraints, mass, and stiffness.'"
+                    ")"
+                ),
+                (
+                    "if (not math.isfinite(_studio_lambda_j)) or "
+                    "_studio_lambda_j <= 0.0:"
+                ),
+                (
+                    "    raise RuntimeError("
+                    f"'Rayleigh damping mode {settings.rayleigh_mode_j} returned an '"
+                    "f'invalid eigenvalue ({_studio_lambda_j!r}); expected a finite, '"
+                    "'positive value. Check constraints, mass, and stiffness.'"
+                    ")"
+                ),
+                "_studio_omega_i = math.sqrt(_studio_lambda_i)",
+                "_studio_omega_j = math.sqrt(_studio_lambda_j)",
+                (
+                    f"_studio_zeta = {settings.rayleigh_damping_ratio:g}"
+                ),
+                (
+                    "_studio_beta_k = "
+                    "2.0 * _studio_zeta / "
+                    "(_studio_omega_i + _studio_omega_j)"
+                ),
+                (
+                    "_studio_alpha_m = "
+                    "_studio_beta_k * _studio_omega_i * _studio_omega_j"
+                ),
+                "ops.rayleigh(_studio_alpha_m, 0.0, 0.0, _studio_beta_k)",
+                "",
+            ])
 
     if settings.analysis_type == "Modal":
         lines.append(
