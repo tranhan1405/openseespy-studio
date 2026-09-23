@@ -6213,17 +6213,13 @@ class MainWindow(QMainWindow):
             self._activate_select_tool()
             return
         if len(self.project.lines) < 2:
-            if action is not None:
-                action.setChecked(False)
-            QMessageBox.information(
-                self,
-                f"{operation.capitalize()} Geometry",
-                (
-                    "Create at least two Geometry Lines before using "
-                    f"{operation.capitalize()}."
-                ),
-            )
-            return
+            if not self._ensure_geometry_line_count(
+                2,
+                title=f"{operation.capitalize()} Geometry",
+            ):
+                if action is not None:
+                    action.setChecked(False)
+                return
 
         self._leave_measure_mode()
         self._leave_frame_pick_mode()
@@ -9481,6 +9477,32 @@ class MainWindow(QMainWindow):
             before = len(self.project.points)
             self._create_point_geometry()
             if len(self.project.points) <= before:
+                return False
+        return True
+
+    def _ensure_geometry_line_count(
+        self,
+        minimum: int,
+        *,
+        title: str,
+    ) -> bool:
+        required = max(1, int(minimum))
+        while len(self.project.lines) < required:
+            current = len(self.project.lines)
+            if not self._ask_create_prerequisite(
+                title=title,
+                message=(
+                    f"This workflow requires at least {required} Geometry "
+                    f"Line{'s' if required != 1 else ''}. "
+                    f"The project currently has {current}.\n\n"
+                    "Create the missing Geometry Line now?"
+                ),
+                action_label="Create Geometry Line Now...",
+            ):
+                return False
+            before = len(self.project.lines)
+            created = self._create_line_geometry()
+            if created is None or len(self.project.lines) <= before:
                 return False
         return True
 
@@ -16328,6 +16350,17 @@ class MainWindow(QMainWindow):
             for tag in target_tags
             if int(tag) in self.project.lines and int(tag) != source_tag
         })
+        if not targets and len(self.project.lines) < 2:
+            if not self._ensure_geometry_line_count(
+                2,
+                title="Copy Line Mesh / FE Recipe",
+            ):
+                return
+            targets = sorted(
+                tag
+                for tag in self.project.lines
+                if int(tag) != source_tag
+            )
         if not targets:
             QMessageBox.information(
                 self,
@@ -16403,6 +16436,13 @@ class MainWindow(QMainWindow):
 
     def _split_selected_geometry_lines_at_intersection(self) -> None:
         tags = self._selected_line_geometry_tags()
+        if len(tags) != 2 and len(self.project.lines) < 2:
+            if not self._ensure_geometry_line_count(
+                2,
+                title="Split by Line",
+            ):
+                return
+            tags = sorted(self.project.lines)[:2]
         if len(tags) != 2:
             QMessageBox.information(
                 self,
@@ -16439,6 +16479,13 @@ class MainWindow(QMainWindow):
 
     def _fillet_selected_geometry_lines(self) -> None:
         tags = self._selected_line_geometry_tags()
+        if len(tags) != 2 and len(self.project.lines) < 2:
+            if not self._ensure_geometry_line_count(
+                2,
+                title="Fillet Geometry Lines",
+            ):
+                return
+            tags = sorted(self.project.lines)[:2]
         if len(tags) != 2:
             QMessageBox.information(
                 self,
@@ -16490,6 +16537,13 @@ class MainWindow(QMainWindow):
 
     def _chamfer_selected_geometry_lines(self) -> None:
         tags = self._selected_line_geometry_tags()
+        if len(tags) != 2 and len(self.project.lines) < 2:
+            if not self._ensure_geometry_line_count(
+                2,
+                title="Chamfer Geometry Lines",
+            ):
+                return
+            tags = sorted(self.project.lines)[:2]
         if len(tags) != 2:
             QMessageBox.information(
                 self,
