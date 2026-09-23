@@ -5,11 +5,14 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPushButton,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from ..project import AnalysisSettingsData, SolutionResultData
@@ -29,12 +32,15 @@ class SurfaceResultDialog(QDialog):
         surface_tags,
         result: SolutionResultData | None = None,
         next_tag: int = 1,
+        new_analysis_callback=None,
         parent=None,
     ):
         super().__init__(parent)
         self.setWindowTitle("Managed Surface Shell Result")
         self.setModal(True)
         self.surface_tags = sorted({int(tag) for tag in surface_tags})
+        self._analyses = dict(analyses)
+        self._new_analysis_callback = new_analysis_callback
 
         root = QVBoxLayout(self)
         info = QLabel(
@@ -63,16 +69,21 @@ class SurfaceResultDialog(QDialog):
         )
 
         self.analysis = QComboBox()
-        for tag in sorted(analyses):
-            item = analyses[tag]
-            self.analysis.addItem(
-                f"{tag} - {item.name} ({item.analysis_type})",
-                int(tag),
-            )
-        if result is not None:
-            index = self.analysis.findData(result.analysis_tag)
-            if index >= 0:
-                self.analysis.setCurrentIndex(index)
+        self._refresh_analysis_choices(
+            result.analysis_tag if result is not None else None
+        )
+        self.analysis_new = QPushButton("New Analysis...")
+        self.analysis_new.setEnabled(callable(self._new_analysis_callback))
+        self.analysis_new.setToolTip(
+            "Define compatible Analysis Settings now without closing this dialog."
+        )
+        self.analysis_new.clicked.connect(self._create_analysis_dependency)
+        self.analysis_holder = QWidget()
+        analysis_row = QHBoxLayout(self.analysis_holder)
+        analysis_row.setContentsMargins(0, 0, 0, 0)
+        analysis_row.setSpacing(4)
+        analysis_row.addWidget(self.analysis, 1)
+        analysis_row.addWidget(self.analysis_new)
 
         self.result_type = QComboBox()
         self.result_type.addItem("Shell Force", "ShellForce")
@@ -86,7 +97,7 @@ class SurfaceResultDialog(QDialog):
 
         form.addRow("Tag:", self.tag)
         form.addRow("Name:", self.name)
-        form.addRow("Analysis:", self.analysis)
+        form.addRow("Analysis:", self.analysis_holder)
         form.addRow("Result:", self.result_type)
         form.addRow("Component:", self.component)
         root.addLayout(form)
@@ -115,6 +126,42 @@ class SurfaceResultDialog(QDialog):
             index = self.component.findText(component)
             if index >= 0:
                 self.component.setCurrentIndex(index)
+
+    def _refresh_analysis_choices(self, select_tag=None) -> None:
+        current = self.analysis.currentData() if self.analysis.count() else None
+        wanted = select_tag if select_tag is not None else current
+        self.analysis.clear()
+        self.analysis.addItem("Select Analysis Settings...", None)
+        for tag in sorted(self._analyses):
+            item = self._analyses[tag]
+            if item.analysis_type == "Modal":
+                continue
+            self.analysis.addItem(
+                f"{tag} - {item.name} ({item.analysis_type})",
+                int(tag),
+            )
+        if wanted is not None:
+            index = self.analysis.findData(int(wanted))
+            if index >= 0:
+                self.analysis.setCurrentIndex(index)
+        elif self.analysis.count() == 2:
+            self.analysis.setCurrentIndex(1)
+
+    def _create_analysis_dependency(self) -> None:
+        if not callable(self._new_analysis_callback):
+            return
+        analysis = self._new_analysis_callback()
+        if analysis is None:
+            return
+        if analysis.analysis_type == "Modal":
+            QMessageBox.warning(
+                self,
+                "Managed Surface Shell Result",
+                "Modal Analysis Settings are not compatible with this result.",
+            )
+            return
+        self._analyses[int(analysis.tag)] = analysis
+        self._refresh_analysis_choices(int(analysis.tag))
 
     def _refresh_components(self) -> None:
         current = self.component.currentText()
