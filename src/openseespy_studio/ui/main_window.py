@@ -22891,6 +22891,185 @@ class MainWindow(QMainWindow):
         )
         library_action.triggered.connect(self._show_material_library)
 
+    def _tree_context_action_group(
+        self,
+        kind: str,
+        action: QAction,
+    ) -> int:
+        """Return a stable UX group for a top-level Model Tree action."""
+        label = " ".join(
+            str(action.text()).replace("&", "").split()
+        ).strip().lower()
+        is_container = (
+            str(kind).endswith("_root")
+            or str(kind).endswith("_group")
+        )
+
+        # Destructive/clearing operations always live at the bottom.
+        non_destructive_clear = (
+            "clear result display",
+            "clear current node selection",
+            "clear quality map",
+            "clear edge preview",
+            "clear pressure preview",
+            "clear intersection",
+        )
+        if label.startswith(("delete", "remove")):
+            return 90
+        if label.startswith("clear") and not label.startswith(
+            non_destructive_clear
+        ):
+            return 90
+
+        # View/selection commands are secondary and visually grouped.
+        if (
+            label.startswith(
+                (
+                    "view",
+                    "zoom",
+                    "hide",
+                    "isolate",
+                    "show all",
+                    "show node",
+                    "show element",
+                    "clear result display",
+                    "clear current node selection",
+                    "clear quality map",
+                    "clear edge preview",
+                    "clear pressure preview",
+                    "clear intersection",
+                )
+            )
+            or label in {"selection", "visualize mesh quality"}
+        ):
+            return 70
+        if label.startswith("select"):
+            return 25 if is_container else 70
+
+        # Object-management commands follow modeling/workflow commands.
+        if label.startswith(
+            (
+                "duplicate",
+                "copy",
+                "rename",
+                "update",
+                "export",
+            )
+        ):
+            return 60
+        if label == "create named selection":
+            return 10 if str(kind) == "named_sets_root" else 60
+
+        # Diagnostics/previews come after direct modeling operations.
+        if label.startswith(
+            (
+                "audit",
+                "preview",
+                "mesh quality",
+                "inspect",
+            )
+        ):
+            return 50
+
+        # New/insert/draw/import commands are first on collection nodes.
+        creation_prefixes = (
+            "new ",
+            "draw ",
+            "insert ",
+            "import ",
+            "add ",
+            "generate",
+        )
+        creation_submenus = {
+            "analysis wizard",
+            "add result request",
+            "sketch plane",
+            "generate",
+        }
+        if (
+            label.startswith(creation_prefixes)
+            or label in creation_submenus
+        ):
+            return 10 if is_container else 40
+
+        # Direct object actions stay at the top for entity nodes.
+        if label.startswith(
+            (
+                "properties",
+                "edit",
+                "configure",
+                "activate",
+                "set active",
+                "run",
+                "evaluate",
+                "apply",
+                "open",
+                "show solver output",
+                "show job manager",
+                "check model",
+            )
+        ):
+            return 20
+
+        # Modeling/assignment submenus form the central workflow block.
+        workflow_submenus = {
+            "create",
+            "definition",
+            "assign",
+            "modify",
+            "modify geometry",
+            "geometry",
+            "mesh / fe",
+            "mesh / fe tools",
+            "line mesh",
+            "surface mesh",
+            "supports",
+            "loads",
+            "outputs / scopes",
+            "network / audit",
+            "plot",
+        }
+        if label in workflow_submenus or label.startswith(
+            ("remesh", "apply support", "assign ")
+        ):
+            return 40
+
+        return 50
+
+    def _organize_tree_context_menu(
+        self,
+        menu: QMenu,
+        kind: str,
+    ) -> None:
+        """Apply one predictable order to every Model Tree context menu."""
+        original_actions = list(menu.actions())
+        actions = [
+            action
+            for action in original_actions
+            if not action.isSeparator()
+        ]
+        if not actions:
+            return
+
+        ranked = sorted(
+            enumerate(actions),
+            key=lambda pair: (
+                self._tree_context_action_group(kind, pair[1]),
+                pair[0],
+            ),
+        )
+
+        for action in original_actions:
+            menu.removeAction(action)
+
+        last_group: int | None = None
+        for _, action in ranked:
+            group = self._tree_context_action_group(kind, action)
+            if last_group is not None and group != last_group:
+                menu.addSeparator()
+            menu.addAction(action)
+            last_group = group
+
     def _append_tree_ai_action(
         self,
         menu: QMenu,
@@ -22919,9 +23098,11 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
 
         def exec_menu() -> None:
-            # Creation/editing commands are the primary tree workflow.
-            # AI help is deliberately appended last so it never displaces
-            # direct modeling commands.
+            # Keep every Model Tree menu consistent before appending AI help.
+            # Collection nodes start with creation/import actions; entity
+            # nodes start with direct object actions; destructive commands
+            # stay at the bottom. AI remains the final, separate action.
+            self._organize_tree_context_menu(menu, str(kind))
             self._append_tree_ai_action(menu, str(kind), value)
             menu.exec(self.tree.viewport().mapToGlobal(position))
 
