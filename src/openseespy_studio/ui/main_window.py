@@ -23040,12 +23040,139 @@ class MainWindow(QMainWindow):
 
         return 50
 
+    def _tree_context_submenu_group(
+        self,
+        title: str,
+        action: QAction,
+    ) -> int:
+        """Return a stable UX group for supported Model Tree submenus."""
+        label = " ".join(
+            str(action.text()).replace("&", "").split()
+        ).strip().lower()
+        title_key = " ".join(str(title).split()).strip().lower()
+
+        if label.startswith(("delete", "remove", "clear")):
+            return 90
+
+        if title_key == "view":
+            if label.startswith("zoom"):
+                return 10
+            if label.startswith(("hide", "isolate")):
+                return 20
+            if label.startswith("show all"):
+                return 30
+
+        if title_key == "selection":
+            if label.startswith("copy tag"):
+                return 20
+            if label.startswith("create named selection"):
+                return 40
+
+        if label.startswith("select"):
+            return 70
+        if label.startswith(
+            (
+                "preview",
+                "inspect",
+                "audit",
+                "mesh quality",
+                "visualize",
+            )
+        ):
+            return 60
+        if label.startswith(("copy", "duplicate", "rename", "update")):
+            return 50
+        if label.startswith(
+            (
+                "new ",
+                "add ",
+                "assign ",
+                "apply ",
+                "mass",
+                "support",
+                "constraint",
+                "zerolength",
+                "beam load",
+                "surface pressure",
+            )
+        ):
+            return 20
+        return 30
+
+    def _organize_tree_context_submenus(
+        self,
+        menu: QMenu,
+    ) -> None:
+        """Normalize only the hand-authored workflow submenus."""
+        supported_titles = {
+            "assign",
+            "create",
+            "modify",
+            "modify geometry",
+            "geometry",
+            "mesh / fe",
+            "mesh / fe tools",
+            "supports",
+            "loads",
+            "outputs / scopes",
+            "network / audit",
+            "view",
+            "selection",
+            "line mesh",
+            "surface mesh",
+            "visualize mesh quality",
+            "generate",
+            "sketch plane",
+        }
+
+        for action in list(menu.actions()):
+            submenu = action.menu()
+            if submenu is None:
+                continue
+            title = " ".join(submenu.title().split()).strip()
+            if title.lower() not in supported_titles:
+                continue
+
+            original_actions = list(submenu.actions())
+            actions = [
+                child
+                for child in original_actions
+                if not child.isSeparator()
+            ]
+            if not actions:
+                continue
+
+            ranked = sorted(
+                enumerate(actions),
+                key=lambda pair: (
+                    self._tree_context_submenu_group(
+                        title,
+                        pair[1],
+                    ),
+                    pair[0],
+                ),
+            )
+            for child in original_actions:
+                submenu.removeAction(child)
+
+            last_group: int | None = None
+            for _, child in ranked:
+                group = self._tree_context_submenu_group(
+                    title,
+                    child,
+                )
+                if last_group is not None and group != last_group:
+                    submenu.addSeparator()
+                submenu.addAction(child)
+                last_group = group
+
     def _organize_tree_context_menu(
         self,
         menu: QMenu,
         kind: str,
     ) -> None:
         """Apply one predictable order to every Model Tree context menu."""
+        self._organize_tree_context_submenus(menu)
         original_actions = list(menu.actions())
         actions = [
             action
