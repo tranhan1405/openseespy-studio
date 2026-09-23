@@ -197,3 +197,14 @@ def test_properties_root_routes_to_model_context():
         {"properties_root"}
     ) == ("fe", "Model")
 
+def test_results_jobs_root_routes_to_result_context():
+    assert MainWindow._tree_selection_display_context(
+        {"jobs_root"}
+    ) == ("fe", "Result")
+
+
+def test_results_jobs_root_preserves_active_result_display():
+    assert not MainWindow._tree_selection_resets_result_overlay(
+        {"jobs_root"}
+    )
+
