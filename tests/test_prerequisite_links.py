@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from openseespy_studio.ui.main_window import FrameGridPanel, MainWindow
 from openseespy_studio.ui.recorder_dialog import RecorderDialog
 from openseespy_studio.ui.analysis_dialog import AnalysisDialog
+from openseespy_studio.ui.analysis_template_dialog import AnalysisTemplateDialog
 from openseespy_studio.ui.calibration_dialog import CalibrationDialog
 from openseespy_studio.ui.constraint_dialog import ConstraintDialog
 from openseespy_studio.ui.geometry_dialogs import ElementDialog, TrussDialog
@@ -782,4 +783,40 @@ def test_twelfth_prerequisite_link_batch():
     assert 'title="Managed Surface Shell Result"' in result_source
     assert "Mesh the following Surface geometry first:" not in result_source
     assert "managed_shell_result.setEnabled(live_mesh)" not in tree_source
+
+def test_thirteenth_prerequisite_link_batch():
+    tree_source = inspect.getsource(MainWindow._show_tree_context_menu)
+
+    # 1: 3-point Plane remains reachable and can create missing Points inline.
+    three_point = inspect.getsource(MainWindow._create_three_point_sketch_plane)
+    assert "_ensure_geometry_point_count" in three_point
+    assert "three.setEnabled(len(self.project.points) >= 3)" not in tree_source
+
+    # 2: Line Mesh Quality can configure its missing mesh recipe inline.
+    quality_source = inspect.getsource(MainWindow._show_line_mesh_quality)
+    assert "Configure Line Mesh Now..." in quality_source
+    assert "_configure_line_mesh(tag, generate=False)" in quality_source
+    assert "quality.setEnabled(line.mesh_recipe_configured)" not in tree_source
+
+    # 3: Surface Edge FE-node selection can create the Surface mesh inline.
+    edge_nodes = inspect.getsource(MainWindow._select_surface_edge_nodes)
+    assert "_ensure_surface_meshes" in edge_nodes
+    assert 'title="Select Surface Edge FE Nodes"' in edge_nodes
+
+    # 4: Surface Boundary FE-node selection can create all missing meshes inline.
+    boundary_nodes = inspect.getsource(MainWindow._select_surface_boundary_nodes)
+    assert "_ensure_surface_meshes" in boundary_nodes
+    assert 'title="Select Surface Boundary FE Nodes"' in boundary_nodes
+
+    # 5: Analysis Wizard -> Mass Source keeps Plain Pattern creation inline.
+    template_source = inspect.getsource(AnalysisTemplateDialog)
+    assert "new_pattern_callback=None" in template_source
+    assert "self._new_pattern_callback = new_pattern_callback" in template_source
+    assert "new_pattern_callback=self._new_pattern_callback" in template_source
+
+    create_template = inspect.getsource(MainWindow._create_analysis_template)
+    assert (
+        "new_pattern_callback=self._create_plain_pattern_dependency"
+        in create_template
+    )
 
