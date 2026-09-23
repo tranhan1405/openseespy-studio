@@ -2146,8 +2146,8 @@ class MainWindow(QMainWindow):
         ):
             menus[name] = self.menuBar().addMenu(name)
 
-        self._make_action("new", "New", "new", self._new_model, "New project")
-        self._make_action("open", "Open", "open", self._open_project, "Open project")
+        self._make_action("new", "New", "new-project", self._new_model, "New project")
+        self._make_action("open", "Open", "open-project", self._open_project, "Open project")
         self._make_action(
             "import_py",
             "Import OpenSeesPy...",
@@ -2202,7 +2202,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "frame_pick",
             "Create by Picking",
-            "frame",
+            "frame-pick",
             self._activate_frame_pick_tool,
             "Click two nodes in the viewport to create a frame member",
             checkable=True,
@@ -2210,14 +2210,14 @@ class MainWindow(QMainWindow):
         self._make_action(
             "frame_input",
             "Create by Input...",
-            "frame",
+            "frame-input",
             self._create_frame,
             "Create a frame member by entering nodes and assignments",
         )
         self._make_action(
             "truss_pick",
             "Create by Picking",
-            "truss",
+            "truss-pick",
             self._activate_truss_pick_tool,
             "Click two nodes in the viewport to create a Truss element",
             checkable=True,
@@ -2225,21 +2225,21 @@ class MainWindow(QMainWindow):
         self._make_action(
             "truss_input",
             "Create by Input...",
-            "truss",
+            "truss-input",
             self._create_truss,
             "Create a Truss element by entering nodes, area, and material",
         )
         self._make_action(
             "sketch_plane_offset",
             "Offset Plane...",
-            "sketch-plane",
+            "offset-plane",
             self._create_offset_sketch_plane,
             "Create a persistent construction plane offset from global XY/XZ/YZ",
         )
         self._make_action(
             "sketch_plane_3point",
             "3-Point Plane...",
-            "sketch-plane",
+            "plane-3point",
             self._create_three_point_sketch_plane,
             "Create a construction plane through three Geometry Points",
         )
@@ -2253,7 +2253,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "line_geometry_pick",
             "Draw Polyline",
-            "geometry-line",
+            "draw-polyline",
             self._activate_geometry_line_pick_tool,
             "Draw continuous Geometry Lines on the active sketch plane with snapping",
             checkable=True,
@@ -2261,14 +2261,14 @@ class MainWindow(QMainWindow):
         self._make_action(
             "line_geometry",
             "Create by Input...",
-            "geometry-line",
+            "line-input",
             self._create_line_geometry,
             "Create reusable Line geometry by coordinate/topology input",
         )
         self._make_action(
             "surface_geometry_pick",
             "Draw Rectangle",
-            "geometry-surface",
+            "draw-rectangle",
             self._activate_geometry_surface_pick_tool,
             "Draw a rectangular Geometry Surface by two diagonal clicks on the active sketch plane",
             checkable=True,
@@ -2276,7 +2276,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "surface_geometry",
             "Create by Input...",
-            "geometry-surface",
+            "surface-input",
             self._create_surface_geometry,
             "Create reusable Rectangle or Quad surface geometry for Shell meshing",
         )
@@ -2523,7 +2523,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "new_section",
             "New Section...",
-            "section",
+            "create-section",
             self._create_section,
             "Create OpenSees section",
         )
@@ -2565,7 +2565,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "support",
             "Support...",
-            "boundary",
+            "support",
             self._apply_restraint,
             "Apply support / restraint to selected nodes",
         )
@@ -2658,7 +2658,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "analysis_template",
             "Analysis Wizard...",
-            "analysis",
+            "analysis-wizard",
             lambda checked=False: self._create_analysis_template("Pushover"),
             "Guided setup that creates analysis, required loading/protocol, and default results",
         )
@@ -2693,7 +2693,7 @@ class MainWindow(QMainWindow):
             "Create a nonlinear time-history earthquake template",
         )
         self._make_action("check_model", "Check Model", "check-model", self._check_model, "Validate the model before analysis")
-        self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
+        self._make_action("run", "Run", "run-analysis", self._toggle_analysis, "Run / stop model")
         self._make_action(
             "moment_curvature",
             "Moment-Curvature...",
@@ -2724,7 +2724,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "plot",
             "Plot",
-            "plot",
+            "plot-results",
             self._show_plot_menu,
             "Plot results from the selected or latest completed Job",
         )
@@ -3007,14 +3007,14 @@ class MainWindow(QMainWindow):
         self._make_action(
             "results_manager",
             "Tabular Data",
-            "plot",
+            "tabular-results",
             self._show_results_manager,
             "Show completed Jobs and result data",
         )
         self._make_action(
             "clear_result",
             "Clear Result",
-            "delete",
+            "clear-result",
             self._clear_result_display,
             "Clear the active result overlay",
         )
@@ -3053,7 +3053,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "solver_output_view",
             "Solver Output",
-            "analysis",
+            "solver-output",
             self._show_solver_output,
             "Show solver output console",
         )
