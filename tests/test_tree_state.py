@@ -208,3 +208,23 @@ def test_results_jobs_root_preserves_active_result_display():
         {"jobs_root"}
     )
 
+def test_boundary_condition_icon_mapping_covers_common_presets():
+    assert MainWindow._boundary_condition_icon_name(
+        "Fixed"
+    ) == "boundary-fixed"
+    assert MainWindow._boundary_condition_icon_name(
+        "Pinned"
+    ) == "boundary-pinned"
+    assert MainWindow._boundary_condition_icon_name(
+        "Roller X"
+    ) == "boundary-roller-x"
+    assert MainWindow._boundary_condition_icon_name(
+        "Roller Y"
+    ) == "boundary-roller-y"
+    assert MainWindow._boundary_condition_icon_name(
+        "Roller Z"
+    ) == "boundary-roller-z"
+    assert MainWindow._boundary_condition_icon_name(
+        "Custom"
+    ) == "boundary"
+
