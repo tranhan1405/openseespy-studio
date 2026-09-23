@@ -23372,13 +23372,18 @@ class MainWindow(QMainWindow):
             )
             create_geometry = menu.addAction("New Surface by Input...")
             create_geometry.triggered.connect(self._create_surface_geometry)
+
             menu.addSeparator()
-            menu.addAction(self.actions["surface_mesh_overlay"])
-            stitch = menu.addAction("Stitch Coincident Shell Nodes...")
-            stitch.triggered.connect(self._stitch_coincident_shell_nodes)
             section = menu.addAction("New Shell Section...")
             section.triggered.connect(self._create_shell_section)
-            audit = menu.addAction("Audit Surface Conformity")
+
+            mesh_tools = menu.addMenu("Mesh / FE Tools")
+            mesh_tools.addAction(self.actions["surface_mesh_overlay"])
+            stitch = mesh_tools.addAction(
+                "Stitch Coincident Shell Nodes..."
+            )
+            stitch.triggered.connect(self._stitch_coincident_shell_nodes)
+            audit = mesh_tools.addAction("Audit Surface Conformity")
             audit.setEnabled(len(self.project.surfaces) >= 2)
             audit.triggered.connect(
                 lambda checked=False:
@@ -23386,6 +23391,8 @@ class MainWindow(QMainWindow):
                     sorted(self.project.surfaces)
                 )
             )
+
+            menu.addSeparator()
             pressure = menu.addAction(
                 "Create Pressure from FE Shell Selection..."
             )
@@ -23400,7 +23407,10 @@ class MainWindow(QMainWindow):
                 return
             state = inspect_surface_mesh_state(self.project, tag)
             live_mesh = bool(state.live_element_tags)
-            configure = menu.addAction("Configure Surface Mesh / Shell Recipe...")
+
+            configure = menu.addAction(
+                "Configure Surface Mesh / Shell Recipe..."
+            )
             configure.triggered.connect(
                 lambda checked=False, t=tag:
                 self._configure_surface_mesh(t)
@@ -23410,39 +23420,26 @@ class MainWindow(QMainWindow):
                 lambda checked=False, t=tag:
                 self._assign_shell_section_to_surfaces([t])
             )
+            generate = menu.addAction(
+                "Remesh" if live_mesh else "Generate Mesh"
+            )
+            generate.triggered.connect(
+                lambda checked=False, t=tag:
+                self._remesh_surface_geometry(t)
+                if live_mesh
+                else self._mesh_surface_geometry(t)
+            )
+
+            menu.addSeparator()
             preview = menu.addAction("Preview Mesh")
             preview.triggered.connect(
                 lambda checked=False, t=tag:
                 self._preview_surface_meshes([t])
             )
-            menu.addSeparator()
-            generate = menu.addAction(
-                "Remesh"
-                if live_mesh else "Generate Mesh"
-            )
-            generate.triggered.connect(
-                lambda checked=False, t=tag:
-                (
-                    self._remesh_surface_geometry(t)
-                    if live_mesh
-                    else self._mesh_surface_geometry(t)
-                )
-            )
-            delete_mesh = menu.addAction("Delete Generated Mesh")
-            delete_mesh.setEnabled(live_mesh)
-            delete_mesh.triggered.connect(
-                lambda checked=False, t=tag:
-                self._delete_surface_mesh(t)
-            )
             select_fe = menu.addAction("Select Generated FE")
             select_fe.triggered.connect(
                 lambda checked=False, t=tag:
                 self._select_generated_fe_for_surfaces([t])
-            )
-            audit = menu.addAction("Audit Mesh Integrity")
-            audit.triggered.connect(
-                lambda checked=False, t=tag:
-                self._audit_surface_mesh_integrity([t])
             )
             quality_menu = menu.addMenu("Visualize Mesh Quality")
             for label, metric in (
@@ -23460,6 +23457,19 @@ class MainWindow(QMainWindow):
             clear_quality.triggered.connect(
                 self._clear_surface_quality_map
             )
+            audit = menu.addAction("Audit Mesh Integrity")
+            audit.triggered.connect(
+                lambda checked=False, t=tag:
+                self._audit_surface_mesh_integrity([t])
+            )
+
+            menu.addSeparator()
+            delete_mesh = menu.addAction("Delete Generated Mesh")
+            delete_mesh.setEnabled(live_mesh)
+            delete_mesh.triggered.connect(
+                lambda checked=False, t=tag:
+                self._delete_surface_mesh(t)
+            )
             exec_menu()
             return
 
@@ -23470,13 +23480,6 @@ class MainWindow(QMainWindow):
                 return
             surface_tags = self._selected_surface_geometry_tags(tag)
             count = len(surface_tags)
-            live_mesh = any(
-                int(element_tag) in self.model.elements
-                for surface_tag in surface_tags
-                for element_tag in self.project.surfaces[
-                    surface_tag
-                ].generated_element_tags
-            )
 
             properties = menu.addAction("Properties")
             properties.triggered.connect(
@@ -23490,7 +23493,9 @@ class MainWindow(QMainWindow):
                     self._edit_surface_geometry(t)
                 )
 
-            copy_surface = menu.addAction(
+            menu.addSeparator()
+            geometry_menu = menu.addMenu("Geometry")
+            copy_surface = geometry_menu.addAction(
                 "Copy / Offset Surface..."
                 if count == 1
                 else f"Copy / Offset {count} Surfaces..."
@@ -23499,80 +23504,24 @@ class MainWindow(QMainWindow):
                 lambda checked=False, tags=tuple(surface_tags):
                 self._copy_surface_geometries(tags)
             )
-
+            flip = geometry_menu.addAction(
+                "Flip Surface Normal"
+                if count == 1
+                else f"Flip Normals ({count} Surfaces)"
+            )
+            flip.triggered.connect(
+                lambda checked=False, tags=tuple(surface_tags):
+                self._flip_surface_normals(tags)
+            )
             if count == 1:
-                inspect_edges = menu.addAction(
+                inspect_edges = geometry_menu.addAction(
                     "Inspect / Preview Surface Edges"
                 )
                 inspect_edges.triggered.connect(
                     lambda checked=False, t=tag:
                     self._inspect_surface_edges(t)
                 )
-                select_edge_nodes = menu.addAction(
-                    "Select Edge FE Nodes..."
-                )
-                select_edge_nodes.triggered.connect(
-                    lambda checked=False, t=tag:
-                    self._select_surface_edge_nodes(t)
-                )
-                managed_support = menu.addAction(
-                    "Managed Edge Support..."
-                )
-                managed_support.triggered.connect(
-                    lambda checked=False, t=tag:
-                    self._manage_surface_edge_support(t)
-                )
-                remove_support = menu.addAction(
-                    "Remove Managed Edge Support..."
-                )
-                remove_support.setEnabled(
-                    any(
-                        support.surface_tag == tag
-                        for support
-                        in self.project.surface_edge_supports.values()
-                    )
-                )
-                remove_support.triggered.connect(
-                    lambda checked=False, t=tag:
-                    self._remove_surface_edge_support(t)
-                )
-
-                managed_line_load = menu.addAction(
-                    "Managed Edge Line Load..."
-                )
-                managed_line_load.triggered.connect(
-                    lambda checked=False, t=tag:
-                    self._manage_surface_edge_line_load(t)
-                )
-                preview_line_load = menu.addAction(
-                    "Preview Managed Edge Line Load..."
-                )
-                preview_line_load.setEnabled(
-                    any(
-                        edge_load.surface_tag == tag
-                        for edge_load
-                        in self.project.surface_edge_loads.values()
-                    )
-                )
-                preview_line_load.triggered.connect(
-                    lambda checked=False, t=tag:
-                    self._preview_surface_edge_line_load(t)
-                )
-                remove_line_load = menu.addAction(
-                    "Remove Managed Edge Line Load..."
-                )
-                remove_line_load.setEnabled(
-                    any(
-                        edge_load.surface_tag == tag
-                        for edge_load
-                        in self.project.surface_edge_loads.values()
-                    )
-                )
-                remove_line_load.triggered.connect(
-                    lambda checked=False, t=tag:
-                    self._remove_surface_edge_line_load(t)
-                )
-            preview_boundary = menu.addAction(
+            preview_boundary = geometry_menu.addAction(
                 "Preview Outer Boundary"
                 if count == 1
                 else f"Preview Outer Boundary ({count} Surfaces)"
@@ -23581,7 +23530,31 @@ class MainWindow(QMainWindow):
                 lambda checked=False, tags=tuple(surface_tags):
                 self._preview_surface_boundary_edges(tags)
             )
-            select_boundary_nodes = menu.addAction(
+            clear_edge_preview = geometry_menu.addAction(
+                "Clear Edge Preview"
+            )
+            clear_edge_preview.triggered.connect(
+                self._clear_surface_edge_preview
+            )
+            if count >= 2:
+                audit = geometry_menu.addAction(
+                    "Audit Shared-Edge Conformity"
+                )
+                audit.triggered.connect(
+                    lambda checked=False, tags=tuple(surface_tags):
+                    self._audit_surface_conformity(tags)
+                )
+
+            mesh_menu = menu.addMenu("Mesh / FE")
+            if count == 1:
+                select_edge_nodes = mesh_menu.addAction(
+                    "Select Edge FE Nodes..."
+                )
+                select_edge_nodes.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._select_surface_edge_nodes(t)
+                )
+            select_boundary_nodes = mesh_menu.addAction(
                 "Select Outer Boundary FE Nodes"
                 if count == 1
                 else f"Select Outer Boundary FE Nodes ({count} Surfaces)"
@@ -23590,40 +23563,75 @@ class MainWindow(QMainWindow):
                 lambda checked=False, tags=tuple(surface_tags):
                 self._select_surface_boundary_nodes(tags)
             )
-            clear_edge_preview = menu.addAction("Clear Edge Preview")
-            clear_edge_preview.triggered.connect(
-                self._clear_surface_edge_preview
-            )
+            mesh_menu.addAction(self.actions["surface_mesh_overlay"])
 
-            if count >= 2:
-                audit = menu.addAction("Audit Shared-Edge Conformity")
-                audit.triggered.connect(
-                    lambda checked=False, tags=tuple(surface_tags):
-                    self._audit_surface_conformity(tags)
+            if count == 1:
+                support_menu = menu.addMenu("Supports")
+                managed_support = support_menu.addAction(
+                    "Managed Edge Support..."
+                )
+                managed_support.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._manage_surface_edge_support(t)
+                )
+                remove_support = support_menu.addAction(
+                    "Remove Managed Edge Support..."
+                )
+                remove_support.setEnabled(
+                    any(
+                        support.surface_tag == tag
+                        for support in
+                        self.project.surface_edge_supports.values()
+                    )
+                )
+                remove_support.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._remove_surface_edge_support(t)
                 )
 
-            flip_label = (
-                "Flip Surface Normal"
-                if count == 1
-                else f"Flip Normals ({count} Surfaces)"
-            )
-            flip = menu.addAction(flip_label)
-            flip.triggered.connect(
-                lambda checked=False, tags=tuple(surface_tags):
-                self._flip_surface_normals(tags)
-            )
+            load_menu = menu.addMenu("Loads")
+            if count == 1:
+                managed_line_load = load_menu.addAction(
+                    "Managed Edge Line Load..."
+                )
+                managed_line_load.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._manage_surface_edge_line_load(t)
+                )
+                preview_line_load = load_menu.addAction(
+                    "Preview Managed Edge Line Load..."
+                )
+                preview_line_load.setEnabled(
+                    any(
+                        edge_load.surface_tag == tag
+                        for edge_load in
+                        self.project.surface_edge_loads.values()
+                    )
+                )
+                preview_line_load.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._preview_surface_edge_line_load(t)
+                )
+                remove_line_load = load_menu.addAction(
+                    "Remove Managed Edge Line Load..."
+                )
+                remove_line_load.setEnabled(preview_line_load.isEnabled())
+                remove_line_load.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._remove_surface_edge_line_load(t)
+                )
+                load_menu.addSeparator()
 
-            menu.addSeparator()
-            create_managed_set = menu.addAction(
-                "Create Managed Named Selection..."
+            pressure = load_menu.addAction(
+                "Managed Surface Pressure..."
                 if count == 1
-                else f"Create Managed Named Selection ({count} Surfaces)..."
+                else f"Create Managed Pressure on {count} Surfaces..."
             )
-            create_managed_set.triggered.connect(
+            pressure.triggered.connect(
                 lambda checked=False, tags=tuple(surface_tags):
-                self._create_surface_named_selection(tags)
+                self._create_surface_pressure_for_surfaces(tags)
             )
-            preview_pressure = menu.addAction(
+            preview_pressure = load_menu.addAction(
                 "Preview Pressure Direction..."
             )
             preview_pressure.triggered.connect(
@@ -23631,7 +23639,7 @@ class MainWindow(QMainWindow):
                 self._preview_surface_pressure(tags)
             )
             if count == 1:
-                preview_managed_pressure = menu.addAction(
+                preview_managed_pressure = load_menu.addAction(
                     "Preview Managed Surface Pressure..."
                 )
                 preview_managed_pressure.setEnabled(
@@ -23644,45 +23652,48 @@ class MainWindow(QMainWindow):
                     lambda checked=False, t=tag:
                     self._preview_managed_surface_pressure(t)
                 )
-                remove_managed_pressure = menu.addAction(
+                remove_managed_pressure = load_menu.addAction(
                     "Remove Managed Surface Pressure..."
                 )
                 remove_managed_pressure.setEnabled(
-                    any(
-                        item.surface_tag == tag
-                        for item in self.project.surface_pressures.values()
-                    )
+                    preview_managed_pressure.isEnabled()
                 )
                 remove_managed_pressure.triggered.connect(
                     lambda checked=False, t=tag:
                     self._remove_managed_surface_pressure(t)
                 )
-            pressure = menu.addAction(
-                "Managed Surface Pressure..."
-                if count == 1
-                else f"Create Managed Pressure on {count} Surfaces..."
+            clear_pressure_preview = load_menu.addAction(
+                "Clear Pressure Preview"
             )
-            pressure.triggered.connect(
+            clear_pressure_preview.triggered.connect(
+                self._clear_surface_pressure_preview
+            )
+
+            output_menu = menu.addMenu("Outputs / Scopes")
+            create_managed_set = output_menu.addAction(
+                "Create Managed Named Selection..."
+                if count == 1
+                else f"Create Managed Named Selection ({count} Surfaces)..."
+            )
+            create_managed_set.triggered.connect(
                 lambda checked=False, tags=tuple(surface_tags):
-                self._create_surface_pressure_for_surfaces(tags)
+                self._create_surface_named_selection(tags)
             )
             if count == 1:
-                managed_shell_recorder = menu.addAction(
+                output_menu.addSeparator()
+                managed_shell_recorder = output_menu.addAction(
                     "Managed Shell Recorder..."
                 )
                 managed_shell_recorder.triggered.connect(
                     lambda checked=False, t=tag:
                     self._manage_surface_shell_recorder(t)
                 )
-                select_recorder_targets = menu.addAction(
+                select_recorder_targets = output_menu.addAction(
                     "Select Managed Recorder FE Targets..."
                 )
                 select_recorder_targets.setEnabled(
                     any(
                         item.surface_tag == tag
-                        and item.generated_recorder_tag is not None
-                        and int(item.generated_recorder_tag)
-                        in self.project.recorders
                         for item in self.project.surface_recorders.values()
                     )
                 )
@@ -23690,20 +23701,19 @@ class MainWindow(QMainWindow):
                     lambda checked=False, t=tag:
                     self._select_managed_surface_recorder_targets(t)
                 )
-                remove_shell_recorder = menu.addAction(
+                remove_shell_recorder = output_menu.addAction(
                     "Remove Managed Shell Recorder..."
                 )
                 remove_shell_recorder.setEnabled(
-                    any(
-                        item.surface_tag == tag
-                        for item in self.project.surface_recorders.values()
-                    )
+                    select_recorder_targets.isEnabled()
                 )
                 remove_shell_recorder.triggered.connect(
                     lambda checked=False, t=tag:
                     self._remove_managed_surface_shell_recorder(t)
                 )
-            managed_shell_result = menu.addAction(
+
+            output_menu.addSeparator()
+            managed_shell_result = output_menu.addAction(
                 "Managed Shell Result..."
                 if count == 1
                 else f"Managed Shell Result on {count} Surfaces..."
@@ -23713,7 +23723,7 @@ class MainWindow(QMainWindow):
                 self._manage_surface_shell_result(tags)
             )
             if count == 1:
-                select_result_scope = menu.addAction(
+                select_result_scope = output_menu.addAction(
                     "Select Managed Result FE Scope..."
                 )
                 select_result_scope.setEnabled(
@@ -23723,23 +23733,16 @@ class MainWindow(QMainWindow):
                     lambda checked=False, t=tag:
                     self._select_managed_surface_result_scope(t)
                 )
-                remove_shell_result = menu.addAction(
+                remove_shell_result = output_menu.addAction(
                     "Remove Managed Shell Result..."
                 )
                 remove_shell_result.setEnabled(
-                    bool(self._managed_surface_results_for_surface(tag))
+                    select_result_scope.isEnabled()
                 )
                 remove_shell_result.triggered.connect(
                     lambda checked=False, t=tag:
                     self._remove_managed_surface_shell_result(t)
                 )
-            clear_pressure_preview = menu.addAction(
-                "Clear Pressure Preview"
-            )
-            clear_pressure_preview.triggered.connect(
-                self._clear_surface_pressure_preview
-            )
-            menu.addAction(self.actions["surface_mesh_overlay"])
 
             menu.addSeparator()
             delete = menu.addAction("Delete Surface")
