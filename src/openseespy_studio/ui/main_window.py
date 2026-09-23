@@ -19198,6 +19198,7 @@ class MainWindow(QMainWindow):
                 units=self.project.units,
                 initial_template=str(initial_template),
                 project=self.project,
+                new_pattern_callback=self._create_plain_pattern_dependency,
                 parent=self,
             )
         except Exception as exc:
