@@ -810,3 +810,31 @@ def test_clear_all_resets_dense_result_state(qapp):
         panel.deleteLater()
         qapp.processEvents()
 
+def test_specialized_cyclic_result_objects_focus_existing_views(qapp):
+    panel = ResultsPanel()
+    try:
+        panel.show_solution_result("CyclicHysteresis")
+        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Cyclic Hysteresis"
+        assert panel.cyclic_compare_view.currentData() == "hysteresis"
+        assert panel.cyclic_detail_tabs.currentIndex() == 0
+
+        panel.show_solution_result("CyclicBackbone")
+        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Cyclic Hysteresis"
+        assert panel.cyclic_compare_view.currentData() == "backbone"
+        assert panel.cyclic_detail_tabs.currentIndex() == 0
+
+        panel.show_solution_result("CyclicReversalMetrics")
+        assert panel.cyclic_compare_view.currentData() == "hysteresis"
+        assert panel.cyclic_detail_tabs.tabText(
+            panel.cyclic_detail_tabs.currentIndex()
+        ) == "Reversals"
+
+        panel.show_solution_result("CyclicCycleMetrics")
+        assert panel.cyclic_detail_tabs.tabText(
+            panel.cyclic_detail_tabs.currentIndex()
+        ) == "Cycles"
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
