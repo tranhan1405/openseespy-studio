@@ -1050,13 +1050,29 @@ class PropertiesPanel(QWidget):
         self._property_context: dict[str, object] = {}
         self._building_property_grid = False
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 6)
-        layout.setSpacing(3)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(6, 4, 6, 6)
+        root_layout.setSpacing(3)
 
         self.entity_label = QLabel("Node")
         self.entity_label.setObjectName("PanelTitle")
-        layout.addWidget(self.entity_label)
+        root_layout.addWidget(self.entity_label)
+
+        self.properties_scroll = QScrollArea()
+        self.properties_scroll.setWidgetResizable(True)
+        self.properties_scroll.setFrameShape(QFrame.NoFrame)
+        self.properties_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded
+        )
+        self.properties_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded
+        )
+        properties_body = QWidget()
+        layout = QVBoxLayout(properties_body)
+        layout.setContentsMargins(0, 0, 2, 0)
+        layout.setSpacing(3)
+        self.properties_scroll.setWidget(properties_body)
+        root_layout.addWidget(self.properties_scroll, 1)
 
         self.table = QTableWidget(0, 2)
         self.table.horizontalHeader().hide()
@@ -31481,6 +31497,13 @@ class MainWindow(QMainWindow):
         options = dict(
             getattr(self, "_active_linked_result_options", {}) or {}
         )
+        if self.results_panel.is_motion_playing():
+            # Keep playback lightweight. The scalar extrema are still
+            # computed for the contour itself, but expensive VTK extrema
+            # label actors are restored only when playback pauses.
+            options["_fast_animation"] = True
+            options["contour_show_min"] = False
+            options["contour_show_max"] = False
         nodes = set(
             getattr(self, "_active_linked_node_scope", set()) or set()
         )
