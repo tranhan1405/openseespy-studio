@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from openseespy_studio.project import SolutionResultData
 from openseespy_studio.ui.main_window import MainWindow, PropertiesPanel
+from openseespy_studio.ui.viewport import ModelViewport
 
 
 @pytest.fixture(scope="module")
@@ -102,3 +103,28 @@ def test_result_renderer_routes_contour_options_to_viewport():
 
     assert "contour_options=options" not in deformed_block
     assert "contour_options=options" in nodal_block
+
+def test_properties_panel_has_outer_scroll_area(qapp):
+    panel = PropertiesPanel()
+    try:
+        assert panel.properties_scroll.widgetResizable()
+        assert panel.properties_scroll.widget() is not None
+        assert panel.properties_scroll.verticalScrollBarPolicy() != 1
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_linked_contour_playback_uses_fast_mesh_updates_and_defers_labels():
+    linked = inspect.getsource(MainWindow._show_linked_result_frame)
+    viewport = inspect.getsource(ModelViewport.show_node_contour)
+
+    assert "is_motion_playing" in linked
+    assert 'options["_fast_animation"] = True' in linked
+    assert 'options["contour_show_min"] = False' in linked
+    assert 'options["contour_show_max"] = False' in linked
+    assert "_node_contour_animation_state" in viewport
+    assert 'point_data["nodal_result"][:]' in viewport
+    assert ".Modified()" in viewport
+
