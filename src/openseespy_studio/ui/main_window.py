@@ -10020,6 +10020,48 @@ class MainWindow(QMainWindow):
     def _delete_time_series(self, tag: int) -> None:
         if tag not in self.project.time_series:
             return
+        while True:
+            users = sorted(
+                pattern
+                for pattern in self.project.load_patterns.values()
+                if pattern.time_series_tag == tag
+            , key=lambda item: item.tag)
+            if not users:
+                break
+            owner = users[0]
+            is_ground_motion = owner.pattern_type == "UniformExcitation"
+            action_label = (
+                f"Edit Ground Motion {owner.tag} Now..."
+                if is_ground_motion
+                else f"Edit Load Pattern {owner.tag} Now..."
+            )
+            if not self._ask_create_prerequisite(
+                title="Delete Time Series",
+                message=(
+                    f"Time Series {tag} is still used by "
+                    f"{'Ground Motion' if is_ground_motion else 'Load Pattern'} "
+                    f"{owner.tag}. Reassign that dependency now?"
+                ),
+                action_label=action_label,
+            ):
+                return
+            before_users = {
+                item.tag
+                for item in self.project.load_patterns.values()
+                if item.time_series_tag == tag
+            }
+            if is_ground_motion:
+                self._edit_ground_motion(owner.tag)
+            else:
+                self._edit_load_pattern(owner.tag)
+            after_users = {
+                item.tag
+                for item in self.project.load_patterns.values()
+                if item.time_series_tag == tag
+            }
+            if after_users == before_users:
+                return
+
         before = self.project.to_dict()
         try:
             self.project.remove_time_series(tag)
@@ -10103,8 +10145,46 @@ class MainWindow(QMainWindow):
     def _delete_load_pattern(self, tag: int) -> None:
         if tag not in self.project.load_patterns:
             return
+        while True:
+            driver_users = sorted(
+                analysis.tag
+                for analysis in self.project.analyses.values()
+                if (
+                    self.project._analysis_uses_deferred_patterns(analysis)
+                    and tag in analysis.deferred_pattern_tags
+                )
+            )
+            if not driver_users:
+                break
+            owner_tag = int(driver_users[0])
+            if not self._ask_create_prerequisite(
+                title="Delete Load Pattern",
+                message=(
+                    f"Load Pattern {tag} is a driving/excitation pattern for "
+                    f"Analysis {owner_tag}. Edit that Analysis now?"
+                ),
+                action_label=f"Edit Analysis {owner_tag} Now...",
+            ):
+                return
+            before_users = set(driver_users)
+            self._edit_analysis(owner_tag)
+            after_users = {
+                analysis.tag
+                for analysis in self.project.analyses.values()
+                if (
+                    self.project._analysis_uses_deferred_patterns(analysis)
+                    and tag in analysis.deferred_pattern_tags
+                )
+            }
+            if after_users == before_users:
+                return
+
         before = self.project.to_dict()
-        self.project.remove_load_pattern(tag)
+        try:
+            self.project.remove_load_pattern(tag)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Delete Load Pattern", str(exc))
+            return
         self._refresh_project_metadata(f"Deleted load pattern {tag}")
         self._record_project_change(f"Delete load pattern {tag}", before)
 
@@ -10338,13 +10418,54 @@ class MainWindow(QMainWindow):
         if pair is None:
             return
         series, pattern = pair
+
+        while True:
+            driver_users = sorted(
+                analysis.tag
+                for analysis in self.project.analyses.values()
+                if (
+                    self.project._analysis_uses_deferred_patterns(analysis)
+                    and pattern.tag in analysis.deferred_pattern_tags
+                )
+            )
+            if not driver_users:
+                break
+            owner_tag = int(driver_users[0])
+            if not self._ask_create_prerequisite(
+                title="Delete Ground Motion",
+                message=(
+                    f"Ground Motion {pattern.tag} drives Analysis "
+                    f"{owner_tag}. Edit that Analysis before deleting it?"
+                ),
+                action_label=f"Edit Analysis {owner_tag} Now...",
+            ):
+                return
+            before_users = set(driver_users)
+            self._edit_analysis(owner_tag)
+            after_users = {
+                analysis.tag
+                for analysis in self.project.analyses.values()
+                if (
+                    self.project._analysis_uses_deferred_patterns(analysis)
+                    and pattern.tag in analysis.deferred_pattern_tags
+                )
+            }
+            if after_users == before_users:
+                return
+
         before = self.project.to_dict()
-        self.project.remove_load_pattern(pattern.tag)
-        if not any(
-            item.time_series_tag == series.tag
-            for item in self.project.load_patterns.values()
-        ):
-            self.project.remove_time_series(series.tag)
+        try:
+            self.project.remove_load_pattern(pattern.tag)
+            if not any(
+                item.time_series_tag == series.tag
+                for item in self.project.load_patterns.values()
+            ):
+                self.project.remove_time_series(series.tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Delete Ground Motion", str(exc))
+            return
         self._refresh_project_metadata(
             f"Deleted ground motion {pattern.tag}"
         )
@@ -15378,7 +15499,26 @@ class MainWindow(QMainWindow):
             wrapper_uses = sorted(
                 self.project.materials_using_material(tag)
             )
-            if not used_by and not connection_uses and not wrapper_uses:
+            truss_uses = sorted(
+                element.tag
+                for element in self.model.elements.values()
+                if element.truss_material_tag == tag
+            )
+            recorder_uses = sorted(
+                recorder.tag
+                for recorder in self.project.recorders.values()
+                if (
+                    recorder.recorder_type == "Fiber"
+                    and recorder.material_tag == tag
+                )
+            )
+            if (
+                not used_by
+                and not connection_uses
+                and not wrapper_uses
+                and not truss_uses
+                and not recorder_uses
+            ):
                 break
 
             if used_by:
@@ -15418,19 +15558,101 @@ class MainWindow(QMainWindow):
                     return
                 continue
 
-            owner_tag = int(wrapper_uses[0])
-            before_users = set(wrapper_uses)
+            if wrapper_uses:
+                owner_tag = int(wrapper_uses[0])
+                before_users = set(wrapper_uses)
+                if not self._ask_create_prerequisite(
+                    title="Delete Material",
+                    message=(
+                        f"Material {tag} is still referenced by wrapper/composite "
+                        f"Material {owner_tag}. Reassign that Material now?"
+                    ),
+                    action_label=f"Edit Wrapper Material {owner_tag} Now...",
+                ):
+                    return
+                self._edit_material(owner_tag)
+                if set(self.project.materials_using_material(tag)) == before_users:
+                    return
+                continue
+
+            if truss_uses:
+                if not self._ask_create_prerequisite(
+                    title="Delete Material",
+                    message=(
+                        f"Material {tag} is assigned to {len(truss_uses)} "
+                        "Truss element(s). Reassign them now?"
+                    ),
+                    action_label="Reassign Truss Material Now...",
+                ):
+                    return
+                replacement_tags = sorted(
+                    candidate_tag
+                    for candidate_tag in self.project.materials
+                    if int(candidate_tag) != int(tag)
+                )
+                choices = ["Create New Material..."] + [
+                    (
+                        f"{candidate_tag} - "
+                        f"{self.project.materials[candidate_tag].name} "
+                        f"({self.project.materials[candidate_tag].material_type})"
+                    )
+                    for candidate_tag in replacement_tags
+                ]
+                choice, ok = QInputDialog.getItem(
+                    self,
+                    "Delete Material",
+                    "Replacement for referenced Truss element(s):",
+                    choices,
+                    0,
+                    False,
+                )
+                if not ok:
+                    return
+                if choice == choices[0]:
+                    created = self._create_material_dependency()
+                    if created is None or int(created.tag) == int(tag):
+                        return
+                    replacement_tag = int(created.tag)
+                else:
+                    replacement_tag = int(
+                        replacement_tags[choices.index(choice) - 1]
+                    )
+                before_reassign = self.project.to_dict()
+                self.model.assign_truss_material(
+                    set(truss_uses),
+                    replacement_tag,
+                )
+                self._refresh_project_metadata(
+                    f"Reassigned {len(truss_uses)} Truss element(s) from "
+                    f"material {tag} to {replacement_tag}"
+                )
+                self._record_project_change(
+                    f"Reassign Truss material {tag} to {replacement_tag}",
+                    before_reassign,
+                )
+                continue
+
+            owner_tag = int(recorder_uses[0])
+            before_users = set(recorder_uses)
             if not self._ask_create_prerequisite(
                 title="Delete Material",
                 message=(
-                    f"Material {tag} is still referenced by wrapper/composite "
-                    f"Material {owner_tag}. Reassign that Material now?"
+                    f"Material {tag} is referenced by Fiber Recorder "
+                    f"{owner_tag}. Reassign that Recorder now?"
                 ),
-                action_label=f"Edit Wrapper Material {owner_tag} Now...",
+                action_label=f"Edit Fiber Recorder {owner_tag} Now...",
             ):
                 return
-            self._edit_material(owner_tag)
-            if set(self.project.materials_using_material(tag)) == before_users:
+            self._edit_recorder(owner_tag)
+            after_users = {
+                recorder.tag
+                for recorder in self.project.recorders.values()
+                if (
+                    recorder.recorder_type == "Fiber"
+                    and recorder.material_tag == tag
+                )
+            }
+            if after_users == before_users:
                 return
 
         answer = QMessageBox.question(
@@ -18433,28 +18655,123 @@ class MainWindow(QMainWindow):
         if section is None:
             return
 
-        used_by = sorted(
-            element.tag
-            for element in self.model.elements.values()
-            if element.section_tag == tag
-        )
-        connection_uses = self.project.connections_using_section(tag)
-        if used_by or connection_uses:
-            QMessageBox.warning(
+        while True:
+            element_users = sorted(
+                element.tag
+                for element in self.model.elements.values()
+                if tag in {
+                    element.section_tag,
+                    element.hinge_i_section_tag,
+                    element.hinge_j_section_tag,
+                    element.interior_section_tag,
+                }
+            )
+            if not element_users:
+                break
+            if not self._ask_create_prerequisite(
+                title="Delete Section",
+                message=(
+                    f"Section {tag} is referenced by {len(element_users)} "
+                    "Frame/Shell element(s), including hinge/interior section "
+                    "assignments. Reassign them now?"
+                ),
+                action_label="Reassign Referenced Sections Now...",
+            ):
+                return
+            old_is_shell = section.section_type in SHELL_SECTION_TYPES
+            replacement_tags = sorted(
+                candidate_tag
+                for candidate_tag, candidate in self.project.sections.items()
+                if (
+                    int(candidate_tag) != int(tag)
+                    and (
+                        (candidate.section_type in SHELL_SECTION_TYPES)
+                        == old_is_shell
+                    )
+                )
+            )
+            choices = ["Create New Section..."] + [
+                (
+                    f"{candidate_tag} - "
+                    f"{self.project.sections[candidate_tag].name} "
+                    f"({self.project.sections[candidate_tag].section_type})"
+                )
+                for candidate_tag in replacement_tags
+            ]
+            choice, ok = QInputDialog.getItem(
                 self,
                 "Delete Section",
-                (
-                    "Section is assigned to element(s): "
-                    + ", ".join(map(str, used_by[:20]))
-                    + ("..." if len(used_by) > 20 else "")
-                    if used_by
-                    else
-                    "Section is assigned to zeroLengthSection connection(s): "
-                    + ", ".join(map(str, connection_uses[:20]))
-                    + ("..." if len(connection_uses) > 20 else "")
-                ),
+                "Replacement Section:",
+                choices,
+                0,
+                False,
             )
-            return
+            if not ok:
+                return
+            if choice == choices[0]:
+                created = self._create_section_dependency()
+                if created is None or int(created.tag) == int(tag):
+                    return
+                if (
+                    (created.section_type in SHELL_SECTION_TYPES)
+                    != old_is_shell
+                ):
+                    QMessageBox.warning(
+                        self,
+                        "Delete Section",
+                        "The replacement Section is not compatible with the "
+                        "referenced element family.",
+                    )
+                    return
+                replacement_tag = int(created.tag)
+            else:
+                replacement_tag = int(
+                    replacement_tags[choices.index(choice) - 1]
+                )
+
+            before_reassign = self.project.to_dict()
+            for element_tag in element_users:
+                element = self.model.elements.get(int(element_tag))
+                if element is None:
+                    continue
+                for attribute in (
+                    "section_tag",
+                    "hinge_i_section_tag",
+                    "hinge_j_section_tag",
+                    "interior_section_tag",
+                ):
+                    if getattr(element, attribute, None) == tag:
+                        setattr(element, attribute, replacement_tag)
+            self._refresh_project_metadata(
+                f"Reassigned Section {tag} references on "
+                f"{len(element_users)} element(s) to {replacement_tag}"
+            )
+            self._record_project_change(
+                f"Reassign Section {tag} to {replacement_tag}",
+                before_reassign,
+            )
+
+        while True:
+            connection_uses = sorted(
+                self.project.connections_using_section(tag)
+            )
+            if not connection_uses:
+                break
+            owner_tag = int(connection_uses[0])
+            before_users = set(connection_uses)
+            if not self._ask_create_prerequisite(
+                title="Delete Section",
+                message=(
+                    f"Section {tag} is still referenced by "
+                    f"zeroLengthSection Connection {owner_tag}. "
+                    "Reassign that Connection now?"
+                ),
+                action_label=f"Edit Connection {owner_tag} Now...",
+            ):
+                return
+            self._edit_connection(owner_tag)
+            if set(self.project.connections_using_section(tag)) == before_users:
+                return
 
         answer = QMessageBox.question(
             self,
@@ -19380,6 +19697,25 @@ class MainWindow(QMainWindow):
         constraint = self.project.constraints.get(tag)
         if constraint is None:
             return
+        owner = next(
+            (
+                connection
+                for connection in self.project.connections.values()
+                if connection.generated_constraint_tag == tag
+            ),
+            None,
+        )
+        if owner is not None:
+            if self._ask_create_prerequisite(
+                title="Managed Connection Constraint",
+                message=(
+                    f"Constraint {tag} is generated and managed by Connection "
+                    f"{owner.tag}. Open the owning Connection now?"
+                ),
+                action_label="Edit Owning Connection Now...",
+            ):
+                self._edit_connection(owner.tag)
+            return
 
         dialog = ConstraintDialog(
             constraint=constraint,
@@ -19409,6 +19745,26 @@ class MainWindow(QMainWindow):
     def _delete_constraint(self, tag: int) -> None:
         constraint = self.project.constraints.get(tag)
         if constraint is None:
+            return
+        owner = next(
+            (
+                connection
+                for connection in self.project.connections.values()
+                if connection.generated_constraint_tag == tag
+            ),
+            None,
+        )
+        if owner is not None:
+            if self._ask_create_prerequisite(
+                title="Managed Connection Constraint",
+                message=(
+                    f"Constraint {tag} is generated by Connection "
+                    f"{owner.tag}. Edit or remove it through the owning "
+                    "Connection workflow?"
+                ),
+                action_label="Open Owning Connection Now...",
+            ):
+                self._edit_connection(owner.tag)
             return
         answer = QMessageBox.question(
             self,
@@ -24461,23 +24817,78 @@ class MainWindow(QMainWindow):
             elements=set(selection_set.element_tags),
         )
 
+    def _edit_surface_named_selection_scope(self, name: str) -> None:
+        selection_set = self.project.selection_sets.get(name)
+        if selection_set is None or not selection_set.surface_tags:
+            return
+        modes = [
+            ("FE nodes + Shell elements", "nodes_and_elements"),
+            ("Shell elements only", "elements"),
+            ("FE nodes only", "nodes"),
+        ]
+        labels = [label for label, _mode in modes]
+        current_index = next(
+            (
+                index
+                for index, (_label, mode) in enumerate(modes)
+                if mode == selection_set.surface_scope_mode
+            ),
+            0,
+        )
+        label, ok = QInputDialog.getItem(
+            self,
+            "Managed Surface Named Selection",
+            "FE scope:",
+            labels,
+            current_index,
+            False,
+        )
+        if not ok:
+            return
+        mode = modes[labels.index(label)][1]
+        if mode == selection_set.surface_scope_mode:
+            return
+        before = self.project.to_dict()
+        updated = SelectionSetData(
+            name=selection_set.name,
+            surface_tags=set(selection_set.surface_tags),
+            surface_scope_mode=mode,
+        )
+        try:
+            self.project.update_selection_set(name, updated)
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Managed Surface Named Selection",
+                str(exc),
+            )
+            return
+        self._refresh_tree()
+        self._show_named_selection_properties(name)
+        self._record_project_change(
+            f"Update managed Surface named selection {name}",
+            before,
+        )
+
     def _update_named_selection(self, name: str) -> None:
         selection_set = self.project.selection_sets.get(name)
         if selection_set is None:
             return
         if selection_set.surface_tags:
-            QMessageBox.information(
-                self,
-                "Managed Surface Named Selection",
-                "This named selection is managed by Geometry Surface "
-                + ", ".join(
-                    f"S{tag}" for tag in sorted(
-                        selection_set.surface_tags
+            if self._ask_create_prerequisite(
+                title="Managed Surface Named Selection",
+                message=(
+                    "This named selection is managed by Geometry Surface "
+                    + ", ".join(
+                        f"S{tag}" for tag in sorted(
+                            selection_set.surface_tags
+                        )
                     )
-                )
-                + ". Change its Geometry scope mode instead of replacing "
-                "it with FE IDs.",
-            )
+                    + ". Change its Geometry scope mode now?"
+                ),
+                action_label="Edit Surface Scope Mode Now...",
+            ):
+                self._edit_surface_named_selection_scope(name)
             return
         nodes, elements = self._selection_sets()
         if not nodes and not elements:
