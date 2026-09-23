@@ -2423,7 +2423,8 @@ class AnalysisSettingsData:
         ):
             raise ValueError("Control DOF must be 1..6.")
         uses_adaptive_step = (
-            self.adaptive_step and self.analysis_type != "Modal"
+            self.adaptive_step
+            and self.analysis_type not in {"Modal", "Response Spectrum"}
         )
         if (
             uses_adaptive_step
