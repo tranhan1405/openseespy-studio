@@ -5486,7 +5486,7 @@ class MainWindow(QMainWindow):
                 "Analysis Information",
             )
         elif job_plot_ref is not None:
-            self._show_job_plot(
+            self._show_job_plot_properties(
                 job_plot_ref[0],
                 job_plot_ref[1],
             )
