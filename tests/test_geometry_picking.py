@@ -107,3 +107,59 @@ def test_surface_pick_collects_four_distinct_geometry_points():
     assert "if point_tag in self._geometry_surface_point_tags" in source
     assert "if count < 4" in source
     assert "closed=(count == 4)" in source
+
+def test_geometry_grid_snap_rounds_to_nearest_visible_intersection():
+    class StubViewport:
+        def _geometry_sketch_grid_spec(self):
+            return {
+                "spacing": 1.0,
+                "start_u": -5.0,
+                "end_u": 5.0,
+                "start_v": -5.0,
+                "end_v": 5.0,
+            }
+
+        def geometry_world_to_local(self, xyz):
+            return float(xyz[0]), float(xyz[1])
+
+        def geometry_local_to_world(self, u, v):
+            return float(u), float(v), 7.0
+
+    snapped = ModelViewport.geometry_sketch_grid_snap(
+        StubViewport(),
+        (1.86, 3.08, 7.0),
+    )
+
+    assert snapped == ((2.0, 3.0, 7.0), 1.0)
+
+
+def test_geometry_grid_snap_rejects_points_outside_visible_grid():
+    class StubViewport:
+        def _geometry_sketch_grid_spec(self):
+            return {
+                "spacing": 1.0,
+                "start_u": -2.0,
+                "end_u": 2.0,
+                "start_v": -2.0,
+                "end_v": 2.0,
+            }
+
+        def geometry_world_to_local(self, xyz):
+            return float(xyz[0]), float(xyz[1])
+
+        def geometry_local_to_world(self, u, v):
+            return float(u), float(v), 0.0
+
+    assert ModelViewport.geometry_sketch_grid_snap(
+        StubViewport(),
+        (3.2, 0.1, 0.0),
+    ) is None
+
+
+def test_main_window_geometry_snap_includes_grid_intersections():
+    source = inspect.getsource(MainWindow._geometry_sketch_snap)
+
+    assert '"geometry_sketch_grid_snap"' in source
+    assert '"kind": "grid"' in source
+    assert "14.0 * 14.0" in source
+
