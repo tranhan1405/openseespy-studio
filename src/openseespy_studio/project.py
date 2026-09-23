@@ -2739,6 +2739,119 @@ class SolutionResultData:
 
 
 @dataclass
+class SketchPlaneData:
+    """Persistent construction/sketch plane defined by an orthonormal basis."""
+
+    tag: int
+    name: str
+    origin: Vec3 = (0.0, 0.0, 0.0)
+    u_axis: Vec3 = (1.0, 0.0, 0.0)
+    v_axis: Vec3 = (0.0, 1.0, 0.0)
+
+    def __post_init__(self) -> None:
+        self.tag = _strict_int(self.tag, "Sketch Plane tag")
+        if self.tag <= 0:
+            raise ValueError("Sketch Plane tag must be positive.")
+        self.name = str(self.name).strip() or f"Plane {self.tag}"
+
+        def vector(value, label: str) -> tuple[float, float, float]:
+            if len(value) != 3:
+                raise ValueError(f"{label} requires three components.")
+            result = tuple(float(item) for item in value)
+            if any(not math.isfinite(item) for item in result):
+                raise ValueError(f"{label} components must be finite.")
+            return result  # type: ignore[return-value]
+
+        def norm(value) -> float:
+            return math.sqrt(sum(float(item) ** 2 for item in value))
+
+        self.origin = vector(self.origin, "Sketch Plane origin")
+        raw_u = vector(self.u_axis, "Sketch Plane U axis")
+        raw_v = vector(self.v_axis, "Sketch Plane V axis")
+        u_norm = norm(raw_u)
+        if u_norm <= 1.0e-12:
+            raise ValueError("Sketch Plane U axis cannot be zero.")
+        u = tuple(item / u_norm for item in raw_u)
+        projection = sum(raw_v[index] * u[index] for index in range(3))
+        v_orth = tuple(
+            raw_v[index] - projection * u[index]
+            for index in range(3)
+        )
+        v_norm = norm(v_orth)
+        if v_norm <= 1.0e-12:
+            raise ValueError(
+                "Sketch Plane U and V axes must not be parallel."
+            )
+        v = tuple(item / v_norm for item in v_orth)
+        self.u_axis = u  # type: ignore[assignment]
+        self.v_axis = v  # type: ignore[assignment]
+
+    @property
+    def normal(self) -> Vec3:
+        u = self.u_axis
+        v = self.v_axis
+        return (
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+        )
+
+    def world_from_uv(self, u: float, v: float) -> Vec3:
+        uu = float(u)
+        vv = float(v)
+        if not math.isfinite(uu) or not math.isfinite(vv):
+            raise ValueError("Sketch Plane local coordinates must be finite.")
+        return tuple(
+            self.origin[index]
+            + uu * self.u_axis[index]
+            + vv * self.v_axis[index]
+            for index in range(3)
+        )  # type: ignore[return-value]
+
+    def uv_from_world(self, xyz) -> tuple[float, float]:
+        point = tuple(float(value) for value in xyz)
+        if len(point) != 3 or any(not math.isfinite(value) for value in point):
+            raise ValueError("Sketch Plane world point must be finite XYZ.")
+        delta = tuple(
+            point[index] - self.origin[index]
+            for index in range(3)
+        )
+        return (
+            sum(delta[index] * self.u_axis[index] for index in range(3)),
+            sum(delta[index] * self.v_axis[index] for index in range(3)),
+        )
+
+    def signed_distance(self, xyz) -> float:
+        point = tuple(float(value) for value in xyz)
+        if len(point) != 3 or any(not math.isfinite(value) for value in point):
+            raise ValueError("Sketch Plane world point must be finite XYZ.")
+        normal = self.normal
+        return sum(
+            (point[index] - self.origin[index]) * normal[index]
+            for index in range(3)
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "origin": list(self.origin),
+            "u_axis": list(self.u_axis),
+            "v_axis": list(self.v_axis),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SketchPlaneData":
+        return cls(
+            tag=data["tag"],
+            name=str(data.get("name", "")),
+            origin=tuple(data.get("origin", (0.0, 0.0, 0.0))),
+            u_axis=tuple(data.get("u_axis", (1.0, 0.0, 0.0))),
+            v_axis=tuple(data.get("v_axis", (0.0, 1.0, 0.0))),
+        )
+
+
+@dataclass
 class PointGeometryData:
     tag: int
     name: str
@@ -3723,6 +3836,7 @@ class ProjectDatabase:
     name: str = "Untitled"
     model: StructuralModel = field(default_factory=StructuralModel)
     selection_sets: dict[str, SelectionSetData] = field(default_factory=dict)
+    sketch_planes: dict[int, SketchPlaneData] = field(default_factory=dict)
     points: dict[int, PointGeometryData] = field(default_factory=dict)
     lines: dict[int, LineGeometryData] = field(default_factory=dict)
     surfaces: dict[int, SurfaceGeometryData] = field(default_factory=dict)
@@ -4306,6 +4420,20 @@ class ProjectDatabase:
             "remapped_elements": sorted(remapped_elements),
         }
 
+
+    def next_sketch_plane_tag(self) -> int:
+        return max(self.sketch_planes, default=0) + 1
+
+    def add_sketch_plane(self, plane: SketchPlaneData) -> None:
+        if plane.tag in self.sketch_planes:
+            raise ValueError(
+                f"Sketch Plane tag {plane.tag} already exists."
+            )
+        self.sketch_planes[plane.tag] = plane
+
+    def remove_sketch_plane(self, tag: int) -> None:
+        tag = _strict_int(tag, "Sketch Plane tag")
+        self.sketch_planes.pop(tag, None)
 
     def next_point_tag(self) -> int:
         return max(self.points, default=0) + 1
@@ -8478,6 +8606,10 @@ class ProjectDatabase:
                 self.selection_sets[name].to_dict()
                 for name in sorted(self.selection_sets)
             ],
+            "sketch_planes": [
+                self.sketch_planes[tag].to_dict()
+                for tag in sorted(self.sketch_planes)
+            ],
             "points": [
                 self.points[tag].to_dict()
                 for tag in sorted(self.points)
@@ -8568,6 +8700,22 @@ class ProjectDatabase:
             ],
             "active_analysis_tag": self.active_analysis_tag,
         }
+
+    @staticmethod
+    def _load_sketch_planes(raw: Any) -> dict[int, SketchPlaneData]:
+        result: dict[int, SketchPlaneData] = {}
+        for index, item in enumerate(
+            _require_list(raw, "Sketch Planes")
+        ):
+            plane = SketchPlaneData.from_dict(
+                _require_object(item, f"Sketch Plane item {index}")
+            )
+            if plane.tag in result:
+                raise ValueError(
+                    f"Duplicate Sketch Plane tag {plane.tag}."
+                )
+            result[plane.tag] = plane
+        return result
 
     @staticmethod
     def _load_points(raw: Any) -> dict[int, PointGeometryData]:
@@ -9067,6 +9215,9 @@ class ProjectDatabase:
             name=str(data.get("name", "Untitled")),
             model=StructuralModel.from_dict(data.get("model", {})),
             selection_sets=selection_sets,
+            sketch_planes=cls._load_sketch_planes(
+                data.get("sketch_planes", [])
+            ),
             points=cls._load_points(data.get("points", [])),
             lines=cls._load_lines(data.get("lines", [])),
             surfaces=cls._load_surfaces(data.get("surfaces", [])),
