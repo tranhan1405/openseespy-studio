@@ -2998,6 +2998,9 @@ class ResultsPanel(QWidget):
     def current_frame_index(self) -> int:
         return int(self._motion_frame_index)
 
+    def set_linked_contour_active(self, active: bool) -> None:
+        self._linked_contour_active = bool(active)
+
     def is_motion_playing(self) -> bool:
         return bool(self._motion_timer.isActive())
 
@@ -3300,9 +3303,19 @@ class ResultsPanel(QWidget):
         if not hasattr(self, "motion_info_label"):
             return
         mode = self._motion_selected_mode()
-        if (
-            self._motion_info is None
-            or self._motion_info.reference_magnitude is None
+        if self._motion_info is None:
+            self._motion_info = motion_info(
+                self._result,
+                mode=mode,
+                scan_reference=not bool(
+                    getattr(self, "_linked_contour_active", False)
+                ),
+            )
+        elif (
+            self._motion_info.reference_magnitude is None
+            and not bool(
+                getattr(self, "_linked_contour_active", False)
+            )
         ):
             self._motion_info = motion_info(
                 self._result,
