@@ -59,3 +59,21 @@ def test_solid_representation_highlight_keeps_edge_overlay():
     assert selected["render_lines_as_tubes"] is False
     assert selected["show_edges"] is True
     assert selected["line_width"] == 2
+
+def test_support_visual_specs_match_basic_boundary_conditions():
+    fixed = ModelViewport._support_visual_spec("Fixed")
+    pinned = ModelViewport._support_visual_spec("Pinned")
+    roller_x = ModelViewport._support_visual_spec("Roller X")
+    roller_y = ModelViewport._support_visual_spec("Roller Y")
+    roller_z = ModelViewport._support_visual_spec("Roller Z")
+    custom = ModelViewport._support_visual_spec("Custom")
+
+    assert fixed["family"] == "fixed"
+    assert pinned["family"] == "pinned"
+    assert roller_x["family"] == "roller"
+    assert roller_x["free_axis"] == "x"
+    assert roller_y["free_axis"] == "y"
+    assert roller_z["free_axis"] == "z"
+    assert custom["family"] == "custom"
+    assert custom["free_axis"] is None
+
