@@ -24628,6 +24628,10 @@ class MainWindow(QMainWindow):
 
         if kind == "solution_result":
             tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_solution_result_properties(tag)
+            )
             evaluate = menu.addAction("Evaluate")
             evaluate.triggered.connect(
                 lambda: self._evaluate_solution_result(tag)
@@ -24723,6 +24727,11 @@ class MainWindow(QMainWindow):
             job_id = int(value)
             job = self._jobs.get(job_id)
 
+            properties = menu.addAction("Properties")
+            properties.setEnabled(job is not None)
+            properties.triggered.connect(
+                lambda: self._show_job_properties(job_id)
+            )
             activate = menu.addAction("Set as Active Result Source")
             activate.setEnabled(job is not None)
             activate.triggered.connect(
