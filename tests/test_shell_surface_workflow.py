@@ -466,12 +466,13 @@ def test_surface_context_exposes_lifecycle_orientation_and_quality_tools():
         MainWindow._show_surface_geometry_properties
     )
 
-    assert "Properties / Mesh Quality" in source
-    assert "Remesh Surface" in source
+    assert 'properties = menu.addAction("Properties")' in source
+    assert 'quality_menu = menu.addMenu("Visualize Mesh Quality")' in source
+    assert '"Remesh"' in source
     assert "Delete Generated Mesh" in source
     assert "Flip Surface Normal" in source
-    assert "_remesh_surface_geometries" in source
-    assert "_delete_surface_meshes" in source
+    assert "_remesh_surface_geometry" in source
+    assert "_delete_surface_mesh" in source
     assert "_flip_surface_normals" in source
 
     assert "Worst aspect ratio" in properties
