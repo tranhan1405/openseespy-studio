@@ -4358,6 +4358,7 @@ class MainWindow(QMainWindow):
             self.project.surfaces,
             self.project.points,
             self.project.lines,
+            constraints=self.project.constraints,
             reset_camera=reset_camera,
         )
         self._refresh_project_metadata(
@@ -4398,7 +4399,7 @@ class MainWindow(QMainWindow):
         self.viewport.set_model_info(
             self.model.name,
             len(self.model.nodes),
-            len(self.model.elements) + len(self.project.connections),
+            len(self.model.elements),
             len(self.project.materials),
             len(self.project.sections),
             len(self.project.connections),
@@ -4425,8 +4426,9 @@ class MainWindow(QMainWindow):
 
         self.status_counts.setText(
             f"Nodes: {len(self.model.nodes)}   "
-            f"Elements: {len(self.model.elements) + len(self.project.connections)}   "
-            f"Connections: {len(self.project.connections)}"
+            f"Elements: {len(self.model.elements)}   "
+            f"Connections: {len(self.project.connections)}   "
+            f"Constraints: {len(self.project.constraints)}"
         )
         units = self.project.units
         self.results_panel.set_units(units)
@@ -4612,11 +4614,8 @@ class MainWindow(QMainWindow):
         nodes.setData(0, Qt.UserRole, ("nodes_root", None))
         fe_model.addChild(nodes)
 
-        total_element_count = (
-            len(self.model.elements) + len(self.project.connections)
-        )
         elements = QTreeWidgetItem([
-            f"Elements ({total_element_count})"
+            f"Elements ({len(self.model.elements)})"
         ])
         elements.setIcon(0, studio_icon("element"))
         elements.setData(0, Qt.UserRole, ("elements_root", None))
@@ -4748,6 +4747,76 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("element", tag))
             type_items.get(element.element_type, elements).addChild(item)
             self._tree_element_items[tag] = item
+
+        # Connection objects are OpenSees elements at export/runtime level,
+        # but they are interaction/interface objects in the preprocessing UX.
+        # Keep them separate from ordinary frame/truss/shell Elements so the
+        # tree follows engineering intent rather than command syntax.
+        connections_root = QTreeWidgetItem([
+            f"Connections ({len(self.project.connections)})"
+        ])
+        connections_root.setIcon(0, studio_icon("element"))
+        connections_root.setData(
+            0,
+            Qt.UserRole,
+            ("connections_root", None),
+        )
+        connections_root.setExpanded(True)
+        fe_model.addChild(connections_root)
+
+        connection_groups: dict[str, QTreeWidgetItem] = {}
+        for connection_type in SUPPORTED_CONNECTION_TYPES:
+            tags = [
+                tag
+                for tag, connection in self.project.connections.items()
+                if connection.connection_type == connection_type
+            ]
+            if not tags:
+                continue
+            group = QTreeWidgetItem([
+                f"{connection_type} ({len(tags)})"
+            ])
+            group.setIcon(0, studio_icon("element"))
+            group.setData(
+                0,
+                Qt.UserRole,
+                ("connection_group", connection_type),
+            )
+            group.setExpanded(True)
+            connections_root.addChild(group)
+            connection_groups[connection_type] = group
+
+        for tag in sorted(self.project.connections):
+            connection = self.project.connections[tag]
+            item = QTreeWidgetItem([
+                f"{connection.connection_type} [{tag}]  {connection.name}"
+            ])
+            item.setIcon(0, studio_icon("element"))
+            item.setData(0, Qt.UserRole, ("connection", tag))
+            connection_groups[connection.connection_type].addChild(item)
+
+        # MPC-style kinematic relationships belong to the FE model rather
+        # than Loads & BCs. Supports/fixities remain in Loads & BCs.
+        constraints_root = QTreeWidgetItem([
+            f"Constraints ({len(self.project.constraints)})"
+        ])
+        constraints_root.setIcon(0, studio_icon("transform"))
+        constraints_root.setData(
+            0,
+            Qt.UserRole,
+            ("constraints_root", None),
+        )
+        constraints_root.setExpanded(True)
+        fe_model.addChild(constraints_root)
+
+        for tag in sorted(self.project.constraints):
+            constraint = self.project.constraints[tag]
+            item = QTreeWidgetItem([
+                f"{constraint.constraint_type} [{tag}]  {constraint.name}"
+            ])
+            item.setIcon(0, studio_icon("transform"))
+            item.setData(0, Qt.UserRole, ("constraint", tag))
+            constraints_root.addChild(item)
 
         named_sets = QTreeWidgetItem([
             f"Named Selections ({len(self.project.selection_sets)})"
@@ -4918,58 +4987,6 @@ class MainWindow(QMainWindow):
                 node_item.setIcon(0, studio_icon(boundary_icon))
                 node_item.setData(0, Qt.UserRole, ("node", tag))
                 group_item.addChild(node_item)
-
-        constraints_root = QTreeWidgetItem([
-            f"Constraints ({len(self.project.constraints)})"
-        ])
-        constraints_root.setIcon(0, studio_icon("transform"))
-        constraints_root.setData(0, Qt.UserRole, ("constraints_root", None))
-        constraints_root.setExpanded(True)
-        loads_bc_root.addChild(constraints_root)
-
-        for tag in sorted(self.project.constraints):
-            constraint = self.project.constraints[tag]
-            item = QTreeWidgetItem([
-                f"{constraint.constraint_type} [{tag}]  {constraint.name}"
-            ])
-            item.setIcon(0, studio_icon("transform"))
-            item.setData(0, Qt.UserRole, ("constraint", tag))
-            constraints_root.addChild(item)
-
-        # OpenSees zeroLength/twoNodeLink/zeroLengthSection objects are
-        # elements even though SARE keeps their editor-specific metadata in
-        # ProjectDatabase.connections. Show them under Elements so imported
-        # OpenSees models preserve the source model semantics.
-        connection_groups: dict[str, QTreeWidgetItem] = {}
-        for connection_type in SUPPORTED_CONNECTION_TYPES:
-            tags = [
-                tag
-                for tag, connection in self.project.connections.items()
-                if connection.connection_type == connection_type
-            ]
-            if not tags:
-                continue
-            group = QTreeWidgetItem([
-                f"{connection_type} ({len(tags)})"
-            ])
-            group.setIcon(0, studio_icon("element"))
-            group.setData(
-                0,
-                Qt.UserRole,
-                ("connection_group", connection_type),
-            )
-            group.setExpanded(True)
-            elements.addChild(group)
-            connection_groups[connection_type] = group
-
-        for tag in sorted(self.project.connections):
-            connection = self.project.connections[tag]
-            item = QTreeWidgetItem([
-                f"Element {tag} · {connection.name}"
-            ])
-            item.setIcon(0, studio_icon("element"))
-            item.setData(0, Qt.UserRole, ("connection", tag))
-            connection_groups[connection.connection_type].addChild(item)
 
         mass_nodes = [
             tag for tag, node in self.model.nodes.items()
@@ -5380,8 +5397,27 @@ class MainWindow(QMainWindow):
                 transformation_tag = int(tag)
             elif kind == "constraint":
                 constraint_tag = int(tag)
+                constraint = self.project.constraints.get(constraint_tag)
+                if constraint is not None:
+                    nodes.add(int(constraint.retained_node))
+                    nodes.update(
+                        int(node_tag)
+                        for node_tag in constraint.constrained_nodes
+                        if int(node_tag) in self.model.nodes
+                    )
             elif kind == "connection":
                 connection_tag = int(tag)
+                connection = self.project.connections.get(connection_tag)
+                if connection is not None:
+                    elements.add(connection_tag)
+                    nodes.update(
+                        node_tag
+                        for node_tag in (
+                            int(connection.node_i),
+                            int(connection.node_j),
+                        )
+                        if node_tag in self.model.nodes
+                    )
             elif kind == "element_type_group":
                 element_type_group = str(tag)
             elif kind == "boundary_group":
