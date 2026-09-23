@@ -991,6 +991,7 @@ class ResultsPanel(QWidget):
         self._build_moment_curvature_tab()
         self._build_pushover_tab()
         self._build_cyclic_tab()
+        self._build_response_spectrum_tab()
         self._build_specimen_tab()
         self._build_calibration_tab()
         self._build_history_tab()
@@ -1227,6 +1228,17 @@ class ResultsPanel(QWidget):
             self._select_tab("Moment–Curvature")
             if hasattr(self, "moment_curvature_detail_tabs"):
                 self.moment_curvature_detail_tabs.setCurrentIndex(0)
+            return
+        if kind == "ResponseSpectrum":
+            curve = str(options.get("curve", "rotd50"))
+            if hasattr(self, "response_spectrum_curve"):
+                index = self.response_spectrum_curve.findData(curve)
+                if index >= 0:
+                    self.response_spectrum_curve.setCurrentIndex(index)
+            self._update_response_spectrum_plot()
+            self._select_tab("Response Spectrum")
+            if curve == "table" and hasattr(self, "response_spectrum_tabs"):
+                self.response_spectrum_tabs.setCurrentIndex(1)
             return
         if kind == "PushoverCurve":
             self._select_tab("Pushover Curve")
@@ -2517,6 +2529,161 @@ class ResultsPanel(QWidget):
         )
         layout.addWidget(self.pushover_plot, 1)
         self.tabs.addTab(page, "Pushover Curve")
+
+    def _build_response_spectrum_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(5)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Curve:"))
+        self.response_spectrum_curve = QComboBox()
+        self.response_spectrum_curve.addItem("Component X", "component_x")
+        self.response_spectrum_curve.addItem("Component Y", "component_y")
+        self.response_spectrum_curve.addItem("RotD50", "rotd50")
+        self.response_spectrum_curve.addItem("RotD100", "rotd100")
+        self.response_spectrum_curve.currentIndexChanged.connect(
+            self._update_response_spectrum_plot
+        )
+        controls.addWidget(self.response_spectrum_curve)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.response_spectrum_info = QLabel(
+            "Run or select a Response Spectrum analysis."
+        )
+        self.response_spectrum_info.setWordWrap(True)
+        layout.addWidget(self.response_spectrum_info)
+
+        self.response_spectrum_tabs = QTabWidget()
+        self.response_spectrum_tabs.setDocumentMode(True)
+        layout.addWidget(self.response_spectrum_tabs, 1)
+
+        curve_page = QWidget()
+        curve_layout = QVBoxLayout(curve_page)
+        curve_layout.setContentsMargins(3, 3, 3, 3)
+        self.response_spectrum_plot = TimeHistoryPlot(
+            empty_message="No response-spectrum data"
+        )
+        curve_layout.addWidget(self.response_spectrum_plot, 1)
+        self.response_spectrum_tabs.addTab(curve_page, "Curve")
+
+        table_page = QWidget()
+        table_layout = QVBoxLayout(table_page)
+        table_layout.setContentsMargins(3, 3, 3, 3)
+        self.response_spectrum_table = QTableWidget(0, 5)
+        self.response_spectrum_table.setHorizontalHeaderLabels([
+            "T (s)",
+            "Sa-X (g)",
+            "Sa-Y (g)",
+            "RotD50 (g)",
+            "RotD100 (g)",
+        ])
+        self.response_spectrum_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.response_spectrum_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.response_spectrum_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        table_layout.addWidget(self.response_spectrum_table, 1)
+        self.response_spectrum_tabs.addTab(table_page, "Data")
+
+        self.tabs.addTab(page, "Response Spectrum")
+
+    def _update_response_spectrum_plot(self) -> None:
+        spectrum = self._result.get("response_spectrum", {})
+        if not isinstance(spectrum, dict):
+            spectrum = {}
+        periods = [
+            float(value)
+            for value in spectrum.get("period_s", [])
+        ]
+        curve = (
+            str(self.response_spectrum_curve.currentData() or "rotd50")
+            if hasattr(self, "response_spectrum_curve")
+            else "rotd50"
+        )
+        key_by_curve = {
+            "component_x": "component_x_sa_g",
+            "component_y": "component_y_sa_g",
+            "rotd50": "rotd50_sa_g",
+            "rotd100": "rotd100_sa_g",
+        }
+        label_by_curve = {
+            "component_x": "Component X",
+            "component_y": "Component Y",
+            "rotd50": "RotD50",
+            "rotd100": "RotD100",
+        }
+        values = [
+            float(value)
+            for value in spectrum.get(key_by_curve.get(curve, ""), [])
+        ]
+        if hasattr(self, "response_spectrum_plot"):
+            self.response_spectrum_plot.set_series(periods, values)
+            self.response_spectrum_plot.clear_overlay()
+
+        damping = spectrum.get("damping_ratio")
+        mode = str(spectrum.get("mode", "") or "")
+        if periods and values:
+            peak_index = max(
+                range(min(len(periods), len(values))),
+                key=lambda index: values[index],
+            )
+            damping_text = (
+                f"{100.0 * float(damping):.3g}%"
+                if damping is not None
+                else "-"
+            )
+            self.response_spectrum_info.setText(
+                f"{mode or 'Response Spectrum'} · "
+                f"{label_by_curve.get(curve, curve)} · "
+                f"damping {damping_text} · "
+                f"peak {values[peak_index]:.4g} g at "
+                f"T={periods[peak_index]:.4g} s"
+            )
+        elif hasattr(self, "response_spectrum_info"):
+            analysis = self._result.get("analysis", {})
+            analysis_type = (
+                str(analysis.get("type", ""))
+                if isinstance(analysis, dict)
+                else ""
+            )
+            if analysis_type == "Response Spectrum":
+                self.response_spectrum_info.setText(
+                    f"{label_by_curve.get(curve, curve)} was not requested "
+                    "or no spectrum data is available."
+                )
+            else:
+                self.response_spectrum_info.setText(
+                    "Run or select a Response Spectrum analysis."
+                )
+
+        if not hasattr(self, "response_spectrum_table"):
+            return
+        x = list(spectrum.get("component_x_sa_g", []))
+        y = list(spectrum.get("component_y_sa_g", []))
+        r50 = list(spectrum.get("rotd50_sa_g", []))
+        r100 = list(spectrum.get("rotd100_sa_g", []))
+        self.response_spectrum_table.setRowCount(len(periods))
+        columns = (x, y, r50, r100)
+        for row, period in enumerate(periods):
+            self.response_spectrum_table.setItem(
+                row, 0, QTableWidgetItem(f"{period:.6g}")
+            )
+            for column, series in enumerate(columns, start=1):
+                value = (
+                    f"{float(series[row]):.6g}"
+                    if row < len(series)
+                    else "-"
+                )
+                self.response_spectrum_table.setItem(
+                    row, column, QTableWidgetItem(value)
+                )
 
     def _build_cyclic_tab(self) -> None:
         page = QWidget()
@@ -4757,6 +4924,7 @@ class ResultsPanel(QWidget):
         self._update_moment_curvature_plot()
         self._update_pushover_plot()
         self._update_cyclic_plot()
+        self._update_response_spectrum_plot()
         self._populate_specimen_response()
         self._update_history_plot()
         self._refresh_motion_controls()
