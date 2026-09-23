@@ -192,10 +192,55 @@ def cyclic_hysteresis_curve(
         force_source="Base shear",
     )
     if not displacement or not force:
-        return [], [], node, dof
+        # Backward compatibility with older Cyclic result schemas that stored
+        # only monitor displacement + scalar base shear and did not include a
+        # time vector or per-node recorder dictionaries.
+        analysis = result.get("analysis", {})
+        history = result.get("history", {})
+        if not isinstance(analysis, dict):
+            analysis = {}
+        if not isinstance(history, dict):
+            return [], [], node, dof
+        try:
+            node = int(
+                history.get("monitor_node", analysis.get("control_node"))
+            )
+        except (TypeError, ValueError):
+            node = None
+        try:
+            dof = int(
+                history.get("control_dof", analysis.get("control_dof", 1))
+            )
+        except (TypeError, ValueError):
+            dof = 1
+        if dof not in range(1, 7):
+            dof = 1
+        rows = history.get("displacement", [])
+        shear = history.get("base_shear", [])
+        if not isinstance(rows, (list, tuple)) or not isinstance(
+            shear, (list, tuple)
+        ):
+            return [], [], node, dof
+        x = []
+        y = []
+        component = dof - 1
+        for row, raw_shear in zip(rows, shear):
+            if not isinstance(row, (list, tuple)) or len(row) <= component:
+                continue
+            try:
+                u = float(row[component])
+                v = -float(raw_shear)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(u) and math.isfinite(v):
+                x.append(u)
+                y.append(v)
+        if not x or not y:
+            return [], [], node, dof
+    else:
+        x = list(displacement)
+        y = list(force)
 
-    x = list(displacement)
-    y = list(force)
     analysis = result.get("analysis", {})
     analysis_type = (
         str(analysis.get("type", ""))
