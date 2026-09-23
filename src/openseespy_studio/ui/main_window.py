@@ -3986,6 +3986,8 @@ class MainWindow(QMainWindow):
         return kinds in (
             {"model_root"},
             {"geometry_root"},
+            {"mesh_root"},
+            {"fe_model_root"},
         )
 
     def _build_status_bar(self) -> None:
@@ -5393,11 +5395,19 @@ class MainWindow(QMainWindow):
         geometry_root_selected = selected_payload_kinds == {
             "geometry_root"
         }
+        mesh_root_selected = selected_payload_kinds == {"mesh_root"}
+        fe_model_root_selected = selected_payload_kinds == {
+            "fe_model_root"
+        }
 
-        # Selecting the Geometry object itself is a navigation action, not a
-        # continuation of an active sketch/trim command. Return to the normal
-        # select pointer while preserving camera and geometry visibility.
-        if geometry_root_selected:
+        # Major display roots are navigation objects, not modeling commands.
+        # Clicking one exits an in-progress sketch/pick/measure tool and
+        # returns to the neutral Select pointer without changing visibility.
+        if (
+            geometry_root_selected
+            or mesh_root_selected
+            or fe_model_root_selected
+        ):
             if self.viewport.interaction_tool() != "select":
                 self._activate_select_tool()
         elif not geometry_mode and self._geometry_sketch_tool_active():
@@ -5609,6 +5619,14 @@ class MainWindow(QMainWindow):
                 elif root_kind == "geometry_root":
                     self.status_message.setText(
                         "Geometry overview · geometry-only display"
+                    )
+                elif root_kind == "mesh_root":
+                    self.status_message.setText(
+                        "Mesh overview · generated FE mesh display"
+                    )
+                elif root_kind == "fe_model_root":
+                    self.status_message.setText(
+                        "FE Model overview · base FE display"
                     )
 
     def _wire_selection(self) -> None:
