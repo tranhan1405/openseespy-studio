@@ -2054,3 +2054,58 @@ def test_new_empty_project_point_dialog_creates_visible_geometry():
         window.undo_stack.setClean()
         window.close()
         app.processEvents()
+
+
+
+def test_custom_sketch_plane_rectangle_creates_surface_on_plane():
+    from PySide6.QtWidgets import QApplication
+
+    from openseespy_studio.project import SketchPlaneData
+    from openseespy_studio.ui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        window._new_model()
+        plane = SketchPlaneData(
+            tag=1,
+            name="Inclined Roof",
+            origin=(0.0, 0.0, 2.0),
+            u_axis=(1.0, 0.0, 0.0),
+            v_axis=(0.0, 1.0, 1.0),
+        )
+        window.project.add_sketch_plane(plane)
+        window._activate_sketch_plane(1, look_at=False)
+        window.actions["geometry_snap"].setChecked(False)
+        window.actions["surface_geometry_pick"].trigger()
+
+        first = plane.world_from_uv(0.0, 0.0)
+        opposite = plane.world_from_uv(4.0, 3.0)
+        window._handle_geometry_rectangle_sketch_click(
+            {
+                "world": first,
+                "screen": (100.0, 100.0),
+                "plane": "plane:1",
+            }
+        )
+        window._handle_geometry_rectangle_sketch_click(
+            {
+                "world": opposite,
+                "screen": (400.0, 300.0),
+                "plane": "plane:1",
+            }
+        )
+
+        assert len(window.project.points) == 4
+        assert len(window.project.surfaces) == 1
+        surface = next(iter(window.project.surfaces.values()))
+        assert surface.corner_point_tags is not None
+        assert len(set(surface.corner_point_tags)) == 4
+        for tag in surface.corner_point_tags:
+            point = window.project.points[int(tag)]
+            assert abs(plane.signed_distance(point.xyz)) <= 1.0e-9
+    finally:
+        window._set_dirty(False)
+        window.undo_stack.setClean()
+        window.close()
+        app.processEvents()
