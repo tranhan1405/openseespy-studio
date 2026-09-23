@@ -67,14 +67,27 @@ def test_results_ribbon_exposes_frame_count_and_extrema_toggles():
     build = inspect.getsource(MainWindow._build_actions_and_ribbon)
     render = inspect.getsource(MainWindow._render_result_data)
     toggle = inspect.getsource(MainWindow._set_result_extrema_visibility)
+    frame_choice = inspect.getsource(
+        MainWindow._apply_result_animation_frame_choice
+    )
+    custom_frame = inspect.getsource(
+        MainWindow._apply_result_animation_custom_frame_limit
+    )
     frame_limit = inspect.getsource(ResultsPanel.set_playback_frame_limit)
 
-    assert "result_frame_count_ribbon" in build
+    assert "result_frame_count_ribbon = QComboBox()" in build
+    assert '("5 Frames", 5)' in build
+    assert '("20 Frames", 20)' in build
+    assert '("100 Frames", 100)' in build
+    assert '("User Defined...", "user")' in build
+    assert "findData(20)" in build
+    assert "result_frame_custom_ribbon = QSpinBox()" in build
     assert "setRange(5, 100)" in build
-    assert "setValue(20)" in build
-    assert 'setSuffix(" frames")' in build
+    assert "setVisible(False)" in build
     assert '"result_show_min"' in build
     assert '"result_show_max"' in build
+    assert 'str(raw) == "user"' in frame_choice
+    assert 'currentData()) != "user"' in custom_frame
     assert "max(5, min(100" in frame_limit
     assert "_sync_result_contour_ribbon_controls" in render
     assert "is_motion_playing" in toggle
