@@ -23236,6 +23236,159 @@ class MainWindow(QMainWindow):
                     ("Element Loads", element_loads),
                 ],
             )
+            return
+        if kind == "connections_root":
+            connection_types: dict[str, int] = {}
+            connected_nodes: set[int] = set()
+            assigned_materials: set[int] = set()
+            for connection in self.project.connections.values():
+                key = str(connection.connection_type)
+                connection_types[key] = connection_types.get(key, 0) + 1
+                connected_nodes.update(
+                    (int(connection.node_i), int(connection.node_j))
+                )
+                assigned_materials.update(
+                    int(material_tag)
+                    for material_tag in
+                    connection.materials_by_dof.values()
+                )
+            rows = [
+                ("Total Connections", len(self.project.connections)),
+                ("Connection Types", len(connection_types)),
+                ("Connected Nodes", len(connected_nodes)),
+                ("Assigned Materials", len(assigned_materials)),
+            ]
+            rows.extend(
+                (f"Type · {name}", count)
+                for name, count in sorted(connection_types.items())
+            )
+            self.properties_panel.set_properties("Connections", rows)
+            return
+        if kind == "loading_root":
+            plain_patterns = sum(
+                1
+                for pattern in self.project.load_patterns.values()
+                if pattern.pattern_type == "Plain"
+            )
+            ground_motions = sum(
+                1
+                for pattern in self.project.load_patterns.values()
+                if pattern.pattern_type == "UniformExcitation"
+            )
+            self.properties_panel.set_properties(
+                "Loading",
+                [
+                    ("Load Patterns", plain_patterns),
+                    ("Ground Motions", ground_motions),
+                    ("Time Series", len(self.project.time_series)),
+                    ("Nodal Loads", len(self.project.nodal_loads)),
+                    (
+                        "Prescribed Displacements",
+                        len(self.project.prescribed_displacements),
+                    ),
+                    ("Element Loads", len(self.project.element_loads)),
+                    (
+                        "Managed Surface Pressures",
+                        len(self.project.surface_pressures),
+                    ),
+                ],
+            )
+            return
+        if kind == "ground_motions_root":
+            motions = [
+                pattern
+                for pattern in self.project.load_patterns.values()
+                if pattern.pattern_type == "UniformExcitation"
+            ]
+            directions: dict[int, int] = {}
+            referenced_series: set[int] = set()
+            path_points = 0
+            for motion in motions:
+                direction = int(motion.direction)
+                directions[direction] = directions.get(direction, 0) + 1
+                series_tag = int(motion.time_series_tag)
+                referenced_series.add(series_tag)
+                series = self.project.time_series.get(series_tag)
+                if series is not None and series.series_type == "Path":
+                    path_points += len(series.values)
+            rows = [
+                ("Total Ground Motions", len(motions)),
+                ("Referenced Time Series", len(referenced_series)),
+                ("Excitation Directions", len(directions)),
+                ("Path Data Points", path_points),
+            ]
+            rows.extend(
+                (f"Direction · DOF {direction}", count)
+                for direction, count in sorted(directions.items())
+            )
+            self.properties_panel.set_properties("Ground Motions", rows)
+            return
+        if kind == "jobs_root":
+            status_counts: dict[str, int] = {}
+            result_jobs = 0
+            saved_plots = 0
+            for job in self._jobs.values():
+                key = str(job.status)
+                status_counts[key] = status_counts.get(key, 0) + 1
+                if job.results:
+                    result_jobs += 1
+                saved_plots += len(job.plots)
+            active_job = (
+                str(self._current_job_id)
+                if self._current_job_id in self._jobs
+                else "None"
+            )
+            rows = [
+                ("Total Jobs", len(self._jobs)),
+                ("Active Job", active_job),
+                ("Jobs with Results", result_jobs),
+                ("Saved Plots", saved_plots),
+            ]
+            rows.extend(
+                (f"Status · {name}", count)
+                for name, count in sorted(status_counts.items())
+            )
+            self.properties_panel.set_properties("Jobs", rows)
+            return
+
+    def _show_solution_root_properties(
+        self,
+        analysis_tag: int,
+    ) -> None:
+        """Show a compact per-analysis Solution summary."""
+        tag = int(analysis_tag)
+        analysis = self.project.analyses.get(tag)
+        results = self.project.solution_results_for_analysis(tag)
+        result_types: dict[str, int] = {}
+        node_scope: set[int] = set()
+        element_scope: set[int] = set()
+        surface_scope: set[int] = set()
+        for result in results:
+            key = str(result.result_type)
+            result_types[key] = result_types.get(key, 0) + 1
+            node_scope.update(int(value) for value in result.node_scope)
+            element_scope.update(
+                int(value) for value in result.element_scope
+            )
+            surface_scope.update(
+                int(value) for value in result.surface_scope
+            )
+        rows = [
+            (
+                "Analysis",
+                analysis.name if analysis is not None else f"#{tag}",
+            ),
+            ("Result Requests", len(results)),
+            ("Result Types", len(result_types)),
+            ("Scoped Nodes", len(node_scope)),
+            ("Scoped Elements", len(element_scope)),
+            ("Scoped Surfaces", len(surface_scope)),
+        ]
+        rows.extend(
+            (f"Type · {name}", count)
+            for name, count in sorted(result_types.items())
+        )
+        self.properties_panel.set_properties("Solution", rows)
 
     def _populate_materials_root_context_menu(
         self,
@@ -25146,6 +25299,12 @@ class MainWindow(QMainWindow):
         if kind == "connections_root":
             create_action = menu.addAction("New ZeroLength / Link...")
             create_action.triggered.connect(self._create_connection)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "connections_root"
+                )
+            )
             exec_menu()
             return
 
@@ -25278,16 +25437,23 @@ class MainWindow(QMainWindow):
                 section_response_available=True,
             )
 
+            result_objects = self.project.solution_results_for_analysis(
+                analysis_tag
+            )
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda checked=False, tag=analysis_tag:
+                self._show_solution_root_properties(tag)
+            )
+
             menu.addSeparator()
             evaluate_all = menu.addAction("Evaluate All Result Requests")
+            evaluate_all.setEnabled(bool(result_objects))
             evaluate_all.triggered.connect(
                 lambda: self._evaluate_all_solution_results(analysis_tag)
             )
             clear_display = menu.addAction("Clear Result Display")
             clear_display.triggered.connect(self._clear_result_display)
-            result_objects = self.project.solution_results_for_analysis(
-                analysis_tag
-            )
             delete_all = menu.addAction("Delete All Result Requests...")
             delete_all.setEnabled(bool(result_objects))
             delete_all.triggered.connect(
@@ -25405,6 +25571,10 @@ class MainWindow(QMainWindow):
                     self.results_dock.show(),
                     self.results_dock.raise_(),
                 )
+            )
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("jobs_root")
             )
             menu.addSeparator()
             clear_display = menu.addAction("Clear Result Display")
@@ -25625,6 +25795,12 @@ class MainWindow(QMainWindow):
             import_motion.triggered.connect(self._import_ground_motion)
             new_series = menu.addAction("New Time Series...")
             new_series.triggered.connect(self._create_time_series)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "loading_root"
+                )
+            )
             exec_menu()
             return
 
@@ -25633,6 +25809,12 @@ class MainWindow(QMainWindow):
             action.triggered.connect(self._create_ground_motion)
             import_action = menu.addAction("Import Ground Motion...")
             import_action.triggered.connect(self._import_ground_motion)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "ground_motions_root"
+                )
+            )
             exec_menu()
             return
 
