@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import math
+import time
 from typing import Any
 
 from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Signal
@@ -998,6 +999,8 @@ class ResultsPanel(QWidget):
         # playback advances multiple analysis frames per tick instead of
         # forcing VTK to redraw at progressively higher frame rates.
         self._motion_frame_accumulator = 0.0
+        self._motion_playback_time: float | None = None
+        self._motion_wall_clock: float | None = None
         self._playback_frame_limit = 20
         self._playback_frame_indices: list[int] = []
         self._playback_sample_cursor = 0
@@ -3080,6 +3083,7 @@ class ResultsPanel(QWidget):
 
     def _frame_slider_changed(self, value: int) -> None:
         self._set_motion_index(int(value))
+        self._sync_transient_playback_clock_to_frame()
 
     def _select_frame_from_plot(self, index: int) -> None:
         if self._motion_info is None:
@@ -3230,6 +3234,7 @@ class ResultsPanel(QWidget):
 
     def _motion_slider_changed(self, value: int) -> None:
         self._set_motion_index(int(value))
+        self._sync_transient_playback_clock_to_frame()
 
     def _set_motion_index(self, index: int) -> None:
         if self._motion_info is None:
@@ -3273,6 +3278,42 @@ class ResultsPanel(QWidget):
         except (TypeError, ValueError):
             return 1.0
 
+    def _transient_time_values(self) -> list[float]:
+        if self._motion_info is None or self._motion_info.kind != "Transient":
+            return []
+        history = (
+            self._result.get("history", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        raw = history.get("time", []) if isinstance(history, dict) else []
+        if not isinstance(raw, list):
+            return []
+        values: list[float] = []
+        for value in raw[: int(self._motion_info.frame_count)]:
+            try:
+                number = float(value)
+            except (TypeError, ValueError, OverflowError):
+                return []
+            if not math.isfinite(number):
+                return []
+            values.append(number)
+        if len(values) < 2:
+            return []
+        if any(values[index] <= values[index - 1] for index in range(1, len(values))):
+            return []
+        return values
+
+    def _sync_transient_playback_clock_to_frame(self) -> None:
+        times = self._transient_time_values()
+        index = int(self._motion_frame_index)
+        self._motion_playback_time = (
+            float(times[index])
+            if times and 0 <= index < len(times)
+            else None
+        )
+        self._motion_wall_clock = time.monotonic()
+
     def _update_motion_timer(self, *_args) -> None:
         if hasattr(self, "frame_speed"):
             index = self.motion_speed.currentIndex()
@@ -3294,6 +3335,8 @@ class ResultsPanel(QWidget):
     def stop_motion(self) -> None:
         self._motion_timer.stop()
         self._motion_frame_accumulator = 0.0
+        self._motion_playback_time = None
+        self._motion_wall_clock = None
         self._set_play_buttons(False)
         self._sync_motion_markers(None)
 
@@ -3306,12 +3349,15 @@ class ResultsPanel(QWidget):
                 self._set_play_buttons(False)
                 return
             self._motion_frame_accumulator = 0.0
+            self._sync_transient_playback_clock_to_frame()
             self._set_play_buttons(True)
             self._motion_timer.setInterval(40)
             self._motion_timer.start()
         else:
             self._motion_timer.stop()
             self._motion_frame_accumulator = 0.0
+            self._motion_playback_time = None
+            self._motion_wall_clock = None
             self._set_play_buttons(False)
             # Re-emit the resting frame so expensive annotations such as
             # contour extrema labels can be restored after fast playback.
@@ -3324,16 +3370,58 @@ class ResultsPanel(QWidget):
         if count <= 0:
             return
 
-        # Fractional accumulation keeps 0.25x/0.5x and transient playback
-        # faithful without raising the render frequency. At >1x we skip
-        # intermediate result frames while the viewport remains near 25 FPS.
+        samples = self._playback_frame_indices
+        transient_times = self._transient_time_values()
+        if samples and transient_times:
+            now = time.monotonic()
+            if self._motion_wall_clock is None:
+                self._motion_wall_clock = now
+            if self._motion_playback_time is None:
+                index = max(0, min(self._motion_frame_index, len(transient_times) - 1))
+                self._motion_playback_time = float(transient_times[index])
+
+            elapsed = max(0.0, now - float(self._motion_wall_clock))
+            self._motion_wall_clock = now
+            self._motion_playback_time += (
+                elapsed * max(0.01, self._motion_speed_value())
+            )
+
+            start_time = float(transient_times[samples[0]])
+            end_time = float(transient_times[samples[-1]])
+            duration = end_time - start_time
+            if self._motion_playback_time > end_time:
+                if self.motion_loop.isChecked() and duration > 0.0:
+                    self._motion_playback_time = (
+                        start_time
+                        + (self._motion_playback_time - start_time) % duration
+                    )
+                else:
+                    self._motion_playback_time = end_time
+                    self._motion_timer.stop()
+                    self._motion_frame_accumulator = 0.0
+                    self._set_play_buttons(False)
+
+            target_time = float(self._motion_playback_time)
+            cursor = 0
+            for sample_index, frame_index in enumerate(samples):
+                if float(transient_times[frame_index]) <= target_time:
+                    cursor = sample_index
+                else:
+                    break
+            self._playback_sample_cursor = cursor
+            target = int(samples[cursor])
+            if target != self._motion_frame_index:
+                self._set_motion_index(target)
+            return
+
+        # Static/modal histories do not have a physical time axis. Advance
+        # through the sampled frames while rendering at the fixed UI cadence.
         self._motion_frame_accumulator += self._motion_frames_per_tick()
         increment = int(self._motion_frame_accumulator)
         if increment <= 0:
             return
         self._motion_frame_accumulator -= float(increment)
 
-        samples = self._playback_frame_indices
         if samples:
             cursor = self._playback_sample_cursor + increment
             if cursor >= len(samples):
