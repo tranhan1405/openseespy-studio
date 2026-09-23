@@ -2302,17 +2302,15 @@ class _Importer:
         self,
         function: ast.FunctionDef,
     ) -> bool:
-        for child in ast.walk(function):
-            if (
-                isinstance(child, ast.Call)
-                and self.command_name(child)
-                in {
-                    "model", "node", "element", "uniaxialMaterial",
-                    "nDMaterial", "section",
-                }
-            ):
-                return True
-        return False
+        # Only functions that establish/reset the OpenSees model are treated
+        # as alternative whole-model variants. Helper functions that merely
+        # add nodes/elements/materials may be called repeatedly by legitimate
+        # model generators (e.g. portal-frame bay/story helpers).
+        return any(
+            isinstance(child, ast.Call)
+            and self.command_name(child) == "model"
+            for child in ast.walk(function)
+        )
 
     def _recognize_external_signal_assignment(
         self,
