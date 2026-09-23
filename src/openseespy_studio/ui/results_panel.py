@@ -3030,16 +3030,36 @@ class ResultsPanel(QWidget):
             self._playback_frame_indices = []
             self._playback_sample_cursor = 0
             return
-        if limit <= 0 or count <= limit:
+        if count <= limit:
             indices = list(range(count))
-        elif limit == 1:
-            indices = [count - 1]
         else:
-            indices = [
-                int(round(index * (count - 1) / (limit - 1)))
-                for index in range(limit)
-            ]
-            # Rounding can duplicate a sample for very short histories.
+            times = self._transient_time_values()
+            if len(times) == count and times[-1] > times[0]:
+                # Sample transient histories uniformly in physical time, not
+                # uniformly in recorder-row index. This preserves sensible
+                # animation spacing when the analysis uses variable time steps.
+                indices = []
+                cursor = 0
+                duration = float(times[-1] - times[0])
+                for sample in range(limit):
+                    target_time = (
+                        float(times[0])
+                        + duration * sample / float(limit - 1)
+                    )
+                    while (
+                        cursor + 1 < count
+                        and abs(float(times[cursor + 1]) - target_time)
+                        <= abs(float(times[cursor]) - target_time)
+                    ):
+                        cursor += 1
+                    indices.append(cursor)
+            else:
+                indices = [
+                    int(round(index * (count - 1) / (limit - 1)))
+                    for index in range(limit)
+                ]
+            # Rounding / variable-step histories can select the same recorder
+            # row more than once. Keep a strictly advancing sample sequence.
             indices = list(dict.fromkeys(indices))
             if indices[0] != 0:
                 indices.insert(0, 0)
