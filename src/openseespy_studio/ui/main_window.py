@@ -23912,6 +23912,7 @@ class MainWindow(QMainWindow):
                 "evaluate",
                 "apply",
                 "open",
+                "reveal",
                 "show solver output",
                 "show job manager",
                 "check model",
@@ -23936,6 +23937,8 @@ class MainWindow(QMainWindow):
             "outputs / scopes",
             "network / audit",
             "plot",
+            "dependencies",
+            "used by",
         }
         if label in workflow_submenus or label.startswith(
             ("remesh", "apply support", "assign ")
@@ -26995,6 +26998,18 @@ class MainWindow(QMainWindow):
                     else None
                 )
             )
+            reveal_series = menu.addAction(
+                "Reveal Referenced Time Series in Tree"
+            )
+            reveal_series.setEnabled(motion_series_tag is not None)
+            reveal_series.triggered.connect(
+                lambda checked=False, series_tag=motion_series_tag:
+                (
+                    self._select_tree_payload("time_series", series_tag)
+                    if series_tag is not None
+                    else None
+                )
+            )
             menu.addSeparator()
             delete = menu.addAction("Delete")
             delete.triggered.connect(
@@ -27173,6 +27188,18 @@ class MainWindow(QMainWindow):
                     else None
                 )
             )
+            reveal_pattern = menu.addAction(
+                "Reveal Parent Load Pattern in Tree"
+            )
+            reveal_pattern.setEnabled(parent_pattern_tag is not None)
+            reveal_pattern.triggered.connect(
+                lambda checked=False, pattern_tag=parent_pattern_tag:
+                (
+                    self._select_tree_payload("load_pattern", pattern_tag)
+                    if pattern_tag is not None
+                    else None
+                )
+            )
             select_target = menu.addAction("Select Target Node")
             select_target.setEnabled(target_node is not None)
             select_target.triggered.connect(
@@ -27234,6 +27261,18 @@ class MainWindow(QMainWindow):
                 lambda checked=False, pattern_tag=parent_pattern_tag:
                 (
                     self._show_load_pattern_properties(pattern_tag)
+                    if pattern_tag is not None
+                    else None
+                )
+            )
+            reveal_pattern = menu.addAction(
+                "Reveal Parent Load Pattern in Tree"
+            )
+            reveal_pattern.setEnabled(parent_pattern_tag is not None)
+            reveal_pattern.triggered.connect(
+                lambda checked=False, pattern_tag=parent_pattern_tag:
+                (
+                    self._select_tree_payload("load_pattern", pattern_tag)
                     if pattern_tag is not None
                     else None
                 )
@@ -27301,6 +27340,18 @@ class MainWindow(QMainWindow):
                 lambda checked=False, pattern_tag=parent_pattern_tag:
                 (
                     self._show_load_pattern_properties(pattern_tag)
+                    if pattern_tag is not None
+                    else None
+                )
+            )
+            reveal_pattern = menu.addAction(
+                "Reveal Parent Load Pattern in Tree"
+            )
+            reveal_pattern.setEnabled(parent_pattern_tag is not None)
+            reveal_pattern.triggered.connect(
+                lambda checked=False, pattern_tag=parent_pattern_tag:
+                (
+                    self._select_tree_payload("load_pattern", pattern_tag)
                     if pattern_tag is not None
                     else None
                 )
@@ -27383,6 +27434,24 @@ class MainWindow(QMainWindow):
             edit_action.triggered.connect(
                 lambda: self._edit_nd_material(tag)
             )
+
+            used_by = menu.addMenu("Used By")
+            used_by.setEnabled(bool(nd_section_tags))
+            for section_tag in sorted(nd_section_tags):
+                section = self.project.sections.get(section_tag)
+                label = (
+                    f"Section {section_tag} - {section.name}"
+                    if section is not None
+                    else f"Section {section_tag}"
+                )
+                action = used_by.addAction(label)
+                action.triggered.connect(
+                    lambda checked=False, value=section_tag: (
+                        self._select_tree_payload("section", value),
+                        self._show_section_properties(value),
+                    )
+                )
+
             select_users = menu.addAction(
                 f"Select FE Using nDMaterial ({len(nd_elements)})"
             )
@@ -27390,6 +27459,14 @@ class MainWindow(QMainWindow):
             select_users.triggered.connect(
                 lambda checked=False, values=set(nd_elements):
                 self.selection.set_selection(elements=set(values))
+            )
+            zoom_users = menu.addAction("Zoom to FE Using nDMaterial")
+            zoom_users.setEnabled(bool(nd_elements))
+            zoom_users.triggered.connect(
+                lambda checked=False, values=set(nd_elements): (
+                    self.selection.set_selection(elements=set(values)),
+                    self._zoom_selection(),
+                )
             )
             delete_action = menu.addAction("Delete")
             delete_action.triggered.connect(
@@ -27400,6 +27477,41 @@ class MainWindow(QMainWindow):
 
         if kind == "material":
             tag = int(value)
+            material = self.project.materials.get(tag)
+
+            dependency_material_tags: set[int] = set()
+            if material is not None:
+                if (
+                    material.base_material_tag is not None
+                    and int(material.base_material_tag)
+                    in self.project.materials
+                ):
+                    dependency_material_tags.add(
+                        int(material.base_material_tag)
+                    )
+                dependency_material_tags.update(
+                    int(material_tag)
+                    for material_tag in material.material_tags
+                    if int(material_tag) in self.project.materials
+                )
+                dependency_material_tags.discard(tag)
+
+            dependent_material_tags = {
+                int(material_tag)
+                for material_tag, candidate
+                in self.project.materials.items()
+                if (
+                    (
+                        candidate.base_material_tag is not None
+                        and int(candidate.base_material_tag) == tag
+                    )
+                    or tag in {
+                        int(component_tag)
+                        for component_tag in candidate.material_tags
+                    }
+                )
+            }
+
             material_section_tags = {
                 int(section_tag)
                 for section_tag, section in self.project.sections.items()
@@ -27425,7 +27537,8 @@ class MainWindow(QMainWindow):
                     or element.hinge_j_section_tag in material_section_tags
                     or element.interior_section_tag in material_section_tags
                 )
-            } | {
+            }
+            material_connections = {
                 int(connection_tag)
                 for connection_tag, connection
                 in self.project.connections.items()
@@ -27435,6 +27548,7 @@ class MainWindow(QMainWindow):
                     in connection.materials_by_dof.values()
                 }
             }
+
             properties_action = menu.addAction("Properties")
             properties_action.triggered.connect(
                 lambda: self._show_material_properties(tag)
@@ -27447,6 +27561,73 @@ class MainWindow(QMainWindow):
             duplicate_action.triggered.connect(
                 lambda: self._duplicate_material(tag)
             )
+
+            dependencies = menu.addMenu("Dependencies")
+            dependencies.setEnabled(bool(dependency_material_tags))
+            for dependency_tag in sorted(dependency_material_tags):
+                dependency = self.project.materials.get(dependency_tag)
+                label = (
+                    f"Material {dependency_tag} - {dependency.name}"
+                    if dependency is not None
+                    else f"Material {dependency_tag}"
+                )
+                action = dependencies.addAction(label)
+                action.triggered.connect(
+                    lambda checked=False, value=dependency_tag: (
+                        self._select_tree_payload("material", value),
+                        self._show_material_properties(value),
+                    )
+                )
+
+            used_by = menu.addMenu("Used By")
+            used_by.setEnabled(bool(
+                dependent_material_tags
+                or material_section_tags
+                or material_connections
+            ))
+            for dependent_tag in sorted(dependent_material_tags):
+                dependent = self.project.materials.get(dependent_tag)
+                label = (
+                    f"Material {dependent_tag} - {dependent.name}"
+                    if dependent is not None
+                    else f"Material {dependent_tag}"
+                )
+                action = used_by.addAction(label)
+                action.triggered.connect(
+                    lambda checked=False, value=dependent_tag: (
+                        self._select_tree_payload("material", value),
+                        self._show_material_properties(value),
+                    )
+                )
+            for section_tag in sorted(material_section_tags):
+                section = self.project.sections.get(section_tag)
+                label = (
+                    f"Section {section_tag} - {section.name}"
+                    if section is not None
+                    else f"Section {section_tag}"
+                )
+                action = used_by.addAction(label)
+                action.triggered.connect(
+                    lambda checked=False, value=section_tag: (
+                        self._select_tree_payload("section", value),
+                        self._show_section_properties(value),
+                    )
+                )
+            for connection_tag in sorted(material_connections):
+                connection = self.project.connections.get(connection_tag)
+                label = (
+                    f"Connection {connection_tag} - {connection.name}"
+                    if connection is not None
+                    else f"Connection {connection_tag}"
+                )
+                action = used_by.addAction(label)
+                action.triggered.connect(
+                    lambda checked=False, value=connection_tag: (
+                        self._select_tree_payload("connection", value),
+                        self._show_connection_properties(value),
+                    )
+                )
+
             select_users = menu.addAction(
                 f"Select FE Using Material ({len(material_elements)})"
             )
@@ -27487,6 +27668,43 @@ class MainWindow(QMainWindow):
 
         if kind == "section":
             tag = int(value)
+            section = self.project.sections.get(tag)
+
+            material_dependencies: set[int] = set()
+            nd_material_dependencies: set[int] = set()
+            if section is not None:
+                if (
+                    section.material_tag is not None
+                    and int(section.material_tag)
+                    in self.project.materials
+                ):
+                    material_dependencies.add(int(section.material_tag))
+                material_dependencies.update(
+                    int(fiber.material_tag)
+                    for fiber in section.fibers
+                    if int(fiber.material_tag) in self.project.materials
+                )
+                material_dependencies.update(
+                    int(component.material_tag)
+                    for component in section.fiber_components
+                    if int(component.material_tag)
+                    in self.project.materials
+                )
+                if (
+                    section.nd_material_tag is not None
+                    and int(section.nd_material_tag)
+                    in self.project.nd_materials
+                ):
+                    nd_material_dependencies.add(
+                        int(section.nd_material_tag)
+                    )
+                nd_material_dependencies.update(
+                    int(layer.material_tag)
+                    for layer in section.shell_layers
+                    if int(layer.material_tag)
+                    in self.project.nd_materials
+                )
+
             section_elements = {
                 int(element_tag)
                 for element_tag, element in self.model.elements.items()
@@ -27496,7 +27714,8 @@ class MainWindow(QMainWindow):
                     element.hinge_j_section_tag,
                     element.interior_section_tag,
                 }
-            } | {
+            }
+            section_connections = {
                 int(connection_tag)
                 for connection_tag, connection
                 in self.project.connections.items()
@@ -27505,6 +27724,7 @@ class MainWindow(QMainWindow):
                     connection.generated_section_tag,
                 }
             }
+
             properties_action = menu.addAction("Properties")
             properties_action.triggered.connect(
                 lambda: self._show_section_properties(tag)
@@ -27517,6 +27737,57 @@ class MainWindow(QMainWindow):
             duplicate_action.triggered.connect(
                 lambda: self._duplicate_section(tag)
             )
+
+            dependencies = menu.addMenu("Dependencies")
+            dependencies.setEnabled(bool(
+                material_dependencies or nd_material_dependencies
+            ))
+            for material_tag in sorted(material_dependencies):
+                material = self.project.materials.get(material_tag)
+                label = (
+                    f"Material {material_tag} - {material.name}"
+                    if material is not None
+                    else f"Material {material_tag}"
+                )
+                action = dependencies.addAction(label)
+                action.triggered.connect(
+                    lambda checked=False, value=material_tag: (
+                        self._select_tree_payload("material", value),
+                        self._show_material_properties(value),
+                    )
+                )
+            for material_tag in sorted(nd_material_dependencies):
+                material = self.project.nd_materials.get(material_tag)
+                label = (
+                    f"nDMaterial {material_tag} - {material.name}"
+                    if material is not None
+                    else f"nDMaterial {material_tag}"
+                )
+                action = dependencies.addAction(label)
+                action.triggered.connect(
+                    lambda checked=False, value=material_tag: (
+                        self._select_tree_payload("nd_material", value),
+                        self._show_nd_material_properties(value),
+                    )
+                )
+
+            used_by = menu.addMenu("Used By")
+            used_by.setEnabled(bool(section_connections))
+            for connection_tag in sorted(section_connections):
+                connection = self.project.connections.get(connection_tag)
+                label = (
+                    f"Connection {connection_tag} - {connection.name}"
+                    if connection is not None
+                    else f"Connection {connection_tag}"
+                )
+                action = used_by.addAction(label)
+                action.triggered.connect(
+                    lambda checked=False, value=connection_tag: (
+                        self._select_tree_payload("connection", value),
+                        self._show_connection_properties(value),
+                    )
+                )
+
             select_users = menu.addAction(
                 f"Select FE Using Section ({len(section_elements)})"
             )
@@ -27524,6 +27795,14 @@ class MainWindow(QMainWindow):
             select_users.triggered.connect(
                 lambda checked=False, values=set(section_elements):
                 self.selection.set_selection(elements=set(values))
+            )
+            zoom_users = menu.addAction("Zoom to FE Using Section")
+            zoom_users.setEnabled(bool(section_elements))
+            zoom_users.triggered.connect(
+                lambda checked=False, values=set(section_elements): (
+                    self.selection.set_selection(elements=set(values)),
+                    self._zoom_selection(),
+                )
             )
             menu.addSeparator()
             delete_action = menu.addAction("Delete")
@@ -27572,6 +27851,16 @@ class MainWindow(QMainWindow):
             select_users.triggered.connect(
                 lambda checked=False, values=set(transformation_elements):
                 self.selection.set_selection(elements=set(values))
+            )
+            zoom_users = menu.addAction(
+                "Zoom to FE Using Transformation"
+            )
+            zoom_users.setEnabled(bool(transformation_elements))
+            zoom_users.triggered.connect(
+                lambda checked=False, values=set(transformation_elements): (
+                    self.selection.set_selection(elements=set(values)),
+                    self._zoom_selection(),
+                )
             )
             menu.addSeparator()
             delete_action = menu.addAction("Delete")
