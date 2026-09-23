@@ -24115,7 +24115,11 @@ class MainWindow(QMainWindow):
             creator=self._create_section,
         ):
             return
-        dialog = MomentCurvatureDialog(self.project, self)
+        dialog = MomentCurvatureDialog(
+            self.project,
+            self,
+            new_section_callback=self._create_section_dependency,
+        )
         if not dialog.exec():
             return
 
