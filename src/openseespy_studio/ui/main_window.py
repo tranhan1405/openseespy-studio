@@ -2530,7 +2530,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "new_shell_section",
             "New Shell Section...",
-            "section",
+            "shell-section",
             self._create_shell_section,
             "Create an ElasticMembranePlate shell section",
         )
@@ -2544,14 +2544,14 @@ class MainWindow(QMainWindow):
         self._make_action(
             "assign_section",
             "Assign Section...",
-            "section",
+            "assign-section",
             self._assign_section_to_selection,
             "Assign section to selected elements",
         )
         self._make_action(
             "assign_transformation",
             "Assign Transformation...",
-            "transform",
+            "assign-transform",
             self._assign_transformation_to_selection,
             "Assign geometric transformation to selected elements",
         )
@@ -2579,14 +2579,14 @@ class MainWindow(QMainWindow):
         self._make_action(
             "constraint",
             "Constraint...",
-            "transform",
+            "constraint",
             self._create_constraint,
             "Create equalDOF, rigidLink, or rigidDiaphragm",
         )
         self._make_action(
             "connection",
             "ZeroLength / Link...",
-            "element",
+            "connection",
             self._create_connection,
             "Create a research zeroLength spring/interface or twoNodeLink",
         )
@@ -2600,14 +2600,14 @@ class MainWindow(QMainWindow):
         self._make_action(
             "mass",
             "Nodal Mass...",
-            "load",
+            "mass",
             self._assign_mass,
             "Assign nodal mass manually",
         )
         self._make_action(
             "mass_source",
             "Mass Source...",
-            "load",
+            "mass-source",
             self._create_mass_source,
             "Generate seismic mass from self mass and selected load patterns",
         )
@@ -2616,22 +2616,22 @@ class MainWindow(QMainWindow):
         self._make_action(
             "ground_motion",
             "Ground Motion...",
-            "timeseries",
+            "ground-motion",
             self._create_ground_motion,
             "Create a Path record with UniformExcitation for NLTH",
         )
         self._make_action(
             "import_ground_motion",
             "Import Ground Motion...",
-            "timeseries",
+            "import-ground-motion",
             self._import_ground_motion,
             "Import AT2, JSON, TXT, CSV or DAT ground-motion data",
         )
-        self._make_action("nodal_load", "Nodal Load...", "load", self._create_nodal_load, "Create nodal load")
+        self._make_action("nodal_load", "Nodal Load...", "nodal-load", self._create_nodal_load, "Create nodal load")
         self._make_action(
             "prescribed_displacement",
             "Prescribed Displacement...",
-            "load",
+            "prescribed-displacement",
             self._create_prescribed_displacement,
             "Create an imposed nodal displacement in a Plain load pattern",
         )
@@ -2639,19 +2639,19 @@ class MainWindow(QMainWindow):
             "ribbonText",
             "Prescr. Disp.",
         )
-        self._make_action("beam_load", "Beam Load...", "load", self._create_element_load, "Create uniform, point, or self-weight beam load")
+        self._make_action("beam_load", "Beam Load...", "beam-load", self._create_element_load, "Create uniform, point, or self-weight beam load")
         self._make_action(
             "shell_pressure",
             "Shell Pressure...",
-            "load",
+            "shell-pressure",
             self._create_shell_pressure,
             "Create uniform pressure normal to selected shell surfaces",
         )
-        self._make_action("analysis_setup", "Analysis Setup...", "analysis", self._create_analysis, "Create analysis settings")
+        self._make_action("analysis_setup", "Analysis Setup...", "analysis-setup", self._create_analysis, "Create analysis settings")
         self._make_action(
             "response_spectrum_analysis",
             "Response Spectrum...",
-            "analysis",
+            "response-spectrum",
             lambda checked=False: self._create_analysis_of_type("Response Spectrum"),
             "Create a response-spectrum analysis with optional RotD50/RotD100 outputs",
         )
@@ -2665,34 +2665,34 @@ class MainWindow(QMainWindow):
         self._make_action(
             "modal_template",
             "Modal",
-            "analysis",
+            "modal",
             lambda checked=False: self._create_analysis_template("Modal"),
             "Create a Modal analysis template",
         )
         self._make_action(
             "pushover_template",
             "Pushover",
-            "analysis",
+            "pushover",
             lambda checked=False: self._create_analysis_template("Pushover"),
             "Create a nonlinear Pushover template",
         )
         self._make_action(
             "cyclic_template",
             "Cyclic",
-            "analysis",
+            "cyclic",
             lambda checked=False: self._create_analysis_template("Cyclic"),
             "Create a cyclic displacement-control template",
         )
         self._make_action(
             "nlth_template",
             "NLTH",
-            "analysis",
+            "nlth",
             lambda checked=False: self._create_analysis_template(
                 "Nonlinear Time History"
             ),
             "Create a nonlinear time-history earthquake template",
         )
-        self._make_action("check_model", "Check Model", "analysis", self._check_model, "Validate the model before analysis")
+        self._make_action("check_model", "Check Model", "check-model", self._check_model, "Validate the model before analysis")
         self._make_action("run", "Run", "run", self._toggle_analysis, "Run / stop model")
         self._make_action(
             "moment_curvature",
@@ -4795,7 +4795,7 @@ class MainWindow(QMainWindow):
         connections_root = QTreeWidgetItem([
             f"Connections ({len(self.project.connections)})"
         ])
-        connections_root.setIcon(0, studio_icon("element"))
+        connections_root.setIcon(0, studio_icon("connection"))
         connections_root.setData(
             0,
             Qt.UserRole,
@@ -4816,7 +4816,7 @@ class MainWindow(QMainWindow):
             group = QTreeWidgetItem([
                 f"{connection_type} ({len(tags)})"
             ])
-            group.setIcon(0, studio_icon("element"))
+            group.setIcon(0, studio_icon("connection"))
             group.setData(
                 0,
                 Qt.UserRole,
@@ -4831,7 +4831,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{connection.connection_type} [{tag}]  {connection.name}"
             ])
-            item.setIcon(0, studio_icon("element"))
+            item.setIcon(0, studio_icon("connection"))
             item.setData(0, Qt.UserRole, ("connection", tag))
             connection_groups[connection.connection_type].addChild(item)
 
@@ -4840,7 +4840,7 @@ class MainWindow(QMainWindow):
         constraints_root = QTreeWidgetItem([
             f"Constraints ({len(self.project.constraints)})"
         ])
-        constraints_root.setIcon(0, studio_icon("transform"))
+        constraints_root.setIcon(0, studio_icon("constraint"))
         constraints_root.setData(
             0,
             Qt.UserRole,
@@ -4854,7 +4854,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{constraint.constraint_type} [{tag}]  {constraint.name}"
             ])
-            item.setIcon(0, studio_icon("transform"))
+            item.setIcon(0, studio_icon("constraint"))
             item.setData(0, Qt.UserRole, ("constraint", tag))
             constraints_root.addChild(item)
 
@@ -4870,7 +4870,7 @@ class MainWindow(QMainWindow):
         ]
 
         mass_root = QTreeWidgetItem(["Mass"])
-        mass_root.setIcon(0, studio_icon("model"))
+        mass_root.setIcon(0, studio_icon("mass"))
         mass_root.setData(0, Qt.UserRole, ("mass_root", None))
         mass_root.setExpanded(True)
         fe_model.addChild(mass_root)
@@ -4878,20 +4878,20 @@ class MainWindow(QMainWindow):
         masses_root = QTreeWidgetItem([
             f"Nodal Masses ({len(mass_nodes)})"
         ])
-        masses_root.setIcon(0, studio_icon("node"))
+        masses_root.setIcon(0, studio_icon("mass"))
         masses_root.setData(0, Qt.UserRole, ("masses_root", None))
         masses_root.setExpanded(True)
         mass_root.addChild(masses_root)
         for tag in sorted(mass_nodes):
             item = QTreeWidgetItem([f"Node {tag}"])
-            item.setIcon(0, studio_icon("node"))
+            item.setIcon(0, studio_icon("mass"))
             item.setData(0, Qt.UserRole, ("nodal_mass", tag))
             masses_root.addChild(item)
 
         element_masses_root = QTreeWidgetItem([
             f"Element Mass ({len(mass_elements)})"
         ])
-        element_masses_root.setIcon(0, studio_icon("element"))
+        element_masses_root.setIcon(0, studio_icon("mass"))
         element_masses_root.setData(
             0,
             Qt.UserRole,
@@ -4904,14 +4904,14 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"Element {tag}  ρL={element.mass_per_length:g}"
             ])
-            item.setIcon(0, studio_icon("element"))
+            item.setIcon(0, studio_icon("mass"))
             item.setData(0, Qt.UserRole, ("element_mass", tag))
             element_masses_root.addChild(item)
 
         mass_sources_root = QTreeWidgetItem([
             f"Mass Sources ({len(self.project.mass_sources)})"
         ])
-        mass_sources_root.setIcon(0, studio_icon("model"))
+        mass_sources_root.setIcon(0, studio_icon("mass-source"))
         mass_sources_root.setData(
             0,
             Qt.UserRole,
@@ -4924,7 +4924,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{source.name} [{tag}]"
             ])
-            item.setIcon(0, studio_icon("model"))
+            item.setIcon(0, studio_icon("mass-source"))
             item.setData(0, Qt.UserRole, ("mass_source", tag))
             mass_sources_root.addChild(item)
 
@@ -5013,7 +5013,12 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{section.section_type} [{tag}]  {section.name}"
             ])
-            item.setIcon(0, studio_icon("section"))
+            section_icon = (
+                "shell-section"
+                if section.section_type in SHELL_SECTION_TYPES
+                else "section"
+            )
+            item.setIcon(0, studio_icon(section_icon))
             item.setData(0, Qt.UserRole, ("section", tag))
             sections_root.addChild(item)
 
@@ -5163,7 +5168,7 @@ class MainWindow(QMainWindow):
                 load_item = QTreeWidgetItem([
                     f"{load.name} [{load.tag}] → Node {load.node_tag}"
                 ])
-                load_item.setIcon(0, studio_icon("load"))
+                load_item.setIcon(0, studio_icon("nodal-load"))
                 load_item.setData(
                     0,
                     Qt.UserRole,
@@ -5185,7 +5190,7 @@ class MainWindow(QMainWindow):
                     f"Prescribed {dof_label}: {displacement.name} "
                     f"[{displacement.tag}] → Node {displacement.node_tag}"
                 ])
-                displacement_item.setIcon(0, studio_icon("load"))
+                displacement_item.setIcon(0, studio_icon("prescribed-displacement"))
                 displacement_item.setData(
                     0,
                     Qt.UserRole,
@@ -5200,7 +5205,12 @@ class MainWindow(QMainWindow):
                     f"{load.load_type}: {load.name} [{load.tag}] "
                     f"→ Element {load.element_tag}"
                 ])
-                load_item.setIcon(0, studio_icon("load"))
+                load_icon = (
+                    "shell-pressure"
+                    if load.load_type == "SurfacePressure"
+                    else "beam-load"
+                )
+                load_item.setIcon(0, studio_icon(load_icon))
                 load_item.setData(
                     0,
                     Qt.UserRole,
@@ -5211,7 +5221,7 @@ class MainWindow(QMainWindow):
         ground_motions_root = QTreeWidgetItem([
             f"Ground Motions ({len(ground_motion_patterns)})"
         ])
-        ground_motions_root.setIcon(0, studio_icon("timeseries"))
+        ground_motions_root.setIcon(0, studio_icon("ground-motion"))
         ground_motions_root.setData(
             0,
             Qt.UserRole,
@@ -5237,7 +5247,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{pattern.name} [{tag}] · {axis} · {points} pts"
             ])
-            item.setIcon(0, studio_icon("timeseries"))
+            item.setIcon(0, studio_icon("ground-motion"))
             item.setData(0, Qt.UserRole, ("ground_motion", tag))
             ground_motions_root.addChild(item)
 
@@ -5249,13 +5259,20 @@ class MainWindow(QMainWindow):
             settings = self.project.analyses[tag]
             active = " [Active]" if tag == self.project.active_analysis_tag else ""
             item = QTreeWidgetItem([f"{settings.analysis_type} [{tag}] {settings.name}{active}"])
-            item.setIcon(0, studio_icon("analysis"))
+            analysis_icon = {
+                "Modal": "modal",
+                "Pushover": "pushover",
+                "Cyclic": "cyclic",
+                "Transient": "nlth",
+                "Response Spectrum": "response-spectrum",
+            }.get(settings.analysis_type, "analysis")
+            item.setIcon(0, studio_icon(analysis_icon))
             item.setData(0, Qt.UserRole, ("analysis", tag))
             item.setExpanded(True)
             analysis.addChild(item)
 
             settings_item = QTreeWidgetItem(["Analysis Settings"])
-            settings_item.setIcon(0, studio_icon("analysis"))
+            settings_item.setIcon(0, studio_icon("analysis-setup"))
             settings_item.setData(
                 0,
                 Qt.UserRole,
