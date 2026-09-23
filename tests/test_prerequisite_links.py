@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 from types import SimpleNamespace
 
-from openseespy_studio.ui.main_window import MainWindow
+from openseespy_studio.ui.main_window import FrameGridPanel, MainWindow
 from openseespy_studio.ui.recorder_dialog import RecorderDialog
 from openseespy_studio.ui.analysis_dialog import AnalysisDialog
 from openseespy_studio.ui.geometry_dialogs import ElementDialog, TrussDialog
@@ -15,6 +15,7 @@ from openseespy_studio.ui.load_dialogs import (
     PrescribedDisplacementDialog,
 )
 from openseespy_studio.ui.moment_curvature_dialog import MomentCurvatureDialog
+from openseespy_studio.ui.mass_source_dialog import MassSourceDialog
 from openseespy_studio.ui.shell_dialog import ShellElementDialog, ShellMeshDialog
 from openseespy_studio.ui.surface_dialog import SurfaceGeometryDialog
 from openseespy_studio.ui.surface_edge_load_dialog import SurfaceEdgeLoadDialog
@@ -118,7 +119,7 @@ def test_major_dependent_workflows_use_prerequisite_links():
         "_assign_section_to_selection": "_create_section",
         "_assign_truss_material_to_selection": "_create_material",
         "_assign_transformation_to_selection": "_create_transformation",
-        "_run_moment_curvature_workflow": "_create_section",
+        "_run_moment_curvature_workflow": "new_section_callback=self._create_section_dependency",
         "_start_analysis": "_create_analysis",
         "_open_calibration": "_create_analysis_template",
         "_create_analysis_template": "_offer_structural_model_creator",
@@ -484,7 +485,16 @@ def test_inline_prerequisite_buttons_cover_core_dependency_dialogs():
         ),
         (
             AnalysisDialog,
-            ("New Plain Pattern...", "new_plain_pattern_callback"),
+            (
+                "New Plain Pattern...",
+                "new_plain_pattern_callback",
+                "New Ground Motion...",
+                "new_ground_motion_callback",
+            ),
+        ),
+        (
+            MassSourceDialog,
+            ("New Plain Pattern...", "new_pattern_callback"),
         ),
         (
             MomentCurvatureDialog,
@@ -541,6 +551,47 @@ def test_inline_dependency_callbacks_are_wired_from_main_window():
         source = inspect.getsource(getattr(MainWindow, method_name))
         for marker in markers:
             assert marker in source
+
+
+def test_eighth_prerequisite_link_batch():
+    edit_recorder = inspect.getsource(MainWindow._edit_recorder)
+    assert "target_creator=self._recorder_target_creator" in edit_recorder
+
+    mass_create = inspect.getsource(MainWindow._create_mass_source)
+    mass_edit = inspect.getsource(MainWindow._edit_mass_source)
+    for source in (mass_create, mass_edit):
+        assert (
+            "new_pattern_callback=self._create_plain_pattern_dependency"
+            in source
+        )
+
+    analysis_create = inspect.getsource(MainWindow._create_analysis_of_type)
+    analysis_edit = inspect.getsource(MainWindow._edit_analysis)
+    for source in (analysis_create, analysis_edit):
+        assert (
+            "new_ground_motion_callback="
+            "self._create_ground_motion_dependency"
+            in source
+        )
+
+    frame_grid = inspect.getsource(FrameGridPanel)
+    assert "Create a Section and assign it to columns." in frame_grid
+    assert "Create a Section and assign it to beams." in frame_grid
+    assert (
+        "Create a Geometric Transformation and assign it to columns."
+        in frame_grid
+    )
+    assert (
+        "Create a Geometric Transformation and assign it to beams."
+        in frame_grid
+    )
+    assert "_create_section_dependency" in frame_grid
+    assert "_create_transformation_dependency" in frame_grid
+
+    moment = inspect.getsource(MainWindow._run_moment_curvature_workflow)
+    dialog_index = moment.index("MomentCurvatureDialog(")
+    assert "_ensure_prerequisite" not in moment[:dialog_index]
+    assert "new_section_callback=self._create_section_dependency" in moment
 
 
 def test_managed_surface_dependency_callbacks_are_wired():
