@@ -3469,7 +3469,7 @@ class ModelViewport(QWidget):
 
         # The sketch grid is viewport state, not model geometry. Rebuild it
         # after plotter.clear() so committing a Line/Surface never hides it.
-        if self._display_domain == "geometry":
+        if self._display_domain != "fe":
             self._render_geometry_sketch_grid()
 
         if self._model is None:
