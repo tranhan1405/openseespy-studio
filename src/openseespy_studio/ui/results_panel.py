@@ -998,7 +998,7 @@ class ResultsPanel(QWidget):
         # playback advances multiple analysis frames per tick instead of
         # forcing VTK to redraw at progressively higher frame rates.
         self._motion_frame_accumulator = 0.0
-        self._playback_frame_limit = 100
+        self._playback_frame_limit = 20
         self._playback_frame_indices: list[int] = []
         self._playback_sample_cursor = 0
         self._calibration_rows: list[dict[str, Any]] = []
@@ -3022,7 +3022,7 @@ class ResultsPanel(QWidget):
             if self._motion_info is not None
             else 0
         )
-        limit = max(0, int(self._playback_frame_limit))
+        limit = max(5, min(100, int(self._playback_frame_limit)))
         if count <= 0:
             self._playback_frame_indices = []
             self._playback_sample_cursor = 0
@@ -3053,7 +3053,7 @@ class ResultsPanel(QWidget):
         )
 
     def set_playback_frame_limit(self, limit: int) -> None:
-        self._playback_frame_limit = max(0, int(limit))
+        self._playback_frame_limit = max(5, min(100, int(limit)))
         self._motion_frame_accumulator = 0.0
         self._rebuild_playback_frame_indices()
 
@@ -3287,18 +3287,8 @@ class ResultsPanel(QWidget):
 
     def _motion_frames_per_tick(self) -> float:
         speed = max(0.01, self._motion_speed_value())
-        # A user-selected animation frame count represents post-processing
-        # samples, so Speed advances through those samples directly. "All"
-        # keeps the physical transient-dt-aware behavior.
-        if self._playback_frame_limit > 0:
-            return speed
-        if (
-            self._motion_info is not None
-            and self._motion_info.transient_dt is not None
-        ):
-            dt = float(self._motion_info.transient_dt)
-            if dt > 0.0:
-                return max(0.0, 0.04 * speed / dt)
+        # Playback advances through the user-selected evenly sampled frame
+        # set. The UI constrains this to 5-100 frames for responsive contours.
         return speed
 
     def stop_motion(self) -> None:
@@ -3344,7 +3334,7 @@ class ResultsPanel(QWidget):
         self._motion_frame_accumulator -= float(increment)
 
         samples = self._playback_frame_indices
-        if self._playback_frame_limit > 0 and samples:
+        if samples:
             cursor = self._playback_sample_cursor + increment
             if cursor >= len(samples):
                 if self.motion_loop.isChecked():
