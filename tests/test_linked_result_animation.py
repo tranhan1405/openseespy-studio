@@ -50,3 +50,28 @@ def test_result_speed_caps_redraw_and_advances_frames():
     assert "setInterval(40)" in timer
     assert "_motion_frame_accumulator" in advance
     assert "_motion_frames_per_tick" in advance
+
+
+def test_animation_frame_sampling_retains_first_and_last_frames():
+    panel_source = inspect.getsource(ResultsPanel._rebuild_playback_frame_indices)
+    advance_source = inspect.getsource(ResultsPanel._advance_motion)
+
+    assert "_playback_frame_limit" in panel_source
+    assert "count - 1" in panel_source
+    assert "dict.fromkeys" in panel_source
+    assert "_playback_frame_indices" in advance_source
+    assert "_playback_sample_cursor" in advance_source
+
+
+def test_results_ribbon_exposes_frame_count_and_extrema_toggles():
+    build = inspect.getsource(MainWindow._build_actions_and_ribbon)
+    render = inspect.getsource(MainWindow._render_result_data)
+    toggle = inspect.getsource(MainWindow._set_result_extrema_visibility)
+
+    assert "result_frame_count_ribbon" in build
+    assert '"100 Frames"' in build
+    assert '"All Frames"' in build
+    assert '"result_show_min"' in build
+    assert '"result_show_max"' in build
+    assert "_sync_result_contour_ribbon_controls" in render
+    assert "is_motion_playing" in toggle
