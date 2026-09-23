@@ -92,20 +92,28 @@ def test_model_tree_refresh_handles_zero_length_section_connection():
         ("elements_root", None),
     )
     assert elements_root is not None
-    assert elements_root.text(0) == "Elements (1)"
+    assert elements_root.text(0) == "Elements (0)"
     assert elements_root.parent() is not None
     assert elements_root.parent().data(
         0, Qt.UserRole
     ) == ("fe_model_root", None)
     assert elements_root.parent().text(0) == "FE Model"
 
+    connections_root = _find_payload(
+        holder.tree,
+        ("connections_root", None),
+    )
+    assert connections_root is not None
+    assert connections_root.text(0) == "Connections (1)"
+    assert connections_root.parent() is elements_root.parent()
+
     group = _find_payload(
         holder.tree,
         ("connection_group", "zeroLengthSection"),
     )
     assert group is not None
-    assert group.parent() is elements_root
+    assert group.parent() is connections_root
     assert group.text(0) == "zeroLengthSection (1)"
     assert group.childCount() == 1
-    assert group.child(0).text(0).startswith("Element 1")
+    assert group.child(0).text(0).startswith("zeroLengthSection [1]")
     assert group.child(0).data(0, Qt.UserRole) == ("connection", 1)
