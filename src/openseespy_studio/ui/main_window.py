@@ -11336,6 +11336,11 @@ class MainWindow(QMainWindow):
         surface = self.project.surfaces.get(tag)
         if surface is None:
             return
+        if not self._ensure_surface_meshes(
+            [tag],
+            title="Managed Surface Edge Support",
+        ):
+            return
         try:
             infos = [
                 surface_edge_info(self.project, tag, edge_index)
@@ -12296,21 +12301,10 @@ class MainWindow(QMainWindow):
         if not tags:
             return
 
-        unmeshed = [
-            tag
-            for tag in tags
-            if inspect_surface_mesh_state(
-                self.project,
-                tag,
-            ).status != "meshed"
-        ]
-        if unmeshed:
-            QMessageBox.information(
-                self,
-                "Managed Surface Shell Result",
-                "Mesh the following Surface geometry first: "
-                + ", ".join(map(str, unmeshed)),
-            )
+        if not self._ensure_surface_meshes(
+            tags,
+            title="Managed Surface Shell Result",
+        ):
             return
 
         analyses = self._compatible_surface_result_analyses()
@@ -22664,7 +22658,6 @@ class MainWindow(QMainWindow):
                 managed_support = menu.addAction(
                     "Managed Edge Support..."
                 )
-                managed_support.setEnabled(live_mesh)
                 managed_support.triggered.connect(
                     lambda checked=False, t=tag:
                     self._manage_surface_edge_support(t)
@@ -22687,7 +22680,6 @@ class MainWindow(QMainWindow):
                 managed_line_load = menu.addAction(
                     "Managed Edge Line Load..."
                 )
-                managed_line_load.setEnabled(live_mesh)
                 managed_line_load.triggered.connect(
                     lambda checked=False, t=tag:
                     self._manage_surface_edge_line_load(t)
@@ -22810,7 +22802,6 @@ class MainWindow(QMainWindow):
                 if count == 1
                 else f"Create Managed Pressure on {count} Surfaces..."
             )
-            pressure.setEnabled(live_mesh)
             pressure.triggered.connect(
                 lambda checked=False, tags=tuple(surface_tags):
                 self._create_surface_pressure_for_surfaces(tags)
@@ -22819,7 +22810,6 @@ class MainWindow(QMainWindow):
                 managed_shell_recorder = menu.addAction(
                     "Managed Shell Recorder..."
                 )
-                managed_shell_recorder.setEnabled(live_mesh)
                 managed_shell_recorder.triggered.connect(
                     lambda checked=False, t=tag:
                     self._manage_surface_shell_recorder(t)
@@ -22858,7 +22848,6 @@ class MainWindow(QMainWindow):
                 if count == 1
                 else f"Managed Shell Result on {count} Surfaces..."
             )
-            managed_shell_result.setEnabled(live_mesh)
             managed_shell_result.triggered.connect(
                 lambda checked=False, tags=tuple(surface_tags):
                 self._manage_surface_shell_result(tags)
