@@ -473,6 +473,22 @@ analyze(10, 0.01)
     assert analysis.rayleigh_mode_i == 1
     assert analysis.eigen_solver == "-fullGenLapack"
 
-    generated = to_openseespy(result.project, analysis)
+    generated = to_openseespy(
+        result.project.model,
+        result.project.materials,
+        result.project.sections,
+        result.project.transformations,
+        result.project.constraints,
+        result.project.connections,
+        result.project.time_series,
+        result.project.load_patterns,
+        result.project.nodal_loads,
+        result.project.analyses,
+        result.project.active_analysis_tag,
+        result.project.element_loads,
+        result.project.prescribed_displacements,
+        result.project.recorders,
+        result.project.units,
+    )
     assert "_studio_beta_k_comm = 2.0 * _studio_zeta / _studio_omega_i" in generated
     assert "ops.rayleigh(0.0, 0.0, 0.0, _studio_beta_k_comm)" in generated
