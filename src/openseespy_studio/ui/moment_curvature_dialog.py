@@ -155,7 +155,14 @@ class MomentCurvatureDialog(QDialog):
         current = self.section.currentData() if self.section.count() else None
         wanted = select_tag if select_tag is not None else current
         self.section.clear()
-        self.section.addItem("Select Section...", None)
+        self.section.addItem(
+            (
+                "Select Section..."
+                if self.project.sections
+                else "No Sections available · use New Section..."
+            ),
+            None,
+        )
         for tag in sorted(self.project.sections):
             item = self.project.sections[tag]
             self.section.addItem(
