@@ -6581,14 +6581,28 @@ class MainWindow(QMainWindow):
         return max(min(scale * 1.0e-9, 1.0e-6), 1.0e-9)
 
     def _geometry_point_on_active_sketch_plane(self, xyz) -> bool:
-        frame = self.viewport.geometry_sketch_frame()
-        origin = tuple(float(value) for value in frame["origin"])
-        normal = tuple(float(value) for value in frame["normal"])
-        distance = abs(sum(
-            (float(xyz[index]) - origin[index]) * normal[index]
-            for index in range(3)
-        ))
-        return distance <= self._geometry_sketch_tolerance()
+        frame_getter = getattr(
+            self.viewport,
+            "geometry_sketch_frame",
+            None,
+        )
+        if callable(frame_getter):
+            frame = frame_getter()
+            origin = tuple(float(value) for value in frame["origin"])
+            normal = tuple(float(value) for value in frame["normal"])
+            distance = abs(sum(
+                (float(xyz[index]) - origin[index]) * normal[index]
+                for index in range(3)
+            ))
+            return distance <= self._geometry_sketch_tolerance()
+
+        # Backward-compatible fallback for extensions/tests that still expose
+        # only the original XY/XZ/YZ + offset sketch-plane API.
+        plane, offset = self.viewport.geometry_sketch_plane()
+        axis = {"xy": 2, "xz": 1, "yz": 0}[plane]
+        return abs(float(xyz[axis]) - float(offset)) <= (
+            self._geometry_sketch_tolerance()
+        )
 
     def _geometry_sketch_snap(
         self,
@@ -6762,31 +6776,50 @@ class MainWindow(QMainWindow):
                 anchor_xyz = tuple(float(value) for value in anchor.xyz)
 
         if anchor_xyz is not None:
-            try:
-                anchor_u, anchor_v = (
-                    self.viewport.geometry_world_to_local(anchor_xyz)
-                )
-                cursor_u, cursor_v = (
-                    self.viewport.geometry_world_to_local(xyz)
-                )
-                inferred = (
-                    (
-                        "Horizontal",
-                        self.viewport.geometry_local_to_world(
-                            cursor_u,
-                            anchor_v,
+            world_to_local = getattr(
+                self.viewport,
+                "geometry_world_to_local",
+                None,
+            )
+            local_to_world = getattr(
+                self.viewport,
+                "geometry_local_to_world",
+                None,
+            )
+            if callable(world_to_local) and callable(local_to_world):
+                try:
+                    anchor_u, anchor_v = world_to_local(anchor_xyz)
+                    cursor_u, cursor_v = world_to_local(xyz)
+                    inferred = (
+                        (
+                            "Horizontal",
+                            local_to_world(cursor_u, anchor_v),
                         ),
-                    ),
-                    (
-                        "Vertical",
-                        self.viewport.geometry_local_to_world(
-                            anchor_u,
-                            cursor_v,
+                        (
+                            "Vertical",
+                            local_to_world(anchor_u, cursor_v),
                         ),
-                    ),
-                )
-            except ValueError:
-                inferred = ()
+                    )
+                except ValueError:
+                    inferred = ()
+            else:
+                plane, offset = self.viewport.geometry_sketch_plane()
+                a = anchor_xyz
+                if plane == "xy":
+                    inferred = (
+                        ("Horizontal", (xyz[0], a[1], offset)),
+                        ("Vertical", (a[0], xyz[1], offset)),
+                    )
+                elif plane == "xz":
+                    inferred = (
+                        ("Horizontal", (xyz[0], offset, a[2])),
+                        ("Vertical", (a[0], offset, xyz[2])),
+                    )
+                else:
+                    inferred = (
+                        ("Horizontal", (offset, xyz[1], a[2])),
+                        ("Vertical", (offset, a[1], xyz[2])),
+                    )
             inference_candidates = []
             for label, candidate in inferred:
                 px, py = self.viewport.geometry_world_to_screen(candidate)
@@ -6956,13 +6989,48 @@ class MainWindow(QMainWindow):
         tuple[float, float, float],
         tuple[float, float, float],
     ]:
-        a_u, a_v = self.viewport.geometry_world_to_local(first)
-        c_u, c_v = self.viewport.geometry_world_to_local(opposite)
+        world_to_local = getattr(
+            self.viewport,
+            "geometry_world_to_local",
+            None,
+        )
+        local_to_world = getattr(
+            self.viewport,
+            "geometry_local_to_world",
+            None,
+        )
+        if callable(world_to_local) and callable(local_to_world):
+            a_u, a_v = world_to_local(first)
+            c_u, c_v = world_to_local(opposite)
+            return (
+                local_to_world(a_u, a_v),
+                local_to_world(c_u, a_v),
+                local_to_world(c_u, c_v),
+                local_to_world(a_u, c_v),
+            )
+
+        a = tuple(float(value) for value in first)
+        c = tuple(float(value) for value in opposite)
+        plane, offset = self.viewport.geometry_sketch_plane()
+        if plane == "xy":
+            return (
+                (a[0], a[1], offset),
+                (c[0], a[1], offset),
+                (c[0], c[1], offset),
+                (a[0], c[1], offset),
+            )
+        if plane == "xz":
+            return (
+                (a[0], offset, a[2]),
+                (c[0], offset, a[2]),
+                (c[0], offset, c[2]),
+                (a[0], offset, c[2]),
+            )
         return (
-            self.viewport.geometry_local_to_world(a_u, a_v),
-            self.viewport.geometry_local_to_world(c_u, a_v),
-            self.viewport.geometry_local_to_world(c_u, c_v),
-            self.viewport.geometry_local_to_world(a_u, c_v),
+            (offset, a[1], a[2]),
+            (offset, c[1], a[2]),
+            (offset, c[1], c[2]),
+            (offset, a[1], c[2]),
         )
 
     def _handle_geometry_line_sketch_click(
