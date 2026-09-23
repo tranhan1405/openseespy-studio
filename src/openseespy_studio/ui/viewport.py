@@ -2286,6 +2286,207 @@ class ModelViewport(QWidget):
                 tags.update(element.node_tags())
         return tags
 
+    @staticmethod
+    def _support_visual_spec(support_type: str) -> dict[str, object]:
+        """Return viewport style metadata for common boundary conditions."""
+        return {
+            "Fixed": {
+                "family": "fixed",
+                "color": "#12843d",
+                "free_axis": None,
+            },
+            "Pinned": {
+                "family": "pinned",
+                "color": "#19b74e",
+                "free_axis": None,
+            },
+            "Roller X": {
+                "family": "roller",
+                "color": "#16a3a8",
+                "free_axis": "x",
+            },
+            "Roller Y": {
+                "family": "roller",
+                "color": "#16a3a8",
+                "free_axis": "y",
+            },
+            "Roller Z": {
+                "family": "roller",
+                "color": "#16a3a8",
+                "free_axis": "z",
+            },
+        }.get(
+            str(support_type),
+            {
+                "family": "custom",
+                "color": "#d7a21b",
+                "free_axis": None,
+            },
+        )
+
+    def _draw_support_symbol(
+        self,
+        support_type: str,
+        xyz: tuple[float, float, float],
+        size: float,
+    ) -> None:
+        """Draw one Mechanical-style support glyph in the FE viewport."""
+        spec = self._support_visual_spec(support_type)
+        family = str(spec["family"])
+        color = str(spec["color"])
+        free_axis = spec["free_axis"]
+        x, y, z = (float(value) for value in xyz)
+        edge_color = "#0b6330"
+
+        if family == "fixed":
+            self.plotter.add_mesh(
+                pv.Cube(
+                    center=(x, y, z - size * 0.34),
+                    x_length=size * 1.18,
+                    y_length=size * 1.18,
+                    z_length=size * 0.50,
+                ),
+                color=color,
+                edge_color=edge_color,
+                show_edges=True,
+                line_width=1,
+                pickable=False,
+                render=False,
+            )
+            self.plotter.add_mesh(
+                pv.Cube(
+                    center=(x, y, z - size * 0.64),
+                    x_length=size * 1.55,
+                    y_length=size * 1.55,
+                    z_length=size * 0.10,
+                ),
+                color="#a8cdb4",
+                edge_color=edge_color,
+                show_edges=True,
+                pickable=False,
+                render=False,
+            )
+            return
+
+        support = pv.Cone(
+            center=(x, y, z - size * 0.54),
+            direction=(0.0, 0.0, -1.0),
+            height=size * 1.02,
+            radius=size * 0.68,
+            resolution=4,
+        )
+        self.plotter.add_mesh(
+            support,
+            color=color,
+            edge_color=edge_color,
+            show_edges=True,
+            line_width=1,
+            pickable=False,
+            render=False,
+        )
+
+        if family == "pinned":
+            self.plotter.add_mesh(
+                pv.Cube(
+                    center=(x, y, z - size * 1.08),
+                    x_length=size * 1.45,
+                    y_length=size * 1.45,
+                    z_length=size * 0.08,
+                ),
+                color="#b7ddc1",
+                edge_color=edge_color,
+                show_edges=True,
+                pickable=False,
+                render=False,
+            )
+            return
+
+        if family == "roller" and isinstance(free_axis, str):
+            axis_vectors = {
+                "x": np.asarray((1.0, 0.0, 0.0)),
+                "y": np.asarray((0.0, 1.0, 0.0)),
+                "z": np.asarray((0.0, 0.0, 1.0)),
+            }
+            axis_colors = {
+                "x": "#d64545",
+                "y": "#2e9f57",
+                "z": "#2b6cb0",
+            }
+            direction = axis_vectors[free_axis]
+
+            # Two rollers make the support visually distinct from a pin.
+            roller_offset = (
+                direction
+                if free_axis in {"x", "y"}
+                else np.asarray((1.0, 0.0, 0.0))
+            )
+            base = np.asarray((x, y, z - size * 1.08))
+            for sign in (-1.0, 1.0):
+                center = base + roller_offset * sign * size * 0.34
+                self.plotter.add_mesh(
+                    pv.Sphere(
+                        radius=size * 0.14,
+                        center=tuple(center),
+                        theta_resolution=12,
+                        phi_resolution=8,
+                    ),
+                    color="#d9eeee",
+                    edge_color="#147b80",
+                    show_edges=True,
+                    pickable=False,
+                    render=False,
+                )
+
+            # A double-ended guide explicitly communicates the released
+            # translation direction X/Y/Z, including the ambiguous Roller Z.
+            if free_axis == "z":
+                guide_center = np.asarray(
+                    (x + size * 0.92, y, z - size * 0.45)
+                )
+            else:
+                guide_center = np.asarray((x, y, z + size * 0.28))
+            half = size * 0.78
+            p1 = guide_center - direction * half
+            p2 = guide_center + direction * half
+            axis_color = axis_colors[free_axis]
+            self.plotter.add_mesh(
+                pv.Line(tuple(p1), tuple(p2)),
+                color=axis_color,
+                line_width=4,
+                pickable=False,
+                render=False,
+            )
+            for end, sign in ((p1, -1.0), (p2, 1.0)):
+                self.plotter.add_mesh(
+                    pv.Cone(
+                        center=tuple(end),
+                        direction=tuple(direction * sign),
+                        height=size * 0.26,
+                        radius=size * 0.10,
+                        resolution=12,
+                    ),
+                    color=axis_color,
+                    pickable=False,
+                    render=False,
+                )
+            return
+
+        # Custom restraint: deliberately neutral/amber because an arbitrary
+        # DOF pattern cannot be represented safely by a standard support icon.
+        self.plotter.add_mesh(
+            pv.Sphere(
+                radius=size * 0.18,
+                center=(x, y, z - size * 1.05),
+                theta_resolution=12,
+                phi_resolution=8,
+            ),
+            color="#f2c94c",
+            edge_color="#9f7b08",
+            show_edges=True,
+            pickable=False,
+            render=False,
+        )
+
     def hide_entities(self, nodes: set[int], elements: set[int]) -> None:
         self._hidden_nodes.update(nodes)
         self._hidden_elements.update(elements)
@@ -3968,69 +4169,11 @@ class ModelViewport(QWidget):
             node = self._model.nodes[tag]
             if not any(node.fixity):
                 continue
-
-            support_type = classify_fixity(node.fixity)
-            x, y, z = node.xyz
-
-            if support_type == "Fixed":
-                support = pv.Cube(
-                    center=(x, y, z - support_size * 0.42),
-                    x_length=support_size * 1.15,
-                    y_length=support_size * 1.15,
-                    z_length=support_size * 0.52,
-                )
-                color = "#12843d"
-            else:
-                support = pv.Cone(
-                    center=(x, y, z - support_size * 0.58),
-                    direction=(0.0, 0.0, -1.0),
-                    height=support_size * 1.12,
-                    radius=support_size * 0.72,
-                    resolution=4,
-                )
-                color = (
-                    "#19b74e"
-                    if support_type == "Pinned"
-                    else "#16a3a8"
-                    if support_type.startswith("Roller")
-                    else "#d7a21b"
-                )
-
-            self.plotter.add_mesh(
-                support,
-                color=color,
-                edge_color="#0b6330",
-                show_edges=True,
-                line_width=1,
-                pickable=False,
-                render=False,
+            self._draw_support_symbol(
+                classify_fixity(node.fixity),
+                node.xyz,
+                support_size,
             )
-
-            if support_type.startswith("Roller"):
-                axis = support_type[-1].lower()
-                direction = {
-                    "x": (1.0, 0.0, 0.0),
-                    "y": (0.0, 1.0, 0.0),
-                    "z": (0.0, 0.0, 1.0),
-                }[axis]
-                half = support_size * 0.65
-                p1 = (
-                    x - direction[0] * half,
-                    y - direction[1] * half,
-                    z - support_size * 1.05 - direction[2] * half,
-                )
-                p2 = (
-                    x + direction[0] * half,
-                    y + direction[1] * half,
-                    z - support_size * 1.05 + direction[2] * half,
-                )
-                self.plotter.add_mesh(
-                    pv.Line(p1, p2),
-                    color="#147b80",
-                    line_width=3,
-                    pickable=False,
-                    render=False,
-                )
 
         visible_node_set = set(visible_nodes)
         connection_size = max(span * 0.012, 0.06)
