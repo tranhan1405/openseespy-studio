@@ -3,6 +3,8 @@ from __future__ import annotations
 import inspect
 
 from openseespy_studio.ui.main_window import MainWindow
+from openseespy_studio.ui.results_panel import ResultsPanel
+from openseespy_studio.ui.viewport import ModelViewport
 
 
 def test_linked_frame_handler_animates_nodal_contours_without_duplicate_motion():
@@ -25,3 +27,26 @@ def test_global_animation_contour_range_is_prepared_from_history():
     assert 'contour_range_mode' in source
     assert '"global"' in source
     assert "nodal_history_contour_range" in source
+
+
+def test_fast_contour_update_precedes_range_resolution():
+    source = inspect.getsource(ModelViewport.show_node_contour)
+
+    assert source.index("animation_state =") < source.index(
+        "resolve_contour_range"
+    )
+    assert '"line_node_tags"' in source
+    assert '"node_point_tags"' in source
+    assert "if display.deformed_geometry" in source
+
+
+def test_result_speed_caps_redraw_and_advances_frames():
+    build = inspect.getsource(ResultsPanel._build_frame_bar)
+    timer = inspect.getsource(ResultsPanel._update_motion_timer)
+    advance = inspect.getsource(ResultsPanel._advance_motion)
+
+    assert '"0.25×"' in build
+    assert '"16×"' in build
+    assert "setInterval(40)" in timer
+    assert "_motion_frame_accumulator" in advance
+    assert "_motion_frames_per_tick" in advance
