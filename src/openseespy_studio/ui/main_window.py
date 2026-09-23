@@ -23238,6 +23238,15 @@ class MainWindow(QMainWindow):
         item = self.tree.itemAt(position)
         if item is None:
             return
+
+        # Match standard tree UX: right-clicking an unselected item first
+        # makes that item the active selection. Preserve an existing
+        # multi-selection when the clicked item already belongs to it.
+        if not item.isSelected():
+            self.tree.clearSelection()
+            self.tree.setCurrentItem(item)
+            item.setSelected(True)
+
         payload = item.data(0, Qt.UserRole)
         if not payload:
             return
