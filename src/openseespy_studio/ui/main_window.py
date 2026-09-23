@@ -9622,6 +9622,7 @@ class MainWindow(QMainWindow):
         dialog = MassSourceDialog(
             self.project,
             next_tag=self.project.next_mass_source_tag(),
+            new_pattern_callback=self._create_plain_pattern_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -9655,6 +9656,7 @@ class MainWindow(QMainWindow):
         dialog = MassSourceDialog(
             self.project,
             source=source,
+            new_pattern_callback=self._create_plain_pattern_dependency,
             parent=self,
         )
         if not dialog.exec():
