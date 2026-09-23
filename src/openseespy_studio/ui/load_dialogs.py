@@ -45,6 +45,47 @@ class MassDialog(QDialog):
     def values(self): return tuple(s.value() for s in self.spins)
 
 
+def _dependency_row(
+    combo: QComboBox,
+    button_text: str,
+    callback,
+) -> QWidget:
+    holder = QWidget()
+    row = QHBoxLayout(holder)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(4)
+    row.addWidget(combo, 1)
+    button = QPushButton(button_text)
+    button.setEnabled(callable(callback))
+    if callable(callback):
+        button.clicked.connect(callback)
+    row.addWidget(button)
+    holder.dependency_button = button
+    return holder
+
+
+def _refresh_plain_pattern_combo(
+    combo: QComboBox,
+    patterns,
+    *,
+    select_tag: int | None = None,
+) -> None:
+    current = combo.currentData() if combo.count() else None
+    wanted = select_tag if select_tag is not None else current
+    combo.clear()
+    combo.addItem("Select Plain load pattern...", None)
+    for tag in sorted(patterns):
+        pattern = patterns[tag]
+        if pattern.pattern_type == "Plain":
+            combo.addItem(f"{tag} - {pattern.name}", int(tag))
+    if wanted is not None:
+        index = combo.findData(int(wanted))
+        if index >= 0:
+            combo.setCurrentIndex(index)
+    elif combo.count() == 2:
+        combo.setCurrentIndex(1)
+
+
 class TimeSeriesDialog(QDialog):
     def __init__(self, series=None, *, next_tag=1, parent=None):
         super().__init__(parent); self.setWindowTitle("Time Series Editor"); self.setModal(True); self.resize(430,420)
@@ -82,9 +123,12 @@ class LoadPatternDialog(QDialog):
         *,
         next_tag=1,
         allow_uniform_excitation=True,
+        new_time_series_callback=None,
         parent=None,
     ):
         super().__init__(parent); self.setWindowTitle("Load Pattern Editor"); self.setModal(True)
+        self._time_series = dict(time_series)
+        self._new_time_series_callback = new_time_series_callback
         root=QVBoxLayout(self); form=QFormLayout()
         self.tag=QSpinBox(); self.tag.setRange(1,2147483647); self.tag.setValue(pattern.tag if pattern else next_tag)
         self.name=QLineEdit(pattern.name if pattern else f"Load Pattern {next_tag}")
@@ -98,11 +142,14 @@ class LoadPatternDialog(QDialog):
         self.kind.addItems(kinds)
         self.kind.setCurrentText(pattern.pattern_type if pattern else "Plain")
         self.ts=QComboBox()
-        for tag in sorted(time_series):
-            s=time_series[tag]; self.ts.addItem(f"{tag} - {s.name} ({s.series_type})",tag)
-        if pattern:
-            i=self.ts.findData(pattern.time_series_tag)
-            if i>=0:self.ts.setCurrentIndex(i)
+        self._refresh_time_series(
+            pattern.time_series_tag if pattern else None
+        )
+        self.ts_holder = _dependency_row(
+            self.ts,
+            "New Time Series...",
+            self._create_time_series_dependency,
+        )
         self.direction=QComboBox()
         for i,name in enumerate(("X","Y","Z","RX","RY","RZ"),1): self.direction.addItem(f"{name} (DOF {i})",i)
         if pattern:
@@ -110,10 +157,27 @@ class LoadPatternDialog(QDialog):
             if i>=0:self.direction.setCurrentIndex(i)
         self.factor=_spin(pattern.factor if pattern else 1.0)
         self.vel0=_spin(pattern.vel0 if pattern else 0.0)
-        for label,w in (("Tag:",self.tag),("Name:",self.name),("Type:",self.kind),("Time series:",self.ts),("Direction:",self.direction),("Scale factor:",self.factor),("Initial velocity:",self.vel0)): form.addRow(label,w)
+        for label,w in (("Tag:",self.tag),("Name:",self.name),("Type:",self.kind),("Time series:",self.ts_holder),("Direction:",self.direction),("Scale factor:",self.factor),("Initial velocity:",self.vel0)): form.addRow(label,w)
         root.addLayout(form)
         b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self._accept); b.rejected.connect(self.reject); root.addWidget(b)
         self.kind.currentTextChanged.connect(self._sync); self._sync(self.kind.currentText())
+    def _refresh_time_series(self, select_tag=None):
+        current=self.ts.currentData() if self.ts.count() else None
+        wanted=select_tag if select_tag is not None else current
+        self.ts.clear(); self.ts.addItem("Select Time Series...",None)
+        for tag in sorted(self._time_series):
+            s=self._time_series[tag]
+            self.ts.addItem(f"{tag} - {s.name} ({s.series_type})",int(tag))
+        if wanted is not None:
+            i=self.ts.findData(int(wanted))
+            if i>=0:self.ts.setCurrentIndex(i)
+        elif self.ts.count()==2:self.ts.setCurrentIndex(1)
+    def _create_time_series_dependency(self):
+        if not callable(self._new_time_series_callback): return
+        series=self._new_time_series_callback()
+        if series is None:return
+        self._time_series[int(series.tag)]=series
+        self._refresh_time_series(int(series.tag))
     def _sync(self,kind):
         dynamic=kind=="UniformExcitation"; self.direction.setEnabled(dynamic); self.factor.setEnabled(dynamic); self.vel0.setEnabled(dynamic)
     def data(self):
@@ -634,21 +698,27 @@ class GroundMotionDialog(QDialog):
 
 class NodalLoadDialog(QDialog):
     labels=("FX","FY","FZ","MX","MY","MZ")
-    def __init__(self, patterns, load=None, *, next_tag=1, node_tag=1, units=None, parent=None):
+    def __init__(self, patterns, load=None, *, next_tag=1, node_tag=1, units=None, new_pattern_callback=None, parent=None):
         super().__init__(parent); self.setWindowTitle("Nodal Load Editor"); self.setModal(True)
         self.unit_system=UnitSystem.from_mapping(units)
+        self._patterns=dict(patterns)
+        self._new_pattern_callback=new_pattern_callback
         root=QVBoxLayout(self); form=QFormLayout()
         self.tag=QSpinBox(); self.tag.setRange(1,2147483647); self.tag.setValue(load.tag if load else next_tag)
         self.name=QLineEdit(load.name if load else f"Nodal Load {next_tag}")
         self.pattern=QComboBox()
-        for tag in sorted(patterns):
-            p=patterns[tag]
-            if p.pattern_type=="Plain": self.pattern.addItem(f"{tag} - {p.name}",tag)
-        if load:
-            i=self.pattern.findData(load.pattern_tag)
-            if i>=0:self.pattern.setCurrentIndex(i)
+        _refresh_plain_pattern_combo(
+            self.pattern,
+            self._patterns,
+            select_tag=(load.pattern_tag if load else None),
+        )
+        self.pattern_holder=_dependency_row(
+            self.pattern,
+            "New Plain Pattern...",
+            self._create_pattern_dependency,
+        )
         self.node=QSpinBox(); self.node.setRange(1,2147483647); self.node.setValue(load.node_tag if load else node_tag)
-        form.addRow("Tag:",self.tag); form.addRow("Name:",self.name); form.addRow("Plain pattern:",self.pattern); form.addRow("Node:",self.node)
+        form.addRow("Tag:",self.tag); form.addRow("Name:",self.name); form.addRow("Plain pattern:",self.pattern_holder); form.addRow("Node:",self.node)
         vals=load.values if load else (0.0,)*6; self.spins=[]
         for index,(label,val) in enumerate(zip(self.labels,vals)):
             s=_spin(val)
@@ -660,6 +730,12 @@ class NodalLoadDialog(QDialog):
             form.addRow(f"{label} [{unit_label}]:",s); self.spins.append(s)
         root.addLayout(form)
         b=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); b.accepted.connect(self._accept); b.rejected.connect(self.reject); root.addWidget(b)
+    def _create_pattern_dependency(self):
+        if not callable(self._new_pattern_callback): return
+        pattern=self._new_pattern_callback()
+        if pattern is None:return
+        self._patterns[int(pattern.tag)]=pattern
+        _refresh_plain_pattern_combo(self.pattern,self._patterns,select_tag=int(pattern.tag))
     def data(self):
         if self.pattern.currentData() is None: raise ValueError("Create a Plain load pattern first.")
         return NodalLoadData(self.tag.value(),self.name.text().strip() or f"Nodal Load {self.tag.value()}",int(self.pattern.currentData()),self.node.value(),tuple(s.value() for s in self.spins))
@@ -683,6 +759,7 @@ class PrescribedDisplacementDialog(QDialog):
         ndf=6,
         units=None,
         allowed_load_types=None,
+        new_pattern_callback=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -690,6 +767,8 @@ class PrescribedDisplacementDialog(QDialog):
         self.setModal(True)
         self.unit_system = UnitSystem.from_mapping(units)
         self.ndf = max(1, min(6, int(ndf)))
+        self._patterns = dict(patterns)
+        self._new_pattern_callback = new_pattern_callback
 
         root = QVBoxLayout(self)
         form = QFormLayout()
@@ -707,17 +786,18 @@ class PrescribedDisplacementDialog(QDialog):
         )
 
         self.pattern = QComboBox()
-        for tag in sorted(patterns):
-            pattern = patterns[tag]
-            if pattern.pattern_type == "Plain":
-                self.pattern.addItem(
-                    f"{tag} - {pattern.name}",
-                    tag,
-                )
-        if displacement:
-            index = self.pattern.findData(displacement.pattern_tag)
-            if index >= 0:
-                self.pattern.setCurrentIndex(index)
+        _refresh_plain_pattern_combo(
+            self.pattern,
+            self._patterns,
+            select_tag=(
+                displacement.pattern_tag if displacement else None
+            ),
+        )
+        self.pattern_holder = _dependency_row(
+            self.pattern,
+            "New Plain Pattern...",
+            self._create_pattern_dependency,
+        )
 
         self.node = QSpinBox()
         self.node.setRange(1, 2147483647)
@@ -748,7 +828,7 @@ class PrescribedDisplacementDialog(QDialog):
 
         form.addRow("Tag:", self.tag)
         form.addRow("Name:", self.name)
-        form.addRow("Plain pattern:", self.pattern)
+        form.addRow("Plain pattern:", self.pattern_holder)
         form.addRow("Node:", self.node)
         form.addRow("DOF:", self.dof)
         form.addRow(self.value_label, self.value)
@@ -764,6 +844,19 @@ class PrescribedDisplacementDialog(QDialog):
 
         self.dof.currentIndexChanged.connect(self._sync_value_label)
         self._sync_value_label()
+
+    def _create_pattern_dependency(self) -> None:
+        if not callable(self._new_pattern_callback):
+            return
+        pattern = self._new_pattern_callback()
+        if pattern is None:
+            return
+        self._patterns[int(pattern.tag)] = pattern
+        _refresh_plain_pattern_combo(
+            self.pattern,
+            self._patterns,
+            select_tag=int(pattern.tag),
+        )
 
     def _sync_value_label(self, *_args) -> None:
         dof = int(self.dof.currentData() or 1)
@@ -815,6 +908,7 @@ class ElementLoadDialog(QDialog):
         element_tag=1,
         units=None,
         allowed_load_types=None,
+        new_pattern_callback=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -822,6 +916,8 @@ class ElementLoadDialog(QDialog):
         self.setModal(True)
         self.resize(500, 500)
         self.unit_system = UnitSystem.from_mapping(units)
+        self._patterns = dict(patterns)
+        self._new_pattern_callback = new_pattern_callback
 
         root = QVBoxLayout(self)
         form = QFormLayout()
@@ -835,17 +931,16 @@ class ElementLoadDialog(QDialog):
         )
 
         self.pattern = QComboBox()
-        for tag in sorted(patterns):
-            pattern = patterns[tag]
-            if pattern.pattern_type == "Plain":
-                self.pattern.addItem(
-                    f"{tag} - {pattern.name}",
-                    tag,
-                )
-        if load:
-            index = self.pattern.findData(load.pattern_tag)
-            if index >= 0:
-                self.pattern.setCurrentIndex(index)
+        _refresh_plain_pattern_combo(
+            self.pattern,
+            self._patterns,
+            select_tag=(load.pattern_tag if load else None),
+        )
+        self.pattern_holder = _dependency_row(
+            self.pattern,
+            "New Plain Pattern...",
+            self._create_pattern_dependency,
+        )
 
         self.element = QSpinBox()
         self.element.setRange(1, 2147483647)
@@ -874,7 +969,7 @@ class ElementLoadDialog(QDialog):
 
         form.addRow("Tag:", self.tag)
         form.addRow("Name:", self.name)
-        form.addRow("Plain pattern:", self.pattern)
+        form.addRow("Plain pattern:", self.pattern_holder)
         form.addRow("Element:", self.element)
         form.addRow("Type:", self.kind)
 
@@ -943,6 +1038,19 @@ class ElementLoadDialog(QDialog):
 
         self.kind.currentIndexChanged.connect(self._sync)
         self._sync()
+
+    def _create_pattern_dependency(self) -> None:
+        if not callable(self._new_pattern_callback):
+            return
+        pattern = self._new_pattern_callback()
+        if pattern is None:
+            return
+        self._patterns[int(pattern.tag)] = pattern
+        _refresh_plain_pattern_combo(
+            self.pattern,
+            self._patterns,
+            select_tag=int(pattern.tag),
+        )
 
     def _sync(self):
         kind = self.kind.currentData()
