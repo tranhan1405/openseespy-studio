@@ -105,3 +105,31 @@ def test_transient_animation_uses_physical_time_clock():
     assert "values[index] <= values[index - 1]" in times
     assert "uniformly in physical time" in sampling
     assert "target_time" in sampling
+
+
+def test_result_viewer_time_selector_drives_history_frame_tables():
+    build = inspect.getsource(ResultsPanel._build_frame_bar)
+    mode = inspect.getsource(ResultsPanel._result_time_mode_changed)
+    custom = inspect.getsource(ResultsPanel._result_time_value_changed)
+    table = inspect.getsource(ResultsPanel._populate_node_table)
+    set_index = inspect.getsource(ResultsPanel._set_motion_index)
+
+    assert '"Last"' in build
+    assert '"First / 0 s"' in build
+    assert '"User Defined..."' in build
+    assert "result_time_value = QDoubleSpinBox()" in build
+    assert "_nearest_transient_time_index" in mode
+    assert "_nearest_transient_time_index" in custom
+    assert 'history_key = "disp" if displacement else "reaction"' in table
+    assert "frame_rows[frame_index]" in table
+    assert "refresh_tables" in set_index
+
+
+def test_reaction_and_displacement_share_transient_frame_clock():
+    handler = inspect.getsource(MainWindow._show_linked_result_frame)
+    advance = inspect.getsource(ResultsPanel._advance_motion)
+
+    assert 'result_type not in {"NodalDisplacement", "NodalReaction"}' in handler
+    assert 'result_type == "NodalReaction"' in handler
+    assert "_transient_time_values()" in advance
+    assert "_motion_playback_time" in advance
