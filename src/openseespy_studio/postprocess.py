@@ -7,7 +7,11 @@ import math
 from collections.abc import Sequence
 from typing import Any
 
-from .beam_loads import resolve_self_weight_local
+from .beam_loads import (
+    resolve_element_load_local_components,
+    resolve_element_load_local_end_components,
+    resolve_self_weight_local,
+)
 from .model import SHELL_ELEMENT_TYPES, StructuralModel
 from .project import (
     ElementLoadData,
@@ -3255,18 +3259,42 @@ def _active_local_element_loads(
             return None
 
         if load.load_type == "Uniform":
+            wx, wy, wz = resolve_element_load_local_components(
+                load, model, transformations
+            )
             active.append({
                 "type": "Uniform",
-                "wx": factor * load.wx,
-                "wy": factor * load.wy,
-                "wz": factor * load.wz,
+                "wx": factor * wx,
+                "wy": factor * wy,
+                "wz": factor * wz,
+            })
+        elif load.load_type in {"Triangular", "Trapezoidal"}:
+            wxa, wya, wza = resolve_element_load_local_components(
+                load, model, transformations
+            )
+            wxb, wyb, wzb = resolve_element_load_local_end_components(
+                load, model, transformations
+            )
+            active.append({
+                "type": "Linear",
+                "wxa": factor * wxa,
+                "wya": factor * wya,
+                "wza": factor * wza,
+                "wxb": factor * wxb,
+                "wyb": factor * wyb,
+                "wzb": factor * wzb,
+                "a_over_l": load.a_over_l,
+                "b_over_l": load.b_over_l,
             })
         elif load.load_type == "Point":
+            px, py, pz = resolve_element_load_local_components(
+                load, model, transformations
+            )
             active.append({
                 "type": "Point",
-                "px": factor * load.px,
-                "py": factor * load.py,
-                "pz": factor * load.pz,
+                "px": factor * px,
+                "py": factor * py,
+                "pz": factor * pz,
                 "x_over_l": load.x_over_l,
             })
         elif load.load_type == "SelfWeight":
@@ -3300,6 +3328,52 @@ def _aggregate_uniform(
         wy += float(load.get("wy", 0.0))
         wz += float(load.get("wz", 0.0))
     return wx, wy, wz
+
+
+def _linear_loads(
+    active_loads: Sequence[dict[str, float]],
+    length: float,
+) -> list[dict[str, float]]:
+    loads: list[dict[str, float]] = []
+    for load in active_loads:
+        if load.get("type") != "Linear":
+            continue
+        a = min(max(float(load.get("a_over_l", 0.0)), 0.0), 1.0)
+        b = min(max(float(load.get("b_over_l", 1.0)), a), 1.0)
+        loads.append({
+            "a": a * length,
+            "b": b * length,
+            "wxa": float(load.get("wxa", 0.0)),
+            "wya": float(load.get("wya", 0.0)),
+            "wza": float(load.get("wza", 0.0)),
+            "wxb": float(load.get("wxb", 0.0)),
+            "wyb": float(load.get("wyb", 0.0)),
+            "wzb": float(load.get("wzb", 0.0)),
+        })
+    return loads
+
+
+def _linear_load_integrals(
+    load: dict[str, float],
+    x: float,
+    start_key: str,
+    end_key: str,
+) -> tuple[float, float]:
+    """Return load resultant and its moment about section x."""
+    a = float(load["a"])
+    b = float(load["b"])
+    if x <= a or b <= a:
+        return 0.0, 0.0
+    u = min(float(x), b) - a
+    qa = float(load[start_key])
+    qb = float(load[end_key])
+    slope = (qb - qa) / (b - a)
+    resultant = qa * u + 0.5 * slope * u * u
+    first_moment_from_a = (
+        0.5 * qa * u * u + slope * u * u * u / 3.0
+    )
+    moment_about_x = resultant * (float(x) - a) - first_moment_from_a
+    return resultant, moment_about_x
 
 
 def _point_loads(
@@ -3344,6 +3418,7 @@ def _resultant_at(
 
     wx, wy, wz = _aggregate_uniform(active_loads)
     points = _point_loads(active_loads, length)
+    linear = _linear_loads(active_loads, length)
     tol = max(length, 1.0) * 1.0e-12
 
     px_sum = py_sum = pz_sum = 0.0
@@ -3362,18 +3437,42 @@ def _resultant_at(
         py_moment += point["py"] * lever
         pz_moment += point["pz"] * lever
 
+    lx_force = ly_force = lz_force = 0.0
+    ly_moment = lz_moment = 0.0
+    for distributed in linear:
+        force, _moment = _linear_load_integrals(
+            distributed, x, "wxa", "wxb"
+        )
+        lx_force += force
+        force, moment = _linear_load_integrals(
+            distributed, x, "wya", "wyb"
+        )
+        ly_force += force
+        ly_moment += moment
+        force, moment = _linear_load_integrals(
+            distributed, x, "wza", "wzb"
+        )
+        lz_force += force
+        lz_moment += moment
+
     if component == "N":
-        return n0 - wx * x - px_sum
+        return n0 - wx * x - lx_force - px_sum
     if component == "Vy":
-        return vy0 + wy * x + py_sum
+        return vy0 + wy * x + ly_force + py_sum
     if component == "Vz":
-        return vz0 - wz * x - pz_sum
+        return vz0 - wz * x - lz_force - pz_sum
     if component == "T":
         return t0
     if component == "Mz":
-        return mz0 + vy0 * x + 0.5 * wy * x * x + py_moment
+        return (
+            mz0 + vy0 * x + 0.5 * wy * x * x
+            + ly_moment + py_moment
+        )
     if component == "My":
-        return my0 + vz0 * x - 0.5 * wz * x * x - pz_moment
+        return (
+            my0 + vz0 * x - 0.5 * wz * x * x
+            - lz_moment - pz_moment
+        )
     raise ValueError(f"Unsupported local force component: {component}")
 
 
@@ -3386,42 +3485,59 @@ def _moment_extrema_positions(
     if component not in {"My", "Mz"} or len(local_force) < 12:
         return []
 
-    values = [float(value) for value in local_force[:12]]
-    wx, wy, wz = _aggregate_uniform(active_loads)
-    _ = wx
+    shear_component = "Vz" if component == "My" else "Vy"
     points = _point_loads(active_loads, length)
+    linear = _linear_loads(active_loads, length)
     breakpoints = sorted({
         0.0,
         float(length),
         *(float(point["x"]) for point in points),
+        *(float(load["a"]) for load in linear),
+        *(float(load["b"]) for load in linear),
     })
 
     roots: list[float] = []
     tol = max(length, 1.0) * 1.0e-12
     for left, right in zip(breakpoints, breakpoints[1:]):
-        if right - left <= tol:
+        width = right - left
+        if width <= tol:
             continue
-        midpoint = 0.5 * (left + right)
+        middle = 0.5 * (left + right)
+        y0 = _resultant_at(
+            local_force, length, shear_component, active_loads, left,
+            side="right",
+        )
+        ym = _resultant_at(
+            local_force, length, shear_component, active_loads, middle,
+            side="right",
+        )
+        y1 = _resultant_at(
+            local_force, length, shear_component, active_loads, right,
+            side="left",
+        )
 
-        if component == "Mz":
-            slope = wy
-            constant = values[1]
-            for point in points:
-                if point["x"] < midpoint:
-                    constant += point["py"]
+        # On each interval q(x) is linear, so shear is at most quadratic.
+        # Fit y(t)=a*t^2+b*t+c at t={0, 1/2, 1} and solve exactly.
+        c = y0
+        a = 2.0 * (y1 + y0 - 2.0 * ym)
+        b = y1 - y0 - a
+        candidates: list[float] = []
+        if abs(a) <= 1.0e-14:
+            if abs(b) > 1.0e-14:
+                candidates.append(-c / b)
         else:
-            # dMy/dx = Vz = -localForce_I(Vz) - wz*x - sum(Pz)
-            slope = -wz
-            constant = -values[2]
-            for point in points:
-                if point["x"] < midpoint:
-                    constant -= point["pz"]
-
-        if abs(slope) <= 1.0e-15:
-            continue
-        root = -constant / slope
-        if left + tol < root < right - tol:
-            roots.append(root)
+            discriminant = b * b - 4.0 * a * c
+            if discriminant >= -1.0e-14:
+                root_disc = math.sqrt(max(0.0, discriminant))
+                candidates.extend((
+                    (-b - root_disc) / (2.0 * a),
+                    (-b + root_disc) / (2.0 * a),
+                ))
+        for ratio in candidates:
+            if 0.0 < ratio < 1.0:
+                root = left + ratio * width
+                if left + tol < root < right - tol:
+                    roots.append(root)
     return roots
 
 
@@ -3435,9 +3551,9 @@ def equilibrium_component_samples(
 ) -> list[tuple[float, float]]:
     """Sample the exact 1D equilibrium field for Studio beam load types.
 
-    Uniform and point beam loads are evaluated analytically from the I-end
-    local force. Point-load coordinates are duplicated for components that
-    jump there, so a plotted polyline shows the discontinuity explicitly.
+    Uniform, linearly varying, and point beam loads are evaluated analytically
+    from the I-end local force. Point-load coordinates are duplicated for
+    components that jump there, so a plotted polyline shows the discontinuity.
     """
     component = str(component)
     if component not in LOCAL_FORCE_INDEX:
@@ -3465,6 +3581,8 @@ def equilibrium_component_samples(
             active_loads,
         )
     )
+    for distributed in _linear_loads(active_loads, length):
+        positions.update((distributed["a"], distributed["b"]))
 
     points = _point_loads(active_loads, length)
     point_positions = {point["x"] for point in points}

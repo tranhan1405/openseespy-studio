@@ -1605,21 +1605,74 @@ class _Importer:
         payload = list(args[type_index + 2:])
         for element_tag in element_tags:
             if load_type == "-beamUniform":
-                if len(payload) < 2:
-                    raise ValueError("beamUniform needs Wy and Wz")
-                wy = float(payload[0])
-                wz = float(payload[1])
-                wx = float(payload[2]) if len(payload) > 2 else 0.0
-                item = ElementLoadData(
-                    self._next_element_load,
-                    f"Imported uniform load {self._next_element_load}",
-                    self.current_pattern,
-                    element_tag,
-                    "Uniform",
-                    wx=wx,
-                    wy=wy,
-                    wz=wz,
+                ndm = int(self.project.model.ndm)
+                is_variable = (
+                    (ndm == 2 and len(payload) >= 6)
+                    or (ndm == 3 and len(payload) >= 8)
                 )
+                if is_variable:
+                    if ndm == 2:
+                        wya, wxa, a_over_l, b_over_l, wyb, wxb = (
+                            float(value) for value in payload[:6]
+                        )
+                        wza = wzb = 0.0
+                    else:
+                        (
+                            wya, wza, wxa, a_over_l, b_over_l,
+                            wyb, wzb, wxb,
+                        ) = (float(value) for value in payload[:8])
+                    tolerance = 1.0e-12
+                    start_zero = all(
+                        abs(value) <= tolerance
+                        for value in (wxa, wya, wza)
+                    )
+                    end_zero = all(
+                        abs(value) <= tolerance
+                        for value in (wxb, wyb, wzb)
+                    )
+                    kind = (
+                        "Triangular"
+                        if start_zero != end_zero
+                        else "Trapezoidal"
+                    )
+                    item = ElementLoadData(
+                        self._next_element_load,
+                        f"Imported {kind.lower()} load "
+                        f"{self._next_element_load}",
+                        self.current_pattern,
+                        element_tag,
+                        kind,
+                        wx=wxa,
+                        wy=wya,
+                        wz=wza,
+                        wx_end=wxb,
+                        wy_end=wyb,
+                        wz_end=wzb,
+                        a_over_l=a_over_l,
+                        b_over_l=b_over_l,
+                    )
+                else:
+                    if not payload:
+                        raise ValueError("beamUniform needs load components")
+                    wy = float(payload[0])
+                    if ndm == 2:
+                        wz = 0.0
+                        wx = float(payload[1]) if len(payload) > 1 else 0.0
+                    else:
+                        if len(payload) < 2:
+                            raise ValueError("3D beamUniform needs Wy and Wz")
+                        wz = float(payload[1])
+                        wx = float(payload[2]) if len(payload) > 2 else 0.0
+                    item = ElementLoadData(
+                        self._next_element_load,
+                        f"Imported uniform load {self._next_element_load}",
+                        self.current_pattern,
+                        element_tag,
+                        "Uniform",
+                        wx=wx,
+                        wy=wy,
+                        wz=wz,
+                    )
             elif load_type == "-beamPoint":
                 if len(payload) < 3:
                     raise ValueError("beamPoint needs Py, Pz and x/L")

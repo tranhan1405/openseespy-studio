@@ -914,7 +914,7 @@ class ElementLoadDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Beam / Element Load Editor")
         self.setModal(True)
-        self.resize(500, 500)
+        self.resize(540, 660)
         self.unit_system = UnitSystem.from_mapping(units)
         self._patterns = dict(patterns)
         self._new_pattern_callback = new_pattern_callback
@@ -925,7 +925,6 @@ class ElementLoadDialog(QDialog):
         self.tag = QSpinBox()
         self.tag.setRange(1, 2147483647)
         self.tag.setValue(load.tag if load else next_tag)
-
         self.name = QLineEdit(
             load.name if load else f"Element Load {next_tag}"
         )
@@ -944,18 +943,21 @@ class ElementLoadDialog(QDialog):
 
         self.element = QSpinBox()
         self.element.setRange(1, 2147483647)
-        self.element.setValue(
-            load.element_tag if load else element_tag
-        )
+        self.element.setValue(load.element_tag if load else element_tag)
 
         self.kind = QComboBox()
         allowed = (
             set(allowed_load_types)
             if allowed_load_types is not None
-            else {"Uniform", "Point", "SelfWeight", "SurfacePressure"}
+            else {
+                "Uniform", "Triangular", "Trapezoidal", "Point",
+                "SelfWeight", "SurfacePressure",
+            }
         )
         for label, value in (
             ("Uniform distributed", "Uniform"),
+            ("Triangular distributed", "Triangular"),
+            ("Trapezoidal / linearly varying", "Trapezoidal"),
             ("Point", "Point"),
             ("Self Weight (global gravity)", "SelfWeight"),
             ("Shell Surface Pressure (normal)", "SurfacePressure"),
@@ -992,13 +994,25 @@ class ElementLoadDialog(QDialog):
         self.wx = _spin(load.wx if load else 0.0)
         self.wy = _spin(load.wy if load else 0.0)
         self.wz = _spin(load.wz if load else 0.0)
-        line_unit = self.unit_system.line_load_label
-        self.uniform_x_label = QLabel()
-        self.uniform_y_label = QLabel()
-        self.uniform_z_label = QLabel()
-        form.addRow(self.uniform_x_label, self.wx)
-        form.addRow(self.uniform_y_label, self.wy)
-        form.addRow(self.uniform_z_label, self.wz)
+        self.wx_end = _spin(load.wx_end if load else 0.0)
+        self.wy_end = _spin(load.wy_end if load else 0.0)
+        self.wz_end = _spin(load.wz_end if load else 0.0)
+        self.a_over_l = _spin(load.a_over_l if load else 0.0, 0.0, 1.0)
+        self.b_over_l = _spin(load.b_over_l if load else 1.0, 0.0, 1.0)
+        self.start_x_label = QLabel()
+        self.start_y_label = QLabel()
+        self.start_z_label = QLabel()
+        self.end_x_label = QLabel()
+        self.end_y_label = QLabel()
+        self.end_z_label = QLabel()
+        form.addRow(self.start_x_label, self.wx)
+        form.addRow(self.start_y_label, self.wy)
+        form.addRow(self.start_z_label, self.wz)
+        form.addRow(self.end_x_label, self.wx_end)
+        form.addRow(self.end_y_label, self.wy_end)
+        form.addRow(self.end_z_label, self.wz_end)
+        form.addRow("Distributed start a/L:", self.a_over_l)
+        form.addRow("Distributed end b/L:", self.b_over_l)
 
         self.px = _spin(load.px if load else 0.0)
         self.py = _spin(load.py if load else 0.0)
@@ -1008,14 +1022,13 @@ class ElementLoadDialog(QDialog):
             0.0,
             1.0,
         )
-        force_unit = self.unit_system.force
         self.point_x_label = QLabel()
         self.point_y_label = QLabel()
         self.point_z_label = QLabel()
         form.addRow(self.point_x_label, self.px)
         form.addRow(self.point_y_label, self.py)
         form.addRow(self.point_z_label, self.pz)
-        form.addRow("Location x/L along member:", self.x_over_l)
+        form.addRow("Point location x/L:", self.x_over_l)
 
         gravity = load.gravity if load else (0.0, 0.0, -9.81)
         self.gx = _spin(gravity[0])
@@ -1031,9 +1044,7 @@ class ElementLoadDialog(QDialog):
         form.addRow("Gravity GZ [m/s²]:", self.gz)
         form.addRow("Density override [kg/m³]:", self.density)
 
-        self.pressure = _spin(
-            load.pressure if load else 0.0,
-        )
+        self.pressure = _spin(load.pressure if load else 0.0)
         form.addRow(
             f"Surface pressure [{self.unit_system.stress_label}]:",
             self.pressure,
@@ -1041,16 +1052,13 @@ class ElementLoadDialog(QDialog):
 
         root.addLayout(form)
         note = QLabel(
-            "Self Weight: density override = 0 uses the linked material "
-            "density. Density [kg/m³] and gravity [m/s²] are physical SI "
-            "inputs; Studio converts them automatically and generates "
-            f"self-weight in [{self.unit_system.line_load_label}]. "
-            "Uniform and Point loads can be entered in Global XYZ or Local "
-            "member xyz; SARE converts Global components to OpenSees local "
-            "beam-load components during export. Self Weight always uses the "
-            "global gravity vector. Shell Surface Pressure uses the shell node "
-            "ordering: positive acts outward along the element normal, "
-            "negative inward."
+            "Distributed loads use start/end intensity vectors. Triangular "
+            "requires exactly one zero-intensity end; Trapezoidal allows both "
+            "ends to be nonzero. a/L and b/L define the loaded part of the "
+            "member. Uniform, Triangular, Trapezoidal and Point loads can be "
+            "entered in Global XYZ or Local member xyz; SARE converts Global "
+            "components to OpenSees local axes during export. Self Weight "
+            "always uses the global gravity vector."
         )
         note.setWordWrap(True)
         root.addWidget(note)
@@ -1081,34 +1089,51 @@ class ElementLoadDialog(QDialog):
 
     def _sync(self):
         kind = self.kind.currentData()
-        uniform = kind == "Uniform"
+        distributed = kind in {"Uniform", "Triangular", "Trapezoidal"}
+        variable = kind in {"Triangular", "Trapezoidal"}
         point = kind == "Point"
         self_weight = kind == "SelfWeight"
         surface_pressure = kind == "SurfacePressure"
-        directional = uniform or point
-        self.coordinate_system.setEnabled(directional)
+        self.coordinate_system.setEnabled(distributed or point)
 
         coordinate = str(self.coordinate_system.currentData() or "global")
         global_axes = coordinate == "global"
         line_unit = self.unit_system.line_load_label
         force_unit = self.unit_system.force
-        if global_axes:
-            self.uniform_x_label.setText(f"Uniform GX (global X) [{line_unit}]:")
-            self.uniform_y_label.setText(f"Uniform GY (global Y) [{line_unit}]:")
-            self.uniform_z_label.setText(f"Uniform GZ (global Z) [{line_unit}]:")
-            self.point_x_label.setText(f"Point GX (global X) [{force_unit}]:")
-            self.point_y_label.setText(f"Point GY (global Y) [{force_unit}]:")
-            self.point_z_label.setText(f"Point GZ (global Z) [{force_unit}]:")
-        else:
-            self.uniform_x_label.setText(f"Uniform Wx (local x) [{line_unit}]:")
-            self.uniform_y_label.setText(f"Uniform Wy (local y) [{line_unit}]:")
-            self.uniform_z_label.setText(f"Uniform Wz (local z) [{line_unit}]:")
-            self.point_x_label.setText(f"Point Px (local x) [{force_unit}]:")
-            self.point_y_label.setText(f"Point Py (local y) [{force_unit}]:")
-            self.point_z_label.setText(f"Point Pz (local z) [{force_unit}]:")
+        axis_names = ("X", "Y", "Z") if global_axes else ("x", "y", "z")
+        coordinate_name = "global" if global_axes else "local"
+        start_prefix = "Uniform" if kind == "Uniform" else "Start"
+        for label, axis in zip(
+            (self.start_x_label, self.start_y_label, self.start_z_label),
+            axis_names,
+        ):
+            label.setText(
+                f"{start_prefix} {axis} ({coordinate_name}) [{line_unit}]:"
+            )
+        for label, axis in zip(
+            (self.end_x_label, self.end_y_label, self.end_z_label),
+            axis_names,
+        ):
+            label.setText(f"End {axis} ({coordinate_name}) [{line_unit}]:")
+
+        point_names = ("GX", "GY", "GZ") if global_axes else ("Px", "Py", "Pz")
+        point_axes = ("global X", "global Y", "global Z") if global_axes else (
+            "local x", "local y", "local z"
+        )
+        for label, name, axis in zip(
+            (self.point_x_label, self.point_y_label, self.point_z_label),
+            point_names,
+            point_axes,
+        ):
+            label.setText(f"Point {name} ({axis}) [{force_unit}]:")
 
         for widget in (self.wx, self.wy, self.wz):
-            widget.setEnabled(uniform)
+            widget.setEnabled(distributed)
+        for widget in (
+            self.wx_end, self.wy_end, self.wz_end,
+            self.a_over_l, self.b_over_l,
+        ):
+            widget.setEnabled(variable)
         for widget in (self.px, self.py, self.pz, self.x_over_l):
             widget.setEnabled(point)
         for widget in (self.gx, self.gy, self.gz, self.density):
@@ -1132,16 +1157,17 @@ class ElementLoadDialog(QDialog):
             py=self.py.value(),
             pz=self.pz.value(),
             x_over_l=self.x_over_l.value(),
-            gravity=(
-                self.gx.value(),
-                self.gy.value(),
-                self.gz.value(),
-            ),
+            gravity=(self.gx.value(), self.gy.value(), self.gz.value()),
             density_override=self.density.value(),
             pressure=self.pressure.value(),
             coordinate_system=str(
                 self.coordinate_system.currentData() or "global"
             ),
+            wx_end=self.wx_end.value(),
+            wy_end=self.wy_end.value(),
+            wz_end=self.wz_end.value(),
+            a_over_l=self.a_over_l.value(),
+            b_over_l=self.b_over_l.value(),
         )
 
     def _accept(self):
@@ -1155,3 +1181,4 @@ class ElementLoadDialog(QDialog):
             )
             return
         self.accept()
+

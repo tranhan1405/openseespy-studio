@@ -2639,7 +2639,7 @@ class MainWindow(QMainWindow):
             "ribbonText",
             "Prescr. Disp.",
         )
-        self._make_action("beam_load", "Beam Load...", "model-beam-load", self._create_element_load, "Create uniform, point, or self-weight beam load")
+        self._make_action("beam_load", "Beam Load...", "model-beam-load", self._create_element_load, "Create uniform, triangular, trapezoidal, point, or self-weight beam load")
         self._make_action(
             "shell_pressure",
             "Shell Pressure...",
@@ -13638,7 +13638,9 @@ class MainWindow(QMainWindow):
             next_tag=self.project.next_element_load_tag(),
             element_tag=selected[0],
             units=self.project.units,
-            allowed_load_types={"Uniform", "Point", "SelfWeight"},
+            allowed_load_types={
+                "Uniform", "Triangular", "Trapezoidal", "Point", "SelfWeight"
+            },
             new_pattern_callback=self._create_plain_pattern_dependency,
             parent=self,
         )
@@ -13674,6 +13676,11 @@ class MainWindow(QMainWindow):
                     density_override=template.density_override,
                     pressure=template.pressure,
                     coordinate_system=template.coordinate_system,
+                    wx_end=template.wx_end,
+                    wy_end=template.wy_end,
+                    wz_end=template.wz_end,
+                    a_over_l=template.a_over_l,
+                    b_over_l=template.b_over_l,
                 )
                 self.project.add_element_load(load)
                 created.append(load.tag)
@@ -13801,19 +13808,34 @@ class MainWindow(QMainWindow):
             ("Element", load.element_tag),
             ("Type", load.load_type),
         ]
-        if load.load_type == "Uniform":
+        if load.load_type in {"Uniform", "Triangular", "Trapezoidal"}:
             coordinate = (
                 "Global XYZ"
                 if load.coordinate_system == "global"
                 else "Local xyz"
             )
-            axis_prefix = "Global" if load.coordinate_system == "global" else "Local"
+            axis_prefix = (
+                "Global" if load.coordinate_system == "global" else "Local"
+            )
+            start_prefix = (
+                axis_prefix
+                if load.load_type == "Uniform"
+                else f"Start {axis_prefix}"
+            )
             rows.extend([
                 ("Coordinate System", coordinate),
-                (f"{axis_prefix} X", f"{load.wx:g}"),
-                (f"{axis_prefix} Y", f"{load.wy:g}"),
-                (f"{axis_prefix} Z", f"{load.wz:g}"),
+                (f"{start_prefix} X", f"{load.wx:g}"),
+                (f"{start_prefix} Y", f"{load.wy:g}"),
+                (f"{start_prefix} Z", f"{load.wz:g}"),
             ])
+            if load.load_type in {"Triangular", "Trapezoidal"}:
+                rows.extend([
+                    (f"End {axis_prefix} X", f"{load.wx_end:g}"),
+                    (f"End {axis_prefix} Y", f"{load.wy_end:g}"),
+                    (f"End {axis_prefix} Z", f"{load.wz_end:g}"),
+                    ("Start a/L", f"{load.a_over_l:g}"),
+                    ("End b/L", f"{load.b_over_l:g}"),
+                ])
         elif load.load_type == "Point":
             coordinate = (
                 "Global XYZ"

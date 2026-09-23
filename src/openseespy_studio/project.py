@@ -1964,6 +1964,11 @@ class ElementLoadData:
     density_override: float = 0.0
     pressure: float = 0.0
     coordinate_system: str = "local"
+    wx_end: float = 0.0
+    wy_end: float = 0.0
+    wz_end: float = 0.0
+    a_over_l: float = 0.0
+    b_over_l: float = 1.0
 
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Element load tag")
@@ -1990,6 +1995,11 @@ class ElementLoadData:
         self.coordinate_system = str(
             self.coordinate_system or "local"
         ).strip().lower()
+        self.wx_end = float(self.wx_end)
+        self.wy_end = float(self.wy_end)
+        self.wz_end = float(self.wz_end)
+        self.a_over_l = float(self.a_over_l)
+        self.b_over_l = float(self.b_over_l)
 
         if self.tag <= 0:
             raise ValueError("Element load tag must be positive.")
@@ -1998,7 +2008,8 @@ class ElementLoadData:
                 "Element load needs valid pattern and element tags."
             )
         if self.load_type not in {
-            "Uniform", "Point", "SelfWeight", "SurfacePressure"
+            "Uniform", "Triangular", "Trapezoidal", "Point",
+            "SelfWeight", "SurfacePressure"
         }:
             raise ValueError(
                 f"Unsupported element load type: {self.load_type}"
@@ -2019,6 +2030,11 @@ class ElementLoadData:
             self.x_over_l,
             self.density_override,
             self.pressure,
+            self.wx_end,
+            self.wy_end,
+            self.wz_end,
+            self.a_over_l,
+            self.b_over_l,
             *self.gravity,
         )
         if any(not math.isfinite(value) for value in numeric_values):
@@ -2027,6 +2043,27 @@ class ElementLoadData:
             raise ValueError("Density override cannot be negative.")
         if self.load_type == "Point" and not 0.0 <= self.x_over_l <= 1.0:
             raise ValueError("Point-load x/L must be between 0 and 1.")
+        if self.load_type in {"Triangular", "Trapezoidal"}:
+            if not 0.0 <= self.a_over_l < self.b_over_l <= 1.0:
+                raise ValueError(
+                    "Distributed-load limits must satisfy "
+                    "0 <= a/L < b/L <= 1."
+                )
+        if self.load_type == "Triangular":
+            tolerance = 1.0e-12
+            start_zero = all(
+                abs(value) <= tolerance
+                for value in (self.wx, self.wy, self.wz)
+            )
+            end_zero = all(
+                abs(value) <= tolerance
+                for value in (self.wx_end, self.wy_end, self.wz_end)
+            )
+            if start_zero == end_zero:
+                raise ValueError(
+                    "Triangular beam load requires exactly one zero-intensity "
+                    "end; use Trapezoidal when both ends are nonzero."
+                )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2046,6 +2083,11 @@ class ElementLoadData:
             "density_override": self.density_override,
             "pressure": self.pressure,
             "coordinate_system": self.coordinate_system,
+            "wx_end": self.wx_end,
+            "wy_end": self.wy_end,
+            "wz_end": self.wz_end,
+            "a_over_l": self.a_over_l,
+            "b_over_l": self.b_over_l,
         }
 
     @classmethod
@@ -2073,6 +2115,11 @@ class ElementLoadData:
             pressure=float(data.get("pressure", 0.0)),
             # Existing projects stored beam components in local axes.
             coordinate_system=str(data.get("coordinate_system", "local")),
+            wx_end=float(data.get("wx_end", 0.0)),
+            wy_end=float(data.get("wy_end", 0.0)),
+            wz_end=float(data.get("wz_end", 0.0)),
+            a_over_l=float(data.get("a_over_l", 0.0)),
+            b_over_l=float(data.get("b_over_l", 1.0)),
         )
 
 

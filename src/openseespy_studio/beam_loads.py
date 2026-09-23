@@ -72,21 +72,12 @@ def global_vector_to_local(
     return tuple(_dot(vector, axis) for axis in axes)
 
 
-def resolve_element_load_local_components(
+def _resolve_beam_vector_local(
     load: ElementLoadData,
+    values: Vec3,
     model: StructuralModel,
     transformations: dict[int, TransformationData],
 ) -> Vec3:
-    """Return Uniform/Point beam-load components in OpenSees local axes."""
-    if load.load_type == "Uniform":
-        values = (load.wx, load.wy, load.wz)
-    elif load.load_type == "Point":
-        values = (load.px, load.py, load.pz)
-    else:
-        raise ValueError(
-            "Only Uniform and Point beam loads use selectable coordinates."
-        )
-
     values = tuple(float(value) for value in values)
     if load.coordinate_system == "local":
         return values
@@ -110,6 +101,41 @@ def resolve_element_load_local_components(
         )
     axes = element_local_axes(model, element, transformation)
     return global_vector_to_local(values, axes)
+
+
+def resolve_element_load_local_components(
+    load: ElementLoadData,
+    model: StructuralModel,
+    transformations: dict[int, TransformationData],
+) -> Vec3:
+    """Return the start/constant beam-load vector in OpenSees local axes."""
+    if load.load_type in {"Uniform", "Triangular", "Trapezoidal"}:
+        values = (load.wx, load.wy, load.wz)
+    elif load.load_type == "Point":
+        values = (load.px, load.py, load.pz)
+    else:
+        raise ValueError(
+            "Only distributed and Point beam loads use selectable coordinates."
+        )
+    return _resolve_beam_vector_local(load, values, model, transformations)
+
+
+def resolve_element_load_local_end_components(
+    load: ElementLoadData,
+    model: StructuralModel,
+    transformations: dict[int, TransformationData],
+) -> Vec3:
+    """Return the end vector for a linearly varying beam load."""
+    if load.load_type not in {"Triangular", "Trapezoidal"}:
+        raise ValueError(
+            "Only Triangular and Trapezoidal loads have an end intensity."
+        )
+    return _resolve_beam_vector_local(
+        load,
+        (load.wx_end, load.wy_end, load.wz_end),
+        model,
+        transformations,
+    )
 
 
 def resolve_self_weight_local(

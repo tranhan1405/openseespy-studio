@@ -5410,6 +5410,8 @@ class ModelViewport(QWidget):
     def _element_load_global_vector(
         self,
         load: ElementLoadData,
+        *,
+        end: bool = False,
     ) -> tuple[np.ndarray, str] | None:
         if self._model is None:
             return None
@@ -5420,8 +5422,12 @@ class ModelViewport(QWidget):
         if transformation is None:
             return None
         try:
-            if load.load_type == "Uniform":
-                values = (load.wx, load.wy, load.wz)
+            if load.load_type in {"Uniform", "Triangular", "Trapezoidal"}:
+                values = (
+                    (load.wx_end, load.wy_end, load.wz_end)
+                    if end and load.load_type in {"Triangular", "Trapezoidal"}
+                    else (load.wx, load.wy, load.wz)
+                )
                 prefix = "w"
             elif load.load_type == "Point":
                 values = (load.px, load.py, load.pz)
@@ -5724,12 +5730,14 @@ class ModelViewport(QWidget):
         visible_elements = self._visible_element_tags()
         entries = []
         max_magnitude = 0.0
+        variable_types = {"Triangular", "Trapezoidal"}
         for load in self._element_loads.values():
             if load.element_tag not in visible_elements:
                 continue
             element = self._model.elements.get(load.element_tag)
             if element is None:
                 continue
+            end_vector = None
             if load.load_type == "SurfacePressure":
                 try:
                     _center, shell_normal, _area = shell_surface_geometry(
@@ -5744,6 +5752,17 @@ class ModelViewport(QWidget):
                 )
                 prefix = "P_normal"
                 magnitude = abs(float(load.pressure))
+            elif load.load_type in variable_types:
+                resolved = self._element_load_global_vector(load)
+                resolved_end = self._element_load_global_vector(load, end=True)
+                if resolved is None or resolved_end is None:
+                    continue
+                vector, prefix = resolved
+                end_vector, _ = resolved_end
+                magnitude = max(
+                    self._vector_norm(vector),
+                    self._vector_norm(end_vector),
+                )
             else:
                 resolved = self._element_load_global_vector(load)
                 if resolved is None:
@@ -5751,7 +5770,9 @@ class ModelViewport(QWidget):
                 vector, prefix = resolved
                 magnitude = self._vector_norm(vector)
             max_magnitude = max(max_magnitude, magnitude)
-            entries.append((load, element, vector, prefix, magnitude))
+            entries.append(
+                (load, element, vector, end_vector, prefix, magnitude)
+            )
 
         if not entries:
             return
@@ -5766,7 +5787,7 @@ class ModelViewport(QWidget):
             f"{force_unit}/{self._units.get('length', '')}"
         )
 
-        for load, element, vector, prefix, magnitude in entries:
+        for load, element, vector, end_vector, prefix, magnitude in entries:
             ratio = (
                 magnitude / max_magnitude
                 if max_magnitude > 1.0e-15
@@ -5819,7 +5840,38 @@ class ModelViewport(QWidget):
                 p_j = np.asarray(node_j.xyz, dtype=float)
                 member = p_j - p_i
 
-            if load.load_type in {"Uniform", "SelfWeight"}:
+            if load.load_type in variable_types:
+                a = min(max(float(load.a_over_l), 0.0), 1.0)
+                b = min(max(float(load.b_over_l), a), 1.0)
+                positions = np.linspace(a, b, 6)
+                for position in positions:
+                    fraction = (
+                        (float(position) - a) / (b - a)
+                        if b - a > 1.0e-15
+                        else 0.0
+                    )
+                    current = (
+                        (1.0 - fraction) * np.asarray(vector, dtype=float)
+                        + fraction * np.asarray(end_vector, dtype=float)
+                    )
+                    current_magnitude = self._vector_norm(current)
+                    if current_magnitude <= 1.0e-15:
+                        continue
+                    current_length = base_length * (
+                        current_magnitude / max_magnitude
+                        if max_magnitude > 1.0e-15
+                        else 1.0
+                    )
+                    arrow = self._arrow_record(
+                        p_i + float(position) * member,
+                        current,
+                        length=max(current_length, base_length * 0.08),
+                    )
+                    if arrow is not None:
+                        arrows.append(arrow)
+                label_point = p_i + 0.5 * (a + b) * member
+                unit = line_unit
+            elif load.load_type in {"Uniform", "SelfWeight"}:
                 positions = (0.18, 0.39, 0.61, 0.82)
                 for position in positions:
                     point = p_i + float(position) * member
@@ -5851,10 +5903,27 @@ class ModelViewport(QWidget):
                 if load.load_type == "Point"
                 else None
             )
-            title = (
-                f"Elem {load.element_tag} · {load.load_type}"
-            )
-            if input_vector is not None:
+            title = f"Elem {load.element_tag} · {load.load_type}"
+            if load.load_type in variable_types:
+                coordinate_label = (
+                    "global" if load.coordinate_system == "global" else "local"
+                )
+                title += (
+                    "\n"
+                    + self._format_vector(
+                        f"w_start_{coordinate_label}",
+                        (load.wx, load.wy, load.wz),
+                        unit,
+                    )
+                    + "\n"
+                    + self._format_vector(
+                        f"w_end_{coordinate_label}",
+                        (load.wx_end, load.wy_end, load.wz_end),
+                        unit,
+                    )
+                    + f"\na/L={load.a_over_l:g} · b/L={load.b_over_l:g}"
+                )
+            elif input_vector is not None:
                 coordinate_label = (
                     "global"
                     if load.coordinate_system == "global"
@@ -5891,7 +5960,7 @@ class ModelViewport(QWidget):
                 label_points,
                 labels,
                 name="display-element-load-labels",
-                text_color="#9b164a",
+                text_color="#8b1042",
                 font_size=10,
                 always_visible=True,
             )

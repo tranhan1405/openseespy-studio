@@ -1137,6 +1137,11 @@ def _element_load_has_nonzero_reference(load) -> bool:
     tolerance = 1.0e-15
     if load.load_type == "Uniform":
         values = (load.wx, load.wy, load.wz)
+    elif load.load_type in {"Triangular", "Trapezoidal"}:
+        values = (
+            load.wx, load.wy, load.wz,
+            load.wx_end, load.wy_end, load.wz_end,
+        )
     elif load.load_type == "Point":
         values = (load.px, load.py, load.pz)
     elif load.load_type == "SelfWeight":

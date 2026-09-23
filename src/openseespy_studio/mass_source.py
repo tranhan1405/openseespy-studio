@@ -3,7 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
-from .beam_loads import element_local_axes, resolve_self_weight_local
+from .beam_loads import (
+    element_local_axes,
+    resolve_element_load_local_components,
+    resolve_element_load_local_end_components,
+    resolve_self_weight_local,
+)
 from .project import MassSourceData, ProjectDatabase, SectionData
 from .units import UnitSystem
 
@@ -336,15 +341,67 @@ def evaluate_mass_source(
                 continue
 
             if load.load_type == "Uniform":
+                local_vector = resolve_element_load_local_components(
+                    load,
+                    project.model,
+                    project.transformations,
+                )
                 global_vector = _local_vector_to_global(
                     project,
                     element.tag,
-                    (load.wx, load.wy, load.wz),
+                    local_vector,
                 )
                 line_force = abs(global_vector[axis - 1]) * multiplier
                 total_mass = line_force * _length(project, element.tag) / g_model
                 add_node(element.i, 0.5 * total_mass, category="load")
                 add_node(element.j, 0.5 * total_mass, category="load")
+                continue
+
+            if load.load_type in {"Triangular", "Trapezoidal"}:
+                start_local = resolve_element_load_local_components(
+                    load,
+                    project.model,
+                    project.transformations,
+                )
+                end_local = resolve_element_load_local_end_components(
+                    load,
+                    project.model,
+                    project.transformations,
+                )
+                start_global = _local_vector_to_global(
+                    project,
+                    element.tag,
+                    start_local,
+                )
+                end_global = _local_vector_to_global(
+                    project,
+                    element.tag,
+                    end_local,
+                )
+                qa = abs(start_global[axis - 1]) * multiplier
+                qb = abs(end_global[axis - 1]) * multiplier
+                a = min(max(float(load.a_over_l), 0.0), 1.0)
+                b = min(max(float(load.b_over_l), a), 1.0)
+                span_ratio = b - a
+                member_length = _length(project, element.tag)
+                force = 0.5 * (qa + qb) * span_ratio * member_length
+                total_mass = force / g_model
+                if qa + qb > 1.0e-15 and span_ratio > 0.0:
+                    centroid = a + span_ratio * (
+                        qa + 2.0 * qb
+                    ) / (3.0 * (qa + qb))
+                else:
+                    centroid = 0.5 * (a + b)
+                add_node(
+                    element.i,
+                    (1.0 - centroid) * total_mass,
+                    category="load",
+                )
+                add_node(
+                    element.j,
+                    centroid * total_mass,
+                    category="load",
+                )
                 continue
 
             if load.load_type == "SurfacePressure":
@@ -366,10 +423,15 @@ def evaluate_mass_source(
                 continue
 
             if load.load_type == "Point":
+                local_vector = resolve_element_load_local_components(
+                    load,
+                    project.model,
+                    project.transformations,
+                )
                 global_vector = _local_vector_to_global(
                     project,
                     element.tag,
-                    (load.px, load.py, load.pz),
+                    local_vector,
                 )
                 force = abs(global_vector[axis - 1]) * multiplier
                 total_mass = force / g_model

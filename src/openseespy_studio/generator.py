@@ -5,6 +5,7 @@ import math
 
 from .beam_loads import (
     resolve_element_load_local_components,
+    resolve_element_load_local_end_components,
     resolve_self_weight_local,
 )
 from .units import UnitSystem
@@ -819,17 +820,42 @@ def element_load_to_openseespy(
     transformations: dict[int, TransformationData] | None = None,
     units: dict[str, str] | None = None,
 ) -> str:
+    transformations = transformations or {}
     if load.load_type == "Uniform":
         wx, wy, wz = resolve_element_load_local_components(
             load,
             model,
-            transformations or {},
+            transformations,
+        )
+    elif load.load_type in {"Triangular", "Trapezoidal"}:
+        wxa, wya, wza = resolve_element_load_local_components(
+            load,
+            model,
+            transformations,
+        )
+        wxb, wyb, wzb = resolve_element_load_local_end_components(
+            load,
+            model,
+            transformations,
+        )
+        if int(model.ndm) == 2:
+            return (
+                "ops.eleLoad('-ele', "
+                f"{load.element_tag}, '-type', '-beamUniform', "
+                f"{wya:g}, {wxa:g}, {load.a_over_l:g}, "
+                f"{load.b_over_l:g}, {wyb:g}, {wxb:g})"
+            )
+        return (
+            "ops.eleLoad('-ele', "
+            f"{load.element_tag}, '-type', '-beamUniform', "
+            f"{wya:g}, {wza:g}, {wxa:g}, {load.a_over_l:g}, "
+            f"{load.b_over_l:g}, {wyb:g}, {wzb:g}, {wxb:g})"
         )
     elif load.load_type == "Point":
         px, py, pz = resolve_element_load_local_components(
             load,
             model,
-            transformations or {},
+            transformations,
         )
         return (
             "ops.eleLoad('-ele', "
@@ -842,7 +868,7 @@ def element_load_to_openseespy(
             model,
             sections or {},
             materials or {},
-            transformations or {},
+            transformations,
             units,
         )
     else:
