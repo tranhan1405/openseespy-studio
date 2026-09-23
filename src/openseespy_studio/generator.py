@@ -4620,7 +4620,10 @@ def to_openseespy(
                 "ops.wipeAnalysis()",
             ])
 
-        if deferred_pattern_tags:
+        if (
+            deferred_pattern_tags
+            and active.analysis_type != "Response Spectrum"
+        ):
             lines.extend(["", "# Template driving / excitation patterns"])
             for deferred_tag in sorted(deferred_pattern_tags):
                 pattern = (load_patterns or {}).get(deferred_tag)
