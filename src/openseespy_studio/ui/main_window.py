@@ -5265,6 +5265,9 @@ class MainWindow(QMainWindow):
         transformation_tag: int | None = None
         constraint_tag: int | None = None
         connection_tag: int | None = None
+        element_type_group: str | None = None
+        boundary_group: str | None = None
+        connection_group: str | None = None
         time_series_tag: int | None = None
         load_pattern_tag: int | None = None
         ground_motion_tag: int | None = None
@@ -5275,6 +5278,7 @@ class MainWindow(QMainWindow):
         analysis_tag: int | None = None
         cyclic_protocol_tag: int | None = None
         recorder_tag: int | None = None
+        solution_root_tag: int | None = None
         solution_result_tag: int | None = None
         solution_information_tag: int | None = None
         solver_output_tag: int | None = None
@@ -5324,6 +5328,12 @@ class MainWindow(QMainWindow):
                 constraint_tag = int(tag)
             elif kind == "connection":
                 connection_tag = int(tag)
+            elif kind == "element_type_group":
+                element_type_group = str(tag)
+            elif kind == "boundary_group":
+                boundary_group = str(tag)
+            elif kind == "connection_group":
+                connection_group = str(tag)
             elif kind == "time_series":
                 time_series_tag = int(tag)
             elif kind == "load_pattern":
@@ -5346,6 +5356,8 @@ class MainWindow(QMainWindow):
                 cyclic_protocol_tag = int(tag)
             elif kind == "recorder":
                 recorder_tag = int(tag)
+            elif kind == "solution_root":
+                solution_root_tag = int(tag)
             elif kind == "solution_result":
                 solution_result_tag = int(tag)
             elif kind == "solution_information":
@@ -5476,6 +5488,14 @@ class MainWindow(QMainWindow):
             self._show_analysis_properties(analysis_tag)
         elif recorder_tag is not None:
             self._show_recorder_properties(recorder_tag)
+        elif element_type_group is not None:
+            self._show_element_type_group_properties(element_type_group)
+        elif boundary_group is not None:
+            self._show_boundary_group_properties(boundary_group)
+        elif connection_group is not None:
+            self._show_connection_group_properties(connection_group)
+        elif solution_root_tag is not None:
+            self._show_solution_root_properties(solution_root_tag)
         elif solution_result_tag is not None:
             self._show_solution_result_properties(solution_result_tag)
         elif solution_convergence_tag is not None:
