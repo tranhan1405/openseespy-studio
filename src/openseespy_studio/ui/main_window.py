@@ -1185,6 +1185,44 @@ class PropertiesPanel(QWidget):
         self.result_fiber_section = QSpinBox()
         self.result_fiber_section.setRange(1, 100000)
 
+        self.result_contour_range = QComboBox()
+        self.result_contour_range.addItem("Auto", "auto")
+        self.result_contour_range.addItem("User Defined", "user")
+        self.result_contour_min = QDoubleSpinBox()
+        self.result_contour_min.setRange(-1.0e30, 1.0e30)
+        self.result_contour_min.setDecimals(8)
+        self.result_contour_max = QDoubleSpinBox()
+        self.result_contour_max.setRange(-1.0e30, 1.0e30)
+        self.result_contour_max.setDecimals(8)
+        self.result_contour_symmetric = QCheckBox("Symmetric about zero")
+        self.result_contour_bands = QSpinBox()
+        self.result_contour_bands.setRange(3, 64)
+        self.result_contour_bands.setValue(11)
+        self.result_contour_palette = QComboBox()
+        self.result_contour_palette.addItem("Auto", "auto")
+        self.result_contour_palette.addItem("Sequential", "sequential")
+        self.result_contour_palette.addItem("Diverging", "diverging")
+        self.result_contour_show_min = QCheckBox("Show minimum")
+        self.result_contour_show_min.setChecked(True)
+        self.result_contour_show_max = QCheckBox("Show maximum")
+        self.result_contour_show_max.setChecked(True)
+        self.result_contour_deformed = QCheckBox(
+            "Contour on deformed geometry"
+        )
+        self.result_contour_deformation_scale = QDoubleSpinBox()
+        self.result_contour_deformation_scale.setRange(0.0, 1.0e9)
+        self.result_contour_deformation_scale.setDecimals(5)
+        self.result_contour_deformation_scale.setValue(1.0)
+        self.result_contour_range.currentIndexChanged.connect(
+            self._update_contour_editor_state
+        )
+        self.result_component.currentTextChanged.connect(
+            self._update_contour_editor_state
+        )
+        self.result_contour_deformed.toggled.connect(
+            self._update_contour_editor_state
+        )
+
         rows = (
             ("Name", self.result_name),
             ("Analysis", self.result_analysis),
@@ -1205,6 +1243,16 @@ class PropertiesPanel(QWidget):
             ("History Quantity", self.result_history_quantity),
             ("History DOF", self.result_history_dof),
             ("Section / IP", self.result_fiber_section),
+            ("Contour Range", self.result_contour_range),
+            ("Contour Min", self.result_contour_min),
+            ("Contour Max", self.result_contour_max),
+            ("Symmetric", self.result_contour_symmetric),
+            ("Contour Bands", self.result_contour_bands),
+            ("Palette", self.result_contour_palette),
+            ("Minimum Marker", self.result_contour_show_min),
+            ("Maximum Marker", self.result_contour_show_max),
+            ("Deformed Geometry", self.result_contour_deformed),
+            ("Deformation Scale", self.result_contour_deformation_scale),
         )
         for label, widget in rows:
             self.result_form.addRow(label + ":", widget)
@@ -1246,6 +1294,30 @@ class PropertiesPanel(QWidget):
             self.result_history_quantity,
             self.result_history_dof,
             self.result_fiber_section,
+            self.result_contour_range,
+            self.result_contour_min,
+            self.result_contour_max,
+            self.result_contour_symmetric,
+            self.result_contour_bands,
+            self.result_contour_palette,
+            self.result_contour_show_min,
+            self.result_contour_show_max,
+            self.result_contour_deformed,
+            self.result_contour_deformation_scale,
+        )
+
+    def _update_contour_editor_state(self, *_args) -> None:
+        user_range = (
+            str(self.result_contour_range.currentData() or "auto") == "user"
+        )
+        self.result_contour_min.setEnabled(user_range)
+        self.result_contour_max.setEnabled(user_range)
+        magnitude = self.result_component.currentText().startswith("|")
+        self.result_contour_symmetric.setEnabled(not magnitude)
+        if magnitude:
+            self.result_contour_symmetric.setChecked(False)
+        self.result_contour_deformation_scale.setEnabled(
+            self.result_contour_deformed.isChecked()
         )
 
     def _set_form_row_visible(self, widget: QWidget, visible: bool) -> None:
@@ -1589,6 +1661,71 @@ class PropertiesPanel(QWidget):
                 max(1, int(options.get("section", 1)))
             )
 
+        if kind in {
+            "NodalDisplacement",
+            "NodalReaction",
+            "ShellForce",
+            "ShellDeformation",
+        }:
+            for widget in (
+                self.result_contour_range,
+                self.result_contour_min,
+                self.result_contour_max,
+                self.result_contour_symmetric,
+                self.result_contour_bands,
+                self.result_contour_palette,
+                self.result_contour_show_min,
+                self.result_contour_show_max,
+                self.result_contour_deformed,
+                self.result_contour_deformation_scale,
+            ):
+                self._set_form_row_visible(widget, True)
+
+            index = self.result_contour_range.findData(
+                str(options.get("contour_range_mode", "auto"))
+            )
+            self.result_contour_range.setCurrentIndex(
+                index if index >= 0 else 0
+            )
+            self.result_contour_min.setValue(
+                float(options.get("contour_min", 0.0) or 0.0)
+            )
+            self.result_contour_max.setValue(
+                float(options.get("contour_max", 1.0) or 1.0)
+            )
+            signed = not self.result_component.currentText().startswith("|")
+            self.result_contour_symmetric.setChecked(
+                signed and bool(options.get("contour_symmetric", True))
+            )
+            self.result_contour_bands.setValue(
+                max(3, min(64, int(options.get("contour_bands", 11))))
+            )
+            index = self.result_contour_palette.findData(
+                str(options.get("contour_palette", "auto"))
+            )
+            self.result_contour_palette.setCurrentIndex(
+                index if index >= 0 else 0
+            )
+            self.result_contour_show_min.setChecked(
+                bool(options.get("contour_show_min", True))
+            )
+            self.result_contour_show_max.setChecked(
+                bool(options.get("contour_show_max", True))
+            )
+            self.result_contour_deformed.setChecked(
+                bool(options.get("contour_deformed_geometry", False))
+            )
+            try:
+                deformation_scale = float(
+                    options.get("contour_deformation_scale", 1.0)
+                )
+            except (TypeError, ValueError):
+                deformation_scale = 1.0
+            self.result_contour_deformation_scale.setValue(
+                max(0.0, deformation_scale)
+            )
+            self._update_contour_editor_state()
+
     def set_solution_scope(
         self,
         nodes: set[int],
@@ -1651,6 +1788,32 @@ class PropertiesPanel(QWidget):
             )
         if kind == "SectionResponse":
             settings["section"] = self.result_fiber_section.value()
+        if kind in {
+            "NodalDisplacement",
+            "NodalReaction",
+            "ShellForce",
+            "ShellDeformation",
+        }:
+            settings.update({
+                "contour_range_mode": str(
+                    self.result_contour_range.currentData() or "auto"
+                ),
+                "contour_min": self.result_contour_min.value(),
+                "contour_max": self.result_contour_max.value(),
+                "contour_symmetric": self.result_contour_symmetric.isChecked(),
+                "contour_bands": self.result_contour_bands.value(),
+                "contour_palette": str(
+                    self.result_contour_palette.currentData() or "auto"
+                ),
+                "contour_show_min": self.result_contour_show_min.isChecked(),
+                "contour_show_max": self.result_contour_show_max.isChecked(),
+                "contour_deformed_geometry": (
+                    self.result_contour_deformed.isChecked()
+                ),
+                "contour_deformation_scale": (
+                    self.result_contour_deformation_scale.value()
+                ),
+            })
 
         return {
             "name": self.result_name.text().strip(),
@@ -22987,6 +23150,7 @@ class MainWindow(QMainWindow):
                 node_tags=nodes or None,
                 element_tags=elements or None,
                 cache_key=result_cache_key,
+                contour_options=options,
             )
         elif result_type in {"NodalDisplacement", "NodalReaction"}:
             quantity = (
@@ -23023,6 +23187,7 @@ class MainWindow(QMainWindow):
                 str(options.get("component", "Nxx")),
                 element_tags=elements or None,
                 cache_key=result_cache_key,
+                contour_options=options,
             )
         elif result_type == "ShellDeformation":
             self.viewport.show_shell_deformation_contour(
@@ -23030,6 +23195,7 @@ class MainWindow(QMainWindow):
                 str(options.get("component", "Exx")),
                 element_tags=elements or None,
                 cache_key=result_cache_key,
+                contour_options=options,
             )
         elif result_type == "HingeState":
             self.viewport.show_hinge_states(
