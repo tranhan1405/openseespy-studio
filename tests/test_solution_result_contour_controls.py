@@ -87,3 +87,18 @@ def test_result_renderer_routes_contour_options_to_viewport():
     assert source.count("contour_options=options") >= 3
     assert "show_shell_force_contour" in source
     assert "show_shell_deformation_contour" in source
+
+    deformed_block = source.split(
+        'if result_type == "DeformedShape":',
+        1,
+    )[1].split(
+        'elif result_type in {"NodalDisplacement", "NodalReaction"}:',
+        1,
+    )[0]
+    nodal_block = source.split(
+        'elif result_type in {"NodalDisplacement", "NodalReaction"}:',
+        1,
+    )[1].split('elif result_type == "MemberForce":', 1)[0]
+
+    assert "contour_options=options" not in deformed_block
+    assert "contour_options=options" in nodal_block
