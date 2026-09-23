@@ -3978,6 +3978,13 @@ class MainWindow(QMainWindow):
         if ribbon_tab is not None:
             self._set_ribbon_tab(ribbon_tab)
 
+    @staticmethod
+    def _tree_selection_resets_result_overlay(
+        kinds: set[str],
+    ) -> bool:
+        """Return whether this tree selection should restore the base model."""
+        return kinds == {"model_root"}
+
     def _build_status_bar(self) -> None:
         self.status_message = QLabel("Ready")
         self.status_units = QLabel("Units: m, kN, s · mass t")
@@ -5408,6 +5415,14 @@ class MainWindow(QMainWindow):
 
         self._sync_ribbon_context(selected_payload_kinds)
 
+        # Mechanical-style root behavior: selecting the overall Model leaves
+        # user visibility (hide/isolate) untouched, but exits any result
+        # visualization so the viewport represents the base FE model again.
+        if self._tree_selection_resets_result_overlay(
+            selected_payload_kinds
+        ):
+            self._clear_result_display()
+
         if (
             solution_result_tag is None
             and "solution_root" not in selected_payload_kinds
@@ -5564,6 +5579,10 @@ class MainWindow(QMainWindow):
             }
             if root_kind in root_summary_kinds:
                 self._show_tree_root_properties(root_kind)
+                if root_kind == "model_root":
+                    self.status_message.setText(
+                        "Model overview · base FE display"
+                    )
 
     def _wire_selection(self) -> None:
         self.selection.changed.connect(self._selection_changed)
