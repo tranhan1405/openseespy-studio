@@ -2247,6 +2247,15 @@ class MainWindow(QMainWindow):
             checkable=True,
         )
         self._make_action(
+            "origin_axes",
+            "Origin OXYZ",
+            "iso",
+            self._toggle_origin_axes,
+            "Show or hide the global world-space origin triad at (0, 0, 0)",
+            checkable=True,
+        )
+        self.actions["origin_axes"].setChecked(True)
+        self._make_action(
             "surface_mesh_overlay",
             "Shell Mesh Overlay",
             "grid",
@@ -3261,6 +3270,7 @@ class MainWindow(QMainWindow):
             small=(
                 "geometry_snap",
                 "geometry_grid",
+                "origin_axes",
             ),
         )
         add_group(
@@ -5975,6 +5985,13 @@ class MainWindow(QMainWindow):
         self.viewport.set_geometry_sketch_grid_visible(bool(checked))
         self.status_message.setText(
             "Geometry sketch grid " + ("shown" if checked else "hidden")
+        )
+
+    def _toggle_origin_axes(self, checked: bool) -> None:
+        self.viewport.set_origin_axes_visible(bool(checked))
+        self.status_message.setText(
+            "Global origin OXYZ "
+            + ("shown at (0, 0, 0)" if checked else "hidden")
         )
 
     def _leave_geometry_trim_mode(self) -> None:
@@ -21180,6 +21197,7 @@ class MainWindow(QMainWindow):
             menu.addAction(self.actions["check_model"])
             menu.addAction(self.actions["run"])
             menu.addSeparator()
+            menu.addAction(self.actions["origin_axes"])
             show_all = menu.addAction("Show All")
             show_all.triggered.connect(self._show_all)
             exec_menu()
@@ -21204,6 +21222,8 @@ class MainWindow(QMainWindow):
             )
             surface_action = menu.addAction("New Surface by Input...")
             surface_action.triggered.connect(self._create_surface_geometry)
+            menu.addSeparator()
+            menu.addAction(self.actions["origin_axes"])
             menu.addSeparator()
             quick_column = menu.addAction("Generate 1D Test Specimen...")
             quick_column.triggered.connect(self._show_test_column_wizard)
