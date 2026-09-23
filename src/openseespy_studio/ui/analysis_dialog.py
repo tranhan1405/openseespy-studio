@@ -234,6 +234,22 @@ class AnalysisDialog(QDialog):
             0.0,
             0.999999,
         )
+        self.damping_model=QComboBox()
+        self.damping_model.addItem("Two-mode mass + stiffness", "TwoMode")
+        self.damping_model.addItem(
+            "Single-mode committed stiffness",
+            "SingleModeCommittedStiffness",
+        )
+        damping_model = analysis.rayleigh_model if analysis else "TwoMode"
+        damping_model_index = self.damping_model.findData(damping_model)
+        self.damping_model.setCurrentIndex(
+            damping_model_index if damping_model_index >= 0 else 0
+        )
+        self.damping_model.setToolTip(
+            "Two-mode uses mass + current-stiffness Rayleigh damping. "
+            "Single-mode committed stiffness reproduces scripts of the form "
+            "rayleigh(0, 0, 0, 2*zeta/omega_i)."
+        )
         self.damping_mode_i=QSpinBox(); self.damping_mode_i.setRange(1,10000)
         self.damping_mode_i.setValue(analysis.rayleigh_mode_i if analysis else 1)
         self.damping_mode_j=QSpinBox(); self.damping_mode_j.setRange(1,10000)
@@ -438,6 +454,7 @@ class AnalysisDialog(QDialog):
             ("arc_length_s","ArcLength s",self.arc_length_s),
             ("arc_length_alpha","ArcLength alpha",self.arc_length_alpha),
             ("damping_ratio","Rayleigh damping ratio",self.damping_ratio),
+            ("damping_model","Rayleigh damping model",self.damping_model),
             ("damping_mode_i","Rayleigh mode i",self.damping_mode_i),
             ("damping_mode_j","Rayleigh mode j",self.damping_mode_j),
             ("modes","Number of modes",self.modes),
@@ -487,6 +504,9 @@ class AnalysisDialog(QDialog):
         )
         self.adaptive.toggled.connect(
             lambda _checked: self._sync(self.kind.currentText())
+        )
+        self.damping_model.currentIndexChanged.connect(
+            self._update_visibility
         )
         self.damping_ratio.valueChanged.connect(
             lambda _value: self._sync(self.kind.currentText())
@@ -672,7 +692,9 @@ class AnalysisDialog(QDialog):
                     "generalized_alpha_m","generalized_alpha_f",
                 })
             if self.damping_ratio.value() > 0.0:
-                visible.update({"damping_mode_i","damping_mode_j"})
+                visible.update({"damping_model","damping_mode_i"})
+                if self.damping_model.currentData() == "TwoMode":
+                    visible.add("damping_mode_j")
         elif modal:
             visible.update({"modes","eigen_solver"})
 
@@ -839,6 +861,7 @@ class AnalysisDialog(QDialog):
             arc_length_s=self.arc_length_s.value(),
             arc_length_alpha=self.arc_length_alpha.value(),
             rayleigh_damping_ratio=self.damping_ratio.value(),
+            rayleigh_model=str(self.damping_model.currentData()),
             rayleigh_mode_i=self.damping_mode_i.value(),
             rayleigh_mode_j=self.damping_mode_j.value(),
             preload_gravity=preload_gravity,
