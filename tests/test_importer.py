@@ -423,3 +423,56 @@ timeSeries(
         and "outside the imported script directory tree" in issue.message
         for issue in result.issues
     )
+
+
+def test_importer_recovers_single_mode_committed_stiffness_rayleigh():
+    source = """
+from openseespy.opensees import *
+
+model('basic', '-ndm', 2, '-ndf', 3)
+node(1, 0.0, 0.0)
+node(2, 0.0, 432.0)
+fix(1, 1, 1, 1)
+mass(2, 5.18, 0.0, 0.0)
+geomTransf('Linear', 1)
+element('elasticBeamColumn', 1, 1, 2, 3600.0, 3225.0, 1080000.0, 1)
+
+timeSeries('Path', 2, '-dt', 0.005, '-values', 0.0, 0.1, -0.2)
+pattern('UniformExcitation', 2, 1, '-accel', 2)
+
+freq = eigen('-fullGenLapack', 1)[0]**0.5
+dampRatio = 0.02
+rayleigh(0.0, 0.0, 0.0, 2*dampRatio/freq)
+
+wipeAnalysis()
+constraints('Plain')
+numberer('Plain')
+system('BandGeneral')
+algorithm('Linear')
+integrator('Newmark', 0.5, 0.25)
+analysis('Transient')
+analyze(10, 0.01)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="cantilever_eq.py",
+        units={"length": "in", "force": "kip", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    assert not any(
+        issue.construct in {"assignment", "rayleigh"}
+        for issue in result.issues
+    )
+
+    analysis = next(iter(result.project.analyses.values()))
+    assert analysis.analysis_type == "Transient"
+    assert analysis.rayleigh_model == "SingleModeCommittedStiffness"
+    assert analysis.rayleigh_damping_ratio == 0.02
+    assert analysis.rayleigh_mode_i == 1
+    assert analysis.eigen_solver == "-fullGenLapack"
+
+    generated = to_openseespy(result.project, analysis)
+    assert "_studio_beta_k_comm = 2.0 * _studio_zeta / _studio_omega_i" in generated
+    assert "ops.rayleigh(0.0, 0.0, 0.0, _studio_beta_k_comm)" in generated
