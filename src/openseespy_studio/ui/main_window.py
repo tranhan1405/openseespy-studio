@@ -2509,7 +2509,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "new_material",
             "New Material...",
-            "uniaxial-material",
+            "model-material",
             self._create_material,
             "Create OpenSees uniaxial material",
         )
@@ -2523,70 +2523,70 @@ class MainWindow(QMainWindow):
         self._make_action(
             "new_section",
             "New Section...",
-            "create-section",
+            "model-section",
             self._create_section,
             "Create OpenSees section",
         )
         self._make_action(
             "new_shell_section",
             "New Shell Section...",
-            "shell-section",
+            "model-shell-section",
             self._create_shell_section,
             "Create an ElasticMembranePlate shell section",
         )
         self._make_action(
             "new_transformation",
             "New Transformation...",
-            "create-transformation",
+            "model-transformation",
             self._create_transformation,
             "Create OpenSees geometric transformation",
         )
         self._make_action(
             "assign_section",
             "Assign Section...",
-            "assign-section",
+            "model-assign-section",
             self._assign_section_to_selection,
             "Assign section to selected elements",
         )
         self._make_action(
             "assign_transformation",
             "Assign Transformation...",
-            "assign-transform",
+            "model-assign-transformation",
             self._assign_transformation_to_selection,
             "Assign geometric transformation to selected elements",
         )
         self._make_action(
             "element_formulation",
             "Element Formulation...",
-            "element-formulation",
+            "model-element-formulation",
             self._set_element_formulation,
             "Set elastic, force-based, or displacement-based formulation",
         )
         self._make_action(
             "support",
             "Support...",
-            "support",
+            "model-support",
             self._apply_restraint,
             "Apply support / restraint to selected nodes",
         )
         self._make_action(
             "clear_support",
             "Clear Support",
-            "clear-support",
+            "model-clear-support",
             self._clear_restraint,
             "Clear restraint on selected nodes",
         )
         self._make_action(
             "constraint",
             "Constraint...",
-            "constraint",
+            "model-constraint",
             self._create_constraint,
             "Create equalDOF, rigidLink, or rigidDiaphragm",
         )
         self._make_action(
             "connection",
             "ZeroLength / Link...",
-            "connection",
+            "model-connection",
             self._create_connection,
             "Create a research zeroLength spring/interface or twoNodeLink",
         )
@@ -2600,23 +2600,23 @@ class MainWindow(QMainWindow):
         self._make_action(
             "mass",
             "Nodal Mass...",
-            "mass",
+            "model-nodal-mass",
             self._assign_mass,
             "Assign nodal mass manually",
         )
         self._make_action(
             "mass_source",
             "Mass Source...",
-            "mass-source",
+            "model-mass-source",
             self._create_mass_source,
             "Generate seismic mass from self mass and selected load patterns",
         )
-        self._make_action("time_series", "Time Series...", "time-series", self._create_time_series, "Create time series")
-        self._make_action("load_pattern", "Load Pattern...", "load-pattern", self._create_load_pattern, "Create a Plain load pattern")
+        self._make_action("time_series", "Time Series...", "model-time-series", self._create_time_series, "Create time series")
+        self._make_action("load_pattern", "Load Pattern...", "model-load-pattern", self._create_load_pattern, "Create a Plain load pattern")
         self._make_action(
             "ground_motion",
             "Ground Motion...",
-            "ground-motion",
+            "model-ground-motion",
             self._create_ground_motion,
             "Create a Path record with UniformExcitation for NLTH",
         )
@@ -2627,11 +2627,11 @@ class MainWindow(QMainWindow):
             self._import_ground_motion,
             "Import AT2, JSON, TXT, CSV or DAT ground-motion data",
         )
-        self._make_action("nodal_load", "Nodal Load...", "nodal-load", self._create_nodal_load, "Create nodal load")
+        self._make_action("nodal_load", "Nodal Load...", "model-nodal-load", self._create_nodal_load, "Create nodal load")
         self._make_action(
             "prescribed_displacement",
             "Prescribed Displacement...",
-            "prescribed-displacement",
+            "model-prescribed-displacement",
             self._create_prescribed_displacement,
             "Create an imposed nodal displacement in a Plain load pattern",
         )
@@ -2639,11 +2639,11 @@ class MainWindow(QMainWindow):
             "ribbonText",
             "Prescr. Disp.",
         )
-        self._make_action("beam_load", "Beam Load...", "beam-load", self._create_element_load, "Create uniform, point, or self-weight beam load")
+        self._make_action("beam_load", "Beam Load...", "model-beam-load", self._create_element_load, "Create uniform, point, or self-weight beam load")
         self._make_action(
             "shell_pressure",
             "Shell Pressure...",
-            "shell-pressure",
+            "model-shell-pressure",
             self._create_shell_pressure,
             "Create uniform pressure normal to selected shell surfaces",
         )
