@@ -1393,13 +1393,39 @@ class _Importer:
         tag = self._next_constraint
         self._next_constraint += 1
         if command == "equalDOF":
+            retained = int(args[0])
+            constrained = int(args[1])
+            dofs = tuple(int(value) for value in args[2:])
+            retained_node = self.project.model.nodes.get(retained)
+            constrained_node = self.project.model.nodes.get(constrained)
+            if (
+                retained_node is not None
+                and constrained_node is not None
+                and dofs
+                and all(
+                    dof <= len(retained_node.fixity)
+                    and dof <= len(constrained_node.fixity)
+                    and bool(retained_node.fixity[dof - 1])
+                    and bool(constrained_node.fixity[dof - 1])
+                    for dof in dofs
+                )
+            ):
+                self.issue(
+                    "WARNING",
+                    None,
+                    "equalDOF",
+                    f"Skipped redundant equalDOF {retained}->{constrained} "
+                    f"for DOF(s) {', '.join(map(str, dofs))}: both nodes are "
+                    "already fixed in those DOFs.",
+                )
+                return
             item = ConstraintData(
                 tag,
                 f"Imported equalDOF {tag}",
                 "equalDOF",
-                int(args[0]),
-                [int(args[1])],
-                dofs=tuple(int(value) for value in args[2:]),
+                retained,
+                [constrained],
+                dofs=dofs,
             )
         elif command == "rigidLink":
             item = ConstraintData(
