@@ -156,11 +156,11 @@ def test_tree_selection_display_context_matches_mechanical_workflow():
         {"named_sets_root"}
     ) == ("fe", "Selection")
 
-def test_model_root_restores_base_model_display_only():
+def test_model_and_geometry_roots_exit_result_display():
     assert MainWindow._tree_selection_resets_result_overlay(
         {"model_root"}
     )
-    assert not MainWindow._tree_selection_resets_result_overlay(
+    assert MainWindow._tree_selection_resets_result_overlay(
         {"geometry_root"}
     )
     assert not MainWindow._tree_selection_resets_result_overlay(
