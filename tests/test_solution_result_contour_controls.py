@@ -106,10 +106,31 @@ def test_result_renderer_routes_contour_options_to_viewport():
 
 def test_properties_panel_has_outer_scroll_area(qapp):
     panel = PropertiesPanel()
+    result = SolutionResultData(
+        tag=1,
+        analysis_tag=1,
+        name="UX",
+        result_type="NodalDisplacement",
+        settings={
+            "component": "UX",
+            "contour_range_mode": "user",
+            "contour_min": -1.0,
+            "contour_max": 1.0,
+            "contour_deformed_geometry": True,
+        },
+    )
     try:
+        panel.resize(320, 240)
+        panel.set_solution_result(result, analysis_name="EQ-X")
+        panel.show()
+        qapp.processEvents()
+
         assert panel.properties_scroll.widgetResizable()
-        assert panel.properties_scroll.widget() is not None
-        assert panel.properties_scroll.verticalScrollBarPolicy() != 1
+        assert panel.properties_scroll.widget() is panel.properties_body
+        assert (
+            panel.properties_scroll.verticalScrollBar().maximum()
+            > 0
+        )
     finally:
         panel.close()
         panel.deleteLater()
