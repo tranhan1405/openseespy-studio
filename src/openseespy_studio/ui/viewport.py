@@ -7101,6 +7101,10 @@ class ModelViewport(QWidget):
         points: list[tuple[float, float, float]] = []
         lines: list[int] = []
         scalars: list[float] = []
+        line_node_tags: list[int] = []
+        node_points: list[tuple[float, float, float]] = []
+        node_scalars: list[float] = []
+        node_point_tags: list[int] = []
 
         visible_elements = set(self._visible_element_tags())
         if element_tags:
@@ -7114,6 +7118,112 @@ class ModelViewport(QWidget):
                     and self._model.elements[tag].j in node_tags
                 )
             }
+
+        visible_nodes = set(self._visible_node_tags())
+        if node_tags:
+            visible_nodes.intersection_update(node_tags)
+        elif element_tags:
+            scoped_nodes: set[int] = set()
+            for element_tag in element_tags:
+                element = self._model.elements.get(element_tag)
+                if element is not None:
+                    scoped_nodes.update((element.i, element.j))
+            visible_nodes.intersection_update(scoped_nodes)
+
+        fast_animation = bool(
+            (contour_options or {}).get("_fast_animation", False)
+        )
+        animation_key = (
+            quantity,
+            component,
+            self._result_scope_key(visible_elements),
+            self._result_scope_key(visible_nodes),
+            display.cache_key(),
+        )
+        animation_state = self._node_contour_animation_state
+        if (
+            fast_animation
+            and isinstance(animation_state, dict)
+            and animation_state.get("key") == animation_key
+        ):
+            # The first playback frame creates the VTK topology. Subsequent
+            # frames update only scalar arrays (and coordinates only when the
+            # contour explicitly follows the deformed shape). This avoids
+            # rebuilding connectivity, sorting scopes, recalculating an
+            # unused auto range, or recreating actors on every timer tick.
+            line_mesh = animation_state.get("line_mesh")
+            node_mesh = animation_state.get("node_mesh")
+            cached_line_tags = animation_state.get("line_node_tags", ())
+            cached_node_tags = animation_state.get("node_point_tags", ())
+            try:
+                if line_mesh is not None:
+                    if (
+                        not isinstance(cached_line_tags, (list, tuple))
+                        or int(line_mesh.n_points) != len(cached_line_tags)
+                    ):
+                        raise ValueError("line contour topology changed")
+                    line_values: list[float] = []
+                    line_points = [] if display.deformed_geometry else None
+                    for raw_tag in cached_line_tags:
+                        tag = int(raw_tag)
+                        value = value_for(tag)
+                        if value is None:
+                            raise ValueError("line contour response changed")
+                        line_values.append(float(value))
+                        if line_points is not None:
+                            line_points.append(displayed_point(tag))
+                    if line_points is not None:
+                        line_mesh.points[:] = np.asarray(
+                            line_points,
+                            dtype=float,
+                        )
+                    line_mesh.point_data["nodal_result"][:] = np.asarray(
+                        line_values,
+                        dtype=float,
+                    )
+                    line_mesh.Modified()
+                elif cached_line_tags:
+                    raise ValueError("line contour topology changed")
+
+                if node_mesh is not None:
+                    if (
+                        not isinstance(cached_node_tags, (list, tuple))
+                        or int(node_mesh.n_points) != len(cached_node_tags)
+                    ):
+                        raise ValueError("node contour topology changed")
+                    current_node_values: list[float] = []
+                    current_node_points = (
+                        [] if display.deformed_geometry else None
+                    )
+                    for raw_tag in cached_node_tags:
+                        tag = int(raw_tag)
+                        value = value_for(tag)
+                        if value is None:
+                            raise ValueError("node contour response changed")
+                        current_node_values.append(float(value))
+                        if current_node_points is not None:
+                            current_node_points.append(displayed_point(tag))
+                    if current_node_points is not None:
+                        node_mesh.points[:] = np.asarray(
+                            current_node_points,
+                            dtype=float,
+                        )
+                    node_mesh.point_data["nodal_result"][:] = np.asarray(
+                        current_node_values,
+                        dtype=float,
+                    )
+                    node_mesh.Modified()
+                elif cached_node_tags:
+                    raise ValueError("node contour topology changed")
+
+                self._result_overlay_active = True
+                self._active_result_view_key = None
+                self.plotter.render()
+                return
+            except (AttributeError, KeyError, TypeError, ValueError):
+                # Fall through to a full rebuild if a recorder changes
+                # topology or a frame unexpectedly lacks a required response.
+                pass
 
         for tag in sorted(visible_elements):
             element = self._model.elements.get(tag)
@@ -7133,21 +7243,8 @@ class ModelViewport(QWidget):
                 displayed_point(element.j),
             ))
             scalars.extend((float(value_i), float(value_j)))
+            line_node_tags.extend((int(element.i), int(element.j)))
             lines.extend((2, index, index + 1))
-
-        node_points: list[tuple[float, float, float]] = []
-        node_scalars: list[float] = []
-        node_point_tags: list[int] = []
-        visible_nodes = set(self._visible_node_tags())
-        if node_tags:
-            visible_nodes.intersection_update(node_tags)
-        elif element_tags:
-            scoped_nodes: set[int] = set()
-            for element_tag in element_tags:
-                element = self._model.elements.get(element_tag)
-                if element is not None:
-                    scoped_nodes.update((element.i, element.j))
-            visible_nodes.intersection_update(scoped_nodes)
 
         for tag in sorted(visible_nodes):
             node = self._model.nodes.get(tag)
@@ -7162,6 +7259,10 @@ class ModelViewport(QWidget):
             self.clear_result_overlay()
             return
 
+        # During playback the active mesh keeps the range established on the
+        # first fast frame. Recomputing Auto min/max here would not update the
+        # existing VTK mapper anyway, and a changing legend makes animations
+        # visually misleading. Exact extrema/range are restored on pause.
         all_values = scalars + node_scalars
         cmap = contour_colormap(display, magnitude=magnitude)
         clim = resolve_contour_range(
@@ -7169,61 +7270,6 @@ class ModelViewport(QWidget):
             display,
             magnitude=magnitude,
         )
-
-        fast_animation = bool(
-            (contour_options or {}).get("_fast_animation", False)
-        )
-        animation_key = (
-            quantity,
-            component,
-            self._result_scope_key(visible_elements),
-            self._result_scope_key(visible_nodes),
-            display.cache_key(),
-        )
-        animation_state = self._node_contour_animation_state
-        if (
-            fast_animation
-            and isinstance(animation_state, dict)
-            and animation_state.get("key") == animation_key
-        ):
-            line_mesh = animation_state.get("line_mesh")
-            node_mesh = animation_state.get("node_mesh")
-            try:
-                if points:
-                    if line_mesh is None or int(line_mesh.n_points) != len(points):
-                        raise ValueError("line contour topology changed")
-                    line_mesh.points[:] = np.asarray(points, dtype=float)
-                    line_mesh.point_data["nodal_result"][:] = np.asarray(
-                        scalars,
-                        dtype=float,
-                    )
-                    line_mesh.Modified()
-                elif line_mesh is not None:
-                    raise ValueError("line contour topology changed")
-
-                if node_points:
-                    if (
-                        node_mesh is None
-                        or int(node_mesh.n_points) != len(node_points)
-                    ):
-                        raise ValueError("node contour topology changed")
-                    node_mesh.points[:] = np.asarray(node_points, dtype=float)
-                    node_mesh.point_data["nodal_result"][:] = np.asarray(
-                        node_scalars,
-                        dtype=float,
-                    )
-                    node_mesh.Modified()
-                elif node_mesh is not None:
-                    raise ValueError("node contour topology changed")
-
-                self._result_overlay_active = True
-                self._active_result_view_key = None
-                self.plotter.render()
-                return
-            except (AttributeError, KeyError, TypeError, ValueError):
-                # Fall through to a full rebuild when topology or the VTK
-                # backing arrays changed unexpectedly.
-                pass
 
         self.clear_result_overlay(render=False)
         entries: list[tuple[object, dict[str, object]]] = []
@@ -7316,6 +7362,8 @@ class ModelViewport(QWidget):
                     if node_points and entries
                     else None
                 ),
+                "line_node_tags": tuple(line_node_tags),
+                "node_point_tags": tuple(node_point_tags),
             }
         else:
             self._remember_result_view(view_key, entries)
