@@ -5429,6 +5429,306 @@ class MainWindow(QMainWindow):
             "Box select: left→right = window, right→left = crossing"
         )
 
+    def _create_offset_sketch_plane(self) -> int | None:
+        base, ok = QInputDialog.getItem(
+            self,
+            "New Offset Plane",
+            "Reference global plane:",
+            ["XY", "XZ", "YZ"],
+            0,
+            False,
+        )
+        if not ok:
+            return None
+        offset, ok = QInputDialog.getDouble(
+            self,
+            "New Offset Plane",
+            "Offset:",
+            0.0,
+            -1.0e12,
+            1.0e12,
+            6,
+        )
+        if not ok:
+            return None
+        tag = self.project.next_sketch_plane_tag()
+        default_name = f"{base.upper()} Offset {offset:g}"
+        name, ok = QInputDialog.getText(
+            self,
+            "New Offset Plane",
+            "Name:",
+            text=default_name,
+        )
+        if not ok:
+            return None
+        key = str(base).strip().lower()
+        frames = {
+            "xy": (
+                (0.0, 0.0, float(offset)),
+                (1.0, 0.0, 0.0),
+                (0.0, 1.0, 0.0),
+            ),
+            "xz": (
+                (0.0, float(offset), 0.0),
+                (1.0, 0.0, 0.0),
+                (0.0, 0.0, 1.0),
+            ),
+            "yz": (
+                (float(offset), 0.0, 0.0),
+                (0.0, 1.0, 0.0),
+                (0.0, 0.0, 1.0),
+            ),
+        }
+        before = self.project.to_dict()
+        try:
+            origin, u_axis, v_axis = frames[key]
+            plane = SketchPlaneData(
+                tag=tag,
+                name=str(name).strip() or default_name,
+                origin=origin,
+                u_axis=u_axis,
+                v_axis=v_axis,
+            )
+            self.project.add_sketch_plane(plane)
+        except (KeyError, TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "New Offset Plane", str(exc))
+            return None
+        self._activate_sketch_plane(tag, look_at=True)
+        self._refresh_tree()
+        self._record_project_change(
+            f"Create Sketch Plane {tag}",
+            before,
+        )
+        self.status_message.setText(
+            f"Created + activated Plane {tag} · {plane.name}"
+        )
+        return tag
+
+    def _create_three_point_sketch_plane(self) -> int | None:
+        if len(self.project.points) < 3:
+            QMessageBox.information(
+                self,
+                "New 3-Point Plane",
+                "Create at least three Geometry Points first.",
+            )
+            return None
+        default_tags = ",".join(
+            str(tag) for tag in sorted(self.project.points)[:3]
+        )
+        text_value, ok = QInputDialog.getText(
+            self,
+            "New 3-Point Plane",
+            "Point tags (P1, P2, P3):",
+            text=default_tags,
+        )
+        if not ok:
+            return None
+        try:
+            tags = [
+                int(token.strip())
+                for token in str(text_value).replace(";", ",").split(",")
+                if token.strip()
+            ]
+        except ValueError:
+            tags = []
+        if len(tags) != 3 or len(set(tags)) != 3:
+            QMessageBox.warning(
+                self,
+                "New 3-Point Plane",
+                "Enter exactly three different Geometry Point tags.",
+            )
+            return None
+        missing = [tag for tag in tags if tag not in self.project.points]
+        if missing:
+            QMessageBox.warning(
+                self,
+                "New 3-Point Plane",
+                "Missing Geometry Point(s): "
+                + ", ".join(map(str, missing)),
+            )
+            return None
+        tag = self.project.next_sketch_plane_tag()
+        default_name = f"Plane through P{tags[0]}, P{tags[1]}, P{tags[2]}"
+        name, ok = QInputDialog.getText(
+            self,
+            "New 3-Point Plane",
+            "Name:",
+            text=default_name,
+        )
+        if not ok:
+            return None
+        p1 = self.project.points[tags[0]].xyz
+        p2 = self.project.points[tags[1]].xyz
+        p3 = self.project.points[tags[2]].xyz
+        u_axis = tuple(
+            float(p2[index]) - float(p1[index])
+            for index in range(3)
+        )
+        v_axis = tuple(
+            float(p3[index]) - float(p1[index])
+            for index in range(3)
+        )
+        before = self.project.to_dict()
+        try:
+            plane = SketchPlaneData(
+                tag=tag,
+                name=str(name).strip() or default_name,
+                origin=tuple(float(value) for value in p1),
+                u_axis=u_axis,
+                v_axis=v_axis,
+            )
+            self.project.add_sketch_plane(plane)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "New 3-Point Plane", str(exc))
+            return None
+        self._activate_sketch_plane(tag, look_at=True)
+        self._refresh_tree()
+        self._record_project_change(
+            f"Create Sketch Plane {tag}",
+            before,
+        )
+        self.status_message.setText(
+            f"Created + activated Plane {tag} · {plane.name}"
+        )
+        return tag
+
+    def _activate_global_sketch_plane(
+        self,
+        plane: str,
+        *,
+        look_at: bool = True,
+    ) -> None:
+        key = str(plane).strip().lower()
+        if key not in {"xy", "xz", "yz"}:
+            return
+        self._active_sketch_plane_tag = None
+        self._active_global_sketch_plane = key
+        self._reset_active_geometry_sketch_anchor()
+        self.viewport.set_display_domain("geometry")
+        self.viewport.set_geometry_sketch_plane(key, 0.0)
+        if look_at:
+            self.viewport.set_view(key, render=False)
+        self.viewport.set_geometry_sketch_grid_visible(True)
+        self.viewport.plotter.render()
+        self._refresh_tree()
+        self.status_message.setText(
+            f"Active Sketch Plane · Global {key.upper()}"
+        )
+
+    def _activate_sketch_plane(
+        self,
+        tag: int,
+        *,
+        look_at: bool = True,
+    ) -> None:
+        plane = self.project.sketch_planes.get(int(tag))
+        if plane is None:
+            return
+        self._active_sketch_plane_tag = int(tag)
+        self._reset_active_geometry_sketch_anchor()
+        self.viewport.set_display_domain("geometry")
+        self.viewport.set_geometry_sketch_frame(
+            plane.origin,
+            plane.u_axis,
+            plane.v_axis,
+            name=plane.name,
+            key=f"plane:{plane.tag}",
+        )
+        if look_at:
+            self.viewport.view_active_sketch_plane(render=False)
+        grid_action = self.actions.get("geometry_grid")
+        if grid_action is not None:
+            grid_action.setChecked(True)
+        self.viewport.set_geometry_sketch_grid_visible(True)
+        self.viewport.plotter.render()
+        self.status_message.setText(
+            f"Active Sketch Plane · Plane {plane.tag} · {plane.name}"
+        )
+
+    def _delete_sketch_plane(self, tag: int) -> None:
+        plane = self.project.sketch_planes.get(int(tag))
+        if plane is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete Sketch Plane",
+            (
+                f"Delete Plane {plane.tag} ({plane.name})?\n\n"
+                "Existing Point/Line/Surface Geometry keeps its XYZ "
+                "coordinates and will not be deleted."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        before = self.project.to_dict()
+        self.project.remove_sketch_plane(int(tag))
+        if self._active_sketch_plane_tag == int(tag):
+            self._active_sketch_plane_tag = None
+            self._active_global_sketch_plane = "xy"
+            self.viewport.set_geometry_sketch_plane("xy", 0.0)
+        self._refresh_all(
+            f"Deleted Sketch Plane {tag}; Geometry preserved",
+            reset_camera=False,
+        )
+        self._record_project_change(
+            f"Delete Sketch Plane {tag}",
+            before,
+        )
+
+    def _show_sketch_plane_properties(self, tag: int) -> None:
+        plane = self.project.sketch_planes.get(int(tag))
+        if plane is None:
+            return
+        self.properties_panel.set_properties(
+            "Sketch Plane",
+            [
+                ("Tag", plane.tag),
+                ("Name", plane.name),
+                ("Origin", ", ".join(f"{value:g}" for value in plane.origin)),
+                ("U axis", ", ".join(f"{value:g}" for value in plane.u_axis)),
+                ("V axis", ", ".join(f"{value:g}" for value in plane.v_axis)),
+                ("Normal", ", ".join(f"{value:g}" for value in plane.normal)),
+                (
+                    "State",
+                    "Active"
+                    if self._active_sketch_plane_tag == int(tag)
+                    else "Inactive",
+                ),
+                ("Geometry dependency", "None · XYZ is independent"),
+            ],
+        )
+
+    def _show_global_sketch_plane_properties(self, plane: str) -> None:
+        key = str(plane).strip().lower()
+        frames = {
+            "xy": ((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)),
+            "xz": ((0, 0, 0), (1, 0, 0), (0, 0, 1), (0, -1, 0)),
+            "yz": ((0, 0, 0), (0, 1, 0), (0, 0, 1), (1, 0, 0)),
+        }
+        if key not in frames:
+            return
+        origin, u_axis, v_axis, normal = frames[key]
+        self.properties_panel.set_properties(
+            f"Global {key.upper()} Sketch Plane",
+            [
+                ("Origin", str(origin)),
+                ("U axis", str(u_axis)),
+                ("V axis", str(v_axis)),
+                ("Normal", str(normal)),
+                (
+                    "State",
+                    "Active"
+                    if (
+                        self._active_sketch_plane_tag is None
+                        and self._active_global_sketch_plane == key
+                    )
+                    else "Inactive",
+                ),
+            ],
+        )
+
     def _active_geometry_sketch_plane(self) -> str:
         if (
             self._active_sketch_plane_tag is not None
@@ -20781,6 +21081,10 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "geometry_root":
+            plane_menu = menu.addMenu("New Sketch Plane")
+            plane_menu.addAction(self.actions["sketch_plane_offset"])
+            plane_menu.addAction(self.actions["sketch_plane_3point"])
+            menu.addSeparator()
             point_action = menu.addAction("New Point...")
             point_action.triggered.connect(self._create_point_geometry)
             line_pick = menu.addAction("Draw Polyline")
@@ -20829,6 +21133,49 @@ class MainWindow(QMainWindow):
             select_all.triggered.connect(self._select_all_tree_nodes)
             menu.addSeparator()
             menu.addAction(self.actions["show_node_numbers"])
+            exec_menu()
+            return
+
+        if kind == "planes_root":
+            menu.addAction(self.actions["sketch_plane_offset"])
+            three = menu.addAction(self.actions["sketch_plane_3point"])
+            three.setEnabled(len(self.project.points) >= 3)
+            exec_menu()
+            return
+
+        if kind == "sketch_plane_global":
+            key = str(value)
+            activate = menu.addAction(
+                f"Activate Global {key.upper()} Plane"
+            )
+            activate.triggered.connect(
+                lambda checked=False, p=key:
+                self._activate_global_sketch_plane(p, look_at=True)
+            )
+            exec_menu()
+            return
+
+        if kind == "sketch_plane":
+            tag = int(value)
+            plane = self.project.sketch_planes.get(tag)
+            if plane is None:
+                return
+            activate = menu.addAction("Activate + Look At")
+            activate.triggered.connect(
+                lambda checked=False, t=tag:
+                self._activate_sketch_plane(t, look_at=True)
+            )
+            activate_only = menu.addAction("Activate without changing view")
+            activate_only.triggered.connect(
+                lambda checked=False, t=tag:
+                self._activate_sketch_plane(t, look_at=False)
+            )
+            menu.addSeparator()
+            delete = menu.addAction("Delete Plane")
+            delete.triggered.connect(
+                lambda checked=False, t=tag:
+                self._delete_sketch_plane(t)
+            )
             exec_menu()
             return
 
@@ -22580,7 +22927,11 @@ class MainWindow(QMainWindow):
         if not payload:
             return
         kind, value = payload
-        if kind == "material":
+        if kind == "sketch_plane":
+            self._activate_sketch_plane(int(value), look_at=True)
+        elif kind == "sketch_plane_global":
+            self._activate_global_sketch_plane(str(value), look_at=True)
+        elif kind == "material":
             self._edit_material(int(value))
         elif kind == "nd_material":
             self._edit_nd_material(int(value))
