@@ -23834,58 +23834,6 @@ class MainWindow(QMainWindow):
             rows.extend((f"Type · {name}", count) for name, count in sorted(support_types.items()))
             self.properties_panel.set_properties("Supports / Restraints", rows)
             return
-        if kind == "element_masses_root":
-            tags = {
-                int(tag)
-                for tag, element in self.model.elements.items()
-                if float(element.mass_per_length) > 0.0
-            }
-            properties = menu.addAction("Properties")
-            properties.triggered.connect(
-                lambda: self._show_tree_root_properties(
-                    "element_masses_root"
-                )
-            )
-            select_all = menu.addAction(
-                f"Select Elements with Mass ({len(tags)})"
-            )
-            select_all.setEnabled(bool(tags))
-            select_all.triggered.connect(
-                lambda checked=False, values=set(tags):
-                self.selection.set_selection(elements=set(values))
-            )
-            menu.addAction(self.actions["show_masses"])
-            exec_menu()
-            return
-
-        if kind == "nodal_mass":
-            tag = int(value)
-            self.selection.set_selection(nodes={tag})
-            properties = menu.addAction("Properties")
-            properties.triggered.connect(
-                lambda: self._show_entity_properties("node", tag)
-            )
-            edit = menu.addAction("Edit Nodal Mass...")
-            edit.triggered.connect(self._assign_mass)
-            clear = menu.addAction("Clear Nodal Mass")
-            clear.triggered.connect(self._clear_mass)
-            zoom = menu.addAction("Zoom to Node")
-            zoom.triggered.connect(self._zoom_selection)
-            exec_menu()
-            return
-
-        if kind == "element_mass":
-            tag = int(value)
-            self.selection.set_selection(elements={tag})
-            properties = menu.addAction("Properties")
-            properties.triggered.connect(
-                lambda: self._show_entity_properties("element", tag)
-            )
-            zoom = menu.addAction("Zoom to Element")
-            zoom.triggered.connect(self._zoom_selection)
-            exec_menu()
-            return
-
         if kind == "masses_root":
             mass_nodes = [
                 node for node in self.model.nodes.values()
@@ -27274,6 +27222,58 @@ class MainWindow(QMainWindow):
             delete.triggered.connect(
                 lambda: self._delete_mass_source(tag)
             )
+            exec_menu()
+            return
+
+        if kind == "element_masses_root":
+            tags = {
+                int(tag)
+                for tag, element in self.model.elements.items()
+                if float(element.mass_per_length) > 0.0
+            }
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "element_masses_root"
+                )
+            )
+            select_all = menu.addAction(
+                f"Select Elements with Mass ({len(tags)})"
+            )
+            select_all.setEnabled(bool(tags))
+            select_all.triggered.connect(
+                lambda checked=False, values=set(tags):
+                self.selection.set_selection(elements=set(values))
+            )
+            menu.addAction(self.actions["show_masses"])
+            exec_menu()
+            return
+
+        if kind == "nodal_mass":
+            tag = int(value)
+            self.selection.set_selection(nodes={tag})
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_entity_properties("node", tag)
+            )
+            edit = menu.addAction("Edit Nodal Mass...")
+            edit.triggered.connect(self._assign_mass)
+            clear = menu.addAction("Clear Nodal Mass")
+            clear.triggered.connect(self._clear_mass)
+            zoom = menu.addAction("Zoom to Node")
+            zoom.triggered.connect(self._zoom_selection)
+            exec_menu()
+            return
+
+        if kind == "element_mass":
+            tag = int(value)
+            self.selection.set_selection(elements={tag})
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_entity_properties("element", tag)
+            )
+            zoom = menu.addAction("Zoom to Element")
+            zoom.triggered.connect(self._zoom_selection)
             exec_menu()
             return
 

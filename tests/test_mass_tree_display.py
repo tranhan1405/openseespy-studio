@@ -38,3 +38,10 @@ def test_mass_has_independent_viewport_display_option():
     assert "display-mass-points" in draw_source
     assert "display-mass-labels" in draw_source
     assert 'name == "masses"' in update_source
+
+
+def test_mass_context_actions_do_not_leak_into_properties_handler():
+    source = inspect.getsource(MainWindow._show_tree_root_properties)
+
+    assert "menu.addAction" not in source
+    assert 'if kind == "element_masses_root":' in source
