@@ -15169,16 +15169,27 @@ class MainWindow(QMainWindow):
         material = self.project.nd_materials.get(int(tag))
         if material is None:
             return
-        users = self.project.sections_using_nd_material(tag)
-        if users:
-            QMessageBox.warning(
-                self,
-                "Delete nD Material",
-                f"nDMaterial {tag} is still referenced by Shell section(s): "
-                + ", ".join(map(str, users))
-                + ". Reassign those references first.",
+        while True:
+            users = sorted(self.project.sections_using_nd_material(tag))
+            if not users:
+                break
+            owner_tag = int(users[0])
+            before_users = set(users)
+            if not self._ask_create_prerequisite(
+                title="Delete nD Material",
+                message=(
+                    f"nDMaterial {tag} is still referenced by Shell Section "
+                    f"{owner_tag}. Reassign that Section now?"
+                ),
+                action_label=f"Edit Shell Section {owner_tag} Now...",
+            ):
+                return
+            self._edit_shell_section(owner_tag)
+            after_users = set(
+                self.project.sections_using_nd_material(tag)
             )
-            return
+            if after_users == before_users:
+                return
         answer = QMessageBox.question(
             self,
             "Delete nD Material",
@@ -15359,33 +15370,68 @@ class MainWindow(QMainWindow):
         if material is None:
             return
 
-        used_by = self.project.sections_using_material(tag)
-        connection_uses = self.project.connections_using_material(tag)
-        wrapper_uses = self.project.materials_using_material(tag)
-        if used_by or connection_uses or wrapper_uses:
-            details = []
-            if used_by:
-                details.append(
-                    "section(s): " + ", ".join(map(str, used_by))
-                )
-            if connection_uses:
-                details.append(
-                    "connection(s): "
-                    + ", ".join(map(str, connection_uses))
-                )
-            if wrapper_uses:
-                details.append(
-                    "wrapper material(s): "
-                    + ", ".join(map(str, wrapper_uses))
-                )
-            QMessageBox.warning(
-                self,
-                "Delete Material",
-                "Material is still referenced by "
-                + "; ".join(details)
-                + ". Reassign those references first.",
+        while True:
+            used_by = sorted(self.project.sections_using_material(tag))
+            connection_uses = sorted(
+                self.project.connections_using_material(tag)
             )
-            return
+            wrapper_uses = sorted(
+                self.project.materials_using_material(tag)
+            )
+            if not used_by and not connection_uses and not wrapper_uses:
+                break
+
+            if used_by:
+                owner_tag = int(used_by[0])
+                before_users = set(used_by)
+                if not self._ask_create_prerequisite(
+                    title="Delete Material",
+                    message=(
+                        f"Material {tag} is still referenced by Section "
+                        f"{owner_tag}. Reassign that Section now?"
+                    ),
+                    action_label=f"Edit Section {owner_tag} Now...",
+                ):
+                    return
+                self._edit_section(owner_tag)
+                if set(self.project.sections_using_material(tag)) == before_users:
+                    return
+                continue
+
+            if connection_uses:
+                owner_tag = int(connection_uses[0])
+                before_users = set(connection_uses)
+                if not self._ask_create_prerequisite(
+                    title="Delete Material",
+                    message=(
+                        f"Material {tag} is still referenced by Connection "
+                        f"{owner_tag}. Reassign that Connection now?"
+                    ),
+                    action_label=f"Edit Connection {owner_tag} Now...",
+                ):
+                    return
+                self._edit_connection(owner_tag)
+                if (
+                    set(self.project.connections_using_material(tag))
+                    == before_users
+                ):
+                    return
+                continue
+
+            owner_tag = int(wrapper_uses[0])
+            before_users = set(wrapper_uses)
+            if not self._ask_create_prerequisite(
+                title="Delete Material",
+                message=(
+                    f"Material {tag} is still referenced by wrapper/composite "
+                    f"Material {owner_tag}. Reassign that Material now?"
+                ),
+                action_label=f"Edit Wrapper Material {owner_tag} Now...",
+            ):
+                return
+            self._edit_material(owner_tag)
+            if set(self.project.materials_using_material(tag)) == before_users:
+                return
 
         answer = QMessageBox.question(
             self,
@@ -18829,14 +18875,71 @@ class MainWindow(QMainWindow):
             if element.transf_tag == tag
         )
         if used_by:
-            QMessageBox.warning(
+            if not self._ask_create_prerequisite(
+                title="Delete Transformation",
+                message=(
+                    f"Transformation {tag} is assigned to "
+                    f"{len(used_by)} Frame element(s). Reassign them now?"
+                ),
+                action_label="Reassign Transformation Now...",
+            ):
+                return
+
+            replacement_tags = sorted(
+                candidate_tag
+                for candidate_tag in self.project.transformations
+                if int(candidate_tag) != int(tag)
+            )
+            choices = ["Create New Transformation..."] + [
+                (
+                    f"{candidate_tag} - "
+                    f"{self.project.transformations[candidate_tag].name} "
+                    f"({self.project.transformations[candidate_tag].transformation_type})"
+                )
+                for candidate_tag in replacement_tags
+            ]
+            choice, ok = QInputDialog.getItem(
                 self,
                 "Delete Transformation",
-                "Transformation is assigned to element(s): "
-                + ", ".join(map(str, used_by[:20]))
-                + ("..." if len(used_by) > 20 else ""),
+                "Replacement for referenced Frame element(s):",
+                choices,
+                0,
+                False,
             )
-            return
+            if not ok:
+                return
+
+            if choice == choices[0]:
+                created = self._create_transformation_dependency()
+                if created is None or int(created.tag) == int(tag):
+                    return
+                replacement_tag = int(created.tag)
+            else:
+                replacement_tag = int(
+                    replacement_tags[choices.index(choice) - 1]
+                )
+
+            before_reassign = self.project.to_dict()
+            try:
+                assigned = self.project.assign_transformation_to_elements(
+                    set(used_by),
+                    replacement_tag,
+                )
+            except ValueError as exc:
+                QMessageBox.warning(
+                    self,
+                    "Delete Transformation",
+                    str(exc),
+                )
+                return
+            self._refresh_project_metadata(
+                f"Reassigned {len(assigned)} Frame element(s) from "
+                f"transformation {tag} to {replacement_tag}"
+            )
+            self._record_project_change(
+                f"Reassign transformation {tag} to {replacement_tag}",
+                before_reassign,
+            )
 
         answer = QMessageBox.question(
             self,
@@ -19049,16 +19152,18 @@ class MainWindow(QMainWindow):
                     "its selected Section, automatic shear-transfer "
                     "constraint, base restraints, and orientation"
                 )
-            QMessageBox.information(
-                self,
-                title,
-                "This zeroLengthSection was created by the specimen-level "
-                "Quick 1D Column / Test Specimen workflow. Edit/rebuild it "
-                "through that wizard so "
-                + detail
-                + " stay consistent. General zeroLengthSection elements "
-                "created manually or imported can be edited directly.",
-            )
+            if self._ask_create_prerequisite(
+                title=title,
+                message=(
+                    "This zeroLengthSection was created by the specimen-level "
+                    "Quick 1D Column / Test Specimen workflow. Open that "
+                    "wizard now so "
+                    + detail
+                    + " stay consistent?"
+                ),
+                action_label="Open Quick 1D Column Wizard Now...",
+            ):
+                self._show_test_column_wizard()
             self._show_connection_properties(tag)
             return
 
