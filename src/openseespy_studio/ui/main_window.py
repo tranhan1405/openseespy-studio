@@ -5472,14 +5472,11 @@ class MainWindow(QMainWindow):
                 solution_convergence_tag,
                 convergence_name,
             )
-            self._show_solution_convergence(solution_convergence_tag)
         elif solver_output_tag is not None:
             self._show_solution_information(
                 solver_output_tag,
                 "Solver Output",
             )
-            self.console_dock.show()
-            self.console_dock.raise_()
         elif solution_information_tag is not None:
             self._show_solution_information(
                 solution_information_tag,
