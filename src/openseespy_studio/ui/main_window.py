@@ -23012,6 +23012,105 @@ class MainWindow(QMainWindow):
                     ("Ground Motions", ground_motions),
                 ],
             )
+            return
+        if kind == "materials_root":
+            material_types: dict[str, int] = {}
+            for material in self.project.materials.values():
+                key = str(material.material_type)
+                material_types[key] = material_types.get(key, 0) + 1
+            rows = [
+                ("Total Materials", len(self.project.materials)),
+                ("Material Types", len(material_types)),
+            ]
+            rows.extend(
+                (f"Type · {name}", count)
+                for name, count in sorted(material_types.items())
+            )
+            self.properties_panel.set_properties("Materials", rows)
+            return
+        if kind == "nd_materials_root":
+            material_types: dict[str, int] = {}
+            for material in self.project.nd_materials.values():
+                key = str(material.material_type)
+                material_types[key] = material_types.get(key, 0) + 1
+            rows = [
+                ("Total nD Materials", len(self.project.nd_materials)),
+                ("Material Types", len(material_types)),
+            ]
+            rows.extend(
+                (f"Type · {name}", count)
+                for name, count in sorted(material_types.items())
+            )
+            self.properties_panel.set_properties("nD Materials", rows)
+            return
+        if kind == "sections_root":
+            shell_sections = sum(
+                1
+                for section in self.project.sections.values()
+                if section.section_type in SHELL_SECTION_TYPES
+            )
+            section_types = {
+                str(section.section_type)
+                for section in self.project.sections.values()
+            }
+            self.properties_panel.set_properties(
+                "Sections",
+                [
+                    ("Total Sections", len(self.project.sections)),
+                    ("Beam / Fiber Sections",
+                     len(self.project.sections) - shell_sections),
+                    ("Shell Sections", shell_sections),
+                    ("Section Types", len(section_types)),
+                ],
+            )
+            return
+        if kind == "transformations_root":
+            transformation_types: dict[str, int] = {}
+            for transformation in self.project.transformations.values():
+                key = str(transformation.transformation_type)
+                transformation_types[key] = (
+                    transformation_types.get(key, 0) + 1
+                )
+            rows = [
+                ("Total Transformations",
+                 len(self.project.transformations)),
+                ("Transformation Types",
+                 len(transformation_types)),
+            ]
+            rows.extend(
+                (f"Type · {name}", count)
+                for name, count in sorted(
+                    transformation_types.items()
+                )
+            )
+            self.properties_panel.set_properties(
+                "Transformations",
+                rows,
+            )
+            return
+        if kind == "analyses_root":
+            analysis_types: dict[str, int] = {}
+            for analysis in self.project.analyses.values():
+                key = str(analysis.analysis_type)
+                analysis_types[key] = analysis_types.get(key, 0) + 1
+            active_tag = self.project.active_analysis_tag
+            active_label = (
+                str(active_tag)
+                if active_tag in self.project.analyses
+                else "None"
+            )
+            rows = [
+                ("Total Analyses", len(self.project.analyses)),
+                ("Active Analysis", active_label),
+                ("Analysis Types", len(analysis_types)),
+                ("Result Requests", len(self.project.solution_results)),
+                ("Recorders", len(self.project.recorders)),
+            ]
+            rows.extend(
+                (f"Type · {name}", count)
+                for name, count in sorted(analysis_types.items())
+            )
+            self.properties_panel.set_properties("Analysis", rows)
 
     def _populate_materials_root_context_menu(
         self,
@@ -24952,6 +25051,13 @@ class MainWindow(QMainWindow):
                     lambda checked=False, name=template_name:
                     self._create_analysis_template(name)
                 )
+
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "analyses_root"
+                )
+            )
             exec_menu()
             return
 
@@ -25487,12 +25593,24 @@ class MainWindow(QMainWindow):
 
         if kind == "materials_root":
             self._populate_materials_root_context_menu(menu)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "materials_root"
+                )
+            )
             exec_menu()
             return
 
         if kind == "nd_materials_root":
             create_action = menu.addAction("New nD Material...")
             create_action.triggered.connect(self._create_nd_material)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "nd_materials_root"
+                )
+            )
             exec_menu()
             return
 
@@ -25540,6 +25658,12 @@ class MainWindow(QMainWindow):
             create_action.triggered.connect(self._create_section)
             shell_action = menu.addAction("New Shell Section...")
             shell_action.triggered.connect(self._create_shell_section)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "sections_root"
+                )
+            )
             exec_menu()
             return
 
@@ -25568,6 +25692,12 @@ class MainWindow(QMainWindow):
         if kind == "transformations_root":
             create_action = menu.addAction("New Transformation...")
             create_action.triggered.connect(self._create_transformation)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "transformations_root"
+                )
+            )
             exec_menu()
             return
 
