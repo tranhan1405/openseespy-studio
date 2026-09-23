@@ -12,8 +12,10 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPushButton,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from ..model import FRAME_ELEMENT_TYPES
@@ -119,11 +121,20 @@ class LineGeometryDialog(QDialog):
         initial_point_i: int | None = None,
         initial_point_j: int | None = None,
         mode: str = "full",
+        new_section_callback=None,
+        new_transformation_callback=None,
+        new_material_callback=None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._line = line
         self._points = dict(points)
+        self._sections = dict(sections)
+        self._transformations = dict(transformations)
+        self._materials = dict(materials)
+        self._new_section_callback = new_section_callback
+        self._new_transformation_callback = new_transformation_callback
+        self._new_material_callback = new_material_callback
         self._mode = str(mode).strip().lower()
         if self._mode not in {"geometry", "mesh", "full"}:
             raise ValueError("Line dialog mode must be geometry, mesh, or full.")
@@ -241,53 +252,64 @@ class LineGeometryDialog(QDialog):
         recipe_form.addRow("Frame formulation:", self.frame_type)
 
         self.section = QComboBox()
-        self.section.addItem("Select Section...", None)
-        for tag in sorted(sections):
-            section = sections[tag]
-            self.section.addItem(
-                f"{tag} - {section.name} ({section.section_type})",
-                int(tag),
-            )
-        if line and line.section_tag is not None:
-            idx = self.section.findData(line.section_tag)
-            if idx >= 0:
-                self.section.setCurrentIndex(idx)
-        elif len(sections) == 1:
-            self.section.setCurrentIndex(1)
-        recipe_form.addRow("Section:", self.section)
+        self.section_new = QPushButton("New Section...")
+        self.section_new.setToolTip(
+            "Define a Section now without closing this Line dialog."
+        )
+        self.section_new.setEnabled(callable(self._new_section_callback))
+        self.section_new.clicked.connect(self._create_section_dependency)
+        section_holder = QWidget()
+        section_row = QHBoxLayout(section_holder)
+        section_row.setContentsMargins(0, 0, 0, 0)
+        section_row.setSpacing(4)
+        section_row.addWidget(self.section, 1)
+        section_row.addWidget(self.section_new)
+        self._refresh_section_choices(
+            line.section_tag if line and line.section_tag is not None else None
+        )
+        recipe_form.addRow("Section:", section_holder)
 
         self.transformation = QComboBox()
-        self.transformation.addItem("Select Transformation...", None)
-        for tag in sorted(transformations):
-            transformation = transformations[tag]
-            self.transformation.addItem(
-                f"{tag} - {transformation.name} "
-                f"({transformation.transformation_type})",
-                int(tag),
-            )
-        if line and line.transformation_tag is not None:
-            idx = self.transformation.findData(line.transformation_tag)
-            if idx >= 0:
-                self.transformation.setCurrentIndex(idx)
-        elif len(transformations) == 1:
-            self.transformation.setCurrentIndex(1)
-        recipe_form.addRow("Transformation:", self.transformation)
+        self.transformation_new = QPushButton("New Transformation...")
+        self.transformation_new.setToolTip(
+            "Define a Geometric Transformation now without closing this dialog."
+        )
+        self.transformation_new.setEnabled(
+            callable(self._new_transformation_callback)
+        )
+        self.transformation_new.clicked.connect(
+            self._create_transformation_dependency
+        )
+        transformation_holder = QWidget()
+        transformation_row = QHBoxLayout(transformation_holder)
+        transformation_row.setContentsMargins(0, 0, 0, 0)
+        transformation_row.setSpacing(4)
+        transformation_row.addWidget(self.transformation, 1)
+        transformation_row.addWidget(self.transformation_new)
+        self._refresh_transformation_choices(
+            line.transformation_tag
+            if line and line.transformation_tag is not None
+            else None
+        )
+        recipe_form.addRow("Transformation:", transformation_holder)
 
         self.material = QComboBox()
-        self.material.addItem("Select Material...", None)
-        for tag in sorted(materials):
-            material = materials[tag]
-            self.material.addItem(
-                f"{tag} - {material.name} ({material.material_type})",
-                int(tag),
-            )
-        if line and line.material_tag is not None:
-            idx = self.material.findData(line.material_tag)
-            if idx >= 0:
-                self.material.setCurrentIndex(idx)
-        elif len(materials) == 1:
-            self.material.setCurrentIndex(1)
-        recipe_form.addRow("Truss material:", self.material)
+        self.material_new = QPushButton("New Material...")
+        self.material_new.setToolTip(
+            "Define a Uniaxial Material now without closing this Line dialog."
+        )
+        self.material_new.setEnabled(callable(self._new_material_callback))
+        self.material_new.clicked.connect(self._create_material_dependency)
+        material_holder = QWidget()
+        material_row = QHBoxLayout(material_holder)
+        material_row.setContentsMargins(0, 0, 0, 0)
+        material_row.setSpacing(4)
+        material_row.addWidget(self.material, 1)
+        material_row.addWidget(self.material_new)
+        self._refresh_material_choices(
+            line.material_tag if line and line.material_tag is not None else None
+        )
+        recipe_form.addRow("Truss material:", material_holder)
 
         self.area = _float_spin(
             line.area if line else 1.0,
@@ -364,17 +386,108 @@ class LineGeometryDialog(QDialog):
         self._sync_family()
         self._sync_mesh()
 
+    @staticmethod
+    def _select_combo_tag(combo: QComboBox, tag: int | None) -> None:
+        if tag is None:
+            if combo.count() == 2:
+                combo.setCurrentIndex(1)
+            return
+        index = combo.findData(int(tag))
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
+    def _refresh_section_choices(self, select_tag: int | None = None) -> None:
+        current = self.section.currentData() if self.section.count() else None
+        wanted = select_tag if select_tag is not None else current
+        self.section.clear()
+        self.section.addItem("Select Section...", None)
+        for tag in sorted(self._sections):
+            section = self._sections[tag]
+            self.section.addItem(
+                f"{tag} - {section.name} ({section.section_type})",
+                int(tag),
+            )
+        self._select_combo_tag(self.section, wanted)
+
+    def _refresh_transformation_choices(
+        self,
+        select_tag: int | None = None,
+    ) -> None:
+        current = (
+            self.transformation.currentData()
+            if self.transformation.count()
+            else None
+        )
+        wanted = select_tag if select_tag is not None else current
+        self.transformation.clear()
+        self.transformation.addItem("Select Transformation...", None)
+        for tag in sorted(self._transformations):
+            transformation = self._transformations[tag]
+            self.transformation.addItem(
+                f"{tag} - {transformation.name} "
+                f"({transformation.transformation_type})",
+                int(tag),
+            )
+        self._select_combo_tag(self.transformation, wanted)
+
+    def _refresh_material_choices(self, select_tag: int | None = None) -> None:
+        current = self.material.currentData() if self.material.count() else None
+        wanted = select_tag if select_tag is not None else current
+        self.material.clear()
+        self.material.addItem("Select Material...", None)
+        for tag in sorted(self._materials):
+            material = self._materials[tag]
+            self.material.addItem(
+                f"{tag} - {material.name} ({material.material_type})",
+                int(tag),
+            )
+        self._select_combo_tag(self.material, wanted)
+
+    def _create_section_dependency(self) -> None:
+        if not callable(self._new_section_callback):
+            return
+        section = self._new_section_callback()
+        if section is None:
+            return
+        self._sections[int(section.tag)] = section
+        self._refresh_section_choices(int(section.tag))
+
+    def _create_transformation_dependency(self) -> None:
+        if not callable(self._new_transformation_callback):
+            return
+        transformation = self._new_transformation_callback()
+        if transformation is None:
+            return
+        self._transformations[int(transformation.tag)] = transformation
+        self._refresh_transformation_choices(int(transformation.tag))
+
+    def _create_material_dependency(self) -> None:
+        if not callable(self._new_material_callback):
+            return
+        material = self._new_material_callback()
+        if material is None:
+            return
+        self._materials[int(material.tag)] = material
+        self._refresh_material_choices(int(material.tag))
+
     def _sync_family(self, *_args) -> None:
         frame = self.family.currentText() == "Frame"
         for widget in (
             self.frame_type,
             self.section,
+            self.section_new,
             self.transformation,
+            self.transformation_new,
             self.integration,
             self.integration_points,
         ):
             widget.setEnabled(frame)
-        for widget in (self.material, self.area, self.do_rayleigh):
+        for widget in (
+            self.material,
+            self.material_new,
+            self.area,
+            self.do_rayleigh,
+        ):
             widget.setEnabled(not frame)
 
     def _sync_mesh(self, *_args) -> None:
