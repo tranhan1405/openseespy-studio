@@ -167,6 +167,11 @@ class ModelViewport(QWidget):
         self._interaction_tool = "select"
         self._geometry_sketch_plane = "xy"
         self._geometry_sketch_plane_offset = 0.0
+        self._geometry_sketch_plane_name = "Global XY"
+        self._geometry_sketch_origin = np.asarray((0.0, 0.0, 0.0), dtype=float)
+        self._geometry_sketch_u_axis = np.asarray((1.0, 0.0, 0.0), dtype=float)
+        self._geometry_sketch_v_axis = np.asarray((0.0, 1.0, 0.0), dtype=float)
+        self._geometry_sketch_normal = np.asarray((0.0, 0.0, 1.0), dtype=float)
         self._geometry_sketch_preview: dict[str, object] | None = None
         self._geometry_sketch_grid_visible = False
         self._last_geometry_sketch_qt_pos: tuple[float, float] | None = None
@@ -334,6 +339,56 @@ class ModelViewport(QWidget):
     def interaction_tool(self) -> str:
         return self._interaction_tool
 
+    @staticmethod
+    def _normalized_sketch_axis(value, label: str) -> np.ndarray:
+        axis = np.asarray(tuple(float(item) for item in value), dtype=float)
+        if axis.shape != (3,) or not np.all(np.isfinite(axis)):
+            raise ValueError(f"{label} must be a finite XYZ vector.")
+        length = float(np.linalg.norm(axis))
+        if length <= 1.0e-12:
+            raise ValueError(f"{label} cannot be zero.")
+        return axis / length
+
+    def set_geometry_sketch_frame(
+        self,
+        origin,
+        u_axis,
+        v_axis,
+        *,
+        name: str = "Sketch Plane",
+        key: str = "custom",
+    ) -> None:
+        origin_array = np.asarray(
+            tuple(float(item) for item in origin),
+            dtype=float,
+        )
+        if origin_array.shape != (3,) or not np.all(np.isfinite(origin_array)):
+            raise ValueError("Sketch Plane origin must be finite XYZ.")
+        u = self._normalized_sketch_axis(u_axis, "Sketch Plane U axis")
+        raw_v = self._normalized_sketch_axis(v_axis, "Sketch Plane V axis")
+        raw_v = raw_v - float(np.dot(raw_v, u)) * u
+        v_length = float(np.linalg.norm(raw_v))
+        if v_length <= 1.0e-12:
+            raise ValueError("Sketch Plane U and V axes cannot be parallel.")
+        v = raw_v / v_length
+        normal = np.cross(u, v)
+        normal /= max(float(np.linalg.norm(normal)), 1.0e-12)
+
+        self._geometry_sketch_plane = str(key).strip().lower() or "custom"
+        self._geometry_sketch_plane_name = str(name).strip() or "Sketch Plane"
+        self._geometry_sketch_origin = origin_array
+        self._geometry_sketch_u_axis = u
+        self._geometry_sketch_v_axis = v
+        self._geometry_sketch_normal = normal
+        self._geometry_sketch_plane_offset = float(
+            np.dot(origin_array, normal)
+        )
+        if self._geometry_sketch_grid_visible:
+            self._remove_overlay("geometry-sketch-grid")
+            if self._display_domain == "geometry":
+                self._render_geometry_sketch_grid()
+                self.plotter.render()
+
     def set_geometry_sketch_plane(
         self,
         plane: str,
@@ -345,19 +400,73 @@ class ModelViewport(QWidget):
         numeric_offset = float(offset)
         if not math.isfinite(numeric_offset):
             raise ValueError("Geometry sketch plane offset must be finite.")
-        self._geometry_sketch_plane = normalized
+        frames = {
+            "xy": (
+                (0.0, 0.0, numeric_offset),
+                (1.0, 0.0, 0.0),
+                (0.0, 1.0, 0.0),
+                "Global XY",
+            ),
+            "xz": (
+                (0.0, numeric_offset, 0.0),
+                (1.0, 0.0, 0.0),
+                (0.0, 0.0, 1.0),
+                "Global XZ",
+            ),
+            "yz": (
+                (numeric_offset, 0.0, 0.0),
+                (0.0, 1.0, 0.0),
+                (0.0, 0.0, 1.0),
+                "Global YZ",
+            ),
+        }
+        origin, u_axis, v_axis, name = frames[normalized]
+        self.set_geometry_sketch_frame(
+            origin,
+            u_axis,
+            v_axis,
+            name=name,
+            key=normalized,
+        )
         self._geometry_sketch_plane_offset = numeric_offset
-        if self._geometry_sketch_grid_visible:
-            self._remove_overlay("geometry-sketch-grid")
-            if self._display_domain == "geometry":
-                self._render_geometry_sketch_grid()
-                self.plotter.render()
 
     def geometry_sketch_plane(self) -> tuple[str, float]:
         return (
             self._geometry_sketch_plane,
             float(self._geometry_sketch_plane_offset),
         )
+
+    def geometry_sketch_frame(self) -> dict[str, object]:
+        return {
+            "key": self._geometry_sketch_plane,
+            "name": self._geometry_sketch_plane_name,
+            "origin": tuple(float(value) for value in self._geometry_sketch_origin),
+            "u_axis": tuple(float(value) for value in self._geometry_sketch_u_axis),
+            "v_axis": tuple(float(value) for value in self._geometry_sketch_v_axis),
+            "normal": tuple(float(value) for value in self._geometry_sketch_normal),
+        }
+
+    def geometry_world_to_local(self, xyz) -> tuple[float, float]:
+        point = np.asarray(tuple(float(value) for value in xyz), dtype=float)
+        if point.shape != (3,) or not np.all(np.isfinite(point)):
+            raise ValueError("Geometry point must be finite XYZ.")
+        delta = point - self._geometry_sketch_origin
+        return (
+            float(np.dot(delta, self._geometry_sketch_u_axis)),
+            float(np.dot(delta, self._geometry_sketch_v_axis)),
+        )
+
+    def geometry_local_to_world(
+        self,
+        u: float,
+        v: float,
+    ) -> tuple[float, float, float]:
+        point = (
+            self._geometry_sketch_origin
+            + float(u) * self._geometry_sketch_u_axis
+            + float(v) * self._geometry_sketch_v_axis
+        )
+        return tuple(float(value) for value in point)
 
     def set_geometry_sketch_grid_visible(self, visible: bool) -> None:
         self._geometry_sketch_grid_visible = bool(visible)
@@ -370,15 +479,25 @@ class ModelViewport(QWidget):
         self.plotter.render()
 
     def set_geometry_sketch_plane_offset_from_point(self, xyz) -> None:
-        point = tuple(float(value) for value in xyz)
-        if len(point) != 3:
-            raise ValueError("Sketch plane point requires X, Y, Z.")
-        if not all(math.isfinite(value) for value in point):
-            raise ValueError("Sketch plane point coordinates must be finite.")
-        axis = {"xy": 2, "xz": 1, "yz": 0}[
-            self._geometry_sketch_plane
-        ]
-        self._geometry_sketch_plane_offset = float(point[axis])
+        point = np.asarray(tuple(float(value) for value in xyz), dtype=float)
+        if point.shape != (3,) or not np.all(np.isfinite(point)):
+            raise ValueError("Sketch plane point requires finite X, Y, Z.")
+        signed = float(
+            np.dot(
+                point - self._geometry_sketch_origin,
+                self._geometry_sketch_normal,
+            )
+        )
+        self._geometry_sketch_origin = (
+            self._geometry_sketch_origin
+            + signed * self._geometry_sketch_normal
+        )
+        self._geometry_sketch_plane_offset = float(
+            np.dot(
+                self._geometry_sketch_origin,
+                self._geometry_sketch_normal,
+            )
+        )
         if self._geometry_sketch_grid_visible:
             self._remove_overlay("geometry-sketch-grid")
             if self._display_domain == "geometry":
@@ -397,9 +516,8 @@ class ModelViewport(QWidget):
         y: int,
     ) -> tuple[float, float, float] | None:
         renderer = self.plotter.renderer
-        plane = self._geometry_sketch_plane
-        offset = float(self._geometry_sketch_plane_offset)
-        axis = {"xy": 2, "xz": 1, "yz": 0}[plane]
+        origin = self._geometry_sketch_origin
+        normal = self._geometry_sketch_normal
 
         def normalized_world(value) -> np.ndarray | None:
             if value is None or len(value) < 4:
@@ -419,17 +537,16 @@ class ModelViewport(QWidget):
                 return None
             return point
 
-        # In a matching orthographic view, every point on the sketch plane
-        # has the same display depth. Unproject the mouse pixel at that exact
-        # depth instead of relying on the current camera clipping interval.
-        # This is the stable CAD-style path used by Draw Line/Rectangle.
-        if self._current_view == plane:
-            reference = [0.0, 0.0, 0.0]
-            reference[axis] = offset
+        # When looking normal to the active workplane, all plane points share
+        # one display depth. This is the most stable CAD-like unprojection.
+        if self._current_view in {
+            self._geometry_sketch_plane,
+            "sketch",
+        }:
             renderer.SetWorldPoint(
-                float(reference[0]),
-                float(reference[1]),
-                float(reference[2]),
+                float(origin[0]),
+                float(origin[1]),
+                float(origin[2]),
                 1.0,
             )
             renderer.WorldToDisplay()
@@ -441,12 +558,10 @@ class ModelViewport(QWidget):
                     renderer.DisplayToWorld()
                     point = normalized_world(renderer.GetWorldPoint())
                     if point is not None:
-                        point[axis] = offset
+                        distance = float(np.dot(point - origin, normal))
+                        point = point - distance * normal
                         return tuple(float(value) for value in point)
 
-        # Perspective/ISO fallback: intersect the camera ray with the active
-        # workplane. The plane may legitimately lie beyond the current far
-        # clip, so only intersections behind the ray origin are rejected.
         def display_world(depth: float) -> np.ndarray | None:
             renderer.SetDisplayPoint(float(x), float(y), float(depth))
             renderer.DisplayToWorld()
@@ -457,18 +572,17 @@ class ModelViewport(QWidget):
         if near is None or far is None:
             return None
         direction = far - near
-        if not np.all(np.isfinite(direction)):
-            return None
-        denominator = float(direction[axis])
+        denominator = float(np.dot(direction, normal))
         if not math.isfinite(denominator) or abs(denominator) <= 1.0e-14:
             return None
-        t = (offset - float(near[axis])) / denominator
+        t = float(np.dot(origin - near, normal)) / denominator
         if not math.isfinite(t) or t < -1.0e-6:
             return None
         point = near + t * direction
-        point[axis] = offset
         if not np.all(np.isfinite(point)):
             return None
+        distance = float(np.dot(point - origin, normal))
+        point = point - distance * normal
         return tuple(float(value) for value in point)
 
     def clear_frame_anchor(self, *, render: bool = True) -> None:
@@ -550,65 +664,48 @@ class ModelViewport(QWidget):
         ):
             return
 
-        if self._points:
-            coords = np.asarray(
-                [point.xyz for point in self._points.values()],
-                dtype=float,
-            )
-            mins = coords.min(axis=0)
-            maxs = coords.max(axis=0)
+        local_points: list[tuple[float, float]] = []
+        for point in self._points.values():
+            try:
+                local_points.append(self.geometry_world_to_local(point.xyz))
+            except ValueError:
+                continue
+        if local_points:
+            values = np.asarray(local_points, dtype=float)
+            min_u, min_v = values.min(axis=0)
+            max_u, max_v = values.max(axis=0)
         else:
-            mins = np.asarray((-5.0, -5.0, -5.0), dtype=float)
-            maxs = np.asarray((5.0, 5.0, 5.0), dtype=float)
+            min_u = min_v = -5.0
+            max_u = max_v = 5.0
 
-        plane = self._geometry_sketch_plane
-        offset = float(self._geometry_sketch_plane_offset)
-        axes = {
-            "xy": (0, 1, 2),
-            "xz": (0, 2, 1),
-            "yz": (1, 2, 0),
-        }[plane]
-        a_axis, b_axis, fixed_axis = axes
-        span = max(
-            float(maxs[a_axis] - mins[a_axis]),
-            float(maxs[b_axis] - mins[b_axis]),
-            10.0,
-        )
+        span = max(float(max_u - min_u), float(max_v - min_v), 10.0)
         spacing = self._nice_geometry_grid_spacing(span)
         half = max(6.0 * spacing, 0.75 * span)
-        center_a = 0.5 * float(mins[a_axis] + maxs[a_axis])
-        center_b = 0.5 * float(mins[b_axis] + maxs[b_axis])
-        start_a = math.floor((center_a - half) / spacing) * spacing
-        end_a = math.ceil((center_a + half) / spacing) * spacing
-        start_b = math.floor((center_b - half) / spacing) * spacing
-        end_b = math.ceil((center_b + half) / spacing) * spacing
+        center_u = 0.5 * float(min_u + max_u)
+        center_v = 0.5 * float(min_v + max_v)
+        start_u = math.floor((center_u - half) / spacing) * spacing
+        end_u = math.ceil((center_u + half) / spacing) * spacing
+        start_v = math.floor((center_v - half) / spacing) * spacing
+        end_v = math.ceil((center_v + half) / spacing) * spacing
 
         points: list[tuple[float, float, float]] = []
         lines: list[int] = []
-
-        def point(a_value: float, b_value: float):
-            xyz = [0.0, 0.0, 0.0]
-            xyz[a_axis] = float(a_value)
-            xyz[b_axis] = float(b_value)
-            xyz[fixed_axis] = offset
-            return tuple(xyz)
-
-        count_a = int(round((end_a - start_a) / spacing))
-        count_b = int(round((end_b - start_b) / spacing))
-        for index in range(count_a + 1):
-            value = start_a + index * spacing
+        count_u = int(round((end_u - start_u) / spacing))
+        count_v = int(round((end_v - start_v) / spacing))
+        for index in range(count_u + 1):
+            value = start_u + index * spacing
             base = len(points)
             points.extend((
-                point(value, start_b),
-                point(value, end_b),
+                self.geometry_local_to_world(value, start_v),
+                self.geometry_local_to_world(value, end_v),
             ))
             lines.extend((2, base, base + 1))
-        for index in range(count_b + 1):
-            value = start_b + index * spacing
+        for index in range(count_v + 1):
+            value = start_v + index * spacing
             base = len(points)
             points.extend((
-                point(start_a, value),
-                point(end_a, value),
+                self.geometry_local_to_world(start_u, value),
+                self.geometry_local_to_world(end_u, value),
             ))
             lines.extend((2, base, base + 1))
 
@@ -6905,6 +7002,31 @@ class ModelViewport(QWidget):
 
         for button in self.view_group.buttons():
             button.setChecked(button.property("view_name") == normalized)
+
+    def view_active_sketch_plane(self, *, render: bool = True) -> None:
+        origin = self._geometry_sketch_origin
+        normal = self._geometry_sketch_normal
+        up = self._geometry_sketch_v_axis
+        camera = self.plotter.camera
+        current_position = np.asarray(camera.GetPosition(), dtype=float)
+        current_focal = np.asarray(camera.GetFocalPoint(), dtype=float)
+        distance = max(
+            float(np.linalg.norm(current_position - current_focal)),
+            10.0,
+        )
+        camera.SetFocalPoint(*origin)
+        camera.SetPosition(*(origin + normal * distance))
+        camera.SetViewUp(*up)
+        camera.SetParallelProjection(True)
+        camera.OrthogonalizeViewUp()
+        self._current_view = "sketch"
+        self._invalidate_geometry_sketch_cursor_preview(render=False)
+        self.plotter.reset_camera()
+        self.plotter.camera.zoom(1.18)
+        for button in self.view_group.buttons():
+            button.setChecked(False)
+        if render:
+            self.plotter.render()
 
     def fit_view(self) -> None:
         if self._selected_nodes or self._selected_elements:
