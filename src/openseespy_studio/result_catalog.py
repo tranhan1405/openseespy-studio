@@ -34,6 +34,44 @@ def result_choices_for_analysis(
 ) -> list[ResultChoice]:
     """Return the shared result catalog for Solution and Job menus."""
     kind = str(analysis_type)
+    if kind == "Response Spectrum":
+        return [
+            ResultChoice(
+                "Response Spectrum",
+                "Component X",
+                "ResponseSpectrum",
+                "Sa – X",
+                {"curve": "component_x"},
+            ),
+            ResultChoice(
+                "Response Spectrum",
+                "Component Y",
+                "ResponseSpectrum",
+                "Sa – Y",
+                {"curve": "component_y"},
+            ),
+            ResultChoice(
+                "Response Spectrum",
+                "RotD50",
+                "ResponseSpectrum",
+                "RotD50",
+                {"curve": "rotd50"},
+            ),
+            ResultChoice(
+                "Response Spectrum",
+                "RotD100",
+                "ResponseSpectrum",
+                "RotD100",
+                {"curve": "rotd100"},
+            ),
+            ResultChoice(
+                "Response Spectrum",
+                "Spectrum Data",
+                "ResponseSpectrum",
+                "Spectrum Data",
+                {"curve": "table"},
+            ),
+        ]
     if kind == "Modal":
         return [
             ResultChoice(
