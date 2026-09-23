@@ -9380,6 +9380,12 @@ class MainWindow(QMainWindow):
             self._create_material,
         )
 
+    def _create_node_dependency(self):
+        return self._capture_created_dependency(
+            lambda: self.model.nodes,
+            self._create_node,
+        )
+
     def _create_section_dependency(self):
         return self._capture_created_dependency(
             lambda: self.project.sections,
@@ -18814,6 +18820,7 @@ class MainWindow(QMainWindow):
             next_tag=self.project.next_constraint_tag(),
             initial_retained=retained,
             initial_constrained=constrained,
+            new_node_callback=self._create_node_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -18844,6 +18851,7 @@ class MainWindow(QMainWindow):
 
         dialog = ConstraintDialog(
             constraint=constraint,
+            new_node_callback=self._create_node_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -24454,7 +24462,11 @@ class MainWindow(QMainWindow):
             )
             return
 
-        dialog = CalibrationDialog(self.project, self)
+        dialog = CalibrationDialog(
+            self.project,
+            self,
+            new_material_callback=self._create_material_dependency,
+        )
         if not dialog.exec():
             return
         try:
