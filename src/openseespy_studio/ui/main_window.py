@@ -5491,7 +5491,7 @@ class MainWindow(QMainWindow):
                 job_plot_ref[1],
             )
         elif job_id is not None:
-            self._select_job_result(job_id)
+            self._show_job_properties(job_id)
         elif show_jobs_root:
             self._show_jobs_summary()
 
