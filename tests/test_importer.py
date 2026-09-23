@@ -385,6 +385,9 @@ pattern('UniformExcitation', 2, 1, '-accel', 2)
     assert series.values == [0.0, 0.10, -0.20, 3.0e-2]
     assert result.source_name == "cantilever_eq.py"
     assert result.linked_files == ["A10000.dat"]
+    detection = dict(result.detection_groups)
+    assert "1 Path Time Series → A10000.dat" in detection["Loads"]
+    assert "1 UniformExcitation Pattern" in detection["Loads"]
 
     pattern = result.project.load_patterns[2]
     assert pattern.pattern_type == "UniformExcitation"
@@ -595,6 +598,8 @@ timeSeries('Path', 2, '-filePath', record+'.dat', '-dt', dt, '-factor', 386.4)
     assert result.source_name == "earthquake.py"
     assert result.linked_files == ["elCentro.at2", "ReadRecord.py"]
     assert "elCentro.dat" not in result.linked_files
+    detection = dict(result.detection_groups)
+    assert "1 Path Time Series → elCentro.at2" in detection["Loads"]
 
 
 def test_importer_recovers_bounded_transient_loop_and_direct_rayleigh(tmp_path):
@@ -678,6 +683,9 @@ while ok == 0 and tCurrent < tFinal:
     assert analysis.rayleigh_beta_k == 0.0
     assert analysis.rayleigh_beta_k_init == 0.0
     assert analysis.rayleigh_beta_k_comm == 0.000625
+    detection = dict(result.detection_groups)
+    assert "Transient Analysis" in detection["Analysis"]
+    assert "Newmark Integrator" in detection["Analysis"]
 
     generated = to_openseespy(
         result.project.model,
