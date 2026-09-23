@@ -2358,7 +2358,7 @@ class MainWindow(QMainWindow):
             "Distance",
             "ruler",
             self._activate_measure_distance,
-            "Measure distance and XYZ offsets between FE nodes or Geometry points",
+            "Measure distance and XYZ offsets with Geometry endpoint, midpoint, intersection and grid snapping",
             checkable=True,
         )
         self._make_action(
@@ -5394,6 +5394,9 @@ class MainWindow(QMainWindow):
         self.viewport.geometry_sketch_finished.connect(
             self._finish_geometry_sketch
         )
+        self.viewport.measure_moved.connect(
+            self._viewport_measure_moved
+        )
         self.viewport.view_requested.connect(self._set_view_from_ui)
         self.viewport.set_selection_filter(self.selection.filter)
 
@@ -5434,6 +5437,7 @@ class MainWindow(QMainWindow):
         self._measure_first_xyz = None
         self._measure_first_label = None
         self.viewport.clear_measure_anchor(render=False)
+        self.viewport.clear_measure_snap_preview(render=False)
         action = self.actions.get("measure_distance")
         if action is not None:
             action.setChecked(False)
@@ -6477,7 +6481,8 @@ class MainWindow(QMainWindow):
         self._measure_first_xyz = None
         self._measure_first_label = None
         self.viewport.clear_measure_anchor(render=False)
-        self.viewport.set_interaction_tool("select")
+        self.viewport.clear_measure_snap_preview(render=False)
+        self.viewport.set_interaction_tool("measure")
         self.viewport.set_selection_filter(
             "all" if geometry_mode else "node"
         )
@@ -6488,7 +6493,7 @@ class MainWindow(QMainWindow):
         self.viewport.plotter.render()
         self.status_message.setText(
             (
-                "Measure Geometry: click first point/location"
+                "Measure Geometry: click first point/location · snap = endpoint / midpoint / intersection / grid"
                 if geometry_mode
                 else "Measure Distance: click the first node"
             )
@@ -6498,25 +6503,25 @@ class MainWindow(QMainWindow):
         self,
         payload: dict[str, object],
     ) -> tuple[tuple[float, float, float], str] | None:
+        if self.viewport.display_domain() == "geometry":
+            snap = self._geometry_sketch_snap(payload)
+            if snap is None:
+                return None
+            return (
+                tuple(float(value) for value in snap["xyz"]),
+                str(snap.get("label") or "Free"),
+            )
+
         kind = payload.get("kind")
         tag = payload.get("tag")
-        if kind == "geometry_point" and tag is not None:
-            point = self.project.points.get(int(tag))
-            if point is not None:
+        if kind == "node" and tag is not None:
+            node = self.model.nodes.get(int(tag))
+            if node is not None:
                 return (
-                    tuple(float(value) for value in point.xyz),
-                    f"P{int(tag)}",
+                    tuple(float(value) for value in node.xyz),
+                    f"N{int(tag)}",
                 )
-        world = payload.get("world")
-        if world is None:
-            return None
-        try:
-            xyz = tuple(float(value) for value in world)
-        except (TypeError, ValueError):
-            return None
-        if len(xyz) != 3 or not all(math.isfinite(value) for value in xyz):
-            return None
-        return xyz, "Free"
+        return None
 
     def _handle_measure_click(
         self,
@@ -6527,97 +6532,70 @@ class MainWindow(QMainWindow):
             return False
 
         geometry_mode = self.viewport.display_domain() == "geometry"
-        kind = payload.get("kind")
-        tag = payload.get("tag")
-
-        if geometry_mode:
-            picked = self._measurement_point_from_payload(payload)
-            if picked is None:
-                self.status_message.setText(
-                    "Measure Geometry: click a Geometry Point or "
-                    "location on the active sketch plane"
+        picked = self._measurement_point_from_payload(payload)
+        if picked is None:
+            self.status_message.setText(
+                (
+                    "Measure Geometry: move near an endpoint, midpoint, "
+                    "intersection or grid point"
+                    if geometry_mode
+                    else "Measure Distance: click a model node"
                 )
-                return True
-            xyz, label = picked
-            if self._measure_first_xyz is None:
-                self._measure_first_xyz = xyz
-                self._measure_first_label = label
-                self.viewport.show_measure_anchor_at(xyz)
-                self.status_message.setText(
-                    f"Measure Geometry: {label} selected · "
-                    "click second point/location"
+            )
+            return True
+
+        xyz, label = picked
+        if self._measure_first_xyz is None:
+            self._measure_first_xyz = xyz
+            self._measure_first_label = label
+            self._measure_first_node_tag = (
+                int(payload["tag"])
+                if (
+                    not geometry_mode
+                    and payload.get("kind") == "node"
+                    and payload.get("tag") is not None
                 )
-                return True
-
-            first_xyz = self._measure_first_xyz
-            first_label = self._measure_first_label or "P1"
-            try:
-                measurement = self.viewport.add_point_distance_measurement(
-                    first_xyz,
-                    xyz,
-                    first_label=first_label,
-                    second_label=label,
-                )
-            except ValueError as exc:
-                self.status_message.setText(str(exc))
-                return True
-
-            self._measure_first_xyz = None
-            self._measure_first_label = None
-            unit = str(self.project.units.get("length", "")).strip()
-            suffix = f" {unit}" if unit else ""
+                else None
+            )
+            self.viewport.show_measure_anchor_at(xyz)
+            self.viewport.clear_measure_snap_preview(render=False)
             self.status_message.setText(
-                f"Measured {first_label} → {label}: "
-                f"L={measurement['distance']:.4g}{suffix}, "
-                f"ΔX={measurement['dx']:.4g}, "
-                f"ΔY={measurement['dy']:.4g}, "
-                f"ΔZ={measurement['dz']:.4g} · "
-                "click another first point"
+                f"Measure: {label} selected · click second point"
             )
             return True
 
-        if kind != "node" or tag is None:
+        first_xyz = self._measure_first_xyz
+        first_label = self._measure_first_label or "P1"
+        if math.dist(first_xyz, xyz) <= 1.0e-15:
             self.status_message.setText(
-                "Measure Distance: click a model node"
+                "Measure: choose a different second point"
             )
             return True
 
-        node_tag = int(tag)
-        if self._measure_first_node_tag is None:
-            self._measure_first_node_tag = node_tag
-            self.viewport.show_measure_anchor(node_tag)
-            self.status_message.setText(
-                f"Measure Distance: node {node_tag} selected · "
-                "click the second node"
-            )
-            return True
-
-        if node_tag == self._measure_first_node_tag:
-            self.status_message.setText(
-                "Measure Distance: choose a different second node"
-            )
-            return True
-
-        first_tag = self._measure_first_node_tag
         try:
-            measurement = self.viewport.add_distance_measurement(
-                first_tag,
-                node_tag,
+            measurement = self.viewport.add_point_distance_measurement(
+                first_xyz,
+                xyz,
+                first_label=first_label,
+                second_label=label,
             )
         except ValueError as exc:
             self.status_message.setText(str(exc))
             return True
 
         self._measure_first_node_tag = None
+        self._measure_first_xyz = None
+        self._measure_first_label = None
+        self.viewport.clear_measure_snap_preview(render=False)
         unit = str(self.project.units.get("length", "")).strip()
         suffix = f" {unit}" if unit else ""
         self.status_message.setText(
-            f"Measured node {first_tag} → {node_tag}: "
+            f"Measured {first_label} → {label}: "
             f"L={measurement['distance']:.4g}{suffix}, "
             f"ΔX={measurement['dx']:.4g}, "
             f"ΔY={measurement['dy']:.4g}, "
             f"ΔZ={measurement['dz']:.4g} · "
-            "click another first node"
+            "click another first point"
         )
         return True
 
@@ -6625,6 +6603,7 @@ class MainWindow(QMainWindow):
         self._measure_first_node_tag = None
         self._measure_first_xyz = None
         self._measure_first_label = None
+        self.viewport.clear_measure_snap_preview(render=False)
         self.viewport.clear_measurements()
         if (
             self.actions.get("measure_distance") is not None
@@ -7661,6 +7640,32 @@ class MainWindow(QMainWindow):
                 cursor=xyz,
                 snap_label=label,
             )
+
+    def _viewport_measure_moved(
+        self,
+        payload: object,
+    ) -> None:
+        action = self.actions.get("measure_distance")
+        if (
+            action is None
+            or not action.isChecked()
+            or not isinstance(payload, dict)
+        ):
+            return
+        if self.viewport.display_domain() != "geometry":
+            return
+
+        snap = self._geometry_sketch_snap(payload)
+        if snap is None:
+            self.viewport.clear_measure_snap_preview(render=True)
+            return
+        xyz = tuple(float(value) for value in snap["xyz"])
+        label = str(snap.get("label") or "Free")
+        self.viewport.show_measure_snap_preview(
+            xyz,
+            label=label,
+            anchor=self._measure_first_xyz,
+        )
 
     def _viewport_entity_clicked(self, payload: object) -> None:
         if not isinstance(payload, dict):
