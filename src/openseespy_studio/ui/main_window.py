@@ -153,7 +153,7 @@ from ..line_mesher import (
     trim_extend_lines_to_line,
 )
 from ..section_response import section_response_sources
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LineGeometryData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LineGeometryData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SketchPlaneData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
     build_worker_pythonpath,
     opensees_material_requires_runtime_probe,
@@ -1626,6 +1626,8 @@ class MainWindow(QMainWindow):
         self._geometry_line_anchor_snap: dict[str, object] | None = None
         self._geometry_surface_point_tags: list[int] = []
         self._geometry_surface_anchor_snap: dict[str, object] | None = None
+        self._active_sketch_plane_tag: int | None = None
+        self._active_global_sketch_plane = "xy"
         self._geometry_sketch_intersections = []
         self._geometry_trim_subject_tag: int | None = None
         self._geometry_trim_endpoint = "nearest"
@@ -2108,6 +2110,20 @@ class MainWindow(QMainWindow):
             "element",
             self._create_truss,
             "Create a Truss element by entering nodes, area, and material",
+        )
+        self._make_action(
+            "sketch_plane_offset",
+            "Offset Plane...",
+            "grid",
+            self._create_offset_sketch_plane,
+            "Create a persistent construction plane offset from global XY/XZ/YZ",
+        )
+        self._make_action(
+            "sketch_plane_3point",
+            "3-Point Plane...",
+            "grid",
+            self._create_three_point_sketch_plane,
+            "Create a construction plane through three Geometry Points",
         )
         self._make_action(
             "point_geometry",
@@ -3092,6 +3108,32 @@ class MainWindow(QMainWindow):
         truss_popup.addAction(self.actions["truss_input"])
         truss_button.setMenu(truss_popup)
 
+        geometry_plane_button = QToolButton()
+        geometry_plane_button.setObjectName("RibbonLargeButton")
+        geometry_plane_button.setDefaultAction(
+            self.actions["sketch_plane_offset"]
+        )
+        geometry_plane_button.setText("Plane")
+        geometry_plane_button.setIcon(
+            self.actions["sketch_plane_offset"].icon()
+        )
+        geometry_plane_button.setIconSize(QSize(28, 28))
+        geometry_plane_button.setToolButtonStyle(
+            Qt.ToolButtonTextUnderIcon
+        )
+        geometry_plane_button.setPopupMode(
+            QToolButton.MenuButtonPopup
+        )
+        geometry_plane_button.setAutoRaise(True)
+        geometry_plane_popup = QMenu(geometry_plane_button)
+        geometry_plane_popup.addAction(
+            self.actions["sketch_plane_offset"]
+        )
+        geometry_plane_popup.addAction(
+            self.actions["sketch_plane_3point"]
+        )
+        geometry_plane_button.setMenu(geometry_plane_popup)
+
         geometry_line_button = QToolButton()
         geometry_line_button.setObjectName("RibbonLargeButton")
         geometry_line_button.setDefaultAction(
@@ -3194,6 +3236,7 @@ class MainWindow(QMainWindow):
             "Create",
             small=("point_geometry",),
             widgets=(
+                geometry_plane_button,
                 geometry_line_button,
                 geometry_surface_button,
             ),
@@ -4223,6 +4266,38 @@ class MainWindow(QMainWindow):
         geometry.setExpanded(True)
         root.addChild(geometry)
 
+        planes = QTreeWidgetItem([
+            f"Planes ({3 + len(self.project.sketch_planes)})"
+        ])
+        planes.setIcon(0, studio_icon("grid"))
+        planes.setData(0, Qt.UserRole, ("planes_root", None))
+        planes.setExpanded(True)
+        geometry.addChild(planes)
+
+        for key, label in (
+            ("xy", "Global XY"),
+            ("xz", "Global XZ"),
+            ("yz", "Global YZ"),
+        ):
+            item = QTreeWidgetItem([label])
+            item.setIcon(0, studio_icon("grid"))
+            item.setData(
+                0,
+                Qt.UserRole,
+                ("sketch_plane_global", key),
+            )
+            planes.addChild(item)
+
+        for tag in sorted(self.project.sketch_planes):
+            plane = self.project.sketch_planes[tag]
+            active = "  [Active]" if tag == self._active_sketch_plane_tag else ""
+            item = QTreeWidgetItem([
+                f"Plane {tag} · {plane.name}{active}"
+            ])
+            item.setIcon(0, studio_icon("grid"))
+            item.setData(0, Qt.UserRole, ("sketch_plane", tag))
+            planes.addChild(item)
+
         points = QTreeWidgetItem([
             f"Points ({len(self.project.points)})"
         ])
@@ -4973,6 +5048,8 @@ class MainWindow(QMainWindow):
     def _tree_selection_changed(self) -> None:
         nodes: set[int] = set()
         elements: set[int] = set()
+        sketch_plane_tag: int | None = None
+        sketch_plane_global: str | None = None
         point_geometry_tag: int | None = None
         line_geometry_tag: int | None = None
         surface_geometry_tag: int | None = None
@@ -5019,6 +5096,10 @@ class MainWindow(QMainWindow):
                     named_selection_name = str(tag)
                     nodes.update(selection_set.node_tags)
                     elements.update(selection_set.element_tags)
+            elif kind == "sketch_plane":
+                sketch_plane_tag = int(tag)
+            elif kind == "sketch_plane_global":
+                sketch_plane_global = str(tag)
             elif kind == "point_geometry":
                 point_geometry_tag = int(tag)
             elif kind in {"line_geometry", "line_mesh_recipe"}:
@@ -5080,6 +5161,9 @@ class MainWindow(QMainWindow):
 
         geometry_tree_kinds = {
             "geometry_root",
+            "planes_root",
+            "sketch_plane",
+            "sketch_plane_global",
             "points_root",
             "lines_root",
             "surfaces_root",
@@ -5162,7 +5246,11 @@ class MainWindow(QMainWindow):
                     elements=elements,
                 )
 
-        if point_geometry_tag is not None:
+        if sketch_plane_tag is not None:
+            self._show_sketch_plane_properties(sketch_plane_tag)
+        elif sketch_plane_global is not None:
+            self._show_global_sketch_plane_properties(sketch_plane_global)
+        elif point_geometry_tag is not None:
             self._show_point_geometry_properties(point_geometry_tag)
         elif line_geometry_tag is not None:
             self._show_line_geometry_properties(line_geometry_tag)
@@ -5342,34 +5430,62 @@ class MainWindow(QMainWindow):
         )
 
     def _active_geometry_sketch_plane(self) -> str:
+        if (
+            self._active_sketch_plane_tag is not None
+            and self._active_sketch_plane_tag in self.project.sketch_planes
+        ):
+            return f"plane:{self._active_sketch_plane_tag}"
         view = self.viewport.current_view().lower()
         if view in {"xy", "xz", "yz"}:
-            return view
-        plane, _offset = self.viewport.geometry_sketch_plane()
-        return str(plane).strip().lower()
+            self._active_global_sketch_plane = view
+        return self._active_global_sketch_plane
 
     def _prepare_geometry_sketch_view(
         self,
         plane: str,
         offset: float,
     ) -> None:
-        """Make the active workplane visible and directly sketchable."""
+        """Make the active construction plane visible and sketchable."""
         normalized = str(plane).strip().lower()
-        self.viewport.set_geometry_sketch_plane(normalized, float(offset))
-
-        # A blank ISO viewport is ambiguous for 2D sketching and can leave the
-        # camera clipping range unrelated to the workplane. Enter the matching
-        # orthographic view first; users can switch back to ISO afterwards.
-        if self.viewport.current_view().lower() == "iso":
-            self.viewport.set_view(normalized, render=False)
+        if normalized.startswith("plane:"):
+            try:
+                tag = int(normalized.split(":", 1)[1])
+            except (TypeError, ValueError):
+                tag = -1
+            custom = self.project.sketch_planes.get(tag)
+            if custom is None:
+                self._active_sketch_plane_tag = None
+                normalized = self._active_global_sketch_plane
+                self.viewport.set_geometry_sketch_plane(
+                    normalized,
+                    float(offset),
+                )
+            else:
+                self._active_sketch_plane_tag = tag
+                self.viewport.set_geometry_sketch_frame(
+                    custom.origin,
+                    custom.u_axis,
+                    custom.v_axis,
+                    name=custom.name,
+                    key=f"plane:{tag}",
+                )
+                if self.viewport.current_view().lower() != "sketch":
+                    self.viewport.view_active_sketch_plane(render=False)
+        else:
+            self._active_sketch_plane_tag = None
+            self._active_global_sketch_plane = normalized
+            self.viewport.set_geometry_sketch_plane(
+                normalized,
+                float(offset),
+            )
+            if self.viewport.current_view().lower() in {"iso", "sketch"}:
+                self.viewport.set_view(normalized, render=False)
 
         grid_action = self.actions.get("geometry_grid")
         if grid_action is not None:
             grid_action.setChecked(True)
         self.viewport.set_geometry_sketch_grid_visible(True)
 
-        # With no geometry yet, fit to the newly-created sketch grid so the
-        # workplane establishes a sane camera/clipping range before click #1.
         if (
             not self.project.points
             and not self.project.lines
@@ -5410,6 +5526,8 @@ class MainWindow(QMainWindow):
             return
 
         if target in {"xy", "xz", "yz"}:
+            self._active_sketch_plane_tag = None
+            self._active_global_sketch_plane = target
             self._reset_active_geometry_sketch_anchor()
             self.viewport.set_geometry_sketch_plane(target, 0.0)
             self.viewport.set_interaction_tool("geometry_sketch")
@@ -5472,7 +5590,7 @@ class MainWindow(QMainWindow):
             action.setChecked(True)
         self.viewport.plotter.render()
         self.status_message.setText(
-            f"Draw Polyline · {plane.upper()} plane · "
+            f"Draw Polyline · {self.viewport.geometry_sketch_frame()['name']} · "
             "click anywhere; snap = endpoint / midpoint / intersection · "
             "right-click or Esc to finish"
         )
@@ -5513,7 +5631,7 @@ class MainWindow(QMainWindow):
             action.setChecked(True)
         self.viewport.plotter.render()
         self.status_message.setText(
-            f"Draw Rectangle · {plane.upper()} plane · "
+            f"Draw Rectangle · {self.viewport.geometry_sketch_frame()['name']} · "
             "click two diagonal corners · right-click or Esc to finish"
         )
 
@@ -6163,11 +6281,14 @@ class MainWindow(QMainWindow):
         return max(min(scale * 1.0e-9, 1.0e-6), 1.0e-9)
 
     def _geometry_point_on_active_sketch_plane(self, xyz) -> bool:
-        plane, offset = self.viewport.geometry_sketch_plane()
-        axis = {"xy": 2, "xz": 1, "yz": 0}[plane]
-        return abs(float(xyz[axis]) - float(offset)) <= (
-            self._geometry_sketch_tolerance()
-        )
+        frame = self.viewport.geometry_sketch_frame()
+        origin = tuple(float(value) for value in frame["origin"])
+        normal = tuple(float(value) for value in frame["normal"])
+        distance = abs(sum(
+            (float(xyz[index]) - origin[index]) * normal[index]
+            for index in range(3)
+        ))
+        return distance <= self._geometry_sketch_tolerance()
 
     def _geometry_sketch_snap(
         self,
@@ -6341,23 +6462,31 @@ class MainWindow(QMainWindow):
                 anchor_xyz = tuple(float(value) for value in anchor.xyz)
 
         if anchor_xyz is not None:
-            plane, offset = self.viewport.geometry_sketch_plane()
-            a = anchor_xyz
-            if plane == "xy":
-                inferred = (
-                    ("Horizontal", (xyz[0], a[1], offset)),
-                    ("Vertical", (a[0], xyz[1], offset)),
+            try:
+                anchor_u, anchor_v = (
+                    self.viewport.geometry_world_to_local(anchor_xyz)
                 )
-            elif plane == "xz":
-                inferred = (
-                    ("Horizontal", (xyz[0], offset, a[2])),
-                    ("Vertical", (a[0], offset, xyz[2])),
+                cursor_u, cursor_v = (
+                    self.viewport.geometry_world_to_local(xyz)
                 )
-            else:
                 inferred = (
-                    ("Horizontal", (offset, xyz[1], a[2])),
-                    ("Vertical", (offset, a[1], xyz[2])),
+                    (
+                        "Horizontal",
+                        self.viewport.geometry_local_to_world(
+                            cursor_u,
+                            anchor_v,
+                        ),
+                    ),
+                    (
+                        "Vertical",
+                        self.viewport.geometry_local_to_world(
+                            anchor_u,
+                            cursor_v,
+                        ),
+                    ),
                 )
+            except ValueError:
+                inferred = ()
             inference_candidates = []
             for label, candidate in inferred:
                 px, py = self.viewport.geometry_world_to_screen(candidate)
@@ -6527,28 +6656,13 @@ class MainWindow(QMainWindow):
         tuple[float, float, float],
         tuple[float, float, float],
     ]:
-        a = tuple(float(value) for value in first)
-        c = tuple(float(value) for value in opposite)
-        plane, offset = self.viewport.geometry_sketch_plane()
-        if plane == "xy":
-            return (
-                (a[0], a[1], offset),
-                (c[0], a[1], offset),
-                (c[0], c[1], offset),
-                (a[0], c[1], offset),
-            )
-        if plane == "xz":
-            return (
-                (a[0], offset, a[2]),
-                (c[0], offset, a[2]),
-                (c[0], offset, c[2]),
-                (a[0], offset, c[2]),
-            )
+        a_u, a_v = self.viewport.geometry_world_to_local(first)
+        c_u, c_v = self.viewport.geometry_world_to_local(opposite)
         return (
-            (offset, a[1], a[2]),
-            (offset, c[1], a[2]),
-            (offset, c[1], c[2]),
-            (offset, a[1], c[2]),
+            self.viewport.geometry_local_to_world(a_u, a_v),
+            self.viewport.geometry_local_to_world(c_u, a_v),
+            self.viewport.geometry_local_to_world(c_u, c_v),
+            self.viewport.geometry_local_to_world(a_u, c_v),
         )
 
     def _handle_geometry_line_sketch_click(
