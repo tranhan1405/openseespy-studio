@@ -1033,3 +1033,70 @@ def test_eighteenth_prerequisite_link_batch():
     assert "assign_transformation_to_elements" in delete_transformation
     assert "Transformation is assigned to element(s):" not in delete_transformation
 
+def test_nineteenth_prerequisite_link_batch():
+    # 1: Delete Time Series routes to each Load Pattern / Ground Motion owner.
+    delete_series = inspect.getsource(MainWindow._delete_time_series)
+    assert "Edit Load Pattern {owner.tag} Now..." in delete_series
+    assert "Edit Ground Motion {owner.tag} Now..." in delete_series
+    assert "self._edit_load_pattern(owner.tag)" in delete_series
+    assert "self._edit_ground_motion(owner.tag)" in delete_series
+
+    # 2: Delete Load Pattern routes to the driving Analysis.
+    delete_pattern = inspect.getsource(MainWindow._delete_load_pattern)
+    assert "Edit Analysis {owner_tag} Now..." in delete_pattern
+    assert "self._edit_analysis(owner_tag)" in delete_pattern
+    assert "_analysis_uses_deferred_patterns" in delete_pattern
+
+    # 3: Delete Material can reassign referenced Truss elements inline.
+    delete_material = inspect.getsource(MainWindow._delete_material)
+    assert "Reassign Truss Material Now..." in delete_material
+    assert "Create New Material..." in delete_material
+    assert "assign_truss_material" in delete_material
+
+    # 4: Delete Material routes Fiber Recorder references to their editor.
+    assert "Edit Fiber Recorder {owner_tag} Now..." in delete_material
+    assert "self._edit_recorder(owner_tag)" in delete_material
+    assert 'recorder.recorder_type == "Fiber"' in delete_material
+
+    # 5: Delete Section can replace all direct / hinge / interior element refs.
+    delete_section = inspect.getsource(MainWindow._delete_section)
+    assert "Reassign Referenced Sections Now..." in delete_section
+    assert "hinge_i_section_tag" in delete_section
+    assert "hinge_j_section_tag" in delete_section
+    assert "interior_section_tag" in delete_section
+    assert "Create New Section..." in delete_section
+
+    # 6: Delete Section routes zeroLengthSection owners to Connection editing.
+    assert "Edit Connection {owner_tag} Now..." in delete_section
+    assert "self._edit_connection(owner_tag)" in delete_section
+    assert "connections_using_section" in delete_section
+
+    # 7: Editing a generated Constraint routes to its owning Connection.
+    edit_constraint = inspect.getsource(MainWindow._edit_constraint)
+    assert "Edit Owning Connection Now..." in edit_constraint
+    assert "generated_constraint_tag == tag" in edit_constraint
+    assert "self._edit_connection(owner.tag)" in edit_constraint
+
+    # 8: Deleting a generated Constraint routes to its owning Connection.
+    delete_constraint = inspect.getsource(MainWindow._delete_constraint)
+    assert "Open Owning Connection Now..." in delete_constraint
+    assert "generated_constraint_tag == tag" in delete_constraint
+    assert "self._edit_connection(owner.tag)" in delete_constraint
+
+    # 9: Surface-managed Named Selection can change scope mode inline.
+    update_selection = inspect.getsource(MainWindow._update_named_selection)
+    assert "Edit Surface Scope Mode Now..." in update_selection
+    assert "_edit_surface_named_selection_scope" in update_selection
+
+    scope_editor = inspect.getsource(
+        MainWindow._edit_surface_named_selection_scope
+    )
+    assert "nodes_and_elements" in scope_editor
+    assert "self.project.update_selection_set" in scope_editor
+
+    # 10: Delete Ground Motion routes to any driving Analysis first.
+    delete_motion = inspect.getsource(MainWindow._delete_ground_motion)
+    assert "Edit Analysis {owner_tag} Now..." in delete_motion
+    assert "self._edit_analysis(owner_tag)" in delete_motion
+    assert "_analysis_uses_deferred_patterns" in delete_motion
+
