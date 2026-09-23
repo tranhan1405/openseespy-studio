@@ -22466,7 +22466,30 @@ class MainWindow(QMainWindow):
             int(tag)
             for tag in plot.get("element_scope", [])
         }
-        self._show_job_plot_properties(job.job_id, plot_id)
+        self.properties_panel.set_properties(
+            str(plot.get("name", f"Result {plot_id}")),
+            [
+                ("Job", job.job_id),
+                ("Analysis", job.analysis_name),
+                ("Type", job.analysis_type),
+                (
+                    "Result Type",
+                    str(plot.get("result_type", "-")),
+                ),
+                (
+                    "Node Scope",
+                    ", ".join(map(str, sorted(node_scope))) or "All",
+                ),
+                (
+                    "Element Scope",
+                    ", ".join(map(str, sorted(element_scope))) or "All",
+                ),
+                (
+                    "Convergence Test",
+                    self._job_convergence_test(job) or "-",
+                ),
+            ],
+        )
 
 
     def _offer_job_analysis_rerun(
@@ -22570,30 +22593,7 @@ class MainWindow(QMainWindow):
             restore_scope_selection=True,
             result_cache_key=("job", job.job_id),
         )
-        self.properties_panel.set_properties(
-            str(plot.get("name", f"Result {plot_id}")),
-            [
-                ("Job", job.job_id),
-                ("Analysis", job.analysis_name),
-                ("Type", job.analysis_type),
-                (
-                    "Result Type",
-                    str(plot.get("result_type", "-")),
-                ),
-                (
-                    "Node Scope",
-                    ", ".join(map(str, sorted(node_scope))) or "All",
-                ),
-                (
-                    "Element Scope",
-                    ", ".join(map(str, sorted(element_scope))) or "All",
-                ),
-                (
-                    "Convergence Test",
-                    self._job_convergence_test(job) or "-",
-                ),
-            ],
-        )
+        self._show_job_plot_properties(job.job_id, plot_id)
         self.status_message.setText(
             f"Job {job.job_id} · "
             f"{plot.get('name', f'Result {plot_id}')}"
