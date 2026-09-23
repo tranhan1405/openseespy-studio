@@ -22967,6 +22967,51 @@ class MainWindow(QMainWindow):
                     ("Mass Sources", len(self.project.mass_sources)),
                 ],
             )
+            return
+        if kind == "properties_root":
+            self.properties_panel.set_properties(
+                "Properties",
+                [
+                    ("Materials", len(self.project.materials)),
+                    ("nD Materials", len(self.project.nd_materials)),
+                    ("Sections", len(self.project.sections)),
+                    ("Transformations", len(self.project.transformations)),
+                ],
+            )
+            return
+        if kind == "loads_bc_root":
+            supported_nodes = sum(
+                1
+                for node in self.model.nodes.values()
+                if any(node.fixity)
+            )
+            mass_nodes = sum(
+                1
+                for node in self.model.nodes.values()
+                if any(abs(value) > 0.0 for value in node.mass)
+            )
+            plain_patterns = sum(
+                1
+                for pattern in self.project.load_patterns.values()
+                if pattern.pattern_type == "Plain"
+            )
+            ground_motions = sum(
+                1
+                for pattern in self.project.load_patterns.values()
+                if pattern.pattern_type == "UniformExcitation"
+            )
+            self.properties_panel.set_properties(
+                "Loads & BCs",
+                [
+                    ("Supported Nodes", supported_nodes),
+                    ("Constraints", len(self.project.constraints)),
+                    ("Mass Nodes", mass_nodes),
+                    ("Mass Sources", len(self.project.mass_sources)),
+                    ("Load Patterns", plain_patterns),
+                    ("Time Series", len(self.project.time_series)),
+                    ("Ground Motions", ground_motions),
+                ],
+            )
 
     def _populate_materials_root_context_menu(
         self,
@@ -23407,6 +23452,28 @@ class MainWindow(QMainWindow):
             exec_menu()
             return
 
+        if kind == "properties_root":
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("properties_root")
+            )
+            material = menu.addAction("New Material...")
+            material.triggered.connect(self._create_material)
+            library = menu.addAction("Insert from Material Library...")
+            library.triggered.connect(self._show_material_library)
+            nd_material = menu.addAction("New nD Material...")
+            nd_material.triggered.connect(self._create_nd_material)
+            section = menu.addAction("New Beam / Fiber Section...")
+            section.triggered.connect(self._create_section)
+            shell_section = menu.addAction("New Shell Section...")
+            shell_section.triggered.connect(self._create_shell_section)
+            transformation = menu.addAction("New Transformation...")
+            transformation.triggered.connect(
+                self._create_transformation
+            )
+            exec_menu()
+            return
+
         if kind == "nodes_root":
             create = menu.addAction("New Node...")
             create.triggered.connect(self._create_node)
@@ -23540,15 +23607,27 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "line_meshes_root":
+            has_lines = bool(self.project.lines)
+            has_live_mesh = any(
+                inspect_line_mesh_state(
+                    self.project,
+                    int(tag),
+                ).live_element_tags
+                for tag in self.project.lines
+            )
+
             generate = menu.addAction(
                 "Generate All Configured Line Meshes"
             )
+            generate.setEnabled(has_lines)
             generate.triggered.connect(
                 self._generate_all_configured_line_meshes
             )
             remesh = menu.addAction("Remesh All Meshed Lines")
+            remesh.setEnabled(has_live_mesh)
             remesh.triggered.connect(self._remesh_all_meshed_lines)
             delete = menu.addAction("Delete All Generated Line Meshes")
+            delete.setEnabled(has_live_mesh)
             delete.triggered.connect(self._delete_all_line_meshes)
             menu.addSeparator()
             audit = menu.addAction("Audit Line Network Connectivity")
@@ -23563,19 +23642,31 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "surface_meshes_root":
+            has_surfaces = bool(self.project.surfaces)
+            has_live_mesh = any(
+                inspect_surface_mesh_state(
+                    self.project,
+                    int(tag),
+                ).live_element_tags
+                for tag in self.project.surfaces
+            )
+
             generate = menu.addAction(
                 "Generate All Configured Surface Meshes"
             )
+            generate.setEnabled(has_surfaces)
             generate.triggered.connect(
                 self._generate_all_configured_surface_meshes
             )
             remesh = menu.addAction("Remesh All Meshed Surfaces")
+            remesh.setEnabled(has_live_mesh)
             remesh.triggered.connect(
                 self._remesh_all_meshed_surfaces
             )
             delete = menu.addAction(
                 "Delete All Generated Surface Meshes"
             )
+            delete.setEnabled(has_live_mesh)
             delete.triggered.connect(
                 self._delete_all_surface_meshes
             )
@@ -24368,6 +24459,39 @@ class MainWindow(QMainWindow):
             exec_menu()
             return
 
+        if kind == "loads_bc_root":
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("loads_bc_root")
+            )
+
+            support = menu.addAction(
+                "Apply / Edit Support on Current Selection..."
+            )
+            support.setEnabled(bool(self.selection.nodes))
+            support.triggered.connect(self._apply_restraint)
+            constraint = menu.addAction("New Constraint...")
+            constraint.triggered.connect(self._create_constraint)
+            mass = menu.addAction(
+                "Assign Mass to Current Node Selection..."
+            )
+            mass.setEnabled(bool(self.selection.nodes))
+            mass.triggered.connect(self._assign_mass)
+            mass_source = menu.addAction("New Mass Source...")
+            mass_source.triggered.connect(self._create_mass_source)
+
+            menu.addSeparator()
+            load_pattern = menu.addAction("New Load Pattern...")
+            load_pattern.triggered.connect(self._create_load_pattern)
+            time_series = menu.addAction("New Time Series...")
+            time_series.triggered.connect(self._create_time_series)
+            ground_motion = menu.addAction("New Ground Motion...")
+            ground_motion.triggered.connect(self._create_ground_motion)
+            import_motion = menu.addAction("Import Ground Motion...")
+            import_motion.triggered.connect(self._import_ground_motion)
+            exec_menu()
+            return
+
         if kind == "boundary_root":
             constrained = {
                 tag
@@ -24431,8 +24555,23 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "connection_group":
+            connection_type = str(value)
+            tags = {
+                tag
+                for tag, connection in self.project.connections.items()
+                if connection.connection_type == connection_type
+            }
+
             create = menu.addAction("New ZeroLength / Link...")
             create.triggered.connect(self._create_connection)
+            select_all = menu.addAction(
+                f"Select All {connection_type} ({len(tags)})"
+            )
+            select_all.setEnabled(bool(tags))
+            select_all.triggered.connect(
+                lambda checked=False, values=tuple(sorted(tags)):
+                self.selection.set_selection(elements=set(values))
+            )
             exec_menu()
             return
 
