@@ -23766,12 +23766,13 @@ class MainWindow(QMainWindow):
                 "New ZeroLength / Link Element..."
             )
             create_connection.triggered.connect(self._create_connection)
+
+            menu.addSeparator()
             select_all = menu.addAction("Select All Structural Elements")
             select_all.setEnabled(bool(self.model.elements))
             select_all.triggered.connect(
                 lambda: self._select_all_tree_elements()
             )
-            menu.addSeparator()
             menu.addAction(self.actions["show_element_numbers"])
             exec_menu()
             return
@@ -23783,6 +23784,9 @@ class MainWindow(QMainWindow):
                 for tag, element in self.model.elements.items()
                 if element.element_type == element_type
             }
+            is_truss_group = element_type == "truss"
+            is_shell_group = element_type in SHELL_ELEMENT_TYPES
+
             select_all = menu.addAction(
                 f"Select All {element_type} ({len(tags)})"
             )
@@ -23791,10 +23795,12 @@ class MainWindow(QMainWindow):
                 lambda checked=False, t=element_type:
                 self._select_all_tree_elements(t)
             )
+
             menu.addSeparator()
-            is_truss_group = element_type == "truss"
-            is_shell_group = element_type in SHELL_ELEMENT_TYPES
-            formulation = menu.addAction("Element Formulation...")
+            definition_menu = menu.addMenu("Definition")
+            formulation = definition_menu.addAction(
+                "Element Formulation..."
+            )
             formulation.setEnabled(
                 not is_truss_group and not is_shell_group
             )
@@ -23805,7 +23811,9 @@ class MainWindow(QMainWindow):
                 )
             )
             if is_shell_group:
-                edit_shell = menu.addAction("Edit Shell Definition...")
+                edit_shell = definition_menu.addAction(
+                    "Edit Shell Definition..."
+                )
                 edit_shell.setEnabled(len(tags) == 1)
                 edit_shell.triggered.connect(
                     lambda checked=False, values=tuple(sorted(tags)): (
@@ -23814,6 +23822,7 @@ class MainWindow(QMainWindow):
                         else None
                     )
                 )
+
             assign = menu.addMenu("Assign")
             material = assign.addAction("Material (Truss)...")
             material.setEnabled(is_truss_group)
@@ -23848,6 +23857,7 @@ class MainWindow(QMainWindow):
                 )
             )
             if is_truss_group:
+                assign.addSeparator()
                 clear_material = assign.addAction("Clear Material")
                 clear_material.triggered.connect(
                     lambda checked=False, t=element_type: (
@@ -23855,19 +23865,18 @@ class MainWindow(QMainWindow):
                         self._clear_truss_material_assignment(),
                     )
                 )
-            beam_load = menu.addAction("Create Beam Load...")
-            beam_load.setEnabled(
-                not is_truss_group and not is_shell_group
-            )
+
+            load_menu = menu.addMenu("Loads")
+            load_menu.setEnabled(not is_truss_group)
+            beam_load = load_menu.addAction("Beam Load...")
+            beam_load.setEnabled(not is_shell_group)
             beam_load.triggered.connect(
                 lambda checked=False, t=element_type: (
                     self._select_all_tree_elements(t),
                     self._create_element_load(),
                 )
             )
-            shell_pressure = menu.addAction(
-                "Create Surface Pressure..."
-            )
+            shell_pressure = load_menu.addAction("Surface Pressure...")
             shell_pressure.setEnabled(is_shell_group)
             shell_pressure.triggered.connect(
                 lambda checked=False, t=element_type: (
@@ -23875,6 +23884,7 @@ class MainWindow(QMainWindow):
                     self._create_shell_pressure(),
                 )
             )
+
             menu.addSeparator()
             named = menu.addAction("Create Named Selection")
             named.setEnabled(bool(tags))
@@ -24032,20 +24042,11 @@ class MainWindow(QMainWindow):
             tag = int(value)
             if tag not in self.selection.elements:
                 self.selection.select("element", tag, "replace")
+
             properties_action = menu.addAction("Properties")
             properties_action.triggered.connect(
                 lambda: self._show_entity_properties("element", tag)
             )
-
-            menu.addSeparator()
-            zoom = menu.addAction("Zoom to Selection")
-            zoom.triggered.connect(self._zoom_selection)
-            hide = menu.addAction("Hide")
-            hide.triggered.connect(self._hide_selection)
-            isolate = menu.addAction("Isolate")
-            isolate.triggered.connect(self._isolate_selection)
-            show_all = menu.addAction("Show All")
-            show_all.triggered.connect(self._show_all)
 
             selected_elements = [
                 self.model.elements[element_tag]
@@ -24066,16 +24067,22 @@ class MainWindow(QMainWindow):
             )
 
             menu.addSeparator()
+            definition_menu = menu.addMenu("Definition")
             if self.model.elements[tag].element_type in SHELL_ELEMENT_TYPES:
-                edit_shell = menu.addAction("Edit Shell Definition...")
+                edit_shell = definition_menu.addAction(
+                    "Edit Shell Definition..."
+                )
                 edit_shell.triggered.connect(
                     lambda: self._edit_shell(tag)
                 )
-            formulation = menu.addAction("Element Formulation...")
+            formulation = definition_menu.addAction(
+                "Element Formulation..."
+            )
             formulation.setEnabled(has_frame)
             formulation.triggered.connect(
                 self._set_element_formulation
             )
+
             assign = menu.addMenu("Assign")
             material_action = assign.addAction("Material (Truss)...")
             material_action.setEnabled(has_truss)
@@ -24083,7 +24090,9 @@ class MainWindow(QMainWindow):
                 self._assign_truss_material_to_selection
             )
             section_action = assign.addAction(
-                "Shell Section..." if has_shell and not has_frame else "Section..."
+                "Shell Section..."
+                if has_shell and not has_frame
+                else "Section..."
             )
             section_action.setEnabled(has_frame or has_shell)
             section_action.triggered.connect(
@@ -24091,9 +24100,7 @@ class MainWindow(QMainWindow):
                 if has_shell and not has_frame
                 else self._assign_section_to_selection
             )
-            transformation_action = assign.addAction(
-                "Transformation..."
-            )
+            transformation_action = assign.addAction("Transformation...")
             transformation_action.setEnabled(has_frame)
             transformation_action.triggered.connect(
                 self._assign_transformation_to_selection
@@ -24116,18 +24123,18 @@ class MainWindow(QMainWindow):
             clear_transformation.triggered.connect(
                 self._clear_transformation_assignment
             )
-            beam_load = menu.addAction("Create Beam Load...")
+
+            load_menu = menu.addMenu("Loads")
+            load_menu.setEnabled(has_frame or has_shell)
+            beam_load = load_menu.addAction("Beam Load...")
             beam_load.setEnabled(has_frame)
             beam_load.triggered.connect(self._create_element_load)
-            shell_pressure = menu.addAction(
-                "Create Surface Pressure..."
-            )
+            shell_pressure = load_menu.addAction("Surface Pressure...")
             shell_pressure.setEnabled(has_shell)
             shell_pressure.triggered.connect(
                 self._create_shell_pressure
             )
 
-            menu.addSeparator()
             modify = menu.addMenu("Modify")
             move = modify.addAction("Move...")
             move.triggered.connect(self._move_selection)
@@ -24138,9 +24145,20 @@ class MainWindow(QMainWindow):
             mirror = modify.addAction("Mirror...")
             mirror.triggered.connect(self._mirror_selection)
 
-            copy_tag = menu.addAction("Copy Tag(s)")
+            view_menu = menu.addMenu("View")
+            zoom = view_menu.addAction("Zoom to Selection")
+            zoom.triggered.connect(self._zoom_selection)
+            hide = view_menu.addAction("Hide")
+            hide.triggered.connect(self._hide_selection)
+            isolate = view_menu.addAction("Isolate")
+            isolate.triggered.connect(self._isolate_selection)
+            show_all = view_menu.addAction("Show All")
+            show_all.triggered.connect(self._show_all)
+
+            selection_menu = menu.addMenu("Selection")
+            copy_tag = selection_menu.addAction("Copy Tag(s)")
             copy_tag.triggered.connect(self._copy_selected_tags)
-            named = menu.addAction("Create Named Selection")
+            named = selection_menu.addAction("Create Named Selection")
             named.triggered.connect(self._create_named_selection)
 
             menu.addSeparator()
