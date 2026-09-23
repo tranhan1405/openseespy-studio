@@ -3988,6 +3988,7 @@ class MainWindow(QMainWindow):
             {"geometry_root"},
             {"mesh_root"},
             {"fe_model_root"},
+            {"properties_root"},
             {"loads_bc_root"},
             {"analyses_root"},
         )
@@ -5432,6 +5433,9 @@ class MainWindow(QMainWindow):
         analyses_root_selected = selected_payload_kinds == {
             "analyses_root"
         }
+        properties_root_selected = selected_payload_kinds == {
+            "properties_root"
+        }
 
         # Major display roots are navigation objects, not modeling commands.
         # Clicking one exits an in-progress sketch/pick/measure tool and
@@ -5442,6 +5446,7 @@ class MainWindow(QMainWindow):
             or fe_model_root_selected
             or loads_bc_root_selected
             or analyses_root_selected
+            or properties_root_selected
         ):
             if self.viewport.interaction_tool() != "select":
                 self._activate_select_tool()
@@ -5473,6 +5478,7 @@ class MainWindow(QMainWindow):
                 {"geometry_root"},
                 {"mesh_root"},
                 {"fe_model_root"},
+                {"properties_root"},
                 {"analyses_root"},
             )
         ):
@@ -5681,6 +5687,10 @@ class MainWindow(QMainWindow):
                 elif root_kind == "fe_model_root":
                     self.status_message.setText(
                         "FE Model overview · base FE display"
+                    )
+                elif root_kind == "properties_root":
+                    self.status_message.setText(
+                        "Properties overview · base FE assignment context"
                     )
                 elif root_kind == "loads_bc_root":
                     self.status_message.setText(
