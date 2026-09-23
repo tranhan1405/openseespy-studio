@@ -894,3 +894,24 @@ def test_linked_frame_bar_tracks_motion_and_graph_markers(qapp):
         panel.close()
         panel.deleteLater()
         qapp.processEvents()
+
+def test_shared_frame_bar_exposes_synced_playback_speed(qapp):
+    panel = ResultsPanel()
+    try:
+        assert panel.frame_speed.currentData() == pytest.approx(1.0)
+        index = panel.frame_speed.findData(4.0)
+        assert index >= 0
+        panel.frame_speed.setCurrentIndex(index)
+        qapp.processEvents()
+        assert panel.motion_speed.currentData() == pytest.approx(4.0)
+
+        index = panel.motion_speed.findData(0.5)
+        assert index >= 0
+        panel.motion_speed.setCurrentIndex(index)
+        qapp.processEvents()
+        assert panel.frame_speed.currentData() == pytest.approx(0.5)
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
