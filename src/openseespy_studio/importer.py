@@ -1356,6 +1356,83 @@ class _Importer:
         self.project.add_constraint(item)
         self.count("Constraints")
 
+    def _read_path_time_series_file(
+        self,
+        node: ast.Call,
+        file_value: Any,
+    ) -> list[float] | None:
+        if self.source_dir is None:
+            self.issue(
+                "UNSUPPORTED",
+                node,
+                "timeSeries Path -filePath",
+                "Relative Path time-series files can only be resolved when "
+                "the imported Python source has a source_path.",
+            )
+            return None
+
+        raw_path = Path(str(file_value))
+        if raw_path.is_absolute():
+            self.issue(
+                "UNSUPPORTED",
+                node,
+                "timeSeries Path -filePath",
+                "Absolute Path time-series files are not opened automatically; "
+                "use a path relative to the imported Python script.",
+            )
+            return None
+
+        base_dir = self.source_dir.resolve()
+        data_path = (base_dir / raw_path).resolve()
+        try:
+            data_path.relative_to(base_dir)
+        except ValueError:
+            self.issue(
+                "UNSUPPORTED",
+                node,
+                "timeSeries Path -filePath",
+                "Path time-series files outside the imported script directory "
+                "tree are not opened automatically.",
+            )
+            return None
+
+        try:
+            text = data_path.read_text(encoding="utf-8-sig")
+        except OSError as exc:
+            self.issue(
+                "ERROR",
+                node,
+                "timeSeries Path -filePath",
+                f"Could not read ground-motion file {str(file_value)!r}: {exc}",
+            )
+            return None
+
+        tokens: list[str] = []
+        for line in text.splitlines():
+            body = line.split("#", 1)[0].replace(",", " ")
+            tokens.extend(body.split())
+
+        if not tokens:
+            self.issue(
+                "ERROR",
+                node,
+                "timeSeries Path -filePath",
+                f"Ground-motion file {str(file_value)!r} contains no numeric values.",
+            )
+            return None
+
+        try:
+            return [float(token) for token in tokens]
+        except ValueError as exc:
+            self.issue(
+                "ERROR",
+                node,
+                "timeSeries Path -filePath",
+                f"Ground-motion file {str(file_value)!r} contains a non-numeric "
+                f"value: {exc}",
+            )
+            return None
+
     def add_time_series(self, node: ast.Call, args: list[Any]) -> None:
         if len(args) < 2:
             raise ValueError("timeSeries needs type and tag")
@@ -1371,13 +1448,33 @@ class _Importer:
         elif kind == "Path":
             dt = self.flag_value(rest, "-dt")
             values = self.flag_values(rest, "-values")
-            if dt is None or not values:
+            file_path = self.flag_value(rest, "-filePath")
+
+            if dt is None:
                 self.issue(
-                    "UNSUPPORTED", node, "timeSeries Path",
-                    "Path import currently requires inline -dt and -values; "
-                    "external files are never opened automatically.",
+                    "UNSUPPORTED",
+                    node,
+                    "timeSeries Path",
+                    "Path import currently requires -dt.",
                 )
                 return
+
+            if not values and file_path is not None:
+                file_values = self._read_path_time_series_file(node, file_path)
+                if file_values is None:
+                    return
+                values = file_values
+
+            if not values:
+                self.issue(
+                    "UNSUPPORTED",
+                    node,
+                    "timeSeries Path",
+                    "Path import requires either inline -values or a relative "
+                    "-filePath that can be resolved from the imported script.",
+                )
+                return
+
             item = TimeSeriesData(
                 tag,
                 f"Imported Path {tag}",
@@ -2922,8 +3019,10 @@ def import_openseespy_source(
     """Parse OpenSeesPy source without executing arbitrary Python.
 
     With source_path, simple sibling-module imports may be reconstructed from
-    Python files in the same directory. They are parsed by the same restricted
-    AST interpreter and are never executed through exec.
+    Python files in the same directory. Relative Path time-series -filePath
+    inputs within that directory tree may also be read as numeric data. Python
+    source is parsed by the same restricted AST interpreter and is never
+    executed through exec.
     """
     return _Importer(
         source,
