@@ -61,7 +61,7 @@ class AnalysisDialog(QDialog):
             else f"{default_kind} {next_tag}"
         )
         self.name=QLineEdit(default_name)
-        self.kind=QComboBox(); self.kind.addItems(["Static","Pushover","Cyclic","Transient","Modal"]); self.kind.setCurrentText(default_kind)
+        self.kind=QComboBox(); self.kind.addItems(["Static","Pushover","Cyclic","Transient","Modal","Response Spectrum"]); self.kind.setCurrentText(default_kind)
         self.constraints=QComboBox(); self.constraints.addItems(["Transformation","Plain"]); self.constraints.setCurrentText(analysis.constraints_handler if analysis else "Transformation")
         self.numberer=QComboBox(); self.numberer.addItems(["RCM","Plain"]); self.numberer.setCurrentText(analysis.numberer if analysis else "RCM")
         self.system=QComboBox(); self.system.addItems(["UmfPack","BandGeneral","ProfileSPD","SparseGeneral"]); self.system.setCurrentText(analysis.system if analysis else "UmfPack")
@@ -398,6 +398,64 @@ class AnalysisDialog(QDialog):
         if analysis:
             index=self.eigen_solver.findData(analysis.eigen_solver)
             if index>=0:self.eigen_solver.setCurrentIndex(index)
+        self.spectrum_mode=QComboBox()
+        self.spectrum_mode.addItems(["Single Component", "Bidirectional / RotD"])
+        self.spectrum_mode.setCurrentText(
+            analysis.response_spectrum_mode
+            if analysis else "Bidirectional / RotD"
+        )
+        self.spectrum_damping=fs(
+            analysis.response_spectrum_damping_ratio if analysis else 0.05,
+            0.0,
+            0.999999,
+        )
+        self.spectrum_t1_step=fs(
+            analysis.response_spectrum_t1_step if analysis else 0.1,
+            1e-6,
+            1e6,
+        )
+        self.spectrum_t1_end=fs(
+            analysis.response_spectrum_t1_end if analysis else 1.0,
+            1e-6,
+            1e6,
+        )
+        self.spectrum_t2_step=fs(
+            analysis.response_spectrum_t2_step if analysis else 0.2,
+            1e-6,
+            1e6,
+        )
+        self.spectrum_t2_end=fs(
+            analysis.response_spectrum_t2_end if analysis else 2.0,
+            1e-6,
+            1e6,
+        )
+        self.spectrum_t3_step=fs(
+            analysis.response_spectrum_t3_step if analysis else 0.5,
+            1e-6,
+            1e6,
+        )
+        self.spectrum_t3_end=fs(
+            analysis.response_spectrum_t3_end if analysis else 5.0,
+            1e-6,
+            1e6,
+        )
+        self.spectrum_component_x=QCheckBox("Component X")
+        self.spectrum_component_x.setChecked(
+            analysis.response_spectrum_component_x if analysis else True
+        )
+        self.spectrum_component_y=QCheckBox("Component Y")
+        self.spectrum_component_y.setChecked(
+            analysis.response_spectrum_component_y if analysis else True
+        )
+        self.spectrum_rotd50=QCheckBox("RotD50")
+        self.spectrum_rotd50.setChecked(
+            analysis.response_spectrum_rotd50 if analysis else True
+        )
+        self.spectrum_rotd100=QCheckBox("RotD100")
+        self.spectrum_rotd100.setChecked(
+            analysis.response_spectrum_rotd100 if analysis else True
+        )
+
         self.recovery=QCheckBox("Try NewtonLineSearch / ModifiedNewton / Newton on failed step"); self.recovery.setChecked(analysis.recovery if analysis else True)
         self.adaptive=QCheckBox("Adaptive step size / automatic cutback")
         self.adaptive.setChecked(analysis.adaptive_step if analysis else False)
@@ -488,6 +546,18 @@ class AnalysisDialog(QDialog):
             ("rayleigh_beta_k_comm","Rayleigh betaKcomm",self.rayleigh_beta_k_comm),
             ("modes","Number of modes",self.modes),
             ("eigen_solver","Eigen solver",self.eigen_solver),
+            ("spectrum_mode","Spectrum type",self.spectrum_mode),
+            ("spectrum_damping","Spectrum damping ratio",self.spectrum_damping),
+            ("spectrum_t1_step","Region 1 ΔT",self.spectrum_t1_step),
+            ("spectrum_t1_end","Region 1 end T",self.spectrum_t1_end),
+            ("spectrum_t2_step","Region 2 ΔT",self.spectrum_t2_step),
+            ("spectrum_t2_end","Region 2 end T",self.spectrum_t2_end),
+            ("spectrum_t3_step","Region 3 ΔT",self.spectrum_t3_step),
+            ("spectrum_t3_end","Region 3 end T",self.spectrum_t3_end),
+            ("spectrum_component_x","Output",self.spectrum_component_x),
+            ("spectrum_component_y","Output",self.spectrum_component_y),
+            ("spectrum_rotd50","Output",self.spectrum_rotd50),
+            ("spectrum_rotd100","Output",self.spectrum_rotd100),
             ("preload_gravity","Gravity preload",self.preload_gravity),
             ("gravity_steps","Gravity preload steps",self.gravity_steps),
             ("gravity_algorithm","Gravity algorithm",self.gravity_algorithm),
@@ -539,6 +609,9 @@ class AnalysisDialog(QDialog):
         )
         self.damping_ratio.valueChanged.connect(
             lambda _value: self._sync(self.kind.currentText())
+        )
+        self.spectrum_mode.currentTextChanged.connect(
+            lambda _text: self._sync(self.kind.currentText())
         )
         self._sync(self.kind.currentText())
 
@@ -636,6 +709,7 @@ class AnalysisDialog(QDialog):
             "Cyclic": ["DisplacementControl"],
             "Transient": ["Newmark", "HHT", "GeneralizedAlpha"],
             "Modal": ["None"],
+            "Response Spectrum": ["None"],
         }[kind]
         defaults = {
             "Static": "LoadControl",
@@ -643,6 +717,7 @@ class AnalysisDialog(QDialog):
             "Cyclic": "DisplacementControl",
             "Transient": "Newmark",
             "Modal": "None",
+            "Response Spectrum": "None",
         }
         current=self.integrator.currentText()
         desired=current if current in options else defaults[kind]
@@ -660,19 +735,22 @@ class AnalysisDialog(QDialog):
         self._sync_integrator(kind)
         integrator=self.integrator.currentText()
         modal=kind=="Modal"
+        response_spectrum=kind=="Response Spectrum"
         transient=kind=="Transient"
         push=kind=="Pushover"
         cyclic=kind=="Cyclic"
         static=kind=="Static"
-        non_modal=not modal
+        non_modal=not (modal or response_spectrum)
         static_dc=static and integrator=="DisplacementControl"
         staged=push or cyclic or transient or static_dc
 
         # Identity and core solver configuration are common to every analysis.
-        common={
-            "tag","name","kind","constraints","numberer","system",
-            "system_pivoting","integrator","external_console",
-        }
+        common={"tag","name","kind"}
+        if not response_spectrum:
+            common.update({
+                "constraints","numberer","system",
+                "system_pivoting","integrator","external_console",
+            })
         visible=set(common)
 
         # Convergence/solution strategy is irrelevant to a pure eigen analysis.
@@ -735,6 +813,20 @@ class AnalysisDialog(QDialog):
                         visible.add("damping_mode_j")
         elif modal:
             visible.update({"modes","eigen_solver"})
+        elif response_spectrum:
+            visible.update({
+                "spectrum_mode","spectrum_damping",
+                "spectrum_t1_step","spectrum_t1_end",
+                "spectrum_t2_step","spectrum_t2_end",
+                "spectrum_t3_step","spectrum_t3_end",
+                "spectrum_component_x","deferred_patterns",
+            })
+            if self.spectrum_mode.currentText() == "Bidirectional / RotD":
+                visible.update({
+                    "spectrum_component_y",
+                    "spectrum_rotd50",
+                    "spectrum_rotd100",
+                })
 
         if staged:
             visible.add("preload_gravity")
@@ -849,7 +941,7 @@ class AnalysisDialog(QDialog):
         preload_gravity = (
             preload_supported and self.preload_gravity.isChecked()
         )
-        if kind == "Transient":
+        if kind in {"Transient", "Response Spectrum"}:
             for raw in (
                 self.deferred_patterns.text()
                 .replace(";", ",")
@@ -920,5 +1012,32 @@ class AnalysisDialog(QDialog):
             adaptive_easy_iterations=self.easy_iter.value(),
             adaptive_growth_after=self.grow_after.value(),
             live_convergence=self.live_convergence.isChecked(),
-            show_external_console=self.external_console.isChecked()
+            show_external_console=self.external_console.isChecked(),
+            response_spectrum_mode=self.spectrum_mode.currentText(),
+            response_spectrum_damping_ratio=self.spectrum_damping.value(),
+            response_spectrum_t1_step=self.spectrum_t1_step.value(),
+            response_spectrum_t1_end=self.spectrum_t1_end.value(),
+            response_spectrum_t2_step=self.spectrum_t2_step.value(),
+            response_spectrum_t2_end=self.spectrum_t2_end.value(),
+            response_spectrum_t3_step=self.spectrum_t3_step.value(),
+            response_spectrum_t3_end=self.spectrum_t3_end.value(),
+            response_spectrum_component_x=self.spectrum_component_x.isChecked(),
+            response_spectrum_component_y=(
+                self.spectrum_component_y.isChecked()
+                if kind == "Response Spectrum"
+                and self.spectrum_mode.currentText() == "Bidirectional / RotD"
+                else False
+            ),
+            response_spectrum_rotd50=(
+                self.spectrum_rotd50.isChecked()
+                if kind == "Response Spectrum"
+                and self.spectrum_mode.currentText() == "Bidirectional / RotD"
+                else False
+            ),
+            response_spectrum_rotd100=(
+                self.spectrum_rotd100.isChecked()
+                if kind == "Response Spectrum"
+                and self.spectrum_mode.currentText() == "Bidirectional / RotD"
+                else False
+            )
         )
