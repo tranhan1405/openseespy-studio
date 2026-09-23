@@ -7060,6 +7060,45 @@ class MainWindow(QMainWindow):
                     "point_tag": None,
                     "line_tags": (),
                 }
+        grid_snapper = getattr(
+            self.viewport,
+            "geometry_sketch_grid_snap",
+            None,
+        )
+        if callable(grid_snapper):
+            grid_result = grid_snapper(xyz)
+            if grid_result is not None:
+                candidate, spacing = grid_result
+                px, py = self.viewport.geometry_world_to_screen(candidate)
+                if math.isfinite(px) and math.isfinite(py):
+                    distance2 = (px - sx) ** 2 + (py - sy) ** 2
+                    if distance2 <= 14.0 * 14.0:
+                        grid_label = f"Grid · spacing {float(spacing):g}"
+                        world_to_local = getattr(
+                            self.viewport,
+                            "geometry_world_to_local",
+                            None,
+                        )
+                        if callable(world_to_local):
+                            try:
+                                grid_u, grid_v = world_to_local(candidate)
+                            except (TypeError, ValueError):
+                                pass
+                            else:
+                                grid_label = (
+                                    f"Grid · U={float(grid_u):g}, "
+                                    f"V={float(grid_v):g}"
+                                )
+                        return {
+                            "xyz": tuple(
+                                float(value) for value in candidate
+                            ),
+                            "kind": "grid",
+                            "label": grid_label,
+                            "point_tag": None,
+                            "line_tags": (),
+                        }
+
         return {
             "xyz": xyz,
             "kind": "free",
