@@ -1313,7 +1313,7 @@ class ResultsPanel(QWidget):
             if hasattr(self, "cyclic_detail_tabs"):
                 self.cyclic_detail_tabs.setCurrentIndex(detail_index)
 
-            self._select_tab("Cyclic Hysteresis")
+            self._select_tab("Nonlinear Response")
             return
         if kind == "SpecimenResponse":
             self._select_tab("Specimen Response")
@@ -2850,7 +2850,7 @@ class ResultsPanel(QWidget):
 
         self.cyclic_detail_tabs.addTab(cycle_page, "Cycles")
 
-        self.tabs.addTab(page, "Cyclic Hysteresis")
+        self.tabs.addTab(page, "Nonlinear Response")
 
     def _build_motion_tab(self) -> None:
         page = QWidget()
