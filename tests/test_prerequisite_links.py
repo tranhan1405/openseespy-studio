@@ -961,3 +961,41 @@ def test_sixteenth_prerequisite_link_batch():
     support_editor = inspect.getsource(MainWindow._manage_surface_edge_support)
     assert "support_tag: int | None = None" in support_editor
 
+def test_seventeenth_prerequisite_link_batch():
+    # Shared Geometry-Line prerequisite chain can create Lines, which in turn
+    # can create missing Geometry Points through the existing Line workflow.
+    ensure_lines = inspect.getsource(MainWindow._ensure_geometry_line_count)
+    assert "Create Geometry Line Now..." in ensure_lines
+    assert "self._create_line_geometry()" in ensure_lines
+
+    # 1: Trim / Extend can create the missing Geometry Line inline.
+    trim_extend = inspect.getsource(MainWindow._activate_geometry_line_target_tool)
+    assert "_ensure_geometry_line_count" in trim_extend
+    assert "Create at least two Geometry Lines before using" not in trim_extend
+
+    # 2: Copy Line Mesh Recipe can create a missing target Line inline.
+    copy_recipe = inspect.getsource(MainWindow._copy_line_mesh_recipe_to_selected)
+    assert "_ensure_geometry_line_count" in copy_recipe
+    assert 'title="Copy Line Mesh / FE Recipe"' in copy_recipe
+    assert "targets = sorted(" in copy_recipe
+
+    # 3: Split by Line can create the missing Line and resume with both Lines.
+    split_lines = inspect.getsource(
+        MainWindow._split_selected_geometry_lines_at_intersection
+    )
+    assert "_ensure_geometry_line_count" in split_lines
+    assert 'title="Split by Line"' in split_lines
+    assert "tags = sorted(self.project.lines)[:2]" in split_lines
+
+    # 4: Fillet can create the missing Line and resume.
+    fillet = inspect.getsource(MainWindow._fillet_selected_geometry_lines)
+    assert "_ensure_geometry_line_count" in fillet
+    assert 'title="Fillet Geometry Lines"' in fillet
+    assert "tags = sorted(self.project.lines)[:2]" in fillet
+
+    # 5: Chamfer can create the missing Line and resume.
+    chamfer = inspect.getsource(MainWindow._chamfer_selected_geometry_lines)
+    assert "_ensure_geometry_line_count" in chamfer
+    assert 'title="Chamfer Geometry Lines"' in chamfer
+    assert "tags = sorted(self.project.lines)[:2]" in chamfer
+
