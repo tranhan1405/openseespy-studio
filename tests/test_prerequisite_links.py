@@ -700,3 +700,47 @@ def test_tenth_prerequisite_link_batch():
     assert 'title="Select Generated FE"' in surface_select
     assert "has no live generated" not in surface_select
 
+def test_eleventh_prerequisite_link_batch():
+    tree_source = inspect.getsource(MainWindow._show_tree_context_menu)
+
+    # 1: Line Preview stays reachable even before its mesh recipe exists.
+    assert "preview.setEnabled(line.mesh_recipe_configured)" not in tree_source
+    line_preview = inspect.getsource(MainWindow._preview_line_mesh)
+    assert "Configure Line Mesh Now..." in line_preview
+
+    # 2: Line Select Generated FE stays reachable and can mesh inline.
+    line_select = inspect.getsource(MainWindow._select_line_generated_fe)
+    assert "Mesh Line Now..." in line_select
+    assert (
+        'select_fe.setEnabled(live_mesh)\n'
+        '            select_fe.triggered.connect(\n'
+        '                lambda checked=False, t=tag:\n'
+        '                self._select_line_generated_fe(t)'
+        not in tree_source
+    )
+
+    # 3: Surface Preview can configure missing recipes without leaving.
+    surface_preview = inspect.getsource(MainWindow._preview_surface_meshes)
+    assert "Configure Surface {tag} Mesh Now..." in surface_preview
+    assert "_configure_surface_mesh(tag, generate=False)" in surface_preview
+    assert "Configure Surface Mesh first for:" not in surface_preview
+    assert "preview.setEnabled(surface.mesh_recipe_configured)" not in tree_source
+
+    # 4: Surface Select Generated FE stays reachable and can mesh inline.
+    surface_select = inspect.getsource(
+        MainWindow._select_generated_fe_for_surfaces
+    )
+    assert "_ensure_surface_meshes" in surface_select
+    assert (
+        'select_fe.setEnabled(live_mesh)\n'
+        '            select_fe.triggered.connect(\n'
+        '                lambda checked=False, t=tag:\n'
+        '                self._select_generated_fe_for_surfaces([t])'
+        not in tree_source
+    )
+
+    # 5: Surface mesh-quality menu stays reachable and meshes inline.
+    surface_quality = inspect.getsource(MainWindow._show_surface_quality_map)
+    assert "_ensure_surface_meshes" in surface_quality
+    assert "quality_menu.setEnabled(live_mesh)" not in tree_source
+
