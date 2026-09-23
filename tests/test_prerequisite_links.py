@@ -999,3 +999,37 @@ def test_seventeenth_prerequisite_link_batch():
     assert 'title="Chamfer Geometry Lines"' in chamfer
     assert "tags = sorted(self.project.lines)[:2]" in chamfer
 
+def test_eighteenth_prerequisite_link_batch():
+    # 1: Deleting a referenced nD Material can edit the owning Shell Section inline.
+    delete_nd = inspect.getsource(MainWindow._delete_nd_material)
+    assert "Edit Shell Section {owner_tag} Now..." in delete_nd
+    assert "self._edit_shell_section(owner_tag)" in delete_nd
+    assert "Reassign those references first." not in delete_nd
+
+    # 2: Deleting a Material referenced by a Section routes to that Section.
+    delete_material = inspect.getsource(MainWindow._delete_material)
+    assert "Edit Section {owner_tag} Now..." in delete_material
+    assert "self._edit_section(owner_tag)" in delete_material
+
+    # 3: Deleting a Material referenced by a Connection routes to that Connection.
+    assert "Edit Connection {owner_tag} Now..." in delete_material
+    assert "self._edit_connection(owner_tag)" in delete_material
+
+    # Managed specimen Connections no longer stop at an information-only dead end.
+    edit_connection = inspect.getsource(MainWindow._edit_connection)
+    assert "Open Quick 1D Column Wizard Now..." in edit_connection
+    assert "self._show_test_column_wizard()" in edit_connection
+
+    # 4: Deleting a Material referenced by a wrapper/composite Material routes inline.
+    assert "Edit Wrapper Material {owner_tag} Now..." in delete_material
+    assert "self._edit_material(owner_tag)" in delete_material
+    assert "Reassign those references first." not in delete_material
+
+    # 5: Deleting a referenced Transformation can create/select a replacement inline.
+    delete_transformation = inspect.getsource(MainWindow._delete_transformation)
+    assert "Reassign Transformation Now..." in delete_transformation
+    assert "Create New Transformation..." in delete_transformation
+    assert "_create_transformation_dependency" in delete_transformation
+    assert "assign_transformation_to_elements" in delete_transformation
+    assert "Transformation is assigned to element(s):" not in delete_transformation
+
