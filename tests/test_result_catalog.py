@@ -44,13 +44,33 @@ def test_pushover_catalog_includes_capacity_curve_and_common_results():
 
 
 def test_cyclic_catalog_includes_hysteresis_not_pushover_curve():
-    types = _types("Cyclic")
+    choices = result_choices_for_analysis("Cyclic")
+    types = {choice.result_type for choice in choices}
 
     assert "CyclicHysteresis" in types
+    assert "CyclicBackbone" in types
+    assert "CyclicReversalMetrics" in types
+    assert "CyclicCycleMetrics" in types
     assert "SpecimenResponse" in types
     assert "PushoverCurve" not in types
     assert "TimeHistory" in types
     assert "ForceDisplacement" in types
+
+    nonlinear = {
+        choice.result_type: choice
+        for choice in choices
+        if choice.result_type.startswith("Cyclic")
+    }
+    assert nonlinear["CyclicHysteresis"].category == "Nonlinear Results"
+    assert (
+        nonlinear["CyclicHysteresis"].label
+        == "Hysteretic Force–Displacement"
+    )
+    assert nonlinear["CyclicBackbone"].label == "Backbone / Envelope"
+    assert (
+        nonlinear["CyclicCycleMetrics"].label
+        == "Cycle Energy & Degradation"
+    )
 
 
 def test_static_and_transient_catalogs_exclude_specialized_curves():
