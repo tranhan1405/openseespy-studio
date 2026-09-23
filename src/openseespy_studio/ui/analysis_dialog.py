@@ -27,6 +27,7 @@ class AnalysisDialog(QDialog):
         analysis_type=None,
         ndf=6,
         plain_patterns=None,
+        new_plain_pattern_callback=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -45,6 +46,7 @@ class AnalysisDialog(QDialog):
             int(tag): str(name)
             for tag, name in dict(plain_patterns or {}).items()
         }
+        self._new_plain_pattern_callback = new_plain_pattern_callback
         self.tag=QSpinBox(); self.tag.setRange(1,2147483647); self.tag.setValue(analysis.tag if analysis else next_tag)
         default_kind = (
             analysis.analysis_type
@@ -278,11 +280,23 @@ class AnalysisDialog(QDialog):
             "Auto-generate is the safe default for Static, Pushover, and Cyclic."
         )
         self.driver_pattern=QComboBox()
-        for pattern_tag, pattern_name in sorted(self.plain_patterns.items()):
-            self.driver_pattern.addItem(
-                f"{pattern_tag} · {pattern_name}",
-                pattern_tag,
-            )
+        self.driver_pattern_new=QPushButton("New Plain Pattern...")
+        self.driver_pattern_new.setEnabled(
+            callable(self._new_plain_pattern_callback)
+        )
+        self.driver_pattern_new.setToolTip(
+            "Define the driving Plain load pattern without closing Analysis Settings."
+        )
+        self.driver_pattern_new.clicked.connect(
+            self._create_driver_pattern_dependency
+        )
+        self.driver_pattern_holder=QWidget()
+        driver_pattern_row=QHBoxLayout(self.driver_pattern_holder)
+        driver_pattern_row.setContentsMargins(0,0,0,0)
+        driver_pattern_row.setSpacing(4)
+        driver_pattern_row.addWidget(self.driver_pattern,1)
+        driver_pattern_row.addWidget(self.driver_pattern_new)
+        self._refresh_driver_pattern_choices()
         self.driver_distribution=QComboBox()
         self.driver_distribution.addItems(
             ["Uniform", "Triangular", "Mass proportional"]
@@ -413,7 +427,7 @@ class AnalysisDialog(QDialog):
             ("gravity_steps","Gravity preload steps",self.gravity_steps),
             ("gravity_algorithm","Gravity algorithm",self.gravity_algorithm),
             ("driver_mode","Driving load",self.driver_mode),
-            ("driver_pattern","Existing Plain pattern",self.driver_pattern),
+            ("driver_pattern","Existing Plain pattern",self.driver_pattern_holder),
             ("driver_distribution","Auto load distribution",self.driver_distribution),
             ("deferred_patterns","Excitation pattern tag(s)",self.deferred_patterns),
             ("recovery","Recovery",self.recovery),
@@ -459,6 +473,48 @@ class AnalysisDialog(QDialog):
             lambda _value: self._sync(self.kind.currentText())
         )
         self._sync(self.kind.currentText())
+
+    def _refresh_driver_pattern_choices(
+        self,
+        select_tag: int | None = None,
+    ) -> None:
+        current = (
+            self.driver_pattern.currentData()
+            if self.driver_pattern.count()
+            else None
+        )
+        wanted = select_tag if select_tag is not None else current
+        self.driver_pattern.clear()
+        self.driver_pattern.addItem("Select Plain load pattern...", None)
+        for pattern_tag, pattern_name in sorted(
+            self.plain_patterns.items()
+        ):
+            self.driver_pattern.addItem(
+                f"{pattern_tag} · {pattern_name}",
+                int(pattern_tag),
+            )
+        if wanted is not None:
+            index = self.driver_pattern.findData(int(wanted))
+            if index >= 0:
+                self.driver_pattern.setCurrentIndex(index)
+        elif self.driver_pattern.count() == 2:
+            self.driver_pattern.setCurrentIndex(1)
+
+    def _create_driver_pattern_dependency(self) -> None:
+        if not callable(self._new_plain_pattern_callback):
+            return
+        pattern = self._new_plain_pattern_callback()
+        if pattern is None:
+            return
+        if pattern.pattern_type != "Plain":
+            QMessageBox.warning(
+                self,
+                "Analysis Settings",
+                "The newly created load pattern is not a Plain pattern.",
+            )
+            return
+        self.plain_patterns[int(pattern.tag)] = pattern.name
+        self._refresh_driver_pattern_choices(int(pattern.tag))
 
     def _set_row_visible(self, key, visible):
         widget=self._row_widgets[key]
