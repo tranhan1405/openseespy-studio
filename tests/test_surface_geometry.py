@@ -194,7 +194,8 @@ def test_surface_ui_separates_geometry_mesh_and_fe_model():
     assert 'QTreeWidgetItem(["Mesh"])' in tree_source
     assert '"surface_mesh_recipe"' in tree_source
     assert "FE Model" in tree_source
-    assert "total_element_count" in tree_source
+    assert 'f"Elements ({len(self.model.elements)})"' in tree_source
+    assert "Connections (" in tree_source
     assert "surface_owned_elements" not in tree_source
     assert "Shell Elements (" not in tree_source
 
