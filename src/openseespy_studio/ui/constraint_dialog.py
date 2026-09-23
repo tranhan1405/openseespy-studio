@@ -7,11 +7,14 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPushButton,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from ..project import ConstraintData
@@ -28,11 +31,13 @@ class ConstraintDialog(QDialog):
         next_tag: int = 1,
         initial_retained: int = 1,
         initial_constrained: list[int] | None = None,
+        new_node_callback=None,
         parent=None,
     ):
         super().__init__(parent)
         self.setWindowTitle("MPC Constraint Editor")
         self.setModal(True)
+        self._new_node_callback = new_node_callback
         self.resize(430, 430)
 
         root = QVBoxLayout(self)
@@ -78,8 +83,38 @@ class ConstraintDialog(QDialog):
         form.addRow("Tag:", self.tag)
         form.addRow("Name:", self.name)
         form.addRow("Type:", self.constraint_type)
-        form.addRow("Retained / master node:", self.retained_node)
-        form.addRow("Constrained / slave nodes:", self.constrained_nodes)
+
+        retained_holder = QWidget()
+        retained_row = QHBoxLayout(retained_holder)
+        retained_row.setContentsMargins(0, 0, 0, 0)
+        retained_row.setSpacing(4)
+        retained_row.addWidget(self.retained_node, 1)
+        self.new_retained_node = QPushButton("New Node...")
+        self.new_retained_node.setEnabled(callable(self._new_node_callback))
+        self.new_retained_node.setToolTip(
+            "Create a node now and use it as the retained/master node."
+        )
+        self.new_retained_node.clicked.connect(
+            self._create_retained_node_dependency
+        )
+        retained_row.addWidget(self.new_retained_node)
+        form.addRow("Retained / master node:", retained_holder)
+
+        constrained_holder = QWidget()
+        constrained_row = QHBoxLayout(constrained_holder)
+        constrained_row.setContentsMargins(0, 0, 0, 0)
+        constrained_row.setSpacing(4)
+        constrained_row.addWidget(self.constrained_nodes, 1)
+        self.new_constrained_node = QPushButton("Add New Node...")
+        self.new_constrained_node.setEnabled(callable(self._new_node_callback))
+        self.new_constrained_node.setToolTip(
+            "Create a node now and append it to the constrained/slave list."
+        )
+        self.new_constrained_node.clicked.connect(
+            self._create_constrained_node_dependency
+        )
+        constrained_row.addWidget(self.new_constrained_node)
+        form.addRow("Constrained / slave nodes:", constrained_holder)
         root.addLayout(form)
 
         hint = QLabel(
@@ -138,6 +173,32 @@ class ConstraintDialog(QDialog):
 
         self.constraint_type.currentTextChanged.connect(self._sync_type)
         self._sync_type(self.constraint_type.currentText())
+
+    def _create_retained_node_dependency(self) -> None:
+        if not callable(self._new_node_callback):
+            return
+        node = self._new_node_callback()
+        if node is None:
+            return
+        self.retained_node.setValue(int(node.tag))
+
+    def _create_constrained_node_dependency(self) -> None:
+        if not callable(self._new_node_callback):
+            return
+        node = self._new_node_callback()
+        if node is None:
+            return
+        try:
+            tags = sorted(
+                parse_tag_expression(self.constrained_nodes.text())
+            )
+        except ValueError:
+            tags = []
+        if int(node.tag) not in tags:
+            tags.append(int(node.tag))
+        self.constrained_nodes.setText(
+            ", ".join(map(str, sorted(tags)))
+        )
 
     def _sync_type(self, constraint_type: str) -> None:
         self.dof_group.setVisible(constraint_type == "equalDOF")
