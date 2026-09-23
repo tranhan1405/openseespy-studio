@@ -954,7 +954,7 @@ class PropertiesPanel(QWidget):
         )
         self.table.itemChanged.connect(self._property_item_changed)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setColumnWidth(0, 112)
+        self.table.setColumnWidth(0, 148)
         layout.addWidget(self.table, 1)
 
         self.cyclic_protocol_view = QWidget()
@@ -14988,24 +14988,79 @@ class MainWindow(QMainWindow):
                 and int(tag) in surface.corner_point_tags
             )
         )
+
+        x, y, z = (float(value) for value in point.xyz)
+        radius = math.sqrt(x * x + y * y + z * z)
+        topology_parts = []
+        if line_users:
+            topology_parts.append(f"{len(line_users)} Line(s)")
+        if surface_users:
+            topology_parts.append(f"{len(surface_users)} Surface(s)")
+        topology_role = (
+            "Isolated"
+            if not topology_parts
+            else " · ".join(topology_parts)
+        )
+
+        local_text = "-"
+        plane_offset_text = "-"
+        frame_getter = getattr(
+            self.viewport,
+            "geometry_sketch_frame",
+            None,
+        )
+        local_getter = getattr(
+            self.viewport,
+            "geometry_world_to_local",
+            None,
+        )
+        if callable(frame_getter) and callable(local_getter):
+            try:
+                u, v = local_getter(point.xyz)
+                frame = frame_getter()
+                origin = tuple(float(value) for value in frame["origin"])
+                normal = tuple(float(value) for value in frame["normal"])
+                signed_offset = sum(
+                    (float(point.xyz[index]) - origin[index])
+                    * normal[index]
+                    for index in range(3)
+                )
+                local_text = f"U={u:g}, V={v:g}"
+                plane_offset_text = f"{signed_offset:g}"
+            except (KeyError, TypeError, ValueError):
+                pass
+
         self.properties_panel.set_properties(
             "Geometry Point",
             [
                 ("Tag", point.tag),
                 ("Name", point.name),
+                ("X", f"{x:g}"),
+                ("Y", f"{y:g}"),
+                ("Z", f"{z:g}"),
                 (
                     "Coordinates",
                     ", ".join(f"{value:g}" for value in point.xyz),
                 ),
+                ("Distance from Origin", f"{radius:g}"),
+                ("Sketch Local", local_text),
+                ("Sketch Plane Offset", plane_offset_text),
+                ("Topology", topology_role),
                 (
                     "Used by Lines",
-                    ", ".join(map(str, line_users))
-                    if line_users else "-",
+                    (
+                        f"{len(line_users)} · "
+                        + ", ".join(f"L{value}" for value in line_users)
+                    )
+                    if line_users else "0",
                 ),
                 (
                     "Used by Surfaces",
-                    ", ".join(map(str, surface_users))
-                    if surface_users else "-",
+                    (
+                        f"{len(surface_users)} · "
+                        + ", ".join(f"S{value}" for value in surface_users)
+                    )
+                    if surface_users else "0",
                 ),
             ],
         )
@@ -16252,6 +16307,42 @@ class MainWindow(QMainWindow):
         point_j = self.project.points.get(line.point_j)
         state = inspect_line_mesh_state(self.project, tag)
         live_elements = list(state.live_element_tags)
+
+        start_text = "-"
+        end_text = "-"
+        delta_text = "-"
+        direction_text = "-"
+        length_text = "-"
+        if point_i is not None and point_j is not None:
+            start = tuple(float(value) for value in point_i.xyz)
+            end = tuple(float(value) for value in point_j.xyz)
+            delta = tuple(
+                end[index] - start[index]
+                for index in range(3)
+            )
+            length = math.sqrt(sum(value * value for value in delta))
+            start_text = ", ".join(f"{value:g}" for value in start)
+            end_text = ", ".join(f"{value:g}" for value in end)
+            delta_text = ", ".join(f"{value:g}" for value in delta)
+            length_text = f"{length:g}"
+            if length > 1.0e-15:
+                direction_text = ", ".join(
+                    f"{value / length:.6g}" for value in delta
+                )
+
+        boundary_surfaces = []
+        for surface in self.project.surfaces.values():
+            corners = tuple(surface.corner_point_tags or ())
+            if len(corners) < 2:
+                continue
+            edge_pairs = {
+                frozenset((int(corners[index]), int(corners[(index + 1) % len(corners)])))
+                for index in range(len(corners))
+            }
+            if frozenset((int(line.point_i), int(line.point_j))) in edge_pairs:
+                boundary_surfaces.append(int(surface.tag))
+        boundary_surfaces.sort()
+
         if line.mesh_recipe_configured:
             recipe = line.element_type
             if line.element_family == "Frame":
@@ -16279,13 +16370,26 @@ class MainWindow(QMainWindow):
                 ("Name", line.name),
                 (
                     "Start Point",
-                    f"{line.point_i} - {point_i.name}"
-                    if point_i is not None else f"{line.point_i} (missing)",
+                    f"P{line.point_i} - {point_i.name}"
+                    if point_i is not None else f"P{line.point_i} (missing)",
                 ),
+                ("Start XYZ", start_text),
                 (
                     "End Point",
-                    f"{line.point_j} - {point_j.name}"
-                    if point_j is not None else f"{line.point_j} (missing)",
+                    f"P{line.point_j} - {point_j.name}"
+                    if point_j is not None else f"P{line.point_j} (missing)",
+                ),
+                ("End XYZ", end_text),
+                ("Delta XYZ", delta_text),
+                ("Length", length_text),
+                ("Unit Direction", direction_text),
+                (
+                    "Boundary of Surfaces",
+                    (
+                        f"{len(boundary_surfaces)} · "
+                        + ", ".join(f"S{value}" for value in boundary_surfaces)
+                    )
+                    if boundary_surfaces else "0",
                 ),
                 (
                     "FE family",
@@ -16689,6 +16793,90 @@ class MainWindow(QMainWindow):
         except ValueError:
             normal_text = "Undefined"
 
+        surface_points = [
+            tuple(float(value) for value in point)
+            for point in surface.points
+        ]
+        center_text = "-"
+        area_text = "-"
+        perimeter_text = "-"
+        edge_lengths_text = "-"
+        geometry_aspect_text = "-"
+        planarity_text = "-"
+        boundary_lines_text = "0"
+        if surface_points:
+            center = tuple(
+                sum(point[axis] for point in surface_points)
+                / len(surface_points)
+                for axis in range(3)
+            )
+            center_text = ", ".join(f"{value:g}" for value in center)
+
+        if len(surface_points) >= 2:
+            edge_lengths = [
+                math.sqrt(sum(
+                    (
+                        surface_points[(index + 1) % len(surface_points)][axis]
+                        - surface_points[index][axis]
+                    ) ** 2
+                    for axis in range(3)
+                ))
+                for index in range(len(surface_points))
+            ]
+            perimeter = sum(edge_lengths)
+            perimeter_text = f"{perimeter:g}"
+            edge_lengths_text = " · ".join(
+                f"E{index + 1}={value:g}"
+                for index, value in enumerate(edge_lengths)
+            )
+            positive_edges = [
+                value for value in edge_lengths
+                if value > 1.0e-15
+            ]
+            if positive_edges:
+                geometry_aspect_text = (
+                    f"{max(positive_edges) / min(positive_edges):.6g}"
+                )
+
+        if len(surface_points) >= 3:
+            anchor = surface_points[0]
+            area = 0.0
+            for index in range(1, len(surface_points) - 1):
+                vector_a = np.asarray(surface_points[index], dtype=float) - np.asarray(anchor, dtype=float)
+                vector_b = np.asarray(surface_points[index + 1], dtype=float) - np.asarray(anchor, dtype=float)
+                area += 0.5 * float(np.linalg.norm(np.cross(vector_a, vector_b)))
+            area_text = f"{area:g}"
+            try:
+                unit_normal = surface_unit_normal(surface)
+                deviations = [
+                    abs(sum(
+                        (point[axis] - anchor[axis]) * unit_normal[axis]
+                        for axis in range(3)
+                    ))
+                    for point in surface_points
+                ]
+                planarity_text = f"{max(deviations, default=0.0):.6g}"
+            except ValueError:
+                pass
+
+        corners = tuple(surface.corner_point_tags or ())
+        if len(corners) >= 2:
+            boundary_line_tags = []
+            for edge_index in range(len(corners)):
+                edge = frozenset((
+                    int(corners[edge_index]),
+                    int(corners[(edge_index + 1) % len(corners)]),
+                ))
+                for line in self.project.lines.values():
+                    if frozenset((int(line.point_i), int(line.point_j))) == edge:
+                        boundary_line_tags.append(int(line.tag))
+                        break
+            if boundary_line_tags:
+                boundary_lines_text = (
+                    f"{len(boundary_line_tags)} · "
+                    + ", ".join(f"L{value}" for value in boundary_line_tags)
+                )
+
         topology = (
             "P" + " → P".join(
                 map(str, surface.corner_point_tags)
@@ -16802,6 +16990,13 @@ class MainWindow(QMainWindow):
             ("Shape", surface.surface_type),
             ("Topology", topology),
             ("Normal", normal_text),
+            ("Center", center_text),
+            ("Area", area_text),
+            ("Perimeter", perimeter_text),
+            ("Edge lengths", edge_lengths_text),
+            ("Geometry aspect ratio", geometry_aspect_text),
+            ("Planarity error", planarity_text),
+            ("Boundary Geometry Lines", boundary_lines_text),
             (
                 "Corners",
                 " · ".join(
