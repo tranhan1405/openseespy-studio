@@ -9533,6 +9533,36 @@ class MainWindow(QMainWindow):
             creator=self._create_load_pattern,
         )
 
+    def _ensure_surface_meshes(
+        self,
+        surface_tags,
+        *,
+        title: str,
+    ) -> bool:
+        tags = [
+            int(tag)
+            for tag in sorted({int(value) for value in surface_tags})
+            if int(tag) in self.project.surfaces
+        ]
+        for tag in tags:
+            if inspect_surface_mesh_state(self.project, tag).status == "meshed":
+                continue
+            if not self._ask_create_prerequisite(
+                title=title,
+                message=(
+                    f"Surface {tag} needs a live Shell mesh for this workflow. "
+                    "Mesh it now? Any missing Shell Section can also be "
+                    "created from the mesh dialog."
+                ),
+                action_label=f"Mesh Surface {tag} Now...",
+            ):
+                return False
+            if not self._configure_surface_mesh(tag, generate=True):
+                return False
+            if inspect_surface_mesh_state(self.project, tag).status != "meshed":
+                return False
+        return True
+
     def _selected_node_tags(
         self,
         title: str,
@@ -11481,6 +11511,11 @@ class MainWindow(QMainWindow):
         surface = self.project.surfaces.get(tag)
         if surface is None:
             return
+        if not self._ensure_surface_meshes(
+            [tag],
+            title="Managed Surface Edge Line Load",
+        ):
+            return
         if not self._plain_load_patterns():
             if not self._ensure_plain_load_pattern(
                 title="Managed Surface Edge Line Load"
@@ -11784,21 +11819,10 @@ class MainWindow(QMainWindow):
         if not surfaces:
             return
 
-        unmeshed = [
-            surface.tag
-            for surface in surfaces
-            if inspect_surface_mesh_state(
-                self.project,
-                surface.tag,
-            ).status != "meshed"
-        ]
-        if unmeshed:
-            QMessageBox.information(
-                self,
-                "Managed Surface Pressure",
-                "Mesh the following Surface geometry first: "
-                + ", ".join(map(str, unmeshed)),
-            )
+        if not self._ensure_surface_meshes(
+            [surface.tag for surface in surfaces],
+            title="Managed Surface Pressure",
+        ):
             return
 
         plain = self._plain_load_patterns()
@@ -12032,13 +12056,10 @@ class MainWindow(QMainWindow):
         surface = self.project.surfaces.get(tag)
         if surface is None:
             return
-        if inspect_surface_mesh_state(self.project, tag).status != "meshed":
-            QMessageBox.information(
-                self,
-                "Managed Surface Shell Recorder",
-                "Mesh the Surface before creating or editing a managed "
-                "Shell recorder.",
-            )
+        if not self._ensure_surface_meshes(
+            [tag],
+            title="Managed Surface Shell Recorder",
+        ):
             return
 
         existing = sorted(
