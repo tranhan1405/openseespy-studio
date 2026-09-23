@@ -126,3 +126,32 @@ def test_material_tree_menu_prioritizes_new_and_keeps_ai_last():
         holder.deleteLater()
         app.processEvents()
 
+
+def test_tree_selection_display_context_matches_mechanical_workflow():
+    assert MainWindow._tree_selection_display_context(
+        {"geometry_root"}
+    ) == ("geometry", "Geometry")
+    assert MainWindow._tree_selection_display_context(
+        {"surface_geometry"}
+    ) == ("geometry", "Geometry")
+
+    # Mesh is a discretized FE context, not a CAD-only Geometry context.
+    assert MainWindow._tree_selection_display_context(
+        {"mesh_root"}
+    ) == ("fe", "Model")
+    assert MainWindow._tree_selection_display_context(
+        {"surface_mesh_recipe"}
+    ) == ("fe", "Model")
+
+    assert MainWindow._tree_selection_display_context(
+        {"fe_model_root"}
+    ) == ("fe", "Model")
+    assert MainWindow._tree_selection_display_context(
+        {"analyses_root"}
+    ) == ("fe", "Analysis")
+    assert MainWindow._tree_selection_display_context(
+        {"solution_root"}
+    ) == ("fe", "Result")
+    assert MainWindow._tree_selection_display_context(
+        {"named_sets_root"}
+    ) == ("fe", "Selection")
