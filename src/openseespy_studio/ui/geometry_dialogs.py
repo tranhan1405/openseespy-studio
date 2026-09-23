@@ -9,9 +9,12 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 
@@ -75,11 +78,15 @@ class ElementDialog(_BaseDialog):
         *,
         sections=None,
         transformations=None,
+        new_section_callback=None,
+        new_transformation_callback=None,
         parent=None,
     ):
         super().__init__("Create Frame Member", parent)
         self._sections = dict(sections or {})
         self._transformations = dict(transformations or {})
+        self._new_section_callback = new_section_callback
+        self._new_transformation_callback = new_transformation_callback
 
         self.tag = _tag_spin(tag)
         self.node_i = _tag_spin(node_i)
@@ -93,7 +100,30 @@ class ElementDialog(_BaseDialog):
         ])
 
         self.section = QComboBox()
+        self.section_new = QPushButton("New Section...")
+        self.section_new.setEnabled(callable(self._new_section_callback))
+        self.section_new.clicked.connect(self._create_section_dependency)
+        self.section_holder = QWidget()
+        section_row = QHBoxLayout(self.section_holder)
+        section_row.setContentsMargins(0, 0, 0, 0)
+        section_row.setSpacing(4)
+        section_row.addWidget(self.section, 1)
+        section_row.addWidget(self.section_new)
+
         self.transformation = QComboBox()
+        self.transformation_new = QPushButton("New Transformation...")
+        self.transformation_new.setEnabled(
+            callable(self._new_transformation_callback)
+        )
+        self.transformation_new.clicked.connect(
+            self._create_transformation_dependency
+        )
+        self.transformation_holder = QWidget()
+        transformation_row = QHBoxLayout(self.transformation_holder)
+        transformation_row.setContentsMargins(0, 0, 0, 0)
+        transformation_row.setSpacing(4)
+        transformation_row.addWidget(self.transformation, 1)
+        transformation_row.addWidget(self.transformation_new)
 
         self.group = QComboBox()
         self.group.setEditable(True)
@@ -109,8 +139,8 @@ class ElementDialog(_BaseDialog):
         self.form.addRow("Node I:", self.node_i)
         self.form.addRow("Node J:", self.node_j)
         self.form.addRow("Formulation:", self.element_type)
-        self.form.addRow("Section:", self.section)
-        self.form.addRow("Transformation:", self.transformation)
+        self.form.addRow("Section:", self.section_holder)
+        self.form.addRow("Transformation:", self.transformation_holder)
         self.form.addRow("Group:", self.group)
         self.form.addRow("Beam integration:", self.integration_type)
         self.form.addRow("Integration points:", self.integration_points)
@@ -127,6 +157,30 @@ class ElementDialog(_BaseDialog):
         )
         note.setWordWrap(True)
         self.root.insertWidget(1, note)
+
+    def _create_section_dependency(self) -> None:
+        if not callable(self._new_section_callback):
+            return
+        section = self._new_section_callback()
+        if section is None:
+            return
+        self._sections[int(section.tag)] = section
+        self._populate_sections(self.element_type.currentText())
+        index = self.section.findData(int(section.tag))
+        if index >= 0:
+            self.section.setCurrentIndex(index)
+
+    def _create_transformation_dependency(self) -> None:
+        if not callable(self._new_transformation_callback):
+            return
+        transformation = self._new_transformation_callback()
+        if transformation is None:
+            return
+        self._transformations[int(transformation.tag)] = transformation
+        self._populate_transformations()
+        index = self.transformation.findData(int(transformation.tag))
+        if index >= 0:
+            self.transformation.setCurrentIndex(index)
 
     def _populate_transformations(self) -> None:
         self.transformation.clear()
@@ -198,10 +252,12 @@ class TrussDialog(_BaseDialog):
         materials=None,
         units=None,
         default_area: float | None = None,
+        new_material_callback=None,
         parent=None,
     ):
         super().__init__("Create Truss Element", parent)
         self._materials = dict(materials or {})
+        self._new_material_callback = new_material_callback
         self.unit_system = UnitSystem.from_mapping(units)
 
         self.tag = _tag_spin(tag)
@@ -216,12 +272,16 @@ class TrussDialog(_BaseDialog):
         self.area.setValue(float(default_area))
 
         self.material = QComboBox()
-        for material_tag in sorted(self._materials):
-            material = self._materials[material_tag]
-            self.material.addItem(
-                f"{material_tag} - {material.name} ({material.material_type})",
-                int(material_tag),
-            )
+        self.material_new = QPushButton("New Material...")
+        self.material_new.setEnabled(callable(self._new_material_callback))
+        self.material_new.clicked.connect(self._create_material_dependency)
+        self.material_holder = QWidget()
+        material_row = QHBoxLayout(self.material_holder)
+        material_row.setContentsMargins(0, 0, 0, 0)
+        material_row.setSpacing(4)
+        material_row.addWidget(self.material, 1)
+        material_row.addWidget(self.material_new)
+        self._refresh_material_choices()
 
         self.group = QComboBox()
         self.group.setEditable(True)
@@ -242,7 +302,7 @@ class TrussDialog(_BaseDialog):
             f"Area [{self.unit_system.length}²]:",
             self.area,
         )
-        self.form.addRow("Uniaxial material:", self.material)
+        self.form.addRow("Uniaxial material:", self.material_holder)
         self.form.addRow("Group:", self.group)
         self.form.addRow(
             f"rho [{self.unit_system.mass_per_length_label}]:",
@@ -258,6 +318,33 @@ class TrussDialog(_BaseDialog):
         )
         note.setWordWrap(True)
         self.root.insertWidget(1, note)
+
+    def _refresh_material_choices(self, select_tag: int | None = None) -> None:
+        current = self.material.currentData() if self.material.count() else None
+        wanted = select_tag if select_tag is not None else current
+        self.material.clear()
+        self.material.addItem("Select Material...", None)
+        for material_tag in sorted(self._materials):
+            material = self._materials[material_tag]
+            self.material.addItem(
+                f"{material_tag} - {material.name} ({material.material_type})",
+                int(material_tag),
+            )
+        if wanted is not None:
+            index = self.material.findData(int(wanted))
+            if index >= 0:
+                self.material.setCurrentIndex(index)
+        elif self.material.count() == 2:
+            self.material.setCurrentIndex(1)
+
+    def _create_material_dependency(self) -> None:
+        if not callable(self._new_material_callback):
+            return
+        material = self._new_material_callback()
+        if material is None:
+            return
+        self._materials[int(material.tag)] = material
+        self._refresh_material_choices(int(material.tag))
 
     def values(self):
         material_tag = self.material.currentData()
