@@ -548,10 +548,10 @@ def test_managed_surface_dependency_callbacks_are_wired():
         MainWindow._manage_surface_edge_line_load
     )
     pressure_source = inspect.getsource(
-        MainWindow._manage_surface_pressure
+        MainWindow._create_surface_pressure_for_surfaces
     )
     result_source = inspect.getsource(
-        MainWindow._manage_surface_result
+        MainWindow._manage_surface_shell_result
     )
 
     assert (
