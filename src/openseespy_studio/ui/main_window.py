@@ -6451,6 +6451,13 @@ class MainWindow(QMainWindow):
             self._activate_select_tool()
             return
 
+        current_tab = (
+            self.ribbon_tabs.tabText(self.ribbon_tabs.currentIndex())
+            if hasattr(self, "ribbon_tabs")
+            else ""
+        )
+        if current_tab == "Sketch":
+            self.viewport.set_display_domain("geometry")
         geometry_mode = self.viewport.display_domain() == "geometry"
         if not geometry_mode and len(self.model.nodes) < 2:
             if action is not None:
