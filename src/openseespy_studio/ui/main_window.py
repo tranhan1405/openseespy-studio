@@ -3762,26 +3762,17 @@ class MainWindow(QMainWindow):
             self._apply_result_ribbon_scale
         )
 
-        self.result_frame_count_ribbon = QComboBox()
+        self.result_frame_count_ribbon = QSpinBox()
+        self.result_frame_count_ribbon.setRange(5, 100)
+        self.result_frame_count_ribbon.setValue(20)
+        self.result_frame_count_ribbon.setSuffix(" frames")
         self.result_frame_count_ribbon.setFixedWidth(104)
-        for label, value in (
-            ("All Frames", 0),
-            ("25 Frames", 25),
-            ("50 Frames", 50),
-            ("100 Frames", 100),
-            ("200 Frames", 200),
-            ("500 Frames", 500),
-        ):
-            self.result_frame_count_ribbon.addItem(label, value)
-        self.result_frame_count_ribbon.setCurrentIndex(
-            self.result_frame_count_ribbon.findData(100)
-        )
         self.result_frame_count_ribbon.setToolTip(
-            "Maximum number of evenly sampled frames used during playback. "
-            "The first and last analysis frames are always retained."
+            "Number of evenly sampled result frames used during playback "
+            "(5-100). The first and last analysis frames are retained."
         )
         self.result_frame_count_ribbon.setEnabled(False)
-        self.result_frame_count_ribbon.currentIndexChanged.connect(
+        self.result_frame_count_ribbon.valueChanged.connect(
             self._apply_result_animation_frame_limit
         )
 
@@ -4079,17 +4070,14 @@ class MainWindow(QMainWindow):
             action.setChecked(bool(options.get(setting, True)))
             action.blockSignals(False)
 
-    def _apply_result_animation_frame_limit(self, index: int) -> None:
+    def _apply_result_animation_frame_limit(self, value: int) -> None:
         if not hasattr(self, "result_frame_count_ribbon"):
             return
-        raw = self.result_frame_count_ribbon.itemData(int(index))
-        try:
-            limit = int(raw)
-        except (TypeError, ValueError):
-            limit = 100
+        limit = max(5, min(100, int(value)))
         self.results_panel.set_playback_frame_limit(limit)
-        label = "all recorded frames" if limit <= 0 else f"{limit} sampled frames"
-        self.status_message.setText(f"Result animation: {label}")
+        self.status_message.setText(
+            f"Result animation: {limit} sampled frames"
+        )
 
     def _redraw_active_contour_result(self) -> None:
         if not self._last_result:
