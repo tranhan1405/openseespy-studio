@@ -9600,12 +9600,24 @@ class MainWindow(QMainWindow):
                 f"{title}: skipped {len(skipped)} managed ground node(s)"
             )
         if not editable and skipped:
-            QMessageBox.information(
-                self,
-                title,
-                "Selected node(s) are generated ground nodes managed by "
-                "connections. Edit the structural/source node instead.",
+            owner = next(
+                (
+                    connection
+                    for connection in self.project.connections.values()
+                    if connection.generated_ground_node is not None
+                    and int(connection.generated_ground_node) in skipped
+                ),
+                None,
             )
+            if owner is not None and self._ask_create_prerequisite(
+                title=title,
+                message=(
+                    "Selected node(s) are generated ground nodes managed by "
+                    f"Connection {owner.tag}. Open the owning Connection now?"
+                ),
+                action_label="Edit Owning Connection Now...",
+            ):
+                self._edit_connection(owner.tag)
         return editable
 
     def _exclude_managed_surface_support_nodes(
@@ -9623,13 +9635,30 @@ class MainWindow(QMainWindow):
                 "Surface Edge Support"
             )
         if not editable and skipped:
-            QMessageBox.information(
-                self,
-                title,
-                "Selected node(s) are managed by Geometry Surface Edge "
-                "Support. Edit or remove the managed support from the "
-                "Surface context menu instead.",
+            owner = next(
+                (
+                    support
+                    for support in self.project.surface_edge_supports.values()
+                    if skipped.intersection(
+                        int(node_tag)
+                        for node_tag in support.generated_node_tags
+                    )
+                ),
+                None,
             )
+            if owner is not None and self._ask_create_prerequisite(
+                title=title,
+                message=(
+                    "Selected node(s) are managed by Geometry Surface Edge "
+                    f"Support {owner.tag} on Surface {owner.surface_tag}. "
+                    "Open the managed support now?"
+                ),
+                action_label="Edit Managed Edge Support Now...",
+            ):
+                self._manage_surface_edge_support(
+                    owner.surface_tag,
+                    support_tag=owner.tag,
+                )
         return editable
 
     def _apply_restraint(self) -> None:
@@ -11347,7 +11376,12 @@ class MainWindow(QMainWindow):
             f"{len(node_tags)} ordered FE node(s)"
         )
 
-    def _manage_surface_edge_support(self, surface_tag: int) -> None:
+    def _manage_surface_edge_support(
+        self,
+        surface_tag: int,
+        *,
+        support_tag: int | None = None,
+    ) -> None:
         tag = int(surface_tag)
         surface = self.project.surfaces.get(tag)
         if surface is None:
@@ -11386,17 +11420,28 @@ class MainWindow(QMainWindow):
                 f"Edge {info.edge_index} · {len(info.live_node_tags)} FE node(s)"
                 + suffix
             )
-        label, ok = QInputDialog.getItem(
-            self,
-            "Managed Surface Edge Support",
-            f"Surface {tag} edge:",
-            labels,
-            0,
-            False,
+        target_support = (
+            self.project.surface_edge_supports.get(int(support_tag))
+            if support_tag is not None
+            else None
         )
-        if not ok:
-            return
-        edge_index = labels.index(label) + 1
+        if (
+            target_support is not None
+            and target_support.surface_tag == tag
+        ):
+            edge_index = int(target_support.edge_index)
+        else:
+            label, ok = QInputDialog.getItem(
+                self,
+                "Managed Surface Edge Support",
+                f"Surface {tag} edge:",
+                labels,
+                0,
+                False,
+            )
+            if not ok:
+                return
+            edge_index = labels.index(label) + 1
         existing = existing_by_edge.get(edge_index)
         initial = existing.fixity if existing is not None else None
         dialog = RestraintDialog(initial=initial, parent=self)
@@ -12297,13 +12342,40 @@ class MainWindow(QMainWindow):
             else None
         )
         if recorder is None:
-            QMessageBox.information(
-                self,
-                "Select Recorder FE Targets",
-                "The managed recorder currently has no live FE realization. "
-                "Mesh/remesh the Surface first.",
+            if not self._ask_create_prerequisite(
+                title="Select Recorder FE Targets",
+                message=(
+                    "The managed recorder currently has no live FE "
+                    "realization. Mesh/remesh the Surface and rebuild the "
+                    "recorder now?"
+                ),
+                action_label="Mesh + Rebuild Recorder Now...",
+            ):
+                return
+            if not self._ensure_surface_meshes(
+                [tag],
+                title="Select Recorder FE Targets",
+            ):
+                return
+            try:
+                generated_tag = sync_surface_recorder(
+                    self.project,
+                    definition.tag,
+                )
+            except (TypeError, ValueError, IndexError) as exc:
+                QMessageBox.warning(
+                    self,
+                    "Select Recorder FE Targets",
+                    str(exc),
+                )
+                return
+            recorder = self.project.recorders.get(int(generated_tag))
+            if recorder is None:
+                return
+            self.model = self.project.model
+            self._refresh_all(
+                f"Rebuilt managed Surface recorder {definition.tag}"
             )
-            return
 
         self.viewport.set_display_domain("fe")
         self.selection.set_selection(
@@ -12317,6 +12389,8 @@ class MainWindow(QMainWindow):
     def _remove_managed_surface_shell_recorder(
         self,
         surface_tag: int,
+        *,
+        recorder_tag: int | None = None,
     ) -> None:
         tag = int(surface_tag)
         definitions = sorted(
@@ -12334,22 +12408,34 @@ class MainWindow(QMainWindow):
                 f"Surface {tag} has no managed Shell recorder.",
             )
             return
-        labels = [
-            f"Recorder {item.tag} · {item.response} · GP "
-            f"{item.section_number} · {item.file_name}"
-            for item in definitions
-        ]
-        label, ok = QInputDialog.getItem(
-            self,
-            "Remove Managed Surface Shell Recorder",
-            f"Surface {tag}:",
-            labels,
-            0,
-            False,
+        target = next(
+            (
+                item
+                for item in definitions
+                if recorder_tag is not None
+                and item.tag == int(recorder_tag)
+            ),
+            None,
         )
-        if not ok:
-            return
-        definition = definitions[labels.index(label)]
+        if target is not None:
+            definition = target
+        else:
+            labels = [
+                f"Recorder {item.tag} · {item.response} · GP "
+                f"{item.section_number} · {item.file_name}"
+                for item in definitions
+            ]
+            label, ok = QInputDialog.getItem(
+                self,
+                "Remove Managed Surface Shell Recorder",
+                f"Surface {tag}:",
+                labels,
+                0,
+                False,
+            )
+            if not ok:
+                return
+            definition = definitions[labels.index(label)]
 
         before = self.project.to_dict()
         try:
@@ -12396,7 +12482,12 @@ class MainWindow(QMainWindow):
             )
         }
 
-    def _manage_surface_shell_result(self, surface_tags) -> None:
+    def _manage_surface_shell_result(
+        self,
+        surface_tags,
+        *,
+        result_tag: int | None = None,
+    ) -> None:
         tags = sorted({
             int(tag)
             for tag in surface_tags
@@ -12444,25 +12535,37 @@ class MainWindow(QMainWindow):
             ),
             key=lambda item: item.tag,
         )
-        choices = ["Create new result..."] + [
-            f"Edit Result {item.tag} · {item.result_type} · "
-            f"{item.settings.get('component', '')}"
-            for item in existing
-        ]
-        choice, ok = QInputDialog.getItem(
-            self,
-            "Managed Surface Shell Result",
-            "Definition:",
-            choices,
-            0,
-            False,
+        target = next(
+            (
+                item
+                for item in existing
+                if result_tag is not None
+                and item.tag == int(result_tag)
+            ),
+            None,
         )
-        if not ok:
-            return
-        editing = (
-            None if choice == choices[0]
-            else existing[choices.index(choice) - 1]
-        )
+        if target is not None:
+            editing = target
+        else:
+            choices = ["Create new result..."] + [
+                f"Edit Result {item.tag} · {item.result_type} · "
+                f"{item.settings.get('component', '')}"
+                for item in existing
+            ]
+            choice, ok = QInputDialog.getItem(
+                self,
+                "Managed Surface Shell Result",
+                "Definition:",
+                choices,
+                0,
+                False,
+            )
+            if not ok:
+                return
+            editing = (
+                None if choice == choices[0]
+                else existing[choices.index(choice) - 1]
+            )
 
         dialog = SurfaceResultDialog(
             analyses,
@@ -20196,13 +20299,19 @@ class MainWindow(QMainWindow):
         if result is None:
             return
         if result.surface_scope:
-            QMessageBox.information(
-                self,
-                "Managed Surface Shell Result",
-                "This result scope is managed by Geometry Surface "
-                + ", ".join(f"S{item}" for item in result.surface_scope)
-                + ". Select/edit the Geometry Surface result instead.",
-            )
+            if self._ask_create_prerequisite(
+                title="Managed Surface Shell Result",
+                message=(
+                    "This result scope is managed by Geometry Surface "
+                    + ", ".join(f"S{item}" for item in result.surface_scope)
+                    + ". Open the managed Surface result definition now?"
+                ),
+                action_label="Edit Managed Surface Result Now...",
+            ):
+                self._manage_surface_shell_result(
+                    result.surface_scope,
+                    result_tag=result.tag,
+                )
             return
         self.properties_panel.set_solution_scope(
             set(self.selection.nodes),
@@ -21131,12 +21240,19 @@ class MainWindow(QMainWindow):
             return
         owner = self._managed_surface_recorder_for_recorder(tag)
         if owner is not None:
-            QMessageBox.information(
-                self,
-                "Managed Surface Shell Recorder",
-                "This recorder is generated by managed Surface Shell Recorder "
-                f"{owner.tag}. Remove the Geometry Surface recorder instead.",
-            )
+            if self._ask_create_prerequisite(
+                title="Managed Surface Shell Recorder",
+                message=(
+                    "This recorder is generated by managed Surface Shell "
+                    f"Recorder {owner.tag}. Remove the managed recorder "
+                    "definition instead?"
+                ),
+                action_label="Remove Managed Recorder Now...",
+            ):
+                self._remove_managed_surface_shell_recorder(
+                    owner.surface_tag,
+                    recorder_tag=owner.tag,
+                )
             return
         answer = QMessageBox.question(
             self,
