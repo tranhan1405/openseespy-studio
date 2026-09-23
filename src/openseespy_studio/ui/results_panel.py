@@ -998,6 +998,9 @@ class ResultsPanel(QWidget):
         # playback advances multiple analysis frames per tick instead of
         # forcing VTK to redraw at progressively higher frame rates.
         self._motion_frame_accumulator = 0.0
+        self._playback_frame_limit = 100
+        self._playback_frame_indices: list[int] = []
+        self._playback_sample_cursor = 0
         self._calibration_rows: list[dict[str, Any]] = []
         self._cyclic_experiment_dataset: dict[str, Any] = {}
         self._cyclic_experiment_path = ""
@@ -3010,6 +3013,50 @@ class ResultsPanel(QWidget):
     def current_frame_index(self) -> int:
         return int(self._motion_frame_index)
 
+    def playback_frame_limit(self) -> int:
+        return int(self._playback_frame_limit)
+
+    def _rebuild_playback_frame_indices(self) -> None:
+        count = (
+            int(self._motion_info.frame_count)
+            if self._motion_info is not None
+            else 0
+        )
+        limit = max(0, int(self._playback_frame_limit))
+        if count <= 0:
+            self._playback_frame_indices = []
+            self._playback_sample_cursor = 0
+            return
+        if limit <= 0 or count <= limit:
+            indices = list(range(count))
+        elif limit == 1:
+            indices = [count - 1]
+        else:
+            indices = [
+                int(round(index * (count - 1) / (limit - 1)))
+                for index in range(limit)
+            ]
+            # Rounding can duplicate a sample for very short histories.
+            indices = list(dict.fromkeys(indices))
+            if indices[0] != 0:
+                indices.insert(0, 0)
+            if indices[-1] != count - 1:
+                indices.append(count - 1)
+        self._playback_frame_indices = indices
+        if not indices:
+            self._playback_sample_cursor = 0
+            return
+        current = int(self._motion_frame_index)
+        self._playback_sample_cursor = min(
+            range(len(indices)),
+            key=lambda item: abs(indices[item] - current),
+        )
+
+    def set_playback_frame_limit(self, limit: int) -> None:
+        self._playback_frame_limit = max(0, int(limit))
+        self._motion_frame_accumulator = 0.0
+        self._rebuild_playback_frame_indices()
+
     def set_linked_contour_active(self, active: bool) -> None:
         self._linked_contour_active = bool(active)
 
@@ -3116,6 +3163,7 @@ class ResultsPanel(QWidget):
             else max(0, count - 1)
         )
         self._motion_frame_index = default_index
+        self._rebuild_playback_frame_indices()
         for slider in (self.motion_slider, self.frame_slider):
             slider.blockSignals(True)
             slider.setRange(0, max(0, count - 1))
@@ -3171,6 +3219,7 @@ class ResultsPanel(QWidget):
             scan_reference=False,
         )
         count = int(self._motion_info.frame_count)
+        self._rebuild_playback_frame_indices()
         for slider in (self.motion_slider, self.frame_slider):
             slider.blockSignals(True)
             slider.setRange(0, max(0, count - 1))
@@ -3190,6 +3239,13 @@ class ResultsPanel(QWidget):
             return
         target = max(0, min(int(index), count - 1))
         self._motion_frame_index = target
+        if self._playback_frame_indices:
+            self._playback_sample_cursor = min(
+                range(len(self._playback_frame_indices)),
+                key=lambda item: abs(
+                    self._playback_frame_indices[item] - target
+                ),
+            )
         for slider in (self.motion_slider, self.frame_slider):
             if slider.value() == target:
                 continue
@@ -3231,6 +3287,11 @@ class ResultsPanel(QWidget):
 
     def _motion_frames_per_tick(self) -> float:
         speed = max(0.01, self._motion_speed_value())
+        # A user-selected animation frame count represents post-processing
+        # samples, so Speed advances through those samples directly. "All"
+        # keeps the physical transient-dt-aware behavior.
+        if self._playback_frame_limit > 0:
+            return speed
         if (
             self._motion_info is not None
             and self._motion_info.transient_dt is not None
@@ -3282,15 +3343,29 @@ class ResultsPanel(QWidget):
             return
         self._motion_frame_accumulator -= float(increment)
 
-        target = self._motion_frame_index + increment
-        if target >= count:
-            if self.motion_loop.isChecked():
-                target %= count
-            else:
-                target = count - 1
-                self._motion_timer.stop()
-                self._motion_frame_accumulator = 0.0
-                self._set_play_buttons(False)
+        samples = self._playback_frame_indices
+        if self._playback_frame_limit > 0 and samples:
+            cursor = self._playback_sample_cursor + increment
+            if cursor >= len(samples):
+                if self.motion_loop.isChecked():
+                    cursor %= len(samples)
+                else:
+                    cursor = len(samples) - 1
+                    self._motion_timer.stop()
+                    self._motion_frame_accumulator = 0.0
+                    self._set_play_buttons(False)
+            self._playback_sample_cursor = cursor
+            target = int(samples[cursor])
+        else:
+            target = self._motion_frame_index + increment
+            if target >= count:
+                if self.motion_loop.isChecked():
+                    target %= count
+                else:
+                    target = count - 1
+                    self._motion_timer.stop()
+                    self._motion_frame_accumulator = 0.0
+                    self._set_play_buttons(False)
         self._set_motion_index(target)
 
     def _sync_motion_markers(self, index: int | None) -> None:
