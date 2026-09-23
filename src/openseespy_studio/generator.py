@@ -1519,10 +1519,34 @@ def analysis_to_openseespy(
                 ),
                 "",
             ])
-        elif settings.rayleigh_model == "SingleModeCommittedStiffness":
+        elif settings.rayleigh_model in {
+            "SingleModeCurrentStiffness",
+            "SingleModeInitialStiffness",
+            "SingleModeCommittedStiffness",
+        }:
             max_mode = settings.rayleigh_mode_i
+            stiffness_label, coefficient_name, rayleigh_command = {
+                "SingleModeCurrentStiffness": (
+                    "current",
+                    "_studio_beta_k",
+                    "ops.rayleigh(0.0, _studio_beta_k, 0.0, 0.0)",
+                ),
+                "SingleModeInitialStiffness": (
+                    "initial",
+                    "_studio_beta_k_init",
+                    "ops.rayleigh(0.0, 0.0, _studio_beta_k_init, 0.0)",
+                ),
+                "SingleModeCommittedStiffness": (
+                    "committed",
+                    "_studio_beta_k_comm",
+                    "ops.rayleigh(0.0, 0.0, 0.0, _studio_beta_k_comm)",
+                ),
+            }[settings.rayleigh_model]
             lines.extend([
-                "# Rayleigh damping: committed-stiffness proportional, calibrated to one mode",
+                (
+                    "# Rayleigh damping: "
+                    f"{stiffness_label}-stiffness proportional, calibrated to one mode"
+                ),
                 (
                     f"_studio_damping_eigs = ops.eigen("
                     f"{settings.eigen_solver!r}, {max_mode})"
@@ -1554,8 +1578,11 @@ def analysis_to_openseespy(
                 ),
                 "_studio_omega_i = math.sqrt(_studio_lambda_i)",
                 f"_studio_zeta = {settings.rayleigh_damping_ratio:g}",
-                "_studio_beta_k_comm = 2.0 * _studio_zeta / _studio_omega_i",
-                "ops.rayleigh(0.0, 0.0, 0.0, _studio_beta_k_comm)",
+                (
+                    f"{coefficient_name} = "
+                    "2.0 * _studio_zeta / _studio_omega_i"
+                ),
+                rayleigh_command,
                 "",
             ])
         else:
