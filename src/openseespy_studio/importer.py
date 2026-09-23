@@ -66,6 +66,119 @@ class OpenSeesImportResult:
     def imported_total(self) -> int:
         return sum(self.imported_counts.values())
 
+    @property
+    def detection_groups(self) -> list[tuple[str, str]]:
+        """Compact summary of objects actually reconstructed by the importer."""
+        project = self.project
+        groups: list[tuple[str, str]] = []
+
+        def joined(parts: list[str]) -> str:
+            return " · ".join(part for part in parts if part)
+
+        model_parts: list[str] = []
+        node_count = len(project.model.nodes)
+        element_count = len(project.model.elements) + len(project.connections)
+        support_count = int(self.imported_counts.get("Supports", 0) or 0)
+        mass_count = int(self.imported_counts.get("Mass assignments", 0) or 0)
+        if node_count:
+            model_parts.append(f"{node_count} Nodes")
+        if element_count:
+            model_parts.append(f"{element_count} Elements")
+        if support_count:
+            model_parts.append(f"{support_count} Supports")
+        if mass_count:
+            model_parts.append(f"{mass_count} Mass assignments")
+        if model_parts:
+            groups.append(("Model", joined(model_parts)))
+
+        property_parts: list[str] = []
+        material_count = len(project.materials) + len(project.nd_materials)
+        if material_count:
+            property_parts.append(f"{material_count} Materials")
+        if project.sections:
+            property_parts.append(f"{len(project.sections)} Sections")
+        if project.transformations:
+            property_parts.append(
+                f"{len(project.transformations)} Transformations"
+            )
+        if property_parts:
+            groups.append(("Properties", joined(property_parts)))
+
+        load_parts: list[str] = []
+        path_series = [
+            series
+            for series in project.time_series.values()
+            if str(series.series_type) == "Path"
+        ]
+        if path_series:
+            data_files = [
+                name
+                for name in self.linked_files
+                if Path(name).suffix.lower() != ".py"
+            ]
+            path_text = f"{len(path_series)} Path Time Series"
+            if len(path_series) == 1 and len(data_files) == 1:
+                path_text += f" → {data_files[0]}"
+            load_parts.append(path_text)
+
+        uniform_patterns = [
+            pattern
+            for pattern in project.load_patterns.values()
+            if str(pattern.pattern_type) == "UniformExcitation"
+        ]
+        if uniform_patterns:
+            load_parts.append(
+                f"{len(uniform_patterns)} UniformExcitation Pattern"
+                + ("s" if len(uniform_patterns) != 1 else "")
+            )
+        plain_patterns = [
+            pattern
+            for pattern in project.load_patterns.values()
+            if str(pattern.pattern_type) == "Plain"
+        ]
+        if plain_patterns:
+            load_parts.append(
+                f"{len(plain_patterns)} Plain Pattern"
+                + ("s" if len(plain_patterns) != 1 else "")
+            )
+        if project.nodal_loads:
+            load_parts.append(f"{len(project.nodal_loads)} Nodal Loads")
+        if project.element_loads:
+            load_parts.append(f"{len(project.element_loads)} Element Loads")
+        if project.prescribed_displacements:
+            load_parts.append(
+                f"{len(project.prescribed_displacements)} Prescribed Displacements"
+            )
+        if load_parts:
+            groups.append(("Loads", joined(load_parts)))
+
+        analysis_parts: list[str] = []
+        analyses = list(project.analyses.values())
+        if analyses:
+            active = project.analyses.get(project.active_analysis_tag)
+            analysis = active if active is not None else analyses[-1]
+            analysis_type = str(analysis.analysis_type or "").strip()
+            integrator = str(analysis.integrator or "").strip()
+            if analysis_type:
+                analysis_parts.append(f"{analysis_type} Analysis")
+            if integrator and integrator.lower() not in {"auto", "none"}:
+                analysis_parts.append(f"{integrator} Integrator")
+            if len(analyses) > 1:
+                analysis_parts.append(f"{len(analyses)} Analysis stages")
+        if analysis_parts:
+            groups.append(("Analysis", joined(analysis_parts)))
+
+        output_parts: list[str] = []
+        if project.recorders:
+            output_parts.append(f"{len(project.recorders)} Recorders")
+        probe_count = int(self.imported_counts.get("Node probes", 0) or 0)
+        if probe_count:
+            output_parts.append(f"{probe_count} Node Probes")
+        if output_parts:
+            groups.append(("Output", joined(output_parts)))
+
+        return groups
+
 
 @dataclass(slots=True)
 class _SafeModuleNamespace:
