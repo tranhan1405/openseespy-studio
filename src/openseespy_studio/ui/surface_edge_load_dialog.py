@@ -6,11 +6,14 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPushButton,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from ..project import SurfaceEdgeLoadData
@@ -38,12 +41,15 @@ class SurfaceEdgeLoadDialog(QDialog):
         edge_load: SurfaceEdgeLoadData | None = None,
         next_tag: int = 1,
         units=None,
+        new_pattern_callback=None,
         parent=None,
     ):
         super().__init__(parent)
         self.setWindowTitle("Managed Surface Edge Line Load")
         self.setModal(True)
         self.unit_system = UnitSystem.from_mapping(units)
+        self._patterns = dict(patterns)
+        self._new_pattern_callback = new_pattern_callback
         self.surface_tag = int(surface_tag)
         self.edge_index = int(edge_index)
 
@@ -67,17 +73,22 @@ class SurfaceEdgeLoadDialog(QDialog):
             else f"S{self.surface_tag} E{self.edge_index} Line Load"
         )
         self.pattern = QComboBox()
-        for tag in sorted(patterns):
-            pattern = patterns[tag]
-            if pattern.pattern_type == "Plain":
-                self.pattern.addItem(f"{tag} - {pattern.name}", int(tag))
-        if edge_load is not None:
-            index = self.pattern.findData(edge_load.pattern_tag)
-            if index >= 0:
-                self.pattern.setCurrentIndex(index)
+        self._refresh_pattern_choices(edge_load.pattern_tag if edge_load is not None else None)
+        self.pattern_new = QPushButton("New Plain Pattern...")
+        self.pattern_new.setEnabled(callable(self._new_pattern_callback))
+        self.pattern_new.setToolTip(
+            "Define a Plain load pattern now without closing this dialog."
+        )
+        self.pattern_new.clicked.connect(self._create_pattern_dependency)
+        self.pattern_holder = QWidget()
+        pattern_row = QHBoxLayout(self.pattern_holder)
+        pattern_row.setContentsMargins(0, 0, 0, 0)
+        pattern_row.setSpacing(4)
+        pattern_row.addWidget(self.pattern, 1)
+        pattern_row.addWidget(self.pattern_new)
         form.addRow("Tag:", self.tag)
         form.addRow("Name:", self.name)
-        form.addRow("Plain pattern:", self.pattern)
+        form.addRow("Plain pattern:", self.pattern_holder)
 
         values = (
             edge_load.values_per_length
@@ -112,6 +123,31 @@ class SurfaceEdgeLoadDialog(QDialog):
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
+
+    def _refresh_pattern_choices(self, select_tag=None) -> None:
+        current = self.pattern.currentData() if self.pattern.count() else None
+        wanted = select_tag if select_tag is not None else current
+        self.pattern.clear()
+        self.pattern.addItem("Select Plain load pattern...", None)
+        for tag in sorted(self._patterns):
+            pattern = self._patterns[tag]
+            if pattern.pattern_type == "Plain":
+                self.pattern.addItem(f"{tag} - {pattern.name}", int(tag))
+        if wanted is not None:
+            index = self.pattern.findData(int(wanted))
+            if index >= 0:
+                self.pattern.setCurrentIndex(index)
+        elif self.pattern.count() == 2:
+            self.pattern.setCurrentIndex(1)
+
+    def _create_pattern_dependency(self) -> None:
+        if not callable(self._new_pattern_callback):
+            return
+        pattern = self._new_pattern_callback()
+        if pattern is None:
+            return
+        self._patterns[int(pattern.tag)] = pattern
+        self._refresh_pattern_choices(int(pattern.tag))
 
     def data(self) -> SurfaceEdgeLoadData:
         if self.pattern.currentData() is None:
