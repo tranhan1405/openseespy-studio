@@ -820,3 +820,43 @@ def test_thirteenth_prerequisite_link_batch():
         in create_template
     )
 
+def test_fourteenth_prerequisite_link_batch():
+    viewport_menu = inspect.getsource(MainWindow._show_viewport_context_menu)
+    tree_menu = inspect.getsource(MainWindow._show_tree_context_menu)
+
+    # 1: Beam Load remains reachable so it can create Pattern/Frame prerequisites.
+    assert 'beam_load_action.setEnabled(has_frame)' not in viewport_menu
+    create_beam_load = inspect.getsource(MainWindow._create_element_load)
+    assert "_ensure_plain_load_pattern" in create_beam_load
+    assert "create_if_missing=True" in create_beam_load
+
+    # 2: Shell Pressure remains reachable so it can create Shell/Pattern prerequisites.
+    assert 'shell_pressure_action.setEnabled(has_shell)' not in viewport_menu
+    create_pressure = inspect.getsource(MainWindow._create_shell_pressure)
+    assert "Create & Mesh Surface Now..." in create_pressure
+
+    # 3: Generate Line Meshes can configure missing Line recipes inline.
+    line_generate = inspect.getsource(
+        MainWindow._generate_all_configured_line_meshes
+    )
+    assert "Configure Line {tag} Mesh Now..." in line_generate
+    assert "_configure_line_mesh(tag, generate=False)" in line_generate
+    assert "No configured unmeshed Geometry Lines are ready." not in line_generate
+    assert "line_generate.setEnabled(bool(self.project.lines))" in tree_menu
+
+    # 4: Generate Surface Meshes can configure missing Surface recipes inline.
+    surface_generate = inspect.getsource(
+        MainWindow._generate_all_configured_surface_meshes
+    )
+    assert "Configure Surface {tag} Mesh Now..." in surface_generate
+    assert "_configure_surface_mesh(tag, generate=False)" in surface_generate
+    assert "No configured unmeshed Surfaces are ready." not in surface_generate
+    assert "surface_generate.setEnabled(bool(self.project.surfaces))" in tree_menu
+
+    # 5: Editing a meshed Geometry Point automatically remeshes dependants.
+    edit_point = inspect.getsource(MainWindow._edit_point_geometry)
+    assert "Edit + Remesh Now..." in edit_point
+    assert "remesh_line_geometry(self.project, line_tag)" in edit_point
+    assert "remesh_surface_geometry(self.project, surface_tag)" in edit_point
+    assert "Delete/remesh the generated FE mesh before moving it." not in edit_point
+
