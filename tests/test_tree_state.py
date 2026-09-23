@@ -1,3 +1,4 @@
+import inspect
 import os
 from types import SimpleNamespace
 
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from openseespy_studio.ui.main_window import MainWindow
+from openseespy_studio.ui.viewport import ModelViewport
 
 
 def _item(text, payload, *, expanded=False):
@@ -228,3 +230,44 @@ def test_boundary_condition_icon_mapping_covers_common_presets():
         "Custom"
     ) == "boundary"
 
+
+
+def test_connections_and_constraints_are_fe_model_branches():
+    source = inspect.getsource(MainWindow._refresh_tree)
+
+    assert 'fe_model.addChild(connections_root)' in source
+    assert 'fe_model.addChild(constraints_root)' in source
+    assert 'loads_bc_root.addChild(constraints_root)' not in source
+    assert 'elements.addChild(group)' not in source
+    assert 'f"Elements ({len(self.model.elements)})"' in source
+    assert '("connections_root", None)' in source
+    assert '("constraints_root", None)' in source
+
+
+def test_tree_selection_highlights_connection_and_constraint_scope():
+    source = inspect.getsource(MainWindow._tree_selection_changed)
+
+    assert 'elements.add(connection_tag)' in source
+    assert 'nodes.add(int(constraint.retained_node))' in source
+    assert 'constraint.constrained_nodes' in source
+    assert 'constraints=self.project.constraints' not in source
+
+
+def test_viewport_draw_model_accepts_constraints():
+    parameters = inspect.signature(ModelViewport.draw_model).parameters
+
+    assert "constraints" in parameters
+
+
+def test_zero_length_spring_glyph_has_axial_extent_and_zigzag():
+    points = ModelViewport._zero_length_spring_points(
+        (0.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+        1.0,
+    )
+
+    assert len(points) == 9
+    assert points[0][0] < 0.0 < points[-1][0]
+    assert abs(points[0][1]) < 1.0e-12
+    assert abs(points[-1][1]) < 1.0e-12
+    assert max(abs(point[1]) for point in points) > 0.0
