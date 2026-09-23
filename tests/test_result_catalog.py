@@ -132,3 +132,17 @@ def test_force_displacement_catalog_default_uses_base_shear():
     assert item.category == "Charts / History"
     assert item.label == "Force–Displacement"
     assert item.settings["force_source"] == "Base shear"
+
+def test_response_spectrum_catalog_is_spectrum_only():
+    choices = result_choices_for_analysis("Response Spectrum")
+
+    assert {choice.result_type for choice in choices} == {"ResponseSpectrum"}
+    assert {choice.settings.get("curve") for choice in choices} == {
+        "component_x",
+        "component_y",
+        "rotd50",
+        "rotd100",
+        "table",
+    }
+    assert all(choice.category == "Response Spectrum" for choice in choices)
+
