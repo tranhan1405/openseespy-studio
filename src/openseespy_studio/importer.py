@@ -193,6 +193,35 @@ class _UnknownValue:
         return f"<unresolved {self.label}>"
 
 
+@dataclass(frozen=True, slots=True)
+class _SafeNumericVector:
+    """Small numpy-like numeric vector for safe symbolic import only."""
+
+    values: tuple[float, ...]
+
+    def __iter__(self):
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+    def __getitem__(self, index):
+        return self.values[index]
+
+    def __neg__(self):
+        return _SafeNumericVector(tuple(-value for value in self.values))
+
+    def __mul__(self, scalar):
+        if isinstance(scalar, (int, float)):
+            return _SafeNumericVector(
+                tuple(float(scalar) * value for value in self.values)
+            )
+        return NotImplemented
+
+    def __rmul__(self, scalar):
+        return self.__mul__(scalar)
+
+
 class _Unresolved(Exception):
     pass
 
@@ -390,6 +419,23 @@ class _SafeEvaluator:
             if (
                 isinstance(node.func, ast.Attribute)
                 and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in {"np", "numpy"}
+                and node.func.attr in {"array", "asarray"}
+                and len(node.args) == 1
+                and not node.keywords
+            ):
+                raw = self.eval(node.args[0])
+                if isinstance(raw, _UnknownValue):
+                    return raw
+                try:
+                    return _SafeNumericVector(
+                        tuple(float(value) for value in raw)
+                    )
+                except (TypeError, ValueError):
+                    raise _Unresolved("numpy numeric array")
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
                 and node.func.value.id == "math"
                 and node.func.attr in {
                     "acos", "asin", "atan", "cos", "sin", "tan",
@@ -525,6 +571,8 @@ class _Importer:
         self.analysis_metadata: dict[str, Any] = {}
         self.analysis_events: list[dict[str, Any]] = []
         self._deferred_modal_frequencies: dict[str, dict[str, Any]] = {}
+        self._deferred_eigen_results: dict[str, dict[str, Any]] = {}
+        self._deferred_rayleigh_coefficients: dict[str, dict[str, Any]] = {}
         self._load_const_event_index: int | None = None
         self._pending_node_probes: set[tuple[str, int, int]] = set()
         self._next_constraint = 1
@@ -2598,6 +2646,15 @@ class _Importer:
                 if isinstance(data, dict):
                     self.analysis_metadata = dict(data)
             return
+        if isinstance(target, ast.Subscript):
+            container = self.eval.eval(target.value)
+            if isinstance(container, _UnknownValue):
+                raise _Unresolved(container.label)
+            key = self.eval.eval(target.slice)
+            if isinstance(container, (dict, list)):
+                container[key] = value
+                return
+            raise _Unresolved("subscript assignment target")
         if (
             isinstance(target, (ast.Tuple, ast.List))
             and isinstance(value, (tuple, list))
