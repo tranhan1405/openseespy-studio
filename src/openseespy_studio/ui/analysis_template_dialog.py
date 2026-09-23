@@ -311,6 +311,7 @@ class AnalysisTemplateDialog(QDialog):
         units: dict[str, str] | None = None,
         initial_template: str = "Pushover",
         project: ProjectDatabase | None = None,
+        new_pattern_callback=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -322,6 +323,7 @@ class AnalysisTemplateDialog(QDialog):
 
         self.unit_system = UnitSystem.from_mapping(units)
         self.project = project
+        self._new_pattern_callback = new_pattern_callback
         self._template_mass_source_overrides: dict[str, MassSourceData] = {}
         self._ground_motion_values: dict[int, list[float]] = {
             1: [],
@@ -1244,6 +1246,7 @@ class AnalysisTemplateDialog(QDialog):
             self.project,
             source=source,
             next_tag=self.project.next_mass_source_tag(),
+            new_pattern_callback=self._new_pattern_callback,
             parent=self,
         )
         if not dialog.exec():
