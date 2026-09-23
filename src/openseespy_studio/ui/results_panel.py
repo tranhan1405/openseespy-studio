@@ -2611,8 +2611,8 @@ class ResultsPanel(QWidget):
         # Keep the essential cyclic summary visible regardless of which
         # detail page is active.
         self.cyclic_info = QLabel(
-            "Run a Cyclic analysis to plot applied base shear versus "
-            "control displacement."
+            "Select a result with displacement and base-reaction history to "
+            "inspect nonlinear force-displacement response."
         )
         self.cyclic_info.setWordWrap(True)
         layout.addWidget(self.cyclic_info)
@@ -7483,15 +7483,11 @@ class ResultsPanel(QWidget):
                 if isinstance(analysis, dict)
                 else ""
             )
-            if analysis_type == "Cyclic":
-                self.cyclic_info.setText(
-                    "Cyclic result is present, but no complete "
-                    "control-displacement/base-shear history is available."
-                )
-            else:
-                self.cyclic_info.setText(
-                    "Run or select a Cyclic analysis to view hysteresis."
-                )
+            self.cyclic_info.setText(
+                f"{analysis_type or 'Analysis'} result does not contain a "
+                "complete displacement/base-reaction history for nonlinear "
+                "force-displacement post-processing."
+            )
             self.cyclic_metrics.setText(
                 "Peak |u|: -   +Vpeak: -   -Vpeak: -   "
                 "Hysteretic energy: -   Closed cycles: -"
@@ -7503,7 +7499,7 @@ class ResultsPanel(QWidget):
             self.cyclic_reversal_table.setRowCount(0)
             self.cyclic_cycle_table.setRowCount(0)
             self.cyclic_research_info.setText(
-                "No cyclic reversal research data is available."
+                "No reversal-based nonlinear response data is available."
             )
             return
 
