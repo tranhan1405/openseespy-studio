@@ -2783,11 +2783,11 @@ class MainWindow(QMainWindow):
         geometry_menu = menus["Geometry"]
         geometry_menu.addAction(self.actions["node"])
         frame_menu = geometry_menu.addMenu("Frame")
-        frame_menu.setIcon(studio_icon("element"))
+        frame_menu.setIcon(studio_icon("frame-menu"))
         frame_menu.addAction(self.actions["frame_pick"])
         frame_menu.addAction(self.actions["frame_input"])
         truss_menu = geometry_menu.addMenu("Truss")
-        truss_menu.setIcon(studio_icon("element"))
+        truss_menu.setIcon(studio_icon("truss-menu"))
         truss_menu.addAction(self.actions["truss_pick"])
         truss_menu.addAction(self.actions["truss_input"])
         geometry_menu.addAction(self.actions["surface_geometry"])
@@ -4554,12 +4554,12 @@ class MainWindow(QMainWindow):
             self._tree_surface_items.clear()
 
         root = QTreeWidgetItem(["OpenSees Model"])
-        root.setIcon(0, studio_icon("model"))
+        root.setIcon(0, studio_icon("model-root"))
         root.setData(0, Qt.UserRole, ("model_root", None))
         root.setExpanded(True)
 
         geometry = QTreeWidgetItem(["Geometry"])
-        geometry.setIcon(0, studio_icon("geometry"))
+        geometry.setIcon(0, studio_icon("geometry-root"))
         geometry.setData(0, Qt.UserRole, ("geometry_root", None))
         geometry.setExpanded(True)
         root.addChild(geometry)
@@ -4567,7 +4567,7 @@ class MainWindow(QMainWindow):
         planes = QTreeWidgetItem([
             f"Planes ({3 + len(self.project.sketch_planes)})"
         ])
-        planes.setIcon(0, studio_icon("sketch-plane"))
+        planes.setIcon(0, studio_icon("sketch-plane-root"))
         planes.setData(0, Qt.UserRole, ("planes_root", None))
         planes.setExpanded(True)
         geometry.addChild(planes)
@@ -4578,7 +4578,7 @@ class MainWindow(QMainWindow):
             ("yz", "Global YZ"),
         ):
             item = QTreeWidgetItem([label])
-            item.setIcon(0, studio_icon("grid"))
+            item.setIcon(0, studio_icon("global-plane"))
             item.setData(
                 0,
                 Qt.UserRole,
@@ -4592,33 +4592,33 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"Plane {tag} · {plane.name}{active}"
             ])
-            item.setIcon(0, studio_icon("sketch-plane"))
+            item.setIcon(0, studio_icon("sketch-plane-item"))
             item.setData(0, Qt.UserRole, ("sketch_plane", tag))
             planes.addChild(item)
 
         points = QTreeWidgetItem([
             f"Points ({len(self.project.points)})"
         ])
-        points.setIcon(0, studio_icon("geometry-point"))
+        points.setIcon(0, studio_icon("geometry-points-root"))
         points.setData(0, Qt.UserRole, ("points_root", None))
         geometry.addChild(points)
 
         lines = QTreeWidgetItem([
             f"Lines ({len(self.project.lines)})"
         ])
-        lines.setIcon(0, studio_icon("geometry-line"))
+        lines.setIcon(0, studio_icon("geometry-lines-root"))
         lines.setData(0, Qt.UserRole, ("lines_root", None))
         geometry.addChild(lines)
 
         surfaces = QTreeWidgetItem([
             f"Surfaces ({len(self.project.surfaces)})"
         ])
-        surfaces.setIcon(0, studio_icon("geometry-surface"))
+        surfaces.setIcon(0, studio_icon("geometry-surfaces-root"))
         surfaces.setData(0, Qt.UserRole, ("surfaces_root", None))
         geometry.addChild(surfaces)
 
         mesh_root = QTreeWidgetItem(["Mesh"])
-        mesh_root.setIcon(0, studio_icon("mesh"))
+        mesh_root.setIcon(0, studio_icon("mesh-root"))
         mesh_root.setData(0, Qt.UserRole, ("mesh_root", None))
         mesh_root.setExpanded(True)
         root.addChild(mesh_root)
@@ -4626,14 +4626,14 @@ class MainWindow(QMainWindow):
         line_meshes = QTreeWidgetItem([
             f"Line Meshes ({len(self.project.lines)})"
         ])
-        line_meshes.setIcon(0, studio_icon("line-mesh"))
+        line_meshes.setIcon(0, studio_icon("line-mesh-root"))
         line_meshes.setData(0, Qt.UserRole, ("line_meshes_root", None))
         mesh_root.addChild(line_meshes)
 
         surface_meshes = QTreeWidgetItem([
             f"Surface Meshes ({len(self.project.surfaces)})"
         ])
-        surface_meshes.setIcon(0, studio_icon("surface-mesh"))
+        surface_meshes.setIcon(0, studio_icon("surface-mesh-root"))
         surface_meshes.setData(
             0,
             Qt.UserRole,
@@ -4829,7 +4829,7 @@ class MainWindow(QMainWindow):
         connections_root = QTreeWidgetItem([
             f"Connections ({len(self.project.connections)})"
         ])
-        connections_root.setIcon(0, studio_icon("connection"))
+        connections_root.setIcon(0, studio_icon("connections-root"))
         connections_root.setData(
             0,
             Qt.UserRole,
@@ -4850,7 +4850,7 @@ class MainWindow(QMainWindow):
             group = QTreeWidgetItem([
                 f"{connection_type} ({len(tags)})"
             ])
-            group.setIcon(0, studio_icon("connection"))
+            group.setIcon(0, studio_icon("connection-group"))
             group.setData(
                 0,
                 Qt.UserRole,
@@ -4865,7 +4865,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{connection.connection_type} [{tag}]  {connection.name}"
             ])
-            item.setIcon(0, studio_icon("connection"))
+            item.setIcon(0, studio_icon("connection-item"))
             item.setData(0, Qt.UserRole, ("connection", tag))
             connection_groups[connection.connection_type].addChild(item)
 
@@ -4874,7 +4874,7 @@ class MainWindow(QMainWindow):
         constraints_root = QTreeWidgetItem([
             f"Constraints ({len(self.project.constraints)})"
         ])
-        constraints_root.setIcon(0, studio_icon("constraint"))
+        constraints_root.setIcon(0, studio_icon("constraints-root"))
         constraints_root.setData(
             0,
             Qt.UserRole,
@@ -4888,7 +4888,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{constraint.constraint_type} [{tag}]  {constraint.name}"
             ])
-            item.setIcon(0, studio_icon("constraint"))
+            item.setIcon(0, studio_icon("constraint-item"))
             item.setData(0, Qt.UserRole, ("constraint", tag))
             constraints_root.addChild(item)
 
@@ -4904,7 +4904,7 @@ class MainWindow(QMainWindow):
         ]
 
         mass_root = QTreeWidgetItem(["Mass"])
-        mass_root.setIcon(0, studio_icon("mass"))
+        mass_root.setIcon(0, studio_icon("mass-root"))
         mass_root.setData(0, Qt.UserRole, ("mass_root", None))
         mass_root.setExpanded(True)
         fe_model.addChild(mass_root)
@@ -4912,7 +4912,7 @@ class MainWindow(QMainWindow):
         masses_root = QTreeWidgetItem([
             f"Nodal Masses ({len(mass_nodes)})"
         ])
-        masses_root.setIcon(0, studio_icon("mass"))
+        masses_root.setIcon(0, studio_icon("nodal-masses-root"))
         masses_root.setData(0, Qt.UserRole, ("masses_root", None))
         masses_root.setExpanded(True)
         mass_root.addChild(masses_root)
