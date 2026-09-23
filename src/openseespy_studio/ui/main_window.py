@@ -23463,6 +23463,68 @@ class MainWindow(QMainWindow):
                 ],
             )
             return
+        if kind == "line_meshes_root":
+            configured = sum(
+                1
+                for line in self.project.lines.values()
+                if line.mesh_recipe_configured
+            )
+            meshed = 0
+            generated_elements: set[int] = set()
+            generated_nodes: set[int] = set()
+            for tag in self.project.lines:
+                state = inspect_line_mesh_state(self.project, int(tag))
+                if state.live_element_tags:
+                    meshed += 1
+                generated_elements.update(state.live_element_tags)
+                line = self.project.lines[int(tag)]
+                generated_nodes.update(
+                    int(node_tag)
+                    for node_tag in line.generated_node_tags
+                    if int(node_tag) in self.model.nodes
+                )
+            self.properties_panel.set_properties(
+                "Line Meshes",
+                [
+                    ("Total Lines", len(self.project.lines)),
+                    ("Configured Recipes", configured),
+                    ("Meshed Lines", meshed),
+                    ("Generated Nodes", len(generated_nodes)),
+                    ("Generated Elements", len(generated_elements)),
+                ],
+            )
+            return
+        if kind == "surface_meshes_root":
+            configured = sum(
+                1
+                for surface in self.project.surfaces.values()
+                if surface.mesh_recipe_configured
+            )
+            meshed = 0
+            generated_elements: set[int] = set()
+            generated_nodes: set[int] = set()
+            for tag in self.project.surfaces:
+                state = inspect_surface_mesh_state(self.project, int(tag))
+                if state.live_element_tags:
+                    meshed += 1
+                generated_elements.update(state.live_element_tags)
+                surface = self.project.surfaces[int(tag)]
+                generated_nodes.update(
+                    int(node_tag)
+                    for node_tag in surface.generated_node_tags
+                    if int(node_tag) in self.model.nodes
+                )
+            self.properties_panel.set_properties(
+                "Surface Meshes",
+                [
+                    ("Total Surfaces", len(self.project.surfaces)),
+                    ("Configured Recipes", configured),
+                    ("Meshed Surfaces", meshed),
+                    ("Generated Nodes", len(generated_nodes)),
+                    ("Generated Elements", len(generated_elements)),
+                ],
+            )
+            return
         if kind == "connections_root":
             connection_types: dict[str, int] = {}
             connected_nodes: set[int] = set()
@@ -23576,6 +23638,111 @@ class MainWindow(QMainWindow):
             )
             self.properties_panel.set_properties("Jobs", rows)
             return
+
+    def _show_element_type_group_properties(
+        self,
+        element_type: str,
+    ) -> None:
+        """Show summary properties for one FE element-type group."""
+        target = str(element_type)
+        elements = {
+            tag: element
+            for tag, element in self.model.elements.items()
+            if element.element_type == target
+        }
+        selected = set(elements) & set(self.selection.elements)
+        node_tags = {
+            int(node_tag)
+            for element in elements.values()
+            for node_tag in element.node_tags()
+        }
+        assigned_sections = sum(
+            1
+            for element in elements.values()
+            if element.section_tag is not None
+        )
+        assigned_transforms = sum(
+            1
+            for element in elements.values()
+            if element.transf_tag is not None
+        )
+        assigned_materials = sum(
+            1
+            for element in elements.values()
+            if element.truss_material_tag is not None
+        )
+        self.properties_panel.set_properties(
+            f"Element Type · {target}",
+            [
+                ("Elements", len(elements)),
+                ("Connected Nodes", len(node_tags)),
+                ("Selected Elements", len(selected)),
+                ("Assigned Sections", assigned_sections),
+                ("Assigned Transformations", assigned_transforms),
+                ("Assigned Truss Materials", assigned_materials),
+            ],
+        )
+
+    def _show_boundary_group_properties(
+        self,
+        support_type: str,
+    ) -> None:
+        """Show summary properties for one restraint group."""
+        target = str(support_type)
+        tags = {
+            tag
+            for tag, node in self.model.nodes.items()
+            if any(node.fixity)
+            and classify_fixity(node.fixity) == target
+        }
+        restrained_dofs = sum(
+            sum(int(value) for value in self.model.nodes[tag].fixity)
+            for tag in tags
+        )
+        self.properties_panel.set_properties(
+            f"Support Group · {target}",
+            [
+                ("Nodes", len(tags)),
+                ("Restrained DOFs", restrained_dofs),
+                ("Selected Nodes", len(tags & set(self.selection.nodes))),
+            ],
+        )
+
+    def _show_connection_group_properties(
+        self,
+        connection_type: str,
+    ) -> None:
+        """Show summary properties for one connection-type group."""
+        target = str(connection_type)
+        connections = [
+            connection
+            for connection in self.project.connections.values()
+            if connection.connection_type == target
+        ]
+        node_tags = {
+            int(node_tag)
+            for connection in connections
+            for node_tag in (connection.node_i, connection.node_j)
+        }
+        materials = {
+            int(material_tag)
+            for connection in connections
+            for material_tag in connection.materials_by_dof.values()
+        }
+        to_ground = sum(
+            1
+            for connection in connections
+            if connection.generated_ground_node is not None
+        )
+        self.properties_panel.set_properties(
+            f"Connection Group · {target}",
+            [
+                ("Connections", len(connections)),
+                ("Connected Nodes", len(node_tags)),
+                ("Assigned Materials", len(materials)),
+                ("Managed Ground Connections", to_ground),
+            ],
+        )
 
     def _show_solution_root_properties(
         self,
@@ -24227,6 +24394,10 @@ class MainWindow(QMainWindow):
 
         if kind == "line_meshes_root":
             has_lines = bool(self.project.lines)
+            has_configured = any(
+                line.mesh_recipe_configured
+                for line in self.project.lines.values()
+            )
             has_live_mesh = any(
                 inspect_line_mesh_state(
                     self.project,
@@ -24235,10 +24406,16 @@ class MainWindow(QMainWindow):
                 for tag in self.project.lines
             )
 
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "line_meshes_root"
+                )
+            )
             generate = menu.addAction(
                 "Generate All Configured Line Meshes"
             )
-            generate.setEnabled(has_lines)
+            generate.setEnabled(has_configured)
             generate.triggered.connect(
                 self._generate_all_configured_line_meshes
             )
@@ -24262,6 +24439,10 @@ class MainWindow(QMainWindow):
 
         if kind == "surface_meshes_root":
             has_surfaces = bool(self.project.surfaces)
+            has_configured = any(
+                surface.mesh_recipe_configured
+                for surface in self.project.surfaces.values()
+            )
             has_live_mesh = any(
                 inspect_surface_mesh_state(
                     self.project,
@@ -24270,10 +24451,16 @@ class MainWindow(QMainWindow):
                 for tag in self.project.surfaces
             )
 
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "surface_meshes_root"
+                )
+            )
             generate = menu.addAction(
                 "Generate All Configured Surface Meshes"
             )
-            generate.setEnabled(has_surfaces)
+            generate.setEnabled(has_configured)
             generate.triggered.connect(
                 self._generate_all_configured_surface_meshes
             )
@@ -25075,6 +25262,11 @@ class MainWindow(QMainWindow):
                 create = menu.addAction("New Frame...")
                 create.triggered.connect(self._create_element)
 
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda checked=False, t=element_type:
+                self._show_element_type_group_properties(t)
+            )
             select_all = menu.addAction(
                 f"Select All {element_type} ({len(tags)})"
             )
@@ -25084,68 +25276,41 @@ class MainWindow(QMainWindow):
                 self._select_all_tree_elements(t)
             )
 
-            menu.addSeparator()
-            definition_menu = menu.addMenu("Definition")
-            formulation = definition_menu.addAction(
-                "Element Formulation..."
-            )
-            formulation.setEnabled(
-                not is_truss_group and not is_shell_group
-            )
-            formulation.triggered.connect(
-                lambda checked=False, t=element_type: (
-                    self._select_all_tree_elements(t),
-                    self._set_element_formulation(),
-                )
-            )
-            if is_shell_group:
-                edit_shell = definition_menu.addAction(
-                    "Edit Shell Definition..."
-                )
-                edit_shell.setEnabled(len(tags) == 1)
-                edit_shell.triggered.connect(
-                    lambda checked=False, values=tuple(sorted(tags)): (
-                        self._edit_shell(values[0])
-                        if len(values) == 1
-                        else None
+            if not is_truss_group:
+                definition_menu = menu.addMenu("Definition")
+                if is_shell_group:
+                    edit_shell = definition_menu.addAction(
+                        "Edit Shell Definition..."
                     )
-                )
+                    edit_shell.setEnabled(len(tags) == 1)
+                    edit_shell.triggered.connect(
+                        lambda checked=False,
+                        values=tuple(sorted(tags)): (
+                            self._edit_shell(values[0])
+                            if len(values) == 1
+                            else None
+                        )
+                    )
+                else:
+                    formulation = definition_menu.addAction(
+                        "Element Formulation..."
+                    )
+                    formulation.triggered.connect(
+                        lambda checked=False, t=element_type: (
+                            self._select_all_tree_elements(t),
+                            self._set_element_formulation(),
+                        )
+                    )
 
             assign = menu.addMenu("Assign")
-            material = assign.addAction("Material (Truss)...")
-            material.setEnabled(is_truss_group)
-            material.triggered.connect(
-                lambda checked=False, t=element_type: (
-                    self._select_all_tree_elements(t),
-                    self._assign_truss_material_to_selection(),
-                )
-            )
-            section = assign.addAction(
-                "Shell Section..." if is_shell_group else "Section..."
-            )
-            section.setEnabled(not is_truss_group)
-            section.triggered.connect(
-                lambda checked=False, t=element_type, shell=is_shell_group: (
-                    self._select_all_tree_elements(t),
-                    (
-                        self._assign_shell_section_to_selection()
-                        if shell
-                        else self._assign_section_to_selection()
-                    ),
-                )
-            )
-            transformation = assign.addAction("Transformation...")
-            transformation.setEnabled(
-                not is_truss_group and not is_shell_group
-            )
-            transformation.triggered.connect(
-                lambda checked=False, t=element_type: (
-                    self._select_all_tree_elements(t),
-                    self._assign_transformation_to_selection(),
-                )
-            )
             if is_truss_group:
-                assign.addSeparator()
+                material = assign.addAction("Material (Truss)...")
+                material.triggered.connect(
+                    lambda checked=False, t=element_type: (
+                        self._select_all_tree_elements(t),
+                        self._assign_truss_material_to_selection(),
+                    )
+                )
                 clear_material = assign.addAction("Clear Material")
                 clear_material.triggered.connect(
                     lambda checked=False, t=element_type: (
@@ -25153,27 +25318,51 @@ class MainWindow(QMainWindow):
                         self._clear_truss_material_assignment(),
                     )
                 )
-
-            load_menu = menu.addMenu("Loads")
-            load_menu.setEnabled(not is_truss_group)
-            beam_load = load_menu.addAction("Beam Load...")
-            beam_load.setEnabled(not is_shell_group)
-            beam_load.triggered.connect(
-                lambda checked=False, t=element_type: (
-                    self._select_all_tree_elements(t),
-                    self._create_element_load(),
+            else:
+                section = assign.addAction(
+                    "Shell Section..." if is_shell_group else "Section..."
                 )
-            )
-            shell_pressure = load_menu.addAction("Surface Pressure...")
-            shell_pressure.setEnabled(is_shell_group)
-            shell_pressure.triggered.connect(
-                lambda checked=False, t=element_type: (
-                    self._select_all_tree_elements(t),
-                    self._create_shell_pressure(),
+                section.triggered.connect(
+                    lambda checked=False, t=element_type,
+                    shell=is_shell_group: (
+                        self._select_all_tree_elements(t),
+                        (
+                            self._assign_shell_section_to_selection()
+                            if shell
+                            else self._assign_section_to_selection()
+                        ),
+                    )
                 )
-            )
+                if not is_shell_group:
+                    transformation = assign.addAction("Transformation...")
+                    transformation.triggered.connect(
+                        lambda checked=False, t=element_type: (
+                            self._select_all_tree_elements(t),
+                            self._assign_transformation_to_selection(),
+                        )
+                    )
 
-            menu.addSeparator()
+            if not is_truss_group:
+                load_menu = menu.addMenu("Loads")
+                if is_shell_group:
+                    shell_pressure = load_menu.addAction(
+                        "Surface Pressure..."
+                    )
+                    shell_pressure.triggered.connect(
+                        lambda checked=False, t=element_type: (
+                            self._select_all_tree_elements(t),
+                            self._create_shell_pressure(),
+                        )
+                    )
+                else:
+                    beam_load = load_menu.addAction("Beam Load...")
+                    beam_load.triggered.connect(
+                        lambda checked=False, t=element_type: (
+                            self._select_all_tree_elements(t),
+                            self._create_element_load(),
+                        )
+                    )
+
             named = menu.addAction("Create Named Selection")
             named.setEnabled(bool(tags))
             named.triggered.connect(
@@ -25278,6 +25467,11 @@ class MainWindow(QMainWindow):
                 if any(node.fixity)
                 and classify_fixity(node.fixity) == support_type
             }
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda checked=False, s=support_type:
+                self._show_boundary_group_properties(s)
+            )
             select_all = menu.addAction(
                 f"Select {support_type} Nodes ({len(tags)})"
             )
@@ -25302,6 +25496,14 @@ class MainWindow(QMainWindow):
                     self._zoom_selection(),
                 )
             )
+            named = menu.addAction("Create Named Selection")
+            named.setEnabled(bool(tags))
+            named.triggered.connect(
+                lambda checked=False, s=support_type: (
+                    self._select_boundary_group(s),
+                    self._create_named_selection(),
+                )
+            )
             menu.addSeparator()
             clear = menu.addAction("Clear Group Supports")
             clear.setEnabled(bool(tags))
@@ -25321,9 +25523,21 @@ class MainWindow(QMainWindow):
                 for tag, connection in self.project.connections.items()
                 if connection.connection_type == connection_type
             }
+            node_tags = {
+                int(node_tag)
+                for connection in self.project.connections.values()
+                if connection.connection_type == connection_type
+                for node_tag in (connection.node_i, connection.node_j)
+                if int(node_tag) in self.model.nodes
+            }
 
             create = menu.addAction("New ZeroLength / Link...")
             create.triggered.connect(self._create_connection)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda checked=False, t=connection_type:
+                self._show_connection_group_properties(t)
+            )
             select_all = menu.addAction(
                 f"Select All {connection_type} ({len(tags)})"
             )
@@ -25331,6 +25545,22 @@ class MainWindow(QMainWindow):
             select_all.triggered.connect(
                 lambda checked=False, values=tuple(sorted(tags)):
                 self.selection.set_selection(elements=set(values))
+            )
+            select_nodes = menu.addAction(
+                f"Select Connected Nodes ({len(node_tags)})"
+            )
+            select_nodes.setEnabled(bool(node_tags))
+            select_nodes.triggered.connect(
+                lambda checked=False, values=set(node_tags):
+                self.selection.set_selection(nodes=set(values))
+            )
+            zoom_nodes = menu.addAction("Zoom to Connected Nodes")
+            zoom_nodes.setEnabled(bool(node_tags))
+            zoom_nodes.triggered.connect(
+                lambda checked=False, values=set(node_tags): (
+                    self.selection.set_selection(nodes=set(values)),
+                    self._zoom_selection(),
+                )
             )
             exec_menu()
             return
@@ -25543,6 +25773,23 @@ class MainWindow(QMainWindow):
 
         if kind == "constraint":
             tag = int(value)
+            constraint = self.project.constraints.get(tag)
+            constraint_nodes = (
+                {
+                    int(constraint.retained_node),
+                    *(
+                        int(node_tag)
+                        for node_tag in constraint.constrained_nodes
+                    ),
+                }
+                if constraint is not None
+                else set()
+            )
+            constraint_nodes = {
+                node_tag
+                for node_tag in constraint_nodes
+                if node_tag in self.model.nodes
+            }
             properties_action = menu.addAction("Properties")
             properties_action.triggered.connect(
                 lambda: self._show_constraint_properties(tag)
@@ -25550,6 +25797,20 @@ class MainWindow(QMainWindow):
             edit_action = menu.addAction("Edit...")
             edit_action.triggered.connect(
                 lambda: self._edit_constraint(tag)
+            )
+            select_nodes = menu.addAction("Select Constraint Nodes")
+            select_nodes.setEnabled(bool(constraint_nodes))
+            select_nodes.triggered.connect(
+                lambda checked=False, values=set(constraint_nodes):
+                self.selection.set_selection(nodes=set(values))
+            )
+            zoom = menu.addAction("Zoom to Constraint")
+            zoom.setEnabled(bool(constraint_nodes))
+            zoom.triggered.connect(
+                lambda checked=False, values=set(constraint_nodes): (
+                    self.selection.set_selection(nodes=set(values)),
+                    self._zoom_selection(),
+                )
             )
             delete_action = menu.addAction("Delete")
             delete_action.triggered.connect(
@@ -25572,6 +25833,17 @@ class MainWindow(QMainWindow):
 
         if kind == "connection":
             tag = int(value)
+            connection = self.project.connections.get(tag)
+            connection_nodes = (
+                {int(connection.node_i), int(connection.node_j)}
+                if connection is not None
+                else set()
+            )
+            connection_nodes = {
+                node_tag
+                for node_tag in connection_nodes
+                if node_tag in self.model.nodes
+            }
             properties_action = menu.addAction("Properties")
             properties_action.triggered.connect(
                 lambda: self._show_connection_properties(tag)
@@ -25579,6 +25851,20 @@ class MainWindow(QMainWindow):
             edit_action = menu.addAction("Edit...")
             edit_action.triggered.connect(
                 lambda: self._edit_connection(tag)
+            )
+            select_nodes = menu.addAction("Select Connection Nodes")
+            select_nodes.setEnabled(bool(connection_nodes))
+            select_nodes.triggered.connect(
+                lambda checked=False, values=set(connection_nodes):
+                self.selection.set_selection(nodes=set(values))
+            )
+            zoom = menu.addAction("Zoom to Connection")
+            zoom.setEnabled(bool(connection_nodes))
+            zoom.triggered.connect(
+                lambda checked=False, values=set(connection_nodes): (
+                    self.selection.set_selection(nodes=set(values)),
+                    self._zoom_selection(),
+                )
             )
             delete_action = menu.addAction("Delete")
             delete_action.triggered.connect(
@@ -25726,11 +26012,18 @@ class MainWindow(QMainWindow):
 
         if kind == "solution_result":
             tag = int(value)
+            result_object = self.project.solution_results.get(tag)
+            result_job = (
+                self._latest_job_for_analysis(result_object.analysis_tag)
+                if result_object is not None
+                else None
+            )
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_solution_result_properties(tag)
             )
             evaluate = menu.addAction("Evaluate")
+            evaluate.setEnabled(result_job is not None)
             evaluate.triggered.connect(
                 lambda: self._evaluate_solution_result(tag)
             )
@@ -25850,6 +26143,7 @@ class MainWindow(QMainWindow):
         if kind == "job":
             job_id = int(value)
             job = self._jobs.get(job_id)
+            has_results = job is not None and bool(job.results)
 
             properties = menu.addAction("Properties")
             properties.setEnabled(job is not None)
@@ -25857,13 +26151,13 @@ class MainWindow(QMainWindow):
                 lambda: self._show_job_properties(job_id)
             )
             activate = menu.addAction("Set as Active Result Source")
-            activate.setEnabled(job is not None)
+            activate.setEnabled(has_results)
             activate.triggered.connect(
                 lambda: self._activate_job_result(job_id)
             )
 
             plot_menu = menu.addMenu("Plot")
-            plot_menu.setEnabled(job is not None)
+            plot_menu.setEnabled(has_results)
             if job is not None:
                 self._populate_result_choice_menu(
                     plot_menu,
@@ -25888,7 +26182,7 @@ class MainWindow(QMainWindow):
             clear_display = menu.addAction("Clear Result Display")
             clear_display.triggered.connect(self._clear_result_display)
             export = menu.addAction("Export Results JSON...")
-            export.setEnabled(job is not None)
+            export.setEnabled(has_results)
             export.triggered.connect(
                 lambda: self._export_job_result_json(job_id)
             )
@@ -26149,12 +26443,38 @@ class MainWindow(QMainWindow):
 
         if kind == "nodal_load":
             tag = int(value)
+            load = self.project.nodal_loads.get(tag)
+            target_node = (
+                int(load.node_tag)
+                if load is not None and int(load.node_tag) in self.model.nodes
+                else None
+            )
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_nodal_load_properties(tag)
             )
             edit = menu.addAction("Edit...")
             edit.triggered.connect(lambda: self._edit_nodal_load(tag))
+            select_target = menu.addAction("Select Target Node")
+            select_target.setEnabled(target_node is not None)
+            select_target.triggered.connect(
+                lambda checked=False, node_tag=target_node:
+                self.selection.set_selection(
+                    nodes={node_tag} if node_tag is not None else set()
+                )
+            )
+            zoom = menu.addAction("Zoom to Target")
+            zoom.setEnabled(target_node is not None)
+            zoom.triggered.connect(
+                lambda checked=False, node_tag=target_node: (
+                    self.selection.set_selection(
+                        nodes={node_tag}
+                        if node_tag is not None
+                        else set()
+                    ),
+                    self._zoom_selection(),
+                )
+            )
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_nodal_load(tag))
             exec_menu()
@@ -26162,6 +26482,15 @@ class MainWindow(QMainWindow):
 
         if kind == "prescribed_displacement":
             tag = int(value)
+            displacement = self.project.prescribed_displacements.get(tag)
+            target_node = (
+                int(displacement.node_tag)
+                if (
+                    displacement is not None
+                    and int(displacement.node_tag) in self.model.nodes
+                )
+                else None
+            )
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_prescribed_displacement_properties(tag)
@@ -26169,6 +26498,26 @@ class MainWindow(QMainWindow):
             edit = menu.addAction("Edit...")
             edit.triggered.connect(
                 lambda: self._edit_prescribed_displacement(tag)
+            )
+            select_target = menu.addAction("Select Target Node")
+            select_target.setEnabled(target_node is not None)
+            select_target.triggered.connect(
+                lambda checked=False, node_tag=target_node:
+                self.selection.set_selection(
+                    nodes={node_tag} if node_tag is not None else set()
+                )
+            )
+            zoom = menu.addAction("Zoom to Target")
+            zoom.setEnabled(target_node is not None)
+            zoom.triggered.connect(
+                lambda checked=False, node_tag=target_node: (
+                    self.selection.set_selection(
+                        nodes={node_tag}
+                        if node_tag is not None
+                        else set()
+                    ),
+                    self._zoom_selection(),
+                )
             )
             delete = menu.addAction("Delete")
             delete.triggered.connect(
@@ -26179,6 +26528,15 @@ class MainWindow(QMainWindow):
 
         if kind == "element_load":
             tag = int(value)
+            load = self.project.element_loads.get(tag)
+            target_element = (
+                int(load.element_tag)
+                if (
+                    load is not None
+                    and int(load.element_tag) in self.model.elements
+                )
+                else None
+            )
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_element_load_properties(tag)
@@ -26186,6 +26544,28 @@ class MainWindow(QMainWindow):
             edit = menu.addAction("Edit...")
             edit.triggered.connect(
                 lambda: self._edit_element_load(tag)
+            )
+            select_target = menu.addAction("Select Target Element")
+            select_target.setEnabled(target_element is not None)
+            select_target.triggered.connect(
+                lambda checked=False, element_tag=target_element:
+                self.selection.set_selection(
+                    elements={element_tag}
+                    if element_tag is not None
+                    else set()
+                )
+            )
+            zoom = menu.addAction("Zoom to Target")
+            zoom.setEnabled(target_element is not None)
+            zoom.triggered.connect(
+                lambda checked=False, element_tag=target_element: (
+                    self.selection.set_selection(
+                        elements={element_tag}
+                        if element_tag is not None
+                        else set()
+                    ),
+                    self._zoom_selection(),
+                )
             )
             delete = menu.addAction("Delete")
             delete.triggered.connect(
