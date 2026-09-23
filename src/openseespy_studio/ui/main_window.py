@@ -23504,6 +23504,11 @@ class MainWindow(QMainWindow):
             state = inspect_line_mesh_state(self.project, tag)
             live_mesh = bool(state.live_element_tags)
 
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda checked=False, t=tag:
+                self._show_line_geometry_properties(t)
+            )
             configure = menu.addAction("Configure Line Mesh / FE Recipe...")
             configure.triggered.connect(
                 lambda checked=False, t=tag:
@@ -23722,6 +23727,11 @@ class MainWindow(QMainWindow):
             state = inspect_surface_mesh_state(self.project, tag)
             live_mesh = bool(state.live_element_tags)
 
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda checked=False, t=tag:
+                self._show_surface_geometry_properties(t)
+            )
             configure = menu.addAction(
                 "Configure Surface Mesh / Shell Recipe..."
             )
