@@ -8,6 +8,7 @@ from .project import (
     MaterialData,
     SectionData,
     TransformationData,
+    resolve_transformation_vecxz,
 )
 from .units import UnitSystem
 
@@ -56,7 +57,9 @@ def element_local_axes(
         for index in range(3)
     ))
     # OpenSees defines local y = vecxz x local x, then z = x x y.
-    local_y = _unit(_cross(transformation.vecxz, local_x))
+    # Resolve Auto with the same project-wide rule used by script export.
+    vecxz = resolve_transformation_vecxz(model, transformation)
+    local_y = _unit(_cross(vecxz, local_x))
     local_z = _unit(_cross(local_x, local_y))
     return local_x, local_y, local_z
 

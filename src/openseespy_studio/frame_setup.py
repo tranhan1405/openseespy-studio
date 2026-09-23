@@ -33,6 +33,7 @@ def _find_compatible_transformation(
         transformation = project.transformations[tag]
         if (
             transformation.transformation_type == transformation_type
+            and transformation.orientation_mode == "auto"
             and _same_vector(transformation.vecxz, vecxz)
         ):
             return tag
@@ -61,6 +62,7 @@ def _ensure_transformation(
             name=name,
             transformation_type=transformation_type,
             vecxz=vecxz,
+            orientation_mode="auto",
         )
     )
     return tag, True

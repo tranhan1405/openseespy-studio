@@ -6,7 +6,12 @@ from typing import Iterable
 
 from .beam_loads import resolve_self_weight_local
 from .model import FRAME_ELEMENT_TYPES, SHELL_ELEMENT_TYPES, SUPPORTED_ELEMENT_TYPES
-from .project import AnalysisSettingsData, ProjectDatabase, SHELL_SECTION_TYPES
+from .project import (
+    AnalysisSettingsData,
+    ProjectDatabase,
+    SHELL_SECTION_TYPES,
+    resolve_transformation_vecxz,
+)
 from .units import UnitSystem
 
 
@@ -556,7 +561,7 @@ def _element_geometry_checks(
         if length <= 1.0e-12:
             continue
 
-        vecxz = transformation.vecxz
+        vecxz = resolve_transformation_vecxz(model, transformation)
         sine = _norm(_cross(axis, vecxz)) / (length * _norm(vecxz))
         if sine <= 1.0e-8:
             suggested = _suggest_vecxz(axis)

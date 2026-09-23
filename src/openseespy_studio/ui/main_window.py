@@ -5087,7 +5087,8 @@ class MainWindow(QMainWindow):
             transformation = self.project.transformations[tag]
             item = QTreeWidgetItem([
                 f"{transformation.transformation_type} [{tag}]  "
-                f"{transformation.name}"
+                f"{transformation.name} · "
+                f"{'Auto' if transformation.orientation_mode == 'auto' else 'Manual'}"
             ])
             item.setIcon(0, studio_icon("transformation-item"))
             item.setData(0, Qt.UserRole, ("transformation", tag))
@@ -9180,12 +9181,19 @@ class MainWindow(QMainWindow):
                     return
                 name = transformation.name
                 transformation_type = transformation.transformation_type
+                orientation_mode = transformation.orientation_mode
                 vecxz = list(transformation.vecxz)
                 if property_id == "name":
                     name = str(value).strip()
                 elif property_id == "transformation_type":
                     transformation_type = str(value)
+                elif property_id == "orientation_mode":
+                    orientation_mode = str(value)
                 elif property_id.startswith("vecxz_"):
+                    if orientation_mode != "manual":
+                        raise ValueError(
+                            "Switch Orientation to Manual before editing vecxz."
+                        )
                     index = {"vecxz_x": 0, "vecxz_y": 1, "vecxz_z": 2}[
                         property_id
                     ]
@@ -9197,6 +9205,7 @@ class MainWindow(QMainWindow):
                     name=name,
                     transformation_type=transformation_type,
                     vecxz=tuple(vecxz),
+                    orientation_mode=orientation_mode,
                 )
                 self.project.update_transformation(tag, updated)
 
@@ -19750,6 +19759,7 @@ class MainWindow(QMainWindow):
             name=f"{source.name} Copy",
             transformation_type=source.transformation_type,
             vecxz=source.vecxz,
+            orientation_mode=source.orientation_mode,
         )
         self.project.add_transformation(duplicate)
         self._refresh_project_metadata(
@@ -19862,58 +19872,72 @@ class MainWindow(QMainWindow):
         transformation = self.project.transformations.get(tag)
         if transformation is None:
             return
-        self.properties_panel.set_properties(
-            "Transformation",
-            [
-                ("Tag", transformation.tag),
-                (
-                    "Name",
-                    transformation.name,
-                    {"id": "name", "editable": True, "kind": "text"},
-                ),
-                (
-                    "Type",
-                    transformation.transformation_type,
-                    {
-                        "id": "transformation_type",
-                        "editable": True,
-                        "kind": "choice",
-                        "current": transformation.transformation_type,
-                        "choices": [
-                            ("Linear", "Linear"),
-                            ("PDelta", "PDelta"),
-                            ("Corotational", "Corotational"),
-                        ],
-                    },
-                ),
+
+        manual = transformation.orientation_mode == "manual"
+        rows = [
+            ("Tag", transformation.tag),
+            (
+                "Name",
+                transformation.name,
+                {"id": "name", "editable": True, "kind": "text"},
+            ),
+            (
+                "Type",
+                transformation.transformation_type,
+                {
+                    "id": "transformation_type",
+                    "editable": True,
+                    "kind": "choice",
+                    "current": transformation.transformation_type,
+                    "choices": [
+                        ("Linear", "Linear"),
+                        ("PDelta", "PDelta"),
+                        ("Corotational", "Corotational"),
+                    ],
+                },
+            ),
+            (
+                "Orientation",
+                "Auto (SARE managed)" if not manual else "Manual",
+                {
+                    "id": "orientation_mode",
+                    "editable": True,
+                    "kind": "choice",
+                    "current": transformation.orientation_mode,
+                    "choices": [
+                        ("Auto (SARE managed)", "auto"),
+                        ("Manual", "manual"),
+                    ],
+                },
+            ),
+        ]
+        if manual:
+            rows.extend([
                 (
                     "vecxz X",
                     f"{transformation.vecxz[0]:g}",
-                    {
-                        "id": "vecxz_x",
-                        "editable": True,
-                        "kind": "float",
-                    },
+                    {"id": "vecxz_x", "editable": True, "kind": "float"},
                 ),
                 (
                     "vecxz Y",
                     f"{transformation.vecxz[1]:g}",
-                    {
-                        "id": "vecxz_y",
-                        "editable": True,
-                        "kind": "float",
-                    },
+                    {"id": "vecxz_y", "editable": True, "kind": "float"},
                 ),
                 (
                     "vecxz Z",
                     f"{transformation.vecxz[2]:g}",
-                    {
-                        "id": "vecxz_z",
-                        "editable": True,
-                        "kind": "float",
-                    },
+                    {"id": "vecxz_z", "editable": True, "kind": "float"},
                 ),
-            ],
+            ])
+        else:
+            rows.append((
+                "Reference vector",
+                "Managed automatically from assigned frame directions",
+            ))
+
+        self.properties_panel.set_properties(
+            "Geometric Transformation",
+            rows,
             context={"kind": "transformation", "tag": int(tag)},
         )
 

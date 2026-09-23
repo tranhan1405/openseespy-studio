@@ -6,7 +6,7 @@ import math
 from .beam_loads import resolve_self_weight_local
 from .units import UnitSystem
 from .model import SHELL_ELEMENT_TYPES, StructuralModel
-from .project import MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind
+from .project import MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, resolve_transformation_vecxz
 from .section_response import automatic_moment_curvature_spec, build_section_response_specs
 from .response_spectrum import build_period_grid
 
@@ -1141,7 +1141,7 @@ def column_response_spec(
         else None
     )
     vecxz = (
-        tuple(float(value) for value in transformation.vecxz)
+        resolve_transformation_vecxz(model, transformation)
         if transformation is not None
         else ((1.0, 0.0, 0.0) if axis == 3 else (0.0, 0.0, 1.0))
     )
@@ -3091,13 +3091,19 @@ def analysis_to_openseespy(
 def transformation_to_openseespy(
     transformation: TransformationData,
     ndm: int = 3,
+    model: StructuralModel | None = None,
 ) -> str:
     if int(ndm) == 2:
         return (
             f"ops.geomTransf('{transformation.transformation_type}', "
             f"{transformation.tag})"
         )
-    x, y, z = transformation.vecxz
+    effective = (
+        resolve_transformation_vecxz(model, transformation)
+        if model is not None
+        else transformation.vecxz
+    )
+    x, y, z = effective
     return (
         f"ops.geomTransf('{transformation.transformation_type}', "
         f"{transformation.tag}, {x:g}, {y:g}, {z:g})"
@@ -3371,8 +3377,9 @@ def to_openseespy(
                 float(node_j.xyz[index]) - float(node_i.xyz[index])
                 for index in range(3)
             )
-            vx, vy, vz = (
-                float(value) for value in transformation.vecxz
+            vx, vy, vz = resolve_transformation_vecxz(
+                model,
+                transformation,
             )
             dx, dy, dz = delta
             cross = (
@@ -4117,6 +4124,7 @@ def to_openseespy(
                 transformation_to_openseespy(
                     transformations[tag],
                     model.ndm,
+                    model,
                 )
             )
 

@@ -1263,11 +1263,13 @@ class TransformationData:
     name: str
     transformation_type: str
     vecxz: tuple[float, float, float] = (0.0, 0.0, 1.0)
+    orientation_mode: str = "manual"
 
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Transformation tag")
         self.name = str(self.name).strip() or f"Transformation {self.tag}"
         self.transformation_type = str(self.transformation_type)
+        self.orientation_mode = str(self.orientation_mode).strip().lower()
         if self.tag <= 0:
             raise ValueError("Transformation tag must be a positive integer.")
         if self.transformation_type not in {
@@ -1277,6 +1279,10 @@ class TransformationData:
         }:
             raise ValueError(
                 f"Unsupported transformation type: {self.transformation_type}"
+            )
+        if self.orientation_mode not in {"auto", "manual"}:
+            raise ValueError(
+                "Transformation orientation mode must be Auto or Manual."
             )
         self.vecxz = tuple(float(value) for value in self.vecxz)
         if len(self.vecxz) != 3:
@@ -1294,6 +1300,7 @@ class TransformationData:
             "name": self.name,
             "transformation_type": self.transformation_type,
             "vecxz": list(self.vecxz),
+            "orientation_mode": self.orientation_mode,
         }
 
     @classmethod
@@ -1313,7 +1320,102 @@ class TransformationData:
                 float(raw_vec[1]),
                 float(raw_vec[2]),
             ),
+            # Legacy projects explicitly stored vecxz, so preserve their
+            # behavior as Manual unless the newer mode is present.
+            orientation_mode=str(data.get("orientation_mode", "manual")),
         )
+
+
+def resolve_transformation_vecxz(
+    model: StructuralModel,
+    transformation: TransformationData,
+) -> tuple[float, float, float]:
+    """Return the effective OpenSees vecxz for a transformation.
+
+    Manual mode returns the user vector unchanged. Auto mode inspects every
+    frame member using the transformation and chooses one deterministic
+    reference direction that stays safely away from all member axes. Common
+    building frames therefore resolve naturally: horizontal beams prefer
+    Global Z and vertical columns prefer Global X.
+    """
+    if (
+        transformation.orientation_mode != "auto"
+        or int(model.ndm) == 2
+    ):
+        return tuple(float(value) for value in transformation.vecxz)
+
+    member_axes: list[tuple[float, float, float]] = []
+    for element in model.elements.values():
+        if (
+            element.element_type not in FRAME_ELEMENT_TYPES
+            or element.transf_tag is None
+            or int(element.transf_tag) != int(transformation.tag)
+        ):
+            continue
+        node_i = model.nodes.get(int(element.i))
+        node_j = model.nodes.get(int(element.j))
+        if node_i is None or node_j is None:
+            continue
+        delta = tuple(
+            float(node_j.xyz[index]) - float(node_i.xyz[index])
+            for index in range(3)
+        )
+        norm = math.sqrt(sum(value * value for value in delta))
+        if norm <= 1.0e-15:
+            continue
+        member_axes.append(tuple(value / norm for value in delta))
+
+    if not member_axes:
+        return tuple(float(value) for value in transformation.vecxz)
+
+    preferred: list[tuple[float, float, float]] = [
+        (0.0, 0.0, 1.0),  # intuitive for horizontal beams
+        (1.0, 0.0, 0.0),  # intuitive fallback for vertical columns
+        (0.0, 1.0, 0.0),
+        (1.0, 1.0, 1.0),
+        (1.0, 1.0, 0.0),
+        (1.0, -1.0, 0.0),
+        (1.0, 0.0, 1.0),
+        (1.0, 0.0, -1.0),
+        (0.0, 1.0, 1.0),
+        (0.0, 1.0, -1.0),
+        (1.0, 1.0, -1.0),
+        (1.0, -1.0, 1.0),
+        (-1.0, 1.0, 1.0),
+    ]
+    # Add more pairwise-distinct directions than there are member axes.
+    # Since each member can be parallel to at most one such direction, at
+    # least one candidate is guaranteed not to be parallel to any member.
+    preferred.extend(
+        (1.0, float(index), float(index * index + 1))
+        for index in range(1, len(member_axes) + 3)
+    )
+
+    best_vector: tuple[float, float, float] | None = None
+    best_clearance = -1.0
+    for raw in preferred:
+        norm = math.sqrt(sum(value * value for value in raw))
+        candidate = tuple(value / norm for value in raw)
+        clearance = min(
+            math.sqrt(max(
+                0.0,
+                1.0 - sum(
+                    candidate[index] * axis[index]
+                    for index in range(3)
+                ) ** 2,
+            ))
+            for axis in member_axes
+        )
+        if clearance > best_clearance + 1.0e-12:
+            best_vector = candidate
+            best_clearance = clearance
+
+    if best_vector is None or best_clearance <= 1.0e-10:
+        raise ValueError(
+            f"Could not resolve Auto orientation for transformation "
+            f"{transformation.tag}."
+        )
+    return best_vector
 
 
 @dataclass
