@@ -3888,6 +3888,36 @@ class MainWindow(QMainWindow):
         self._set_dirty(False)
         self._show_frame_grid()
 
+    def _reset_sketch_plane_context(
+        self,
+        *,
+        preserve_valid_custom: bool = False,
+    ) -> None:
+        """Synchronize active sketch-plane UI state after project replacement."""
+        active = self._active_sketch_plane_tag
+        if (
+            preserve_valid_custom
+            and active is not None
+            and active in self.project.sketch_planes
+        ):
+            plane = self.project.sketch_planes[active]
+            self.viewport.set_geometry_sketch_frame(
+                plane.origin,
+                plane.u_axis,
+                plane.v_axis,
+                name=plane.name,
+                key=f"plane:{plane.tag}",
+            )
+            return
+
+        self._active_sketch_plane_tag = None
+        self._active_global_sketch_plane = "xy"
+        self._geometry_line_point_tags = []
+        self._geometry_line_anchor_snap = None
+        self._geometry_surface_point_tags = []
+        self._geometry_surface_anchor_snap = None
+        self.viewport.set_geometry_sketch_plane("xy", 0.0)
+
     def _new_model(self) -> None:
         if not self._maybe_save_changes():
             return
@@ -3897,6 +3927,7 @@ class MainWindow(QMainWindow):
             model=StructuralModel("Untitled"),
         )
         self.model = self.project.model
+        self._reset_sketch_plane_context()
         self._project_path = None
         self._reset_runtime_results()
         self.undo_stack.clear()
@@ -13873,6 +13904,9 @@ class MainWindow(QMainWindow):
         sketch_active = self._geometry_sketch_tool_active()
         self.project = ProjectDatabase.from_dict(snapshot)
         self.model = self.project.model
+        self._reset_sketch_plane_context(
+            preserve_valid_custom=True,
+        )
         self.selection.clear()
 
         if sketch_active:
@@ -13988,6 +14022,7 @@ class MainWindow(QMainWindow):
         self.selection.clear()
         self.project = project
         self.model = project.model
+        self._reset_sketch_plane_context()
         self._project_path = target
         self._reset_runtime_results()
         self.undo_stack.clear()
@@ -14048,6 +14083,7 @@ class MainWindow(QMainWindow):
         self.selection.clear()
         self.project = project
         self.model = project.model
+        self._reset_sketch_plane_context()
         self._project_path = Path(path)
         self._reset_runtime_results()
         self.undo_stack.clear()
@@ -14115,6 +14151,7 @@ class MainWindow(QMainWindow):
         self.selection.clear()
         self.project = result.project
         self.model = self.project.model
+        self._reset_sketch_plane_context()
         self._project_path = None
         self._reset_runtime_results()
         self.undo_stack.clear()
