@@ -281,15 +281,15 @@ def test_line_mesh_ui_exposes_preview_remesh_delete_audit_and_fe_bridge():
     assert "Edit Line Geometry..." in context
     assert "Configure Line Mesh / FE Recipe..." in context
     assert 'if kind == "line_mesh_recipe"' in context
-    assert "Preview Line Mesh" in context
-    assert "Remesh Line" in context
-    assert "Delete Generated Line Mesh" in context
+    assert 'preview = menu.addAction("Preview Mesh")' in context
+    assert '"Remesh"' in context
+    assert 'menu.addAction("Delete Generated Mesh")' in context
     assert "Select Generated FE" in context
-    assert "Audit Line Mesh Integrity" in context
+    assert 'menu.addAction("Audit Mesh Integrity")' in context
     assert "Mesh Quality..." in context
     assert "Reverse Line Direction" in context
     assert "Copy This Mesh / FE Recipe" in context
-    assert "Generate / Remesh" in context
+    assert '"Generate Mesh"' in context
     assert "Audit Line Network Connectivity" in context
     assert "Inspect Line Network Intersections..." in context
     assert "Conform / Heal Line Network" in context
@@ -2767,16 +2767,19 @@ def test_geometry_sketch_grid_is_workplane_aware_and_toggleable():
     setter = inspect.getsource(
         ModelViewport.set_geometry_sketch_grid_visible
     )
+    grid_spec = inspect.getsource(
+        ModelViewport._geometry_sketch_grid_spec
+    )
     render = inspect.getsource(
         ModelViewport._render_geometry_sketch_grid
     )
 
     assert "set_geometry_sketch_grid_visible" in toggle
     assert "_geometry_sketch_grid_visible" in setter
-    assert "geometry_world_to_local" in render
+    assert "geometry_world_to_local" in grid_spec
     assert "geometry_local_to_world" in render
-    assert "start_u" in render
-    assert "start_v" in render
+    assert "start_u" in grid_spec
+    assert "start_v" in grid_spec
     assert 'name="geometry-sketch-grid"' in render
 
 
