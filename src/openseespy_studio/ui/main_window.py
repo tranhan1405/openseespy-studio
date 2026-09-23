@@ -5386,13 +5386,11 @@ class MainWindow(QMainWindow):
         ):
             self._active_solution_result_tag = None
 
-        # Result objects restore their own saved scope below.  Do not clear
-        # and then immediately re-apply that selection, because each change
-        # rebuilds VTK highlight actors and forces an extra render.
-        result_restores_scope = (
-            solution_result_tag is not None
-            or job_plot_ref is not None
-        )
+        # Tree selection is intentionally passive for saved results.
+        # Result scopes are restored only when the user explicitly evaluates
+        # or shows a result, so selecting a result node must not preserve a
+        # stale FE selection from the previously selected model object.
+        result_restores_scope = False
         if not result_restores_scope:
             if geometry_mode:
                 # Geometry selection is owned by the Model Tree, not by the
