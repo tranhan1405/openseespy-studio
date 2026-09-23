@@ -26101,12 +26101,37 @@ class MainWindow(QMainWindow):
             "analysis_settings",
         }:
             tag = int(value)
+            latest_analysis_job = next(
+                (
+                    self._jobs[job_id]
+                    for job_id in sorted(self._jobs, reverse=True)
+                    if self._jobs[job_id].analysis_tag == tag
+                ),
+                None,
+            )
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_analysis_properties(tag)
             )
             edit = menu.addAction("Edit Analysis Settings...")
             edit.triggered.connect(lambda: self._edit_analysis(tag))
+            solution_properties = menu.addAction(
+                "Open Solution Properties"
+            )
+            solution_properties.triggered.connect(
+                lambda checked=False, analysis_tag=tag:
+                self._show_solution_root_properties(analysis_tag)
+            )
+            latest_job = menu.addAction("Open Latest Job Properties")
+            latest_job.setEnabled(latest_analysis_job is not None)
+            latest_job.triggered.connect(
+                lambda checked=False, job=latest_analysis_job:
+                (
+                    self._show_job_properties(job.job_id)
+                    if job is not None
+                    else None
+                )
+            )
 
             menu.addSeparator()
             active = menu.addAction("Set Active")
@@ -26192,6 +26217,24 @@ class MainWindow(QMainWindow):
                 if result_object is not None
                 else None
             )
+            result_scope_nodes = {
+                int(node_tag)
+                for node_tag in (
+                    result_object.node_scope
+                    if result_object is not None
+                    else []
+                )
+                if int(node_tag) in self.model.nodes
+            }
+            result_scope_elements = {
+                int(element_tag)
+                for element_tag in (
+                    result_object.element_scope
+                    if result_object is not None
+                    else []
+                )
+                if int(element_tag) in self.model.elements
+            }
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_solution_result_properties(tag)
@@ -26203,6 +26246,34 @@ class MainWindow(QMainWindow):
             )
             clear_display = menu.addAction("Clear Result Display")
             clear_display.triggered.connect(self._clear_result_display)
+            select_scope = menu.addAction("Select Result Scope")
+            select_scope.setEnabled(
+                bool(result_scope_nodes or result_scope_elements)
+            )
+            select_scope.triggered.connect(
+                lambda checked=False,
+                nodes=set(result_scope_nodes),
+                elements=set(result_scope_elements):
+                self.selection.set_selection(
+                    nodes=set(nodes),
+                    elements=set(elements),
+                )
+            )
+            zoom_scope = menu.addAction("Zoom to Result Scope")
+            zoom_scope.setEnabled(
+                bool(result_scope_nodes or result_scope_elements)
+            )
+            zoom_scope.triggered.connect(
+                lambda checked=False,
+                nodes=set(result_scope_nodes),
+                elements=set(result_scope_elements): (
+                    self.selection.set_selection(
+                        nodes=set(nodes),
+                        elements=set(elements),
+                    ),
+                    self._zoom_selection(),
+                )
+            )
 
             menu.addSeparator()
             duplicate = menu.addAction("Duplicate")
@@ -26224,6 +26295,7 @@ class MainWindow(QMainWindow):
 
         if kind == "solution_information":
             analysis_tag = int(value)
+            result_job = self._latest_job_for_analysis(analysis_tag)
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_solution_information(
@@ -26232,6 +26304,7 @@ class MainWindow(QMainWindow):
                 )
             )
             solver_output = menu.addAction("Show Solver Output")
+            solver_output.setEnabled(result_job is not None)
             solver_output.triggered.connect(
                 lambda: (
                     self._show_solution_information(
@@ -26247,6 +26320,7 @@ class MainWindow(QMainWindow):
                 analysis.test if analysis is not None else None
             )
             convergence = menu.addAction(f"Open {label}")
+            convergence.setEnabled(result_job is not None)
             convergence.triggered.connect(
                 lambda: self._show_solution_convergence(analysis_tag)
             )
@@ -26255,6 +26329,7 @@ class MainWindow(QMainWindow):
 
         if kind == "solution_convergence":
             analysis_tag = int(value)
+            result_job = self._latest_job_for_analysis(analysis_tag)
             analysis = self.project.analyses.get(analysis_tag)
             label = convergence_result_label(
                 analysis.test if analysis is not None else None
@@ -26267,6 +26342,7 @@ class MainWindow(QMainWindow):
                 )
             )
             evaluate = menu.addAction(f"Open {label}")
+            evaluate.setEnabled(result_job is not None)
             evaluate.triggered.connect(
                 lambda: self._show_solution_convergence(analysis_tag)
             )
@@ -26275,6 +26351,7 @@ class MainWindow(QMainWindow):
 
         if kind == "solver_output":
             analysis_tag = int(value)
+            result_job = self._latest_job_for_analysis(analysis_tag)
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_solution_information(
@@ -26283,6 +26360,7 @@ class MainWindow(QMainWindow):
                 )
             )
             show = menu.addAction("Show Solver Output")
+            show.setEnabled(result_job is not None)
             show.triggered.connect(
                 lambda: (
                     self.console_dock.show(),
@@ -26319,10 +26397,53 @@ class MainWindow(QMainWindow):
             job = self._jobs.get(job_id)
             has_results = job is not None and bool(job.results)
 
+            linked_analysis_tag = (
+                int(job.analysis_tag)
+                if (
+                    job is not None
+                    and job.analysis_tag is not None
+                    and int(job.analysis_tag)
+                    in self.project.analyses
+                )
+                else None
+            )
+            can_rerun = (
+                linked_analysis_tag is not None
+                and job is not None
+                and job.status != "Running"
+                and (
+                    self._analysis_process is None
+                    or self._analysis_process.state()
+                    == QProcess.NotRunning
+                )
+            )
+
             properties = menu.addAction("Properties")
             properties.setEnabled(job is not None)
             properties.triggered.connect(
                 lambda: self._show_job_properties(job_id)
+            )
+            open_analysis = menu.addAction(
+                "Open Analysis Properties"
+            )
+            open_analysis.setEnabled(linked_analysis_tag is not None)
+            open_analysis.triggered.connect(
+                lambda checked=False, analysis_tag=linked_analysis_tag:
+                (
+                    self._show_analysis_properties(analysis_tag)
+                    if analysis_tag is not None
+                    else None
+                )
+            )
+            rerun = menu.addAction("Run Analysis Again")
+            rerun.setEnabled(can_rerun)
+            rerun.triggered.connect(
+                lambda checked=False, analysis_tag=linked_analysis_tag:
+                (
+                    self._run_analysis_from_tree(analysis_tag)
+                    if analysis_tag is not None
+                    else None
+                )
             )
             activate = menu.addAction("Set as Active Result Source")
             activate.setEnabled(has_results)
@@ -26802,12 +26923,33 @@ class MainWindow(QMainWindow):
                 if load is not None and int(load.node_tag) in self.model.nodes
                 else None
             )
+            parent_pattern_tag = (
+                int(load.pattern_tag)
+                if (
+                    load is not None
+                    and int(load.pattern_tag)
+                    in self.project.load_patterns
+                )
+                else None
+            )
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_nodal_load_properties(tag)
             )
             edit = menu.addAction("Edit...")
             edit.triggered.connect(lambda: self._edit_nodal_load(tag))
+            open_pattern = menu.addAction(
+                "Open Parent Load Pattern Properties"
+            )
+            open_pattern.setEnabled(parent_pattern_tag is not None)
+            open_pattern.triggered.connect(
+                lambda checked=False, pattern_tag=parent_pattern_tag:
+                (
+                    self._show_load_pattern_properties(pattern_tag)
+                    if pattern_tag is not None
+                    else None
+                )
+            )
             select_target = menu.addAction("Select Target Node")
             select_target.setEnabled(target_node is not None)
             select_target.triggered.connect(
@@ -26844,6 +26986,15 @@ class MainWindow(QMainWindow):
                 )
                 else None
             )
+            parent_pattern_tag = (
+                int(displacement.pattern_tag)
+                if (
+                    displacement is not None
+                    and int(displacement.pattern_tag)
+                    in self.project.load_patterns
+                )
+                else None
+            )
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_prescribed_displacement_properties(tag)
@@ -26851,6 +27002,18 @@ class MainWindow(QMainWindow):
             edit = menu.addAction("Edit...")
             edit.triggered.connect(
                 lambda: self._edit_prescribed_displacement(tag)
+            )
+            open_pattern = menu.addAction(
+                "Open Parent Load Pattern Properties"
+            )
+            open_pattern.setEnabled(parent_pattern_tag is not None)
+            open_pattern.triggered.connect(
+                lambda checked=False, pattern_tag=parent_pattern_tag:
+                (
+                    self._show_load_pattern_properties(pattern_tag)
+                    if pattern_tag is not None
+                    else None
+                )
             )
             select_target = menu.addAction("Select Target Node")
             select_target.setEnabled(target_node is not None)
@@ -26890,6 +27053,15 @@ class MainWindow(QMainWindow):
                 )
                 else None
             )
+            parent_pattern_tag = (
+                int(load.pattern_tag)
+                if (
+                    load is not None
+                    and int(load.pattern_tag)
+                    in self.project.load_patterns
+                )
+                else None
+            )
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_element_load_properties(tag)
@@ -26897,6 +27069,18 @@ class MainWindow(QMainWindow):
             edit = menu.addAction("Edit...")
             edit.triggered.connect(
                 lambda: self._edit_element_load(tag)
+            )
+            open_pattern = menu.addAction(
+                "Open Parent Load Pattern Properties"
+            )
+            open_pattern.setEnabled(parent_pattern_tag is not None)
+            open_pattern.triggered.connect(
+                lambda checked=False, pattern_tag=parent_pattern_tag:
+                (
+                    self._show_load_pattern_properties(pattern_tag)
+                    if pattern_tag is not None
+                    else None
+                )
             )
             select_target = menu.addAction("Select Target Element")
             select_target.setEnabled(target_element is not None)
@@ -27190,6 +27374,16 @@ class MainWindow(QMainWindow):
         select_action.triggered.connect(
             lambda: self._select_named_selection(name)
         )
+        zoom_action = menu.addAction("Zoom to Selection")
+        zoom_action.setEnabled(
+            bool(selection_set.node_tags or selection_set.element_tags)
+        )
+        zoom_action.triggered.connect(
+            lambda checked=False, n=name: (
+                self._select_named_selection(n),
+                self._zoom_selection(),
+            )
+        )
 
         menu.addSeparator()
         if selection_set.surface_tags:
@@ -27202,6 +27396,9 @@ class MainWindow(QMainWindow):
         else:
             update_action = menu.addAction(
                 "Update from Current Selection"
+            )
+            update_action.setEnabled(
+                bool(self.selection.nodes or self.selection.elements)
             )
             update_action.triggered.connect(
                 lambda: self._update_named_selection(name)
