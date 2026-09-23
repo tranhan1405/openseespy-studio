@@ -4713,7 +4713,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"Point {tag} · {point.name}"
             ])
-            item.setIcon(0, studio_icon("geometry-point"))
+            item.setIcon(0, studio_icon("geometry-point-item"))
             item.setData(0, Qt.UserRole, ("point_geometry", tag))
             points.addChild(item)
 
@@ -4722,7 +4722,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"Line {tag} · {line.name}"
             ])
-            item.setIcon(0, studio_icon("geometry-line"))
+            item.setIcon(0, studio_icon("geometry-line-item"))
             item.setData(0, Qt.UserRole, ("line_geometry", tag))
             lines.addChild(item)
             self._tree_line_items[tag] = item
@@ -4746,7 +4746,7 @@ class MainWindow(QMainWindow):
             mesh_item = QTreeWidgetItem([
                 f"Line {tag} · {mesh_status}"
             ])
-            mesh_item.setIcon(0, studio_icon("line-mesh"))
+            mesh_item.setIcon(0, studio_icon("line-mesh-item"))
             mesh_item.setData(
                 0,
                 Qt.UserRole,
@@ -4759,7 +4759,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"Surface {tag} · {surface.name}"
             ])
-            item.setIcon(0, studio_icon("geometry-surface"))
+            item.setIcon(0, studio_icon("geometry-surface-item"))
             item.setData(
                 0,
                 Qt.UserRole,
@@ -4789,7 +4789,7 @@ class MainWindow(QMainWindow):
             mesh_item = QTreeWidgetItem([
                 f"Surface {tag} · {mesh_status}"
             ])
-            mesh_item.setIcon(0, studio_icon("surface-mesh"))
+            mesh_item.setIcon(0, studio_icon("surface-mesh-item"))
             mesh_item.setData(
                 0,
                 Qt.UserRole,
@@ -5393,25 +5393,25 @@ class MainWindow(QMainWindow):
             for result in probes:
                 result_item = QTreeWidgetItem([result.name])
                 result_icon = {
-                    "DeformedShape": "result-deformed",
-                    "ModeShape": "result-deformed",
+                    "DeformedShape": "result-deformed-shape",
+                    "ModeShape": "result-mode-shape",
                     "NodalDisplacement": "result-displacement",
                     "NodalReaction": "result-reaction",
                     "MemberForce": "result-member-force",
-                    "ShellForce": "result-shell",
-                    "ShellDeformation": "result-shell",
-                    "TimeHistory": "result-history",
-                    "ForceDisplacement": "result-history",
-                    "PushoverCurve": "result-history",
-                    "CyclicHysteresis": "result-history",
-                    "ResponseSpectrum": "response-spectrum",
-                    "SpecimenResponse": "result-nonlinear",
-                    "SectionResponse": "result-nonlinear",
-                    "FiberStress": "result-nonlinear",
-                    "FiberStrain": "result-nonlinear",
-                    "HingeState": "result-nonlinear",
+                    "ShellForce": "result-shell-force",
+                    "ShellDeformation": "result-shell-deformation",
+                    "TimeHistory": "result-time-history",
+                    "ForceDisplacement": "result-force-displacement",
+                    "PushoverCurve": "result-pushover-curve",
+                    "CyclicHysteresis": "result-cyclic-hysteresis",
+                    "ResponseSpectrum": "result-response-spectrum",
+                    "SpecimenResponse": "result-specimen-response",
+                    "SectionResponse": "result-section-response",
+                    "FiberStress": "result-fiber-stress",
+                    "FiberStrain": "result-fiber-strain",
+                    "HingeState": "result-hinge-state",
                     "Convergence": "convergence",
-                    "Motion": "result-deformed",
+                    "Motion": "result-motion",
                 }.get(result.result_type, "results")
                 result_item.setIcon(0, studio_icon(result_icon))
                 result_item.setData(
@@ -5424,25 +5424,25 @@ class MainWindow(QMainWindow):
             for result in regular_results:
                 result_item = QTreeWidgetItem([result.name])
                 result_icon = {
-                    "DeformedShape": "result-deformed",
-                    "ModeShape": "result-deformed",
+                    "DeformedShape": "result-deformed-shape",
+                    "ModeShape": "result-mode-shape",
                     "NodalDisplacement": "result-displacement",
                     "NodalReaction": "result-reaction",
                     "MemberForce": "result-member-force",
-                    "ShellForce": "result-shell",
-                    "ShellDeformation": "result-shell",
-                    "TimeHistory": "result-history",
-                    "ForceDisplacement": "result-history",
-                    "PushoverCurve": "result-history",
-                    "CyclicHysteresis": "result-history",
-                    "ResponseSpectrum": "response-spectrum",
-                    "SpecimenResponse": "result-nonlinear",
-                    "SectionResponse": "result-nonlinear",
-                    "FiberStress": "result-nonlinear",
-                    "FiberStrain": "result-nonlinear",
-                    "HingeState": "result-nonlinear",
+                    "ShellForce": "result-shell-force",
+                    "ShellDeformation": "result-shell-deformation",
+                    "TimeHistory": "result-time-history",
+                    "ForceDisplacement": "result-force-displacement",
+                    "PushoverCurve": "result-pushover-curve",
+                    "CyclicHysteresis": "result-cyclic-hysteresis",
+                    "ResponseSpectrum": "result-response-spectrum",
+                    "SpecimenResponse": "result-specimen-response",
+                    "SectionResponse": "result-section-response",
+                    "FiberStress": "result-fiber-stress",
+                    "FiberStrain": "result-fiber-strain",
+                    "HingeState": "result-hinge-state",
                     "Convergence": "convergence",
-                    "Motion": "result-deformed",
+                    "Motion": "result-motion",
                 }.get(result.result_type, "results")
                 result_item.setIcon(0, studio_icon(result_icon))
                 result_item.setData(
@@ -5503,25 +5503,25 @@ class MainWindow(QMainWindow):
                 ])
                 plot_result_type = str(plot.get("result_type", ""))
                 plot_icon = {
-                    "DeformedShape": "result-deformed",
-                    "ModeShape": "result-deformed",
+                    "DeformedShape": "result-deformed-shape",
+                    "ModeShape": "result-mode-shape",
                     "NodalDisplacement": "result-displacement",
                     "NodalReaction": "result-reaction",
                     "MemberForce": "result-member-force",
-                    "ShellForce": "result-shell",
-                    "ShellDeformation": "result-shell",
-                    "TimeHistory": "result-history",
-                    "ForceDisplacement": "result-history",
-                    "PushoverCurve": "result-history",
-                    "CyclicHysteresis": "result-history",
-                    "ResponseSpectrum": "response-spectrum",
-                    "SpecimenResponse": "result-nonlinear",
-                    "SectionResponse": "result-nonlinear",
-                    "FiberStress": "result-nonlinear",
-                    "FiberStrain": "result-nonlinear",
-                    "HingeState": "result-nonlinear",
+                    "ShellForce": "result-shell-force",
+                    "ShellDeformation": "result-shell-deformation",
+                    "TimeHistory": "result-time-history",
+                    "ForceDisplacement": "result-force-displacement",
+                    "PushoverCurve": "result-pushover-curve",
+                    "CyclicHysteresis": "result-cyclic-hysteresis",
+                    "ResponseSpectrum": "result-response-spectrum",
+                    "SpecimenResponse": "result-specimen-response",
+                    "SectionResponse": "result-section-response",
+                    "FiberStress": "result-fiber-stress",
+                    "FiberStrain": "result-fiber-strain",
+                    "HingeState": "result-hinge-state",
                     "Convergence": "convergence",
-                    "Motion": "result-deformed",
+                    "Motion": "result-motion",
                 }.get(plot_result_type, "results")
                 plot_item.setIcon(0, studio_icon(plot_icon))
                 plot_item.setData(
