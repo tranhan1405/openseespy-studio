@@ -7,8 +7,10 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QMessageBox,
+    QPushButton,
     QScrollArea,
     QSpinBox,
     QVBoxLayout,
@@ -21,10 +23,17 @@ from ..units import UnitSystem
 
 
 class MomentCurvatureDialog(QDialog):
-    def __init__(self, project: ProjectDatabase, parent=None):
+    def __init__(
+        self,
+        project: ProjectDatabase,
+        parent=None,
+        *,
+        new_section_callback=None,
+    ):
         super().__init__(parent)
         self.project = project
         self.units = UnitSystem.from_mapping(project.units)
+        self._new_section_callback = new_section_callback
 
         self.setWindowTitle("Moment-Curvature")
         self.resize(620, 520)
@@ -59,15 +68,17 @@ class MomentCurvatureDialog(QDialog):
         form = QFormLayout(setup_group)
 
         self.section = QComboBox()
-        if not project.sections:
-            self.section.addItem("No Sections available · create one first", None)
-        for tag in sorted(project.sections):
-            item = project.sections[tag]
-            self.section.addItem(
-                f"{tag} - {item.name} ({item.section_type})",
-                int(tag),
-            )
-        form.addRow("Section:", self.section)
+        self.section_new = QPushButton("New Section...")
+        self.section_new.setEnabled(callable(self._new_section_callback))
+        self.section_new.clicked.connect(self._create_section_dependency)
+        self.section_holder = QWidget()
+        section_row = QHBoxLayout(self.section_holder)
+        section_row.setContentsMargins(0, 0, 0, 0)
+        section_row.setSpacing(4)
+        section_row.addWidget(self.section, 1)
+        section_row.addWidget(self.section_new)
+        self._refresh_section_choices()
+        form.addRow("Section:", self.section_holder)
 
         self.axis = QComboBox()
         if int(project.model.ndm) == 2:
@@ -139,6 +150,35 @@ class MomentCurvatureDialog(QDialog):
         self.buttons.accepted.connect(self._validate_and_accept)
         self.buttons.rejected.connect(self.reject)
         root.addWidget(self.buttons)
+
+    def _refresh_section_choices(self, select_tag=None) -> None:
+        current = self.section.currentData() if self.section.count() else None
+        wanted = select_tag if select_tag is not None else current
+        self.section.clear()
+        self.section.addItem("Select Section...", None)
+        for tag in sorted(self.project.sections):
+            item = self.project.sections[tag]
+            self.section.addItem(
+                f"{tag} - {item.name} ({item.section_type})",
+                int(tag),
+            )
+        if wanted is not None:
+            index = self.section.findData(int(wanted))
+            if index >= 0:
+                self.section.setCurrentIndex(index)
+        elif self.section.count() == 2:
+            self.section.setCurrentIndex(1)
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(
+            self.section.count() > 1
+        )
+
+    def _create_section_dependency(self) -> None:
+        if not callable(self._new_section_callback):
+            return
+        section = self._new_section_callback()
+        if section is None:
+            return
+        self._refresh_section_choices(int(section.tag))
 
     def spec(self) -> MomentCurvatureSpec:
         section_tag = self.section.currentData()
