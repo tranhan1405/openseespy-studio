@@ -519,6 +519,9 @@ class AnalysisDialog(QDialog):
     def _set_row_visible(self, key, visible):
         widget=self._row_widgets[key]
         widget.setVisible(bool(visible))
+        if key == "driver_pattern":
+            self.driver_pattern.setVisible(bool(visible))
+            self.driver_pattern_new.setVisible(bool(visible))
         label=self.form.labelForField(widget)
         if label is not None:
             label.setVisible(bool(visible))
