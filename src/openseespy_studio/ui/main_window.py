@@ -3257,6 +3257,16 @@ class MainWindow(QMainWindow):
             action.setEnabled(False)
         self.actions["result_deformed"].setChecked(True)
 
+        self._make_action(
+            "result_show_grid",
+            "Grid",
+            "grid",
+            self._toggle_result_grid,
+            "Show or hide the active viewport grid while reviewing results",
+            checkable=True,
+        )
+        self.actions["result_show_grid"].setChecked(True)
+
         for key, label, setting in (
             ("result_show_min", "Min", "contour_show_min"),
             ("result_show_max", "Max", "contour_show_max"),
@@ -3306,6 +3316,7 @@ class MainWindow(QMainWindow):
             self.actions["result_undeformed"],
         ])
         result_display_menu.addSeparator()
+        result_display_menu.addAction(self.actions["result_show_grid"])
         result_display_menu.addActions([
             self.actions["result_show_min"],
             self.actions["result_show_max"],
@@ -3840,7 +3851,7 @@ class MainWindow(QMainWindow):
             result_page,
             "View",
             large=("fit_result",),
-            small=("iso", "xy", "xz", "yz"),
+            small=("result_show_grid", "iso", "xy", "xz", "yz"),
         )
         result_page.finish()
         result_index = self.ribbon_tabs.addTab(result_page, "Result")
@@ -4066,6 +4077,27 @@ class MainWindow(QMainWindow):
         fit = self.actions.get("fit_result")
         if fit is not None:
             fit.setEnabled(bool(self._last_result))
+
+    def _toggle_result_grid(self, checked: bool) -> None:
+        visible = bool(checked)
+        self.viewport.set_geometry_sketch_grid_visible(visible)
+        geometry_grid = self.actions.get("geometry_grid")
+        if geometry_grid is not None:
+            geometry_grid.blockSignals(True)
+            geometry_grid.setChecked(visible)
+            geometry_grid.blockSignals(False)
+        self.status_message.setText(
+            "Result grid " + ("shown" if visible else "hidden")
+        )
+
+    def _sync_result_grid_control(self) -> None:
+        action = self.actions.get("result_show_grid")
+        if action is None:
+            return
+        visible = self.viewport.geometry_sketch_grid_visible()
+        action.blockSignals(True)
+        action.setChecked(bool(visible))
+        action.blockSignals(False)
 
     def _set_result_contour_controls_enabled(self, enabled: bool) -> None:
         enabled = bool(enabled)
@@ -23449,6 +23481,7 @@ class MainWindow(QMainWindow):
         fit_action = self.actions.get("fit_result")
         if fit_action is not None:
             fit_action.setEnabled(True)
+        self._sync_result_grid_control()
         self.results_panel.set_result(
             payload,
             cache_key=result_cache_key,
