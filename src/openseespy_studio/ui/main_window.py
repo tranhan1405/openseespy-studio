@@ -22447,6 +22447,28 @@ class MainWindow(QMainWindow):
             ],
         )
 
+    def _show_job_plot_properties(
+        self,
+        job_id: int,
+        plot_id: int,
+    ) -> None:
+        job = self._jobs.get(int(job_id))
+        if job is None:
+            return
+        plot = job.plot(int(plot_id))
+        if plot is None:
+            return
+        node_scope = {
+            int(tag)
+            for tag in plot.get("node_scope", [])
+        }
+        element_scope = {
+            int(tag)
+            for tag in plot.get("element_scope", [])
+        }
+        self._show_job_plot_properties(job.job_id, plot_id)
+
+
     def _offer_job_analysis_rerun(
         self,
         job_id: int,
@@ -24799,6 +24821,10 @@ class MainWindow(QMainWindow):
             if plot is None:
                 return
 
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_job_plot_properties(job_id, plot_id)
+            )
             show = menu.addAction("Show")
             show.triggered.connect(
                 lambda: self._show_job_plot(job_id, plot_id)
