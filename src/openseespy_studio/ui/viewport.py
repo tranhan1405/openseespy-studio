@@ -65,6 +65,7 @@ class ModelViewport(QWidget):
     box_selected = Signal(object)
     geometry_sketch_moved = Signal(object)
     geometry_sketch_finished = Signal()
+    measure_moved = Signal(object)
     view_requested = Signal(str)
 
     def __init__(self, parent=None):
@@ -176,6 +177,7 @@ class ModelViewport(QWidget):
         self._geometry_sketch_grid_visible = True
         self._origin_axes_visible = True
         self._last_geometry_sketch_qt_pos: tuple[float, float] | None = None
+        self._last_measure_qt_pos: tuple[float, float] | None = None
         self._measurement_actor_names: set[str] = set()
         self._measurement_counter = 0
         self._box_origin: QPoint | None = None
@@ -325,7 +327,7 @@ class ModelViewport(QWidget):
         self._reset_scene()
 
     def set_interaction_tool(self, tool: str) -> None:
-        if tool not in {"select", "box", "geometry_sketch"}:
+        if tool not in {"select", "box", "geometry_sketch", "measure"}:
             raise ValueError(f"Unknown interaction tool: {tool}")
         self._interaction_tool = tool
         self._box_origin = None
@@ -334,6 +336,7 @@ class ModelViewport(QWidget):
         self._nav_mode = None
         self._nav_last_pos = None
         self._last_geometry_sketch_qt_pos = None
+        self._last_measure_qt_pos = None
         self._pending_hover_vtk_pos = None
         self._rubber_band.hide() if self._rubber_band is not None else None
 
@@ -1125,6 +1128,76 @@ class ModelViewport(QWidget):
             )
         self.plotter.render()
 
+    def clear_measure_snap_preview(
+        self,
+        *,
+        render: bool = True,
+    ) -> None:
+        """Remove the temporary Measure snap target and preview line."""
+        for name in (
+            "measure-snap-target",
+            "measure-snap-line",
+            "measure-snap-label",
+        ):
+            self._remove_overlay(name)
+        if render:
+            self.plotter.render()
+
+    def show_measure_snap_preview(
+        self,
+        xyz,
+        *,
+        label: str | None = None,
+        anchor=None,
+    ) -> None:
+        """Preview the point Measure will snap to before the user clicks."""
+        self.clear_measure_snap_preview(render=False)
+        point = np.asarray(tuple(float(value) for value in xyz), dtype=float)
+        if point.shape != (3,) or not np.all(np.isfinite(point)):
+            self.plotter.render()
+            return
+
+        self.plotter.add_mesh(
+            pv.PolyData([point]),
+            name="measure-snap-target",
+            color="#00a8a8",
+            render_points_as_spheres=True,
+            point_size=15,
+            pickable=False,
+            render=False,
+        )
+
+        if anchor is not None:
+            first = np.asarray(
+                tuple(float(value) for value in anchor),
+                dtype=float,
+            )
+            if (
+                first.shape == (3,)
+                and np.all(np.isfinite(first))
+                and float(np.linalg.norm(point - first)) > 1.0e-15
+            ):
+                self.plotter.add_mesh(
+                    pv.Line(first, point),
+                    name="measure-snap-line",
+                    color="#6f42c1",
+                    line_width=2,
+                    opacity=0.75,
+                    pickable=False,
+                    render=False,
+                )
+
+        if label:
+            self._add_annotation_labels(
+                [point],
+                [str(label)],
+                name="measure-snap-label",
+                text_color="#087f7f",
+                font_size=10,
+                always_visible=True,
+            )
+        self.plotter.render()
+
     def clear_measure_anchor(self, *, render: bool = True) -> None:
         """Remove the temporary first-point marker for the Measure tool."""
         self._remove_overlay("measure-anchor")
@@ -1263,6 +1336,7 @@ class ModelViewport(QWidget):
     def clear_measurements(self, *, render: bool = True) -> None:
         """Remove all persistent Measure overlays from the viewport."""
         self.clear_measure_anchor(render=False)
+        self.clear_measure_snap_preview(render=False)
         for name in tuple(self._measurement_actor_names):
             self._remove_overlay(name)
         self._measurement_actor_names.clear()
@@ -1572,6 +1646,34 @@ class ModelViewport(QWidget):
                             self._invalidate_geometry_sketch_cursor_preview(
                                 render=True
                             )
+                    return False
+                if self._interaction_tool == "measure":
+                    last = self._last_measure_qt_pos
+                    if (
+                        last is None
+                        or (qt_pos[0] - last[0]) ** 2
+                        + (qt_pos[1] - last[1]) ** 2 >= 9.0
+                    ):
+                        self._last_measure_qt_pos = qt_pos
+                        vtk_pos = self._vtk_position_from_qt(event)
+                        world = (
+                            self.geometry_workplane_point(*vtk_pos)
+                            if self._display_domain == "geometry"
+                            else None
+                        )
+                        self.measure_moved.emit(
+                            {
+                                "world": world,
+                                "screen": qt_pos,
+                                "plane": (
+                                    self._geometry_sketch_plane
+                                    if self._display_domain == "geometry"
+                                    else None
+                                ),
+                            }
+                        )
+                    if self._display_domain != "geometry":
+                        self._schedule_hover_from_qt(event)
                     return False
                 self._schedule_hover_from_qt(event)
                 return False
