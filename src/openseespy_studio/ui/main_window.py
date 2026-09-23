@@ -24551,6 +24551,7 @@ class MainWindow(QMainWindow):
                 return
             state = inspect_line_mesh_state(self.project, tag)
             live_mesh = bool(state.live_element_tags)
+            has_mesh_state = state.status != "unmeshed"
 
             properties = menu.addAction("Properties")
             properties.triggered.connect(
@@ -24591,7 +24592,7 @@ class MainWindow(QMainWindow):
                 self._show_line_mesh_quality(t)
             )
             audit = menu.addAction("Audit Mesh Integrity")
-            audit.setEnabled(live_mesh)
+            audit.setEnabled(has_mesh_state)
             audit.triggered.connect(
                 lambda checked=False, t=tag:
                 self._audit_line_mesh_integrity(t)
@@ -24599,7 +24600,7 @@ class MainWindow(QMainWindow):
 
             menu.addSeparator()
             delete_mesh = menu.addAction("Delete Generated Mesh")
-            delete_mesh.setEnabled(live_mesh)
+            delete_mesh.setEnabled(has_mesh_state)
             delete_mesh.triggered.connect(
                 lambda checked=False, t=tag:
                 self._delete_line_mesh(t)
@@ -24876,6 +24877,7 @@ class MainWindow(QMainWindow):
                 return
             state = inspect_surface_mesh_state(self.project, tag)
             live_mesh = bool(state.live_element_tags)
+            has_mesh_state = state.status != "unmeshed"
 
             properties = menu.addAction("Properties")
             properties.triggered.connect(
@@ -24934,7 +24936,7 @@ class MainWindow(QMainWindow):
                 self._clear_surface_quality_map
             )
             audit = menu.addAction("Audit Mesh Integrity")
-            audit.setEnabled(live_mesh)
+            audit.setEnabled(has_mesh_state)
             audit.triggered.connect(
                 lambda checked=False, t=tag:
                 self._audit_surface_mesh_integrity([t])
@@ -24942,7 +24944,7 @@ class MainWindow(QMainWindow):
 
             menu.addSeparator()
             delete_mesh = menu.addAction("Delete Generated Mesh")
-            delete_mesh.setEnabled(live_mesh)
+            delete_mesh.setEnabled(has_mesh_state)
             delete_mesh.triggered.connect(
                 lambda checked=False, t=tag:
                 self._delete_surface_mesh(t)
@@ -26485,6 +26487,26 @@ class MainWindow(QMainWindow):
 
         if kind == "mass_source":
             tag = int(value)
+            source = self.project.mass_sources.get(tag)
+            affected_mass_nodes: set[int] = set()
+            if source is not None:
+                try:
+                    mass_summary = evaluate_mass_source(
+                        self.project,
+                        source,
+                    )
+                except (TypeError, ValueError):
+                    mass_summary = None
+                if mass_summary is not None:
+                    affected_mass_nodes = {
+                        int(node_tag)
+                        for node_tag, mass
+                        in mass_summary.nodal_mass.items()
+                        if (
+                            float(mass) > 0.0
+                            and int(node_tag) in self.model.nodes
+                        )
+                    }
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_mass_source_properties(tag)
@@ -26492,6 +26514,14 @@ class MainWindow(QMainWindow):
             apply_action = menu.addAction("Apply / Regenerate Mass")
             apply_action.triggered.connect(
                 lambda: self._apply_mass_source(tag)
+            )
+            select_nodes = menu.addAction(
+                f"Select Affected Nodes ({len(affected_mass_nodes)})"
+            )
+            select_nodes.setEnabled(bool(affected_mass_nodes))
+            select_nodes.triggered.connect(
+                lambda checked=False, values=set(affected_mass_nodes):
+                self.selection.set_selection(nodes=set(values))
             )
             edit = menu.addAction("Edit...")
             edit.triggered.connect(
@@ -26546,12 +26576,60 @@ class MainWindow(QMainWindow):
 
         if kind == "time_series":
             tag = int(value)
+            referencing_plain_patterns = {
+                int(pattern_tag)
+                for pattern_tag, pattern in self.project.load_patterns.items()
+                if (
+                    int(pattern.time_series_tag) == tag
+                    and pattern.pattern_type == "Plain"
+                )
+            }
+            series_nodes = {
+                int(load.node_tag)
+                for load in self.project.nodal_loads.values()
+                if (
+                    int(load.pattern_tag) in referencing_plain_patterns
+                    and int(load.node_tag) in self.model.nodes
+                )
+            } | {
+                int(displacement.node_tag)
+                for displacement
+                in self.project.prescribed_displacements.values()
+                if (
+                    int(displacement.pattern_tag)
+                    in referencing_plain_patterns
+                    and int(displacement.node_tag) in self.model.nodes
+                )
+            }
+            series_elements = {
+                int(load.element_tag)
+                for load in self.project.element_loads.values()
+                if (
+                    int(load.pattern_tag) in referencing_plain_patterns
+                    and int(load.element_tag) in self.model.elements
+                )
+            }
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_time_series_properties(tag)
             )
             edit = menu.addAction("Edit...")
             edit.triggered.connect(lambda: self._edit_time_series(tag))
+            select_loaded = menu.addAction(
+                "Select FE Loaded by This Time Series"
+            )
+            select_loaded.setEnabled(
+                bool(series_nodes or series_elements)
+            )
+            select_loaded.triggered.connect(
+                lambda checked=False,
+                nodes=set(series_nodes),
+                elements=set(series_elements):
+                self.selection.set_selection(
+                    nodes=set(nodes),
+                    elements=set(elements),
+                )
+            )
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_time_series(tag))
             exec_menu()
@@ -26591,6 +26669,16 @@ class MainWindow(QMainWindow):
 
         if kind == "ground_motion":
             tag = int(value)
+            motion = self.project.load_patterns.get(tag)
+            motion_series_tag = (
+                int(motion.time_series_tag)
+                if (
+                    motion is not None
+                    and int(motion.time_series_tag)
+                    in self.project.time_series
+                )
+                else None
+            )
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_ground_motion_properties(tag)
@@ -26598,6 +26686,18 @@ class MainWindow(QMainWindow):
             edit = menu.addAction("Edit...")
             edit.triggered.connect(
                 lambda: self._edit_ground_motion(tag)
+            )
+            open_series = menu.addAction(
+                "Open Referenced Time Series Properties"
+            )
+            open_series.setEnabled(motion_series_tag is not None)
+            open_series.triggered.connect(
+                lambda checked=False, series_tag=motion_series_tag:
+                (
+                    self._show_time_series_properties(series_tag)
+                    if series_tag is not None
+                    else None
+                )
             )
             menu.addSeparator()
             delete = menu.addAction("Delete")
@@ -26852,6 +26952,22 @@ class MainWindow(QMainWindow):
 
         if kind == "nd_material":
             tag = int(value)
+            nd_section_tags = {
+                int(section_tag)
+                for section_tag, section in self.project.sections.items()
+                if (
+                    section.nd_material_tag == tag
+                    or any(
+                        int(layer.material_tag) == tag
+                        for layer in section.shell_layers
+                    )
+                )
+            }
+            nd_elements = {
+                int(element_tag)
+                for element_tag, element in self.model.elements.items()
+                if element.section_tag in nd_section_tags
+            }
             properties_action = menu.addAction("Properties")
             properties_action.triggered.connect(
                 lambda: self._show_nd_material_properties(tag)
@@ -26859,6 +26975,14 @@ class MainWindow(QMainWindow):
             edit_action = menu.addAction("Edit...")
             edit_action.triggered.connect(
                 lambda: self._edit_nd_material(tag)
+            )
+            select_users = menu.addAction(
+                f"Select FE Using nDMaterial ({len(nd_elements)})"
+            )
+            select_users.setEnabled(bool(nd_elements))
+            select_users.triggered.connect(
+                lambda checked=False, values=set(nd_elements):
+                self.selection.set_selection(elements=set(values))
             )
             delete_action = menu.addAction("Delete")
             delete_action.triggered.connect(
@@ -26869,6 +26993,41 @@ class MainWindow(QMainWindow):
 
         if kind == "material":
             tag = int(value)
+            material_section_tags = {
+                int(section_tag)
+                for section_tag, section in self.project.sections.items()
+                if (
+                    section.material_tag == tag
+                    or any(
+                        int(fiber.material_tag) == tag
+                        for fiber in section.fibers
+                    )
+                    or any(
+                        int(component.material_tag) == tag
+                        for component in section.fiber_components
+                    )
+                )
+            }
+            material_elements = {
+                int(element_tag)
+                for element_tag, element in self.model.elements.items()
+                if (
+                    element.truss_material_tag == tag
+                    or element.section_tag in material_section_tags
+                    or element.hinge_i_section_tag in material_section_tags
+                    or element.hinge_j_section_tag in material_section_tags
+                    or element.interior_section_tag in material_section_tags
+                )
+            } | {
+                int(connection_tag)
+                for connection_tag, connection
+                in self.project.connections.items()
+                if tag in {
+                    int(material_tag)
+                    for material_tag
+                    in connection.materials_by_dof.values()
+                }
+            }
             properties_action = menu.addAction("Properties")
             properties_action.triggered.connect(
                 lambda: self._show_material_properties(tag)
@@ -26880,6 +27039,22 @@ class MainWindow(QMainWindow):
             duplicate_action = menu.addAction("Duplicate")
             duplicate_action.triggered.connect(
                 lambda: self._duplicate_material(tag)
+            )
+            select_users = menu.addAction(
+                f"Select FE Using Material ({len(material_elements)})"
+            )
+            select_users.setEnabled(bool(material_elements))
+            select_users.triggered.connect(
+                lambda checked=False, values=set(material_elements):
+                self.selection.set_selection(elements=set(values))
+            )
+            zoom_users = menu.addAction("Zoom to FE Using Material")
+            zoom_users.setEnabled(bool(material_elements))
+            zoom_users.triggered.connect(
+                lambda checked=False, values=set(material_elements): (
+                    self.selection.set_selection(elements=set(values)),
+                    self._zoom_selection(),
+                )
             )
             menu.addSeparator()
             delete_action = menu.addAction("Delete")
@@ -26905,6 +27080,24 @@ class MainWindow(QMainWindow):
 
         if kind == "section":
             tag = int(value)
+            section_elements = {
+                int(element_tag)
+                for element_tag, element in self.model.elements.items()
+                if tag in {
+                    element.section_tag,
+                    element.hinge_i_section_tag,
+                    element.hinge_j_section_tag,
+                    element.interior_section_tag,
+                }
+            } | {
+                int(connection_tag)
+                for connection_tag, connection
+                in self.project.connections.items()
+                if tag in {
+                    connection.section_tag,
+                    connection.generated_section_tag,
+                }
+            }
             properties_action = menu.addAction("Properties")
             properties_action.triggered.connect(
                 lambda: self._show_section_properties(tag)
@@ -26916,6 +27109,14 @@ class MainWindow(QMainWindow):
             duplicate_action = menu.addAction("Duplicate")
             duplicate_action.triggered.connect(
                 lambda: self._duplicate_section(tag)
+            )
+            select_users = menu.addAction(
+                f"Select FE Using Section ({len(section_elements)})"
+            )
+            select_users.setEnabled(bool(section_elements))
+            select_users.triggered.connect(
+                lambda checked=False, values=set(section_elements):
+                self.selection.set_selection(elements=set(values))
             )
             menu.addSeparator()
             delete_action = menu.addAction("Delete")
@@ -26939,6 +27140,11 @@ class MainWindow(QMainWindow):
 
         if kind == "transformation":
             tag = int(value)
+            transformation_elements = {
+                int(element_tag)
+                for element_tag, element in self.model.elements.items()
+                if element.transf_tag == tag
+            }
             properties_action = menu.addAction("Properties")
             properties_action.triggered.connect(
                 lambda: self._show_transformation_properties(tag)
@@ -26950,6 +27156,15 @@ class MainWindow(QMainWindow):
             duplicate_action = menu.addAction("Duplicate")
             duplicate_action.triggered.connect(
                 lambda: self._duplicate_transformation(tag)
+            )
+            select_users = menu.addAction(
+                "Select FE Using Transformation "
+                f"({len(transformation_elements)})"
+            )
+            select_users.setEnabled(bool(transformation_elements))
+            select_users.triggered.connect(
+                lambda checked=False, values=set(transformation_elements):
+                self.selection.set_selection(elements=set(values))
             )
             menu.addSeparator()
             delete_action = menu.addAction("Delete")
