@@ -20687,6 +20687,7 @@ class MainWindow(QMainWindow):
             return
         dialog = RecorderDialog(
             recorder=recorder,
+            target_creator=self._recorder_target_creator,
             parent=self,
         )
         if not dialog.exec():
