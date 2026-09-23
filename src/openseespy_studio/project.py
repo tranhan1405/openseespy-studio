@@ -2460,16 +2460,17 @@ class AnalysisSettingsData:
         if (
             self.analysis_type == "Transient"
             and self.rayleigh_damping_ratio > 0.0
-            and self.rayleigh_mode_i < 1
+            and self.rayleigh_model == "TwoMode"
+            and (self.rayleigh_mode_i < 1 or self.rayleigh_mode_j < 1)
         ):
-            raise ValueError("Rayleigh damping mode i must be positive.")
+            raise ValueError("Rayleigh damping modes must be positive.")
         if (
             self.analysis_type == "Transient"
             and self.rayleigh_damping_ratio > 0.0
-            and self.rayleigh_model == "TwoMode"
-            and self.rayleigh_mode_j < 1
+            and self.rayleigh_model == "SingleModeCommittedStiffness"
+            and self.rayleigh_mode_i < 1
         ):
-            raise ValueError("Rayleigh damping mode j must be positive.")
+            raise ValueError("Rayleigh damping mode i must be positive.")
         if (
             self.analysis_type == "Transient"
             and self.rayleigh_damping_ratio > 0.0
