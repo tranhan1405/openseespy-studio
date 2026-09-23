@@ -561,7 +561,21 @@ def _element_geometry_checks(
         if length <= 1.0e-12:
             continue
 
-        vecxz = resolve_transformation_vecxz(model, transformation)
+        try:
+            vecxz = resolve_transformation_vecxz(model, transformation)
+        except ValueError as exc:
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Transformation orientation",
+                    f"Element {tag}: {exc}",
+                    "element",
+                    tag,
+                    "Use separate Auto transformations for incompatible "
+                    "member direction families, or switch to Manual.",
+                )
+            )
+            continue
         sine = _norm(_cross(axis, vecxz)) / (length * _norm(vecxz))
         if sine <= 1.0e-8:
             suggested = _suggest_vecxz(axis)

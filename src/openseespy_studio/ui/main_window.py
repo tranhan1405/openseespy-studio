@@ -13540,7 +13540,6 @@ class MainWindow(QMainWindow):
                     element_tag=element_tag,
                     load_type="SurfacePressure",
                     pressure=template.pressure,
-                    coordinate_system=template.coordinate_system,
                 )
                 self.project.add_element_load(load)
                 created.append(load.tag)
@@ -13674,6 +13673,7 @@ class MainWindow(QMainWindow):
                     gravity=template.gravity,
                     density_override=template.density_override,
                     pressure=template.pressure,
+                    coordinate_system=template.coordinate_system,
                 )
                 self.project.add_element_load(load)
                 created.append(load.tag)
@@ -19947,7 +19947,7 @@ class MainWindow(QMainWindow):
         else:
             rows.append((
                 "Reference vector",
-                "Managed automatically from assigned frame directions",
+                "Stable Auto: Global Z up; Global X/Y fallback near parallel",
             ))
 
         self.properties_panel.set_properties(
