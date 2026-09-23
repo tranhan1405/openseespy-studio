@@ -22936,10 +22936,6 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "geometry_root":
-            plane_menu = menu.addMenu("New Sketch Plane")
-            plane_menu.addAction(self.actions["sketch_plane_offset"])
-            plane_menu.addAction(self.actions["sketch_plane_3point"])
-            menu.addSeparator()
             point_action = menu.addAction("New Point...")
             point_action.triggered.connect(self._create_point_geometry)
             line_pick = menu.addAction("Draw Polyline")
@@ -22954,15 +22950,22 @@ class MainWindow(QMainWindow):
             )
             surface_action = menu.addAction("New Surface by Input...")
             surface_action.triggered.connect(self._create_surface_geometry)
+
+            menu.addSeparator()
+            plane_menu = menu.addMenu("Sketch Plane")
+            plane_menu.addAction(self.actions["sketch_plane_offset"])
+            plane_menu.addAction(self.actions["sketch_plane_3point"])
+
+            generator_menu = menu.addMenu("Generate")
+            quick_column = generator_menu.addAction("1D Test Specimen...")
+            quick_column.triggered.connect(self._show_test_column_wizard)
+            quick_2d = generator_menu.addAction("2D Frame...")
+            quick_2d.triggered.connect(self._show_frame_grid_2d)
+            grid_action = generator_menu.addAction("3D Frame Grid...")
+            grid_action.triggered.connect(self._show_frame_grid)
+
             menu.addSeparator()
             menu.addAction(self.actions["origin_axes"])
-            menu.addSeparator()
-            quick_column = menu.addAction("Generate 1D Test Specimen...")
-            quick_column.triggered.connect(self._show_test_column_wizard)
-            quick_2d = menu.addAction("Generate 2D Frame...")
-            quick_2d.triggered.connect(self._show_frame_grid_2d)
-            grid_action = menu.addAction("Generate 3D Frame Grid...")
-            grid_action.triggered.connect(self._show_frame_grid)
             exec_menu()
             return
 
@@ -23186,49 +23189,50 @@ class MainWindow(QMainWindow):
                 return
             state = inspect_line_mesh_state(self.project, tag)
             live_mesh = bool(state.live_element_tags)
+
             configure = menu.addAction("Configure Line Mesh / FE Recipe...")
             configure.triggered.connect(
                 lambda checked=False, t=tag:
                 self._configure_line_mesh(t)
             )
-            quality = menu.addAction("Mesh Quality...")
-            quality.triggered.connect(
-                lambda checked=False, t=tag:
-                self._show_line_mesh_quality(t)
+            generate = menu.addAction(
+                "Remesh" if live_mesh else "Generate Mesh"
             )
+            generate.triggered.connect(
+                lambda checked=False, t=tag:
+                self._remesh_line_geometry(t)
+                if live_mesh
+                else self._mesh_line_geometry(t)
+            )
+
+            menu.addSeparator()
             preview = menu.addAction("Preview Mesh")
             preview.triggered.connect(
                 lambda checked=False, t=tag:
                 self._preview_line_mesh(t)
-            )
-            menu.addSeparator()
-            generate = menu.addAction(
-                "Remesh"
-                if live_mesh else "Generate Mesh"
-            )
-            generate.triggered.connect(
-                lambda checked=False, t=tag:
-                (
-                    self._remesh_line_geometry(t)
-                    if live_mesh
-                    else self._mesh_line_geometry(t)
-                )
-            )
-            delete_mesh = menu.addAction("Delete Generated Mesh")
-            delete_mesh.setEnabled(live_mesh)
-            delete_mesh.triggered.connect(
-                lambda checked=False, t=tag:
-                self._delete_line_mesh(t)
             )
             select_fe = menu.addAction("Select Generated FE")
             select_fe.triggered.connect(
                 lambda checked=False, t=tag:
                 self._select_line_generated_fe(t)
             )
+            quality = menu.addAction("Mesh Quality...")
+            quality.triggered.connect(
+                lambda checked=False, t=tag:
+                self._show_line_mesh_quality(t)
+            )
             audit = menu.addAction("Audit Mesh Integrity")
             audit.triggered.connect(
                 lambda checked=False, t=tag:
                 self._audit_line_mesh_integrity(t)
+            )
+
+            menu.addSeparator()
+            delete_mesh = menu.addAction("Delete Generated Mesh")
+            delete_mesh.setEnabled(live_mesh)
+            delete_mesh.triggered.connect(
+                lambda checked=False, t=tag:
+                self._delete_line_mesh(t)
             )
             exec_menu()
             return
@@ -23240,8 +23244,7 @@ class MainWindow(QMainWindow):
                 return
             line_tags = self._selected_line_geometry_tags(tag)
             count = len(line_tags)
-            state = inspect_line_mesh_state(self.project, tag)
-            live_mesh = bool(state.live_element_tags)
+
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda checked=False, t=tag:
@@ -23253,14 +23256,51 @@ class MainWindow(QMainWindow):
                     lambda checked=False, t=tag:
                     self._edit_line_geometry(t)
                 )
-                reverse = menu.addAction("Reverse Line Direction")
+
+            menu.addSeparator()
+            modify_menu = menu.addMenu("Modify Geometry")
+            if count == 1:
+                reverse = modify_menu.addAction("Reverse Direction")
                 reverse.triggered.connect(
                     lambda checked=False, t=tag:
                     self._reverse_line_geometry(t)
                 )
+            copy_geometry = modify_menu.addAction(
+                "Copy / Offset Line..."
+                if count == 1
+                else f"Copy / Offset {count} Lines..."
+            )
+            copy_geometry.triggered.connect(
+                lambda checked=False, tags=tuple(line_tags):
+                self._copy_offset_geometry_lines(tags)
+            )
+            if count == 1:
+                divide = modify_menu.addAction("Divide Line...")
+                divide.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._divide_geometry_line(t)
+                )
+            if count == 2:
+                trim_extend = modify_menu.addAction(
+                    "Trim / Extend This Line to Other Selected Line..."
+                )
+                trim_extend.triggered.connect(
+                    lambda checked=False, t=tag,
+                    tags=tuple(line_tags):
+                    self._trim_extend_geometry_line(t, tags)
+                )
+            if count > 1:
+                merge = modify_menu.addAction(
+                    f"Merge {count} Collinear Lines"
+                )
+                merge.triggered.connect(
+                    lambda checked=False, tags=tuple(line_tags):
+                    self._merge_selected_geometry_lines(tags)
+                )
 
             if count > 1:
-                copy_recipe = menu.addAction(
+                mesh_menu = menu.addMenu("Mesh / FE")
+                copy_recipe = mesh_menu.addAction(
                     f"Copy This Mesh / FE Recipe to "
                     f"{count - 1} Selected Line(s)"
                 )
@@ -23273,63 +23313,30 @@ class MainWindow(QMainWindow):
                     )
                 )
 
-            menu.addSeparator()
-            copy_geometry = menu.addAction(
-                "Copy / Offset Geometry Line..."
-                if count == 1
-                else f"Copy / Offset {count} Geometry Lines..."
-            )
-            copy_geometry.triggered.connect(
-                lambda checked=False, tags=tuple(line_tags):
-                self._copy_offset_geometry_lines(tags)
-            )
-            if count == 1:
-                divide = menu.addAction("Divide Geometry Line...")
-                divide.triggered.connect(
-                    lambda checked=False, t=tag:
-                    self._divide_geometry_line(t)
-                )
-            if count == 2:
-                trim_extend = menu.addAction(
-                    "Trim / Extend This Line to Other Selected Line..."
-                )
-                trim_extend.triggered.connect(
-                    lambda checked=False, t=tag,
-                    tags=tuple(line_tags):
-                    self._trim_extend_geometry_line(t, tags)
-                )
-            if count > 1:
-                merge = menu.addAction(
-                    f"Merge {count} Collinear Lines"
-                )
-                merge.triggered.connect(
-                    lambda checked=False, tags=tuple(line_tags):
-                    self._merge_selected_geometry_lines(tags)
-                )
-
             network_tags = (
                 tuple(line_tags)
                 if count > 1
                 else tuple(sorted(self.project.lines))
             )
-            inspect_intersections = menu.addAction(
-                "Inspect Selected Line Intersections..."
+            network_menu = menu.addMenu("Network / Audit")
+            inspect_intersections = network_menu.addAction(
+                "Inspect Selected Intersections..."
                 if count > 1
-                else "Inspect Line Network Intersections..."
+                else "Inspect Network Intersections..."
             )
             inspect_intersections.setEnabled(len(network_tags) >= 2)
             inspect_intersections.triggered.connect(
                 lambda checked=False, tags=network_tags:
                 self._inspect_line_geometry_intersections(tags)
             )
-            clear_intersections = menu.addAction(
+            clear_intersections = network_menu.addAction(
                 "Clear Intersection Preview"
             )
             clear_intersections.triggered.connect(
                 self._clear_line_intersection_preview
             )
-            conform_network = menu.addAction(
-                "Conform / Heal Selected Line Network"
+            conform_network = network_menu.addAction(
+                "Conform / Heal Selected Network"
                 if count > 1
                 else "Conform / Heal Line Network"
             )
@@ -23338,8 +23345,8 @@ class MainWindow(QMainWindow):
                 lambda checked=False, tags=network_tags:
                 self._conform_line_network_ui(tags)
             )
-            network_audit = menu.addAction(
-                "Audit Selected Line Connectivity"
+            network_audit = network_menu.addAction(
+                "Audit Selected Connectivity"
                 if count > 1
                 else "Audit Line Network Connectivity"
             )
