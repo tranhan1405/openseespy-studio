@@ -34,10 +34,13 @@ class MassSourceDialog(QDialog):
         source: MassSourceData | None = None,
         *,
         next_tag: int = 1,
+        new_pattern_callback=None,
         parent=None,
     ):
         super().__init__(parent)
         self.project = project
+        self._new_pattern_callback = new_pattern_callback
+        self._source = source
         self.setWindowTitle("Mass Source")
         self.setModal(True)
         self.resize(720, 610)
@@ -116,6 +119,17 @@ class MassSourceDialog(QDialog):
         note.setWordWrap(True)
         loads_layout.addWidget(note)
 
+        pattern_actions = QHBoxLayout()
+        pattern_actions.addStretch(1)
+        self.new_pattern = QPushButton("New Plain Pattern...")
+        self.new_pattern.setEnabled(callable(self._new_pattern_callback))
+        self.new_pattern.setToolTip(
+            "Define a gravity/load pattern without closing Mass Source."
+        )
+        self.new_pattern.clicked.connect(self._create_pattern_dependency)
+        pattern_actions.addWidget(self.new_pattern)
+        loads_layout.addLayout(pattern_actions)
+
         self.pattern_table = QTableWidget(0, 4)
         self.pattern_table.setHorizontalHeaderLabels(
             ["Use", "Tag", "Plain load pattern", "Mass factor"]
@@ -155,6 +169,59 @@ class MassSourceDialog(QDialog):
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
+
+    def _current_pattern_factors(self) -> dict[int, float]:
+        factors: dict[int, float] = {}
+        for row in range(self.pattern_table.rowCount()):
+            item = self.pattern_table.item(row, 0)
+            if item is None:
+                continue
+            tag = int(item.data(Qt.UserRole))
+            spin = self.pattern_table.cellWidget(row, 3)
+            value = float(spin.value()) if spin is not None else 1.0
+            if item.checkState() == Qt.Checked:
+                factors[tag] = value
+        return factors
+
+    def _create_pattern_dependency(self) -> None:
+        if not callable(self._new_pattern_callback):
+            return
+        pattern = self._new_pattern_callback()
+        if pattern is None:
+            return
+        if pattern.pattern_type != "Plain":
+            QMessageBox.warning(
+                self,
+                "Mass Source",
+                "Mass Source can only use Plain load patterns.",
+            )
+            return
+
+        factors = self._current_pattern_factors()
+        factors[int(pattern.tag)] = factors.get(int(pattern.tag), 1.0)
+        staged = MassSourceData(
+            tag=self.tag.value(),
+            name=self.name.text().strip()
+            or f"Mass Source {self.tag.value()}",
+            include_self_mass=self.include_self.isChecked(),
+            load_factors=factors,
+            gravity_axis=int(self.gravity_axis.currentData() or 3),
+            directions=tuple(
+                dof
+                for dof, check in self.direction_checks.items()
+                if check.isChecked()
+            ),
+        )
+        self._populate_patterns(staged)
+        for row in range(self.pattern_table.rowCount()):
+            item = self.pattern_table.item(row, 0)
+            if (
+                item is not None
+                and int(item.data(Qt.UserRole)) == int(pattern.tag)
+            ):
+                item.setCheckState(Qt.Checked)
+                self.pattern_table.scrollToItem(item)
+                break
 
     def _eligible_patterns(self):
         result = []
