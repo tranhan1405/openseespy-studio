@@ -26075,12 +26075,37 @@ class MainWindow(QMainWindow):
 
         if kind == "analysis_cyclic_protocol":
             tag = int(value)
+            latest_analysis_job = next(
+                (
+                    self._jobs[job_id]
+                    for job_id in sorted(self._jobs, reverse=True)
+                    if self._jobs[job_id].analysis_tag == tag
+                ),
+                None,
+            )
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_cyclic_protocol_properties(tag)
             )
             edit = menu.addAction("Edit Analysis Settings...")
             edit.triggered.connect(lambda: self._edit_analysis(tag))
+            solution_properties = menu.addAction(
+                "Open Solution Properties"
+            )
+            solution_properties.triggered.connect(
+                lambda checked=False, analysis_tag=tag:
+                self._show_solution_root_properties(analysis_tag)
+            )
+            latest_job = menu.addAction("Open Latest Job Properties")
+            latest_job.setEnabled(latest_analysis_job is not None)
+            latest_job.triggered.connect(
+                lambda checked=False, job=latest_analysis_job:
+                (
+                    self._show_job_properties(job.job_id)
+                    if job is not None
+                    else None
+                )
+            )
 
             active = menu.addAction("Set Active")
             active.setEnabled(tag != self.project.active_analysis_tag)
@@ -26155,6 +26180,22 @@ class MainWindow(QMainWindow):
         if kind == "solution_root":
             analysis_tag = int(value)
             analysis_settings = self.project.analyses.get(analysis_tag)
+            latest_analysis_job = next(
+                (
+                    self._jobs[job_id]
+                    for job_id in sorted(self._jobs, reverse=True)
+                    if self._jobs[job_id].analysis_tag == analysis_tag
+                ),
+                None,
+            )
+            can_run_analysis = (
+                analysis_settings is not None
+                and (
+                    self._analysis_process is None
+                    or self._analysis_process.state()
+                    == QProcess.NotRunning
+                )
+            )
             analysis_type = (
                 analysis_settings.analysis_type
                 if analysis_settings is not None
@@ -26191,6 +26232,28 @@ class MainWindow(QMainWindow):
             properties.triggered.connect(
                 lambda checked=False, tag=analysis_tag:
                 self._show_solution_root_properties(tag)
+            )
+            open_analysis = menu.addAction("Open Analysis Properties")
+            open_analysis.setEnabled(analysis_settings is not None)
+            open_analysis.triggered.connect(
+                lambda checked=False, tag=analysis_tag:
+                self._show_analysis_properties(tag)
+            )
+            latest_job = menu.addAction("Open Latest Job Properties")
+            latest_job.setEnabled(latest_analysis_job is not None)
+            latest_job.triggered.connect(
+                lambda checked=False, job=latest_analysis_job:
+                (
+                    self._show_job_properties(job.job_id)
+                    if job is not None
+                    else None
+                )
+            )
+            run_analysis = menu.addAction("Run Analysis Again")
+            run_analysis.setEnabled(can_run_analysis)
+            run_analysis.triggered.connect(
+                lambda checked=False, tag=analysis_tag:
+                self._run_analysis_from_tree(tag)
             )
 
             menu.addSeparator()
@@ -26500,6 +26563,24 @@ class MainWindow(QMainWindow):
             plot = job.plot(plot_id) if job is not None else None
             if plot is None:
                 return
+            plot_nodes = {
+                int(node_tag)
+                for node_tag in plot.get("node_scope", [])
+                if int(node_tag) in self.model.nodes
+            }
+            plot_elements = {
+                int(element_tag)
+                for element_tag in plot.get("element_scope", [])
+                if int(element_tag) in self.model.elements
+            }
+            linked_analysis_tag = (
+                int(job.analysis_tag)
+                if (
+                    job.analysis_tag is not None
+                    and int(job.analysis_tag) in self.project.analyses
+                )
+                else None
+            )
 
             properties = menu.addAction("Properties")
             properties.triggered.connect(
@@ -26508,6 +26589,45 @@ class MainWindow(QMainWindow):
             show = menu.addAction("Show")
             show.triggered.connect(
                 lambda: self._show_job_plot(job_id, plot_id)
+            )
+            select_scope = menu.addAction("Select Plot Scope")
+            select_scope.setEnabled(bool(plot_nodes or plot_elements))
+            select_scope.triggered.connect(
+                lambda checked=False,
+                nodes=set(plot_nodes),
+                elements=set(plot_elements):
+                self.selection.set_selection(
+                    nodes=set(nodes),
+                    elements=set(elements),
+                )
+            )
+            zoom_scope = menu.addAction("Zoom to Plot Scope")
+            zoom_scope.setEnabled(bool(plot_nodes or plot_elements))
+            zoom_scope.triggered.connect(
+                lambda checked=False,
+                nodes=set(plot_nodes),
+                elements=set(plot_elements): (
+                    self.selection.set_selection(
+                        nodes=set(nodes),
+                        elements=set(elements),
+                    ),
+                    self._zoom_selection(),
+                )
+            )
+            open_job = menu.addAction("Open Job Properties")
+            open_job.triggered.connect(
+                lambda checked=False, value=job_id:
+                self._show_job_properties(value)
+            )
+            open_analysis = menu.addAction("Open Analysis Properties")
+            open_analysis.setEnabled(linked_analysis_tag is not None)
+            open_analysis.triggered.connect(
+                lambda checked=False, analysis_tag=linked_analysis_tag:
+                (
+                    self._show_analysis_properties(analysis_tag)
+                    if analysis_tag is not None
+                    else None
+                )
             )
             clear_display = menu.addAction("Clear Result Display")
             clear_display.triggered.connect(self._clear_result_display)
@@ -26587,6 +26707,21 @@ class MainWindow(QMainWindow):
                 self.selection.set_selection(
                     nodes=set(nodes),
                     elements=set(elements),
+                )
+            )
+            zoom_targets = menu.addAction("Zoom to Recorder Targets")
+            zoom_targets.setEnabled(
+                bool(recorder_nodes or recorder_elements)
+            )
+            zoom_targets.triggered.connect(
+                lambda checked=False,
+                nodes=set(recorder_nodes),
+                elements=set(recorder_elements): (
+                    self.selection.set_selection(
+                        nodes=set(nodes),
+                        elements=set(elements),
+                    ),
+                    self._zoom_selection(),
                 )
             )
             delete = menu.addAction("Delete")
@@ -26730,6 +26865,11 @@ class MainWindow(QMainWindow):
                     and int(load.element_tag) in self.model.elements
                 )
             }
+            referencing_patterns = {
+                int(pattern_tag)
+                for pattern_tag, pattern in self.project.load_patterns.items()
+                if int(pattern.time_series_tag) == tag
+            }
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_time_series_properties(tag)
@@ -26751,6 +26891,41 @@ class MainWindow(QMainWindow):
                     elements=set(elements),
                 )
             )
+            zoom_loaded = menu.addAction(
+                "Zoom to FE Loaded by This Time Series"
+            )
+            zoom_loaded.setEnabled(
+                bool(series_nodes or series_elements)
+            )
+            zoom_loaded.triggered.connect(
+                lambda checked=False,
+                nodes=set(series_nodes),
+                elements=set(series_elements): (
+                    self.selection.set_selection(
+                        nodes=set(nodes),
+                        elements=set(elements),
+                    ),
+                    self._zoom_selection(),
+                )
+            )
+            used_by = menu.addMenu(
+                f"Referencing Load Patterns ({len(referencing_patterns)})"
+            )
+            used_by.setEnabled(bool(referencing_patterns))
+            for pattern_tag in sorted(referencing_patterns):
+                pattern = self.project.load_patterns.get(pattern_tag)
+                label = (
+                    f"{pattern_tag} - {pattern.name}"
+                    if pattern is not None
+                    else str(pattern_tag)
+                )
+                pattern_action = used_by.addAction(label)
+                pattern_action.triggered.connect(
+                    lambda checked=False, value=pattern_tag: (
+                        self._select_tree_payload("load_pattern", value),
+                        self._show_load_pattern_properties(value),
+                    )
+                )
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_time_series(tag))
             exec_menu()
@@ -26842,13 +27017,46 @@ class MainWindow(QMainWindow):
 
         if kind == "load_pattern":
             tag = int(value)
+            pattern = self.project.load_patterns.get(tag)
+            pattern_series_tag = (
+                int(pattern.time_series_tag)
+                if (
+                    pattern is not None
+                    and int(pattern.time_series_tag)
+                    in self.project.time_series
+                )
+                else None
+            )
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_load_pattern_properties(tag)
             )
             edit = menu.addAction("Edit...")
             edit.triggered.connect(lambda: self._edit_load_pattern(tag))
-            pattern = self.project.load_patterns.get(tag)
+            open_series = menu.addAction(
+                "Open Referenced Time Series Properties"
+            )
+            open_series.setEnabled(pattern_series_tag is not None)
+            open_series.triggered.connect(
+                lambda checked=False, series_tag=pattern_series_tag:
+                (
+                    self._show_time_series_properties(series_tag)
+                    if series_tag is not None
+                    else None
+                )
+            )
+            reveal_series = menu.addAction(
+                "Reveal Referenced Time Series in Tree"
+            )
+            reveal_series.setEnabled(pattern_series_tag is not None)
+            reveal_series.triggered.connect(
+                lambda checked=False, series_tag=pattern_series_tag:
+                (
+                    self._select_tree_payload("time_series", series_tag)
+                    if series_tag is not None
+                    else None
+                )
+            )
             if pattern is not None and pattern.pattern_type == "Plain":
                 loaded_nodes = {
                     int(load.node_tag)
@@ -26909,6 +27117,21 @@ class MainWindow(QMainWindow):
                 select_elements.triggered.connect(
                     lambda checked=False, values=set(loaded_elements):
                     self.selection.set_selection(elements=set(values))
+                )
+                zoom_loaded = menu.addAction("Zoom to Loaded FE")
+                zoom_loaded.setEnabled(
+                    bool(loaded_nodes or loaded_elements)
+                )
+                zoom_loaded.triggered.connect(
+                    lambda checked=False,
+                    nodes=set(loaded_nodes),
+                    elements=set(loaded_elements): (
+                        self.selection.set_selection(
+                            nodes=set(nodes),
+                            elements=set(elements),
+                        ),
+                        self._zoom_selection(),
+                    )
                 )
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_load_pattern(tag))
