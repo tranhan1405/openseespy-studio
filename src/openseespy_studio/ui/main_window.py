@@ -23755,16 +23755,19 @@ class MainWindow(QMainWindow):
                 self._preview_line_mesh(t)
             )
             select_fe = menu.addAction("Select Generated FE")
+            select_fe.setEnabled(live_mesh)
             select_fe.triggered.connect(
                 lambda checked=False, t=tag:
                 self._select_line_generated_fe(t)
             )
             quality = menu.addAction("Mesh Quality...")
+            quality.setEnabled(live_mesh)
             quality.triggered.connect(
                 lambda checked=False, t=tag:
                 self._show_line_mesh_quality(t)
             )
             audit = menu.addAction("Audit Mesh Integrity")
+            audit.setEnabled(live_mesh)
             audit.triggered.connect(
                 lambda checked=False, t=tag:
                 self._audit_line_mesh_integrity(t)
@@ -23992,6 +23995,7 @@ class MainWindow(QMainWindow):
                 self._preview_surface_meshes([t])
             )
             select_fe = menu.addAction("Select Generated FE")
+            select_fe.setEnabled(live_mesh)
             select_fe.triggered.connect(
                 lambda checked=False, t=tag:
                 self._select_generated_fe_for_surfaces([t])
@@ -24003,6 +24007,7 @@ class MainWindow(QMainWindow):
                 ("Warpage", "warpage"),
             ):
                 quality_action = quality_menu.addAction(label)
+                quality_action.setEnabled(live_mesh)
                 quality_action.triggered.connect(
                     lambda checked=False, m=metric, t=tag:
                     self._show_surface_quality_map([t], m)
@@ -24013,6 +24018,7 @@ class MainWindow(QMainWindow):
                 self._clear_surface_quality_map
             )
             audit = menu.addAction("Audit Mesh Integrity")
+            audit.setEnabled(live_mesh)
             audit.triggered.connect(
                 lambda checked=False, t=tag:
                 self._audit_surface_mesh_integrity([t])
@@ -24035,6 +24041,13 @@ class MainWindow(QMainWindow):
                 return
             surface_tags = self._selected_surface_geometry_tags(tag)
             count = len(surface_tags)
+            has_live_surface_mesh = any(
+                inspect_surface_mesh_state(
+                    self.project,
+                    int(surface_tag),
+                ).live_element_tags
+                for surface_tag in surface_tags
+            )
 
             properties = menu.addAction("Properties")
             properties.triggered.connect(
@@ -24105,6 +24118,7 @@ class MainWindow(QMainWindow):
                 select_edge_nodes = mesh_menu.addAction(
                     "Select Edge FE Nodes..."
                 )
+                select_edge_nodes.setEnabled(has_live_surface_mesh)
                 select_edge_nodes.triggered.connect(
                     lambda checked=False, t=tag:
                     self._select_surface_edge_nodes(t)
@@ -24114,6 +24128,7 @@ class MainWindow(QMainWindow):
                 if count == 1
                 else f"Select Outer Boundary FE Nodes ({count} Surfaces)"
             )
+            select_boundary_nodes.setEnabled(has_live_surface_mesh)
             select_boundary_nodes.triggered.connect(
                 lambda checked=False, tags=tuple(surface_tags):
                 self._select_surface_boundary_nodes(tags)
@@ -24341,6 +24356,16 @@ class MainWindow(QMainWindow):
             is_truss_group = element_type == "truss"
             is_shell_group = element_type in SHELL_ELEMENT_TYPES
 
+            if is_truss_group:
+                create = menu.addAction("New Truss...")
+                create.triggered.connect(self._create_truss)
+            elif is_shell_group:
+                create = menu.addAction("New Shell Element...")
+                create.triggered.connect(self._create_shell)
+            else:
+                create = menu.addAction("New Frame...")
+                create.triggered.connect(self._create_element)
+
             select_all = menu.addAction(
                 f"Select All {element_type} ({len(tags)})"
             )
@@ -24533,6 +24558,14 @@ class MainWindow(QMainWindow):
             select_all.triggered.connect(
                 lambda checked=False, s=support_type:
                 self._select_boundary_group(s)
+            )
+            edit_group = menu.addAction("Apply / Edit Group Support...")
+            edit_group.setEnabled(bool(tags))
+            edit_group.triggered.connect(
+                lambda checked=False, s=support_type: (
+                    self._select_boundary_group(s),
+                    self._apply_restraint(),
+                )
             )
             zoom = menu.addAction("Zoom to Group")
             zoom.setEnabled(bool(tags))
