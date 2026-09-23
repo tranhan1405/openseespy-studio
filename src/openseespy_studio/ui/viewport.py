@@ -44,6 +44,7 @@ from ..shell_quality import shell_element_quality_from_model
 from ..surface_mesher import surface_mesh_preview_segments
 from ..project import (
     ConnectionData,
+    ConstraintData,
     ElementLoadData,
     LineGeometryData,
     MaterialData,
@@ -78,6 +79,7 @@ class ModelViewport(QWidget):
         self.setObjectName("ViewportRoot")
         self._model: StructuralModel | None = None
         self._connections: dict[int, ConnectionData] = {}
+        self._constraints: dict[int, ConstraintData] = {}
         self._nodal_loads: dict[int, NodalLoadData] = {}
         self._prescribed_displacements: dict[
             int,
@@ -2977,6 +2979,213 @@ class ModelViewport(QWidget):
                 render=False,
             )
 
+    @staticmethod
+    def _polyline_mesh(
+        points: list[tuple[float, float, float]],
+    ):
+        """Build one VTK polyline from ordered 3D points."""
+        if len(points) < 2:
+            return None
+        mesh = pv.PolyData(np.asarray(points, dtype=float))
+        mesh.lines = np.hstack((
+            np.asarray([len(points)], dtype=np.int64),
+            np.arange(len(points), dtype=np.int64),
+        ))
+        return mesh
+
+    @staticmethod
+    def _zero_length_spring_points(
+        center: tuple[float, float, float],
+        orient_x: tuple[float, float, float],
+        size: float,
+    ) -> list[tuple[float, float, float]]:
+        """Return a compact zig-zag spring glyph around a zeroLength point."""
+        origin = np.asarray(center, dtype=float)
+        axis = np.asarray(orient_x, dtype=float)
+        norm = float(np.linalg.norm(axis))
+        if norm <= 1.0e-12:
+            axis = np.asarray((1.0, 0.0, 0.0), dtype=float)
+        else:
+            axis /= norm
+
+        reference = (
+            np.asarray((0.0, 0.0, 1.0), dtype=float)
+            if abs(float(axis[2])) < 0.85
+            else np.asarray((0.0, 1.0, 0.0), dtype=float)
+        )
+        transverse = np.cross(axis, reference)
+        transverse_norm = float(np.linalg.norm(transverse))
+        if transverse_norm <= 1.0e-12:
+            transverse = np.asarray((0.0, 1.0, 0.0), dtype=float)
+        else:
+            transverse /= transverse_norm
+
+        half = float(size) * 1.25
+        amplitude = float(size) * 0.34
+        axial = (-1.0, -0.78, -0.52, -0.26, 0.0, 0.26, 0.52, 0.78, 1.0)
+        lateral = (0.0, 0.0, 1.0, -1.0, 1.0, -1.0, 1.0, 0.0, 0.0)
+        return [
+            tuple(
+                float(value)
+                for value in (
+                    origin
+                    + axis * (half * t)
+                    + transverse * (amplitude * s)
+                )
+            )
+            for t, s in zip(axial, lateral)
+        ]
+
+    def _draw_connection_symbol(
+        self,
+        connection: ConnectionData,
+        size: float,
+    ) -> None:
+        """Draw a schematic connection glyph without changing FE geometry."""
+        if self._model is None:
+            return
+        if (
+            connection.node_i not in self._model.nodes
+            or connection.node_j not in self._model.nodes
+        ):
+            return
+
+        a = self._model.nodes[connection.node_i].xyz
+        b = self._model.nodes[connection.node_j].xyz
+        center = tuple(
+            (float(x) + float(y)) * 0.5
+            for x, y in zip(a, b)
+        )
+
+        if connection.connection_type == "twoNodeLink":
+            self.plotter.add_mesh(
+                pv.Line(a, b),
+                name=f"connection-link-{connection.tag}",
+                color="#8e44ad",
+                line_width=4,
+                pickable=False,
+                render=False,
+            )
+            self.plotter.add_mesh(
+                pv.Sphere(
+                    radius=size * 0.34,
+                    center=center,
+                ),
+                name=f"connection-link-center-{connection.tag}",
+                color="#9b59b6",
+                pickable=False,
+                render=False,
+            )
+            return
+
+        if connection.connection_type == "zeroLength":
+            spring = self._polyline_mesh(
+                self._zero_length_spring_points(
+                    center,
+                    connection.orient_x,
+                    size,
+                )
+            )
+            if spring is not None:
+                self.plotter.add_mesh(
+                    spring,
+                    name=f"connection-spring-{connection.tag}",
+                    color="#8e44ad",
+                    line_width=4,
+                    render_lines_as_tubes=True,
+                    pickable=False,
+                    render=False,
+                )
+            self.plotter.add_mesh(
+                pv.Sphere(
+                    radius=size * 0.18,
+                    center=center,
+                ),
+                name=f"connection-spring-center-{connection.tag}",
+                color="#6c3483",
+                pickable=False,
+                render=False,
+            )
+            return
+
+        # zeroLengthSection: use a compact joint/hinge glyph so it remains
+        # visually distinct from a directional zeroLength spring.
+        self.plotter.add_mesh(
+            pv.Sphere(
+                radius=size * 0.58,
+                center=center,
+                theta_resolution=12,
+                phi_resolution=8,
+            ),
+            name=f"connection-section-{connection.tag}",
+            color="#8e44ad",
+            edge_color="#5e3370",
+            show_edges=True,
+            pickable=False,
+            render=False,
+        )
+
+    def _draw_constraint_symbol(
+        self,
+        constraint: ConstraintData,
+        size: float,
+        visible_nodes: set[int],
+    ) -> None:
+        """Draw retained/slave relationships for MPC-style constraints."""
+        if self._model is None:
+            return
+        retained = int(constraint.retained_node)
+        if retained not in visible_nodes or retained not in self._model.nodes:
+            return
+
+        master = self._model.nodes[retained].xyz
+        if constraint.constraint_type == "rigidLink":
+            color = "#34495e"
+            width = 6
+        elif constraint.constraint_type == "rigidDiaphragm":
+            color = "#148f77"
+            width = 3
+        else:
+            color = "#2471a3"
+            width = 2
+
+        for slave_tag in constraint.constrained_nodes:
+            slave_tag = int(slave_tag)
+            if (
+                slave_tag not in visible_nodes
+                or slave_tag not in self._model.nodes
+            ):
+                continue
+            slave = self._model.nodes[slave_tag].xyz
+            self.plotter.add_mesh(
+                pv.Line(master, slave),
+                name=(
+                    f"constraint-{constraint.tag}-"
+                    f"{retained}-{slave_tag}"
+                ),
+                color=color,
+                line_width=width,
+                pickable=False,
+                render=False,
+            )
+
+        # Retained/master node marker. Slave nodes remain ordinary FE nodes;
+        # this asymmetry makes the master/slave relationship readable.
+        self.plotter.add_mesh(
+            pv.Sphere(
+                radius=size * 0.34,
+                center=master,
+                theta_resolution=10,
+                phi_resolution=8,
+            ),
+            name=f"constraint-master-{constraint.tag}",
+            color=color,
+            edge_color="#263238",
+            show_edges=True,
+            pickable=False,
+            render=False,
+        )
+
     def draw_model(
         self,
         model: StructuralModel,
@@ -2985,10 +3194,12 @@ class ModelViewport(QWidget):
         points: dict[int, PointGeometryData] | None = None,
         lines: dict[int, LineGeometryData] | None = None,
         *,
+        constraints: dict[int, ConstraintData] | None = None,
         reset_camera: bool = True,
     ) -> None:
         self._model = model
         self._connections = dict(connections or {})
+        self._constraints = dict(constraints or {})
         self._surfaces = dict(surfaces or {})
         self._points = dict(points or {})
         self._lines = dict(lines or {})
@@ -4183,48 +4394,15 @@ class ModelViewport(QWidget):
                 or connection.node_j not in visible_node_set
             ):
                 continue
-            a = self._model.nodes[connection.node_i].xyz
-            b = self._model.nodes[connection.node_j].xyz
+            self._draw_connection_symbol(connection, connection_size)
 
-            if connection.connection_type == "twoNodeLink":
-                self.plotter.add_mesh(
-                    pv.Line(a, b),
-                    color="#8e44ad",
-                    line_width=4,
-                    pickable=False,
-                    render=False,
-                )
-                center = tuple(
-                    (float(x) + float(y)) * 0.5
-                    for x, y in zip(a, b)
-                )
-                self.plotter.add_mesh(
-                    pv.Sphere(
-                        radius=connection_size * 0.42,
-                        center=center,
-                    ),
-                    color="#9b59b6",
-                    pickable=False,
-                    render=False,
-                )
-            else:
-                center = tuple(
-                    (float(x) + float(y)) * 0.5
-                    for x, y in zip(a, b)
-                )
-                self.plotter.add_mesh(
-                    pv.Sphere(
-                        radius=connection_size * 0.58,
-                        center=center,
-                        theta_resolution=12,
-                        phi_resolution=8,
-                    ),
-                    color="#8e44ad",
-                    edge_color="#5e3370",
-                    show_edges=True,
-                    pickable=False,
-                    render=False,
-                )
+        constraint_size = max(span * 0.011, 0.055)
+        for constraint in self._constraints.values():
+            self._draw_constraint_symbol(
+                constraint,
+                constraint_size,
+                visible_node_set,
+            )
 
         self._update_highlight_overlays(render=False)
         self._update_display_overlays(render=False)
@@ -4457,6 +4635,8 @@ class ModelViewport(QWidget):
     ) -> None:
         for name in (
             "selection-elements",
+            "selection-connections",
+            "selection-zero-connections",
             "selection-nodes",
             "hover-element",
             "hover-node",
@@ -4561,6 +4741,61 @@ class ModelViewport(QWidget):
                     selection_style["render_lines_as_tubes"]
                 ),
                 opacity=1.0,
+                pickable=False,
+                render=False,
+            )
+
+        # Connection tags share the FE element tag namespace, but are stored
+        # separately from StructuralModel.elements. Highlight them explicitly.
+        selected_connection_tags = sorted(
+            set(self._selected_elements) & set(self._connections)
+        )
+        connection_line_points: list[tuple[float, float, float]] = []
+        connection_line_cells: list[int] = []
+        zero_connection_points: list[tuple[float, float, float]] = []
+        for tag in selected_connection_tags:
+            connection = self._connections[tag]
+            if (
+                connection.node_i not in self._model.nodes
+                or connection.node_j not in self._model.nodes
+            ):
+                continue
+            a = self._model.nodes[connection.node_i].xyz
+            b = self._model.nodes[connection.node_j].xyz
+            if connection.connection_type == "twoNodeLink":
+                start = len(connection_line_points)
+                connection_line_points.extend((a, b))
+                connection_line_cells.extend((2, start, start + 1))
+            else:
+                zero_connection_points.append(tuple(
+                    (float(x) + float(y)) * 0.5
+                    for x, y in zip(a, b)
+                ))
+
+        if connection_line_points:
+            link_overlay = pv.PolyData(
+                np.asarray(connection_line_points, dtype=float)
+            )
+            link_overlay.lines = np.asarray(
+                connection_line_cells,
+                dtype=np.int64,
+            )
+            self.plotter.add_mesh(
+                link_overlay,
+                name="selection-connections",
+                color="#ff9800",
+                line_width=9,
+                render_lines_as_tubes=True,
+                pickable=False,
+                render=False,
+            )
+        if zero_connection_points:
+            self.plotter.add_mesh(
+                pv.PolyData(zero_connection_points),
+                name="selection-zero-connections",
+                color="#ff9800",
+                render_points_as_spheres=True,
+                point_size=16,
                 pickable=False,
                 render=False,
             )
