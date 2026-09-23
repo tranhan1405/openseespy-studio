@@ -1823,7 +1823,19 @@ class _Importer:
 
     def analysis_command(self, command: str, args: list[Any]) -> None:
         if command == "wipeAnalysis":
+            preserved = {
+                key: self.analysis_state[key]
+                for key in (
+                    "rayleigh_model",
+                    "rayleigh_damping_ratio",
+                    "rayleigh_mode_i",
+                    "rayleigh_mode_j",
+                    "eigen_solver",
+                )
+                if key in self.analysis_state
+            }
             self.analysis_state.clear()
+            self.analysis_state.update(preserved)
         elif command in {"constraints", "numberer"} and args:
             self.analysis_state[command] = str(args[0])
         elif command == "system" and args:
