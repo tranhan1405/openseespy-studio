@@ -2990,9 +2990,19 @@ class ResultsPanel(QWidget):
     def _select_frame_from_plot(self, index: int) -> None:
         if self._motion_info is None:
             return
+        target = int(index)
+        sender = self.sender()
+        if sender is getattr(self, "cyclic_plot", None):
+            if (
+                str(self.cyclic_compare_view.currentData() or "hysteresis")
+                != "hysteresis"
+            ):
+                return
+            # Cyclic hysteresis prepends the undeformed origin.
+            target = max(0, target - 1)
         count = int(self._motion_info.frame_count)
-        if 0 <= int(index) < count:
-            self._set_motion_index(int(index))
+        if 0 <= target < count:
+            self._set_motion_index(target)
 
     def _set_play_buttons(self, checked: bool) -> None:
         for button in (
@@ -3090,7 +3100,19 @@ class ResultsPanel(QWidget):
                 "available for motion playback."
             )
         )
-        self._sync_motion_markers(None)
+        if count > 0:
+            frame = motion_frame(
+                self._result,
+                default_index,
+                mode=self._motion_selected_mode(),
+                info=self._motion_info,
+            )
+            self.frame_coordinate.setText(frame.label)
+        self._sync_motion_markers(
+            None
+            if self._motion_info.kind == "Modal"
+            else (default_index if count > 0 else None)
+        )
 
     def _motion_source_changed(self, *_args) -> None:
         self._motion_frame_index = 0
@@ -3176,9 +3198,7 @@ class ResultsPanel(QWidget):
                 self._motion_info is None
                 or self._motion_info.frame_count <= 0
             ):
-                self.motion_play.blockSignals(True)
-                self.motion_play.setChecked(False)
-                self.motion_play.blockSignals(False)
+                self._set_play_buttons(False)
                 return
             self._set_play_buttons(True)
             speed = max(0.01, self._motion_speed_value())
@@ -3226,7 +3246,14 @@ class ResultsPanel(QWidget):
     def _sync_motion_markers(self, index: int | None) -> None:
         self.history_plot.set_marker(index)
         self.pushover_plot.set_marker(index)
-        self.cyclic_plot.set_marker(index)
+        if (
+            index is not None
+            and str(self.cyclic_compare_view.currentData() or "hysteresis")
+            == "hysteresis"
+        ):
+            self.cyclic_plot.set_marker(int(index) + 1)
+        else:
+            self.cyclic_plot.set_marker(None)
 
     def _emit_current_motion_frame(self, *_args) -> None:
         if not hasattr(self, "motion_info_label"):
