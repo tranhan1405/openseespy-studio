@@ -379,6 +379,10 @@ def result_frame_payload(
 
     frame_index = max(0, int(index))
     final = dict(payload.get("final", {}) or {})
+    if not include_displacements:
+        final.pop("node_displacements", None)
+    if not include_reactions:
+        final.pop("node_reactions", None)
     displacements: dict[str, list[float]] = {}
     reactions: dict[str, list[float]] = {}
 
