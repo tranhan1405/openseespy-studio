@@ -31493,12 +31493,17 @@ class MainWindow(QMainWindow):
         if not self._last_result:
             return
 
+        options = dict(
+            getattr(self, "_active_linked_result_options", {}) or {}
+        )
         frame_payload = result_frame_payload(
             self._last_result,
             int(index),
-        )
-        options = dict(
-            getattr(self, "_active_linked_result_options", {}) or {}
+            include_displacements=(
+                result_type == "NodalDisplacement"
+                or bool(options.get("contour_deformed_geometry", False))
+            ),
+            include_reactions=(result_type == "NodalReaction"),
         )
         if self.results_panel.is_motion_playing():
             # Keep playback lightweight. The scalar extrema are still
