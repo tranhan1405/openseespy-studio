@@ -11273,6 +11273,11 @@ class MainWindow(QMainWindow):
         surface = self.project.surfaces.get(tag)
         if surface is None:
             return
+        if not self._ensure_surface_meshes(
+            [tag],
+            title="Select Surface Edge FE Nodes",
+        ):
+            return
 
         infos = [
             surface_edge_info(self.project, tag, edge_index)
@@ -11791,6 +11796,11 @@ class MainWindow(QMainWindow):
             if int(tag) in self.project.surfaces
         })
         if not tags:
+            return
+        if not self._ensure_surface_meshes(
+            tags,
+            title="Select Surface Boundary FE Nodes",
+        ):
             return
         try:
             edges = surface_boundary_edges(self.project, tags)
@@ -15971,6 +15981,21 @@ class MainWindow(QMainWindow):
         line = self.project.lines.get(int(tag))
         if line is None:
             return
+        if not line.mesh_recipe_configured:
+            if not self._ask_create_prerequisite(
+                title="Line Mesh Quality",
+                message=(
+                    f"Geometry Line {tag} needs a Line Mesh / FE recipe "
+                    "before mesh quality can be evaluated. Configure it now?"
+                ),
+                action_label="Configure Line Mesh Now...",
+            ):
+                return
+            if not self._configure_line_mesh(tag, generate=False):
+                return
+            line = self.project.lines.get(int(tag))
+            if line is None or not line.mesh_recipe_configured:
+                return
         try:
             quality = line_mesh_quality(self.project, tag)
         except (TypeError, ValueError) as exc:
@@ -22127,7 +22152,6 @@ class MainWindow(QMainWindow):
         if kind == "planes_root":
             menu.addAction(self.actions["sketch_plane_offset"])
             three = menu.addAction(self.actions["sketch_plane_3point"])
-            three.setEnabled(len(self.project.points) >= 3)
             exec_menu()
             return
 
@@ -22338,7 +22362,6 @@ class MainWindow(QMainWindow):
                 self._configure_line_mesh(t)
             )
             quality = menu.addAction("Mesh Quality...")
-            quality.setEnabled(line.mesh_recipe_configured)
             quality.triggered.connect(
                 lambda checked=False, t=tag:
                 self._show_line_mesh_quality(t)
