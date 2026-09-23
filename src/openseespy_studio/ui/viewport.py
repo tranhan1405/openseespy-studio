@@ -494,6 +494,9 @@ class ModelViewport(QWidget):
             self._render_geometry_sketch_grid()
         self.plotter.render()
 
+    def geometry_sketch_grid_visible(self) -> bool:
+        return bool(self._geometry_sketch_grid_visible)
+
     def set_geometry_sketch_plane_offset_from_point(self, xyz) -> None:
         raw_point = tuple(float(value) for value in xyz)
         if (
@@ -6141,6 +6144,10 @@ class ModelViewport(QWidget):
             "result-contour-nodes",
             "result-contour-extrema",
             "result-contour-extrema-labels",
+            "result-contour-minimum",
+            "result-contour-minimum-labels",
+            "result-contour-maximum",
+            "result-contour-maximum-labels",
             "result-shell-contour",
             "result-shell-deformation-contour",
             "result-hinge-members",
@@ -6170,25 +6177,58 @@ class ModelViewport(QWidget):
     ) -> None:
         if not positions or not labels:
             return
-        points = pv.PolyData(np.asarray(positions, dtype=float))
-        self.plotter.add_mesh(
-            points,
-            name="result-contour-extrema",
-            render_points_as_spheres=True,
-            point_size=13,
-            color="#ffffff",
-            pickable=False,
-            show_scalar_bar=False,
-            render=False,
-        )
-        self._add_annotation_labels(
-            positions,
-            labels,
-            name="result-contour-extrema-labels",
-            text_color="#ffffff",
-            font_size=10,
-            always_visible=True,
-        )
+
+        # White extrema text disappears on the light viewport background.
+        # Give MIN and MAX independent, saturated colors so they remain easy
+        # to identify without depending on the active contour palette.
+        groups = {
+            "minimum": {
+                "positions": [],
+                "labels": [],
+                "color": "#6a1b9a",
+            },
+            "maximum": {
+                "positions": [],
+                "labels": [],
+                "color": "#d50000",
+            },
+        }
+        for position, label in zip(positions, labels):
+            key = (
+                "maximum"
+                if str(label).lstrip().upper().startswith("MAX")
+                else "minimum"
+            )
+            groups[key]["positions"].append(position)
+            groups[key]["labels"].append(str(label))
+
+        for key, payload in groups.items():
+            group_positions = payload["positions"]
+            group_labels = payload["labels"]
+            if not group_positions:
+                continue
+            color = str(payload["color"])
+            points = pv.PolyData(
+                np.asarray(group_positions, dtype=float)
+            )
+            self.plotter.add_mesh(
+                points,
+                name=f"result-contour-{key}",
+                render_points_as_spheres=True,
+                point_size=15,
+                color=color,
+                pickable=False,
+                show_scalar_bar=False,
+                render=False,
+            )
+            self._add_annotation_labels(
+                group_positions,
+                group_labels,
+                name=f"result-contour-{key}-labels",
+                text_color=color,
+                font_size=11,
+                always_visible=True,
+            )
 
     @staticmethod
     def _result_scope_key(tags: set[int] | None) -> tuple[int, ...]:
