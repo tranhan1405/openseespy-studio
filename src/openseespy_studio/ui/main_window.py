@@ -10234,11 +10234,6 @@ class MainWindow(QMainWindow):
             plain,
             load=load,
             units=self.project.units,
-            allowed_load_types=(
-                {"SurfacePressure"}
-                if load.load_type == "SurfacePressure"
-                else {"Uniform", "Point", "SelfWeight"}
-            ),
             new_pattern_callback=self._create_plain_pattern_dependency,
             parent=self,
         )
@@ -13318,6 +13313,7 @@ class MainWindow(QMainWindow):
             materials=self.project.materials,
             units=self.project.units,
             default_area=self._default_truss_area(),
+            new_material_callback=self._create_material_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -13513,6 +13509,8 @@ class MainWindow(QMainWindow):
             node_j=node_j,
             sections=self._frame_sections(),
             transformations=self.project.transformations,
+            new_section_callback=self._create_frame_section_dependency,
+            new_transformation_callback=self._create_transformation_dependency,
             parent=self,
         )
         if not dialog.exec():
