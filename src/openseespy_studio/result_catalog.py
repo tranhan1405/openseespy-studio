@@ -90,7 +90,10 @@ def result_choices_for_analysis(
                 label,
                 "NodalDisplacement",
                 label,
-                {"component": component},
+                {
+                    "component": component,
+                    "contour_range_mode": "global",
+                },
             )
         )
 
@@ -101,7 +104,10 @@ def result_choices_for_analysis(
                 f"Reaction {component}",
                 "NodalReaction",
                 f"Reaction {component}",
-                {"component": component},
+                {
+                    "component": component,
+                    "contour_range_mode": "global",
+                },
             )
         )
 
