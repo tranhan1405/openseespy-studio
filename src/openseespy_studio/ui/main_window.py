@@ -24487,6 +24487,10 @@ class MainWindow(QMainWindow):
 
         if kind == "constraint":
             tag = int(value)
+            properties_action = menu.addAction("Properties")
+            properties_action.triggered.connect(
+                lambda: self._show_constraint_properties(tag)
+            )
             edit_action = menu.addAction("Edit...")
             edit_action.triggered.connect(
                 lambda: self._edit_constraint(tag)
@@ -24506,6 +24510,10 @@ class MainWindow(QMainWindow):
 
         if kind == "connection":
             tag = int(value)
+            properties_action = menu.addAction("Properties")
+            properties_action.triggered.connect(
+                lambda: self._show_connection_properties(tag)
+            )
             edit_action = menu.addAction("Edit...")
             edit_action.triggered.connect(
                 lambda: self._edit_connection(tag)
@@ -24804,6 +24812,10 @@ class MainWindow(QMainWindow):
 
         if kind == "recorder":
             tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_recorder_properties(tag)
+            )
             edit = menu.addAction("Edit...")
             edit.triggered.connect(lambda: self._edit_recorder(tag))
             delete = menu.addAction("Delete")
@@ -24855,6 +24867,10 @@ class MainWindow(QMainWindow):
 
         if kind == "time_series":
             tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_time_series_properties(tag)
+            )
             edit = menu.addAction("Edit...")
             edit.triggered.connect(lambda: self._edit_time_series(tag))
             delete = menu.addAction("Delete")
@@ -24908,6 +24924,10 @@ class MainWindow(QMainWindow):
 
         if kind == "load_pattern":
             tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_load_pattern_properties(tag)
+            )
             edit = menu.addAction("Edit...")
             edit.triggered.connect(lambda: self._edit_load_pattern(tag))
             pattern = self.project.load_patterns.get(tag)
@@ -24937,6 +24957,10 @@ class MainWindow(QMainWindow):
 
         if kind == "nodal_load":
             tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_nodal_load_properties(tag)
+            )
             edit = menu.addAction("Edit...")
             edit.triggered.connect(lambda: self._edit_nodal_load(tag))
             delete = menu.addAction("Delete")
@@ -24946,6 +24970,10 @@ class MainWindow(QMainWindow):
 
         if kind == "prescribed_displacement":
             tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_prescribed_displacement_properties(tag)
+            )
             edit = menu.addAction("Edit...")
             edit.triggered.connect(
                 lambda: self._edit_prescribed_displacement(tag)
@@ -24959,6 +24987,10 @@ class MainWindow(QMainWindow):
 
         if kind == "element_load":
             tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_element_load_properties(tag)
+            )
             edit = menu.addAction("Edit...")
             edit.triggered.connect(
                 lambda: self._edit_element_load(tag)
