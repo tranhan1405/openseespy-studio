@@ -22988,10 +22988,11 @@ class MainWindow(QMainWindow):
         if kind == "nodes_root":
             create = menu.addAction("New Node...")
             create.triggered.connect(self._create_node)
+
+            menu.addSeparator()
             select_all = menu.addAction("Select All Nodes")
             select_all.setEnabled(bool(self.model.nodes))
             select_all.triggered.connect(self._select_all_tree_nodes)
-            menu.addSeparator()
             menu.addAction(self.actions["show_node_numbers"])
             exec_menu()
             return
@@ -23966,40 +23967,35 @@ class MainWindow(QMainWindow):
             tag = int(value)
             if tag not in self.selection.nodes:
                 self.selection.select("node", tag, "replace")
+
             properties_action = menu.addAction("Properties")
             properties_action.triggered.connect(
                 lambda: self._show_entity_properties("node", tag)
             )
 
             menu.addSeparator()
-            zoom = menu.addAction("Zoom to Selection")
-            zoom.triggered.connect(self._zoom_selection)
-            hide = menu.addAction("Hide")
-            hide.triggered.connect(self._hide_selection)
-            isolate = menu.addAction("Isolate")
-            isolate.triggered.connect(self._isolate_selection)
-            show_all = menu.addAction("Show All")
-            show_all.triggered.connect(self._show_all)
-
-            menu.addSeparator()
-            support_action = menu.addAction("Support / Restraint...")
+            assign_menu = menu.addMenu("Assign")
+            support_action = assign_menu.addAction(
+                "Support / Restraint..."
+            )
             support_action.triggered.connect(self._apply_restraint)
-            clear_action = menu.addAction("Clear Support")
+            clear_action = assign_menu.addAction("Clear Support")
             clear_action.triggered.connect(self._clear_restraint)
-            mass_action = menu.addAction("Assign Mass...")
+            assign_menu.addSeparator()
+            mass_action = assign_menu.addAction("Mass...")
             mass_action.triggered.connect(self._assign_mass)
-            clear_mass = menu.addAction("Clear Mass")
+            clear_mass = assign_menu.addAction("Clear Mass")
             clear_mass.triggered.connect(self._clear_mass)
-            nodal_load = menu.addAction("Create Nodal Load...")
-            nodal_load.triggered.connect(self._create_nodal_load)
 
-            constraint = menu.addAction("Create Constraint...")
+            create_menu = menu.addMenu("Create")
+            nodal_load = create_menu.addAction("Nodal Load...")
+            nodal_load.triggered.connect(self._create_nodal_load)
+            constraint = create_menu.addAction("Constraint...")
             constraint.triggered.connect(self._create_constraint)
-            connection = menu.addAction("Create ZeroLength / Link...")
+            connection = create_menu.addAction("ZeroLength / Link...")
             connection.setEnabled(1 <= len(self.selection.nodes) <= 2)
             connection.triggered.connect(self._create_connection)
 
-            menu.addSeparator()
             modify = menu.addMenu("Modify")
             move = modify.addAction("Move...")
             move.triggered.connect(self._move_selection)
@@ -24009,22 +24005,21 @@ class MainWindow(QMainWindow):
             rotate.triggered.connect(self._rotate_selection)
             mirror = modify.addAction("Mirror...")
             mirror.triggered.connect(self._mirror_selection)
-            reverse_shell = modify.addAction("Reverse Shell Normal")
-            reverse_shell.setEnabled(has_shell)
-            reverse_shell.triggered.connect(
-                self._reverse_selected_shell_normals
-            )
-            stitch_shell = modify.addAction(
-                "Stitch Coincident Shell Nodes..."
-            )
-            stitch_shell.setEnabled(has_shell)
-            stitch_shell.triggered.connect(
-                self._stitch_coincident_shell_nodes
-            )
 
-            copy_tag = menu.addAction("Copy Tag(s)")
+            view_menu = menu.addMenu("View")
+            zoom = view_menu.addAction("Zoom to Selection")
+            zoom.triggered.connect(self._zoom_selection)
+            hide = view_menu.addAction("Hide")
+            hide.triggered.connect(self._hide_selection)
+            isolate = view_menu.addAction("Isolate")
+            isolate.triggered.connect(self._isolate_selection)
+            show_all = view_menu.addAction("Show All")
+            show_all.triggered.connect(self._show_all)
+
+            selection_menu = menu.addMenu("Selection")
+            copy_tag = selection_menu.addAction("Copy Tag(s)")
             copy_tag.triggered.connect(self._copy_selected_tags)
-            named = menu.addAction("Create Named Selection")
+            named = selection_menu.addAction("Create Named Selection")
             named.triggered.connect(self._create_named_selection)
 
             menu.addSeparator()
