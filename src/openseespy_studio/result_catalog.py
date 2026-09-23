@@ -226,14 +226,37 @@ def result_choices_for_analysis(
             )
         )
     if kind == "Cyclic":
-        choices.append(
-            ResultChoice(
-                "Charts / History",
-                "Cyclic Hysteresis",
-                "CyclicHysteresis",
-                "Cyclic Hysteresis",
-                {},
-            )
+        choices.extend(
+            [
+                ResultChoice(
+                    "Nonlinear Results",
+                    "Hysteretic Force–Displacement",
+                    "CyclicHysteresis",
+                    "Hysteretic Force–Displacement",
+                    {},
+                ),
+                ResultChoice(
+                    "Nonlinear Results",
+                    "Backbone / Envelope",
+                    "CyclicBackbone",
+                    "Cyclic Backbone / Envelope",
+                    {},
+                ),
+                ResultChoice(
+                    "Nonlinear Results",
+                    "Reversal Metrics",
+                    "CyclicReversalMetrics",
+                    "Cyclic Reversal Metrics",
+                    {},
+                ),
+                ResultChoice(
+                    "Nonlinear Results",
+                    "Cycle Energy & Degradation",
+                    "CyclicCycleMetrics",
+                    "Cycle Energy & Degradation",
+                    {},
+                ),
+            ]
         )
     choices.append(
         ResultChoice(
