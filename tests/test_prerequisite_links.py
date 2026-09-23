@@ -744,3 +744,42 @@ def test_eleventh_prerequisite_link_batch():
     assert "_ensure_surface_meshes" in surface_quality
     assert "quality_menu.setEnabled(live_mesh)" not in tree_source
 
+def test_twelfth_prerequisite_link_batch():
+    tree_source = inspect.getsource(MainWindow._show_tree_context_menu)
+
+    # 1: Managed Edge Support can create the required Surface mesh inline.
+    support_source = inspect.getsource(MainWindow._manage_surface_edge_support)
+    assert "_ensure_surface_meshes" in support_source
+    assert 'title="Managed Surface Edge Support"' in support_source
+    assert "managed_support.setEnabled(live_mesh)" not in tree_source
+
+    # 2: Managed Edge Line Load remains reachable before meshing.
+    edge_load_source = inspect.getsource(
+        MainWindow._manage_surface_edge_line_load
+    )
+    assert "_ensure_surface_meshes" in edge_load_source
+    assert "managed_line_load.setEnabled(live_mesh)" not in tree_source
+
+    # 3: Managed Surface Pressure remains reachable before meshing.
+    pressure_source = inspect.getsource(
+        MainWindow._create_surface_pressure_for_surfaces
+    )
+    assert "_ensure_surface_meshes" in pressure_source
+    assert "pressure.setEnabled(live_mesh)" not in tree_source
+
+    # 4: Managed Shell Recorder remains reachable before meshing.
+    recorder_source = inspect.getsource(
+        MainWindow._manage_surface_shell_recorder
+    )
+    assert "_ensure_surface_meshes" in recorder_source
+    assert "managed_shell_recorder.setEnabled(live_mesh)" not in tree_source
+
+    # 5: Managed Shell Result can create the required Surface mesh inline.
+    result_source = inspect.getsource(
+        MainWindow._manage_surface_shell_result
+    )
+    assert "_ensure_surface_meshes" in result_source
+    assert 'title="Managed Surface Shell Result"' in result_source
+    assert "Mesh the following Surface geometry first:" not in result_source
+    assert "managed_shell_result.setEnabled(live_mesh)" not in tree_source
+
