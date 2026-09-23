@@ -23237,6 +23237,232 @@ class MainWindow(QMainWindow):
                 ],
             )
             return
+        if kind == "planes_root":
+            active_plane = self._active_global_sketch_plane.upper()
+            if (
+                self._active_sketch_plane_tag is not None
+                and self._active_sketch_plane_tag
+                in self.project.sketch_planes
+            ):
+                active_plane = self.project.sketch_planes[
+                    self._active_sketch_plane_tag
+                ].name
+            self.properties_panel.set_properties(
+                "Sketch Planes",
+                [
+                    ("Global Planes", 3),
+                    ("Custom Planes", len(self.project.sketch_planes)),
+                    ("Active Plane", active_plane),
+                ],
+            )
+            return
+        if kind == "points_root":
+            referenced_points = {
+                int(point_tag)
+                for line in self.project.lines.values()
+                for point_tag in (line.point_i, line.point_j)
+                if int(point_tag) in self.project.points
+            }
+            self.properties_panel.set_properties(
+                "Geometry Points",
+                [
+                    ("Total Points", len(self.project.points)),
+                    ("Referenced by Lines", len(referenced_points)),
+                    (
+                        "Free Points",
+                        len(self.project.points) - len(referenced_points),
+                    ),
+                ],
+            )
+            return
+        if kind == "lines_root":
+            configured = sum(
+                1
+                for line in self.project.lines.values()
+                if line.mesh_recipe_configured
+            )
+            meshed = sum(
+                1
+                for tag in self.project.lines
+                if inspect_line_mesh_state(
+                    self.project,
+                    int(tag),
+                ).live_element_tags
+            )
+            frame_lines = sum(
+                1
+                for line in self.project.lines.values()
+                if line.element_family == "Frame"
+            )
+            truss_lines = sum(
+                1
+                for line in self.project.lines.values()
+                if line.element_family == "Truss"
+            )
+            self.properties_panel.set_properties(
+                "Geometry Lines",
+                [
+                    ("Total Lines", len(self.project.lines)),
+                    ("Configured Mesh Recipes", configured),
+                    ("Meshed Lines", meshed),
+                    ("Frame Lines", frame_lines),
+                    ("Truss Lines", truss_lines),
+                ],
+            )
+            return
+        if kind == "surfaces_root":
+            configured = sum(
+                1
+                for surface in self.project.surfaces.values()
+                if surface.mesh_recipe_configured
+            )
+            meshed = sum(
+                1
+                for tag in self.project.surfaces
+                if inspect_surface_mesh_state(
+                    self.project,
+                    int(tag),
+                ).live_element_tags
+            )
+            assigned_sections = sum(
+                1
+                for surface in self.project.surfaces.values()
+                if surface.section_tag is not None
+            )
+            self.properties_panel.set_properties(
+                "Geometry Surfaces",
+                [
+                    ("Total Surfaces", len(self.project.surfaces)),
+                    ("Configured Mesh Recipes", configured),
+                    ("Meshed Surfaces", meshed),
+                    ("Assigned Shell Sections", assigned_sections),
+                    ("Managed Surface Pressures",
+                     len(self.project.surface_pressures)),
+                ],
+            )
+            return
+        if kind == "mesh_root":
+            line_configured = sum(
+                1 for line in self.project.lines.values()
+                if line.mesh_recipe_configured
+            )
+            surface_configured = sum(
+                1 for surface in self.project.surfaces.values()
+                if surface.mesh_recipe_configured
+            )
+            live_line_elements: set[int] = set()
+            for tag in self.project.lines:
+                live_line_elements.update(
+                    inspect_line_mesh_state(self.project, int(tag)).live_element_tags
+                )
+            live_surface_elements: set[int] = set()
+            for tag in self.project.surfaces:
+                live_surface_elements.update(
+                    inspect_surface_mesh_state(self.project, int(tag)).live_element_tags
+                )
+            self.properties_panel.set_properties(
+                "Mesh / FE",
+                [
+                    ("Configured Line Recipes", line_configured),
+                    ("Configured Surface Recipes", surface_configured),
+                    ("Generated Line Elements", len(live_line_elements)),
+                    ("Generated Surface Elements", len(live_surface_elements)),
+                ],
+            )
+            return
+        if kind == "nodes_root":
+            supported = sum(1 for node in self.model.nodes.values() if any(node.fixity))
+            with_mass = sum(
+                1 for node in self.model.nodes.values()
+                if any(abs(value) > 0.0 for value in node.mass)
+            )
+            self.properties_panel.set_properties(
+                "Nodes",
+                [
+                    ("Total Nodes", len(self.model.nodes)),
+                    ("Supported Nodes", supported),
+                    ("Nodes with Mass", with_mass),
+                    ("Selected Nodes", len(self.selection.nodes)),
+                ],
+            )
+            return
+        if kind == "elements_root":
+            element_types: dict[str, int] = {}
+            for element in self.model.elements.values():
+                key = str(element.element_type)
+                element_types[key] = element_types.get(key, 0) + 1
+            rows = [
+                ("Total Elements", len(self.model.elements)),
+                ("Element Types", len(element_types)),
+                ("Selected Elements", len(self.selection.elements)),
+            ]
+            rows.extend((f"Type · {name}", count) for name, count in sorted(element_types.items()))
+            self.properties_panel.set_properties("Elements", rows)
+            return
+        if kind == "boundary_root":
+            support_types: dict[str, int] = {}
+            for node in self.model.nodes.values():
+                if not any(node.fixity):
+                    continue
+                key = str(classify_fixity(node.fixity))
+                support_types[key] = support_types.get(key, 0) + 1
+            rows = [
+                ("Supported Nodes", sum(support_types.values())),
+                ("Support Types", len(support_types)),
+            ]
+            rows.extend((f"Type · {name}", count) for name, count in sorted(support_types.items()))
+            self.properties_panel.set_properties("Supports / Restraints", rows)
+            return
+        if kind == "masses_root":
+            mass_nodes = [
+                node for node in self.model.nodes.values()
+                if any(abs(value) > 0.0 for value in node.mass)
+            ]
+            nonzero_dofs = sum(
+                sum(abs(value) > 0.0 for value in node.mass)
+                for node in mass_nodes
+            )
+            selected_mass_nodes = sum(
+                1
+                for tag in self.selection.nodes
+                if tag in self.model.nodes
+                and any(abs(value) > 0.0 for value in self.model.nodes[tag].mass)
+            )
+            self.properties_panel.set_properties(
+                "Nodal Masses",
+                [
+                    ("Nodes with Mass", len(mass_nodes)),
+                    ("Nonzero Mass DOFs", nonzero_dofs),
+                    ("Selected Nodes with Mass", selected_mass_nodes),
+                    ("Mass Source Definitions", len(self.project.mass_sources)),
+                ],
+            )
+            return
+        if kind == "named_sets_root":
+            surface_managed = sum(
+                1 for selection_set in self.project.selection_sets.values()
+                if selection_set.surface_tags
+            )
+            direct_fe = len(self.project.selection_sets) - surface_managed
+            node_tags: set[int] = set()
+            element_tags: set[int] = set()
+            surface_tags: set[int] = set()
+            for selection_set in self.project.selection_sets.values():
+                node_tags.update(selection_set.node_tags)
+                element_tags.update(selection_set.element_tags)
+                surface_tags.update(selection_set.surface_tags)
+            self.properties_panel.set_properties(
+                "Named Selections",
+                [
+                    ("Total Sets", len(self.project.selection_sets)),
+                    ("Direct FE Sets", direct_fe),
+                    ("Surface-managed Sets", surface_managed),
+                    ("Referenced Nodes", len(node_tags)),
+                    ("Referenced Elements", len(element_tags)),
+                    ("Referenced Surfaces", len(surface_tags)),
+                ],
+            )
+            return
         if kind == "connections_root":
             connection_types: dict[str, int] = {}
             connected_nodes: set[int] = set()
@@ -23854,6 +24080,10 @@ class MainWindow(QMainWindow):
         if kind == "nodes_root":
             create = menu.addAction("New Node...")
             create.triggered.connect(self._create_node)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("nodes_root")
+            )
 
             menu.addSeparator()
             select_all = menu.addAction("Select All Nodes")
@@ -23865,7 +24095,11 @@ class MainWindow(QMainWindow):
 
         if kind == "planes_root":
             menu.addAction(self.actions["sketch_plane_offset"])
-            three = menu.addAction(self.actions["sketch_plane_3point"])
+            menu.addAction(self.actions["sketch_plane_3point"])
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("planes_root")
+            )
             exec_menu()
             return
 
@@ -23918,6 +24152,10 @@ class MainWindow(QMainWindow):
         if kind == "points_root":
             create = menu.addAction("New Point...")
             create.triggered.connect(self._create_point_geometry)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("points_root")
+            )
             select_all = menu.addAction("Select All Points")
             select_all.setEnabled(bool(self.project.points))
             select_all.triggered.connect(
@@ -23979,6 +24217,10 @@ class MainWindow(QMainWindow):
             surface_delete.setEnabled(surface_remesh.isEnabled())
             surface_delete.triggered.connect(
                 self._delete_all_surface_meshes
+            )
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("mesh_root")
             )
             exec_menu()
             return
@@ -24066,6 +24308,10 @@ class MainWindow(QMainWindow):
             )
             create = menu.addAction("New Line by Input...")
             create.triggered.connect(self._create_line_geometry)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("lines_root")
+            )
             select_all = menu.addAction("Select All Lines")
             select_all.setEnabled(bool(self.project.lines))
             select_all.triggered.connect(
@@ -24358,6 +24604,10 @@ class MainWindow(QMainWindow):
                 "Create Pressure from FE Shell Selection..."
             )
             pressure.triggered.connect(self._create_shell_pressure)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("surfaces_root")
+            )
             select_all = menu.addAction("Select All Surfaces")
             select_all.setEnabled(bool(self.project.surfaces))
             select_all.triggered.connect(
@@ -24790,6 +25040,10 @@ class MainWindow(QMainWindow):
                 "New ZeroLength / Link Element..."
             )
             create_connection.triggered.connect(self._create_connection)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("elements_root")
+            )
 
             menu.addSeparator()
             select_all = menu.addAction("Select All Structural Elements")
@@ -24932,6 +25186,10 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "named_sets_root":
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("named_sets_root")
+            )
             create = menu.addAction(
                 "Create Direct FE Selection from Current Selection..."
             )
@@ -24987,6 +25245,10 @@ class MainWindow(QMainWindow):
             select_all.setEnabled(bool(constrained))
             select_all.triggered.connect(
                 lambda: self.selection.set_selection(nodes=constrained)
+            )
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("boundary_root")
             )
             menu.addSeparator()
             apply_support = menu.addAction(
@@ -25739,6 +26001,10 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "masses_root":
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("masses_root")
+            )
             assign_action = menu.addAction(
                 "Assign Mass to Current Node Selection..."
             )
