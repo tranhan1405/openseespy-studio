@@ -344,3 +344,82 @@ ops.uniaxialMaterial(
     assert material.parameters["a2"] == 1.0
     assert material.parameters["a3"] == 0.029
     assert material.parameters["a4"] == 1.0
+
+
+def test_importer_reads_relative_path_time_series_file(tmp_path):
+    motion_path = tmp_path / "A10000.dat"
+    motion_path.write_text(
+        "0.0\n0.10 -0.20\n3.0e-2\n",
+        encoding="utf-8",
+    )
+    source_path = tmp_path / "cantilever_eq.py"
+    source = """
+from openseespy.opensees import *
+
+model('basic', '-ndm', 2, '-ndf', 3)
+G = 386.0
+timeSeries(
+    'Path', 2,
+    '-dt', 0.005,
+    '-filePath', 'A10000.dat',
+    '-factor', G,
+)
+pattern('UniformExcitation', 2, 1, '-accel', 2)
+"""
+    source_path.write_text(source, encoding="utf-8")
+
+    result = import_openseespy_source(
+        source,
+        source_name=source_path.name,
+        source_path=source_path,
+        units={"length": "in", "force": "kip", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    assert result.unsupported_count == 0
+
+    series = result.project.time_series[2]
+    assert series.series_type == "Path"
+    assert series.dt == 0.005
+    assert series.factor == 386.0
+    assert series.values == [0.0, 0.10, -0.20, 3.0e-2]
+
+    pattern = result.project.load_patterns[2]
+    assert pattern.pattern_type == "UniformExcitation"
+    assert pattern.time_series_tag == 2
+    assert pattern.direction == 1
+
+
+def test_importer_rejects_path_time_series_file_outside_script_tree(tmp_path):
+    script_dir = tmp_path / "model"
+    script_dir.mkdir()
+    outside_path = tmp_path / "outside.dat"
+    outside_path.write_text("0.0 0.1", encoding="utf-8")
+
+    source_path = script_dir / "unsafe_eq.py"
+    source = """
+from openseespy.opensees import *
+
+model('basic', '-ndm', 2, '-ndf', 3)
+timeSeries(
+    'Path', 2,
+    '-dt', 0.01,
+    '-filePath', '../outside.dat',
+)
+"""
+    source_path.write_text(source, encoding="utf-8")
+
+    result = import_openseespy_source(
+        source,
+        source_name=source_path.name,
+        source_path=source_path,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert 2 not in result.project.time_series
+    assert any(
+        issue.severity == "UNSUPPORTED"
+        and issue.construct == "timeSeries Path -filePath"
+        and "outside the imported script directory tree" in issue.message
+        for issue in result.issues
+    )
