@@ -2124,6 +2124,21 @@ class AnalysisSettingsData:
     rayleigh_beta_k: float = 0.0
     rayleigh_beta_k_init: float = 0.0
     rayleigh_beta_k_comm: float = 0.0
+    # Response-spectrum generation uses one or two existing
+    # UniformExcitation patterns as acceleration sources. RotD50/RotD100
+    # are outputs of the same analysis, not separate analysis types.
+    response_spectrum_mode: str = "Bidirectional / RotD"
+    response_spectrum_damping_ratio: float = 0.05
+    response_spectrum_t1_step: float = 0.1
+    response_spectrum_t1_end: float = 1.0
+    response_spectrum_t2_step: float = 0.2
+    response_spectrum_t2_end: float = 2.0
+    response_spectrum_t3_step: float = 0.5
+    response_spectrum_t3_end: float = 5.0
+    response_spectrum_component_x: bool = True
+    response_spectrum_component_y: bool = True
+    response_spectrum_rotd50: bool = True
+    response_spectrum_rotd100: bool = True
 
     def __post_init__(self) -> None:
         self.tag=_strict_int(self.tag, "Analysis tag"); self.name=str(self.name).strip() or f"Analysis {self.tag}"
@@ -2132,7 +2147,7 @@ class AnalysisSettingsData:
         self.tolerance=float(self.tolerance)
         self.max_iterations=(
             _strict_int(self.max_iterations, "Analysis max iterations")
-            if self.analysis_type != "Modal"
+            if self.analysis_type not in {"Modal", "Response Spectrum"}
             else int(self.max_iterations)
         )
         self.steps=(
@@ -2183,7 +2198,8 @@ class AnalysisSettingsData:
         self.adaptive_min_factor=float(self.adaptive_min_factor)
         self.adaptive_growth_factor=float(self.adaptive_growth_factor)
         uses_adaptive_integer_settings = (
-            self.adaptive_step and self.analysis_type != "Modal"
+            self.adaptive_step
+            and self.analysis_type not in {"Modal", "Response Spectrum"}
         )
         self.adaptive_easy_iterations = (
             _strict_int(
@@ -2223,6 +2239,34 @@ class AnalysisSettingsData:
         self.rayleigh_beta_k=float(self.rayleigh_beta_k)
         self.rayleigh_beta_k_init=float(self.rayleigh_beta_k_init)
         self.rayleigh_beta_k_comm=float(self.rayleigh_beta_k_comm)
+        self.response_spectrum_mode = str(
+            self.response_spectrum_mode or "Bidirectional / RotD"
+        )
+        self.response_spectrum_damping_ratio = float(
+            self.response_spectrum_damping_ratio
+        )
+        self.response_spectrum_t1_step = float(self.response_spectrum_t1_step)
+        self.response_spectrum_t1_end = float(self.response_spectrum_t1_end)
+        self.response_spectrum_t2_step = float(self.response_spectrum_t2_step)
+        self.response_spectrum_t2_end = float(self.response_spectrum_t2_end)
+        self.response_spectrum_t3_step = float(self.response_spectrum_t3_step)
+        self.response_spectrum_t3_end = float(self.response_spectrum_t3_end)
+        self.response_spectrum_component_x = _strict_bool(
+            self.response_spectrum_component_x,
+            "Response spectrum component X output",
+        )
+        self.response_spectrum_component_y = _strict_bool(
+            self.response_spectrum_component_y,
+            "Response spectrum component Y output",
+        )
+        self.response_spectrum_rotd50 = _strict_bool(
+            self.response_spectrum_rotd50,
+            "Response spectrum RotD50 output",
+        )
+        self.response_spectrum_rotd100 = _strict_bool(
+            self.response_spectrum_rotd100,
+            "Response spectrum RotD100 output",
+        )
         numeric_values = (
             self.tolerance,
             self.load_increment,
@@ -2241,6 +2285,13 @@ class AnalysisSettingsData:
             self.rayleigh_beta_k,
             self.rayleigh_beta_k_init,
             self.rayleigh_beta_k_comm,
+            self.response_spectrum_damping_ratio,
+            self.response_spectrum_t1_step,
+            self.response_spectrum_t1_end,
+            self.response_spectrum_t2_step,
+            self.response_spectrum_t2_end,
+            self.response_spectrum_t3_step,
+            self.response_spectrum_t3_end,
             self.adaptive_cutback_factor,
             self.adaptive_min_factor,
             self.adaptive_growth_factor,
@@ -2249,7 +2300,7 @@ class AnalysisSettingsData:
         if any(not math.isfinite(value) for value in numeric_values):
             raise ValueError("Analysis numeric settings must be finite.")
         if self.tag<=0: raise ValueError("Analysis tag must be positive.")
-        if self.analysis_type not in {"Static","Pushover","Cyclic","Transient","Modal"}:
+        if self.analysis_type not in {"Static","Pushover","Cyclic","Transient","Modal","Response Spectrum"}:
             raise ValueError(f"Unsupported analysis type: {self.analysis_type}")
         default_integrators = {
             "Static": "LoadControl",
@@ -2257,6 +2308,7 @@ class AnalysisSettingsData:
             "Cyclic": "DisplacementControl",
             "Transient": "Newmark",
             "Modal": "None",
+            "Response Spectrum": "None",
         }
         if self.integrator in {"", "Auto"}:
             self.integrator = default_integrators[self.analysis_type]
@@ -2266,6 +2318,7 @@ class AnalysisSettingsData:
             "Cyclic": {"DisplacementControl"},
             "Transient": {"Newmark", "HHT", "GeneralizedAlpha"},
             "Modal": {"None"},
+            "Response Spectrum": {"None"},
         }
         if self.integrator not in allowed_integrators[self.analysis_type]:
             raise ValueError(
@@ -2287,7 +2340,7 @@ class AnalysisSettingsData:
         )
         self.control_dof = (
             _strict_int(raw_control_dof, "Analysis control DOF")
-            if self.analysis_type != "Modal"
+            if self.analysis_type not in {"Modal", "Response Spectrum"}
             else int(raw_control_dof)
         )
 
@@ -2307,7 +2360,7 @@ class AnalysisSettingsData:
         )
 
         uses_deferred_patterns = (
-            self.analysis_type in {"Transient", "Pushover", "Cyclic"}
+            self.analysis_type in {"Transient", "Pushover", "Cyclic", "Response Spectrum"}
             or (
                 self.analysis_type == "Static"
                 and self.integrator == "DisplacementControl"
@@ -2330,7 +2383,7 @@ class AnalysisSettingsData:
             raise ValueError(
                 "System pivoting (-piv) is only supported for SparseGeneral."
             )
-        uses_iterative_convergence = self.analysis_type != "Modal"
+        uses_iterative_convergence = self.analysis_type not in {"Modal", "Response Spectrum"}
         if (
             uses_iterative_convergence
             and self.test not in {"NormDispIncr","NormUnbalance","EnergyIncr"}
@@ -2365,7 +2418,7 @@ class AnalysisSettingsData:
         ):
             raise ValueError("Analysis steps must be at least 1.")
         if (
-            self.analysis_type != "Modal"
+            self.analysis_type not in {"Modal", "Response Spectrum"}
             and self.control_dof not in range(1, 7)
         ):
             raise ValueError("Control DOF must be 1..6.")
@@ -2501,6 +2554,67 @@ class AnalysisSettingsData:
             and any(tag <= 0 for tag in self.deferred_pattern_tags)
         ):
             raise ValueError("Deferred load-pattern tags must be positive.")
+        if self.analysis_type == "Response Spectrum":
+            if self.response_spectrum_mode not in {
+                "Single Component",
+                "Bidirectional / RotD",
+            }:
+                raise ValueError("Unsupported response-spectrum mode.")
+            required_sources = (
+                1
+                if self.response_spectrum_mode == "Single Component"
+                else 2
+            )
+            if len(self.deferred_pattern_tags) != required_sources:
+                raise ValueError(
+                    "Response Spectrum "
+                    + self.response_spectrum_mode
+                    + f" needs exactly {required_sources} UniformExcitation "
+                    "pattern tag(s)."
+                )
+            if not 0.0 <= self.response_spectrum_damping_ratio < 1.0:
+                raise ValueError(
+                    "Response-spectrum damping ratio must be in [0, 1)."
+                )
+            if (
+                self.response_spectrum_t1_step <= 0.0
+                or self.response_spectrum_t2_step <= 0.0
+                or self.response_spectrum_t3_step <= 0.0
+            ):
+                raise ValueError(
+                    "Response-spectrum period intervals must be positive."
+                )
+            if not (
+                0.0 < self.response_spectrum_t1_end
+                <= self.response_spectrum_t2_end
+                <= self.response_spectrum_t3_end
+            ):
+                raise ValueError(
+                    "Response-spectrum region ends must be positive and "
+                    "non-decreasing."
+                )
+            if not any((
+                self.response_spectrum_component_x,
+                self.response_spectrum_component_y,
+                self.response_spectrum_rotd50,
+                self.response_spectrum_rotd100,
+            )):
+                raise ValueError(
+                    "Response Spectrum needs at least one requested output."
+                )
+            if (
+                self.response_spectrum_mode == "Single Component"
+                and (
+                    self.response_spectrum_component_y
+                    or self.response_spectrum_rotd50
+                    or self.response_spectrum_rotd100
+                )
+            ):
+                raise ValueError(
+                    "Single Component response spectrum only supports "
+                    "Component X output."
+                )
+
         if self.analysis_type == "Modal" and self.num_modes < 1:
             raise ValueError("Number of modes must be at least 1.")
         uses_eigen_solver = (
@@ -2534,7 +2648,13 @@ class AnalysisSettingsData:
             "adaptive_growth_after","live_convergence","show_external_console",
             "algorithm_initial","system_pivoting","gravity_algorithm",
             "rayleigh_model","rayleigh_alpha_m","rayleigh_beta_k",
-            "rayleigh_beta_k_init","rayleigh_beta_k_comm"
+            "rayleigh_beta_k_init","rayleigh_beta_k_comm",
+            "response_spectrum_mode","response_spectrum_damping_ratio",
+            "response_spectrum_t1_step","response_spectrum_t1_end",
+            "response_spectrum_t2_step","response_spectrum_t2_end",
+            "response_spectrum_t3_step","response_spectrum_t3_end",
+            "response_spectrum_component_x","response_spectrum_component_y",
+            "response_spectrum_rotd50","response_spectrum_rotd100"
         )}
 
     @classmethod
@@ -2700,6 +2820,7 @@ SOLUTION_RESULT_TYPES = {
     "SpecimenResponse",
     "MomentCurvature",
     "SectionResponse",
+    "ResponseSpectrum",
 }
 
 
@@ -7884,7 +8005,7 @@ class ProjectDatabase:
         analysis: AnalysisSettingsData,
     ) -> bool:
         return bool(
-            analysis.analysis_type in {"Transient", "Pushover", "Cyclic"}
+            analysis.analysis_type in {"Transient", "Pushover", "Cyclic", "Response Spectrum"}
             or (
                 analysis.analysis_type == "Static"
                 and analysis.integrator == "DisplacementControl"
