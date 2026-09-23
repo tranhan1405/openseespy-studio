@@ -11047,14 +11047,21 @@ class MainWindow(QMainWindow):
             for tag in tags
             if not self.project.surfaces[tag].mesh_recipe_configured
         ]
-        if unconfigured:
-            QMessageBox.information(
-                self,
-                "Preview Surface Mesh",
-                "Configure Surface Mesh first for: "
-                + ", ".join(map(str, unconfigured)),
-            )
-            return
+        for tag in unconfigured:
+            if not self._ask_create_prerequisite(
+                title="Preview Surface Mesh",
+                message=(
+                    f"Surface {tag} needs a Surface Mesh / Shell recipe "
+                    "before it can be previewed. Configure it now?"
+                ),
+                action_label=f"Configure Surface {tag} Mesh Now...",
+            ):
+                return
+            if not self._configure_surface_mesh(tag, generate=False):
+                return
+            surface = self.project.surfaces.get(int(tag))
+            if surface is None or not surface.mesh_recipe_configured:
+                return
         total = 0
         summaries = []
         try:
@@ -22343,7 +22350,6 @@ class MainWindow(QMainWindow):
                 self._show_line_mesh_quality(t)
             )
             preview = menu.addAction("Preview Mesh")
-            preview.setEnabled(line.mesh_recipe_configured)
             preview.triggered.connect(
                 lambda checked=False, t=tag:
                 self._preview_line_mesh(t)
@@ -22368,7 +22374,6 @@ class MainWindow(QMainWindow):
                 self._delete_line_mesh(t)
             )
             select_fe = menu.addAction("Select Generated FE")
-            select_fe.setEnabled(live_mesh)
             select_fe.triggered.connect(
                 lambda checked=False, t=tag:
                 self._select_line_generated_fe(t)
@@ -22552,7 +22557,6 @@ class MainWindow(QMainWindow):
                 self._assign_shell_section_to_surfaces([t])
             )
             preview = menu.addAction("Preview Mesh")
-            preview.setEnabled(surface.mesh_recipe_configured)
             preview.triggered.connect(
                 lambda checked=False, t=tag:
                 self._preview_surface_meshes([t])
@@ -22577,7 +22581,6 @@ class MainWindow(QMainWindow):
                 self._delete_surface_mesh(t)
             )
             select_fe = menu.addAction("Select Generated FE")
-            select_fe.setEnabled(live_mesh)
             select_fe.triggered.connect(
                 lambda checked=False, t=tag:
                 self._select_generated_fe_for_surfaces([t])
@@ -22588,7 +22591,6 @@ class MainWindow(QMainWindow):
                 self._audit_surface_mesh_integrity([t])
             )
             quality_menu = menu.addMenu("Visualize Mesh Quality")
-            quality_menu.setEnabled(live_mesh)
             for label, metric in (
                 ("Aspect Ratio", "aspect_ratio"),
                 ("Skew", "skew"),
