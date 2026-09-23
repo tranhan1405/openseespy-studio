@@ -9301,6 +9301,19 @@ class MainWindow(QMainWindow):
             self._create_load_pattern,
         )
 
+    def _ground_motion_patterns(self):
+        return {
+            tag: pattern
+            for tag, pattern in self.project.load_patterns.items()
+            if pattern.pattern_type == "UniformExcitation"
+        }
+
+    def _create_ground_motion_dependency(self):
+        return self._capture_created_dependency(
+            self._ground_motion_patterns,
+            self._create_ground_motion,
+        )
+
     def _create_analysis_dependency(self):
         return self._capture_created_dependency(
             self._compatible_surface_result_analyses,
@@ -19377,6 +19390,7 @@ class MainWindow(QMainWindow):
             ndf=self.model.ndf,
             plain_patterns=self._plain_pattern_choices(),
             new_plain_pattern_callback=self._create_plain_pattern_dependency,
+            new_ground_motion_callback=self._create_ground_motion_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -19430,6 +19444,7 @@ class MainWindow(QMainWindow):
             ndf=self.model.ndf,
             plain_patterns=self._plain_pattern_choices(),
             new_plain_pattern_callback=self._create_plain_pattern_dependency,
+            new_ground_motion_callback=self._create_ground_motion_dependency,
             parent=self,
         )
         if not dialog.exec():
