@@ -22929,6 +22929,45 @@ class MainWindow(QMainWindow):
             f"Job {job.job_id} · duplicated result: {duplicate['name']}"
         )
 
+    def _show_tree_root_properties(self, kind: str) -> None:
+        """Show compact summary properties for major Model Tree roots."""
+        kind = str(kind)
+        if kind == "model_root":
+            self.properties_panel.set_properties(
+                "Model",
+                [
+                    ("Nodes", len(self.model.nodes)),
+                    ("Elements", len(self.model.elements)),
+                    ("Materials", len(self.project.materials)),
+                    ("Sections", len(self.project.sections)),
+                    ("Analyses", len(self.project.analyses)),
+                ],
+            )
+            return
+        if kind == "geometry_root":
+            self.properties_panel.set_properties(
+                "Geometry",
+                [
+                    ("Sketch Planes", len(self.project.sketch_planes)),
+                    ("Points", len(self.project.points)),
+                    ("Lines", len(self.project.lines)),
+                    ("Surfaces", len(self.project.surfaces)),
+                ],
+            )
+            return
+        if kind == "fe_model_root":
+            self.properties_panel.set_properties(
+                "Finite Element Model",
+                [
+                    ("Nodes", len(self.model.nodes)),
+                    ("Elements", len(self.model.elements)),
+                    ("Constraints", len(self.project.constraints)),
+                    ("Connections", len(self.project.connections)),
+                    ("Recorders", len(self.project.recorders)),
+                    ("Mass Sources", len(self.project.mass_sources)),
+                ],
+            )
+
     def _populate_materials_root_context_menu(
         self,
         menu: QMenu,
@@ -23297,6 +23336,10 @@ class MainWindow(QMainWindow):
             menu.exec(self.tree.viewport().mapToGlobal(position))
 
         if kind == "model_root":
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("model_root")
+            )
             menu.addAction(self.actions["check_model"])
             menu.addAction(self.actions["run"])
             menu.addSeparator()
@@ -23307,6 +23350,10 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "geometry_root":
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("geometry_root")
+            )
             point_action = menu.addAction("New Point...")
             point_action.triggered.connect(self._create_point_geometry)
             line_pick = menu.addAction("Draw Polyline")
@@ -23341,6 +23388,10 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "fe_model_root":
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("fe_model_root")
+            )
             node_action = menu.addAction("New Node...")
             node_action.triggered.connect(self._create_node)
             frame_action = menu.addAction("New Frame...")
