@@ -3919,6 +3919,17 @@ class MainWindow(QMainWindow):
             tabs.setCurrentIndex(index)
 
     @staticmethod
+    def _boundary_condition_icon_name(support_type: str) -> str:
+        """Return a distinct Tree icon for common restraint presets."""
+        return {
+            "Fixed": "boundary-fixed",
+            "Pinned": "boundary-pinned",
+            "Roller X": "boundary-roller-x",
+            "Roller Y": "boundary-roller-y",
+            "Roller Z": "boundary-roller-z",
+        }.get(str(support_type), "boundary")
+
+    @staticmethod
     def _tree_selection_display_context(
         kinds: set[str],
     ) -> tuple[str, str | None]:
@@ -4891,7 +4902,10 @@ class MainWindow(QMainWindow):
             group_item = QTreeWidgetItem([
                 f"{support_type} ({len(tags)})"
             ])
-            group_item.setIcon(0, studio_icon("boundary"))
+            boundary_icon = self._boundary_condition_icon_name(
+                support_type
+            )
+            group_item.setIcon(0, studio_icon(boundary_icon))
             group_item.setData(
                 0,
                 Qt.UserRole,
@@ -4901,7 +4915,7 @@ class MainWindow(QMainWindow):
             boundary_root.addChild(group_item)
             for tag in tags:
                 node_item = QTreeWidgetItem([f"Node {tag}"])
-                node_item.setIcon(0, studio_icon("boundary"))
+                node_item.setIcon(0, studio_icon(boundary_icon))
                 node_item.setData(0, Qt.UserRole, ("node", tag))
                 group_item.addChild(node_item)
 
