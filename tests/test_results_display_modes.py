@@ -384,7 +384,7 @@ def test_cyclic_tab_shows_synchronized_column_reversal_and_cycle_metrics(qapp):
         panel.show_solution_result("CyclicHysteresis")
         qapp.processEvents()
 
-        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Cyclic Hysteresis"
+        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Nonlinear Response"
         assert panel.cyclic_reversal_table.columnCount() == 20
         assert panel.cyclic_reversal_table.rowCount() == 3
         assert panel.cyclic_cycle_table.rowCount() == 1
@@ -814,12 +814,12 @@ def test_specialized_cyclic_result_objects_focus_existing_views(qapp):
     panel = ResultsPanel()
     try:
         panel.show_solution_result("CyclicHysteresis")
-        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Cyclic Hysteresis"
+        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Nonlinear Response"
         assert panel.cyclic_compare_view.currentData() == "hysteresis"
         assert panel.cyclic_detail_tabs.currentIndex() == 0
 
         panel.show_solution_result("CyclicBackbone")
-        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Cyclic Hysteresis"
+        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Nonlinear Response"
         assert panel.cyclic_compare_view.currentData() == "backbone"
         assert panel.cyclic_detail_tabs.currentIndex() == 0
 
