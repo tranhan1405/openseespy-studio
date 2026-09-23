@@ -152,3 +152,18 @@ def test_force_displacement_catalog_default_uses_base_shear():
     assert item.category == "Charts / History"
     assert item.label == "Force–Displacement"
     assert item.settings["force_source"] == "Base shear"
+
+def test_nodal_results_default_to_global_animation_contour_range():
+    for analysis_kind in ("Static", "Transient", "Cyclic", "Pushover"):
+        choices = result_choices_for_analysis(analysis_kind)
+        nodal = [
+            choice
+            for choice in choices
+            if choice.result_type in {"NodalDisplacement", "NodalReaction"}
+        ]
+        assert nodal
+        assert all(
+            choice.settings.get("contour_range_mode") == "global"
+            for choice in nodal
+        )
+
