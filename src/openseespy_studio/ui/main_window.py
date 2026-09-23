@@ -24206,6 +24206,9 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "analyses_root":
+            action = menu.addAction("New Analysis...")
+            action.triggered.connect(self._create_analysis)
+
             template_menu = menu.addMenu("Analysis Wizard")
             for template_name in (
                 "Modal",
@@ -24213,14 +24216,11 @@ class MainWindow(QMainWindow):
                 "Cyclic",
                 "Nonlinear Time History",
             ):
-                action = template_menu.addAction(template_name)
-                action.triggered.connect(
+                template_action = template_menu.addAction(template_name)
+                template_action.triggered.connect(
                     lambda checked=False, name=template_name:
                     self._create_analysis_template(name)
                 )
-            menu.addSeparator()
-            action = menu.addAction("New Analysis...")
-            action.triggered.connect(self._create_analysis)
             exec_menu()
             return
 
@@ -24230,6 +24230,10 @@ class MainWindow(QMainWindow):
             "analysis_cyclic_protocol",
         }:
             tag = int(value)
+            edit = menu.addAction("Edit Analysis Settings...")
+            edit.triggered.connect(lambda: self._edit_analysis(tag))
+
+            menu.addSeparator()
             active = menu.addAction("Set Active")
             active.setEnabled(tag != self.project.active_analysis_tag)
             active.triggered.connect(lambda: self._set_active_analysis(tag))
@@ -24241,9 +24245,8 @@ class MainWindow(QMainWindow):
             run.triggered.connect(
                 lambda: self._run_analysis_from_tree(tag)
             )
+
             menu.addSeparator()
-            edit = menu.addAction("Edit Analysis Settings...")
-            edit.triggered.connect(lambda: self._edit_analysis(tag))
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_analysis(tag))
             exec_menu()
@@ -24305,6 +24308,10 @@ class MainWindow(QMainWindow):
             evaluate.triggered.connect(
                 lambda: self._evaluate_solution_result(tag)
             )
+            clear_display = menu.addAction("Clear Result Display")
+            clear_display.triggered.connect(self._clear_result_display)
+
+            menu.addSeparator()
             duplicate = menu.addAction("Duplicate")
             duplicate.triggered.connect(
                 lambda: self._duplicate_solution_result(tag)
@@ -24313,9 +24320,8 @@ class MainWindow(QMainWindow):
             rename.triggered.connect(
                 lambda: self._rename_solution_result(tag)
             )
+
             menu.addSeparator()
-            clear_display = menu.addAction("Clear Result Display")
-            clear_display.triggered.connect(self._clear_result_display)
             delete = menu.addAction("Delete Result...")
             delete.triggered.connect(
                 lambda: self._delete_solution_result(tag)
@@ -24453,17 +24459,20 @@ class MainWindow(QMainWindow):
             show.triggered.connect(
                 lambda: self._show_job_plot(job_id, plot_id)
             )
-            rename = menu.addAction("Rename...")
-            rename.triggered.connect(
-                lambda: self._rename_job_plot(job_id, plot_id)
-            )
+            clear_display = menu.addAction("Clear Result Display")
+            clear_display.triggered.connect(self._clear_result_display)
+
+            menu.addSeparator()
             duplicate = menu.addAction("Duplicate")
             duplicate.triggered.connect(
                 lambda: self._duplicate_job_plot(job_id, plot_id)
             )
+            rename = menu.addAction("Rename...")
+            rename.triggered.connect(
+                lambda: self._rename_job_plot(job_id, plot_id)
+            )
+
             menu.addSeparator()
-            clear_display = menu.addAction("Clear Result Display")
-            clear_display.triggered.connect(self._clear_result_display)
             delete = menu.addAction("Delete Result...")
             delete.triggered.connect(
                 lambda: self._delete_job_plot(job_id, plot_id)
@@ -24744,6 +24753,7 @@ class MainWindow(QMainWindow):
         selection_set = self.project.selection_sets.get(name)
         if selection_set is None:
             return
+
         properties_action = menu.addAction("Properties")
         properties_action.triggered.connect(
             lambda: self._show_named_selection_properties(name)
@@ -24753,22 +24763,27 @@ class MainWindow(QMainWindow):
             lambda: self._select_named_selection(name)
         )
 
-        update_action = menu.addAction("Update from Current Selection")
-        update_action.setEnabled(not selection_set.surface_tags)
-        update_action.triggered.connect(
-            lambda: self._update_named_selection(name)
-        )
-        if selection_set.surface_tags:
-            edit_scope_action = menu.addAction("Edit Surface Scope Mode...")
-            edit_scope_action.triggered.connect(
-                lambda: self._edit_managed_named_selection(name)
-            )
-
         menu.addSeparator()
+        if selection_set.surface_tags:
+            edit_scope_action = menu.addAction(
+                "Edit Surface Scope Mode..."
+            )
+            edit_scope_action.triggered.connect(
+                lambda: self._edit_surface_named_selection_scope(name)
+            )
+        else:
+            update_action = menu.addAction(
+                "Update from Current Selection"
+            )
+            update_action.triggered.connect(
+                lambda: self._update_named_selection(name)
+            )
         rename_action = menu.addAction("Rename...")
         rename_action.triggered.connect(
             lambda: self._rename_named_selection(name)
         )
+
+        menu.addSeparator()
         delete_action = menu.addAction("Delete")
         delete_action.triggered.connect(
             lambda: self._delete_named_selection(name)
