@@ -577,10 +577,22 @@ class RibbonPage(QWidget):
 
 
 class FrameGridPanel(QWidget):
-    def __init__(self, generate_callback, close_callback, parent=None):
+    def __init__(
+        self,
+        generate_callback,
+        close_callback,
+        *,
+        new_section_callback=None,
+        new_transformation_callback=None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.generate_callback = generate_callback
         self.close_callback = close_callback
+        self._new_section_callback = new_section_callback
+        self._new_transformation_callback = new_transformation_callback
+        self._sections = {}
+        self._transformations = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 6, 8, 8)
@@ -683,10 +695,50 @@ class FrameGridPanel(QWidget):
         assignment = QFormLayout()
         assignment.setContentsMargins(0, 1, 0, 0)
         assignment.setVerticalSpacing(5)
-        assignment.addRow("Section (columns):", self.column_section)
-        assignment.addRow("Section (beams):", self.beam_section)
-        assignment.addRow("Transformation (columns):", self.column_transformation)
-        assignment.addRow("Transformation (beams):", self.beam_transformation)
+        assignment.addRow(
+            "Section (columns):",
+            self._dependency_selector(
+                self.column_section,
+                "New...",
+                lambda: self._create_section_dependency(
+                    self.column_section
+                ),
+                "Create a Section and assign it to columns.",
+            ),
+        )
+        assignment.addRow(
+            "Section (beams):",
+            self._dependency_selector(
+                self.beam_section,
+                "New...",
+                lambda: self._create_section_dependency(
+                    self.beam_section
+                ),
+                "Create a Section and assign it to beams.",
+            ),
+        )
+        assignment.addRow(
+            "Transformation (columns):",
+            self._dependency_selector(
+                self.column_transformation,
+                "New...",
+                lambda: self._create_transformation_dependency(
+                    self.column_transformation
+                ),
+                "Create a Geometric Transformation and assign it to columns.",
+            ),
+        )
+        assignment.addRow(
+            "Transformation (beams):",
+            self._dependency_selector(
+                self.beam_transformation,
+                "New...",
+                lambda: self._create_transformation_dependency(
+                    self.beam_transformation
+                ),
+                "Create a Geometric Transformation and assign it to beams.",
+            ),
+        )
         assign_widget = QWidget()
         assign_widget.setLayout(assignment)
         layout.addWidget(assign_widget)
@@ -783,6 +835,59 @@ class FrameGridPanel(QWidget):
             f"{columns + beams} elements"
         )
 
+    def _dependency_selector(
+        self,
+        combo: QComboBox,
+        button_text: str,
+        callback,
+        tooltip: str,
+    ) -> QWidget:
+        holder = QWidget()
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        row.addWidget(combo, 1)
+        button = QPushButton(button_text)
+        button.setMaximumWidth(54)
+        button.setToolTip(tooltip)
+        button.setEnabled(callable(callback))
+        button.clicked.connect(callback)
+        row.addWidget(button)
+        return holder
+
+    def _create_section_dependency(self, target: QComboBox) -> None:
+        if not callable(self._new_section_callback):
+            return
+        section = self._new_section_callback()
+        if section is None:
+            return
+        self._sections[int(section.tag)] = section
+        self.refresh_assignments(
+            self._sections,
+            self._transformations,
+        )
+        index = target.findData(int(section.tag))
+        if index >= 0:
+            target.setCurrentIndex(index)
+
+    def _create_transformation_dependency(
+        self,
+        target: QComboBox,
+    ) -> None:
+        if not callable(self._new_transformation_callback):
+            return
+        transformation = self._new_transformation_callback()
+        if transformation is None:
+            return
+        self._transformations[int(transformation.tag)] = transformation
+        self.refresh_assignments(
+            self._sections,
+            self._transformations,
+        )
+        index = target.findData(int(transformation.tag))
+        if index >= 0:
+            target.setCurrentIndex(index)
+
     @staticmethod
     def _separator() -> QFrame:
         line = QFrame()
@@ -837,6 +942,10 @@ class FrameGridPanel(QWidget):
         return widget
 
     def refresh_assignments(self, sections, transformations) -> None:
+        self._sections = dict(sections or {})
+        self._transformations = dict(transformations or {})
+        sections = self._sections
+        transformations = self._transformations
         combos = (
             self.column_section,
             self.beam_section,
@@ -1722,7 +1831,13 @@ class MainWindow(QMainWindow):
         dock.setAllowedAreas(Qt.RightDockWidgetArea)
         dock.setMinimumWidth(315)
 
-        self.frame_grid_panel = FrameGridPanel(self._generate_frame_grid, dock.hide)
+        self.frame_grid_panel = FrameGridPanel(
+            self._generate_frame_grid,
+            dock.hide,
+            new_section_callback=self._create_frame_section_dependency,
+            new_transformation_callback=self._create_transformation_dependency,
+            parent=self,
+        )
         dock.setWidget(self.frame_grid_panel)
 
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
