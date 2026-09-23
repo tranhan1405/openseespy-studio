@@ -912,3 +912,52 @@ def test_fifteenth_prerequisite_link_batch():
     )
     assert "recorder_tag: int | None = None" in recorder_editor
 
+def test_sixteenth_prerequisite_link_batch():
+    # 1: Deleting a generated recorder routes to exact managed removal.
+    delete_recorder = inspect.getsource(MainWindow._delete_recorder)
+    assert "Remove Managed Recorder Now..." in delete_recorder
+    assert "recorder_tag=owner.tag" in delete_recorder
+    assert "Remove the Geometry Surface recorder instead." not in delete_recorder
+
+    recorder_remove = inspect.getsource(
+        MainWindow._remove_managed_surface_shell_recorder
+    )
+    assert "recorder_tag: int | None = None" in recorder_remove
+
+    # 2: Managed Surface result scope editing opens the exact owner result.
+    scope_source = inspect.getsource(
+        MainWindow._use_current_selection_for_solution_result
+    )
+    assert "Edit Managed Surface Result Now..." in scope_source
+    assert "result_tag=result.tag" in scope_source
+    assert "Select/edit the Geometry Surface result instead." not in scope_source
+
+    result_editor = inspect.getsource(MainWindow._manage_surface_shell_result)
+    assert "result_tag: int | None = None" in result_editor
+
+    # 3: Missing recorder FE realization can mesh and rebuild inline.
+    recorder_targets = inspect.getsource(
+        MainWindow._select_managed_surface_recorder_targets
+    )
+    assert "Mesh + Rebuild Recorder Now..." in recorder_targets
+    assert "_ensure_surface_meshes" in recorder_targets
+    assert "sync_surface_recorder" in recorder_targets
+    assert "Mesh/remesh the Surface first." not in recorder_targets
+
+    # 4: Managed ground nodes route directly to their owning Connection.
+    ground_nodes = inspect.getsource(MainWindow._exclude_managed_ground_nodes)
+    assert "Edit Owning Connection Now..." in ground_nodes
+    assert "self._edit_connection(owner.tag)" in ground_nodes
+    assert "Edit the structural/source node instead." not in ground_nodes
+
+    # 5: Managed support nodes route directly to the exact Surface support.
+    support_nodes = inspect.getsource(
+        MainWindow._exclude_managed_surface_support_nodes
+    )
+    assert "Edit Managed Edge Support Now..." in support_nodes
+    assert "support_tag=owner.tag" in support_nodes
+    assert "Surface context menu instead." not in support_nodes
+
+    support_editor = inspect.getsource(MainWindow._manage_surface_edge_support)
+    assert "support_tag: int | None = None" in support_editor
+
