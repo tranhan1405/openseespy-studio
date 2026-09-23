@@ -54,6 +54,7 @@ class SurfaceGeometryDialog(QDialog):
         initial_point_tags: tuple[int, int, int, int] | None = None,
         preview_callback=None,
         mode: str = "full",
+        new_section_callback=None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -70,6 +71,7 @@ class SurfaceGeometryDialog(QDialog):
         self.resize(520, 650)
         self._surface = surface
         self._sections = dict(sections)
+        self._new_section_callback = new_section_callback
         self._preview_callback = preview_callback
         self._corner_point_tags = (
             surface.corner_point_tags
@@ -176,20 +178,24 @@ class SurfaceGeometryDialog(QDialog):
         mesh_form = QFormLayout(mesh_group)
 
         self.section = QComboBox()
-        self.section.addItem("Select Shell Section...", None)
-        for tag in sorted(self._sections):
-            section = self._sections[tag]
-            self.section.addItem(
-                f"{tag} - {section.name} ({section.section_type})",
-                tag,
-            )
-        if surface and surface.section_tag is not None:
-            index = self.section.findData(surface.section_tag)
-            if index >= 0:
-                self.section.setCurrentIndex(index)
-        elif len(self._sections) == 1:
-            self.section.setCurrentIndex(1)
-        mesh_form.addRow("Shell section:", self.section)
+        self.section_new = QPushButton("New Shell Section...")
+        self.section_new.setToolTip(
+            "Define a shell-compatible Section now without closing this dialog."
+        )
+        self.section_new.setEnabled(callable(self._new_section_callback))
+        self.section_new.clicked.connect(self._create_section_dependency)
+        section_holder = QWidget()
+        section_row = QHBoxLayout(section_holder)
+        section_row.setContentsMargins(0, 0, 0, 0)
+        section_row.setSpacing(4)
+        section_row.addWidget(self.section, 1)
+        section_row.addWidget(self.section_new)
+        self._refresh_section_choices(
+            surface.section_tag
+            if surface and surface.section_tag is not None
+            else None
+        )
+        mesh_form.addRow("Shell section:", section_holder)
 
         self.formulation = QComboBox()
         self.formulation.addItems(sorted(SHELL_ELEMENT_TYPES))
@@ -399,6 +405,33 @@ class SurfaceGeometryDialog(QDialog):
         rectangle = self.surface_type.currentText() == "Rectangle"
         self.rectangle_group.setVisible(rectangle)
         self.quad_group.setVisible(not rectangle)
+
+    def _refresh_section_choices(self, select_tag: int | None = None) -> None:
+        current = self.section.currentData() if self.section.count() else None
+        wanted = select_tag if select_tag is not None else current
+        self.section.clear()
+        self.section.addItem("Select Shell Section...", None)
+        for tag in sorted(self._sections):
+            section = self._sections[tag]
+            self.section.addItem(
+                f"{tag} - {section.name} ({section.section_type})",
+                int(tag),
+            )
+        if wanted is not None:
+            index = self.section.findData(int(wanted))
+            if index >= 0:
+                self.section.setCurrentIndex(index)
+        elif self.section.count() == 2:
+            self.section.setCurrentIndex(1)
+
+    def _create_section_dependency(self) -> None:
+        if not callable(self._new_section_callback):
+            return
+        section = self._new_section_callback()
+        if section is None:
+            return
+        self._sections[int(section.tag)] = section
+        self._refresh_section_choices(int(section.tag))
 
     def _sync_formulation(self, *_args) -> None:
         advanced = self.formulation.currentText() == "ASDShellQ4"
