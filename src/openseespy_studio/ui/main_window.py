@@ -5436,6 +5436,7 @@ class MainWindow(QMainWindow):
         properties_root_selected = selected_payload_kinds == {
             "properties_root"
         }
+        jobs_root_selected = selected_payload_kinds == {"jobs_root"}
 
         # Major display roots are navigation objects, not modeling commands.
         # Clicking one exits an in-progress sketch/pick/measure tool and
@@ -5447,6 +5448,7 @@ class MainWindow(QMainWindow):
             or loads_bc_root_selected
             or analyses_root_selected
             or properties_root_selected
+            or jobs_root_selected
         ):
             if self.viewport.interaction_tool() != "select":
                 self._activate_select_tool()
@@ -5480,6 +5482,7 @@ class MainWindow(QMainWindow):
                 {"fe_model_root"},
                 {"properties_root"},
                 {"analyses_root"},
+                {"jobs_root"},
             )
         ):
             self._set_loads_bc_display_context(False)
@@ -5507,6 +5510,15 @@ class MainWindow(QMainWindow):
             )
 
         self._sync_ribbon_context(selected_payload_kinds)
+
+        if jobs_root_selected:
+            # Results / Jobs is a navigation context, not a particular result.
+            # Keep any currently displayed result in the viewport, but expose
+            # the job manager without silently activating a different Job.
+            self.results_panel.show_jobs()
+            if not self.results_dock.isVisible():
+                self.results_dock.show()
+            self.results_dock.raise_()
 
         # Mechanical-style root behavior: model-level display objects leave
         # user visibility (hide/isolate) untouched, but exit result
@@ -5636,6 +5648,9 @@ class MainWindow(QMainWindow):
             self._show_job_properties(job_id)
         elif show_jobs_root:
             self._show_jobs_summary()
+            self.status_message.setText(
+                "Results / Jobs overview · current result display preserved"
+            )
         elif len(selected_payload_kinds) == 1:
             root_kind = next(iter(selected_payload_kinds))
             root_summary_kinds = {
