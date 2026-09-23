@@ -23336,6 +23336,11 @@ class MainWindow(QMainWindow):
 
         if kind == "sketch_plane_global":
             key = str(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda checked=False, p=key:
+                self._show_global_sketch_plane_properties(p)
+            )
             activate = menu.addAction(
                 f"Activate Global {key.upper()} Plane"
             )
@@ -23351,6 +23356,11 @@ class MainWindow(QMainWindow):
             plane = self.project.sketch_planes.get(tag)
             if plane is None:
                 return
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda checked=False, t=tag:
+                self._show_sketch_plane_properties(t)
+            )
             activate = menu.addAction("Activate and Look At")
             activate.triggered.connect(
                 lambda checked=False, t=tag:
@@ -24688,6 +24698,13 @@ class MainWindow(QMainWindow):
 
         if kind == "solution_information":
             analysis_tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_solution_information(
+                    analysis_tag,
+                    "Analysis Information",
+                )
+            )
             solver_output = menu.addAction("Show Solver Output")
             solver_output.triggered.connect(
                 lambda: (
@@ -24716,6 +24733,13 @@ class MainWindow(QMainWindow):
             label = convergence_result_label(
                 analysis.test if analysis is not None else None
             )
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_solution_information(
+                    analysis_tag,
+                    label,
+                )
+            )
             evaluate = menu.addAction(f"Open {label}")
             evaluate.triggered.connect(
                 lambda: self._show_solution_convergence(analysis_tag)
@@ -24724,6 +24748,14 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "solver_output":
+            analysis_tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_solution_information(
+                    analysis_tag,
+                    "Solver Output",
+                )
+            )
             show = menu.addAction("Show Solver Output")
             show.triggered.connect(
                 lambda: (
