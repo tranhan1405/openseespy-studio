@@ -23288,7 +23288,7 @@ class MainWindow(QMainWindow):
             frame_action.triggered.connect(self._create_element)
             truss_action = menu.addAction("New Truss...")
             truss_action.triggered.connect(self._create_truss)
-            shell_action = menu.addAction("New Direct Shell Element...")
+            shell_action = menu.addAction("New Shell Element...")
             shell_action.triggered.connect(self._create_shell)
             connection_action = menu.addAction(
                 "New ZeroLength / Link Element..."
@@ -23332,12 +23332,12 @@ class MainWindow(QMainWindow):
             plane = self.project.sketch_planes.get(tag)
             if plane is None:
                 return
-            activate = menu.addAction("Activate + Look At")
+            activate = menu.addAction("Activate and Look At")
             activate.triggered.connect(
                 lambda checked=False, t=tag:
                 self._activate_sketch_plane(t, look_at=True)
             )
-            activate_only = menu.addAction("Activate without changing view")
+            activate_only = menu.addAction("Activate Only")
             activate_only.triggered.connect(
                 lambda checked=False, t=tag:
                 self._activate_sketch_plane(t, look_at=False)
@@ -23690,7 +23690,7 @@ class MainWindow(QMainWindow):
             section = menu.addAction("New Shell Section...")
             section.triggered.connect(self._create_shell_section)
 
-            mesh_tools = menu.addMenu("Mesh / FE Tools")
+            mesh_tools = menu.addMenu("Mesh / FE")
             mesh_tools.addAction(self.actions["surface_mesh_overlay"])
             stitch = mesh_tools.addAction(
                 "Stitch Coincident Shell Nodes..."
@@ -24072,7 +24072,7 @@ class MainWindow(QMainWindow):
             create.triggered.connect(self._create_element)
             create_truss = menu.addAction("New Truss...")
             create_truss.triggered.connect(self._create_truss)
-            create_shell = menu.addAction("New Direct Shell Element...")
+            create_shell = menu.addAction("New Shell Element...")
             create_shell.triggered.connect(self._create_shell)
             create_connection = menu.addAction(
                 "New ZeroLength / Link Element..."
@@ -24268,7 +24268,7 @@ class MainWindow(QMainWindow):
                 )
             )
             menu.addSeparator()
-            clear = menu.addAction("Clear These Supports")
+            clear = menu.addAction("Clear Group Supports")
             clear.setEnabled(bool(tags))
             clear.triggered.connect(
                 lambda checked=False, s=support_type: (
