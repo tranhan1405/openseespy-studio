@@ -170,6 +170,9 @@ def test_major_model_roots_exit_result_display():
         {"fe_model_root"}
     )
     assert MainWindow._tree_selection_resets_result_overlay(
+        {"properties_root"}
+    )
+    assert MainWindow._tree_selection_resets_result_overlay(
         {"loads_bc_root"}
     )
     assert MainWindow._tree_selection_resets_result_overlay(
@@ -188,4 +191,9 @@ def test_analysis_root_routes_to_analysis_context():
     assert MainWindow._tree_selection_display_context(
         {"analyses_root"}
     ) == ("fe", "Analysis")
+
+def test_properties_root_routes_to_model_context():
+    assert MainWindow._tree_selection_display_context(
+        {"properties_root"}
+    ) == ("fe", "Model")
 
