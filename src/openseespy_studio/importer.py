@@ -346,6 +346,7 @@ class _Importer:
         self.analysis_state: dict[str, Any] = {}
         self.analysis_metadata: dict[str, Any] = {}
         self.analysis_events: list[dict[str, Any]] = []
+        self._deferred_modal_frequencies: dict[str, dict[str, Any]] = {}
         self._next_constraint = 1
         self._next_load = 1
         self._next_element_load = 1
@@ -1883,8 +1884,20 @@ class _Importer:
 
     def handle_call(self, command: str, node: ast.Call) -> None:
         try:
+            if command == "rayleigh":
+                if self._recognize_single_mode_rayleigh(node):
+                    return
+                args = self.call_args(node)
+                self.issue(
+                    "WARNING",
+                    node,
+                    "rayleigh",
+                    "Rayleigh damping was not mapped to a supported Studio damping model.",
+                )
+                return
+
             args = self.call_args(node)
-            if command in {"wipe", "rayleigh", "loadConst", "reactions"}:
+            if command in {"wipe", "loadConst", "reactions"}:
                 return
             if command == "model":
                 ndm = int(self.flag_value(args, "-ndm", 3))
@@ -1955,6 +1968,105 @@ class _Importer:
             )
         except (IndexError, KeyError, TypeError, ValueError) as exc:
             self.issue("ERROR", node, command, str(exc))
+
+    def _recognize_eigen_frequency_assignment(self, stmt: ast.Assign) -> bool:
+        if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
+            return False
+
+        value = stmt.value
+        subscript: ast.Subscript | None = None
+
+        if (
+            isinstance(value, ast.BinOp)
+            and isinstance(value.op, ast.Pow)
+            and isinstance(value.right, ast.Constant)
+            and float(value.right.value) == 0.5
+            and isinstance(value.left, ast.Subscript)
+        ):
+            subscript = value.left
+        elif (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Attribute)
+            and isinstance(value.func.value, ast.Name)
+            and value.func.value.id == "math"
+            and value.func.attr == "sqrt"
+            and len(value.args) == 1
+            and isinstance(value.args[0], ast.Subscript)
+        ):
+            subscript = value.args[0]
+
+        if subscript is None or not isinstance(subscript.value, ast.Call):
+            return False
+        if self.command_name(subscript.value) != "eigen":
+            return False
+
+        try:
+            args = self.call_args(subscript.value)
+        except _Unresolved:
+            return False
+        if not args:
+            return False
+
+        index_node = subscript.slice
+        if not isinstance(index_node, ast.Constant):
+            return False
+        try:
+            index = int(index_node.value)
+            num_modes = int(args[-1])
+        except (TypeError, ValueError):
+            return False
+        if index < 0 or index >= num_modes:
+            return False
+
+        solver = (
+            str(args[0])
+            if len(args) > 1 and isinstance(args[0], str)
+            else "-genBandArpack"
+        )
+        self._deferred_modal_frequencies[stmt.targets[0].id] = {
+            "mode": index + 1,
+            "solver": solver,
+            "num_modes": num_modes,
+        }
+        return True
+
+    def _recognize_single_mode_rayleigh(self, node: ast.Call) -> bool:
+        if len(node.args) != 4:
+            return False
+
+        try:
+            first_three = [float(self.eval.eval(arg)) for arg in node.args[:3]]
+        except (_Unresolved, TypeError, ValueError):
+            return False
+        if any(abs(value) > 1.0e-15 for value in first_three):
+            return False
+
+        beta_expr = node.args[3]
+        if (
+            not isinstance(beta_expr, ast.BinOp)
+            or not isinstance(beta_expr.op, ast.Div)
+            or not isinstance(beta_expr.right, ast.Name)
+        ):
+            return False
+
+        frequency_name = beta_expr.right.id
+        spec = self._deferred_modal_frequencies.get(frequency_name)
+        if spec is None:
+            return False
+
+        try:
+            numerator = float(self.eval.eval(beta_expr.left))
+        except (_Unresolved, TypeError, ValueError):
+            return False
+        if not math.isfinite(numerator) or numerator <= 0.0:
+            return False
+
+        self.analysis_state["rayleigh_model"] = "SingleModeCommittedStiffness"
+        self.analysis_state["rayleigh_damping_ratio"] = numerator / 2.0
+        self.analysis_state["rayleigh_mode_i"] = int(spec["mode"])
+        self.analysis_state["eigen_solver"] = str(spec["solver"])
+        self.count("Rayleigh damping")
+        return True
 
     def _runtime_call_name(self, call: ast.Call) -> str | None:
         if isinstance(call.func, ast.Name):
@@ -2392,6 +2504,8 @@ class _Importer:
             return
 
         if isinstance(stmt, ast.Assign):
+            if self._recognize_eigen_frequency_assignment(stmt):
+                return
             runtime_calls = self._runtime_calls_in(stmt.value)
             if runtime_calls:
                 target_names: set[str] = set()
@@ -2873,10 +2987,23 @@ class _Importer:
             "gamma": float(meta.get("gamma", 0.5)),
             "beta": float(meta.get("beta", 0.25)),
             "rayleigh_damping_ratio": float(
-                meta.get("rayleigh_damping_ratio", 0.0)
+                meta.get(
+                    "rayleigh_damping_ratio",
+                    state.get("rayleigh_damping_ratio", 0.0),
+                )
             ),
-            "rayleigh_mode_i": int(meta.get("rayleigh_mode_i", 1)),
-            "rayleigh_mode_j": int(meta.get("rayleigh_mode_j", 3)),
+            "rayleigh_model": str(
+                meta.get(
+                    "rayleigh_model",
+                    state.get("rayleigh_model", "TwoMode"),
+                )
+            ),
+            "rayleigh_mode_i": int(
+                meta.get("rayleigh_mode_i", state.get("rayleigh_mode_i", 1))
+            ),
+            "rayleigh_mode_j": int(
+                meta.get("rayleigh_mode_j", state.get("rayleigh_mode_j", 3))
+            ),
             "preload_gravity": bool(
                 meta.get(
                     "preload_gravity",
