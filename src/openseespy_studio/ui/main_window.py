@@ -24261,17 +24261,9 @@ class MainWindow(QMainWindow):
                 "section test.",
             )
             return
-        if not self._ensure_prerequisite(
-            title="Moment-Curvature",
-            message=(
-                "Moment-Curvature requires an existing Section. "
-                "Create the Section now?"
-            ),
-            action_label="Create Section Now...",
-            available=lambda: bool(self.project.sections),
-            creator=self._create_section,
-        ):
-            return
+        # Open the workflow even when no Section exists yet. The dialog
+        # exposes "New Section..." and refreshes/selects the new dependency
+        # in place, so the user never has to leave Moment-Curvature.
         dialog = MomentCurvatureDialog(
             self.project,
             self,
