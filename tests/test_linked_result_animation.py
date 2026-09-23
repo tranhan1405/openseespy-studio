@@ -133,3 +133,17 @@ def test_reaction_and_displacement_share_transient_frame_clock():
     assert 'result_type == "NodalReaction"' in handler
     assert "_transient_time_values()" in advance
     assert "_motion_playback_time" in advance
+
+
+def test_results_ribbon_exposes_grid_toggle_and_contrast_extrema():
+    build = inspect.getsource(MainWindow._build_actions_and_ribbon)
+    toggle = inspect.getsource(MainWindow._toggle_result_grid)
+    extrema = inspect.getsource(ModelViewport._show_contour_extrema)
+
+    assert '"result_show_grid"' in build
+    assert '"Grid"' in build
+    assert 'small=("result_show_grid", "iso", "xy", "xz", "yz")' in build
+    assert "set_geometry_sketch_grid_visible" in toggle
+    assert '"#d50000"' in extrema
+    assert '"#6a1b9a"' in extrema
+    assert 'font_size=11' in extrema
