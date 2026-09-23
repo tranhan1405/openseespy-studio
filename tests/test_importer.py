@@ -437,6 +437,18 @@ mass(2, 5.18, 0.0, 0.0)
 geomTransf('Linear', 1)
 element('elasticBeamColumn', 1, 1, 2, 3600.0, 3225.0, 1080000.0, 1)
 
+timeSeries('Linear', 1)
+pattern('Plain', 1, 1)
+load(2, 0.0, -2000.0, 0.0)
+constraints('Plain')
+numberer('Plain')
+system('BandGeneral')
+algorithm('Linear')
+integrator('LoadControl', 0.1)
+analysis('Static')
+analyze(10)
+loadConst('-time', 0.0)
+
 timeSeries('Path', 2, '-dt', 0.005, '-values', 0.0, 0.1, -0.2)
 pattern('UniformExcitation', 2, 1, '-accel', 2)
 
@@ -472,6 +484,9 @@ analyze(10, 0.01)
     assert analysis.rayleigh_damping_ratio == 0.02
     assert analysis.rayleigh_mode_i == 1
     assert analysis.eigen_solver == "-fullGenLapack"
+    assert analysis.preload_gravity is True
+    assert analysis.gravity_steps == 10
+    assert analysis.deferred_pattern_tags == [2]
 
     generated = to_openseespy(
         result.project.model,
