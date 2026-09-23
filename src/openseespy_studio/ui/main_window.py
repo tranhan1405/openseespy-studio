@@ -22943,8 +22943,12 @@ class MainWindow(QMainWindow):
             or label in {"selection", "visualize mesh quality"}
         ):
             return 70
+        if label == "select" and str(kind) == "set":
+            return 20
         if label.startswith("select"):
             return 25 if is_container else 70
+        if label == "show":
+            return 20
 
         # Object-management commands follow modeling/workflow commands.
         if label.startswith(
