@@ -2683,6 +2683,11 @@ class _Importer:
         if self.analysis_state.get("analysis_kind") != "Transient":
             return False
 
+        # The loop is collapsed into one Studio transient driver, so recover
+        # nested nodeDisp/nodeVel/nodeAccel/nodeReaction requests before the
+        # loop body is intentionally skipped.
+        self._recognize_node_probe_calls(stmt)
+
         analyze_calls = [
             child
             for child in ast.walk(stmt)

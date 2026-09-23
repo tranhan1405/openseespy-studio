@@ -706,9 +706,14 @@ system('BandGeneral')
 algorithm('Linear')
 integrator('Newmark', 0.5, 0.25)
 analysis('Transient')
-analyze(2, 0.01)
+tFinal = 0.02
+tCurrent = getTime()
+ok = 0
 history = []
-history.append(nodeDisp(2, 1))
+while ok == 0 and tCurrent < tFinal:
+    ok = analyze(1, 0.01)
+    tCurrent = getTime()
+    history.append(nodeDisp(2, 1))
 reaction_x = nodeReaction(1, 1)
 """
 
