@@ -153,6 +153,10 @@ from ..line_mesher import (
     trim_extend_lines_to_line,
 )
 from ..section_response import section_response_sources
+from ..solution_status import (
+    classify_solution_result_status,
+    solver_input_signature,
+)
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LineGeometryData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SketchPlaneData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
     build_worker_pythonpath,
@@ -1114,6 +1118,8 @@ class PropertiesPanel(QWidget):
         self.result_analysis.setReadOnly(True)
         self.result_type = QLineEdit()
         self.result_type.setReadOnly(True)
+        self.result_status = QLabel("-")
+        self.result_status.setWordWrap(True)
         self.result_data_source = QComboBox()
         self.result_data_source.addItem("Latest Job", "latest")
         self.result_frame = QComboBox()
@@ -1183,6 +1189,7 @@ class PropertiesPanel(QWidget):
             ("Name", self.result_name),
             ("Analysis", self.result_analysis),
             ("Result Type", self.result_type),
+            ("Status", self.result_status),
             ("Data Source", self.result_data_source),
             ("Frame", self.result_frame),
             ("Node Scope", self.result_node_scope),
@@ -1393,6 +1400,9 @@ class PropertiesPanel(QWidget):
         result: SolutionResultData,
         *,
         analysis_name: str,
+        status_text: str = "",
+        status_tooltip: str = "",
+        can_evaluate: bool = True,
     ) -> None:
         self._solution_result_tag = int(result.tag)
         self.table.hide()
@@ -1404,6 +1414,9 @@ class PropertiesPanel(QWidget):
         self.result_name.setText(result.name)
         self.result_analysis.setText(str(analysis_name))
         self.result_type.setText(result.result_type)
+        self.result_status.setText(str(status_text or "-"))
+        self.result_status.setToolTip(str(status_tooltip or ""))
+        self.result_evaluate_button.setEnabled(bool(can_evaluate))
         self.result_node_scope.setText(
             ", ".join(map(str, result.node_scope))
         )
@@ -5326,8 +5339,12 @@ class MainWindow(QMainWindow):
             solution.addChild(probes_root)
 
             for result in probes:
-                result_item = QTreeWidgetItem([result.name])
+                result_status = self._solution_result_status(result)
+                result_item = QTreeWidgetItem([
+                    f"{result_status.symbol} {result.name}"
+                ])
                 result_item.setIcon(0, studio_icon("results"))
+                result_item.setToolTip(0, result_status.tooltip)
                 result_item.setData(
                     0,
                     Qt.UserRole,
@@ -5336,8 +5353,12 @@ class MainWindow(QMainWindow):
                 probes_root.addChild(result_item)
 
             for result in regular_results:
-                result_item = QTreeWidgetItem([result.name])
+                result_status = self._solution_result_status(result)
+                result_item = QTreeWidgetItem([
+                    f"{result_status.symbol} {result.name}"
+                ])
                 result_item.setIcon(0, studio_icon("results"))
+                result_item.setToolTip(0, result_status.tooltip)
                 result_item.setData(
                     0,
                     Qt.UserRole,
@@ -20926,9 +20947,46 @@ class MainWindow(QMainWindow):
         target = int(analysis_tag)
         for job_id in sorted(self._jobs, reverse=True):
             job = self._jobs[job_id]
-            if job.analysis_tag == target and job.results:
+            if (
+                job.analysis_tag == target
+                and str(job.status) == "Completed"
+                and bool(job.results)
+            ):
                 return job
         return None
+
+    def _latest_job_attempt_for_analysis(
+        self,
+        analysis_tag: int,
+    ) -> JobRecord | None:
+        target = int(analysis_tag)
+        for job_id in sorted(self._jobs, reverse=True):
+            job = self._jobs[job_id]
+            if job.analysis_tag == target:
+                return job
+        return None
+
+    def _analysis_solver_signature(self, analysis_tag: int) -> str:
+        return solver_input_signature(
+            self.project.to_dict(),
+            analysis_tag=int(analysis_tag),
+        )
+
+    def _solution_result_status(self, result: SolutionResultData):
+        latest = self._latest_job_attempt_for_analysis(result.analysis_tag)
+        return classify_solution_result_status(
+            has_job=latest is not None,
+            job_status=(latest.status if latest is not None else ""),
+            has_results=bool(latest.results) if latest is not None else False,
+            job_signature=(
+                str(getattr(latest, "project_signature", "") or "")
+                if latest is not None
+                else ""
+            ),
+            current_signature=self._analysis_solver_signature(
+                result.analysis_tag
+            ),
+        )
 
     @staticmethod
     def _node_probe_component_labels(quantity: str) -> tuple[str, ...]:
@@ -21141,10 +21199,17 @@ class MainWindow(QMainWindow):
         )
         self._refresh_tree()
         self._show_solution_result_properties(result.tag)
-        self._evaluate_solution_result(result.tag)
-        self.status_message.setText(
-            f"Inserted result: {result.name}"
-        )
+        status = self._solution_result_status(result)
+        if status.code == "up_to_date":
+            if self._evaluate_solution_result(result.tag):
+                self.status_message.setText(
+                    f"Inserted and displayed result: {result.name}"
+                )
+        else:
+            self.status_message.setText(
+                f"Inserted result: {result.name} · {status.label}. "
+                f"{status.action}"
+            )
 
     def _delete_solution_result(self, tag: int) -> None:
         result = self.project.solution_results.get(int(tag))
@@ -21300,6 +21365,7 @@ class MainWindow(QMainWindow):
             return
         self._active_solution_result_tag = int(tag)
         analysis = self.project.analyses.get(result.analysis_tag)
+        status = self._solution_result_status(result)
         self.properties_panel.set_solution_result(
             result,
             analysis_name=(
@@ -21307,6 +21373,9 @@ class MainWindow(QMainWindow):
                 if analysis is not None
                 else f"Analysis {result.analysis_tag}"
             ),
+            status_text=f"{status.symbol} {status.label}",
+            status_tooltip=status.tooltip,
+            can_evaluate=status.code == "up_to_date",
         )
         if (
             result.result_type == "TimeHistory"
@@ -21401,10 +21470,18 @@ class MainWindow(QMainWindow):
             before,
         )
         self._refresh_tree()
-        self._show_solution_result_properties(updated.tag)
-        self.status_message.setText(
-            f"Updated result: {updated.name}"
-        )
+        status = self._solution_result_status(updated)
+        if status.code == "up_to_date":
+            if self._evaluate_solution_result(updated.tag):
+                self.status_message.setText(
+                    f"Updated and displayed result: {updated.name}"
+                )
+        else:
+            self._show_solution_result_properties(updated.tag)
+            self.status_message.setText(
+                f"Updated result: {updated.name} · {status.label}. "
+                f"{status.action}"
+            )
 
     def _evaluate_solution_result_details(
         self,
@@ -21528,10 +21605,6 @@ class MainWindow(QMainWindow):
     ) -> dict[str, object] | None:
         job = self._latest_job_for_analysis(analysis_tag)
         if job is None:
-            self._offer_result_analysis_run(
-                title="Evaluate Result",
-                analysis_tag=analysis_tag,
-            )
             return None
         result = dict(job.results)
         self._last_result = result
@@ -21551,13 +21624,27 @@ class MainWindow(QMainWindow):
             self.results_dock.show()
             self.results_dock.raise_()
 
-    def _evaluate_solution_result(self, tag: int) -> None:
+    def _evaluate_solution_result(self, tag: int) -> bool:
         result_object = self.project.solution_results.get(int(tag))
         if result_object is None:
-            return
+            return False
+
+        status = self._solution_result_status(result_object)
+        if status.code != "up_to_date":
+            self.status_message.setText(
+                f"{result_object.name}: {status.label}. {status.action}"
+            )
+            self._show_solution_result_properties(result_object.tag)
+            return False
+
         result = self._load_analysis_result(result_object.analysis_tag)
         if result is None:
-            return
+            self.status_message.setText(
+                f"{result_object.name}: result data is unavailable. "
+                "Use Run Analysis / Re-run Analysis."
+            )
+            self._show_solution_result_properties(result_object.tag)
+            return False
 
         source_job = self._latest_job_for_analysis(
             result_object.analysis_tag
@@ -21579,6 +21666,7 @@ class MainWindow(QMainWindow):
             f"Evaluated result: {result_object.name}"
         )
         self._show_solution_result_properties(result_object.tag)
+        return True
 
     def _evaluate_all_solution_results(self, analysis_tag: int) -> None:
         objects = self.project.solution_results_for_analysis(analysis_tag)
@@ -21587,16 +21675,20 @@ class MainWindow(QMainWindow):
                 "There are no result requests to evaluate."
             )
             return
-        if self._latest_job_for_analysis(analysis_tag) is None:
-            self._offer_result_analysis_run(
-                title="Evaluate All Results",
-                analysis_tag=analysis_tag,
+        status = self._solution_result_status(objects[0])
+        if status.code != "up_to_date":
+            self.status_message.setText(
+                f"Cannot evaluate result requests: {status.label}. "
+                f"{status.action}"
             )
             return
-        for result in objects:
-            self._evaluate_solution_result(result.tag)
+        evaluated = sum(
+            1
+            for result in objects
+            if self._evaluate_solution_result(result.tag)
+        )
         self.status_message.setText(
-            f"Evaluated {len(objects)} result request(s)"
+            f"Evaluated {evaluated} result request(s)"
         )
 
     def _delete_analysis(self, tag: int) -> None:
@@ -26960,7 +27052,11 @@ class MainWindow(QMainWindow):
                     else None
                 )
             )
-            run_analysis = menu.addAction("Run Analysis Again")
+            run_analysis = menu.addAction(
+                "Re-run Analysis..."
+                if latest_analysis_job is not None
+                else "Run Analysis..."
+            )
             run_analysis.setEnabled(can_run_analysis)
             run_analysis.triggered.connect(
                 lambda checked=False, tag=analysis_tag:
@@ -26968,8 +27064,14 @@ class MainWindow(QMainWindow):
             )
 
             menu.addSeparator()
-            evaluate_all = menu.addAction("Evaluate All Result Requests")
-            evaluate_all.setEnabled(bool(result_objects))
+            evaluate_all = menu.addAction("Evaluate All Results")
+            evaluate_all.setEnabled(
+                bool(result_objects)
+                and any(
+                    self._solution_result_status(result).code == "up_to_date"
+                    for result in result_objects
+                )
+            )
             evaluate_all.triggered.connect(
                 lambda: self._evaluate_all_solution_results(analysis_tag)
             )
@@ -27022,7 +27124,14 @@ class MainWindow(QMainWindow):
             tag = int(value)
             result_object = self.project.solution_results.get(tag)
             result_job = (
-                self._latest_job_for_analysis(result_object.analysis_tag)
+                self._latest_job_attempt_for_analysis(
+                    result_object.analysis_tag
+                )
+                if result_object is not None
+                else None
+            )
+            result_status = (
+                self._solution_result_status(result_object)
                 if result_object is not None
                 else None
             )
@@ -27049,9 +27158,30 @@ class MainWindow(QMainWindow):
                 lambda: self._show_solution_result_properties(tag)
             )
             evaluate = menu.addAction("Evaluate")
-            evaluate.setEnabled(result_job is not None)
+            evaluate.setEnabled(
+                result_status is not None
+                and result_status.code == "up_to_date"
+            )
             evaluate.triggered.connect(
                 lambda: self._evaluate_solution_result(tag)
+            )
+            run_analysis = menu.addAction(
+                "Re-run Analysis..."
+                if result_job is not None
+                else "Run Analysis..."
+            )
+            run_analysis.setEnabled(result_object is not None)
+            run_analysis.triggered.connect(
+                lambda checked=False,
+                analysis_tag=(
+                    result_object.analysis_tag
+                    if result_object is not None
+                    else None
+                ): (
+                    self._run_analysis_from_tree(int(analysis_tag))
+                    if analysis_tag is not None
+                    else None
+                )
             )
             clear_display = menu.addAction("Clear Result Display")
             clear_display.triggered.connect(self._clear_result_display)
@@ -29828,6 +29958,10 @@ class MainWindow(QMainWindow):
             job = JobRecord(
                 job_id=self._job_counter,
                 analysis_tag=analysis_tag,
+                project_signature=solver_input_signature(
+                    case_project.to_dict(),
+                    analysis_tag=analysis_tag,
+                ),
                 analysis_name=(
                     f"{analysis.name} · Calibration R"
                     f"{int(row.get('round', 1) or 1)} C{case_id}"
@@ -30148,6 +30282,7 @@ class MainWindow(QMainWindow):
             analysis_tag=settings.tag,
             analysis_name=settings.name,
             analysis_type=settings.analysis_type,
+            project_signature=self._analysis_solver_signature(settings.tag),
         )
         job.start()
         if settings.analysis_type == "Modal":
