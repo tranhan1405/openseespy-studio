@@ -2465,7 +2465,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "zoom_selection",
             "Zoom to Selection",
-            "fit",
+            "zoom-selection",
             self._zoom_selection,
             "Fit the selected nodes/elements in the viewport",
         )
@@ -2480,7 +2480,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "clear_measurements",
             "Clear Measurements",
-            "delete",
+            "clear-measurements",
             self._clear_measurements,
             "Remove all measurement overlays from the viewport",
         )
@@ -2501,7 +2501,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "show_all",
             "Show All",
-            "display",
+            "show-all",
             self._show_all,
             "Restore all hidden model entities",
         )
@@ -2509,14 +2509,14 @@ class MainWindow(QMainWindow):
         self._make_action(
             "new_material",
             "New Material...",
-            "material",
+            "uniaxial-material",
             self._create_material,
             "Create OpenSees uniaxial material",
         )
         self._make_action(
             "material_library",
             "Material Library...",
-            "material",
+            "material-library",
             self._show_material_library,
             "Browse verified sources and insert a material into this project",
         )
@@ -2558,7 +2558,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "element_formulation",
             "Element Formulation...",
-            "element",
+            "element-formulation",
             self._set_element_formulation,
             "Set elastic, force-based, or displacement-based formulation",
         )
@@ -2572,7 +2572,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "clear_support",
             "Clear Support",
-            "boundary",
+            "clear-support",
             self._clear_restraint,
             "Clear restraint on selected nodes",
         )
@@ -2611,8 +2611,8 @@ class MainWindow(QMainWindow):
             self._create_mass_source,
             "Generate seismic mass from self mass and selected load patterns",
         )
-        self._make_action("time_series", "Time Series...", "timeseries", self._create_time_series, "Create time series")
-        self._make_action("load_pattern", "Load Pattern...", "load", self._create_load_pattern, "Create a Plain load pattern")
+        self._make_action("time_series", "Time Series...", "time-series", self._create_time_series, "Create time series")
+        self._make_action("load_pattern", "Load Pattern...", "load-pattern", self._create_load_pattern, "Create a Plain load pattern")
         self._make_action(
             "ground_motion",
             "Ground Motion...",
@@ -5166,7 +5166,7 @@ class MainWindow(QMainWindow):
         series_root = QTreeWidgetItem([
             f"Time Series ({len(standalone_series)})"
         ])
-        series_root.setIcon(0, studio_icon("timeseries"))
+        series_root.setIcon(0, studio_icon("time-series"))
         series_root.setData(0, Qt.UserRole, ("time_series_root", None))
         series_root.setExpanded(True)
         loading_root.addChild(series_root)
@@ -5175,14 +5175,14 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{series.series_type} [{tag}]  {series.name}"
             ])
-            item.setIcon(0, studio_icon("timeseries"))
+            item.setIcon(0, studio_icon("time-series"))
             item.setData(0, Qt.UserRole, ("time_series", tag))
             series_root.addChild(item)
 
         patterns_root = QTreeWidgetItem([
             f"Load Patterns ({len(plain_patterns)})"
         ])
-        patterns_root.setIcon(0, studio_icon("load"))
+        patterns_root.setIcon(0, studio_icon("load-pattern"))
         patterns_root.setData(0, Qt.UserRole, ("load_patterns_root", None))
         patterns_root.setExpanded(True)
         loading_root.addChild(patterns_root)
@@ -5191,7 +5191,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"Plain [{tag}]  {pattern.name}"
             ])
-            item.setIcon(0, studio_icon("load"))
+            item.setIcon(0, studio_icon("load-pattern"))
             item.setData(0, Qt.UserRole, ("load_pattern", tag))
             item.setExpanded(True)
             patterns_root.addChild(item)
@@ -5392,7 +5392,28 @@ class MainWindow(QMainWindow):
 
             for result in probes:
                 result_item = QTreeWidgetItem([result.name])
-                result_item.setIcon(0, studio_icon("results"))
+                result_icon = {
+                    "DeformedShape": "result-deformed",
+                    "ModeShape": "result-deformed",
+                    "NodalDisplacement": "result-displacement",
+                    "NodalReaction": "result-reaction",
+                    "MemberForce": "result-member-force",
+                    "ShellForce": "result-shell",
+                    "ShellDeformation": "result-shell",
+                    "TimeHistory": "result-history",
+                    "ForceDisplacement": "result-history",
+                    "PushoverCurve": "result-history",
+                    "CyclicHysteresis": "result-history",
+                    "ResponseSpectrum": "response-spectrum",
+                    "SpecimenResponse": "result-nonlinear",
+                    "SectionResponse": "result-nonlinear",
+                    "FiberStress": "result-nonlinear",
+                    "FiberStrain": "result-nonlinear",
+                    "HingeState": "result-nonlinear",
+                    "Convergence": "convergence",
+                    "Motion": "result-deformed",
+                }.get(result.result_type, "results")
+                result_item.setIcon(0, studio_icon(result_icon))
                 result_item.setData(
                     0,
                     Qt.UserRole,
@@ -5402,7 +5423,28 @@ class MainWindow(QMainWindow):
 
             for result in regular_results:
                 result_item = QTreeWidgetItem([result.name])
-                result_item.setIcon(0, studio_icon("results"))
+                result_icon = {
+                    "DeformedShape": "result-deformed",
+                    "ModeShape": "result-deformed",
+                    "NodalDisplacement": "result-displacement",
+                    "NodalReaction": "result-reaction",
+                    "MemberForce": "result-member-force",
+                    "ShellForce": "result-shell",
+                    "ShellDeformation": "result-shell",
+                    "TimeHistory": "result-history",
+                    "ForceDisplacement": "result-history",
+                    "PushoverCurve": "result-history",
+                    "CyclicHysteresis": "result-history",
+                    "ResponseSpectrum": "response-spectrum",
+                    "SpecimenResponse": "result-nonlinear",
+                    "SectionResponse": "result-nonlinear",
+                    "FiberStress": "result-nonlinear",
+                    "FiberStrain": "result-nonlinear",
+                    "HingeState": "result-nonlinear",
+                    "Convergence": "convergence",
+                    "Motion": "result-deformed",
+                }.get(result.result_type, "results")
+                result_item.setIcon(0, studio_icon(result_icon))
                 result_item.setData(
                     0,
                     Qt.UserRole,
@@ -5424,7 +5466,13 @@ class MainWindow(QMainWindow):
                 f"{recorder.recorder_type} [{tag}] {recorder.name} "
                 f"→ {targets}"
             ])
-            item.setIcon(0, studio_icon("recorder"))
+            recorder_icon = {
+                "node": "recorder-node",
+                "element": "recorder-element",
+                "section": "recorder-section",
+                "fiber": "recorder-fiber",
+            }.get(recorder.recorder_type.lower(), "recorder")
+            item.setIcon(0, studio_icon(recorder_icon))
             item.setData(0, Qt.UserRole, ("recorder", tag))
             recorders.addChild(item)
         root.addChild(analysis)
@@ -5453,7 +5501,29 @@ class MainWindow(QMainWindow):
                 plot_item = QTreeWidgetItem([
                     str(plot.get("name", f"Result {plot_id}"))
                 ])
-                plot_item.setIcon(0, studio_icon("results"))
+                plot_result_type = str(plot.get("result_type", ""))
+                plot_icon = {
+                    "DeformedShape": "result-deformed",
+                    "ModeShape": "result-deformed",
+                    "NodalDisplacement": "result-displacement",
+                    "NodalReaction": "result-reaction",
+                    "MemberForce": "result-member-force",
+                    "ShellForce": "result-shell",
+                    "ShellDeformation": "result-shell",
+                    "TimeHistory": "result-history",
+                    "ForceDisplacement": "result-history",
+                    "PushoverCurve": "result-history",
+                    "CyclicHysteresis": "result-history",
+                    "ResponseSpectrum": "response-spectrum",
+                    "SpecimenResponse": "result-nonlinear",
+                    "SectionResponse": "result-nonlinear",
+                    "FiberStress": "result-nonlinear",
+                    "FiberStrain": "result-nonlinear",
+                    "HingeState": "result-nonlinear",
+                    "Convergence": "convergence",
+                    "Motion": "result-deformed",
+                }.get(plot_result_type, "results")
+                plot_item.setIcon(0, studio_icon(plot_icon))
                 plot_item.setData(
                     0,
                     Qt.UserRole,
