@@ -9327,6 +9327,32 @@ class MainWindow(QMainWindow):
         creator()
         return bool(available())
 
+    def _ensure_geometry_point_count(
+        self,
+        minimum: int,
+        *,
+        title: str,
+    ) -> bool:
+        required = max(1, int(minimum))
+        while len(self.project.points) < required:
+            current = len(self.project.points)
+            if not self._ask_create_prerequisite(
+                title=title,
+                message=(
+                    f"This workflow requires at least {required} Geometry "
+                    f"Point{'s' if required != 1 else ''}. "
+                    f"The project currently has {current}.\n\n"
+                    "Create the missing Geometry Point now?"
+                ),
+                action_label="Create Geometry Point Now...",
+            ):
+                return False
+            before = len(self.project.points)
+            self._create_point_geometry()
+            if len(self.project.points) <= before:
+                return False
+        return True
+
     def _ensure_node_count(
         self,
         minimum: int,
@@ -15354,12 +15380,10 @@ class MainWindow(QMainWindow):
         point_i: int | None = None,
         point_j: int | None = None,
     ) -> int | None:
-        if len(self.project.points) < 2:
-            QMessageBox.information(
-                self,
-                "New Geometry Line",
-                "Create at least two Geometry Points before creating a Line.",
-            )
+        if not self._ensure_geometry_point_count(
+            2,
+            title="New Geometry Line",
+        ):
             return None
 
         dialog = LineGeometryDialog(
