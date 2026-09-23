@@ -1549,7 +1549,8 @@ def test_spaceclaim_style_geometry_sketch_actions_and_working_plane():
     assert "shell-compatible Section" not in surface_activate
     assert 'set_interaction_tool("geometry_sketch")' in line_activate
     assert 'set_interaction_tool("geometry_sketch")' in surface_activate
-    assert "_geometry_sketch_plane_offset" in viewport_plane
+    assert "_geometry_sketch_origin" in viewport_plane
+    assert "_geometry_sketch_normal" in viewport_plane
 
 
 def test_geometry_polyline_sketch_is_continuous_and_geometry_only():
@@ -2402,8 +2403,8 @@ def test_geometry_sketch_plane_rejects_nan_inf_offsets_and_points():
 
     assert "math.isfinite(numeric_offset)" in plane
     assert "offset must be finite" in plane
-    assert "all(math.isfinite(value) for value in point)" in offset
-    assert "coordinates must be finite" in offset
+    assert "all(math.isfinite(value) for value in raw_point)" in offset
+    assert "requires finite X, Y, Z" in offset
 
 
 def test_geometry_view_change_validates_name_and_resets_sketch_cursor_state():
@@ -2492,7 +2493,9 @@ def test_geometry_sketch_activation_aligns_blank_iso_view_and_shows_grid():
         MainWindow._activate_geometry_surface_pick_tool
     )
 
-    assert 'current_view().lower() == "iso"' in prepare
+    assert 'normalized.startswith("plane:")' in prepare
+    assert "set_geometry_sketch_frame" in prepare
+    assert "view_active_sketch_plane" in prepare
     assert "self.viewport.set_view(normalized, render=False)" in prepare
     assert "set_geometry_sketch_grid_visible(True)" in prepare
     assert "grid_action.setChecked(True)" in prepare
@@ -2586,11 +2589,11 @@ def test_geometry_iso_sketch_keeps_active_workplane_and_offset():
         MainWindow._activate_geometry_surface_pick_tool
     )
 
-    assert "self.viewport.geometry_sketch_plane()" in active
+    assert "_active_sketch_plane_tag" in active
+    assert "_active_global_sketch_plane" in active
     assert 'view in {"xy", "xz", "yz"}' in active
     for source in (line, surface):
         assert "current_plane, current_offset" in source
-        assert 'current_view().lower() == "iso"' in source
         assert "plane_offset" in source
         assert "_prepare_geometry_sketch_view(plane, plane_offset)" in source
 
@@ -2770,9 +2773,10 @@ def test_geometry_sketch_grid_is_workplane_aware_and_toggleable():
 
     assert "set_geometry_sketch_grid_visible" in toggle
     assert "_geometry_sketch_grid_visible" in setter
-    assert '"xy": (0, 1, 2)' in render
-    assert '"xz": (0, 2, 1)' in render
-    assert '"yz": (1, 2, 0)' in render
+    assert "geometry_world_to_local" in render
+    assert "geometry_local_to_world" in render
+    assert "start_u" in render
+    assert "start_v" in render
     assert 'name="geometry-sketch-grid"' in render
 
 
