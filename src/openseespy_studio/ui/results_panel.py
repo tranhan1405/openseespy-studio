@@ -2960,6 +2960,26 @@ class ResultsPanel(QWidget):
         next_button.clicked.connect(lambda: self._step_motion(1))
         row.addWidget(next_button)
 
+        row.addWidget(QLabel("Speed:"))
+        self.frame_speed = QComboBox()
+        for label, speed in (
+            ("0.25×", 0.25),
+            ("0.5×", 0.5),
+            ("1×", 1.0),
+            ("2×", 2.0),
+            ("4×", 4.0),
+            ("8×", 8.0),
+            ("16×", 16.0),
+        ):
+            self.frame_speed.addItem(label, speed)
+        self.frame_speed.setCurrentIndex(
+            max(0, self.motion_speed.currentIndex())
+        )
+        self.frame_speed.currentIndexChanged.connect(
+            self._frame_speed_changed
+        )
+        row.addWidget(self.frame_speed)
+
         self.frame_slider = QSlider(Qt.Horizontal)
         self.frame_slider.setRange(0, 0)
         self.frame_slider.valueChanged.connect(self._frame_slider_changed)
@@ -2977,6 +2997,18 @@ class ResultsPanel(QWidget):
 
     def current_frame_index(self) -> int:
         return int(self._motion_frame_index)
+
+    def is_motion_playing(self) -> bool:
+        return bool(self._motion_timer.isActive())
+
+    def _frame_speed_changed(self, index: int) -> None:
+        if not hasattr(self, "motion_speed"):
+            return
+        if self.motion_speed.currentIndex() != int(index):
+            self.motion_speed.blockSignals(True)
+            self.motion_speed.setCurrentIndex(int(index))
+            self.motion_speed.blockSignals(False)
+        self._update_motion_timer()
 
     def has_result_frames(self) -> bool:
         return bool(
@@ -3169,6 +3201,12 @@ class ResultsPanel(QWidget):
             return 1.0
 
     def _update_motion_timer(self, *_args) -> None:
+        if hasattr(self, "frame_speed"):
+            index = self.motion_speed.currentIndex()
+            if self.frame_speed.currentIndex() != index:
+                self.frame_speed.blockSignals(True)
+                self.frame_speed.setCurrentIndex(index)
+                self.frame_speed.blockSignals(False)
         if not self._motion_timer.isActive():
             return
         speed = max(0.01, self._motion_speed_value())
@@ -3217,6 +3255,9 @@ class ResultsPanel(QWidget):
         else:
             self._motion_timer.stop()
             self._set_play_buttons(False)
+            # Re-emit the resting frame so expensive annotations such as
+            # contour extrema labels can be restored after fast playback.
+            self._emit_current_motion_frame()
 
     def _advance_motion(self) -> None:
         if self._motion_info is None:
