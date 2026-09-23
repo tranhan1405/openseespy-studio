@@ -153,6 +153,7 @@ from ..line_mesher import (
     trim_extend_lines_to_line,
 )
 from ..section_response import section_response_sources
+from ..response_spectrum import build_period_grid
 from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LineGeometryData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SketchPlaneData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
 from ..runtime import (
     build_worker_pythonpath,
@@ -21651,7 +21652,57 @@ class MainWindow(QMainWindow):
                 ),
             ),
         ]
-        if settings.analysis_type == "Modal":
+        if settings.analysis_type == "Response Spectrum":
+            outputs = [
+                label
+                for enabled, label in (
+                    (settings.response_spectrum_component_x, "Component X"),
+                    (settings.response_spectrum_component_y, "Component Y"),
+                    (settings.response_spectrum_rotd50, "RotD50"),
+                    (settings.response_spectrum_rotd100, "RotD100"),
+                )
+                if enabled
+            ]
+            rows = [
+                ("Tag", settings.tag),
+                ("Name", settings.name),
+                ("Type", settings.analysis_type),
+                (
+                    "Active",
+                    "Yes"
+                    if tag == self.project.active_analysis_tag
+                    else "No",
+                ),
+                ("Spectrum type", settings.response_spectrum_mode),
+                (
+                    "Ground-motion pattern(s)",
+                    ", ".join(
+                        map(str, settings.deferred_pattern_tags)
+                    )
+                    or "-",
+                ),
+                (
+                    "Damping ratio",
+                    f"{100.0 * settings.response_spectrum_damping_ratio:g}%",
+                ),
+                (
+                    "Region 1",
+                    f"ΔT={settings.response_spectrum_t1_step:g} s · "
+                    f"end={settings.response_spectrum_t1_end:g} s",
+                ),
+                (
+                    "Region 2",
+                    f"ΔT={settings.response_spectrum_t2_step:g} s · "
+                    f"end={settings.response_spectrum_t2_end:g} s",
+                ),
+                (
+                    "Region 3",
+                    f"ΔT={settings.response_spectrum_t3_step:g} s · "
+                    f"end={settings.response_spectrum_t3_end:g} s",
+                ),
+                ("Outputs", ", ".join(outputs) or "-"),
+            ]
+        elif settings.analysis_type == "Modal":
             rows.extend([
                 ("Modes", settings.num_modes),
                 ("Eigen solver", settings.eigen_solver),
@@ -30152,6 +30203,17 @@ class MainWindow(QMainWindow):
         job.start()
         if settings.analysis_type == "Modal":
             total = settings.num_modes
+        elif settings.analysis_type == "Response Spectrum":
+            total = len(
+                build_period_grid(
+                    settings.response_spectrum_t1_step,
+                    settings.response_spectrum_t1_end,
+                    settings.response_spectrum_t2_step,
+                    settings.response_spectrum_t2_end,
+                    settings.response_spectrum_t3_step,
+                    settings.response_spectrum_t3_end,
+                )
+            )
         elif settings.analysis_type == "Cyclic":
             total = len(
                 cyclic_displacement_steps(
@@ -30167,7 +30229,11 @@ class MainWindow(QMainWindow):
             algorithm=(
                 settings.eigen_solver
                 if settings.analysis_type == "Modal"
-                else settings.algorithm
+                else (
+                    "Linear Newmark SDOF"
+                    if settings.analysis_type == "Response Spectrum"
+                    else settings.algorithm
+                )
             ),
             message="Starting solver",
         )
@@ -30834,6 +30900,30 @@ class MainWindow(QMainWindow):
                         scale=1.0,
                         cache_key=self._last_result_cache_key,
                     )
+            elif analysis_type == "Response Spectrum":
+                spectrum = result.get("response_spectrum", {})
+                default_curve = (
+                    "rotd50"
+                    if isinstance(spectrum, dict)
+                    and spectrum.get("rotd50_sa_g")
+                    else (
+                        "rotd100"
+                        if isinstance(spectrum, dict)
+                        and spectrum.get("rotd100_sa_g")
+                        else (
+                            "component_x"
+                            if isinstance(spectrum, dict)
+                            and spectrum.get("component_x_sa_g")
+                            else "component_y"
+                        )
+                    )
+                )
+                self.results_panel.show_solution_result(
+                    "ResponseSpectrum",
+                    {"curve": default_curve},
+                )
+                self.results_dock.show()
+                self.results_dock.raise_()
             elif result.get("final") and not is_moment_curvature:
                 self.viewport.show_deformed_shape(
                     result,
