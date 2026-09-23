@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,11 @@ class OpenSeesImportResult:
     @property
     def imported_total(self) -> int:
         return sum(self.imported_counts.values())
+
+
+@dataclass(slots=True)
+class _SafeModuleNamespace:
+    values: dict[str, Any]
 
 
 class _Unresolved(Exception):
@@ -224,6 +230,14 @@ class _SafeEvaluator:
         if isinstance(node, ast.Subscript):
             return self.eval(node.value)[self.eval(node.slice)]
         if isinstance(node, ast.Attribute):
+            if isinstance(node.value, ast.Name):
+                namespace = self.env.get(node.value.id)
+                if isinstance(namespace, _SafeModuleNamespace):
+                    if node.attr in namespace.values:
+                        return namespace.values[node.attr]
+                    raise _Unresolved(
+                        f"{node.value.id}.{node.attr}"
+                    )
             if (
                 isinstance(node.value, ast.Name)
                 and node.value.id in {"math", "np", "numpy"}
@@ -318,6 +332,8 @@ class _Importer:
             else None
         )
         self._imported_local_modules: set[Path] = set()
+        self._local_module_exports: dict[Path, dict[str, Any]] = {}
+        self._virtual_path_series: dict[Path, list[float]] = {}
         if self.source_path is not None:
             self._imported_local_modules.add(self.source_path)
         self.units = UnitSystem.from_mapping(units)
@@ -1398,6 +1414,10 @@ class _Importer:
             )
             return None
 
+        cached_values = self._virtual_path_series.get(data_path)
+        if cached_values is not None:
+            return list(cached_values)
+
         try:
             text = data_path.read_text(encoding="utf-8-sig")
         except OSError as exc:
@@ -1831,6 +1851,10 @@ class _Importer:
                     "rayleigh_damping_ratio",
                     "rayleigh_mode_i",
                     "rayleigh_mode_j",
+                    "rayleigh_alpha_m",
+                    "rayleigh_beta_k",
+                    "rayleigh_beta_k_init",
+                    "rayleigh_beta_k_comm",
                     "eigen_solver",
                 )
                 if key in self.analysis_state
@@ -1899,6 +1923,8 @@ class _Importer:
         try:
             if command == "rayleigh":
                 if self._recognize_single_mode_rayleigh(node):
+                    return
+                if self._recognize_direct_rayleigh(node):
                     return
                 args = self.call_args(node)
                 self.issue(
@@ -2085,6 +2111,24 @@ class _Importer:
         self.count("Rayleigh damping")
         return True
 
+    def _recognize_direct_rayleigh(self, node: ast.Call) -> bool:
+        if len(node.args) != 4:
+            return False
+        try:
+            values = [float(self.eval.eval(arg)) for arg in node.args]
+        except (_Unresolved, TypeError, ValueError):
+            return False
+        if any(not math.isfinite(value) for value in values):
+            return False
+
+        self.analysis_state["rayleigh_model"] = "DirectCoefficients"
+        self.analysis_state["rayleigh_alpha_m"] = values[0]
+        self.analysis_state["rayleigh_beta_k"] = values[1]
+        self.analysis_state["rayleigh_beta_k_init"] = values[2]
+        self.analysis_state["rayleigh_beta_k_comm"] = values[3]
+        self.count("Rayleigh damping")
+        return True
+
     def _runtime_call_name(self, call: ast.Call) -> str | None:
         if isinstance(call.func, ast.Name):
             return (
@@ -2216,12 +2260,36 @@ class _Importer:
             return
         raise _Unresolved("assignment target")
 
+    @staticmethod
+    def _safe_module_export_value(value: Any) -> bool:
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return True
+        if isinstance(value, (tuple, list)):
+            return (
+                len(value) <= 10000
+                and all(
+                    _Importer._safe_module_export_value(item)
+                    for item in value
+                )
+            )
+        if isinstance(value, dict):
+            return (
+                len(value) <= 10000
+                and all(
+                    isinstance(key, (str, int, float, bool))
+                    and _Importer._safe_module_export_value(item)
+                    for key, item in value.items()
+                )
+            )
+        return False
+
     def _import_local_module(
         self,
         module_name: str,
         stmt: ast.Import,
+        alias_name: str | None = None,
     ) -> bool:
-        """Safely inline a sibling Python module for OpenSees side effects."""
+        """Safely inline a sibling module and expose simple scalar constants."""
         if (
             self.source_dir is None
             or not module_name
@@ -2233,7 +2301,11 @@ class _Importer:
         candidate = (self.source_dir / f"{module_name}.py").resolve()
         if candidate.parent != self.source_dir or not candidate.is_file():
             return False
+
+        namespace_name = str(alias_name or module_name)
         if candidate in self._imported_local_modules:
+            exports = self._local_module_exports.get(candidate, {})
+            self.env[namespace_name] = _SafeModuleNamespace(dict(exports))
             return True
 
         try:
@@ -2258,9 +2330,15 @@ class _Importer:
         saved_source_name = self.source_name
         self.env["__name__"] = module_name
         self.source_name = candidate.name
+        exports: dict[str, Any] = {}
         try:
             for child in module_tree.body:
                 self.statement(child)
+            for name, value in self.env.items():
+                if name.startswith("__") or name in saved_env:
+                    continue
+                if self._safe_module_export_value(value):
+                    exports[name] = value
         finally:
             self.env.clear()
             self.env.update(saved_env)
@@ -2269,7 +2347,196 @@ class _Importer:
             self.direct_ops = saved_direct_ops
             self.source_name = saved_source_name
 
+        self._local_module_exports[candidate] = dict(exports)
+        self.env[namespace_name] = _SafeModuleNamespace(dict(exports))
         self.count("Local modules")
+        return True
+
+    def _resolve_safe_source_relative_path(
+        self,
+        node: ast.AST,
+        file_value: Any,
+        construct: str,
+    ) -> Path | None:
+        if self.source_dir is None:
+            self.issue(
+                "UNSUPPORTED",
+                node,
+                construct,
+                "This file reference needs the imported Python source path.",
+            )
+            return None
+
+        raw_path = Path(str(file_value))
+        if raw_path.is_absolute():
+            self.issue(
+                "UNSUPPORTED",
+                node,
+                construct,
+                "Absolute file paths are not opened during safe import.",
+            )
+            return None
+
+        base_dir = self.source_dir.resolve()
+        candidate = (base_dir / raw_path).resolve()
+        try:
+            candidate.relative_to(base_dir)
+        except ValueError:
+            self.issue(
+                "UNSUPPORTED",
+                node,
+                construct,
+                "Referenced files outside the imported script directory tree "
+                "are not opened during safe import.",
+            )
+            return None
+        return candidate
+
+    def _read_peer_at2(
+        self,
+        node: ast.AST,
+        file_value: Any,
+    ) -> tuple[float, int, list[float]] | None:
+        path = self._resolve_safe_source_relative_path(
+            node,
+            file_value,
+            "ReadRecord PEER motion",
+        )
+        if path is None:
+            return None
+        try:
+            lines = path.read_text(encoding="utf-8-sig").splitlines()
+        except OSError as exc:
+            self.issue(
+                "ERROR",
+                node,
+                "ReadRecord PEER motion",
+                f"Could not read PEER record {str(file_value)!r}: {exc}",
+            )
+            return None
+
+        npts: int | None = None
+        dt: float | None = None
+        header_index: int | None = None
+        old_pattern = re.compile(
+            r"NPTS\s*=\s*(\d+)\s*,?\s*DT\s*=\s*"
+            r"([+\-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+\-]?\d+)?)",
+            re.IGNORECASE,
+        )
+        for index, line in enumerate(lines):
+            match = old_pattern.search(line)
+            if match is not None:
+                npts = int(match.group(1))
+                dt = float(match.group(2))
+                header_index = index
+                break
+
+            words = line.replace(",", " ").split()
+            if (
+                len(words) >= 4
+                and words[-2].upper() == "NPTS"
+                and words[-1].upper() == "DT"
+            ):
+                try:
+                    npts = int(words[0])
+                    dt = float(words[1])
+                except ValueError:
+                    continue
+                header_index = index
+                break
+
+        if (
+            npts is None
+            or dt is None
+            or header_index is None
+            or npts <= 0
+            or dt <= 0.0
+        ):
+            self.issue(
+                "ERROR",
+                node,
+                "ReadRecord PEER motion",
+                f"Could not find a valid NPTS/DT header in {path.name}.",
+            )
+            return None
+
+        values: list[float] = []
+        for line in lines[header_index + 1:]:
+            for token in line.replace(",", " ").split():
+                try:
+                    values.append(float(token))
+                except ValueError:
+                    continue
+
+        if not values:
+            self.issue(
+                "ERROR",
+                node,
+                "ReadRecord PEER motion",
+                f"No acceleration values were found in {path.name}.",
+            )
+            return None
+        if len(values) != npts:
+            self.issue(
+                "WARNING",
+                node,
+                "ReadRecord PEER motion",
+                f"{path.name} declares NPTS={npts} but contains "
+                f"{len(values)} numeric acceleration values after the header.",
+            )
+        return float(dt), int(npts), values
+
+    def _recognize_peer_read_record_assignment(
+        self,
+        stmt: ast.Assign,
+    ) -> bool:
+        if len(stmt.targets) != 1 or not isinstance(stmt.value, ast.Call):
+            return False
+        call = stmt.value
+        if (
+            not isinstance(call.func, ast.Attribute)
+            or not isinstance(call.func.value, ast.Name)
+            or call.func.attr != "ReadRecord"
+            or len(call.args) < 2
+        ):
+            return False
+
+        module_value = self.env.get(call.func.value.id)
+        if not isinstance(module_value, _SafeModuleNamespace):
+            return False
+
+        try:
+            input_name = self.eval.eval(call.args[0])
+            output_name = self.eval.eval(call.args[1])
+        except _Unresolved:
+            return False
+
+        parsed = self._read_peer_at2(stmt, input_name)
+        if parsed is None:
+            return True
+        dt, npts, values = parsed
+
+        output_path = self._resolve_safe_source_relative_path(
+            stmt,
+            output_name,
+            "ReadRecord output",
+        )
+        if output_path is None:
+            return True
+        self._virtual_path_series[output_path] = list(values)
+
+        try:
+            self.assign(stmt.targets[0], (dt, npts))
+        except _Unresolved:
+            self.issue(
+                "UNSUPPORTED",
+                stmt,
+                "ReadRecord assignment",
+                "ReadRecord result must be assigned to two simple targets.",
+            )
+            return True
+
+        self.count("Ground-motion records")
         return True
 
     def _recognize_cyclic_history_for(self, stmt: ast.For) -> bool:
@@ -2380,6 +2647,98 @@ class _Importer:
         })
         self.count("Cyclic drivers")
         self.count("Cyclic targets", len(targets))
+        return True
+
+    def _recognize_transient_time_while(self, stmt: ast.While) -> bool:
+        """Recognize common bounded transient loops driven by getTime()."""
+        if self.analysis_state.get("analysis_kind") != "Transient":
+            return False
+
+        analyze_calls = [
+            child
+            for child in ast.walk(stmt)
+            if isinstance(child, ast.Call)
+            and self.command_name(child) == "analyze"
+        ]
+        if not analyze_calls:
+            return False
+
+        primary_args: list[Any] | None = None
+        for call in analyze_calls:
+            try:
+                values = self.call_args(call)
+            except _Unresolved:
+                continue
+            if len(values) >= 2:
+                primary_args = values
+                break
+        if primary_args is None:
+            return False
+
+        try:
+            chunk_steps = int(primary_args[0])
+            analysis_dt = float(primary_args[1])
+        except (TypeError, ValueError):
+            return False
+        if chunk_steps < 1 or analysis_dt <= 0.0:
+            return False
+
+        final_time: float | None = None
+        for child in ast.walk(stmt.test):
+            if not isinstance(child, ast.Compare):
+                continue
+            if len(child.ops) != 1 or len(child.comparators) != 1:
+                continue
+            if not isinstance(child.ops[0], (ast.Lt, ast.LtE)):
+                continue
+            try:
+                candidate = float(self.eval.eval(child.comparators[0]))
+            except (_Unresolved, TypeError, ValueError):
+                continue
+            if math.isfinite(candidate) and candidate > 0.0:
+                final_time = candidate
+                break
+        if final_time is None:
+            return False
+
+        total_steps = max(
+            1,
+            int(math.ceil(final_time / analysis_dt - 1.0e-12)),
+        )
+        has_initial_tangent_recovery = any(
+            isinstance(child, ast.Call)
+            and self.command_name(child) == "algorithm"
+            and len(child.args) >= 1
+            and isinstance(child.args[0], ast.Constant)
+            and child.args[0].value == "ModifiedNewton"
+            for child in ast.walk(stmt)
+        )
+
+        self.analysis_state["steps"] = total_steps
+        self.analysis_state["dt"] = analysis_dt
+        self.analysis_state["recovery"] = bool(
+            has_initial_tangent_recovery or len(analyze_calls) > 1
+        )
+        self.analysis_events.append({
+            "steps": total_steps,
+            "dt": analysis_dt,
+            "integrator": self.analysis_state.get("integrator"),
+            "integrator_args": list(
+                self.analysis_state.get("integrator_args", [])
+            ),
+            "analysis_kind": "Transient",
+            "pattern_tags": sorted(self.project.load_patterns),
+            "current_pattern": self.current_pattern,
+            "algorithm": self.analysis_state.get("algorithm"),
+            "recognized_transient_loop": True,
+        })
+        for child in ast.walk(stmt):
+            if isinstance(child, ast.Name) and isinstance(
+                child.ctx,
+                ast.Store,
+            ):
+                self.runtime_only_names.add(child.id)
+        self.count("Transient drivers")
         return True
 
     def _recognize_pushover_while(self, stmt: ast.While) -> bool:
@@ -2511,7 +2870,11 @@ class _Importer:
                 if alias.name == "openseespy.opensees":
                     self.ops_aliases.add(alias.asname or "ops")
                     continue
-                self._import_local_module(alias.name, stmt)
+                self._import_local_module(
+                    alias.name,
+                    stmt,
+                    alias.asname or alias.name,
+                )
             return
 
         if isinstance(stmt, ast.ImportFrom):
@@ -2521,6 +2884,8 @@ class _Importer:
             return
 
         if isinstance(stmt, ast.Assign):
+            if self._recognize_peer_read_record_assignment(stmt):
+                return
             if self._recognize_eigen_frequency_assignment(stmt):
                 return
             runtime_calls = self._runtime_calls_in(stmt.value)
@@ -2789,6 +3154,8 @@ class _Importer:
             return
 
         if isinstance(stmt, ast.While):
+            if self._recognize_transient_time_while(stmt):
+                return
             if self._recognize_pushover_while(stmt):
                 return
             if not self._studio_source:
@@ -3062,6 +3429,24 @@ class _Importer:
             ),
             "rayleigh_mode_j": int(
                 meta.get("rayleigh_mode_j", state.get("rayleigh_mode_j", 3))
+            ),
+            "rayleigh_alpha_m": float(
+                meta.get("rayleigh_alpha_m", state.get("rayleigh_alpha_m", 0.0))
+            ),
+            "rayleigh_beta_k": float(
+                meta.get("rayleigh_beta_k", state.get("rayleigh_beta_k", 0.0))
+            ),
+            "rayleigh_beta_k_init": float(
+                meta.get(
+                    "rayleigh_beta_k_init",
+                    state.get("rayleigh_beta_k_init", 0.0),
+                )
+            ),
+            "rayleigh_beta_k_comm": float(
+                meta.get(
+                    "rayleigh_beta_k_comm",
+                    state.get("rayleigh_beta_k_comm", 0.0),
+                )
             ),
             "preload_gravity": bool(
                 meta.get(

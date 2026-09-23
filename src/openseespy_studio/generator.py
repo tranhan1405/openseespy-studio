@@ -1488,11 +1488,38 @@ def analysis_to_openseespy(
         system_command,
     ]
 
+    _studio_has_direct_rayleigh = (
+        settings.rayleigh_model == "DirectCoefficients"
+        and any(
+            abs(value) > 0.0
+            for value in (
+                settings.rayleigh_alpha_m,
+                settings.rayleigh_beta_k,
+                settings.rayleigh_beta_k_init,
+                settings.rayleigh_beta_k_comm,
+            )
+        )
+    )
     if (
         settings.analysis_type == "Transient"
-        and settings.rayleigh_damping_ratio > 0.0
+        and (
+            settings.rayleigh_damping_ratio > 0.0
+            or _studio_has_direct_rayleigh
+        )
     ):
-        if settings.rayleigh_model == "SingleModeCommittedStiffness":
+        if settings.rayleigh_model == "DirectCoefficients":
+            lines.extend([
+                "# Rayleigh damping: imported direct coefficients",
+                (
+                    "ops.rayleigh("
+                    f"{settings.rayleigh_alpha_m:g}, "
+                    f"{settings.rayleigh_beta_k:g}, "
+                    f"{settings.rayleigh_beta_k_init:g}, "
+                    f"{settings.rayleigh_beta_k_comm:g})"
+                ),
+                "",
+            ])
+        elif settings.rayleigh_model == "SingleModeCommittedStiffness":
             max_mode = settings.rayleigh_mode_i
             lines.extend([
                 "# Rayleigh damping: committed-stiffness proportional, calibrated to one mode",

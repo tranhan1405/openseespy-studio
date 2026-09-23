@@ -2120,6 +2120,10 @@ class AnalysisSettingsData:
     system_pivoting: bool = False
     gravity_algorithm: str = "Auto"
     rayleigh_model: str = "TwoMode"
+    rayleigh_alpha_m: float = 0.0
+    rayleigh_beta_k: float = 0.0
+    rayleigh_beta_k_init: float = 0.0
+    rayleigh_beta_k_comm: float = 0.0
 
     def __post_init__(self) -> None:
         self.tag=_strict_int(self.tag, "Analysis tag"); self.name=str(self.name).strip() or f"Analysis {self.tag}"
@@ -2215,6 +2219,10 @@ class AnalysisSettingsData:
         )
         self.gravity_algorithm=str(self.gravity_algorithm or "Auto")
         self.rayleigh_model=str(self.rayleigh_model or "TwoMode")
+        self.rayleigh_alpha_m=float(self.rayleigh_alpha_m)
+        self.rayleigh_beta_k=float(self.rayleigh_beta_k)
+        self.rayleigh_beta_k_init=float(self.rayleigh_beta_k_init)
+        self.rayleigh_beta_k_comm=float(self.rayleigh_beta_k_comm)
         numeric_values = (
             self.tolerance,
             self.load_increment,
@@ -2229,6 +2237,10 @@ class AnalysisSettingsData:
             self.arc_length_s,
             self.arc_length_alpha,
             self.rayleigh_damping_ratio,
+            self.rayleigh_alpha_m,
+            self.rayleigh_beta_k,
+            self.rayleigh_beta_k_init,
+            self.rayleigh_beta_k_comm,
             self.adaptive_cutback_factor,
             self.adaptive_min_factor,
             self.adaptive_growth_factor,
@@ -2455,7 +2467,11 @@ class AnalysisSettingsData:
             and not 0.0 <= self.rayleigh_damping_ratio < 1.0
         ):
             raise ValueError("Rayleigh damping ratio must be in [0, 1).")
-        if self.rayleigh_model not in {"TwoMode", "SingleModeCommittedStiffness"}:
+        if self.rayleigh_model not in {
+            "TwoMode",
+            "SingleModeCommittedStiffness",
+            "DirectCoefficients",
+        }:
             raise ValueError("Unsupported Rayleigh damping model.")
         if (
             self.analysis_type == "Transient"
@@ -2492,6 +2508,7 @@ class AnalysisSettingsData:
             or (
                 self.analysis_type == "Transient"
                 and self.rayleigh_damping_ratio > 0.0
+                and self.rayleigh_model != "DirectCoefficients"
             )
         )
         if uses_eigen_solver and self.eigen_solver not in {
@@ -2516,7 +2533,8 @@ class AnalysisSettingsData:
             "adaptive_growth_factor","adaptive_easy_iterations",
             "adaptive_growth_after","live_convergence","show_external_console",
             "algorithm_initial","system_pivoting","gravity_algorithm",
-            "rayleigh_model"
+            "rayleigh_model","rayleigh_alpha_m","rayleigh_beta_k",
+            "rayleigh_beta_k_init","rayleigh_beta_k_comm"
         )}
 
     @classmethod

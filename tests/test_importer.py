@@ -507,3 +507,186 @@ analyze(10, 0.01)
     )
     assert "_studio_beta_k_comm = 2.0 * _studio_zeta / _studio_omega_i" in generated
     assert "ops.rayleigh(0.0, 0.0, 0.0, _studio_beta_k_comm)" in generated
+
+
+def test_importer_exposes_safe_constants_from_sibling_module(tmp_path):
+    gravity = tmp_path / "RCFrameGravity.py"
+    gravity.write_text(
+        """
+from openseespy.opensees import *
+model('basic', '-ndm', 2, '-ndf', 3)
+node(1, 0.0, 0.0)
+node(3, 0.0, 120.0)
+fix(1, 1, 1, 1)
+P = 2000.0
+""",
+        encoding="utf-8",
+    )
+    source_path = tmp_path / "earthquake.py"
+    source = """
+from openseespy.opensees import *
+import RCFrameGravity
+g = 400.0
+m = RCFrameGravity.P/g
+mass(3, m, m, 0.0)
+"""
+    source_path.write_text(source, encoding="utf-8")
+
+    result = import_openseespy_source(
+        source,
+        source_name=source_path.name,
+        source_path=source_path,
+        units={"length": "in", "force": "kip", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    assert result.project.model.nodes[3].mass[:3] == (5.0, 5.0, 0.0)
+    assert not any(
+        issue.construct == "assignment"
+        and issue.line == 5
+        for issue in result.issues
+    )
+
+
+def test_importer_recognizes_peer_readrecord_without_executing_helper(tmp_path):
+    (tmp_path / "ReadRecord.py").write_text(
+        """
+def ReadRecord(inFilename, outFilename):
+    raise RuntimeError("safe importer must never execute this function")
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / "elCentro.at2").write_text(
+        """PEER NGA RECORD
+ACCELERATION TIME HISTORY IN UNITS OF G
+NPTS= 4, DT= .00500 SEC
+0.10 -0.20
+0.30 0.00
+""",
+        encoding="utf-8",
+    )
+    source_path = tmp_path / "earthquake.py"
+    source = """
+from openseespy.opensees import *
+import ReadRecord
+record = 'elCentro'
+dt, nPts = ReadRecord.ReadRecord(record+'.at2', record+'.dat')
+timeSeries('Path', 2, '-filePath', record+'.dat', '-dt', dt, '-factor', 386.4)
+"""
+    source_path.write_text(source, encoding="utf-8")
+
+    result = import_openseespy_source(
+        source,
+        source_name=source_path.name,
+        source_path=source_path,
+        units={"length": "in", "force": "kip", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    series = result.project.time_series[2]
+    assert series.dt == 0.005
+    assert series.factor == 386.4
+    assert series.values == [0.10, -0.20, 0.30, 0.00]
+    assert result.imported_counts["Ground-motion records"] == 1
+
+
+def test_importer_recovers_bounded_transient_loop_and_direct_rayleigh(tmp_path):
+    (tmp_path / "ReadRecord.py").write_text(
+        "def ReadRecord(inFilename, outFilename):\n    return 0.0, 0\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "elCentro.at2").write_text(
+        """HEADER
+NPTS= 4, DT= .00500 SEC
+0.10 -0.20 0.30 0.00
+""",
+        encoding="utf-8",
+    )
+    source_path = tmp_path / "earthquake.py"
+    source = """
+from openseespy.opensees import *
+model('basic', '-ndm', 2, '-ndf', 3)
+node(1, 0.0, 0.0)
+node(2, 0.0, 120.0)
+fix(1, 1, 1, 1)
+mass(2, 1.0, 1.0, 0.0)
+timeSeries('Linear', 1)
+pattern('Plain', 1, 1)
+load(2, 0.0, -10.0, 0.0)
+constraints('Plain')
+numberer('Plain')
+system('BandGeneral')
+algorithm('Linear')
+integrator('LoadControl', 0.1)
+analysis('Static')
+analyze(10)
+loadConst('-time', 0.0)
+
+import ReadRecord
+record = 'elCentro'
+dt, nPts = ReadRecord.ReadRecord(record+'.at2', record+'.dat')
+timeSeries('Path', 2, '-filePath', record+'.dat', '-dt', dt, '-factor', 386.4)
+pattern('UniformExcitation', 2, 1, '-accel', 2)
+rayleigh(0.0, 0.0, 0.0, 0.000625)
+wipeAnalysis()
+system('BandGeneral')
+constraints('Plain')
+test('NormDispIncr', 1.0e-12, 10)
+algorithm('Newton')
+numberer('RCM')
+integrator('Newmark', 0.5, 0.25)
+analysis('Transient')
+tFinal = nPts*dt
+tCurrent = getTime()
+ok = 0
+while ok == 0 and tCurrent < tFinal:
+    ok = analyze(1, .01)
+    if ok != 0:
+        test('NormDispIncr', 1.0e-12, 100, 0)
+        algorithm('ModifiedNewton', '-initial')
+        ok = analyze(1, .01)
+    tCurrent = getTime()
+"""
+    source_path.write_text(source, encoding="utf-8")
+
+    result = import_openseespy_source(
+        source,
+        source_name=source_path.name,
+        source_path=source_path,
+        units={"length": "in", "force": "kip", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    assert not any(issue.construct == "While" for issue in result.issues)
+    analysis = next(iter(result.project.analyses.values()))
+    assert analysis.analysis_type == "Transient"
+    assert analysis.steps == 2
+    assert analysis.dt == 0.01
+    assert analysis.preload_gravity is True
+    assert analysis.gravity_steps == 10
+    assert analysis.deferred_pattern_tags == [2]
+    assert analysis.recovery is True
+    assert analysis.rayleigh_model == "DirectCoefficients"
+    assert analysis.rayleigh_alpha_m == 0.0
+    assert analysis.rayleigh_beta_k == 0.0
+    assert analysis.rayleigh_beta_k_init == 0.0
+    assert analysis.rayleigh_beta_k_comm == 0.000625
+
+    generated = to_openseespy(
+        result.project.model,
+        result.project.materials,
+        result.project.sections,
+        result.project.transformations,
+        result.project.constraints,
+        result.project.connections,
+        result.project.time_series,
+        result.project.load_patterns,
+        result.project.nodal_loads,
+        result.project.analyses,
+        result.project.active_analysis_tag,
+        result.project.element_loads,
+        result.project.prescribed_displacements,
+        result.project.recorders,
+        result.project.units,
+    )
+    assert "ops.rayleigh(0, 0, 0, 0.000625)" in generated

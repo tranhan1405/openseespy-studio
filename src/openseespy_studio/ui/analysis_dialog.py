@@ -240,6 +240,10 @@ class AnalysisDialog(QDialog):
             "Single-mode committed stiffness",
             "SingleModeCommittedStiffness",
         )
+        self.damping_model.addItem(
+            "Direct OpenSees coefficients",
+            "DirectCoefficients",
+        )
         damping_model = analysis.rayleigh_model if analysis else "TwoMode"
         damping_model_index = self.damping_model.findData(damping_model)
         self.damping_model.setCurrentIndex(
@@ -248,7 +252,28 @@ class AnalysisDialog(QDialog):
         self.damping_model.setToolTip(
             "Two-mode uses mass + current-stiffness Rayleigh damping. "
             "Single-mode committed stiffness reproduces scripts of the form "
-            "rayleigh(0, 0, 0, 2*zeta/omega_i)."
+            "rayleigh(0, 0, 0, 2*zeta/omega_i). Direct coefficients preserve "
+            "rayleigh(alphaM, betaK, betaKinit, betaKcomm) exactly."
+        )
+        self.rayleigh_alpha_m=fs(
+            analysis.rayleigh_alpha_m if analysis else 0.0,
+            -1e20,
+            1e20,
+        )
+        self.rayleigh_beta_k=fs(
+            analysis.rayleigh_beta_k if analysis else 0.0,
+            -1e20,
+            1e20,
+        )
+        self.rayleigh_beta_k_init=fs(
+            analysis.rayleigh_beta_k_init if analysis else 0.0,
+            -1e20,
+            1e20,
+        )
+        self.rayleigh_beta_k_comm=fs(
+            analysis.rayleigh_beta_k_comm if analysis else 0.0,
+            -1e20,
+            1e20,
         )
         self.damping_mode_i=QSpinBox(); self.damping_mode_i.setRange(1,10000)
         self.damping_mode_i.setValue(analysis.rayleigh_mode_i if analysis else 1)
@@ -457,6 +482,10 @@ class AnalysisDialog(QDialog):
             ("damping_model","Rayleigh damping model",self.damping_model),
             ("damping_mode_i","Rayleigh mode i",self.damping_mode_i),
             ("damping_mode_j","Rayleigh mode j",self.damping_mode_j),
+            ("rayleigh_alpha_m","Rayleigh alphaM",self.rayleigh_alpha_m),
+            ("rayleigh_beta_k","Rayleigh betaK",self.rayleigh_beta_k),
+            ("rayleigh_beta_k_init","Rayleigh betaKinit",self.rayleigh_beta_k_init),
+            ("rayleigh_beta_k_comm","Rayleigh betaKcomm",self.rayleigh_beta_k_comm),
             ("modes","Number of modes",self.modes),
             ("eigen_solver","Eigen solver",self.eigen_solver),
             ("preload_gravity","Gravity preload",self.preload_gravity),
@@ -681,7 +710,7 @@ class AnalysisDialog(QDialog):
             })
         elif transient:
             visible.update({
-                "steps","dt","damping_ratio",
+                "steps","dt","damping_model",
             })
             if integrator=="Newmark":
                 visible.update({"gamma","beta"})
@@ -691,10 +720,19 @@ class AnalysisDialog(QDialog):
                 visible.update({
                     "generalized_alpha_m","generalized_alpha_f",
                 })
-            if self.damping_ratio.value() > 0.0:
-                visible.update({"damping_model","damping_mode_i"})
-                if self.damping_model.currentData() == "TwoMode":
-                    visible.add("damping_mode_j")
+            if self.damping_model.currentData() == "DirectCoefficients":
+                visible.update({
+                    "rayleigh_alpha_m",
+                    "rayleigh_beta_k",
+                    "rayleigh_beta_k_init",
+                    "rayleigh_beta_k_comm",
+                })
+            else:
+                visible.add("damping_ratio")
+                if self.damping_ratio.value() > 0.0:
+                    visible.add("damping_mode_i")
+                    if self.damping_model.currentData() == "TwoMode":
+                        visible.add("damping_mode_j")
         elif modal:
             visible.update({"modes","eigen_solver"})
 
@@ -864,6 +902,10 @@ class AnalysisDialog(QDialog):
             rayleigh_model=str(self.damping_model.currentData()),
             rayleigh_mode_i=self.damping_mode_i.value(),
             rayleigh_mode_j=self.damping_mode_j.value(),
+            rayleigh_alpha_m=self.rayleigh_alpha_m.value(),
+            rayleigh_beta_k=self.rayleigh_beta_k.value(),
+            rayleigh_beta_k_init=self.rayleigh_beta_k_init.value(),
+            rayleigh_beta_k_comm=self.rayleigh_beta_k_comm.value(),
             preload_gravity=preload_gravity,
             gravity_steps=self.gravity_steps.value(),
             gravity_algorithm=self.gravity_algorithm.currentText(),
