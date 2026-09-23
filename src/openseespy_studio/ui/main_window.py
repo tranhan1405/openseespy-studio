@@ -3982,8 +3982,11 @@ class MainWindow(QMainWindow):
     def _tree_selection_resets_result_overlay(
         kinds: set[str],
     ) -> bool:
-        """Return whether this tree selection should restore the base model."""
-        return kinds == {"model_root"}
+        """Return whether this tree selection should exit result display."""
+        return kinds in (
+            {"model_root"},
+            {"geometry_root"},
+        )
 
     def _build_status_bar(self) -> None:
         self.status_message = QLabel("Ready")
@@ -5387,9 +5390,29 @@ class MainWindow(QMainWindow):
             self._tree_selection_display_context(selected_payload_kinds)
         )
         geometry_mode = display_domain == "geometry"
-        if not geometry_mode and self._geometry_sketch_tool_active():
+        geometry_root_selected = selected_payload_kinds == {
+            "geometry_root"
+        }
+
+        # Selecting the Geometry object itself is a navigation action, not a
+        # continuation of an active sketch/trim command. Return to the normal
+        # select pointer while preserving camera and geometry visibility.
+        if geometry_root_selected:
+            if self.viewport.interaction_tool() != "select":
+                self._activate_select_tool()
+        elif not geometry_mode and self._geometry_sketch_tool_active():
             self._activate_select_tool()
+
         self.viewport.set_display_domain(display_domain)
+
+        if geometry_root_selected:
+            # Match Mechanical's Geometry object: show geometry rather than a
+            # mesh/result representation. The mesh overlay remains available
+            # as an explicit user command after the root has been selected.
+            mesh_overlay = self.actions.get("surface_mesh_overlay")
+            if mesh_overlay is not None:
+                mesh_overlay.setChecked(False)
+            self.viewport.set_geometry_mesh_overlay_visible(False)
         line_geometry_tags = {
             int(item.data(0, Qt.UserRole)[1])
             for item in self.tree.selectedItems()
@@ -5415,9 +5438,9 @@ class MainWindow(QMainWindow):
 
         self._sync_ribbon_context(selected_payload_kinds)
 
-        # Mechanical-style root behavior: selecting the overall Model leaves
-        # user visibility (hide/isolate) untouched, but exits any result
-        # visualization so the viewport represents the base FE model again.
+        # Mechanical-style root behavior: model-level display objects leave
+        # user visibility (hide/isolate) untouched, but exit result
+        # visualization before showing their own graphics context.
         if self._tree_selection_resets_result_overlay(
             selected_payload_kinds
         ):
@@ -5582,6 +5605,10 @@ class MainWindow(QMainWindow):
                 if root_kind == "model_root":
                     self.status_message.setText(
                         "Model overview · base FE display"
+                    )
+                elif root_kind == "geometry_root":
+                    self.status_message.setText(
+                        "Geometry overview · geometry-only display"
                     )
 
     def _wire_selection(self) -> None:
