@@ -2147,3 +2147,82 @@ def test_origin_oxyz_toggle_tracks_true_global_origin():
         window.undo_stack.setClean()
         window.close()
         app.processEvents()
+
+
+
+def test_geometry_grid_persists_after_line_and_surface_commit():
+    from PySide6.QtWidgets import QApplication
+
+    from openseespy_studio.ui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        window._new_model()
+        window.viewport.set_display_domain("geometry")
+        window.viewport.set_geometry_sketch_plane("xy", 0.0)
+        window.viewport.set_geometry_sketch_grid_visible(True)
+
+        window.actions["line_geometry_pick"].trigger()
+        window._handle_geometry_line_sketch_click(
+            {"world": (0.0, 0.0, 0.0), "screen": (0.0, 0.0)}
+        )
+        window._handle_geometry_line_sketch_click(
+            {"world": (2.0, 0.0, 0.0), "screen": (200.0, 0.0)}
+        )
+        assert "geometry-sketch-grid" in window.viewport.plotter.renderer.actors
+
+        window._activate_geometry_surface_pick_tool(True)
+        window._handle_geometry_rectangle_sketch_click(
+            {"world": (0.0, 1.0, 0.0), "screen": (0.0, 100.0)}
+        )
+        window._handle_geometry_rectangle_sketch_click(
+            {"world": (2.0, 3.0, 0.0), "screen": (200.0, 300.0)}
+        )
+        assert "geometry-sketch-grid" in window.viewport.plotter.renderer.actors
+        assert window.actions["geometry_grid"].isChecked()
+    finally:
+        window._set_dirty(False)
+        window.undo_stack.setClean()
+        window.close()
+        app.processEvents()
+
+
+def test_geometry_measure_accepts_free_plane_locations():
+    from PySide6.QtWidgets import QApplication
+
+    from openseespy_studio.ui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        window._new_model()
+        window.viewport.set_display_domain("geometry")
+        window.actions["measure_distance"].trigger()
+
+        first = {
+            "kind": None,
+            "tag": None,
+            "world": (0.0, 0.0, 0.0),
+            "screen": (0.0, 0.0),
+        }
+        second = {
+            "kind": None,
+            "tag": None,
+            "world": (3.0, 4.0, 0.0),
+            "screen": (300.0, 400.0),
+        }
+        assert window._handle_measure_click(first) is True
+        assert window._measure_first_xyz == (0.0, 0.0, 0.0)
+        assert window._handle_measure_click(second) is True
+        assert window._measure_first_xyz is None
+        assert window.viewport._measurement_counter == 1
+        assert any(
+            name.startswith("measure-1-")
+            for name in window.viewport._measurement_actor_names
+        )
+    finally:
+        window._set_dirty(False)
+        window.undo_stack.setClean()
+        window.close()
+        app.processEvents()
