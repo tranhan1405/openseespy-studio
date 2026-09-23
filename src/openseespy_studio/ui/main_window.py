@@ -3256,6 +3256,29 @@ class MainWindow(QMainWindow):
             action.setProperty("resultDisplayMode", mode)
             action.setEnabled(False)
         self.actions["result_deformed"].setChecked(True)
+
+        for key, label, setting in (
+            ("result_show_min", "Min", "contour_show_min"),
+            ("result_show_max", "Max", "contour_show_max"),
+        ):
+            action = self._make_action(
+                key,
+                label,
+                "plot",
+                lambda checked=False, value=setting: (
+                    self._set_result_extrema_visibility(value, checked)
+                ),
+                (
+                    "Show the minimum contour marker when animation is paused"
+                    if setting == "contour_show_min"
+                    else "Show the maximum contour marker when animation is paused"
+                ),
+                checkable=True,
+            )
+            action.setProperty("contourSetting", setting)
+            action.setChecked(True)
+            action.setEnabled(False)
+
         self._make_action(
             "fit_result",
             "Fit Result",
@@ -3281,6 +3304,11 @@ class MainWindow(QMainWindow):
             self.actions["result_deformed"],
             self.actions["result_both"],
             self.actions["result_undeformed"],
+        ])
+        result_display_menu.addSeparator()
+        result_display_menu.addActions([
+            self.actions["result_show_min"],
+            self.actions["result_show_max"],
         ])
         menus["Results"].addAction(self.actions["fit_result"])
         menus["Results"].addAction(self.actions["clear_result"])
@@ -3734,6 +3762,28 @@ class MainWindow(QMainWindow):
             self._apply_result_ribbon_scale
         )
 
+        self.result_frame_count_ribbon = QComboBox()
+        self.result_frame_count_ribbon.setFixedWidth(104)
+        for label, value in (
+            ("All Frames", 0),
+            ("25 Frames", 25),
+            ("50 Frames", 50),
+            ("100 Frames", 100),
+            ("200 Frames", 200),
+            ("500 Frames", 500),
+        ):
+            self.result_frame_count_ribbon.addItem(label, value)
+        self.result_frame_count_ribbon.setCurrentIndex(
+            self.result_frame_count_ribbon.findData(100)
+        )
+        self.result_frame_count_ribbon.setToolTip(
+            "Maximum number of evenly sampled frames used during playback. "
+            "The first and last analysis frames are always retained."
+        )
+        self.result_frame_count_ribbon.currentIndexChanged.connect(
+            self._apply_result_animation_frame_limit
+        )
+
         result_page = RibbonPage()
         add_group(
             result_page,
@@ -3756,6 +3806,16 @@ class MainWindow(QMainWindow):
                 "result_undeformed",
             ),
             widgets=(self.result_scale_ribbon,),
+        )
+        add_group(
+            result_page,
+            "Contour",
+            small=("result_show_min", "result_show_max"),
+        )
+        add_group(
+            result_page,
+            "Animation",
+            widgets=(self.result_frame_count_ribbon,),
         )
         add_group(
             result_page,
@@ -3988,6 +4048,146 @@ class MainWindow(QMainWindow):
         if fit is not None:
             fit.setEnabled(bool(self._last_result))
 
+    def _set_result_contour_controls_enabled(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        for key in ("result_show_min", "result_show_max"):
+            action = self.actions.get(key)
+            if action is not None:
+                action.setEnabled(enabled)
+
+    def _sync_result_contour_ribbon_controls(
+        self,
+        result_type: str,
+        options: dict[str, object],
+    ) -> None:
+        active = str(result_type) in {
+            "NodalDisplacement",
+            "NodalReaction",
+            "ShellForce",
+            "ShellDeformation",
+        }
+        self._set_result_contour_controls_enabled(active)
+        for key, setting in (
+            ("result_show_min", "contour_show_min"),
+            ("result_show_max", "contour_show_max"),
+        ):
+            action = self.actions.get(key)
+            if action is None:
+                continue
+            action.blockSignals(True)
+            action.setChecked(bool(options.get(setting, True)))
+            action.blockSignals(False)
+
+    def _apply_result_animation_frame_limit(self, index: int) -> None:
+        if not hasattr(self, "result_frame_count_ribbon"):
+            return
+        raw = self.result_frame_count_ribbon.itemData(int(index))
+        try:
+            limit = int(raw)
+        except (TypeError, ValueError):
+            limit = 100
+        self.results_panel.set_playback_frame_limit(limit)
+        label = "all recorded frames" if limit <= 0 else f"{limit} sampled frames"
+        self.status_message.setText(f"Result animation: {label}")
+
+    def _redraw_active_contour_result(self) -> None:
+        if not self._last_result:
+            return
+        result_type = str(
+            getattr(self, "_active_linked_result_type", "") or ""
+        )
+        options = dict(
+            getattr(self, "_active_linked_result_options", {}) or {}
+        )
+        nodes = set(
+            getattr(self, "_active_linked_node_scope", set()) or set()
+        )
+        elements = set(
+            getattr(self, "_active_linked_element_scope", set()) or set()
+        )
+        if result_type in {"NodalDisplacement", "NodalReaction"}:
+            if self.results_panel.has_result_frames():
+                self._show_linked_result_frame(
+                    self.results_panel.current_frame_index(),
+                    "",
+                )
+            else:
+                quantity = (
+                    "Reaction"
+                    if result_type == "NodalReaction"
+                    else "Displacement"
+                )
+                component = str(
+                    options.get(
+                        "component",
+                        "FX" if quantity == "Reaction" else "|U|",
+                    )
+                )
+                self.viewport.show_node_contour(
+                    self._last_result,
+                    quantity,
+                    component,
+                    node_tags=nodes or None,
+                    element_tags=elements or None,
+                    cache_key=self._last_result_cache_key,
+                    contour_options=options,
+                )
+        elif result_type == "ShellForce":
+            self.viewport.show_shell_force_contour(
+                self._last_result,
+                str(options.get("component", "Nxx")),
+                element_tags=elements or None,
+                cache_key=self._last_result_cache_key,
+                contour_options=options,
+            )
+        elif result_type == "ShellDeformation":
+            self.viewport.show_shell_deformation_contour(
+                self._last_result,
+                str(options.get("component", "Exx")),
+                element_tags=elements or None,
+                cache_key=self._last_result_cache_key,
+                contour_options=options,
+            )
+
+    def _set_result_extrema_visibility(
+        self,
+        setting: str,
+        checked: bool,
+    ) -> None:
+        result_type = str(
+            getattr(self, "_active_linked_result_type", "") or ""
+        )
+        if result_type not in {
+            "NodalDisplacement",
+            "NodalReaction",
+            "ShellForce",
+            "ShellDeformation",
+        }:
+            self._set_result_contour_controls_enabled(False)
+            return
+        setting = str(setting)
+        if setting not in {"contour_show_min", "contour_show_max"}:
+            return
+        options = dict(
+            getattr(self, "_active_linked_result_options", {}) or {}
+        )
+        options[setting] = bool(checked)
+        self._active_linked_result_options = options
+
+        checkbox = (
+            self.properties_panel.result_contour_show_min
+            if setting == "contour_show_min"
+            else self.properties_panel.result_contour_show_max
+        )
+        checkbox.blockSignals(True)
+        checkbox.setChecked(bool(checked))
+        checkbox.blockSignals(False)
+
+        # Playback intentionally suppresses both extrema actors for
+        # responsiveness. The selected display state is restored on pause.
+        if not self.results_panel.is_motion_playing():
+            self._redraw_active_contour_result()
+
     def _sync_result_ribbon_controls(
         self,
         kind: str,
@@ -4130,6 +4330,9 @@ class MainWindow(QMainWindow):
         self._active_linked_element_scope = set()
         self._active_result_display_kind = None
         self._set_result_display_controls_enabled(False)
+        self._set_result_contour_controls_enabled(False)
+        if hasattr(self, "result_frame_count_ribbon"):
+            self.result_frame_count_ribbon.setEnabled(False)
         fit_action = self.actions.get("fit_result")
         if fit_action is not None:
             fit_action.setEnabled(bool(self._last_result))
@@ -23208,6 +23411,14 @@ class MainWindow(QMainWindow):
             cache_key=result_cache_key,
         )
         self.results_panel.show_solution_result(result_type, options)
+        self._sync_result_contour_ribbon_controls(
+            str(result_type),
+            options,
+        )
+        if hasattr(self, "result_frame_count_ribbon"):
+            self.result_frame_count_ribbon.setEnabled(
+                self.results_panel.has_result_frames()
+            )
         if result_type == "DeformedShape":
             self._sync_result_ribbon_controls(
                 "deformation",
