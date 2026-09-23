@@ -3918,7 +3918,23 @@ class MainWindow(QMainWindow):
         if index is not None and tabs.currentIndex() != index:
             tabs.setCurrentIndex(index)
 
-    def _sync_ribbon_context(self, kinds: set[str]) -> None:
+    @staticmethod
+    def _tree_selection_display_context(
+        kinds: set[str],
+    ) -> tuple[str, str | None]:
+        """Map Model Tree selection to a Mechanical-style display context."""
+        geometry_kinds = {
+            "geometry_root",
+            "planes_root",
+            "sketch_plane",
+            "sketch_plane_global",
+            "points_root",
+            "lines_root",
+            "surfaces_root",
+            "point_geometry",
+            "line_geometry",
+            "surface_geometry",
+        }
         result_kinds = {
             "jobs_root",
             "job",
@@ -3929,16 +3945,38 @@ class MainWindow(QMainWindow):
             "solution_convergence",
             "solver_output",
         }
-        if kinds & result_kinds:
-            self._set_ribbon_tab("Result")
-            return
-        if kinds & {
+        analysis_kinds = {
+            "analyses_root",
             "analysis",
             "analysis_settings",
             "analysis_cyclic_protocol",
+            "recorders_root",
             "recorder",
-        }:
-            self._set_ribbon_tab("Analysis")
+        }
+        selection_kinds = {
+            "named_sets_root",
+            "set",
+        }
+
+        # Geometry is the only branch that owns the CAD/topology display.
+        # Mesh recipes intentionally fall through to FE/Model: selecting
+        # Mesh shows the discretized model, not the CAD-only representation.
+        if kinds and kinds <= geometry_kinds:
+            return "geometry", "Geometry"
+        if kinds & result_kinds:
+            return "fe", "Result"
+        if kinds & analysis_kinds:
+            return "fe", "Analysis"
+        if kinds & selection_kinds:
+            return "fe", "Selection"
+        if kinds:
+            return "fe", "Model"
+        return "fe", None
+
+    def _sync_ribbon_context(self, kinds: set[str]) -> None:
+        _domain, ribbon_tab = self._tree_selection_display_context(kinds)
+        if ribbon_tab is not None:
+            self._set_ribbon_tab(ribbon_tab)
 
     def _build_status_bar(self) -> None:
         self.status_message = QLabel("Ready")
@@ -5326,32 +5364,13 @@ class MainWindow(QMainWindow):
             elif kind == "jobs_root":
                 show_jobs_root = True
 
-        geometry_tree_kinds = {
-            "geometry_root",
-            "planes_root",
-            "sketch_plane",
-            "sketch_plane_global",
-            "points_root",
-            "lines_root",
-            "surfaces_root",
-            "point_geometry",
-            "line_geometry",
-            "surface_geometry",
-            "mesh_root",
-            "line_meshes_root",
-            "surface_meshes_root",
-            "line_mesh_recipe",
-            "surface_mesh_recipe",
-        }
-        geometry_mode = (
-            bool(selected_payload_kinds)
-            and selected_payload_kinds <= geometry_tree_kinds
+        display_domain, _ribbon_tab = (
+            self._tree_selection_display_context(selected_payload_kinds)
         )
+        geometry_mode = display_domain == "geometry"
         if not geometry_mode and self._geometry_sketch_tool_active():
             self._activate_select_tool()
-        self.viewport.set_display_domain(
-            "geometry" if geometry_mode else "fe"
-        )
+        self.viewport.set_display_domain(display_domain)
         line_geometry_tags = {
             int(item.data(0, Qt.UserRole)[1])
             for item in self.tree.selectedItems()
@@ -5489,6 +5508,42 @@ class MainWindow(QMainWindow):
             self._show_job_properties(job_id)
         elif show_jobs_root:
             self._show_jobs_summary()
+        elif len(selected_payload_kinds) == 1:
+            root_kind = next(iter(selected_payload_kinds))
+            root_summary_kinds = {
+                "model_root",
+                "geometry_root",
+                "fe_model_root",
+                "properties_root",
+                "loads_bc_root",
+                "materials_root",
+                "nd_materials_root",
+                "sections_root",
+                "transformations_root",
+                "analyses_root",
+                "constraints_root",
+                "recorders_root",
+                "mass_sources_root",
+                "time_series_root",
+                "load_patterns_root",
+                "planes_root",
+                "points_root",
+                "lines_root",
+                "surfaces_root",
+                "mesh_root",
+                "nodes_root",
+                "elements_root",
+                "boundary_root",
+                "masses_root",
+                "named_sets_root",
+                "line_meshes_root",
+                "surface_meshes_root",
+                "connections_root",
+                "loading_root",
+                "ground_motions_root",
+            }
+            if root_kind in root_summary_kinds:
+                self._show_tree_root_properties(root_kind)
 
     def _wire_selection(self) -> None:
         self.selection.changed.connect(self._selection_changed)
