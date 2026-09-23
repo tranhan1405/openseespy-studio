@@ -224,14 +224,19 @@ def result_choices_for_analysis(
     if kind == "Pushover":
         choices.append(
             ResultChoice(
-                "Charts / History",
+                "Nonlinear Results",
                 "Pushover Capacity Curve",
                 "PushoverCurve",
                 "Pushover Capacity Curve",
                 {},
             )
         )
-    if kind == "Cyclic":
+
+    # Cyclic-response post-processing is capability-based rather than tied
+    # only to the dedicated Cyclic integrator. A Transient analysis may be
+    # driven by a manually defined cyclic loading protocol and still produce
+    # a valid force-displacement loop, reversals and dissipated-energy data.
+    if kind in {"Cyclic", "Transient"}:
         choices.extend(
             [
                 ResultChoice(
