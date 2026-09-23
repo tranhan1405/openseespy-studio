@@ -179,3 +179,31 @@ def test_nodal_history_contour_range_scans_all_frames_and_scope():
         "UY",
         node_tags={2},
     ) == (-0.4, 0.0)
+
+def test_result_frame_payload_can_skip_unused_response_families():
+    result = transient_result()
+    for node_data in result["history"]["nodes"].values():
+        node_data["reaction"] = [
+            [1.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [3.0, 0.0, 0.0],
+        ]
+
+    disp_only = result_frame_payload(
+        result,
+        1,
+        include_displacements=True,
+        include_reactions=False,
+    )
+    assert "node_displacements" in disp_only["final"]
+    assert "node_reactions" not in disp_only["final"]
+
+    reaction_only = result_frame_payload(
+        result,
+        1,
+        include_displacements=False,
+        include_reactions=True,
+    )
+    assert "node_displacements" not in reaction_only["final"]
+    assert "node_reactions" in reaction_only["final"]
+
