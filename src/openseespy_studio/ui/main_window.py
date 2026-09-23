@@ -2185,7 +2185,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "clear_selection",
             "Clear Selection",
-            "select",
+            "clear-selection",
             self.selection.clear,
             "Clear the current node/element selection",
         )
@@ -2438,7 +2438,7 @@ class MainWindow(QMainWindow):
             ("box", "Box", "box"),
             ("polygon", "Polygon", "polygon"),
             ("byid", "By ID", "by-id"),
-            ("bytype", "By Type", "by-id"),
+            ("bytype", "By Type", "by-type"),
         ):
             self._make_action(
                 key,
@@ -2487,14 +2487,14 @@ class MainWindow(QMainWindow):
         self._make_action(
             "hide_selection",
             "Hide Selection",
-            "display",
+            "hide-selection",
             self._hide_selection,
             "Hide the selected nodes/elements",
         )
         self._make_action(
             "isolate_selection",
             "Isolate Selection",
-            "select",
+            "isolate-selection",
             self._isolate_selection,
             "Show only the selected nodes/elements",
         )
@@ -2697,7 +2697,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "moment_curvature",
             "Moment-Curvature...",
-            "analysis",
+            "moment-curvature",
             lambda checked=False: self._run_moment_curvature_workflow(),
             (
                 "Run an isolated zeroLengthSection section test and plot "
@@ -2707,7 +2707,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "hinge_backbone",
             "Hinge Backbone...",
-            "analysis",
+            "hinge-backbone",
             self._open_hinge_backbone,
             (
                 "Convert researcher-identified M-theta or M-kappa backbone "
@@ -2717,7 +2717,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "calibration",
             "Cyclic Calibration...",
-            "analysis",
+            "calibration",
             self._open_calibration,
             "Calibrate model parameters against experimental cyclic data",
         )
@@ -2738,7 +2738,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "export_results",
             "Export Active Job Results...",
-            "save",
+            "export-results",
             self._export_active_job_results,
             "Export the active or latest completed Job results to JSON",
         )
@@ -4987,7 +4987,7 @@ class MainWindow(QMainWindow):
             named_sets.addChild(item)
 
         properties_root = QTreeWidgetItem(["Properties"])
-        properties_root.setIcon(0, studio_icon("material"))
+        properties_root.setIcon(0, studio_icon("properties"))
         properties_root.setData(
             0,
             Qt.UserRole,
@@ -4999,7 +4999,7 @@ class MainWindow(QMainWindow):
         materials_root = QTreeWidgetItem([
             f"Materials ({len(self.project.materials)})"
         ])
-        materials_root.setIcon(0, studio_icon("material"))
+        materials_root.setIcon(0, studio_icon("uniaxial-material"))
         materials_root.setData(0, Qt.UserRole, ("materials_root", None))
         materials_root.setExpanded(True)
         properties_root.addChild(materials_root)
@@ -5009,14 +5009,14 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{material.material_type} [{tag}]  {material.name}"
             ])
-            item.setIcon(0, studio_icon("material"))
+            item.setIcon(0, studio_icon("uniaxial-material"))
             item.setData(0, Qt.UserRole, ("material", tag))
             materials_root.addChild(item)
 
         nd_materials_root = QTreeWidgetItem([
             f"nD Materials ({len(self.project.nd_materials)})"
         ])
-        nd_materials_root.setIcon(0, studio_icon("material"))
+        nd_materials_root.setIcon(0, studio_icon("nd-material"))
         nd_materials_root.setData(
             0,
             Qt.UserRole,
@@ -5030,7 +5030,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{material.material_type} [{tag}]  {material.name}"
             ])
-            item.setIcon(0, studio_icon("material"))
+            item.setIcon(0, studio_icon("nd-material"))
             item.setData(0, Qt.UserRole, ("nd_material", tag))
             nd_materials_root.addChild(item)
 
@@ -5286,7 +5286,7 @@ class MainWindow(QMainWindow):
             ground_motions_root.addChild(item)
 
         analysis = QTreeWidgetItem([f"Analysis ({len(self.project.analyses)})"])
-        analysis.setIcon(0, studio_icon("analysis"))
+        analysis.setIcon(0, studio_icon("analysis-root"))
         analysis.setData(0, Qt.UserRole, ("analyses_root", None))
         analysis.setExpanded(True)
         for tag in sorted(self.project.analyses):
@@ -5319,7 +5319,7 @@ class MainWindow(QMainWindow):
                 protocol_item = QTreeWidgetItem([
                     f"Cyclic Protocol ({len(targets)} targets)"
                 ])
-                protocol_item.setIcon(0, studio_icon("timeseries"))
+                protocol_item.setIcon(0, studio_icon("cyclic-protocol"))
                 protocol_item.setData(
                     0,
                     Qt.UserRole,
@@ -5331,13 +5331,13 @@ class MainWindow(QMainWindow):
             solution = QTreeWidgetItem([
                 f"Result Requests ({len(solution_results)})"
             ])
-            solution.setIcon(0, studio_icon("results"))
+            solution.setIcon(0, studio_icon("result-requests"))
             solution.setData(0, Qt.UserRole, ("solution_root", tag))
             solution.setExpanded(True)
             item.addChild(solution)
 
             information = QTreeWidgetItem(["Analysis Information"])
-            information.setIcon(0, studio_icon("results"))
+            information.setIcon(0, studio_icon("analysis-info"))
             information.setData(
                 0,
                 Qt.UserRole,
@@ -5347,7 +5347,7 @@ class MainWindow(QMainWindow):
             solution.addChild(information)
 
             solver_output = QTreeWidgetItem(["Solver Output"])
-            solver_output.setIcon(0, studio_icon("results"))
+            solver_output.setIcon(0, studio_icon("solver-output"))
             solver_output.setData(
                 0,
                 Qt.UserRole,
@@ -5358,7 +5358,7 @@ class MainWindow(QMainWindow):
             convergence = QTreeWidgetItem([
                 convergence_result_label(settings.test)
             ])
-            convergence.setIcon(0, studio_icon("results"))
+            convergence.setIcon(0, studio_icon("convergence"))
             convergence.setData(
                 0,
                 Qt.UserRole,
@@ -5381,7 +5381,7 @@ class MainWindow(QMainWindow):
             probes_root = QTreeWidgetItem([
                 f"Probes ({len(probes)})"
             ])
-            probes_root.setIcon(0, studio_icon("results"))
+            probes_root.setIcon(0, studio_icon("probes"))
             probes_root.setData(
                 0,
                 Qt.UserRole,
@@ -5430,7 +5430,7 @@ class MainWindow(QMainWindow):
         root.addChild(analysis)
 
         results = QTreeWidgetItem([f"Results / Jobs ({len(self._jobs)})"])
-        results.setIcon(0, studio_icon("results"))
+        results.setIcon(0, studio_icon("jobs"))
         results.setData(0, Qt.UserRole, ("jobs_root", None))
         results.setExpanded(True)
         for job_id in sorted(self._jobs, reverse=True):
@@ -5439,7 +5439,7 @@ class MainWindow(QMainWindow):
                 f"Job {job_id} · {job.analysis_name} "
                 f"({job.analysis_type}) · {job.status}"
             ])
-            item.setIcon(0, studio_icon("results"))
+            item.setIcon(0, studio_icon("job"))
             item.setData(0, Qt.UserRole, ("job", job_id))
             item.setExpanded(True)
             results.addChild(item)
