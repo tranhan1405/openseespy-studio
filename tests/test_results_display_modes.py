@@ -915,3 +915,43 @@ def test_shared_frame_bar_exposes_synced_playback_speed(qapp):
         panel.deleteLater()
         qapp.processEvents()
 
+def test_linked_contour_frame_emit_skips_duplicate_motion_vectors(qapp):
+    panel = ResultsPanel()
+    result = {
+        "analysis": {"type": "Transient"},
+        "history": {
+            "time": [0.0, 0.1],
+            "nodes": {
+                "1": {
+                    "disp": [[0.0, 0.0, 0.0], [0.1, 0.0, 0.0]],
+                    "reaction": [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                }
+            },
+        },
+        "final": {"node_displacements": {"1": [0.1, 0.0, 0.0]}},
+        "convergence": {"steps": []},
+        "modes": {},
+    }
+    motion_calls = []
+    result_calls = []
+    panel.motion_frame_requested.connect(
+        lambda *args: motion_calls.append(args)
+    )
+    panel.result_frame_requested.connect(
+        lambda *args: result_calls.append(args)
+    )
+    try:
+        panel.set_linked_contour_active(True)
+        panel.set_result(result)
+        panel._set_motion_index(1)
+        qapp.processEvents()
+
+        assert result_calls
+        assert result_calls[-1][0] == 1
+        assert not motion_calls
+        assert "t = 0.1 s" in result_calls[-1][1]
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
