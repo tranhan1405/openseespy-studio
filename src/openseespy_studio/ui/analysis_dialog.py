@@ -667,7 +667,7 @@ class AnalysisDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "Analysis Settings",
-                "Transient excitation expects a UniformExcitation pattern.",
+                "Ground-motion excitation expects a UniformExcitation pattern.",
             )
             return
         existing = []
