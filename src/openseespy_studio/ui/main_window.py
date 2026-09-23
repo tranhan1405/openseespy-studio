@@ -2647,57 +2647,57 @@ class MainWindow(QMainWindow):
             self._create_shell_pressure,
             "Create uniform pressure normal to selected shell surfaces",
         )
-        self._make_action("analysis_setup", "Analysis Setup...", "analysis-setup", self._create_analysis, "Create analysis settings")
+        self._make_action("analysis_setup", "Analysis Setup...", "analysis-setup-ribbon", self._create_analysis, "Create analysis settings")
         self._make_action(
             "response_spectrum_analysis",
             "Response Spectrum...",
-            "response-spectrum",
+            "analysis-response-spectrum",
             lambda checked=False: self._create_analysis_of_type("Response Spectrum"),
             "Create a response-spectrum analysis with optional RotD50/RotD100 outputs",
         )
         self._make_action(
             "analysis_template",
             "Analysis Wizard...",
-            "analysis-wizard",
+            "analysis-wizard-ribbon",
             lambda checked=False: self._create_analysis_template("Pushover"),
             "Guided setup that creates analysis, required loading/protocol, and default results",
         )
         self._make_action(
             "modal_template",
             "Modal",
-            "modal",
+            "analysis-modal",
             lambda checked=False: self._create_analysis_template("Modal"),
             "Create a Modal analysis template",
         )
         self._make_action(
             "pushover_template",
             "Pushover",
-            "pushover",
+            "analysis-pushover",
             lambda checked=False: self._create_analysis_template("Pushover"),
             "Create a nonlinear Pushover template",
         )
         self._make_action(
             "cyclic_template",
             "Cyclic",
-            "cyclic",
+            "analysis-cyclic",
             lambda checked=False: self._create_analysis_template("Cyclic"),
             "Create a cyclic displacement-control template",
         )
         self._make_action(
             "nlth_template",
             "NLTH",
-            "nlth",
+            "analysis-nlth",
             lambda checked=False: self._create_analysis_template(
                 "Nonlinear Time History"
             ),
             "Create a nonlinear time-history earthquake template",
         )
-        self._make_action("check_model", "Check Model", "check-model", self._check_model, "Validate the model before analysis")
-        self._make_action("run", "Run", "run-analysis", self._toggle_analysis, "Run / stop model")
+        self._make_action("check_model", "Check Model", "analysis-check", self._check_model, "Validate the model before analysis")
+        self._make_action("run", "Run", "analysis-run", self._toggle_analysis, "Run / stop model")
         self._make_action(
             "moment_curvature",
             "Moment-Curvature...",
-            "moment-curvature",
+            "analysis-moment-curvature",
             lambda checked=False: self._run_moment_curvature_workflow(),
             (
                 "Run an isolated zeroLengthSection section test and plot "
@@ -2707,7 +2707,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "hinge_backbone",
             "Hinge Backbone...",
-            "hinge-backbone",
+            "analysis-hinge-backbone",
             self._open_hinge_backbone,
             (
                 "Convert researcher-identified M-theta or M-kappa backbone "
@@ -2717,14 +2717,14 @@ class MainWindow(QMainWindow):
         self._make_action(
             "calibration",
             "Cyclic Calibration...",
-            "calibration",
+            "analysis-calibration",
             self._open_calibration,
             "Calibrate model parameters against experimental cyclic data",
         )
         self._make_action(
             "plot",
             "Plot",
-            "plot-results",
+            "analysis-plot",
             self._show_plot_menu,
             "Plot results from the selected or latest completed Job",
         )
@@ -3007,26 +3007,41 @@ class MainWindow(QMainWindow):
         self._make_action(
             "results_manager",
             "Tabular Data",
-            "tabular-results",
+            "result-tabular",
             self._show_results_manager,
             "Show completed Jobs and result data",
         )
         self._make_action(
             "clear_result",
             "Clear Result",
-            "clear-result",
+            "result-clear",
             self._clear_result_display,
             "Clear the active result overlay",
         )
-        for key, label, mode in (
-            ("result_deformed", "Deformed", "deformed_only"),
-            ("result_both", "Both", "both"),
-            ("result_undeformed", "Undeformed", "undeformed_only"),
+        for key, label, mode, icon_name in (
+            (
+                "result_deformed",
+                "Deformed",
+                "deformed_only",
+                "result-display-deformed",
+            ),
+            (
+                "result_both",
+                "Both",
+                "both",
+                "result-display-both",
+            ),
+            (
+                "result_undeformed",
+                "Undeformed",
+                "undeformed_only",
+                "result-display-undeformed",
+            ),
         ):
             action = self._make_action(
                 key,
                 label,
-                "plot",
+                icon_name,
                 lambda checked=False, value=mode: (
                     self._set_result_display_mode(value)
                 ),
@@ -3045,7 +3060,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "fit_result",
             "Fit Result",
-            "box",
+            "result-fit",
             self._fit_active_result,
             "Fit the active result/model in the viewport",
         )
@@ -3053,7 +3068,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "solver_output_view",
             "Solver Output",
-            "solver-output",
+            "analysis-solver-output",
             self._show_solver_output,
             "Show solver output console",
         )
