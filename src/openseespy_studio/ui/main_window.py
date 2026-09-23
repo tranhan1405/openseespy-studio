@@ -23177,6 +23177,9 @@ class MainWindow(QMainWindow):
 
         self._last_result = payload
         self._last_result_cache_key = result_cache_key
+        self.results_panel.set_linked_contour_active(
+            result_type in {"NodalDisplacement", "NodalReaction"}
+        )
         fit_action = self.actions.get("fit_result")
         if fit_action is not None:
             fit_action.setEnabled(True)
