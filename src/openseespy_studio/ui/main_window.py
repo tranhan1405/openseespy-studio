@@ -2232,7 +2232,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "sketch_plane_offset",
             "Offset Plane...",
-            "offset-plane",
+            "sketch-plane",
             self._create_offset_sketch_plane,
             "Create a persistent construction plane offset from global XY/XZ/YZ",
         )
@@ -2246,14 +2246,14 @@ class MainWindow(QMainWindow):
         self._make_action(
             "point_geometry",
             "Point...",
-            "geometry-point",
+            "sketch-point",
             self._create_point_geometry,
             "Create reusable preprocessing Point geometry",
         )
         self._make_action(
             "line_geometry_pick",
             "Draw Polyline",
-            "draw-polyline",
+            "sketch-line",
             self._activate_geometry_line_pick_tool,
             "Draw continuous Geometry Lines on the active sketch plane with snapping",
             checkable=True,
@@ -2268,7 +2268,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "surface_geometry_pick",
             "Draw Rectangle",
-            "draw-rectangle",
+            "sketch-rectangle",
             self._activate_geometry_surface_pick_tool,
             "Draw a rectangular Geometry Surface by two diagonal clicks on the active sketch plane",
             checkable=True,
@@ -2283,7 +2283,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "geometry_trim_pick",
             "Trim",
-            "trim",
+            "sketch-trim",
             self._activate_geometry_trim_tool,
             "Click the side of a Geometry Line to trim, then click the cutting Line",
             checkable=True,
@@ -2291,7 +2291,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "geometry_extend_pick",
             "Extend",
-            "extend",
+            "sketch-extend",
             self._activate_geometry_extend_tool,
             "Click the endpoint side of a Geometry Line to extend, then click the boundary Line",
             checkable=True,
@@ -2299,42 +2299,42 @@ class MainWindow(QMainWindow):
         self._make_action(
             "geometry_split",
             "Split / Divide...",
-            "split",
+            "sketch-split",
             self._split_selected_geometry_line,
             "Split one selected Geometry Line into real topology segments",
         )
         self._make_action(
             "geometry_join",
             "Join",
-            "join",
+            "sketch-join",
             self._join_selected_geometry_lines,
             "Join selected contiguous collinear Geometry Lines",
         )
         self._make_action(
             "geometry_split_by_line",
             "Split by Line",
-            "split-by-line",
+            "sketch-split-by-line",
             self._split_selected_geometry_lines_at_intersection,
             "Split two selected Geometry Lines at their finite intersection",
         )
         self._make_action(
             "geometry_fillet",
             "Fillet...",
-            "fillet",
+            "sketch-rounded-corner",
             self._fillet_selected_geometry_lines,
             "Create a tangent segmented fillet between two connected Geometry Lines",
         )
         self._make_action(
             "geometry_chamfer",
             "Chamfer...",
-            "chamfer",
+            "sketch-chamfer",
             self._chamfer_selected_geometry_lines,
             "Create a straight chamfer between two connected Geometry Lines",
         )
         self._make_action(
             "geometry_trim_multiple",
             "Trim Multiple",
-            "trim",
+            "sketch-trim-multiple",
             self._activate_geometry_batch_trim_tool,
             "Use selected Geometry Lines as subjects, then click one cutting Line",
             checkable=True,
@@ -2342,7 +2342,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "geometry_extend_multiple",
             "Extend Multiple",
-            "extend",
+            "sketch-extend-multiple",
             self._activate_geometry_batch_extend_tool,
             "Use selected Geometry Lines as subjects, then click one boundary Line",
             checkable=True,
@@ -2350,7 +2350,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "geometry_snap",
             "Snap",
-            "geometry-snap",
+            "sketch-snap",
             self._toggle_geometry_snap,
             "Toggle endpoint, midpoint, intersection and orthogonal inference snapping",
             checkable=True,
@@ -2359,7 +2359,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "geometry_grid",
             "Grid",
-            "grid",
+            "sketch-grid",
             self._toggle_geometry_grid,
             "Show or hide the active Geometry sketch grid",
             checkable=True,
@@ -2368,7 +2368,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "origin_axes",
             "Origin OXYZ",
-            "origin-axes",
+            "sketch-origin",
             self._toggle_origin_axes,
             "Show or hide the global world-space origin triad at (0, 0, 0)",
             checkable=True,
@@ -2377,7 +2377,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "surface_mesh_overlay",
             "Shell Mesh Overlay",
-            "surface-mesh",
+            "sketch-mesh-preview",
             self._toggle_surface_mesh_overlay,
             "Show generated Shell FE mesh as a non-pickable overlay in Geometry mode",
             checkable=True,
@@ -2472,7 +2472,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "measure_distance",
             "Distance",
-            "ruler",
+            "sketch-measure",
             self._activate_measure_distance,
             "Measure distance and XYZ offsets with endpoint, midpoint, intersection, nearest-line, orthogonal and grid snapping",
             checkable=True,
@@ -2480,7 +2480,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "clear_measurements",
             "Clear Measurements",
-            "clear-measurements",
+            "sketch-clear-measurements",
             self._clear_measurements,
             "Remove all measurement overlays from the viewport",
         )
@@ -3348,7 +3348,7 @@ class MainWindow(QMainWindow):
         geometry_plan_view_button.setObjectName("RibbonLargeButton")
         geometry_plan_view_button.setDefaultAction(self.actions["xy"])
         geometry_plan_view_button.setText("Plan View")
-        geometry_plan_view_button.setIcon(self.actions["xy"].icon())
+        geometry_plan_view_button.setIcon(studio_icon("sketch-plan-view"))
         geometry_plan_view_button.setIconSize(QSize(28, 28))
         geometry_plan_view_button.setToolButtonStyle(
             Qt.ToolButtonTextUnderIcon
