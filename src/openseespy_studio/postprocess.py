@@ -169,48 +169,53 @@ TIME_HISTORY_NODE_KEYS: dict[str, str] = {
 def cyclic_hysteresis_curve(
     result: dict[str, Any] | None,
 ) -> tuple[list[float], list[float], int | None, int | None]:
-    """Return control displacement and applied base shear for Cyclic analysis."""
+    """Return a usable global force-displacement response path.
+
+    The response is intentionally analysis-type agnostic. Dedicated Cyclic
+    analyses and Transient analyses driven by a manually defined cyclic load
+    history share the same post-processing path when the required response
+    histories are available.
+    """
     if not isinstance(result, dict):
         return [], [], None, None
+
+    (
+        displacement,
+        force,
+        node,
+        dof,
+        _force_source,
+        _force_node,
+        _force_dof,
+    ) = force_displacement_curve(
+        result,
+        force_source="Base shear",
+    )
+    if not displacement or not force:
+        return [], [], node, dof
+
+    x = list(displacement)
+    y = list(force)
     analysis = result.get("analysis", {})
-    history = result.get("history", {})
-    if not isinstance(analysis, dict) or not isinstance(history, dict):
-        return [], [], None, None
-    if str(analysis.get("type", "")) != "Cyclic":
-        return [], [], None, None
+    analysis_type = (
+        str(analysis.get("type", ""))
+        if isinstance(analysis, dict)
+        else ""
+    )
 
-    try:
-        node = int(history.get("monitor_node", analysis.get("control_node")))
-    except (TypeError, ValueError):
-        node = None
-    try:
-        dof = int(history.get("control_dof", analysis.get("control_dof", 1)))
-    except (TypeError, ValueError):
-        dof = 1
-    if dof not in range(1, 7):
-        dof = 1
-
-    rows = history.get("displacement", [])
-    shear = history.get("base_shear", [])
-    if not isinstance(rows, (list, tuple)) or not isinstance(shear, (list, tuple)):
-        return [], [], node, dof
-
-    x: list[float] = [0.0]
-    y: list[float] = [0.0]
-    index = dof - 1
-    for row, raw_shear in zip(rows, shear):
-        if not isinstance(row, (list, tuple)) or len(row) <= index:
-            continue
-        try:
-            displacement = float(row[index])
-            base_shear = -float(raw_shear)
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(displacement) and math.isfinite(base_shear):
-            x.append(displacement)
-            y.append(base_shear)
-    if len(x) == 1:
-        return [], [], node, dof
+    # Preserve the historical dedicated-Cyclic convention, where the
+    # undeformed origin is shown even when the first recorder row starts after
+    # the first converged increment. Do not fabricate an origin for Transient
+    # histories, which may legitimately begin from a non-zero equilibrium
+    # state.
+    if (
+        analysis_type == "Cyclic"
+        and x
+        and y
+        and (abs(float(x[0])) > 1.0e-15 or abs(float(y[0])) > 1.0e-15)
+    ):
+        x.insert(0, 0.0)
+        y.insert(0, 0.0)
     return x, y, node, dof
 
 
@@ -1005,7 +1010,7 @@ def column_cyclic_reversal_metrics(
     specimen = result.get("specimen", {})
     if (
         not isinstance(analysis, dict)
-        or str(analysis.get("type", "")) != "Cyclic"
+        or str(analysis.get("type", "")) not in {"Cyclic", "Transient"}
         or not isinstance(history, dict)
         or not isinstance(specimen, dict)
         or specimen.get("kind") != "test-column"
@@ -2646,12 +2651,6 @@ def force_displacement_curve(
     if not isinstance(history, dict):
         history = {}
 
-    if displacement_node is None:
-        raw = history.get("monitor_node", analysis.get("control_node"))
-        try:
-            displacement_node = int(raw) if raw is not None else None
-        except (TypeError, ValueError):
-            displacement_node = None
     if displacement_dof is None:
         raw = history.get("control_dof", analysis.get("control_dof", 1))
         try:
@@ -2664,6 +2663,36 @@ def force_displacement_curve(
         displacement_dof = 1
     if displacement_dof not in range(1, 7):
         displacement_dof = 1
+
+    if displacement_node is None:
+        raw = history.get("monitor_node", analysis.get("control_node"))
+        try:
+            displacement_node = int(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            displacement_node = None
+
+    if displacement_node is None:
+        # Transient analyses do not always define a formal control node.
+        # Prefer the recorded node with the largest response amplitude in the
+        # selected DOF; for conventional frame NLTH this naturally selects a
+        # roof/monitor response instead of a restrained support node.
+        best_node: int | None = None
+        best_peak = -1.0
+        for candidate in time_history_node_tags(result):
+            _time, candidate_values = time_history_series(
+                result,
+                "Displacement",
+                node_tag=int(candidate),
+                dof=displacement_dof,
+            )
+            peak = max(
+                (abs(float(value)) for value in candidate_values),
+                default=-1.0,
+            )
+            if peak > best_peak:
+                best_peak = peak
+                best_node = int(candidate)
+        displacement_node = best_node
 
     normalized_source = str(force_source or "Base shear").strip().lower()
     source_label = (
