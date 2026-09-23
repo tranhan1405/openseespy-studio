@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 42
+PROJECT_FORMAT_VERSION = 43
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -1330,13 +1330,16 @@ def resolve_transformation_vecxz(
     model: StructuralModel,
     transformation: TransformationData,
 ) -> tuple[float, float, float]:
-    """Return the effective OpenSees vecxz for a transformation.
+    """Return a stable effective OpenSees vecxz for one transformation.
 
-    Manual mode returns the user vector unchanged. Auto mode inspects every
-    frame member using the transformation and chooses one deterministic
-    reference direction that stays safely away from all member axes. Common
-    building frames therefore resolve naturally: horizontal beams prefer
-    Global Z and vertical columns prefer Global X.
+    Auto mode follows a fixed building-frame convention instead of searching
+    for an arbitrary "best" vector: Global Z is the preferred up direction;
+    Global X, then Global Y, are deterministic fallbacks when the preferred
+    direction is too close to a member axis. The same reference must be safe
+    for every frame member sharing the transformation tag. If one Auto tag
+    mixes incompatible member families (for example X-, Y-, and Z-aligned
+    members), SARE requires separate Auto transformations rather than silently
+    rotating section axes.
     """
     if (
         transformation.orientation_mode != "auto"
@@ -1368,54 +1371,34 @@ def resolve_transformation_vecxz(
     if not member_axes:
         return tuple(float(value) for value in transformation.vecxz)
 
-    preferred: list[tuple[float, float, float]] = [
-        (0.0, 0.0, 1.0),  # intuitive for horizontal beams
-        (1.0, 0.0, 0.0),  # intuitive fallback for vertical columns
-        (0.0, 1.0, 0.0),
-        (1.0, 1.0, 1.0),
-        (1.0, 1.0, 0.0),
-        (1.0, -1.0, 0.0),
-        (1.0, 0.0, 1.0),
-        (1.0, 0.0, -1.0),
-        (0.0, 1.0, 1.0),
-        (0.0, 1.0, -1.0),
-        (1.0, 1.0, -1.0),
-        (1.0, -1.0, 1.0),
-        (-1.0, 1.0, 1.0),
-    ]
-    # Add more pairwise-distinct directions than there are member axes.
-    # Since each member can be parallel to at most one such direction, at
-    # least one candidate is guaranteed not to be parallel to any member.
-    preferred.extend(
-        (1.0, float(index), float(index * index + 1))
-        for index in range(1, len(member_axes) + 3)
+    # Keep the preferred up direction until the geometry is genuinely close
+    # to the singular case. This avoids orientation changes from small model
+    # perturbations while still protecting OpenSees from near-parallel vecxz.
+    min_sine = math.sin(math.radians(5.0))
+    candidates = (
+        (0.0, 0.0, 1.0),  # Global Z: normal beam / inclined-member up
+        (1.0, 0.0, 0.0),  # Global X: vertical-column fallback
+        (0.0, 1.0, 0.0),  # Global Y: secondary deterministic fallback
     )
-
-    best_vector: tuple[float, float, float] | None = None
-    best_clearance = -1.0
-    for raw in preferred:
-        norm = math.sqrt(sum(value * value for value in raw))
-        candidate = tuple(value / norm for value in raw)
-        clearance = min(
+    for candidate in candidates:
+        if all(
             math.sqrt(max(
                 0.0,
                 1.0 - sum(
                     candidate[index] * axis[index]
                     for index in range(3)
                 ) ** 2,
-            ))
+            )) >= min_sine
             for axis in member_axes
-        )
-        if clearance > best_clearance + 1.0e-12:
-            best_vector = candidate
-            best_clearance = clearance
+        ):
+            return candidate
 
-    if best_vector is None or best_clearance <= 1.0e-10:
-        raise ValueError(
-            f"Could not resolve Auto orientation for transformation "
-            f"{transformation.tag}."
-        )
-    return best_vector
+    raise ValueError(
+        "Auto orientation cannot preserve a stable Global-Up convention for "
+        f"transformation {transformation.tag} because it is shared by "
+        "incompatible member directions. Assign separate Auto "
+        "transformations to those member families, or use Manual orientation."
+    )
 
 
 @dataclass
@@ -1980,6 +1963,7 @@ class ElementLoadData:
     gravity: tuple[float, float, float] = (0.0, 0.0, -9.81)
     density_override: float = 0.0
     pressure: float = 0.0
+    coordinate_system: str = "local"
 
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Element load tag")
@@ -2003,6 +1987,9 @@ class ElementLoadData:
         self.gravity = tuple(float(value) for value in self.gravity)
         self.density_override = float(self.density_override)
         self.pressure = float(self.pressure)
+        self.coordinate_system = str(
+            self.coordinate_system or "local"
+        ).strip().lower()
 
         if self.tag <= 0:
             raise ValueError("Element load tag must be positive.")
@@ -2015,6 +2002,10 @@ class ElementLoadData:
         }:
             raise ValueError(
                 f"Unsupported element load type: {self.load_type}"
+            )
+        if self.coordinate_system not in {"local", "global"}:
+            raise ValueError(
+                "Beam-load coordinate system must be Local or Global."
             )
         if len(self.gravity) != 3:
             raise ValueError("Gravity vector needs three components.")
@@ -2054,6 +2045,7 @@ class ElementLoadData:
             "gravity": list(self.gravity),
             "density_override": self.density_override,
             "pressure": self.pressure,
+            "coordinate_system": self.coordinate_system,
         }
 
     @classmethod
@@ -2079,6 +2071,8 @@ class ElementLoadData:
             ),
             density_override=float(data.get("density_override", 0.0)),
             pressure=float(data.get("pressure", 0.0)),
+            # Existing projects stored beam components in local axes.
+            coordinate_system=str(data.get("coordinate_system", "local")),
         )
 
 

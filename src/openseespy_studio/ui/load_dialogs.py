@@ -955,8 +955,8 @@ class ElementLoadDialog(QDialog):
             else {"Uniform", "Point", "SelfWeight", "SurfacePressure"}
         )
         for label, value in (
-            ("Uniform (local axes)", "Uniform"),
-            ("Point (local axes)", "Point"),
+            ("Uniform distributed", "Uniform"),
+            ("Point", "Point"),
             ("Self Weight (global gravity)", "SelfWeight"),
             ("Shell Surface Pressure (normal)", "SurfacePressure"),
         ):
@@ -973,13 +973,32 @@ class ElementLoadDialog(QDialog):
         form.addRow("Element:", self.element)
         form.addRow("Type:", self.kind)
 
+        self.coordinate_system = QComboBox()
+        self.coordinate_system.addItem("Global XYZ", "global")
+        self.coordinate_system.addItem("Local xyz", "local")
+        coordinate_value = (
+            load.coordinate_system if load is not None else "global"
+        )
+        coordinate_index = self.coordinate_system.findData(coordinate_value)
+        self.coordinate_system.setCurrentIndex(
+            coordinate_index if coordinate_index >= 0 else 0
+        )
+        self.coordinate_system.setToolTip(
+            "Global keeps the load direction fixed in model XYZ. Local follows "
+            "the member local x/y/z axes defined by its geometric transformation."
+        )
+        form.addRow("Coordinate system:", self.coordinate_system)
+
         self.wx = _spin(load.wx if load else 0.0)
         self.wy = _spin(load.wy if load else 0.0)
         self.wz = _spin(load.wz if load else 0.0)
         line_unit = self.unit_system.line_load_label
-        form.addRow(f"Uniform Wx (local x) [{line_unit}]:", self.wx)
-        form.addRow(f"Uniform Wy (local y) [{line_unit}]:", self.wy)
-        form.addRow(f"Uniform Wz (local z) [{line_unit}]:", self.wz)
+        self.uniform_x_label = QLabel()
+        self.uniform_y_label = QLabel()
+        self.uniform_z_label = QLabel()
+        form.addRow(self.uniform_x_label, self.wx)
+        form.addRow(self.uniform_y_label, self.wy)
+        form.addRow(self.uniform_z_label, self.wz)
 
         self.px = _spin(load.px if load else 0.0)
         self.py = _spin(load.py if load else 0.0)
@@ -990,10 +1009,13 @@ class ElementLoadDialog(QDialog):
             1.0,
         )
         force_unit = self.unit_system.force
-        form.addRow(f"Point Px (local x) [{force_unit}]:", self.px)
-        form.addRow(f"Point Py (local y) [{force_unit}]:", self.py)
-        form.addRow(f"Point Pz (local z) [{force_unit}]:", self.pz)
-        form.addRow("Location x/L:", self.x_over_l)
+        self.point_x_label = QLabel()
+        self.point_y_label = QLabel()
+        self.point_z_label = QLabel()
+        form.addRow(self.point_x_label, self.px)
+        form.addRow(self.point_y_label, self.py)
+        form.addRow(self.point_z_label, self.pz)
+        form.addRow("Location x/L along member:", self.x_over_l)
 
         gravity = load.gravity if load else (0.0, 0.0, -9.81)
         self.gx = _spin(gravity[0])
@@ -1023,8 +1045,12 @@ class ElementLoadDialog(QDialog):
             "density. Density [kg/m³] and gravity [m/s²] are physical SI "
             "inputs; Studio converts them automatically and generates "
             f"self-weight in [{self.unit_system.line_load_label}]. "
-            "Shell Surface Pressure uses the shell node ordering: positive "
-            "acts outward along the element normal, negative inward."
+            "Uniform and Point loads can be entered in Global XYZ or Local "
+            "member xyz; SARE converts Global components to OpenSees local "
+            "beam-load components during export. Self Weight always uses the "
+            "global gravity vector. Shell Surface Pressure uses the shell node "
+            "ordering: positive acts outward along the element normal, "
+            "negative inward."
         )
         note.setWordWrap(True)
         root.addWidget(note)
@@ -1037,6 +1063,7 @@ class ElementLoadDialog(QDialog):
         root.addWidget(buttons)
 
         self.kind.currentIndexChanged.connect(self._sync)
+        self.coordinate_system.currentIndexChanged.connect(self._sync)
         self._sync()
 
     def _create_pattern_dependency(self) -> None:
@@ -1058,6 +1085,27 @@ class ElementLoadDialog(QDialog):
         point = kind == "Point"
         self_weight = kind == "SelfWeight"
         surface_pressure = kind == "SurfacePressure"
+        directional = uniform or point
+        self.coordinate_system.setEnabled(directional)
+
+        coordinate = str(self.coordinate_system.currentData() or "global")
+        global_axes = coordinate == "global"
+        line_unit = self.unit_system.line_load_label
+        force_unit = self.unit_system.force
+        if global_axes:
+            self.uniform_x_label.setText(f"Uniform GX (global X) [{line_unit}]:")
+            self.uniform_y_label.setText(f"Uniform GY (global Y) [{line_unit}]:")
+            self.uniform_z_label.setText(f"Uniform GZ (global Z) [{line_unit}]:")
+            self.point_x_label.setText(f"Point GX (global X) [{force_unit}]:")
+            self.point_y_label.setText(f"Point GY (global Y) [{force_unit}]:")
+            self.point_z_label.setText(f"Point GZ (global Z) [{force_unit}]:")
+        else:
+            self.uniform_x_label.setText(f"Uniform Wx (local x) [{line_unit}]:")
+            self.uniform_y_label.setText(f"Uniform Wy (local y) [{line_unit}]:")
+            self.uniform_z_label.setText(f"Uniform Wz (local z) [{line_unit}]:")
+            self.point_x_label.setText(f"Point Px (local x) [{force_unit}]:")
+            self.point_y_label.setText(f"Point Py (local y) [{force_unit}]:")
+            self.point_z_label.setText(f"Point Pz (local z) [{force_unit}]:")
 
         for widget in (self.wx, self.wy, self.wz):
             widget.setEnabled(uniform)
@@ -1091,6 +1139,9 @@ class ElementLoadDialog(QDialog):
             ),
             density_override=self.density.value(),
             pressure=self.pressure.value(),
+            coordinate_system=str(
+                self.coordinate_system.currentData() or "global"
+            ),
         )
 
     def _accept(self):

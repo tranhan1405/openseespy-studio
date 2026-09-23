@@ -73,8 +73,8 @@ class TransformationDialog(QDialog):
             mode_index if mode_index >= 0 else 0
         )
         self.orientation_mode.setToolTip(
-            "Auto lets SARE choose a safe common reference direction from "
-            "the frame members using this transformation. Choose Manual "
+            "Auto uses a stable Global Z up direction, with deterministic Global X/Y "
+            "fallback only near parallel member directions. Choose Manual "
             "only when you need explicit section orientation control."
         )
 

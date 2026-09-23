@@ -13540,6 +13540,7 @@ class MainWindow(QMainWindow):
                     element_tag=element_tag,
                     load_type="SurfacePressure",
                     pressure=template.pressure,
+                    coordinate_system=template.coordinate_system,
                 )
                 self.project.add_element_load(load)
                 created.append(load.tag)
@@ -13801,17 +13802,31 @@ class MainWindow(QMainWindow):
             ("Type", load.load_type),
         ]
         if load.load_type == "Uniform":
+            coordinate = (
+                "Global XYZ"
+                if load.coordinate_system == "global"
+                else "Local xyz"
+            )
+            axis_prefix = "Global" if load.coordinate_system == "global" else "Local"
             rows.extend([
-                ("Wx", f"{load.wx:g}"),
-                ("Wy", f"{load.wy:g}"),
-                ("Wz", f"{load.wz:g}"),
+                ("Coordinate System", coordinate),
+                (f"{axis_prefix} X", f"{load.wx:g}"),
+                (f"{axis_prefix} Y", f"{load.wy:g}"),
+                (f"{axis_prefix} Z", f"{load.wz:g}"),
             ])
         elif load.load_type == "Point":
+            coordinate = (
+                "Global XYZ"
+                if load.coordinate_system == "global"
+                else "Local xyz"
+            )
+            axis_prefix = "Global" if load.coordinate_system == "global" else "Local"
             rows.extend([
-                ("Px", f"{load.px:g}"),
-                ("Py", f"{load.py:g}"),
-                ("Pz", f"{load.pz:g}"),
-                ("x/L", f"{load.x_over_l:g}"),
+                ("Coordinate System", coordinate),
+                (f"{axis_prefix} X", f"{load.px:g}"),
+                (f"{axis_prefix} Y", f"{load.py:g}"),
+                (f"{axis_prefix} Z", f"{load.pz:g}"),
+                ("x/L along member", f"{load.x_over_l:g}"),
             ])
         elif load.load_type == "SurfacePressure":
             unit_system = UnitSystem.from_mapping(self.project.units)

@@ -5420,17 +5420,26 @@ class ModelViewport(QWidget):
         if transformation is None:
             return None
         try:
+            if load.load_type == "Uniform":
+                values = (load.wx, load.wy, load.wz)
+                prefix = "w"
+            elif load.load_type == "Point":
+                values = (load.px, load.py, load.pz)
+                prefix = "P"
+            else:
+                values = None
+                prefix = "w"
+
+            if values is not None and load.coordinate_system == "global":
+                return np.asarray(values, dtype=float), prefix
+
             local_x, local_y, local_z = element_local_axes(
                 self._model,
                 element,
                 transformation,
             )
-            if load.load_type == "Uniform":
-                local = (load.wx, load.wy, load.wz)
-                prefix = "w"
-            elif load.load_type == "Point":
-                local = (load.px, load.py, load.pz)
-                prefix = "P"
+            if values is not None:
+                local = values
             else:
                 local = resolve_self_weight_local(
                     load,
@@ -5440,7 +5449,6 @@ class ModelViewport(QWidget):
                     self._transformations,
                     self._units,
                 )
-                prefix = "w"
         except ValueError:
             return None
 
@@ -5836,7 +5844,7 @@ class ModelViewport(QWidget):
                     arrows.append(arrow)
                 unit = force_unit
 
-            local_vector = (
+            input_vector = (
                 (load.wx, load.wy, load.wz)
                 if load.load_type == "Uniform"
                 else (load.px, load.py, load.pz)
@@ -5846,10 +5854,15 @@ class ModelViewport(QWidget):
             title = (
                 f"Elem {load.element_tag} · {load.load_type}"
             )
-            if local_vector is not None:
+            if input_vector is not None:
+                coordinate_label = (
+                    "global"
+                    if load.coordinate_system == "global"
+                    else "local"
+                )
                 title += "\n" + self._format_vector(
-                    f"{prefix}_local",
-                    local_vector,
+                    f"{prefix}_{coordinate_label}",
+                    input_vector,
                     unit,
                 )
             elif load.load_type == "SurfacePressure":

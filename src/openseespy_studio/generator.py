@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
-from .beam_loads import resolve_self_weight_local
+from .beam_loads import (
+    resolve_element_load_local_components,
+    resolve_self_weight_local,
+)
 from .units import UnitSystem
 from .model import SHELL_ELEMENT_TYPES, StructuralModel
 from .project import MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, resolve_transformation_vecxz
@@ -817,12 +820,21 @@ def element_load_to_openseespy(
     units: dict[str, str] | None = None,
 ) -> str:
     if load.load_type == "Uniform":
-        wx, wy, wz = load.wx, load.wy, load.wz
+        wx, wy, wz = resolve_element_load_local_components(
+            load,
+            model,
+            transformations or {},
+        )
     elif load.load_type == "Point":
+        px, py, pz = resolve_element_load_local_components(
+            load,
+            model,
+            transformations or {},
+        )
         return (
             "ops.eleLoad('-ele', "
             f"{load.element_tag}, '-type', '-beamPoint', "
-            f"{load.py:g}, {load.pz:g}, {load.x_over_l:g}, {load.px:g})"
+            f"{py:g}, {pz:g}, {load.x_over_l:g}, {px:g})"
         )
     elif load.load_type == "SelfWeight":
         wx, wy, wz = resolve_self_weight_local(

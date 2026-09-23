@@ -52,7 +52,7 @@ def test_auto_orientation_horizontal_xy_frame_prefers_global_z():
     assert resolve_transformation_vecxz(model, transformation) == (0.0, 0.0, 1.0)
 
 
-def test_auto_orientation_mixed_xyz_members_is_safe_for_all():
+def test_auto_orientation_mixed_xyz_requires_separate_member_families():
     model = StructuralModel()
     model.add_node(1, 0.0, 0.0, 0.0)
     model.add_node(2, 1.0, 0.0, 0.0)
@@ -63,17 +63,16 @@ def test_auto_orientation_mixed_xyz_members_is_safe_for_all():
     transformation = TransformationData(
         8, "Auto", "Linear", orientation_mode="auto"
     )
-    vec = resolve_transformation_vecxz(model, transformation)
 
-    assert all(abs(value) > 0.0 for value in vec)
-    for node_j in (2, 3, 4):
-        axis = model.nodes[node_j].xyz
-        cross = (
-            vec[1] * axis[2] - vec[2] * axis[1],
-            vec[2] * axis[0] - vec[0] * axis[2],
-            vec[0] * axis[1] - vec[1] * axis[0],
+    try:
+        resolve_transformation_vecxz(model, transformation)
+    except ValueError as exc:
+        assert "separate Auto transformations" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected mixed XYZ member families to require separate Auto "
+            "transformations."
         )
-        assert math.sqrt(sum(value * value for value in cross)) > 1.0e-6
 
 
 def test_auto_orientation_exports_resolved_vecxz_and_validates_cleanly():
@@ -104,3 +103,15 @@ def test_auto_orientation_exports_resolved_vecxz_and_validates_cleanly():
         and issue.severity == "ERROR"
     ]
     assert errors == []
+
+
+def test_auto_orientation_small_beam_inclination_keeps_global_z_up():
+    model = StructuralModel()
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 4.0, 0.0, 0.2)
+    model.add_element(1, 1, 2, section_tag=1, transf_tag=8)
+    transformation = TransformationData(
+        8, "Auto Inclined Beam", "Linear", orientation_mode="auto"
+    )
+
+    assert resolve_transformation_vecxz(model, transformation) == (0.0, 0.0, 1.0)

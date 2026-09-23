@@ -548,3 +548,97 @@ def test_generated_script_declares_consistent_project_units():
 
     assert "# Consistent model units: m, kN, s" in script
     assert "Material stress/modulus inputs are stored in Pa" in script
+
+
+def test_legacy_element_load_coordinate_system_remains_local():
+    restored = ElementLoadData.from_dict({
+        "tag": 1,
+        "name": "Legacy UDL",
+        "pattern_tag": 1,
+        "element_tag": 5,
+        "load_type": "Uniform",
+        "wy": -2.0,
+    })
+    assert restored.coordinate_system == "local"
+
+
+def test_global_uniform_load_is_projected_to_member_local_axes():
+    model = StructuralModel()
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 2.0, 0.0, 0.0)
+    model.add_element(1, 1, 2, section_tag=1, transf_tag=1)
+    transformations = {
+        1: TransformationData(
+            1, "Beam", "Linear", (0.0, 0.0, 1.0)
+        )
+    }
+    load = ElementLoadData(
+        1,
+        "Global Down",
+        1,
+        1,
+        "Uniform",
+        wx=0.0,
+        wy=0.0,
+        wz=-10.0,
+        coordinate_system="global",
+    )
+
+    text = element_load_to_openseespy(
+        load,
+        model,
+        transformations=transformations,
+    )
+
+    assert text == (
+        "ops.eleLoad('-ele', 1, '-type', '-beamUniform', 0, -10, 0)"
+    )
+
+
+def test_global_point_load_is_projected_to_member_local_axes():
+    model = StructuralModel()
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0, 3.0)
+    model.add_element(1, 1, 2, section_tag=1, transf_tag=1)
+    transformations = {
+        1: TransformationData(
+            1, "Column", "Linear", (1.0, 0.0, 0.0)
+        )
+    }
+    load = ElementLoadData(
+        1,
+        "Global Vertical",
+        1,
+        1,
+        "Point",
+        px=0.0,
+        py=0.0,
+        pz=-12.0,
+        x_over_l=0.4,
+        coordinate_system="global",
+    )
+
+    text = element_load_to_openseespy(
+        load,
+        model,
+        transformations=transformations,
+    )
+
+    assert text == (
+        "ops.eleLoad('-ele', 1, '-type', '-beamPoint', 0, 0, 0.4, -12)"
+    )
+
+
+def test_global_element_load_coordinate_system_round_trip():
+    load = ElementLoadData(
+        3,
+        "Global UDL",
+        1,
+        2,
+        "Uniform",
+        wz=-4.0,
+        coordinate_system="global",
+    )
+    restored = ElementLoadData.from_dict(load.to_dict())
+    assert restored.coordinate_system == "global"
+    assert restored.wz == -4.0
