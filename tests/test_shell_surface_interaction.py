@@ -118,9 +118,12 @@ def test_surface_context_exposes_multi_surface_and_fe_bridge():
     source = inspect.getsource(MainWindow._show_tree_context_menu)
 
     assert "_selected_surface_geometry_tags" in source
-    assert "Mesh / Remesh" in source
-    assert "Delete Generated Meshes" in source
-    assert "Flip Normals" in source
+    assert 'if kind == "surface_mesh_recipe"' in source
+    assert '"Generate Mesh"' in source
+    assert '"Remesh"' in source
+    assert 'menu.addAction("Delete Generated Mesh")' in source
+    assert '"Flip Surface Normal"' in source
+    assert "Flip Normals (" in source
     assert "Select Generated FE" in source
     assert "_select_generated_fe_for_surfaces" in source
     assert "surface_mesh_overlay" in source
