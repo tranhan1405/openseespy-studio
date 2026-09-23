@@ -174,6 +174,7 @@ class ModelViewport(QWidget):
         self._geometry_sketch_normal = np.asarray((0.0, 0.0, 1.0), dtype=float)
         self._geometry_sketch_preview: dict[str, object] | None = None
         self._geometry_sketch_grid_visible = False
+        self._origin_axes_visible = True
         self._last_geometry_sketch_qt_pos: tuple[float, float] | None = None
         self._measurement_actor_names: set[str] = set()
         self._measurement_counter = 0
@@ -662,6 +663,123 @@ class ModelViewport(QWidget):
 
     def show_line_anchor(self, node_tag: int) -> None:
         self.show_frame_anchor(node_tag)
+
+    def set_origin_axes_visible(self, visible: bool) -> None:
+        self._origin_axes_visible = bool(visible)
+        for name in (
+            "origin-axes-o",
+            "origin-axis-x",
+            "origin-axis-y",
+            "origin-axis-z",
+            "origin-axis-label-o",
+            "origin-axis-label-x",
+            "origin-axis-label-y",
+            "origin-axis-label-z",
+        ):
+            self._remove_overlay(name)
+        if self._origin_axes_visible:
+            self._render_origin_axes()
+        self.plotter.render()
+
+    def origin_axes_visible(self) -> bool:
+        return bool(self._origin_axes_visible)
+
+    def _origin_axes_span(self) -> float:
+        coords: list[tuple[float, float, float]] = []
+        if self._model is not None:
+            coords.extend(
+                tuple(float(value) for value in node.xyz)
+                for node in self._model.nodes.values()
+            )
+        coords.extend(
+            tuple(float(value) for value in point.xyz)
+            for point in self._points.values()
+        )
+        if not coords:
+            return 1.0
+        values = np.asarray(coords, dtype=float)
+        if values.ndim != 2 or values.shape[1] != 3:
+            return 1.0
+        finite = values[np.all(np.isfinite(values), axis=1)]
+        if not len(finite):
+            return 1.0
+        low = finite.min(axis=0)
+        high = finite.max(axis=0)
+        return max(
+            float(high[0] - low[0]),
+            float(high[1] - low[1]),
+            float(high[2] - low[2]),
+            float(np.max(np.abs(finite))) * 0.15,
+            1.0,
+        )
+
+    def _render_origin_axes(self) -> None:
+        for name in (
+            "origin-axes-o",
+            "origin-axis-x",
+            "origin-axis-y",
+            "origin-axis-z",
+            "origin-axis-label-o",
+            "origin-axis-label-x",
+            "origin-axis-label-y",
+            "origin-axis-label-z",
+        ):
+            self._remove_overlay(name)
+        if not self._origin_axes_visible:
+            return
+
+        origin = np.asarray((0.0, 0.0, 0.0), dtype=float)
+        length = max(self._origin_axes_span() * 0.14, 1.0e-6)
+        endpoints = {
+            "x": origin + np.asarray((length, 0.0, 0.0)),
+            "y": origin + np.asarray((0.0, length, 0.0)),
+            "z": origin + np.asarray((0.0, 0.0, length)),
+        }
+        axis_styles = {
+            "x": ("#d62828", "X"),
+            "y": ("#2a9d45", "Y"),
+            "z": ("#1769d2", "Z"),
+        }
+
+        self.plotter.add_mesh(
+            pv.PolyData([origin]),
+            name="origin-axes-o",
+            color="#20262e",
+            render_points_as_spheres=True,
+            point_size=10,
+            pickable=False,
+            render=False,
+        )
+        for key, endpoint in endpoints.items():
+            color, _label = axis_styles[key]
+            self.plotter.add_mesh(
+                pv.Line(origin, endpoint),
+                name=f"origin-axis-{key}",
+                color=color,
+                line_width=5,
+                render_lines_as_tubes=True,
+                pickable=False,
+                render=False,
+            )
+
+        self._add_annotation_labels(
+            [origin],
+            ["O"],
+            name="origin-axis-label-o",
+            text_color="#20262e",
+            font_size=11,
+            always_visible=True,
+        )
+        for key, endpoint in endpoints.items():
+            color, label = axis_styles[key]
+            self._add_annotation_labels(
+                [endpoint],
+                [label],
+                name=f"origin-axis-label-{key}",
+                text_color=color,
+                font_size=12,
+                always_visible=True,
+            )
 
     @staticmethod
     def _nice_geometry_grid_spacing(span: float) -> float:
@@ -3303,6 +3421,10 @@ class ModelViewport(QWidget):
         self._navigation_lod_enabled = False
         self._undeformed_model_visible = True
 
+        # Persistent world-space origin reference. Unlike the orientation
+        # cube, this triad sits at the model's actual global (0, 0, 0).
+        self._render_origin_axes()
+
         if self._model is None:
             if preserved_camera is not None:
                 self.plotter.camera_position = preserved_camera
@@ -3316,6 +3438,9 @@ class ModelViewport(QWidget):
         ):
             if preserved_camera is not None:
                 self.plotter.camera_position = preserved_camera
+            elif reset_camera and self._origin_axes_visible:
+                self.plotter.reset_camera()
+                self.plotter.camera.zoom(1.15)
             self.plotter.render()
             return
 
