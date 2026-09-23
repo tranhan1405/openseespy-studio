@@ -5,6 +5,21 @@ from types import SimpleNamespace
 
 from openseespy_studio.ui.main_window import MainWindow
 from openseespy_studio.ui.recorder_dialog import RecorderDialog
+from openseespy_studio.ui.analysis_dialog import AnalysisDialog
+from openseespy_studio.ui.geometry_dialogs import ElementDialog, TrussDialog
+from openseespy_studio.ui.line_geometry_dialog import LineGeometryDialog
+from openseespy_studio.ui.load_dialogs import (
+    ElementLoadDialog,
+    LoadPatternDialog,
+    NodalLoadDialog,
+    PrescribedDisplacementDialog,
+)
+from openseespy_studio.ui.moment_curvature_dialog import MomentCurvatureDialog
+from openseespy_studio.ui.shell_dialog import ShellElementDialog, ShellMeshDialog
+from openseespy_studio.ui.surface_dialog import SurfaceGeometryDialog
+from openseespy_studio.ui.surface_edge_load_dialog import SurfaceEdgeLoadDialog
+from openseespy_studio.ui.surface_pressure_dialog import SurfacePressureDialog
+from openseespy_studio.ui.surface_result_dialog import SurfaceResultDialog
 
 
 class _PrerequisiteHolder:
@@ -370,4 +385,192 @@ def test_remaining_prerequisite_dead_ends_are_linked():
     assert "Create / Link Path Series Now..." in edit_ground
     assert "_ask_create_prerequisite" in edit_ground
     assert "update_load_pattern" in edit_ground
+
+class _GeometryPointHolder:
+    _ensure_geometry_point_count = MainWindow._ensure_geometry_point_count
+
+    def __init__(self):
+        self.project = SimpleNamespace(points={})
+        self.prompts = 0
+
+    def _ask_create_prerequisite(self, **_kwargs) -> bool:
+        self.prompts += 1
+        return True
+
+    def _create_point_geometry(self) -> int:
+        tag = len(self.project.points) + 1
+        self.project.points[tag] = object()
+        return tag
+
+
+def test_geometry_point_prerequisite_can_create_until_required_count():
+    holder = _GeometryPointHolder()
+
+    ready = holder._ensure_geometry_point_count(
+        2,
+        title="New Geometry Line",
+    )
+
+    assert ready is True
+    assert len(holder.project.points) == 2
+    assert holder.prompts == 2
+
+
+def test_inline_prerequisite_buttons_cover_core_dependency_dialogs():
+    checks = (
+        (
+            LineGeometryDialog,
+            (
+                "New Section...",
+                "New Transformation...",
+                "New Material...",
+                "new_section_callback",
+                "new_transformation_callback",
+                "new_material_callback",
+            ),
+        ),
+        (
+            SurfaceGeometryDialog,
+            ("New Shell Section...", "new_section_callback"),
+        ),
+        (
+            ShellElementDialog,
+            ("New Shell Section...", "new_section_callback"),
+        ),
+        (
+            ShellMeshDialog,
+            ("New Shell Section...", "new_section_callback"),
+        ),
+        (
+            ElementDialog,
+            (
+                "New Section...",
+                "New Transformation...",
+                "new_section_callback",
+                "new_transformation_callback",
+            ),
+        ),
+        (
+            TrussDialog,
+            ("New Material...", "new_material_callback"),
+        ),
+        (
+            LoadPatternDialog,
+            ("New Time Series...", "new_time_series_callback"),
+        ),
+        (
+            NodalLoadDialog,
+            ("New Plain Pattern...", "new_pattern_callback"),
+        ),
+        (
+            PrescribedDisplacementDialog,
+            ("New Plain Pattern...", "new_pattern_callback"),
+        ),
+        (
+            ElementLoadDialog,
+            ("New Plain Pattern...", "new_pattern_callback"),
+        ),
+        (
+            SurfacePressureDialog,
+            ("New Plain Pattern...", "new_pattern_callback"),
+        ),
+        (
+            SurfaceEdgeLoadDialog,
+            ("New Plain Pattern...", "new_pattern_callback"),
+        ),
+        (
+            SurfaceResultDialog,
+            ("New Analysis...", "new_analysis_callback"),
+        ),
+        (
+            AnalysisDialog,
+            ("New Plain Pattern...", "new_plain_pattern_callback"),
+        ),
+        (
+            MomentCurvatureDialog,
+            ("New Section...", "new_section_callback"),
+        ),
+    )
+
+    for dialog_class, markers in checks:
+        source = inspect.getsource(dialog_class)
+        for marker in markers:
+            assert marker in source, (
+                f"{dialog_class.__name__} is missing prerequisite route: "
+                f"{marker}"
+            )
+
+
+def test_inline_dependency_callbacks_are_wired_from_main_window():
+    expected = {
+        "_configure_line_mesh": (
+            "new_section_callback=self._create_frame_section_dependency",
+            "new_transformation_callback=self._create_transformation_dependency",
+            "new_material_callback=self._create_material_dependency",
+        ),
+        "_configure_surface_mesh": (
+            "new_section_callback=self._create_shell_section_dependency",
+        ),
+        "_create_shell_mesh": (
+            "new_section_callback=self._create_shell_section_dependency",
+        ),
+        "_create_shell": (
+            "new_section_callback=self._create_shell_section_dependency",
+        ),
+        "_create_frame": (
+            "new_section_callback=self._create_frame_section_dependency",
+            "new_transformation_callback=self._create_transformation_dependency",
+        ),
+        "_create_truss": (
+            "new_material_callback=self._create_material_dependency",
+        ),
+        "_create_nodal_load": (
+            "new_pattern_callback=self._create_plain_pattern_dependency",
+        ),
+        "_create_prescribed_displacement": (
+            "new_pattern_callback=self._create_plain_pattern_dependency",
+        ),
+        "_create_element_load": (
+            "new_pattern_callback=self._create_plain_pattern_dependency",
+        ),
+        "_run_moment_curvature_workflow": (
+            "new_section_callback=self._create_section_dependency",
+        ),
+    }
+    for method_name, markers in expected.items():
+        source = inspect.getsource(getattr(MainWindow, method_name))
+        for marker in markers:
+            assert marker in source
+
+
+def test_managed_surface_dependency_callbacks_are_wired():
+    edge_source = inspect.getsource(
+        MainWindow._manage_surface_edge_line_load
+    )
+    pressure_source = inspect.getsource(
+        MainWindow._manage_surface_pressure
+    )
+    result_source = inspect.getsource(
+        MainWindow._manage_surface_result
+    )
+
+    assert (
+        "new_pattern_callback=self._create_plain_pattern_dependency"
+        in edge_source
+    )
+    assert (
+        "new_pattern_callback=self._create_plain_pattern_dependency"
+        in pressure_source
+    )
+    assert (
+        "new_analysis_callback=self._create_analysis_dependency"
+        in result_source
+    )
+
+
+def test_nodal_load_edit_no_longer_passes_element_load_only_keyword():
+    source = inspect.getsource(MainWindow._edit_nodal_load)
+
+    assert "allowed_load_types=" not in source
+    assert "new_pattern_callback=self._create_plain_pattern_dependency" in source
 
