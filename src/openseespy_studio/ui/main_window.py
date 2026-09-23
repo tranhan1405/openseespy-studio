@@ -5455,7 +5455,7 @@ class MainWindow(QMainWindow):
         recorders = QTreeWidgetItem([
             f"Recorders ({len(self.project.recorders)})"
         ])
-        recorders.setIcon(0, studio_icon("recorder"))
+        recorders.setIcon(0, studio_icon("recorder-root"))
         recorders.setData(0, Qt.UserRole, ("recorders_root", None))
         recorders.setExpanded(True)
         analysis.addChild(recorders)
