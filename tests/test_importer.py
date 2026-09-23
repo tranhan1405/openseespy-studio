@@ -690,3 +690,53 @@ while ok == 0 and tCurrent < tFinal:
         result.project.units,
     )
     assert "ops.rayleigh(0, 0, 0, 0.000625)" in generated
+
+
+def test_importer_recovers_node_response_queries_as_probes():
+    source = """
+from openseespy.opensees import *
+model('basic', '-ndm', 2, '-ndf', 3)
+node(1, 0.0, 0.0)
+node(2, 0.0, 120.0)
+fix(1, 1, 1, 1)
+mass(2, 1.0, 1.0, 0.0)
+constraints('Plain')
+numberer('Plain')
+system('BandGeneral')
+algorithm('Linear')
+integrator('Newmark', 0.5, 0.25)
+analysis('Transient')
+analyze(2, 0.01)
+history = []
+history.append(nodeDisp(2, 1))
+reaction_x = nodeReaction(1, 1)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="probe_example.py",
+        units={"length": "in", "force": "kip", "time": "s"},
+    )
+
+    probes = [
+        item
+        for item in result.project.solution_results.values()
+        if bool(item.settings.get("probe", False))
+    ]
+    assert len(probes) == 2
+
+    by_quantity = {
+        str(item.settings["quantity"]): item
+        for item in probes
+    }
+    disp = by_quantity["Displacement"]
+    assert disp.result_type == "TimeHistory"
+    assert disp.node_scope == [2]
+    assert disp.settings["node"] == 2
+    assert disp.settings["dof"] == 1
+
+    reaction = by_quantity["Reaction"]
+    assert reaction.node_scope == [1]
+    assert reaction.settings["node"] == 1
+    assert reaction.settings["dof"] == 1
+    assert result.imported_counts["Node probes"] == 2

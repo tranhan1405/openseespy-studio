@@ -6082,6 +6082,46 @@ class ModelViewport(QWidget):
             return "actual_section"
         return representation
 
+    def clear_node_probe_overlay(self, *, render: bool = True) -> None:
+        for name in ("node-probe-point", "node-probe-label"):
+            self._remove_overlay(name)
+        if render:
+            self.plotter.render()
+
+    def show_node_probe(
+        self,
+        node_tag: int,
+        label: str,
+        *,
+        render: bool = True,
+    ) -> None:
+        self.clear_node_probe_overlay(render=False)
+        if self._model is None:
+            return
+        node = self._model.nodes.get(int(node_tag))
+        if node is None:
+            return
+        cloud = pv.PolyData(np.asarray([node.xyz], dtype=float))
+        self.plotter.add_mesh(
+            cloud,
+            name="node-probe-point",
+            color="#8f4db8",
+            point_size=18,
+            render_points_as_spheres=True,
+            pickable=False,
+            render=False,
+        )
+        self._add_annotation_labels(
+            [node.xyz],
+            [str(label)],
+            name="node-probe-label",
+            text_color="#6a318f",
+            font_size=11,
+            always_visible=True,
+        )
+        if render:
+            self.plotter.render()
+
     def clear_result_overlay(self, *, render: bool = True) -> None:
         for name in (
             "result-overlay",
@@ -6097,6 +6137,8 @@ class ModelViewport(QWidget):
             "result-hinge-points",
             "motion-overlay",
             "motion-nodes",
+            "node-probe-point",
+            "node-probe-label",
         ):
             self._remove_overlay(name)
         self._result_overlay_active = False

@@ -5301,7 +5301,41 @@ class MainWindow(QMainWindow):
             )
             information.addChild(convergence)
 
-            for result in solution_results:
+            probes = [
+                result
+                for result in solution_results
+                if (
+                    result.result_type == "TimeHistory"
+                    and bool(result.settings.get("probe", False))
+                )
+            ]
+            regular_results = [
+                result for result in solution_results if result not in probes
+            ]
+
+            probes_root = QTreeWidgetItem([
+                f"Probes ({len(probes)})"
+            ])
+            probes_root.setIcon(0, studio_icon("results"))
+            probes_root.setData(
+                0,
+                Qt.UserRole,
+                ("solution_probes_root", tag),
+            )
+            probes_root.setExpanded(True)
+            solution.addChild(probes_root)
+
+            for result in probes:
+                result_item = QTreeWidgetItem([result.name])
+                result_item.setIcon(0, studio_icon("results"))
+                result_item.setData(
+                    0,
+                    Qt.UserRole,
+                    ("solution_result", result.tag),
+                )
+                probes_root.addChild(result_item)
+
+            for result in regular_results:
                 result_item = QTreeWidgetItem([result.name])
                 result_item.setIcon(0, studio_icon("results"))
                 result_item.setData(
@@ -5414,6 +5448,7 @@ class MainWindow(QMainWindow):
         cyclic_protocol_tag: int | None = None
         recorder_tag: int | None = None
         solution_root_tag: int | None = None
+        solution_probes_root_tag: int | None = None
         solution_result_tag: int | None = None
         solution_information_tag: int | None = None
         solver_output_tag: int | None = None
@@ -5526,8 +5561,23 @@ class MainWindow(QMainWindow):
                 recorder_tag = int(tag)
             elif kind == "solution_root":
                 solution_root_tag = int(tag)
+            elif kind == "solution_probes_root":
+                solution_probes_root_tag = int(tag)
             elif kind == "solution_result":
                 solution_result_tag = int(tag)
+                result_object = self.project.solution_results.get(
+                    solution_result_tag
+                )
+                if (
+                    result_object is not None
+                    and result_object.result_type == "TimeHistory"
+                    and bool(result_object.settings.get("probe", False))
+                ):
+                    nodes.update(
+                        int(node_tag)
+                        for node_tag in result_object.node_scope
+                        if int(node_tag) in self.model.nodes
+                    )
             elif kind == "solution_information":
                 solution_information_tag = int(tag)
             elif kind == "solver_output":
@@ -5765,6 +5815,8 @@ class MainWindow(QMainWindow):
             self._show_connection_group_properties(connection_group)
         elif solution_root_tag is not None:
             self._show_solution_root_properties(solution_root_tag)
+        elif solution_probes_root_tag is not None:
+            self._show_solution_probes_properties(solution_probes_root_tag)
         elif solution_result_tag is not None:
             self._show_solution_result_properties(solution_result_tag)
         elif solution_convergence_tag is not None:
@@ -20878,6 +20930,175 @@ class MainWindow(QMainWindow):
                 return job
         return None
 
+    @staticmethod
+    def _node_probe_component_labels(quantity: str) -> tuple[str, ...]:
+        return {
+            "Displacement": ("UX", "UY", "UZ", "RX", "RY", "RZ"),
+            "Velocity": ("VX", "VY", "VZ", "WX", "WY", "WZ"),
+            "Acceleration": (
+                "AX", "AY", "AZ", "AlphaX", "AlphaY", "AlphaZ"
+            ),
+            "Reaction": ("FX", "FY", "FZ", "MX", "MY", "MZ"),
+        }.get(str(quantity), ("DOF 1",))
+
+    def _create_node_probe(
+        self,
+        *,
+        node_tag: int | None = None,
+        analysis_tag: int | None = None,
+        quantity: str | None = None,
+        dof: int | None = None,
+    ) -> None:
+        if not self.project.analyses:
+            self.status_message.setText(
+                "Node Probe requires an Analysis. Create an Analysis first."
+            )
+            return
+
+        target_analysis = (
+            int(analysis_tag)
+            if analysis_tag is not None
+            else int(
+                self.project.active_analysis_tag
+                or min(self.project.analyses)
+            )
+        )
+        if target_analysis not in self.project.analyses:
+            return
+
+        if node_tag is None:
+            selected = sorted(
+                int(tag)
+                for tag in self.selection.nodes
+                if int(tag) in self.model.nodes
+            )
+            if selected:
+                node_tag = selected[0]
+            else:
+                choices = [str(tag) for tag in sorted(self.model.nodes)]
+                if not choices:
+                    self.status_message.setText(
+                        "Node Probe requires at least one FE node."
+                    )
+                    return
+                value, accepted = QInputDialog.getItem(
+                    self,
+                    "Node Probe",
+                    "Node:",
+                    choices,
+                    0,
+                    False,
+                )
+                if not accepted:
+                    return
+                node_tag = int(value)
+
+        node_tag = int(node_tag)
+        if node_tag not in self.model.nodes:
+            return
+
+        quantities = [
+            "Displacement",
+            "Velocity",
+            "Acceleration",
+            "Reaction",
+        ]
+        if quantity is None:
+            value, accepted = QInputDialog.getItem(
+                self,
+                "Node Probe",
+                "Quantity:",
+                quantities,
+                0,
+                False,
+            )
+            if not accepted:
+                return
+            quantity = str(value)
+        quantity = str(quantity)
+        if quantity not in quantities:
+            return
+
+        labels = self._node_probe_component_labels(quantity)
+        usable = labels[:max(1, min(int(self.model.ndf), len(labels)))]
+        if dof is None:
+            value, accepted = QInputDialog.getItem(
+                self,
+                "Node Probe",
+                "Component:",
+                list(usable),
+                0,
+                False,
+            )
+            if not accepted:
+                return
+            dof = list(usable).index(str(value)) + 1
+        dof = int(dof)
+        if not 1 <= dof <= int(self.model.ndf):
+            return
+        component = labels[dof - 1]
+
+        before = self.project.to_dict()
+        result = SolutionResultData(
+            tag=self.project.next_solution_result_tag(),
+            analysis_tag=target_analysis,
+            name=f"Probe Node {node_tag} · {component}",
+            result_type="TimeHistory",
+            node_scope=[node_tag],
+            settings={
+                "node": node_tag,
+                "quantity": quantity,
+                "dof": dof,
+                "probe": True,
+            },
+        )
+        try:
+            self.project.add_solution_result(result)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Node Probe", str(exc))
+            return
+
+        self._record_project_change(
+            f"Create node probe {result.tag}",
+            before,
+        )
+        self._refresh_tree()
+        self._show_solution_result_properties(result.tag)
+        self.selection.set_selection(nodes={node_tag})
+        self.viewport.show_node_probe(
+            node_tag,
+            f"[P {component}]",
+        )
+        if self._latest_job_for_analysis(target_analysis) is not None:
+            self._evaluate_solution_result(result.tag)
+        self.status_message.setText(
+            f"Created Node Probe: node {node_tag} {quantity} {component}"
+        )
+
+    def _show_solution_probes_properties(self, analysis_tag: int) -> None:
+        probes = [
+            result
+            for result in self.project.solution_results_for_analysis(
+                int(analysis_tag)
+            )
+            if (
+                result.result_type == "TimeHistory"
+                and bool(result.settings.get("probe", False))
+            )
+        ]
+        self.properties_panel.set_properties(
+            "Node Probes",
+            [
+                ("Analysis", int(analysis_tag)),
+                ("Probe Count", len(probes)),
+                ("Quantities", ", ".join(sorted({
+                    str(result.settings.get("quantity", "Displacement"))
+                    for result in probes
+                })) or "-"),
+                ("Workflow", "Select a probe to plot/export its time history"),
+            ],
+        )
+
     def _insert_solution_result(
         self,
         analysis_tag: int,
@@ -21087,6 +21308,31 @@ class MainWindow(QMainWindow):
                 else f"Analysis {result.analysis_tag}"
             ),
         )
+        if (
+            result.result_type == "TimeHistory"
+            and bool(result.settings.get("probe", False))
+        ):
+            node_tag = int(
+                result.settings.get(
+                    "node",
+                    result.node_scope[0] if result.node_scope else 0,
+                )
+                or 0
+            )
+            dof = int(result.settings.get("dof", 1) or 1)
+            quantity = str(
+                result.settings.get("quantity", "Displacement")
+            )
+            labels = self._node_probe_component_labels(quantity)
+            component = (
+                labels[dof - 1]
+                if 1 <= dof <= len(labels)
+                else f"DOF {dof}"
+            )
+            self.viewport.show_node_probe(
+                node_tag,
+                f"[P {component}]",
+            )
 
     def _solution_result_from_payload(
         self,
@@ -26131,6 +26377,32 @@ class MainWindow(QMainWindow):
                 lambda: self._show_entity_properties("node", tag)
             )
 
+            probe_menu = menu.addMenu("Probe")
+            for probe_quantity in (
+                "Displacement",
+                "Velocity",
+                "Acceleration",
+                "Reaction",
+            ):
+                probe_action = probe_menu.addAction(
+                    f"{probe_quantity}..."
+                )
+                probe_action.triggered.connect(
+                    lambda checked=False,
+                    q=probe_quantity,
+                    n=tag:
+                    self._create_node_probe(
+                        node_tag=n,
+                        quantity=q,
+                    )
+                )
+            probe_menu.addSeparator()
+            generic_probe = probe_menu.addAction("Node Probe...")
+            generic_probe.triggered.connect(
+                lambda checked=False, n=tag:
+                self._create_node_probe(node_tag=n)
+            )
+
             menu.addSeparator()
             assign_menu = menu.addMenu("Assign")
             support_action = assign_menu.addAction(
@@ -26635,6 +26907,11 @@ class MainWindow(QMainWindow):
                 if analysis_settings is not None
                 else ""
             )
+            probe_action = menu.addAction("Add Node Probe...")
+            probe_action.triggered.connect(
+                lambda checked=False, tag=analysis_tag:
+                self._create_node_probe(analysis_tag=tag)
+            )
             insert_menu = menu.addMenu("Add Result Request")
             self._populate_result_choice_menu(
                 insert_menu,
@@ -26702,6 +26979,41 @@ class MainWindow(QMainWindow):
             delete_all.setEnabled(bool(result_objects))
             delete_all.triggered.connect(
                 lambda: self._delete_all_solution_results(analysis_tag)
+            )
+            exec_menu()
+            return
+
+        if kind == "solution_probes_root":
+            analysis_tag = int(value)
+            probes = [
+                result
+                for result in self.project.solution_results_for_analysis(
+                    analysis_tag
+                )
+                if (
+                    result.result_type == "TimeHistory"
+                    and bool(result.settings.get("probe", False))
+                )
+            ]
+            add_probe = menu.addAction("Add Node Probe...")
+            add_probe.triggered.connect(
+                lambda checked=False, tag=analysis_tag:
+                self._create_node_probe(analysis_tag=tag)
+            )
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda checked=False, tag=analysis_tag:
+                self._show_solution_probes_properties(tag)
+            )
+            evaluate_all = menu.addAction("Evaluate All Probes")
+            evaluate_all.setEnabled(bool(probes))
+            evaluate_all.triggered.connect(
+                lambda checked=False, values=tuple(
+                    result.tag for result in probes
+                ): [
+                    self._evaluate_solution_result(tag)
+                    for tag in values
+                ]
             )
             exec_menu()
             return
@@ -28478,6 +28790,8 @@ class MainWindow(QMainWindow):
                 self._show_job_plot(int(value[0]), int(value[1]))
             except (TypeError, ValueError, IndexError):
                 return
+        elif kind == "solution_probes_root":
+            self._show_solution_probes_properties(int(value))
         elif kind == "solution_result":
             self._evaluate_solution_result(int(value))
         elif kind == "solution_convergence":

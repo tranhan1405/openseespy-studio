@@ -27,6 +27,7 @@ from .project import (
     RecorderData,
     SectionData,
     ShellLayerData,
+    SolutionResultData,
     TimeSeriesData,
     TransformationData,
 )
@@ -364,6 +365,7 @@ class _Importer:
         self.analysis_events: list[dict[str, Any]] = []
         self._deferred_modal_frequencies: dict[str, dict[str, Any]] = {}
         self._load_const_event_index: int | None = None
+        self._pending_node_probes: set[tuple[str, int, int]] = set()
         self._next_constraint = 1
         self._next_load = 1
         self._next_element_load = 1
@@ -2145,6 +2147,33 @@ class _Importer:
             return call.func.attr
         return None
 
+    def _recognize_node_probe_calls(self, node: ast.AST) -> bool:
+        """Recover node response queries as editable TimeHistory probes."""
+        quantity_by_call = {
+            "nodeDisp": "Displacement",
+            "nodeVel": "Velocity",
+            "nodeAccel": "Acceleration",
+            "nodeReaction": "Reaction",
+        }
+        found = False
+        for child in ast.walk(node):
+            if not isinstance(child, ast.Call):
+                continue
+            runtime_name = self._runtime_call_name(child)
+            quantity = quantity_by_call.get(str(runtime_name))
+            if quantity is None or len(child.args) < 2:
+                continue
+            try:
+                node_tag = int(self.eval.eval(child.args[0]))
+                dof = int(self.eval.eval(child.args[1]))
+            except (_Unresolved, TypeError, ValueError):
+                continue
+            if node_tag <= 0 or dof <= 0:
+                continue
+            self._pending_node_probes.add((quantity, node_tag, dof))
+            found = True
+        return found
+
     def _runtime_calls_in(self, node: ast.AST) -> list[str]:
         names: list[str] = []
         for child in ast.walk(node):
@@ -2888,20 +2917,22 @@ class _Importer:
                 return
             if self._recognize_eigen_frequency_assignment(stmt):
                 return
+            probe_recovered = self._recognize_node_probe_calls(stmt.value)
             runtime_calls = self._runtime_calls_in(stmt.value)
             if runtime_calls:
                 target_names: set[str] = set()
                 for target in stmt.targets:
                     target_names.update(self._simple_target_names(target))
                 self.runtime_only_names.update(target_names)
-                self.issue(
-                    "WARNING",
-                    stmt,
-                    "runtime value",
-                    "Skipped runtime-only value from "
-                    + ", ".join(sorted(set(runtime_calls)))
-                    + "; model reconstruction continues.",
-                )
+                if not probe_recovered:
+                    self.issue(
+                        "WARNING",
+                        stmt,
+                        "runtime value",
+                        "Skipped runtime-only value from "
+                        + ", ".join(sorted(set(runtime_calls)))
+                        + "; model reconstruction continues.",
+                    )
                 return
             try:
                 value = self.eval.eval(stmt.value)
@@ -2969,6 +3000,8 @@ class _Importer:
             return
 
         if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+            if self._recognize_node_probe_calls(stmt.value):
+                return
             command = self.command_name(stmt.value)
             if command is not None:
                 self.handle_call(command, stmt.value)
@@ -3542,6 +3575,54 @@ class _Importer:
             analysis = AnalysisSettingsData(**kwargs)
             self.project.add_analysis(analysis)
             self.count("Analyses")
+
+            for quantity, node_tag, dof in sorted(
+                self._pending_node_probes,
+                key=lambda item: (item[1], item[0], item[2]),
+            ):
+                if node_tag not in self.project.model.nodes:
+                    self.issue(
+                        "WARNING",
+                        None,
+                        "node probe",
+                        f"Skipped imported {quantity} probe for missing "
+                        f"node {node_tag}.",
+                    )
+                    continue
+                if not 1 <= dof <= int(self.project.model.ndf):
+                    self.issue(
+                        "WARNING",
+                        None,
+                        "node probe",
+                        f"Skipped imported {quantity} probe at node {node_tag}: "
+                        f"DOF {dof} is invalid for ndf={self.project.model.ndf}.",
+                    )
+                    continue
+                labels = {
+                    "Displacement": ("UX", "UY", "UZ", "RX", "RY", "RZ"),
+                    "Velocity": ("VX", "VY", "VZ", "WX", "WY", "WZ"),
+                    "Acceleration": (
+                        "AX", "AY", "AZ", "AlphaX", "AlphaY", "AlphaZ"
+                    ),
+                    "Reaction": ("FX", "FY", "FZ", "MX", "MY", "MZ"),
+                }
+                component = labels[quantity][dof - 1]
+                result = SolutionResultData(
+                    tag=self.project.next_solution_result_tag(),
+                    analysis_tag=analysis.tag,
+                    name=f"Probe Node {node_tag} · {component}",
+                    result_type="TimeHistory",
+                    node_scope=[node_tag],
+                    settings={
+                        "node": node_tag,
+                        "quantity": quantity,
+                        "dof": dof,
+                        "probe": True,
+                        "imported": True,
+                    },
+                )
+                self.project.add_solution_result(result)
+                self.count("Node probes")
         except (TypeError, ValueError) as exc:
             self.issue(
                 "WARNING", None, "analysis",
