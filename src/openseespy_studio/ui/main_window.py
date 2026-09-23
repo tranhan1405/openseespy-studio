@@ -5679,12 +5679,11 @@ class MainWindow(QMainWindow):
 
     def _create_three_point_sketch_plane(self) -> int | None:
         if len(self.project.points) < 3:
-            QMessageBox.information(
-                self,
-                "New 3-Point Plane",
-                "Create at least three Geometry Points first.",
-            )
-            return None
+            if not self._ensure_geometry_point_count(
+                3,
+                title="New 3-Point Plane",
+            ):
+                return None
         default_tags = ",".join(
             str(tag) for tag in sorted(self.project.points)[:3]
         )
@@ -10843,20 +10842,10 @@ class MainWindow(QMainWindow):
         })
         if not tags:
             return
-        live = any(
-            int(element_tag) in self.model.elements
-            for tag in tags
-            for element_tag in self.project.surfaces[
-                tag
-            ].generated_element_tags
-        )
-        if not live:
-            QMessageBox.information(
-                self,
-                "Shell Mesh Quality",
-                "Mesh the selected Surface geometry before visualizing "
-                "element quality.",
-            )
+        if not self._ensure_surface_meshes(
+            tags,
+            title="Shell Mesh Quality",
+        ):
             return
         try:
             self.viewport.show_surface_mesh_quality(tags, metric)
@@ -10928,8 +10917,21 @@ class MainWindow(QMainWindow):
         self,
         surface_tags,
     ) -> None:
+        tags = sorted({
+            int(tag)
+            for tag in surface_tags
+            if int(tag) in self.project.surfaces
+        })
+        if not tags:
+            return
+        if not self._ensure_surface_meshes(
+            tags,
+            title="Select Generated FE",
+        ):
+            return
+
         element_tags: set[int] = set()
-        for surface_tag in surface_tags:
+        for surface_tag in tags:
             surface = self.project.surfaces.get(int(surface_tag))
             if surface is None:
                 continue
@@ -10941,12 +10943,6 @@ class MainWindow(QMainWindow):
                 ):
                     element_tags.add(int(element_tag))
         if not element_tags:
-            QMessageBox.information(
-                self,
-                "Select Generated FE",
-                "The selected Surface geometry has no live generated "
-                "Shell elements.",
-            )
             return
         self.viewport.set_display_domain("fe")
         self.selection.set_selection(elements=element_tags)
@@ -15887,12 +15883,20 @@ class MainWindow(QMainWindow):
         if line is None:
             return
         if not line.mesh_recipe_configured:
-            QMessageBox.information(
-                self,
-                "Preview Line Mesh",
-                "Configure the Line Mesh / FE recipe before previewing.",
-            )
-            return
+            if not self._ask_create_prerequisite(
+                title="Preview Line Mesh",
+                message=(
+                    f"Geometry Line {tag} needs a Line Mesh / FE recipe "
+                    "before it can be previewed. Configure it now?"
+                ),
+                action_label="Configure Line Mesh Now...",
+            ):
+                return
+            if not self._configure_line_mesh(tag, generate=False):
+                return
+            line = self.project.lines.get(int(tag))
+            if line is None or not line.mesh_recipe_configured:
+                return
         try:
             divisions, points = line_mesh_preview_points(
                 self.project,
@@ -15930,12 +15934,28 @@ class MainWindow(QMainWindow):
             for element_tag in state.live_element_tags
         }
         if not nodes and not elements:
-            QMessageBox.information(
-                self,
-                "Select Generated FE",
-                f"Geometry Line {tag} is not meshed.",
-            )
-            return
+            if not self._ask_create_prerequisite(
+                title="Select Generated FE",
+                message=(
+                    f"Geometry Line {tag} has no live FE mesh. "
+                    "Mesh it now?"
+                ),
+                action_label="Mesh Line Now...",
+            ):
+                return
+            self._mesh_line_geometry(tag)
+            state = inspect_line_mesh_state(self.project, tag)
+            nodes = {
+                int(node_tag)
+                for node_tag in state.tracked_node_tags
+                if int(node_tag) in self.model.nodes
+            }
+            elements = {
+                int(element_tag)
+                for element_tag in state.live_element_tags
+            }
+            if not nodes and not elements:
+                return
         self.viewport.set_display_domain("fe")
         self.selection.set_selection(
             nodes=nodes,
