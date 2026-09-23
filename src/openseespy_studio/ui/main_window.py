@@ -2871,15 +2871,15 @@ class MainWindow(QMainWindow):
         model_menu.addAction(self.actions["element_formulation"])
         model_menu.addSeparator()
         model_menu.addAction(self.actions["connection"])
+        model_menu.addSeparator()
+        model_menu.addAction(self.actions["mass"])
+        model_menu.addAction(self.actions["mass_source"])
         model_menu.addAction(self.actions["recorder"])
 
         loads_menu = menus["Loads & BCs"]
         loads_menu.addAction(self.actions["support"])
         loads_menu.addAction(self.actions["clear_support"])
         loads_menu.addAction(self.actions["constraint"])
-        loads_menu.addSeparator()
-        loads_menu.addAction(self.actions["mass"])
-        loads_menu.addAction(self.actions["mass_source"])
         loads_menu.addSeparator()
         loads_menu.addAction(self.actions["time_series"])
         loads_menu.addAction(self.actions["load_pattern"])
@@ -3101,6 +3101,13 @@ class MainWindow(QMainWindow):
                 "Show prescribed/imposed nodal displacement symbols",
             ),
             (
+                "show_masses",
+                "Masses",
+                "node",
+                "masses",
+                "Show nodal and element mass definitions",
+            ),
+            (
                 "show_section_axes",
                 "Section Axes",
                 "transform",
@@ -3133,6 +3140,7 @@ class MainWindow(QMainWindow):
             self.actions["show_nodal_loads"],
             self.actions["show_element_loads"],
             self.actions["show_prescribed_displacements"],
+            self.actions["show_masses"],
             self.actions["show_load_values"],
             self.actions["show_section_axes"],
         ])
@@ -3603,6 +3611,7 @@ class MainWindow(QMainWindow):
                 "show_nodal_loads",
                 "show_element_loads",
                 "show_prescribed_displacements",
+                "show_masses",
                 "show_load_values",
             ),
         )
@@ -4001,6 +4010,7 @@ class MainWindow(QMainWindow):
             {"fe_model_root"},
             {"properties_root"},
             {"loads_bc_root"},
+            {"mass_root"},
             {"analyses_root"},
         )
 
@@ -4028,6 +4038,22 @@ class MainWindow(QMainWindow):
             if action is not None:
                 action.setChecked(target)
             self.viewport.set_display_option(option_name, target)
+
+    def _set_mass_display_context(self, enabled: bool) -> None:
+        """Show or hide mass glyphs independently from Loads & BCs."""
+        enabled = bool(enabled)
+        has_mass = any(
+            any(abs(float(value)) > 0.0 for value in node.mass)
+            for node in self.model.nodes.values()
+        ) or any(
+            float(element.mass_per_length) > 0.0
+            for element in self.model.elements.values()
+        )
+        target = enabled and has_mass
+        action = self.actions.get("show_masses")
+        if action is not None:
+            action.setChecked(target)
+        self.viewport.set_display_option("masses", target)
 
     def _build_status_bar(self) -> None:
         self.status_message = QLabel("Ready")
@@ -4818,6 +4844,76 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("constraint", tag))
             constraints_root.addChild(item)
 
+        mass_nodes = [
+            tag
+            for tag, node in self.model.nodes.items()
+            if any(abs(value) > 0.0 for value in node.mass)
+        ]
+        mass_elements = [
+            tag
+            for tag, element in self.model.elements.items()
+            if float(element.mass_per_length) > 0.0
+        ]
+
+        mass_root = QTreeWidgetItem(["Mass"])
+        mass_root.setIcon(0, studio_icon("model"))
+        mass_root.setData(0, Qt.UserRole, ("mass_root", None))
+        mass_root.setExpanded(True)
+        fe_model.addChild(mass_root)
+
+        masses_root = QTreeWidgetItem([
+            f"Nodal Masses ({len(mass_nodes)})"
+        ])
+        masses_root.setIcon(0, studio_icon("node"))
+        masses_root.setData(0, Qt.UserRole, ("masses_root", None))
+        masses_root.setExpanded(True)
+        mass_root.addChild(masses_root)
+        for tag in sorted(mass_nodes):
+            item = QTreeWidgetItem([f"Node {tag}"])
+            item.setIcon(0, studio_icon("node"))
+            item.setData(0, Qt.UserRole, ("nodal_mass", tag))
+            masses_root.addChild(item)
+
+        element_masses_root = QTreeWidgetItem([
+            f"Element Mass ({len(mass_elements)})"
+        ])
+        element_masses_root.setIcon(0, studio_icon("element"))
+        element_masses_root.setData(
+            0,
+            Qt.UserRole,
+            ("element_masses_root", None),
+        )
+        element_masses_root.setExpanded(True)
+        mass_root.addChild(element_masses_root)
+        for tag in sorted(mass_elements):
+            element = self.model.elements[tag]
+            item = QTreeWidgetItem([
+                f"Element {tag}  ρL={element.mass_per_length:g}"
+            ])
+            item.setIcon(0, studio_icon("element"))
+            item.setData(0, Qt.UserRole, ("element_mass", tag))
+            element_masses_root.addChild(item)
+
+        mass_sources_root = QTreeWidgetItem([
+            f"Mass Sources ({len(self.project.mass_sources)})"
+        ])
+        mass_sources_root.setIcon(0, studio_icon("model"))
+        mass_sources_root.setData(
+            0,
+            Qt.UserRole,
+            ("mass_sources_root", None),
+        )
+        mass_sources_root.setExpanded(True)
+        mass_root.addChild(mass_sources_root)
+        for tag in sorted(self.project.mass_sources):
+            source = self.project.mass_sources[tag]
+            item = QTreeWidgetItem([
+                f"{source.name} [{tag}]"
+            ])
+            item.setIcon(0, studio_icon("model"))
+            item.setData(0, Qt.UserRole, ("mass_source", tag))
+            mass_sources_root.addChild(item)
+
         named_sets = QTreeWidgetItem([
             f"Named Selections ({len(self.project.selection_sets)})"
         ])
@@ -4987,40 +5083,6 @@ class MainWindow(QMainWindow):
                 node_item.setIcon(0, studio_icon(boundary_icon))
                 node_item.setData(0, Qt.UserRole, ("node", tag))
                 group_item.addChild(node_item)
-
-        mass_nodes = [
-            tag for tag, node in self.model.nodes.items()
-            if any(abs(value) > 0.0 for value in node.mass)
-        ]
-        masses_root = QTreeWidgetItem([f"Masses ({len(mass_nodes)})"])
-        masses_root.setIcon(0, studio_icon("load"))
-        masses_root.setData(0, Qt.UserRole, ("masses_root", None))
-        loads_bc_root.addChild(masses_root)
-        for tag in sorted(mass_nodes):
-            item = QTreeWidgetItem([f"Node {tag}"])
-            item.setIcon(0, studio_icon("load"))
-            item.setData(0, Qt.UserRole, ("node", tag))
-            masses_root.addChild(item)
-
-        mass_sources_root = QTreeWidgetItem([
-            f"Mass Sources ({len(self.project.mass_sources)})"
-        ])
-        mass_sources_root.setIcon(0, studio_icon("load"))
-        mass_sources_root.setData(
-            0,
-            Qt.UserRole,
-            ("mass_sources_root", None),
-        )
-        mass_sources_root.setExpanded(True)
-        loads_bc_root.addChild(mass_sources_root)
-        for tag in sorted(self.project.mass_sources):
-            source = self.project.mass_sources[tag]
-            item = QTreeWidgetItem([
-                f"{source.name} [{tag}]"
-            ])
-            item.setIcon(0, studio_icon("load"))
-            item.setData(0, Qt.UserRole, ("mass_source", tag))
-            mass_sources_root.addChild(item)
 
         loading_root = QTreeWidgetItem(["Loading"])
         loading_root.setIcon(0, studio_icon("load"))
@@ -5345,6 +5407,8 @@ class MainWindow(QMainWindow):
         nodal_load_tag: int | None = None
         prescribed_displacement_tag: int | None = None
         element_load_tag: int | None = None
+        nodal_mass_tag: int | None = None
+        element_mass_tag: int | None = None
         mass_source_tag: int | None = None
         analysis_tag: int | None = None
         cyclic_protocol_tag: int | None = None
@@ -5436,6 +5500,20 @@ class MainWindow(QMainWindow):
                 prescribed_displacement_tag = int(tag)
             elif kind == "element_load":
                 element_load_tag = int(tag)
+            elif kind == "nodal_mass":
+                nodal_mass_tag = int(tag)
+                if nodal_mass_tag in self.model.nodes:
+                    nodes.add(nodal_mass_tag)
+            elif kind == "element_mass":
+                element_mass_tag = int(tag)
+                if element_mass_tag in self.model.elements:
+                    elements.add(element_mass_tag)
+                    nodes.update(
+                        int(node_tag)
+                        for node_tag in
+                        self.model.elements[element_mass_tag].node_tags()
+                        if int(node_tag) in self.model.nodes
+                    )
             elif kind == "mass_source":
                 mass_source_tag = int(tag)
             elif kind == "analysis":
@@ -5480,6 +5558,18 @@ class MainWindow(QMainWindow):
         loads_bc_root_selected = selected_payload_kinds == {
             "loads_bc_root"
         }
+        mass_context_kinds = {
+            "mass_root",
+            "masses_root",
+            "nodal_mass",
+            "element_masses_root",
+            "element_mass",
+            "mass_sources_root",
+            "mass_source",
+        }
+        mass_context_selected = bool(
+            selected_payload_kinds & mass_context_kinds
+        )
         analyses_root_selected = selected_payload_kinds == {
             "analyses_root"
         }
@@ -5522,7 +5612,11 @@ class MainWindow(QMainWindow):
         # main Model/Mesh/FE roots removes them so display context does not
         # leak between major tree branches.
         if loads_bc_root_selected:
+            self._set_mass_display_context(False)
             self._set_loads_bc_display_context(True)
+        elif mass_context_selected:
+            self._set_loads_bc_display_context(False)
+            self._set_mass_display_context(True)
         elif (
             selected_payload_kinds
             in (
@@ -5536,6 +5630,7 @@ class MainWindow(QMainWindow):
             )
         ):
             self._set_loads_bc_display_context(False)
+            self._set_mass_display_context(False)
         line_geometry_tags = {
             int(item.data(0, Qt.UserRole)[1])
             for item in self.tree.selectedItems()
@@ -5648,6 +5743,10 @@ class MainWindow(QMainWindow):
             )
         elif element_load_tag is not None:
             self._show_element_load_properties(element_load_tag)
+        elif nodal_mass_tag is not None:
+            self._show_entity_properties("node", nodal_mass_tag)
+        elif element_mass_tag is not None:
+            self._show_entity_properties("element", element_mass_tag)
         elif mass_source_tag is not None:
             self._show_mass_source_properties(mass_source_tag)
         elif named_selection_name is not None:
@@ -5716,6 +5815,9 @@ class MainWindow(QMainWindow):
                 "analyses_root",
                 "constraints_root",
                 "recorders_root",
+                "mass_root",
+                "masses_root",
+                "element_masses_root",
                 "mass_sources_root",
                 "time_series_root",
                 "load_patterns_root",
@@ -5727,7 +5829,6 @@ class MainWindow(QMainWindow):
                 "nodes_root",
                 "elements_root",
                 "boundary_root",
-                "masses_root",
                 "named_sets_root",
                 "line_meshes_root",
                 "surface_meshes_root",
@@ -5752,6 +5853,10 @@ class MainWindow(QMainWindow):
                 elif root_kind == "fe_model_root":
                     self.status_message.setText(
                         "FE Model overview · base FE display"
+                    )
+                elif root_kind == "mass_root":
+                    self.status_message.setText(
+                        "Mass overview · nodal, element, and source definitions"
                     )
                 elif root_kind == "properties_root":
                     self.status_message.setText(
@@ -23239,8 +23344,16 @@ class MainWindow(QMainWindow):
                     ("Elements", len(self.model.elements)),
                     ("Constraints", len(self.project.constraints)),
                     ("Connections", len(self.project.connections)),
-                    ("Recorders", len(self.project.recorders)),
+                    ("Mass Nodes", sum(
+                        1 for node in self.model.nodes.values()
+                        if any(abs(value) > 0.0 for value in node.mass)
+                    )),
+                    ("Elements with Mass", sum(
+                        1 for element in self.model.elements.values()
+                        if float(element.mass_per_length) > 0.0
+                    )),
                     ("Mass Sources", len(self.project.mass_sources)),
+                    ("Recorders", len(self.project.recorders)),
                 ],
             )
             return
@@ -23261,11 +23374,6 @@ class MainWindow(QMainWindow):
                 for node in self.model.nodes.values()
                 if any(node.fixity)
             )
-            mass_nodes = sum(
-                1
-                for node in self.model.nodes.values()
-                if any(abs(value) > 0.0 for value in node.mass)
-            )
             plain_patterns = sum(
                 1
                 for pattern in self.project.load_patterns.values()
@@ -23281,8 +23389,6 @@ class MainWindow(QMainWindow):
                 [
                     ("Supported Nodes", supported_nodes),
                     ("Constraints", len(self.project.constraints)),
-                    ("Mass Nodes", mass_nodes),
-                    ("Mass Sources", len(self.project.mass_sources)),
                     ("Load Patterns", plain_patterns),
                     ("Time Series", len(self.project.time_series)),
                     ("Ground Motions", ground_motions),
@@ -23426,6 +23532,45 @@ class MainWindow(QMainWindow):
                 for name, count in sorted(recorder_types.items())
             )
             self.properties_panel.set_properties("Recorders", rows)
+            return
+        if kind == "mass_root":
+            mass_nodes = sum(
+                1
+                for node in self.model.nodes.values()
+                if any(abs(value) > 0.0 for value in node.mass)
+            )
+            mass_elements = sum(
+                1
+                for element in self.model.elements.values()
+                if float(element.mass_per_length) > 0.0
+            )
+            self.properties_panel.set_properties(
+                "Mass",
+                [
+                    ("Nodal Mass Assignments", mass_nodes),
+                    ("Elements with Mass", mass_elements),
+                    ("Mass Source Definitions", len(self.project.mass_sources)),
+                    ("Display", "Independent from Loads & BCs"),
+                ],
+            )
+            return
+        if kind == "element_masses_root":
+            mass_elements = [
+                element
+                for element in self.model.elements.values()
+                if float(element.mass_per_length) > 0.0
+            ]
+            consistent = sum(
+                1 for element in mass_elements if element.consistent_mass
+            )
+            self.properties_panel.set_properties(
+                "Element Mass",
+                [
+                    ("Elements with Mass", len(mass_elements)),
+                    ("Consistent Mass", consistent),
+                    ("Lumped Mass", len(mass_elements) - consistent),
+                ],
+            )
             return
         if kind == "mass_sources_root":
             self_mass_count = sum(
@@ -23689,6 +23834,58 @@ class MainWindow(QMainWindow):
             rows.extend((f"Type · {name}", count) for name, count in sorted(support_types.items()))
             self.properties_panel.set_properties("Supports / Restraints", rows)
             return
+        if kind == "element_masses_root":
+            tags = {
+                int(tag)
+                for tag, element in self.model.elements.items()
+                if float(element.mass_per_length) > 0.0
+            }
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "element_masses_root"
+                )
+            )
+            select_all = menu.addAction(
+                f"Select Elements with Mass ({len(tags)})"
+            )
+            select_all.setEnabled(bool(tags))
+            select_all.triggered.connect(
+                lambda checked=False, values=set(tags):
+                self.selection.set_selection(elements=set(values))
+            )
+            menu.addAction(self.actions["show_masses"])
+            exec_menu()
+            return
+
+        if kind == "nodal_mass":
+            tag = int(value)
+            self.selection.set_selection(nodes={tag})
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_entity_properties("node", tag)
+            )
+            edit = menu.addAction("Edit Nodal Mass...")
+            edit.triggered.connect(self._assign_mass)
+            clear = menu.addAction("Clear Nodal Mass")
+            clear.triggered.connect(self._clear_mass)
+            zoom = menu.addAction("Zoom to Node")
+            zoom.triggered.connect(self._zoom_selection)
+            exec_menu()
+            return
+
+        if kind == "element_mass":
+            tag = int(value)
+            self.selection.set_selection(elements={tag})
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_entity_properties("element", tag)
+            )
+            zoom = menu.addAction("Zoom to Element")
+            zoom.triggered.connect(self._zoom_selection)
+            exec_menu()
+            return
+
         if kind == "masses_root":
             mass_nodes = [
                 node for node in self.model.nodes.values()
@@ -24498,6 +24695,23 @@ class MainWindow(QMainWindow):
                 "New ZeroLength / Link Element..."
             )
             connection_action.triggered.connect(self._create_connection)
+            exec_menu()
+            return
+
+        if kind == "mass_root":
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties("mass_root")
+            )
+            assign = menu.addAction(
+                "Assign Nodal Mass to Current Selection..."
+            )
+            assign.setEnabled(bool(self.selection.nodes))
+            assign.triggered.connect(self._assign_mass)
+            source = menu.addAction("New Mass Source...")
+            source.triggered.connect(self._create_mass_source)
+            menu.addSeparator()
+            menu.addAction(self.actions["show_masses"])
             exec_menu()
             return
 
@@ -25803,13 +26017,6 @@ class MainWindow(QMainWindow):
             support.triggered.connect(self._apply_restraint)
             constraint = menu.addAction("New Constraint...")
             constraint.triggered.connect(self._create_constraint)
-            mass = menu.addAction(
-                "Assign Mass to Current Node Selection..."
-            )
-            mass.setEnabled(bool(self.selection.nodes))
-            mass.triggered.connect(self._assign_mass)
-            mass_source = menu.addAction("New Mass Source...")
-            mass_source.triggered.connect(self._create_mass_source)
 
             menu.addSeparator()
             load_pattern = menu.addAction("New Load Pattern...")
@@ -28226,6 +28433,11 @@ class MainWindow(QMainWindow):
         elif kind == "node":
             self._show_entity_properties("node", int(value))
         elif kind == "element":
+            self._show_entity_properties("element", int(value))
+        elif kind == "nodal_mass":
+            self.selection.set_selection(nodes={int(value)})
+            self._assign_mass()
+        elif kind == "element_mass":
             self._show_entity_properties("element", int(value))
         elif kind == "material":
             self._edit_material(int(value))

@@ -106,6 +106,7 @@ class ModelViewport(QWidget):
             "nodal_loads": False,
             "element_loads": False,
             "prescribed_displacements": False,
+            "masses": False,
             "section_axes": False,
             "load_values": True,
         }
@@ -4876,6 +4877,8 @@ class ModelViewport(QWidget):
             "display-prescribed-displacement-rotation-arcs",
             "display-prescribed-displacement-rotation-heads",
             "display-prescribed-displacement-labels",
+            "display-mass-points",
+            "display-mass-labels",
             "display-section-axis-y",
             "display-section-axis-z",
             "display-section-axis-labels",
@@ -5128,6 +5131,72 @@ class ModelViewport(QWidget):
                 name="display-nodal-load-labels",
                 text_color="#a71919",
                 font_size=10,
+                always_visible=True,
+            )
+
+    def _draw_masses(self) -> None:
+        """Draw a dedicated FE mass overlay without treating mass as a load."""
+        if self._model is None:
+            return
+
+        visible_nodes = self._visible_node_tags()
+        visible_elements = self._visible_element_tags()
+        mass_points: list[tuple[float, float, float]] = []
+        label_points: list[tuple[float, float, float]] = []
+        labels: list[str] = []
+
+        for tag in sorted(visible_nodes):
+            node = self._model.nodes.get(tag)
+            if (
+                node is None
+                or not any(abs(float(value)) > 0.0 for value in node.mass)
+            ):
+                continue
+            xyz = tuple(float(value) for value in node.xyz)
+            mass_points.append(xyz)
+            label_points.append(xyz)
+            labels.append("M")
+
+        for tag in sorted(visible_elements):
+            element = self._model.elements.get(tag)
+            if element is None or float(element.mass_per_length) <= 0.0:
+                continue
+            nodes = [
+                self._model.nodes.get(node_tag)
+                for node_tag in element.node_tags()
+            ]
+            if not nodes or any(node is None for node in nodes):
+                continue
+            center = tuple(
+                sum(
+                    float(node.xyz[index])
+                    for node in nodes
+                    if node is not None
+                ) / len(nodes)
+                for index in range(3)
+            )
+            label_points.append(center)
+            labels.append("ρL")
+
+        if mass_points:
+            cloud = pv.PolyData(np.asarray(mass_points, dtype=float))
+            self.plotter.add_mesh(
+                cloud,
+                name="display-mass-points",
+                color="#6f4aa8",
+                point_size=15,
+                render_points_as_spheres=True,
+                pickable=False,
+                render=False,
+            )
+
+        if label_points:
+            self._add_annotation_labels(
+                label_points,
+                labels,
+                name="display-mass-labels",
+                text_color="#5b3b8c",
+                font_size=11,
                 always_visible=True,
             )
 
@@ -5837,6 +5906,10 @@ class ModelViewport(QWidget):
                 "display-prescribed-displacement-rotation-heads",
                 "display-prescribed-displacement-labels",
             ),
+            "masses": (
+                "display-mass-points",
+                "display-mass-labels",
+            ),
             "section_axes": (
                 "display-section-axis-y",
                 "display-section-axis-z",
@@ -5872,6 +5945,8 @@ class ModelViewport(QWidget):
             and self._display_options[name]
         ):
             self._draw_prescribed_displacements()
+        elif name == "masses" and self._display_options[name]:
+            self._draw_masses()
         elif name == "section_axes" and self._display_options[name]:
             self._draw_section_axes()
         elif name == "load_values" and self._display_options[name]:
@@ -5905,11 +5980,14 @@ class ModelViewport(QWidget):
                 self._draw_element_loads()
             if self._display_options["prescribed_displacements"]:
                 self._draw_prescribed_displacements()
+            if self._display_options["masses"]:
+                self._draw_masses()
 
         if render and (
             self._display_options["nodal_loads"]
             or self._display_options["element_loads"]
             or self._display_options["prescribed_displacements"]
+            or self._display_options["masses"]
         ):
             self.plotter.render()
 
@@ -5929,6 +6007,8 @@ class ModelViewport(QWidget):
             self._draw_element_loads()
         if self._display_options["prescribed_displacements"]:
             self._draw_prescribed_displacements()
+        if self._display_options["masses"]:
+            self._draw_masses()
         if self._display_options["section_axes"]:
             self._draw_section_axes()
         if render:
