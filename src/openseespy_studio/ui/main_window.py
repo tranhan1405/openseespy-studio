@@ -2649,6 +2649,13 @@ class MainWindow(QMainWindow):
         )
         self._make_action("analysis_setup", "Analysis Setup...", "analysis", self._create_analysis, "Create analysis settings")
         self._make_action(
+            "response_spectrum_analysis",
+            "Response Spectrum...",
+            "analysis",
+            lambda checked=False: self._create_analysis_of_type("Response Spectrum"),
+            "Create a response-spectrum analysis with optional RotD50/RotD100 outputs",
+        )
+        self._make_action(
             "analysis_template",
             "Analysis Wizard...",
             "analysis",
@@ -2898,6 +2905,7 @@ class MainWindow(QMainWindow):
         template_menu.addAction(self.actions["nlth_template"])
         menus["Analysis"].addSeparator()
         menus["Analysis"].addAction(self.actions["analysis_setup"])
+        menus["Analysis"].addAction(self.actions["response_spectrum_analysis"])
         menus["Analysis"].addAction(self.actions["check_model"])
         menus["Analysis"].addSeparator()
         menus["Analysis"].addAction(self.actions["run"])
@@ -3481,7 +3489,12 @@ class MainWindow(QMainWindow):
             analysis_page,
             "Solver",
             large=("run",),
-            small=("analysis_setup", "check_model", "solver_output_view"),
+            small=(
+                "analysis_setup",
+                "response_spectrum_analysis",
+                "check_model",
+                "solver_output_view",
+            ),
         )
         add_group(
             analysis_page,
@@ -26807,6 +26820,11 @@ class MainWindow(QMainWindow):
         if kind == "analyses_root":
             action = menu.addAction("New Analysis...")
             action.triggered.connect(self._create_analysis)
+            spectrum_action = menu.addAction("Response Spectrum...")
+            spectrum_action.triggered.connect(
+                lambda checked=False:
+                self._create_analysis_of_type("Response Spectrum")
+            )
 
             template_menu = menu.addMenu("Analysis Wizard")
             for template_name in (
