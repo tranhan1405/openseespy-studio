@@ -333,7 +333,10 @@ if __name__ == '__main__':
 """
     result = import_openseespy_source(source, units=UNITS)
 
-    assert result.error_count == 0
+    assert result.error_count == 0, [
+        (issue.severity, issue.line, issue.construct, issue.message)
+        for issue in result.issues
+    ]
     assert set(result.project.model.nodes) == {1, 2}
     assert result.project.model.nodes[2].mass[:3] == (1.0, 0.0, 0.0)
 
