@@ -23844,8 +23844,46 @@ class MainWindow(QMainWindow):
                     self._merge_selected_geometry_lines(tags)
                 )
 
-            if count > 1:
-                mesh_menu = menu.addMenu("Mesh / FE")
+            mesh_menu = menu.addMenu("Mesh / FE")
+            if count == 1:
+                line_mesh_state = inspect_line_mesh_state(
+                    self.project,
+                    tag,
+                )
+                has_live_line_mesh = bool(
+                    line_mesh_state.live_element_tags
+                )
+                configure_mesh = mesh_menu.addAction(
+                    "Configure Line Mesh / FE Recipe..."
+                )
+                configure_mesh.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._configure_line_mesh(t)
+                )
+                generate_mesh = mesh_menu.addAction(
+                    "Remesh" if has_live_line_mesh else "Generate Mesh"
+                )
+                generate_mesh.triggered.connect(
+                    lambda checked=False, t=tag,
+                    live=has_live_line_mesh:
+                    self._remesh_line_geometry(t)
+                    if live
+                    else self._mesh_line_geometry(t)
+                )
+                preview_mesh = mesh_menu.addAction("Preview Mesh")
+                preview_mesh.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._preview_line_mesh(t)
+                )
+                select_generated = mesh_menu.addAction(
+                    "Select Generated FE"
+                )
+                select_generated.setEnabled(has_live_line_mesh)
+                select_generated.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._select_line_generated_fe(t)
+                )
+            else:
                 copy_recipe = mesh_menu.addAction(
                     f"Copy This Mesh / FE Recipe to "
                     f"{count - 1} Selected Line(s)"
@@ -24115,6 +24153,46 @@ class MainWindow(QMainWindow):
 
             mesh_menu = menu.addMenu("Mesh / FE")
             if count == 1:
+                configure_mesh = mesh_menu.addAction(
+                    "Configure Surface Mesh / Shell Recipe..."
+                )
+                configure_mesh.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._configure_surface_mesh(t)
+                )
+                assign_shell_section = mesh_menu.addAction(
+                    "Assign Shell Section..."
+                )
+                assign_shell_section.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._assign_shell_section_to_surfaces([t])
+                )
+                generate_mesh = mesh_menu.addAction(
+                    "Remesh"
+                    if has_live_surface_mesh
+                    else "Generate Mesh"
+                )
+                generate_mesh.triggered.connect(
+                    lambda checked=False, t=tag,
+                    live=has_live_surface_mesh:
+                    self._remesh_surface_geometry(t)
+                    if live
+                    else self._mesh_surface_geometry(t)
+                )
+                preview_mesh = mesh_menu.addAction("Preview Mesh")
+                preview_mesh.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._preview_surface_meshes([t])
+                )
+                select_generated = mesh_menu.addAction(
+                    "Select Generated FE"
+                )
+                select_generated.setEnabled(has_live_surface_mesh)
+                select_generated.triggered.connect(
+                    lambda checked=False, t=tag:
+                    self._select_generated_fe_for_surfaces([t])
+                )
+
                 select_edge_nodes = mesh_menu.addAction(
                     "Select Edge FE Nodes..."
                 )
@@ -24480,6 +24558,9 @@ class MainWindow(QMainWindow):
             create = menu.addAction(
                 "Create Direct FE Selection from Current Selection..."
             )
+            create.setEnabled(
+                bool(self.selection.nodes or self.selection.elements)
+            )
             create.triggered.connect(self._create_named_selection)
             exec_menu()
             return
@@ -24534,11 +24615,18 @@ class MainWindow(QMainWindow):
             apply_support = menu.addAction(
                 "Apply / Edit Support on Current Selection..."
             )
+            apply_support.setEnabled(bool(self.selection.nodes))
             apply_support.triggered.connect(self._apply_restraint)
             clear_support = menu.addAction(
                 "Clear Support on Current Selection"
             )
-            clear_support.setEnabled(bool(self.selection.nodes))
+            clear_support.setEnabled(
+                any(
+                    tag in self.model.nodes
+                    and any(self.model.nodes[tag].fixity)
+                    for tag in self.selection.nodes
+                )
+            )
             clear_support.triggered.connect(self._clear_restraint)
             exec_menu()
             return
@@ -25232,9 +25320,24 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "masses_root":
-            assign_action = menu.addAction("Assign to Current Node Selection...")
+            assign_action = menu.addAction(
+                "Assign Mass to Current Node Selection..."
+            )
+            assign_action.setEnabled(bool(self.selection.nodes))
             assign_action.triggered.connect(self._assign_mass)
-            clear_action = menu.addAction("Clear Current Node Selection")
+            clear_action = menu.addAction(
+                "Clear Mass from Current Node Selection"
+            )
+            clear_action.setEnabled(
+                any(
+                    tag in self.model.nodes
+                    and any(
+                        abs(value) > 0.0
+                        for value in self.model.nodes[tag].mass
+                    )
+                    for tag in self.selection.nodes
+                )
+            )
             clear_action.triggered.connect(self._clear_mass)
             exec_menu()
             return
