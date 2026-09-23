@@ -2193,7 +2193,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "ai_assistant",
             "AI Assistant",
-            "analysis",
+            "ai-assistant",
             self._show_ai_assistant,
             "Open the read-only SARE engineering AI assistant",
         )
@@ -2202,7 +2202,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "frame_pick",
             "Create by Picking",
-            "element",
+            "frame",
             self._activate_frame_pick_tool,
             "Click two nodes in the viewport to create a frame member",
             checkable=True,
@@ -2210,14 +2210,14 @@ class MainWindow(QMainWindow):
         self._make_action(
             "frame_input",
             "Create by Input...",
-            "element",
+            "frame",
             self._create_frame,
             "Create a frame member by entering nodes and assignments",
         )
         self._make_action(
             "truss_pick",
             "Create by Picking",
-            "element",
+            "truss",
             self._activate_truss_pick_tool,
             "Click two nodes in the viewport to create a Truss element",
             checkable=True,
@@ -2225,35 +2225,35 @@ class MainWindow(QMainWindow):
         self._make_action(
             "truss_input",
             "Create by Input...",
-            "element",
+            "truss",
             self._create_truss,
             "Create a Truss element by entering nodes, area, and material",
         )
         self._make_action(
             "sketch_plane_offset",
             "Offset Plane...",
-            "grid",
+            "sketch-plane",
             self._create_offset_sketch_plane,
             "Create a persistent construction plane offset from global XY/XZ/YZ",
         )
         self._make_action(
             "sketch_plane_3point",
             "3-Point Plane...",
-            "grid",
+            "sketch-plane",
             self._create_three_point_sketch_plane,
             "Create a construction plane through three Geometry Points",
         )
         self._make_action(
             "point_geometry",
             "Point...",
-            "node",
+            "geometry-point",
             self._create_point_geometry,
             "Create reusable preprocessing Point geometry",
         )
         self._make_action(
             "line_geometry_pick",
             "Draw Polyline",
-            "element",
+            "geometry-line",
             self._activate_geometry_line_pick_tool,
             "Draw continuous Geometry Lines on the active sketch plane with snapping",
             checkable=True,
@@ -2261,14 +2261,14 @@ class MainWindow(QMainWindow):
         self._make_action(
             "line_geometry",
             "Create by Input...",
-            "element",
+            "geometry-line",
             self._create_line_geometry,
             "Create reusable Line geometry by coordinate/topology input",
         )
         self._make_action(
             "surface_geometry_pick",
             "Draw Rectangle",
-            "grid",
+            "geometry-surface",
             self._activate_geometry_surface_pick_tool,
             "Draw a rectangular Geometry Surface by two diagonal clicks on the active sketch plane",
             checkable=True,
@@ -2276,14 +2276,14 @@ class MainWindow(QMainWindow):
         self._make_action(
             "surface_geometry",
             "Create by Input...",
-            "grid",
+            "geometry-surface",
             self._create_surface_geometry,
             "Create reusable Rectangle or Quad surface geometry for Shell meshing",
         )
         self._make_action(
             "geometry_trim_pick",
             "Trim",
-            "delete",
+            "trim",
             self._activate_geometry_trim_tool,
             "Click the side of a Geometry Line to trim, then click the cutting Line",
             checkable=True,
@@ -2291,7 +2291,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "geometry_extend_pick",
             "Extend",
-            "move",
+            "extend",
             self._activate_geometry_extend_tool,
             "Click the endpoint side of a Geometry Line to extend, then click the boundary Line",
             checkable=True,
@@ -2299,42 +2299,42 @@ class MainWindow(QMainWindow):
         self._make_action(
             "geometry_split",
             "Split / Divide...",
-            "element",
+            "split",
             self._split_selected_geometry_line,
             "Split one selected Geometry Line into real topology segments",
         )
         self._make_action(
             "geometry_join",
             "Join",
-            "copy",
+            "join",
             self._join_selected_geometry_lines,
             "Join selected contiguous collinear Geometry Lines",
         )
         self._make_action(
             "geometry_split_by_line",
             "Split by Line",
-            "element",
+            "split-by-line",
             self._split_selected_geometry_lines_at_intersection,
             "Split two selected Geometry Lines at their finite intersection",
         )
         self._make_action(
             "geometry_fillet",
             "Fillet...",
-            "rotate",
+            "fillet",
             self._fillet_selected_geometry_lines,
             "Create a tangent segmented fillet between two connected Geometry Lines",
         )
         self._make_action(
             "geometry_chamfer",
             "Chamfer...",
-            "element",
+            "chamfer",
             self._chamfer_selected_geometry_lines,
             "Create a straight chamfer between two connected Geometry Lines",
         )
         self._make_action(
             "geometry_trim_multiple",
             "Trim Multiple",
-            "delete",
+            "trim",
             self._activate_geometry_batch_trim_tool,
             "Use selected Geometry Lines as subjects, then click one cutting Line",
             checkable=True,
@@ -2342,7 +2342,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "geometry_extend_multiple",
             "Extend Multiple",
-            "move",
+            "extend",
             self._activate_geometry_batch_extend_tool,
             "Use selected Geometry Lines as subjects, then click one boundary Line",
             checkable=True,
@@ -2377,7 +2377,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "surface_mesh_overlay",
             "Shell Mesh Overlay",
-            "grid",
+            "surface-mesh",
             self._toggle_surface_mesh_overlay,
             "Show generated Shell FE mesh as a non-pickable overlay in Geometry mode",
             checkable=True,
@@ -2385,7 +2385,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "shell_input",
             "Direct Shell Element...",
-            "element",
+            "shell-element",
             self._create_shell,
             "Create one low-level four-node OpenSees Shell element directly",
         )
@@ -2400,7 +2400,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "frame_2d",
             "2D Frame",
-            "grid",
+            "frame-2d",
             self._show_frame_grid_2d,
             "Quick-create a planar X-Z frame with automatic out-of-plane restraints",
         )
@@ -4559,7 +4559,7 @@ class MainWindow(QMainWindow):
         root.setExpanded(True)
 
         geometry = QTreeWidgetItem(["Geometry"])
-        geometry.setIcon(0, studio_icon("grid"))
+        geometry.setIcon(0, studio_icon("geometry"))
         geometry.setData(0, Qt.UserRole, ("geometry_root", None))
         geometry.setExpanded(True)
         root.addChild(geometry)
@@ -4567,7 +4567,7 @@ class MainWindow(QMainWindow):
         planes = QTreeWidgetItem([
             f"Planes ({3 + len(self.project.sketch_planes)})"
         ])
-        planes.setIcon(0, studio_icon("grid"))
+        planes.setIcon(0, studio_icon("sketch-plane"))
         planes.setData(0, Qt.UserRole, ("planes_root", None))
         planes.setExpanded(True)
         geometry.addChild(planes)
@@ -4592,33 +4592,33 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"Plane {tag} · {plane.name}{active}"
             ])
-            item.setIcon(0, studio_icon("grid"))
+            item.setIcon(0, studio_icon("sketch-plane"))
             item.setData(0, Qt.UserRole, ("sketch_plane", tag))
             planes.addChild(item)
 
         points = QTreeWidgetItem([
             f"Points ({len(self.project.points)})"
         ])
-        points.setIcon(0, studio_icon("node"))
+        points.setIcon(0, studio_icon("geometry-point"))
         points.setData(0, Qt.UserRole, ("points_root", None))
         geometry.addChild(points)
 
         lines = QTreeWidgetItem([
             f"Lines ({len(self.project.lines)})"
         ])
-        lines.setIcon(0, studio_icon("element"))
+        lines.setIcon(0, studio_icon("geometry-line"))
         lines.setData(0, Qt.UserRole, ("lines_root", None))
         geometry.addChild(lines)
 
         surfaces = QTreeWidgetItem([
             f"Surfaces ({len(self.project.surfaces)})"
         ])
-        surfaces.setIcon(0, studio_icon("element"))
+        surfaces.setIcon(0, studio_icon("geometry-surface"))
         surfaces.setData(0, Qt.UserRole, ("surfaces_root", None))
         geometry.addChild(surfaces)
 
         mesh_root = QTreeWidgetItem(["Mesh"])
-        mesh_root.setIcon(0, studio_icon("grid"))
+        mesh_root.setIcon(0, studio_icon("mesh"))
         mesh_root.setData(0, Qt.UserRole, ("mesh_root", None))
         mesh_root.setExpanded(True)
         root.addChild(mesh_root)
@@ -4626,14 +4626,14 @@ class MainWindow(QMainWindow):
         line_meshes = QTreeWidgetItem([
             f"Line Meshes ({len(self.project.lines)})"
         ])
-        line_meshes.setIcon(0, studio_icon("element"))
+        line_meshes.setIcon(0, studio_icon("line-mesh"))
         line_meshes.setData(0, Qt.UserRole, ("line_meshes_root", None))
         mesh_root.addChild(line_meshes)
 
         surface_meshes = QTreeWidgetItem([
             f"Surface Meshes ({len(self.project.surfaces)})"
         ])
-        surface_meshes.setIcon(0, studio_icon("grid"))
+        surface_meshes.setIcon(0, studio_icon("surface-mesh"))
         surface_meshes.setData(
             0,
             Qt.UserRole,
@@ -4675,7 +4675,24 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{element_type} ({type_counts[element_type]})"
             ])
-            item.setIcon(0, studio_icon("element"))
+            element_type_lower = element_type.lower()
+            element_icon = (
+                "truss"
+                if "truss" in element_type_lower
+                else (
+                    "shell-element"
+                    if "shell" in element_type_lower
+                    else (
+                        "frame"
+                        if any(
+                            token in element_type_lower
+                            for token in ("beam", "column")
+                        )
+                        else "element"
+                    )
+                )
+            )
+            item.setIcon(0, studio_icon(element_icon))
             item.setData(
                 0,
                 Qt.UserRole,
@@ -4696,7 +4713,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"Point {tag} · {point.name}"
             ])
-            item.setIcon(0, studio_icon("node"))
+            item.setIcon(0, studio_icon("geometry-point"))
             item.setData(0, Qt.UserRole, ("point_geometry", tag))
             points.addChild(item)
 
@@ -4705,7 +4722,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"Line {tag} · {line.name}"
             ])
-            item.setIcon(0, studio_icon("element"))
+            item.setIcon(0, studio_icon("geometry-line"))
             item.setData(0, Qt.UserRole, ("line_geometry", tag))
             lines.addChild(item)
             self._tree_line_items[tag] = item
@@ -4729,7 +4746,7 @@ class MainWindow(QMainWindow):
             mesh_item = QTreeWidgetItem([
                 f"Line {tag} · {mesh_status}"
             ])
-            mesh_item.setIcon(0, studio_icon("element"))
+            mesh_item.setIcon(0, studio_icon("line-mesh"))
             mesh_item.setData(
                 0,
                 Qt.UserRole,
@@ -4742,7 +4759,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"Surface {tag} · {surface.name}"
             ])
-            item.setIcon(0, studio_icon("grid"))
+            item.setIcon(0, studio_icon("geometry-surface"))
             item.setData(
                 0,
                 Qt.UserRole,
@@ -4772,7 +4789,7 @@ class MainWindow(QMainWindow):
             mesh_item = QTreeWidgetItem([
                 f"Surface {tag} · {mesh_status}"
             ])
-            mesh_item.setIcon(0, studio_icon("grid"))
+            mesh_item.setIcon(0, studio_icon("surface-mesh"))
             mesh_item.setData(
                 0,
                 Qt.UserRole,
@@ -4783,7 +4800,24 @@ class MainWindow(QMainWindow):
         for tag in sorted(self.model.elements):
             element = self.model.elements[tag]
             item = QTreeWidgetItem([f"Element {tag}"])
-            item.setIcon(0, studio_icon("element"))
+            element_type_lower = element.element_type.lower()
+            element_icon = (
+                "truss"
+                if "truss" in element_type_lower
+                else (
+                    "shell-element"
+                    if "shell" in element_type_lower
+                    else (
+                        "frame"
+                        if any(
+                            token in element_type_lower
+                            for token in ("beam", "column")
+                        )
+                        else "element"
+                    )
+                )
+            )
+            item.setIcon(0, studio_icon(element_icon))
             item.setData(0, Qt.UserRole, ("element", tag))
             type_items.get(element.element_type, elements).addChild(item)
             self._tree_element_items[tag] = item
