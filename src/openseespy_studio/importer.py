@@ -4008,10 +4008,13 @@ class _Importer:
                 or analysis_type_hint.lower() == "pushover"
             ):
                 analysis_type = "Pushover"
+            elif state.get("analysis_kind") == "Transient":
+                # eigen() is often called only to calibrate Rayleigh damping
+                # before a transient analysis; it must not reclassify the
+                # whole analysis as Modal.
+                analysis_type = "Transient"
             elif state.get("modal"):
                 analysis_type = "Modal"
-            elif state.get("analysis_kind") == "Transient":
-                analysis_type = "Transient"
             elif state.get("integrator") == "DisplacementControl":
                 analysis_type = (
                     "Static"
