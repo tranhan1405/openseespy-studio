@@ -40,11 +40,14 @@ class CalibrationDialog(QDialog):
         self,
         project: ProjectDatabase,
         parent=None,
+        *,
+        new_material_callback=None,
     ):
         super().__init__(parent)
         self.setWindowTitle("Calibration / Parameter Study")
         self.resize(900, 620)
         self.project = project
+        self._new_material_callback = new_material_callback
         self._dataset: dict[str, Any] = {}
         self._dataset_path = ""
 
@@ -108,6 +111,17 @@ class CalibrationDialog(QDialog):
         self.parameter_table.horizontalHeader().setStretchLastSection(True)
         root.addWidget(self.parameter_table)
 
+        material_actions = QHBoxLayout()
+        material_actions.addStretch(1)
+        self.new_material = QPushButton("New Material...")
+        self.new_material.setEnabled(callable(self._new_material_callback))
+        self.new_material.setToolTip(
+            "Define a calibratable Material without closing Calibration."
+        )
+        self.new_material.clicked.connect(self._create_material_dependency)
+        material_actions.addWidget(self.new_material)
+        root.addLayout(material_actions)
+
         self.case_info = QLabel("")
         self.case_info.setWordWrap(True)
 
@@ -117,14 +131,7 @@ class CalibrationDialog(QDialog):
             self.parameter_table.setCellWidget(row, 0, enabled)
 
             material = QComboBox()
-            for tag in sorted(self.project.materials):
-                item = self.project.materials[tag]
-                if not item.parameters:
-                    continue
-                material.addItem(
-                    f"[{tag}] {item.name} · {item.material_type}",
-                    int(tag),
-                )
+            self._populate_material_combo(material)
             material.currentIndexChanged.connect(
                 lambda _index, r=row: self._material_changed(r)
             )
@@ -239,6 +246,55 @@ class CalibrationDialog(QDialog):
         root.addWidget(self.buttons)
 
         self._strategy_changed()
+
+    def _populate_material_combo(
+        self,
+        combo: QComboBox,
+        *,
+        select_tag: int | None = None,
+    ) -> None:
+        current = combo.currentData() if combo.count() else None
+        wanted = select_tag if select_tag is not None else current
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("Select Material...", None)
+        for tag in sorted(self.project.materials):
+            item = self.project.materials[tag]
+            if not item.parameters:
+                continue
+            combo.addItem(
+                f"[{tag}] {item.name} · {item.material_type}",
+                int(tag),
+            )
+        if wanted is not None:
+            index = combo.findData(int(wanted))
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        elif combo.count() == 2:
+            combo.setCurrentIndex(1)
+        combo.blockSignals(False)
+
+    def _create_material_dependency(self) -> None:
+        if not callable(self._new_material_callback):
+            return
+        material = self._new_material_callback()
+        if material is None:
+            return
+        for row in range(self.parameter_table.rowCount()):
+            combo = self.parameter_table.cellWidget(row, 1)
+            if not isinstance(combo, QComboBox):
+                continue
+            selected = (
+                int(material.tag)
+                if row == 0
+                else combo.currentData()
+            )
+            self._populate_material_combo(
+                combo,
+                select_tag=selected,
+            )
+            self._material_changed(row)
+        self._update_case_count()
 
     @staticmethod
     def _weight_spin(value: float) -> QDoubleSpinBox:
