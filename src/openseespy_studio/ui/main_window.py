@@ -24511,6 +24511,14 @@ class MainWindow(QMainWindow):
 
         if kind == "point_geometry":
             tag = int(value)
+            point_in_use = any(
+                tag in {line.point_i, line.point_j}
+                for line in self.project.lines.values()
+            ) or any(
+                surface.corner_point_tags is not None
+                and tag in surface.corner_point_tags
+                for surface in self.project.surfaces.values()
+            )
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda checked=False, t=tag:
@@ -24521,8 +24529,14 @@ class MainWindow(QMainWindow):
                 lambda checked=False, t=tag:
                 self._edit_point_geometry(t)
             )
+            create_line = menu.addAction("Create Line from This Point...")
+            create_line.triggered.connect(
+                lambda checked=False, t=tag:
+                self._create_line_geometry_from_points(point_i=t)
+            )
             menu.addSeparator()
             delete = menu.addAction("Delete Point")
+            delete.setEnabled(not point_in_use)
             delete.triggered.connect(
                 lambda checked=False, t=tag:
                 self._delete_point_geometry(t)
@@ -24694,6 +24708,56 @@ class MainWindow(QMainWindow):
                     self._select_line_generated_fe(t)
                 )
             else:
+                selected_line_states = {
+                    line_tag: inspect_line_mesh_state(
+                        self.project,
+                        int(line_tag),
+                    )
+                    for line_tag in line_tags
+                }
+                selected_line_elements = {
+                    int(element_tag)
+                    for state in selected_line_states.values()
+                    for element_tag in state.live_element_tags
+                    if int(element_tag) in self.model.elements
+                }
+                selected_line_nodes = {
+                    int(node_tag)
+                    for element_tag in selected_line_elements
+                    for node_tag in
+                    self.model.elements[element_tag].node_tags()
+                    if int(node_tag) in self.model.nodes
+                }
+                all_line_recipes = all(
+                    self.project.lines[line_tag].mesh_recipe_configured
+                    for line_tag in line_tags
+                )
+
+                batch_mesh = mesh_menu.addAction(
+                    f"Generate / Remesh Selected Lines ({count})"
+                )
+                batch_mesh.setEnabled(all_line_recipes)
+                batch_mesh.triggered.connect(
+                    lambda checked=False, tags=tuple(line_tags):
+                    self._remesh_line_geometries(tags)
+                )
+                select_generated = mesh_menu.addAction(
+                    f"Select Generated FE ({count} Lines)"
+                )
+                select_generated.setEnabled(
+                    bool(selected_line_nodes or selected_line_elements)
+                )
+                select_generated.triggered.connect(
+                    lambda checked=False,
+                    nodes=set(selected_line_nodes),
+                    elements=set(selected_line_elements): (
+                        self.viewport.set_display_domain("fe"),
+                        self.selection.set_selection(
+                            nodes=set(nodes),
+                            elements=set(elements),
+                        ),
+                    )
+                )
                 copy_recipe = mesh_menu.addAction(
                     f"Copy This Mesh / FE Recipe to "
                     f"{count - 1} Selected Line(s)"
@@ -24966,6 +25030,62 @@ class MainWindow(QMainWindow):
                 )
 
             mesh_menu = menu.addMenu("Mesh / FE")
+            if count > 1:
+                selected_surface_states = {
+                    surface_tag: inspect_surface_mesh_state(
+                        self.project,
+                        int(surface_tag),
+                    )
+                    for surface_tag in surface_tags
+                }
+                selected_surface_elements = {
+                    int(element_tag)
+                    for state in selected_surface_states.values()
+                    for element_tag in state.live_element_tags
+                    if int(element_tag) in self.model.elements
+                }
+                selected_surface_nodes = {
+                    int(node_tag)
+                    for element_tag in selected_surface_elements
+                    for node_tag in
+                    self.model.elements[element_tag].node_tags()
+                    if int(node_tag) in self.model.nodes
+                }
+                all_surface_recipes = all(
+                    self.project.surfaces[
+                        surface_tag
+                    ].mesh_recipe_configured
+                    for surface_tag in surface_tags
+                )
+                batch_mesh = mesh_menu.addAction(
+                    f"Generate / Remesh Selected Surfaces ({count})"
+                )
+                batch_mesh.setEnabled(all_surface_recipes)
+                batch_mesh.triggered.connect(
+                    lambda checked=False, tags=tuple(surface_tags):
+                    self._remesh_surface_geometries(tags)
+                )
+                select_generated = mesh_menu.addAction(
+                    f"Select Generated FE ({count} Surfaces)"
+                )
+                select_generated.setEnabled(
+                    bool(
+                        selected_surface_nodes
+                        or selected_surface_elements
+                    )
+                )
+                select_generated.triggered.connect(
+                    lambda checked=False,
+                    nodes=set(selected_surface_nodes),
+                    elements=set(selected_surface_elements): (
+                        self.viewport.set_display_domain("fe"),
+                        self.selection.set_selection(
+                            nodes=set(nodes),
+                            elements=set(elements),
+                        ),
+                    )
+                )
+
             if count == 1:
                 configure_mesh = mesh_menu.addAction(
                     "Configure Surface Mesh / Shell Recipe..."
@@ -25582,11 +25702,28 @@ class MainWindow(QMainWindow):
             )
             support_action.triggered.connect(self._apply_restraint)
             clear_action = assign_menu.addAction("Clear Support")
+            clear_action.setEnabled(
+                any(
+                    node_tag in self.model.nodes
+                    and any(self.model.nodes[node_tag].fixity)
+                    for node_tag in self.selection.nodes
+                )
+            )
             clear_action.triggered.connect(self._clear_restraint)
             assign_menu.addSeparator()
             mass_action = assign_menu.addAction("Mass...")
             mass_action.triggered.connect(self._assign_mass)
             clear_mass = assign_menu.addAction("Clear Mass")
+            clear_mass.setEnabled(
+                any(
+                    node_tag in self.model.nodes
+                    and any(
+                        abs(value) > 0.0
+                        for value in self.model.nodes[node_tag].mass
+                    )
+                    for node_tag in self.selection.nodes
+                )
+            )
             clear_mass.triggered.connect(self._clear_mass)
 
             create_menu = menu.addMenu("Create")
@@ -25657,75 +25794,110 @@ class MainWindow(QMainWindow):
                 element.element_type in SHELL_ELEMENT_TYPES
                 for element in selected_elements
             )
+            has_truss_material = any(
+                element.element_type == "truss"
+                and element.truss_material_tag is not None
+                for element in selected_elements
+            )
+            has_section_assignment = any(
+                element.element_type
+                in (FRAME_ELEMENT_TYPES | SHELL_ELEMENT_TYPES)
+                and element.section_tag is not None
+                for element in selected_elements
+            )
+            has_transformation_assignment = any(
+                element.element_type in FRAME_ELEMENT_TYPES
+                and element.transf_tag is not None
+                for element in selected_elements
+            )
 
             menu.addSeparator()
-            definition_menu = menu.addMenu("Definition")
-            if self.model.elements[tag].element_type in SHELL_ELEMENT_TYPES:
-                edit_shell = definition_menu.addAction(
-                    "Edit Shell Definition..."
-                )
-                edit_shell.triggered.connect(
-                    lambda: self._edit_shell(tag)
-                )
-            formulation = definition_menu.addAction(
-                "Element Formulation..."
-            )
-            formulation.setEnabled(has_frame)
-            formulation.triggered.connect(
-                self._set_element_formulation
-            )
+            if has_frame or (
+                self.model.elements[tag].element_type
+                in SHELL_ELEMENT_TYPES
+            ):
+                definition_menu = menu.addMenu("Definition")
+                if (
+                    self.model.elements[tag].element_type
+                    in SHELL_ELEMENT_TYPES
+                ):
+                    edit_shell = definition_menu.addAction(
+                        "Edit Shell Definition..."
+                    )
+                    edit_shell.triggered.connect(
+                        lambda: self._edit_shell(tag)
+                    )
+                if has_frame:
+                    formulation = definition_menu.addAction(
+                        "Element Formulation..."
+                    )
+                    formulation.triggered.connect(
+                        self._set_element_formulation
+                    )
 
             assign = menu.addMenu("Assign")
-            material_action = assign.addAction("Material (Truss)...")
-            material_action.setEnabled(has_truss)
-            material_action.triggered.connect(
-                self._assign_truss_material_to_selection
-            )
-            section_action = assign.addAction(
-                "Shell Section..."
-                if has_shell and not has_frame
-                else "Section..."
-            )
-            section_action.setEnabled(has_frame or has_shell)
-            section_action.triggered.connect(
-                self._assign_shell_section_to_selection
-                if has_shell and not has_frame
-                else self._assign_section_to_selection
-            )
-            transformation_action = assign.addAction("Transformation...")
-            transformation_action.setEnabled(has_frame)
-            transformation_action.triggered.connect(
-                self._assign_transformation_to_selection
-            )
-            assign.addSeparator()
-            clear_material = assign.addAction("Clear Material (Truss)")
-            clear_material.setEnabled(has_truss)
-            clear_material.triggered.connect(
-                self._clear_truss_material_assignment
-            )
-            clear_section = assign.addAction("Clear Section")
-            clear_section.setEnabled(has_frame or has_shell)
-            clear_section.triggered.connect(
-                self._clear_section_assignment
-            )
-            clear_transformation = assign.addAction(
-                "Clear Transformation"
-            )
-            clear_transformation.setEnabled(has_frame)
-            clear_transformation.triggered.connect(
-                self._clear_transformation_assignment
-            )
+            if has_truss:
+                material_action = assign.addAction("Material (Truss)...")
+                material_action.triggered.connect(
+                    self._assign_truss_material_to_selection
+                )
+            if has_frame or has_shell:
+                section_action = assign.addAction(
+                    "Shell Section..."
+                    if has_shell and not has_frame
+                    else "Section..."
+                )
+                section_action.triggered.connect(
+                    self._assign_shell_section_to_selection
+                    if has_shell and not has_frame
+                    else self._assign_section_to_selection
+                )
+            if has_frame:
+                transformation_action = assign.addAction(
+                    "Transformation..."
+                )
+                transformation_action.triggered.connect(
+                    self._assign_transformation_to_selection
+                )
 
-            load_menu = menu.addMenu("Loads")
-            load_menu.setEnabled(has_frame or has_shell)
-            beam_load = load_menu.addAction("Beam Load...")
-            beam_load.setEnabled(has_frame)
-            beam_load.triggered.connect(self._create_element_load)
-            shell_pressure = load_menu.addAction("Surface Pressure...")
-            shell_pressure.setEnabled(has_shell)
-            shell_pressure.triggered.connect(
-                self._create_shell_pressure
-            )
+            if (
+                has_truss_material
+                or has_section_assignment
+                or has_transformation_assignment
+            ):
+                assign.addSeparator()
+            if has_truss_material:
+                clear_material = assign.addAction(
+                    "Clear Material (Truss)"
+                )
+                clear_material.triggered.connect(
+                    self._clear_truss_material_assignment
+                )
+            if has_section_assignment:
+                clear_section = assign.addAction("Clear Section")
+                clear_section.triggered.connect(
+                    self._clear_section_assignment
+                )
+            if has_transformation_assignment:
+                clear_transformation = assign.addAction(
+                    "Clear Transformation"
+                )
+                clear_transformation.triggered.connect(
+                    self._clear_transformation_assignment
+                )
+
+            if has_frame or has_shell:
+                load_menu = menu.addMenu("Loads")
+                if has_frame:
+                    beam_load = load_menu.addAction("Beam Load...")
+                    beam_load.triggered.connect(self._create_element_load)
+                if has_shell:
+                    shell_pressure = load_menu.addAction(
+                        "Surface Pressure..."
+                    )
+                    shell_pressure.triggered.connect(
+                        self._create_shell_pressure
+                    )
 
             modify = menu.addMenu("Modify")
             move = modify.addAction("Move...")
@@ -26249,12 +26421,51 @@ class MainWindow(QMainWindow):
 
         if kind == "recorder":
             tag = int(value)
+            recorder = self.project.recorders.get(tag)
+            recorder_nodes = {
+                int(target)
+                for target in (
+                    recorder.target_tags if recorder is not None else []
+                )
+                if (
+                    recorder is not None
+                    and recorder.recorder_type == "Node"
+                    and int(target) in self.model.nodes
+                )
+            }
+            recorder_elements = {
+                int(target)
+                for target in (
+                    recorder.target_tags if recorder is not None else []
+                )
+                if (
+                    recorder is not None
+                    and recorder.recorder_type != "Node"
+                    and (
+                        int(target) in self.model.elements
+                        or int(target) in self.project.connections
+                    )
+                )
+            }
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_recorder_properties(tag)
             )
             edit = menu.addAction("Edit...")
             edit.triggered.connect(lambda: self._edit_recorder(tag))
+            select_targets = menu.addAction("Select Recorder Targets")
+            select_targets.setEnabled(
+                bool(recorder_nodes or recorder_elements)
+            )
+            select_targets.triggered.connect(
+                lambda checked=False,
+                nodes=set(recorder_nodes),
+                elements=set(recorder_elements):
+                self.selection.set_selection(
+                    nodes=set(nodes),
+                    elements=set(elements),
+                )
+            )
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_recorder(tag))
             exec_menu()
@@ -26418,6 +26629,32 @@ class MainWindow(QMainWindow):
             edit.triggered.connect(lambda: self._edit_load_pattern(tag))
             pattern = self.project.load_patterns.get(tag)
             if pattern is not None and pattern.pattern_type == "Plain":
+                loaded_nodes = {
+                    int(load.node_tag)
+                    for load in self.project.nodal_loads.values()
+                    if (
+                        int(load.pattern_tag) == tag
+                        and int(load.node_tag) in self.model.nodes
+                    )
+                } | {
+                    int(displacement.node_tag)
+                    for displacement
+                    in self.project.prescribed_displacements.values()
+                    if (
+                        int(displacement.pattern_tag) == tag
+                        and int(displacement.node_tag)
+                        in self.model.nodes
+                    )
+                }
+                loaded_elements = {
+                    int(load.element_tag)
+                    for load in self.project.element_loads.values()
+                    if (
+                        int(load.pattern_tag) == tag
+                        and int(load.element_tag)
+                        in self.model.elements
+                    )
+                }
                 add_load = menu.addAction("Add Nodal Load...")
                 add_load.triggered.connect(self._create_nodal_load)
                 add_displacement = menu.addAction(
@@ -26435,6 +26672,22 @@ class MainWindow(QMainWindow):
                 )
                 add_shell_pressure.triggered.connect(
                     self._create_shell_pressure
+                )
+                select_nodes = menu.addAction(
+                    f"Select Loaded Nodes ({len(loaded_nodes)})"
+                )
+                select_nodes.setEnabled(bool(loaded_nodes))
+                select_nodes.triggered.connect(
+                    lambda checked=False, values=set(loaded_nodes):
+                    self.selection.set_selection(nodes=set(values))
+                )
+                select_elements = menu.addAction(
+                    f"Select Loaded Elements ({len(loaded_elements)})"
+                )
+                select_elements.setEnabled(bool(loaded_elements))
+                select_elements.triggered.connect(
+                    lambda checked=False, values=set(loaded_elements):
+                    self.selection.set_selection(elements=set(values))
                 )
             delete = menu.addAction("Delete")
             delete.triggered.connect(lambda: self._delete_load_pattern(tag))
