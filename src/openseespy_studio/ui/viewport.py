@@ -197,6 +197,7 @@ class ModelViewport(QWidget):
             list[tuple[object, dict[str, object]]],
         ] = OrderedDict()
         self._result_view_cache_limit = 18
+        self._node_contour_animation_state: dict[str, object] | None = None
         self._motion_element_mesh = None
         self._motion_node_mesh = None
         self._motion_element_node_tags: list[int] = []
@@ -4025,6 +4026,7 @@ class ModelViewport(QWidget):
         self._result_view_cache.clear()
         self._active_result_view_key = None
         self._result_overlay_active = False
+        self._node_contour_animation_state = None
         self.plotter.clear()
         self._measurement_actor_names.clear()
         self._measurement_counter = 0
@@ -6151,6 +6153,7 @@ class ModelViewport(QWidget):
             self._remove_overlay(name)
         self._result_overlay_active = False
         self._active_result_view_key = None
+        self._node_contour_animation_state = None
         self._motion_element_mesh = None
         self._motion_node_mesh = None
         self._motion_element_node_tags = []
@@ -7167,6 +7170,61 @@ class ModelViewport(QWidget):
             magnitude=magnitude,
         )
 
+        fast_animation = bool(
+            (contour_options or {}).get("_fast_animation", False)
+        )
+        animation_key = (
+            quantity,
+            component,
+            self._result_scope_key(visible_elements),
+            self._result_scope_key(visible_nodes),
+            display.cache_key(),
+        )
+        animation_state = self._node_contour_animation_state
+        if (
+            fast_animation
+            and isinstance(animation_state, dict)
+            and animation_state.get("key") == animation_key
+        ):
+            line_mesh = animation_state.get("line_mesh")
+            node_mesh = animation_state.get("node_mesh")
+            try:
+                if points:
+                    if line_mesh is None or int(line_mesh.n_points) != len(points):
+                        raise ValueError("line contour topology changed")
+                    line_mesh.points[:] = np.asarray(points, dtype=float)
+                    line_mesh.point_data["nodal_result"][:] = np.asarray(
+                        scalars,
+                        dtype=float,
+                    )
+                    line_mesh.Modified()
+                elif line_mesh is not None:
+                    raise ValueError("line contour topology changed")
+
+                if node_points:
+                    if (
+                        node_mesh is None
+                        or int(node_mesh.n_points) != len(node_points)
+                    ):
+                        raise ValueError("node contour topology changed")
+                    node_mesh.points[:] = np.asarray(node_points, dtype=float)
+                    node_mesh.point_data["nodal_result"][:] = np.asarray(
+                        node_scalars,
+                        dtype=float,
+                    )
+                    node_mesh.Modified()
+                elif node_mesh is not None:
+                    raise ValueError("node contour topology changed")
+
+                self._result_overlay_active = True
+                self._active_result_view_key = None
+                self.plotter.render()
+                return
+            except (AttributeError, KeyError, TypeError, ValueError):
+                # Fall through to a full rebuild when topology or the VTK
+                # backing arrays changed unexpectedly.
+                pass
+
         self.clear_result_overlay(render=False)
         entries: list[tuple[object, dict[str, object]]] = []
 
@@ -7245,7 +7303,22 @@ class ModelViewport(QWidget):
                 )
         self._show_contour_extrema(extrema_positions, extrema_labels)
 
-        self._remember_result_view(view_key, entries)
+        if fast_animation:
+            self._node_contour_animation_state = {
+                "key": animation_key,
+                "line_mesh": (
+                    entries[0][0]
+                    if points and entries
+                    else None
+                ),
+                "node_mesh": (
+                    entries[-1][0]
+                    if node_points and entries
+                    else None
+                ),
+            }
+        else:
+            self._remember_result_view(view_key, entries)
         self._result_overlay_active = True
         self.plotter.render()
 
