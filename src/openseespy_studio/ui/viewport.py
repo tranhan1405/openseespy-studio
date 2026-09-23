@@ -173,7 +173,7 @@ class ModelViewport(QWidget):
         self._geometry_sketch_v_axis = np.asarray((0.0, 1.0, 0.0), dtype=float)
         self._geometry_sketch_normal = np.asarray((0.0, 0.0, 1.0), dtype=float)
         self._geometry_sketch_preview: dict[str, object] | None = None
-        self._geometry_sketch_grid_visible = False
+        self._geometry_sketch_grid_visible = True
         self._origin_axes_visible = True
         self._last_geometry_sketch_qt_pos: tuple[float, float] | None = None
         self._measurement_actor_names: set[str] = set()
@@ -339,6 +339,9 @@ class ModelViewport(QWidget):
 
     def interaction_tool(self) -> str:
         return self._interaction_tool
+
+    def display_domain(self) -> str:
+        return str(self._display_domain)
 
     @staticmethod
     def _normalized_sketch_axis(value, label: str) -> np.ndarray:
@@ -1065,13 +1068,13 @@ class ModelViewport(QWidget):
         if render:
             self.plotter.render()
 
-    def show_measure_anchor(self, node_tag: int) -> None:
-        """Highlight the first node selected for a distance measurement."""
+    def show_measure_anchor_at(self, xyz) -> None:
+        """Highlight an arbitrary world-space first measurement point."""
         self.clear_measure_anchor(render=False)
-        if self._model is None or int(node_tag) not in self._model.nodes:
+        point = np.asarray(tuple(float(value) for value in xyz), dtype=float)
+        if point.shape != (3,) or not np.all(np.isfinite(point)):
             self.plotter.render()
             return
-        point = self._model.nodes[int(node_tag)].xyz
         self.plotter.add_mesh(
             pv.PolyData([point]),
             name="measure-anchor",
@@ -1083,23 +1086,37 @@ class ModelViewport(QWidget):
         )
         self.plotter.render()
 
-    def add_distance_measurement(
-        self,
-        first_node_tag: int,
-        second_node_tag: int,
-    ) -> dict[str, float]:
-        """Draw and return a node-to-node distance measurement."""
-        if self._model is None:
-            raise ValueError("No model is currently displayed.")
-        first_tag = int(first_node_tag)
-        second_tag = int(second_node_tag)
-        if first_tag not in self._model.nodes or second_tag not in self._model.nodes:
-            raise ValueError("Measure nodes must exist in the current model.")
+    def show_measure_anchor(self, node_tag: int) -> None:
+        """Highlight the first FE node selected for a distance measurement."""
+        if self._model is None or int(node_tag) not in self._model.nodes:
+            self.clear_measure_anchor(render=True)
+            return
+        self.show_measure_anchor_at(self._model.nodes[int(node_tag)].xyz)
 
-        p1 = np.asarray(self._model.nodes[first_tag].xyz, dtype=float)
-        p2 = np.asarray(self._model.nodes[second_tag].xyz, dtype=float)
+    def add_point_distance_measurement(
+        self,
+        first_xyz,
+        second_xyz,
+        *,
+        first_label: str | None = None,
+        second_label: str | None = None,
+    ) -> dict[str, float]:
+        """Draw a persistent distance measurement between arbitrary XYZ points."""
+        p1 = np.asarray(tuple(float(value) for value in first_xyz), dtype=float)
+        p2 = np.asarray(tuple(float(value) for value in second_xyz), dtype=float)
+        if (
+            p1.shape != (3,)
+            or p2.shape != (3,)
+            or not np.all(np.isfinite(p1))
+            or not np.all(np.isfinite(p2))
+        ):
+            raise ValueError("Measure points require finite XYZ coordinates.")
+
         delta = p2 - p1
         distance = float(np.linalg.norm(delta))
+        if distance <= 1.0e-15:
+            raise ValueError("Measure Distance requires two different points.")
+
         unit = str(self._units.get("length", "")).strip()
         suffix = f" {unit}" if unit else ""
 
@@ -1128,7 +1145,13 @@ class ModelViewport(QWidget):
         )
 
         midpoint = (p1 + p2) * 0.5
+        title = ""
+        if first_label or second_label:
+            title = (
+                f"{first_label or 'P1'} → {second_label or 'P2'}\n"
+            )
         label = (
+            f"{title}"
             f"L = {distance:.4g}{suffix}\n"
             f"ΔX = {delta[0]:.4g}{suffix}   "
             f"ΔY = {delta[1]:.4g}{suffix}   "
@@ -1154,6 +1177,25 @@ class ModelViewport(QWidget):
             "dy": float(delta[1]),
             "dz": float(delta[2]),
         }
+
+    def add_distance_measurement(
+        self,
+        first_node_tag: int,
+        second_node_tag: int,
+    ) -> dict[str, float]:
+        """Draw and return an FE node-to-node distance measurement."""
+        if self._model is None:
+            raise ValueError("No model is currently displayed.")
+        first_tag = int(first_node_tag)
+        second_tag = int(second_node_tag)
+        if first_tag not in self._model.nodes or second_tag not in self._model.nodes:
+            raise ValueError("Measure nodes must exist in the current model.")
+        return self.add_point_distance_measurement(
+            self._model.nodes[first_tag].xyz,
+            self._model.nodes[second_tag].xyz,
+            first_label=f"N{first_tag}",
+            second_label=f"N{second_tag}",
+        )
 
     def clear_measurements(self, *, render: bool = True) -> None:
         """Remove all persistent Measure overlays from the viewport."""
@@ -3424,6 +3466,11 @@ class ModelViewport(QWidget):
         # Persistent world-space origin reference. Unlike the orientation
         # cube, this triad sits at the model's actual global (0, 0, 0).
         self._render_origin_axes()
+
+        # The sketch grid is viewport state, not model geometry. Rebuild it
+        # after plotter.clear() so committing a Line/Surface never hides it.
+        if self._display_domain == "geometry":
+            self._render_geometry_sketch_grid()
 
         if self._model is None:
             if preserved_camera is not None:
