@@ -9259,12 +9259,10 @@ class MainWindow(QMainWindow):
         )
 
         beam_load_action = menu.addAction("Create Beam Load...")
-        beam_load_action.setEnabled(has_frame)
         beam_load_action.triggered.connect(self._create_element_load)
         shell_pressure_action = menu.addAction(
             "Create Surface Pressure..."
         )
-        shell_pressure_action.setEnabled(has_shell)
         shell_pressure_action.triggered.connect(
             self._create_shell_pressure
         )
@@ -15389,13 +15387,17 @@ class MainWindow(QMainWindow):
                     "Surface(s) "
                     + ", ".join(map(str, sorted(meshed_surfaces)))
                 )
-            QMessageBox.information(
-                self,
-                "Edit Geometry Point",
-                "This Point is used by meshed " + "; ".join(users)
-                + ". Delete/remesh the generated FE mesh before moving it.",
-            )
-            return
+            if not self._ask_create_prerequisite(
+                title="Edit Geometry Point",
+                message=(
+                    "This Point is used by meshed "
+                    + "; ".join(users)
+                    + ". Edit the Point and automatically remesh those "
+                    "dependent Geometry objects?"
+                ),
+                action_label="Edit + Remesh Now...",
+            ):
+                return
         dialog = PointGeometryDialog(
             next_tag=point.tag,
             point=point,
@@ -15407,10 +15409,26 @@ class MainWindow(QMainWindow):
         try:
             updated = dialog.data()
             self.project.update_point(tag, updated)
+            for line_tag in sorted(meshed_lines):
+                remesh_line_geometry(self.project, line_tag)
+            for surface_tag in sorted(meshed_surfaces):
+                remesh_surface_geometry(self.project, surface_tag)
         except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            self._refresh_all()
             QMessageBox.warning(self, "Geometry Point", str(exc))
             return
-        self._refresh_all(f"Updated Geometry Point {updated.tag}")
+        self.model = self.project.model
+        remesh_note = ""
+        if meshed_lines or meshed_surfaces:
+            remesh_note = (
+                f" · remeshed {len(meshed_lines)} Line(s) and "
+                f"{len(meshed_surfaces)} Surface(s)"
+            )
+        self._refresh_all(
+            f"Updated Geometry Point {updated.tag}{remesh_note}"
+        )
         self._show_point_geometry_properties(updated.tag)
         self._record_project_change(
             f"Edit Geometry Point {tag}",
@@ -15720,12 +15738,50 @@ class MainWindow(QMainWindow):
             )
         )
         if not tags:
-            QMessageBox.information(
-                self,
-                "Generate Line Meshes",
-                "No configured unmeshed Geometry Lines are ready.",
+            candidates = sorted(
+                tag
+                for tag, line in self.project.lines.items()
+                if (
+                    not line.mesh_recipe_configured
+                    and not inspect_line_mesh_state(
+                        self.project,
+                        int(tag),
+                    ).live_element_tags
+                )
             )
-            return
+            if not candidates:
+                QMessageBox.information(
+                    self,
+                    "Generate Line Meshes",
+                    "No unmeshed Geometry Lines are available.",
+                )
+                return
+            for tag in candidates:
+                if not self._ask_create_prerequisite(
+                    title="Generate Line Meshes",
+                    message=(
+                        f"Geometry Line {tag} has no Line Mesh / FE recipe. "
+                        "Configure it now?"
+                    ),
+                    action_label=f"Configure Line {tag} Mesh Now...",
+                ):
+                    return
+                if not self._configure_line_mesh(tag, generate=False):
+                    return
+            tags = sorted(
+                tag
+                for tag in candidates
+                if (
+                    tag in self.project.lines
+                    and self.project.lines[tag].mesh_recipe_configured
+                    and not inspect_line_mesh_state(
+                        self.project,
+                        int(tag),
+                    ).live_element_tags
+                )
+            )
+            if not tags:
+                return
         before = self.project.to_dict()
         try:
             results = remesh_line_batch(self.project, tags)
@@ -17157,12 +17213,50 @@ class MainWindow(QMainWindow):
             )
         )
         if not tags:
-            QMessageBox.information(
-                self,
-                "Generate Surface Meshes",
-                "No configured unmeshed Surfaces are ready.",
+            candidates = sorted(
+                tag
+                for tag, surface in self.project.surfaces.items()
+                if (
+                    not surface.mesh_recipe_configured
+                    and not inspect_surface_mesh_state(
+                        self.project,
+                        int(tag),
+                    ).live_element_tags
+                )
             )
-            return
+            if not candidates:
+                QMessageBox.information(
+                    self,
+                    "Generate Surface Meshes",
+                    "No unmeshed Surface geometry is available.",
+                )
+                return
+            for tag in candidates:
+                if not self._ask_create_prerequisite(
+                    title="Generate Surface Meshes",
+                    message=(
+                        f"Surface {tag} has no Surface Mesh / Shell recipe. "
+                        "Configure it now?"
+                    ),
+                    action_label=f"Configure Surface {tag} Mesh Now...",
+                ):
+                    return
+                if not self._configure_surface_mesh(tag, generate=False):
+                    return
+            tags = sorted(
+                tag
+                for tag in candidates
+                if (
+                    tag in self.project.surfaces
+                    and self.project.surfaces[tag].mesh_recipe_configured
+                    and not inspect_surface_mesh_state(
+                        self.project,
+                        int(tag),
+                    ).live_element_tags
+                )
+            )
+            if not tags:
+                return
         self._remesh_surface_geometries(tags)
 
     def _remesh_all_meshed_surfaces(self) -> None:
@@ -22203,14 +22297,7 @@ class MainWindow(QMainWindow):
             line_generate = line_menu.addAction(
                 "Generate All Configured Line Meshes"
             )
-            line_generate.setEnabled(any(
-                line.mesh_recipe_configured
-                and not inspect_line_mesh_state(
-                    self.project,
-                    int(tag),
-                ).live_element_tags
-                for tag, line in self.project.lines.items()
-            ))
+            line_generate.setEnabled(bool(self.project.lines))
             line_generate.triggered.connect(
                 self._generate_all_configured_line_meshes
             )
@@ -22233,14 +22320,7 @@ class MainWindow(QMainWindow):
             surface_generate = surface_menu.addAction(
                 "Generate All Configured Surface Meshes"
             )
-            surface_generate.setEnabled(any(
-                surface.mesh_recipe_configured
-                and not inspect_surface_mesh_state(
-                    self.project,
-                    int(tag),
-                ).live_element_tags
-                for tag, surface in self.project.surfaces.items()
-            ))
+            surface_generate.setEnabled(bool(self.project.surfaces))
             surface_generate.triggered.connect(
                 self._generate_all_configured_surface_meshes
             )
