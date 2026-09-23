@@ -10022,10 +10022,13 @@ class MainWindow(QMainWindow):
             return
         while True:
             users = sorted(
-                pattern
-                for pattern in self.project.load_patterns.values()
-                if pattern.time_series_tag == tag
-            , key=lambda item: item.tag)
+                (
+                    pattern
+                    for pattern in self.project.load_patterns.values()
+                    if pattern.time_series_tag == tag
+                ),
+                key=lambda item: item.tag,
+            )
             if not users:
                 break
             owner = users[0]
