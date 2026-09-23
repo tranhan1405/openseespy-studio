@@ -156,7 +156,7 @@ def test_tree_selection_display_context_matches_mechanical_workflow():
         {"named_sets_root"}
     ) == ("fe", "Selection")
 
-def test_model_geometry_mesh_fe_and_load_roots_exit_result_display():
+def test_major_model_roots_exit_result_display():
     assert MainWindow._tree_selection_resets_result_overlay(
         {"model_root"}
     )
@@ -172,6 +172,9 @@ def test_model_geometry_mesh_fe_and_load_roots_exit_result_display():
     assert MainWindow._tree_selection_resets_result_overlay(
         {"loads_bc_root"}
     )
+    assert MainWindow._tree_selection_resets_result_overlay(
+        {"analyses_root"}
+    )
     assert not MainWindow._tree_selection_resets_result_overlay(
         {"solution_root"}
     )
@@ -180,4 +183,9 @@ def test_loads_bc_root_routes_to_fe_model_context():
     assert MainWindow._tree_selection_display_context(
         {"loads_bc_root"}
     ) == ("fe", "Model")
+
+def test_analysis_root_routes_to_analysis_context():
+    assert MainWindow._tree_selection_display_context(
+        {"analyses_root"}
+    ) == ("fe", "Analysis")
 
