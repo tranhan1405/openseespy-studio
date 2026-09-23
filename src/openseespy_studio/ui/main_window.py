@@ -25378,6 +25378,10 @@ class MainWindow(QMainWindow):
             self._edit_line_geometry(int(value))
         elif kind == "surface_geometry":
             self._edit_surface_geometry(int(value))
+        elif kind == "line_mesh_recipe":
+            self._configure_line_mesh(int(value))
+        elif kind == "surface_mesh_recipe":
+            self._configure_surface_mesh(int(value))
         elif kind == "node":
             self._show_entity_properties("node", int(value))
         elif kind == "element":
