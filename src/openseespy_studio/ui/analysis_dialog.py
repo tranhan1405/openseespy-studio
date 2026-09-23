@@ -28,6 +28,7 @@ class AnalysisDialog(QDialog):
         ndf=6,
         plain_patterns=None,
         new_plain_pattern_callback=None,
+        new_ground_motion_callback=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -47,6 +48,7 @@ class AnalysisDialog(QDialog):
             for tag, name in dict(plain_patterns or {}).items()
         }
         self._new_plain_pattern_callback = new_plain_pattern_callback
+        self._new_ground_motion_callback = new_ground_motion_callback
         self.tag=QSpinBox(); self.tag.setRange(1,2147483647); self.tag.setValue(analysis.tag if analysis else next_tag)
         default_kind = (
             analysis.analysis_type
@@ -266,6 +268,23 @@ class AnalysisDialog(QDialog):
         self.deferred_patterns.setPlaceholderText(
             "e.g. 3  (driving lateral / excitation pattern)"
         )
+        self.deferred_pattern_new = QPushButton("New Ground Motion...")
+        self.deferred_pattern_new.setEnabled(
+            callable(self._new_ground_motion_callback)
+        )
+        self.deferred_pattern_new.setToolTip(
+            "Create a Path Time Series + UniformExcitation pattern "
+            "without closing Analysis Settings."
+        )
+        self.deferred_pattern_new.clicked.connect(
+            self._create_ground_motion_dependency
+        )
+        self.deferred_pattern_holder = QWidget()
+        deferred_row = QHBoxLayout(self.deferred_pattern_holder)
+        deferred_row.setContentsMargins(0, 0, 0, 0)
+        deferred_row.setSpacing(4)
+        deferred_row.addWidget(self.deferred_patterns, 1)
+        deferred_row.addWidget(self.deferred_pattern_new)
         self.driver_mode=QComboBox()
         self.driver_mode.addItem(
             "Auto-generate reference pattern",
@@ -429,7 +448,7 @@ class AnalysisDialog(QDialog):
             ("driver_mode","Driving load",self.driver_mode),
             ("driver_pattern","Existing Plain pattern",self.driver_pattern_holder),
             ("driver_distribution","Auto load distribution",self.driver_distribution),
-            ("deferred_patterns","Excitation pattern tag(s)",self.deferred_patterns),
+            ("deferred_patterns","Excitation pattern tag(s)",self.deferred_pattern_holder),
             ("recovery","Recovery",self.recovery),
             ("adaptive","Adaptive step",self.adaptive),
             ("cutback","Cutback factor",self.cutback),
@@ -516,12 +535,47 @@ class AnalysisDialog(QDialog):
         self.plain_patterns[int(pattern.tag)] = pattern.name
         self._refresh_driver_pattern_choices(int(pattern.tag))
 
+    def _create_ground_motion_dependency(self) -> None:
+        if not callable(self._new_ground_motion_callback):
+            return
+        pattern = self._new_ground_motion_callback()
+        if pattern is None:
+            return
+        if pattern.pattern_type != "UniformExcitation":
+            QMessageBox.warning(
+                self,
+                "Analysis Settings",
+                "Transient excitation expects a UniformExcitation pattern.",
+            )
+            return
+        existing = []
+        for raw in (
+            self.deferred_patterns.text()
+            .replace(";", ",")
+            .replace(" ", ",")
+            .split(",")
+        ):
+            value = raw.strip()
+            if value:
+                try:
+                    existing.append(int(value))
+                except ValueError:
+                    continue
+        if int(pattern.tag) not in existing:
+            existing.append(int(pattern.tag))
+        self.deferred_patterns.setText(
+            ", ".join(str(tag) for tag in existing)
+        )
+
     def _set_row_visible(self, key, visible):
         widget=self._row_widgets[key]
         widget.setVisible(bool(visible))
         if key == "driver_pattern":
             self.driver_pattern.setVisible(bool(visible))
             self.driver_pattern_new.setVisible(bool(visible))
+        elif key == "deferred_patterns":
+            self.deferred_patterns.setVisible(bool(visible))
+            self.deferred_pattern_new.setVisible(bool(visible))
         label=self.form.labelForField(widget)
         if label is not None:
             label.setVisible(bool(visible))
