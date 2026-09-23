@@ -3762,18 +3762,42 @@ class MainWindow(QMainWindow):
             self._apply_result_ribbon_scale
         )
 
-        self.result_frame_count_ribbon = QSpinBox()
-        self.result_frame_count_ribbon.setRange(5, 100)
-        self.result_frame_count_ribbon.setValue(20)
-        self.result_frame_count_ribbon.setSuffix(" frames")
-        self.result_frame_count_ribbon.setFixedWidth(104)
+        self.result_frame_count_ribbon = QComboBox()
+        self.result_frame_count_ribbon.setFixedWidth(112)
+        for label, value in (
+            ("5 Frames", 5),
+            ("10 Frames", 10),
+            ("20 Frames", 20),
+            ("30 Frames", 30),
+            ("50 Frames", 50),
+            ("100 Frames", 100),
+            ("User Defined...", "user"),
+        ):
+            self.result_frame_count_ribbon.addItem(label, value)
+        self.result_frame_count_ribbon.setCurrentIndex(
+            self.result_frame_count_ribbon.findData(20)
+        )
         self.result_frame_count_ribbon.setToolTip(
-            "Number of evenly sampled result frames used during playback "
-            "(5-100). The first and last analysis frames are retained."
+            "Choose the number of evenly sampled result frames used during "
+            "playback. Select User Defined for a custom value from 5 to 100."
         )
         self.result_frame_count_ribbon.setEnabled(False)
-        self.result_frame_count_ribbon.valueChanged.connect(
-            self._apply_result_animation_frame_limit
+        self.result_frame_count_ribbon.currentIndexChanged.connect(
+            self._apply_result_animation_frame_choice
+        )
+
+        self.result_frame_custom_ribbon = QSpinBox()
+        self.result_frame_custom_ribbon.setRange(5, 100)
+        self.result_frame_custom_ribbon.setValue(20)
+        self.result_frame_custom_ribbon.setSuffix(" frames")
+        self.result_frame_custom_ribbon.setFixedWidth(104)
+        self.result_frame_custom_ribbon.setToolTip(
+            "User-defined animation frame count (5-100)."
+        )
+        self.result_frame_custom_ribbon.setEnabled(False)
+        self.result_frame_custom_ribbon.setVisible(False)
+        self.result_frame_custom_ribbon.valueChanged.connect(
+            self._apply_result_animation_custom_frame_limit
         )
 
         result_page = RibbonPage()
@@ -3807,7 +3831,10 @@ class MainWindow(QMainWindow):
         add_group(
             result_page,
             "Animation",
-            widgets=(self.result_frame_count_ribbon,),
+            widgets=(
+                self.result_frame_count_ribbon,
+                self.result_frame_custom_ribbon,
+            ),
         )
         add_group(
             result_page,
@@ -4070,13 +4097,38 @@ class MainWindow(QMainWindow):
             action.setChecked(bool(options.get(setting, True)))
             action.blockSignals(False)
 
-    def _apply_result_animation_frame_limit(self, value: int) -> None:
+    def _apply_result_animation_frame_choice(self, _index: int) -> None:
         if not hasattr(self, "result_frame_count_ribbon"):
+            return
+        raw = self.result_frame_count_ribbon.currentData()
+        user_defined = str(raw) == "user"
+        if hasattr(self, "result_frame_custom_ribbon"):
+            self.result_frame_custom_ribbon.setVisible(user_defined)
+            self.result_frame_custom_ribbon.setEnabled(
+                user_defined and self.result_frame_count_ribbon.isEnabled()
+            )
+        if user_defined:
+            limit = int(self.result_frame_custom_ribbon.value())
+        else:
+            try:
+                limit = int(raw)
+            except (TypeError, ValueError):
+                limit = 20
+        limit = max(5, min(100, limit))
+        self.results_panel.set_playback_frame_limit(limit)
+        self.status_message.setText(
+            f"Result animation: {limit} sampled frames"
+        )
+
+    def _apply_result_animation_custom_frame_limit(self, value: int) -> None:
+        if not hasattr(self, "result_frame_count_ribbon"):
+            return
+        if str(self.result_frame_count_ribbon.currentData()) != "user":
             return
         limit = max(5, min(100, int(value)))
         self.results_panel.set_playback_frame_limit(limit)
         self.status_message.setText(
-            f"Result animation: {limit} sampled frames"
+            f"Result animation: {limit} sampled frames (User Defined)"
         )
 
     def _redraw_active_contour_result(self) -> None:
@@ -4322,6 +4374,8 @@ class MainWindow(QMainWindow):
         self._set_result_contour_controls_enabled(False)
         if hasattr(self, "result_frame_count_ribbon"):
             self.result_frame_count_ribbon.setEnabled(False)
+        if hasattr(self, "result_frame_custom_ribbon"):
+            self.result_frame_custom_ribbon.setEnabled(False)
         fit_action = self.actions.get("fit_result")
         if fit_action is not None:
             fit_action.setEnabled(bool(self._last_result))
@@ -23405,9 +23459,15 @@ class MainWindow(QMainWindow):
             options,
         )
         if hasattr(self, "result_frame_count_ribbon"):
-            self.result_frame_count_ribbon.setEnabled(
-                self.results_panel.has_result_frames()
-            )
+            frame_controls_enabled = self.results_panel.has_result_frames()
+            self.result_frame_count_ribbon.setEnabled(frame_controls_enabled)
+            if hasattr(self, "result_frame_custom_ribbon"):
+                self.result_frame_custom_ribbon.setEnabled(
+                    frame_controls_enabled
+                    and str(
+                        self.result_frame_count_ribbon.currentData()
+                    ) == "user"
+                )
         if result_type == "DeformedShape":
             self._sync_result_ribbon_controls(
                 "deformation",
