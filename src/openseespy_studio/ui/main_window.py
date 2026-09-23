@@ -3780,6 +3780,7 @@ class MainWindow(QMainWindow):
             "Maximum number of evenly sampled frames used during playback. "
             "The first and last analysis frames are always retained."
         )
+        self.result_frame_count_ribbon.setEnabled(False)
         self.result_frame_count_ribbon.currentIndexChanged.connect(
             self._apply_result_animation_frame_limit
         )
