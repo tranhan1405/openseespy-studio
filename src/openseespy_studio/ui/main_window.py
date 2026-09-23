@@ -2151,26 +2151,26 @@ class MainWindow(QMainWindow):
         self._make_action(
             "import_py",
             "Import OpenSeesPy...",
-            "open",
+            "import-openseespy",
             self._import_openseespy_script,
             "Safely reconstruct a Studio project from an OpenSeesPy script",
         )
         self._make_action("save", "Save", "save", self._save_project, "Save project")
         self._make_action("undo", "Undo", "undo", self.undo_stack.undo, "Undo")
         self._make_action("redo", "Redo", "redo", self.undo_stack.redo, "Redo")
-        self._make_action("save_as", "Save As...", "save", self._save_project_as, "Save project as")
-        self._make_action("export_py", "Export OpenSeesPy...", "save", self._export_script, "Export readable OpenSeesPy script")
+        self._make_action("save_as", "Save As...", "save-as", self._save_project_as, "Save project as")
+        self._make_action("export_py", "Export OpenSeesPy...", "export-openseespy", self._export_script, "Export readable OpenSeesPy script")
         self._make_action(
             "close_project",
             "Close Project",
-            "delete",
+            "close-project",
             self._new_model,
             "Close the current project and return to an empty project",
         )
         self._make_action(
             "exit",
             "Exit",
-            "delete",
+            "exit-app",
             self.close,
             "Exit SARE",
         )
@@ -2350,7 +2350,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "geometry_snap",
             "Snap",
-            "select",
+            "geometry-snap",
             self._toggle_geometry_snap,
             "Toggle endpoint, midpoint, intersection and orthogonal inference snapping",
             checkable=True,
@@ -2368,7 +2368,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "origin_axes",
             "Origin OXYZ",
-            "iso",
+            "origin-axes",
             self._toggle_origin_axes,
             "Show or hide the global world-space origin triad at (0, 0, 0)",
             checkable=True,
@@ -2389,11 +2389,11 @@ class MainWindow(QMainWindow):
             self._create_shell,
             "Create one low-level four-node OpenSees Shell element directly",
         )
-        self._make_action("grid", "Grid", "grid", self._show_frame_grid, "Create frame grid")
+        self._make_action("grid", "Grid", "frame-grid", self._show_frame_grid, "Create frame grid")
         self._make_action(
             "column_1d",
             "1D Column",
-            "element",
+            "column-1d",
             self._show_test_column_wizard,
             "Quick-create a standalone column / experimental test specimen",
         )
@@ -2404,7 +2404,7 @@ class MainWindow(QMainWindow):
             self._show_frame_grid_2d,
             "Quick-create a planar X-Z frame with automatic out-of-plane restraints",
         )
-        self._make_action("extrude", "Extrude", "copy", self._not_implemented, "Extrude geometry")
+        self._make_action("extrude", "Extrude", "extrude", self._not_implemented, "Extrude geometry")
         self.actions["extrude"].setEnabled(False)
         self.actions["extrude"].setToolTip(
             "Extrude is not implemented in the current research-alpha release"
@@ -2537,7 +2537,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "new_transformation",
             "New Transformation...",
-            "transform",
+            "create-transformation",
             self._create_transformation,
             "Create OpenSees geometric transformation",
         )
@@ -4644,20 +4644,20 @@ class MainWindow(QMainWindow):
         # Geometry defines topology, Mesh stores discretization/FE recipes,
         # and generated OpenSees entities live only under FE Model.
         fe_model = QTreeWidgetItem(["FE Model"])
-        fe_model.setIcon(0, studio_icon("model"))
+        fe_model.setIcon(0, studio_icon("fe-model"))
         fe_model.setData(0, Qt.UserRole, ("fe_model_root", None))
         fe_model.setExpanded(True)
         root.addChild(fe_model)
 
         nodes = QTreeWidgetItem([f"Nodes ({len(self.model.nodes)})"])
-        nodes.setIcon(0, studio_icon("node"))
+        nodes.setIcon(0, studio_icon("node-root"))
         nodes.setData(0, Qt.UserRole, ("nodes_root", None))
         fe_model.addChild(nodes)
 
         elements = QTreeWidgetItem([
             f"Elements ({len(self.model.elements)})"
         ])
-        elements.setIcon(0, studio_icon("element"))
+        elements.setIcon(0, studio_icon("element-root"))
         elements.setData(0, Qt.UserRole, ("elements_root", None))
         elements.setExpanded(True)
         fe_model.addChild(elements)
@@ -4965,7 +4965,7 @@ class MainWindow(QMainWindow):
         named_sets = QTreeWidgetItem([
             f"Named Selections ({len(self.project.selection_sets)})"
         ])
-        named_sets.setIcon(0, studio_icon("select"))
+        named_sets.setIcon(0, studio_icon("named-selection"))
         named_sets.setData(0, Qt.UserRole, ("named_sets_root", None))
         named_sets.setExpanded(True)
         fe_model.addChild(named_sets)
@@ -5037,7 +5037,7 @@ class MainWindow(QMainWindow):
         sections_root = QTreeWidgetItem([
             f"Sections ({len(self.project.sections)})"
         ])
-        sections_root.setIcon(0, studio_icon("section"))
+        sections_root.setIcon(0, studio_icon("section-root"))
         sections_root.setData(0, Qt.UserRole, ("sections_root", None))
         sections_root.setExpanded(True)
         properties_root.addChild(sections_root)
@@ -5059,7 +5059,7 @@ class MainWindow(QMainWindow):
         transformations_root = QTreeWidgetItem([
             f"Transformations ({len(self.project.transformations)})"
         ])
-        transformations_root.setIcon(0, studio_icon("transform"))
+        transformations_root.setIcon(0, studio_icon("transformation-root"))
         transformations_root.setData(
             0,
             Qt.UserRole,
@@ -5079,7 +5079,7 @@ class MainWindow(QMainWindow):
             transformations_root.addChild(item)
 
         loads_bc_root = QTreeWidgetItem(["Loads & BCs"])
-        loads_bc_root.setIcon(0, studio_icon("load"))
+        loads_bc_root.setIcon(0, studio_icon("loads-bcs"))
         loads_bc_root.setData(
             0,
             Qt.UserRole,
@@ -5096,7 +5096,7 @@ class MainWindow(QMainWindow):
         boundary_root = QTreeWidgetItem([
             f"Boundary Conditions ({len(constrained_nodes)})"
         ])
-        boundary_root.setIcon(0, studio_icon("boundary"))
+        boundary_root.setIcon(0, studio_icon("boundary-root"))
         boundary_root.setData(0, Qt.UserRole, ("boundary_root", None))
         boundary_root.setExpanded(True)
         loads_bc_root.addChild(boundary_root)
@@ -5138,7 +5138,7 @@ class MainWindow(QMainWindow):
                 group_item.addChild(node_item)
 
         loading_root = QTreeWidgetItem(["Loading"])
-        loading_root.setIcon(0, studio_icon("load"))
+        loading_root.setIcon(0, studio_icon("loading"))
         loading_root.setData(0, Qt.UserRole, ("loading_root", None))
         loading_root.setExpanded(True)
         loads_bc_root.addChild(loading_root)
