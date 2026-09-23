@@ -8,6 +8,7 @@ from .units import UnitSystem
 from .model import SHELL_ELEMENT_TYPES, StructuralModel
 from .project import MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind
 from .section_response import automatic_moment_curvature_spec, build_section_response_specs
+from .response_spectrum import build_period_grid
 
 
 @dataclass(slots=True)
@@ -1300,6 +1301,71 @@ def moment_curvature_response_spec(
         active_analysis=active_analysis,
     )
 
+def _response_spectrum_sources(
+    settings: AnalysisSettingsData,
+    load_patterns: dict[int, LoadPatternData] | None,
+    time_series: dict[int, TimeSeriesData] | None,
+) -> list[dict[str, object]]:
+    if settings.analysis_type != "Response Spectrum":
+        return []
+    expected = (
+        1
+        if settings.response_spectrum_mode == "Single Component"
+        else 2
+    )
+    pattern_tags = list(settings.deferred_pattern_tags)
+    if len(pattern_tags) != expected:
+        raise ValueError(
+            f"Response Spectrum {settings.response_spectrum_mode} needs "
+            f"exactly {expected} UniformExcitation pattern tag(s)."
+        )
+    components: list[dict[str, object]] = []
+    for pattern_tag in pattern_tags:
+        pattern = (load_patterns or {}).get(int(pattern_tag))
+        if pattern is None:
+            raise ValueError(
+                f"Response Spectrum references missing load pattern "
+                f"{pattern_tag}."
+            )
+        if pattern.pattern_type != "UniformExcitation":
+            raise ValueError(
+                f"Response Spectrum pattern {pattern_tag} must be "
+                "UniformExcitation."
+            )
+        series = (time_series or {}).get(int(pattern.time_series_tag))
+        if series is None:
+            raise ValueError(
+                f"Response Spectrum pattern {pattern_tag} references "
+                f"missing time series {pattern.time_series_tag}."
+            )
+        if series.series_type != "Path":
+            raise ValueError(
+                f"Response Spectrum time series {series.tag} must be Path."
+            )
+        scale = float(series.factor) * float(pattern.factor)
+        components.append({
+            "pattern_tag": int(pattern.tag),
+            "time_series_tag": int(series.tag),
+            "direction": int(pattern.direction),
+            "name": str(series.name),
+            "dt": float(series.dt),
+            "values": [float(value) * scale for value in series.values],
+        })
+    if len(components) == 2:
+        directions = [int(item["direction"]) for item in components]
+        if any(direction not in {1, 2, 3} for direction in directions):
+            raise ValueError(
+                "Bidirectional RotD sources must use translational "
+                "UniformExcitation directions 1, 2, or 3."
+            )
+        if directions[0] == directions[1]:
+            raise ValueError(
+                "Bidirectional RotD sources must use two distinct "
+                "UniformExcitation directions."
+            )
+    return components
+
+
 def analysis_to_openseespy(
     settings: AnalysisSettingsData,
     *,
@@ -1316,6 +1382,8 @@ def analysis_to_openseespy(
     specimen_response_spec: dict[str, object] | None = None,
     moment_curvature_spec: dict[str, object] | None = None,
     section_response_specs: list[dict[str, object]] | None = None,
+    response_spectrum_components: list[dict[str, object]] | None = None,
+    response_spectrum_gravity: float = 9.80665,
 ) -> list[str]:
     ndm = int(ndm)
     translational_dofs = tuple(range(1, max(ndm, 0) + 1))
@@ -1331,6 +1399,10 @@ def analysis_to_openseespy(
     moment_curvature_spec = dict(moment_curvature_spec or {})
     section_response_specs = [
         dict(spec) for spec in (section_response_specs or [])
+    ]
+    response_spectrum_components = [
+        dict(component)
+        for component in (response_spectrum_components or [])
     ]
     section_response_catalog = {
         str(spec.get('key', f'response:{index}')): dict(spec)
@@ -1353,7 +1425,24 @@ def analysis_to_openseespy(
         if settings.analysis_type == "Cyclic"
         else []
     )
-    total_steps = len(cyclic_steps) if settings.analysis_type == "Cyclic" else settings.steps
+    spectrum_periods = (
+        build_period_grid(
+            settings.response_spectrum_t1_step,
+            settings.response_spectrum_t1_end,
+            settings.response_spectrum_t2_step,
+            settings.response_spectrum_t2_end,
+            settings.response_spectrum_t3_step,
+            settings.response_spectrum_t3_end,
+        )
+        if settings.analysis_type == "Response Spectrum"
+        else []
+    )
+    if settings.analysis_type == "Cyclic":
+        total_steps = len(cyclic_steps)
+    elif settings.analysis_type == "Response Spectrum":
+        total_steps = len(spectrum_periods)
+    else:
+        total_steps = settings.steps
     if monitor_node is None and (
         settings.analysis_type in {"Pushover", "Cyclic"}
         or (
@@ -1487,6 +1576,88 @@ def analysis_to_openseespy(
         f"ops.numberer('{settings.numberer}')",
         system_command,
     ]
+
+    if settings.analysis_type == "Response Spectrum":
+        expected = (
+            1
+            if settings.response_spectrum_mode == "Single Component"
+            else 2
+        )
+        if len(response_spectrum_components) != expected:
+            raise ValueError(
+                f"Response Spectrum {settings.response_spectrum_mode} needs "
+                f"{expected} resolved source component(s)."
+            )
+        source_metadata = [
+            {
+                key: component.get(key)
+                for key in (
+                    "pattern_tag",
+                    "time_series_tag",
+                    "direction",
+                    "name",
+                    "dt",
+                )
+            }
+            for component in response_spectrum_components
+        ]
+        lines.extend([
+            "",
+            "# Response Spectrum generation (linear SDOF sweep)",
+            "from openseespy_studio.response_spectrum import compute_response_spectrum as _studio_compute_response_spectrum",
+            f"_studio_rs_sources = {response_spectrum_components!r}",
+            f"_studio_rs_periods = {spectrum_periods!r}",
+            "_studio_results['response_spectrum'] = {",
+            f"    'mode': {settings.response_spectrum_mode!r},",
+            f"    'damping_ratio': {settings.response_spectrum_damping_ratio:g},",
+            f"    'sources': {source_metadata!r},",
+            "    'period_s': [],",
+        ])
+        if settings.response_spectrum_component_x:
+            lines.append("    'component_x_sa_g': [],")
+        if settings.response_spectrum_component_y:
+            lines.append("    'component_y_sa_g': [],")
+        if settings.response_spectrum_rotd50:
+            lines.append("    'rotd50_sa_g': [],")
+        if settings.response_spectrum_rotd100:
+            lines.append("    'rotd100_sa_g': [],")
+        lines.extend([
+            "}",
+            (
+                f"_studio_emit('start', total={len(spectrum_periods)}, "
+                "analysis_type='Response Spectrum', "
+                "algorithm='Linear Newmark SDOF')"
+            ),
+            "for _studio_index, _studio_period in enumerate(_studio_rs_periods, start=1):",
+            "    _studio_point = _studio_compute_response_spectrum(",
+            "        _studio_rs_sources,",
+            "        [_studio_period],",
+            f"        {settings.response_spectrum_damping_ratio:g},",
+            f"        {float(response_spectrum_gravity):g},",
+            f"        include_component_x={settings.response_spectrum_component_x!r},",
+            f"        include_component_y={settings.response_spectrum_component_y!r},",
+            f"        include_rotd50={settings.response_spectrum_rotd50!r},",
+            f"        include_rotd100={settings.response_spectrum_rotd100!r},",
+            "    )",
+            "    _studio_curve = _studio_results['response_spectrum']",
+            "    _studio_curve['period_s'].append(float(_studio_period))",
+            "    for _studio_key in ('component_x_sa_g', 'component_y_sa_g', 'rotd50_sa_g', 'rotd100_sa_g'):",
+            "        if _studio_key in _studio_curve and _studio_key in _studio_point:",
+            "            _studio_curve[_studio_key].append(float(_studio_point[_studio_key][0]))",
+            (
+                f"    _studio_emit('progress', step=_studio_index, "
+                f"total={len(spectrum_periods)}, "
+                "percent=100.0 * _studio_index / max(len(_studio_rs_periods), 1), "
+                "algorithm='Linear Newmark SDOF', iterations=0, "
+                "time=float(_studio_period), monitor=0.0, base_shear=0.0)"
+            ),
+            "_studio_results['final'] = {",
+            "    'response_spectrum_points': len(_studio_rs_periods),",
+            "    'period_min_s': min(_studio_rs_periods) if _studio_rs_periods else None,",
+            "    'period_max_s': max(_studio_rs_periods) if _studio_rs_periods else None,",
+            "}",
+        ])
+        return lines
 
     _studio_has_direct_rayleigh = (
         settings.rayleigh_model == "DirectCoefficients"
@@ -4546,6 +4717,15 @@ def to_openseespy(
             active_analysis=active,
         )
 
+        response_spectrum_components = _response_spectrum_sources(
+            active,
+            load_patterns,
+            time_series,
+        )
+        response_spectrum_gravity = UnitSystem.from_mapping(
+            units
+        ).acceleration_from_m_per_s2(9.80665)
+
         lines.extend(
             analysis_to_openseespy(
                 active,
@@ -4592,6 +4772,8 @@ def to_openseespy(
                 specimen_response_spec=specimen_response_spec,
                 moment_curvature_spec=moment_curvature_spec,
                 section_response_specs=section_response_specs,
+                response_spectrum_components=response_spectrum_components,
+                response_spectrum_gravity=response_spectrum_gravity,
             )
         )
 
