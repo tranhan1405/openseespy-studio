@@ -6499,12 +6499,188 @@ class MainWindow(QMainWindow):
             )
         )
 
+    def _geometry_measure_snap(
+        self,
+        payload: dict[str, object],
+    ) -> dict[str, object] | None:
+        """Resolve a CAD-like Measure snap without changing Geometry topology."""
+        base = self._geometry_sketch_snap(payload)
+        if base is None:
+            return None
+        if str(base.get("kind", "")) in {
+            "endpoint",
+            "intersection",
+            "midpoint",
+        }:
+            return base
+
+        screen = payload.get("screen")
+        raw = payload.get("world")
+        if screen is None or raw is None:
+            return base
+        try:
+            sx, sy = float(screen[0]), float(screen[1])
+            xyz = tuple(float(value) for value in raw)
+        except (TypeError, ValueError, IndexError):
+            return base
+        if (
+            len(xyz) != 3
+            or not all(math.isfinite(value) for value in xyz)
+            or not math.isfinite(sx)
+            or not math.isfinite(sy)
+        ):
+            return base
+
+        alternatives: list[
+            tuple[
+                float,
+                int,
+                str,
+                tuple[float, float, float],
+                tuple[int, ...],
+                str,
+            ]
+        ] = []
+
+        # Nearest point on a Geometry Line, resolved in screen space so the
+        # behavior remains intuitive in perspective and under zoom.
+        for line_tag, line in self.project.lines.items():
+            point_i = self.project.points.get(int(line.point_i))
+            point_j = self.project.points.get(int(line.point_j))
+            if point_i is None or point_j is None:
+                continue
+            try:
+                ix, iy = self.viewport.geometry_world_to_screen(point_i.xyz)
+                jx, jy = self.viewport.geometry_world_to_screen(point_j.xyz)
+            except (TypeError, ValueError):
+                continue
+            if not all(math.isfinite(value) for value in (ix, iy, jx, jy)):
+                continue
+            dx = jx - ix
+            dy = jy - iy
+            length2 = dx * dx + dy * dy
+            if length2 <= 1.0e-12:
+                continue
+            parameter = (
+                (sx - ix) * dx + (sy - iy) * dy
+            ) / length2
+            parameter = max(0.0, min(1.0, parameter))
+            # Endpoints have a larger, higher-priority topology snap.
+            if parameter <= 0.025 or parameter >= 0.975:
+                continue
+            px = ix + parameter * dx
+            py = iy + parameter * dy
+            distance2 = (px - sx) ** 2 + (py - sy) ** 2
+            if distance2 > 11.0 * 11.0:
+                continue
+            candidate = tuple(
+                float(point_i.xyz[axis])
+                + parameter
+                * (
+                    float(point_j.xyz[axis])
+                    - float(point_i.xyz[axis])
+                )
+                for axis in range(3)
+            )
+            alternatives.append(
+                (
+                    distance2,
+                    0,
+                    "line_nearest",
+                    candidate,
+                    (int(line_tag),),
+                    f"Nearest L{int(line_tag)}",
+                )
+            )
+
+        # Orthogonal inference from the first Measure point is useful for
+        # checking horizontal/vertical offsets without creating Geometry.
+        if (
+            self._measure_first_xyz is not None
+            and self._geometry_point_on_active_sketch_plane(
+                self._measure_first_xyz
+            )
+        ):
+            world_to_local = getattr(
+                self.viewport,
+                "geometry_world_to_local",
+                None,
+            )
+            local_to_world = getattr(
+                self.viewport,
+                "geometry_local_to_world",
+                None,
+            )
+            if callable(world_to_local) and callable(local_to_world):
+                try:
+                    anchor_u, anchor_v = world_to_local(
+                        self._measure_first_xyz
+                    )
+                    cursor_u, cursor_v = world_to_local(xyz)
+                    inferred = (
+                        (
+                            "Horizontal",
+                            local_to_world(cursor_u, anchor_v),
+                        ),
+                        (
+                            "Vertical",
+                            local_to_world(anchor_u, cursor_v),
+                        ),
+                    )
+                except (TypeError, ValueError):
+                    inferred = ()
+                for label, candidate in inferred:
+                    px, py = self.viewport.geometry_world_to_screen(candidate)
+                    if not math.isfinite(px) or not math.isfinite(py):
+                        continue
+                    distance2 = (px - sx) ** 2 + (py - sy) ** 2
+                    if distance2 <= 9.0 * 9.0:
+                        alternatives.append(
+                            (
+                                distance2,
+                                1,
+                                "orthogonal",
+                                tuple(
+                                    float(value)
+                                    for value in candidate
+                                ),
+                                (),
+                                f"Orthogonal · {label}",
+                            )
+                        )
+
+        # Grid/free from the shared Geometry snap engine remains a fallback.
+        base_xyz = tuple(float(value) for value in base["xyz"])
+        bx, by = self.viewport.geometry_world_to_screen(base_xyz)
+        if math.isfinite(bx) and math.isfinite(by):
+            base_distance2 = (bx - sx) ** 2 + (by - sy) ** 2
+        else:
+            base_distance2 = float("inf")
+
+        if alternatives:
+            best = min(
+                alternatives,
+                key=lambda item: (item[0], item[1]),
+            )
+            if (
+                str(base.get("kind", "")) == "free"
+                or best[0] < base_distance2
+            ):
+                return {
+                    "xyz": best[3],
+                    "kind": best[2],
+                    "label": best[5],
+                    "point_tag": None,
+                    "line_tags": best[4],
+                }
+        return base
+
     def _measurement_point_from_payload(
         self,
         payload: dict[str, object],
     ) -> tuple[tuple[float, float, float], str] | None:
         if self.viewport.display_domain() == "geometry":
-            snap = self._geometry_sketch_snap(payload)
+            snap = self._geometry_measure_snap(payload)
             if snap is None:
                 return None
             return (
@@ -7655,7 +7831,7 @@ class MainWindow(QMainWindow):
         if self.viewport.display_domain() != "geometry":
             return
 
-        snap = self._geometry_sketch_snap(payload)
+        snap = self._geometry_measure_snap(payload)
         if snap is None:
             self.viewport.clear_measure_snap_preview(render=True)
             return
@@ -7843,6 +8019,32 @@ class MainWindow(QMainWindow):
         )
 
     def _viewport_entity_hovered(self, payload: object) -> None:
+        measure_action = self.actions.get("measure_distance")
+        if (
+            measure_action is not None
+            and measure_action.isChecked()
+            and self.viewport.display_domain() != "geometry"
+        ):
+            if (
+                isinstance(payload, dict)
+                and payload.get("kind") == "node"
+                and payload.get("tag") is not None
+            ):
+                node_tag = int(payload["tag"])
+                node = self.model.nodes.get(node_tag)
+                if node is not None:
+                    self.viewport.show_measure_snap_preview(
+                        node.xyz,
+                        label=f"N{node_tag}",
+                        anchor=self._measure_first_xyz,
+                    )
+                    self.status_message.setText(
+                        f"Measure snap: N{node_tag}"
+                    )
+                    return
+            self.viewport.clear_measure_snap_preview(render=True)
+            return
+
         if isinstance(payload, dict):
             raw_kind = str(payload.get("kind", ""))
             kind = (
