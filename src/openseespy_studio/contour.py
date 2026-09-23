@@ -10,6 +10,8 @@ class ContourDisplayOptions:
     range_mode: str = "auto"
     minimum: float | None = None
     maximum: float | None = None
+    global_minimum: float | None = None
+    global_maximum: float | None = None
     symmetric: bool = True
     bands: int = 11
     palette: str = "auto"
@@ -23,6 +25,8 @@ class ContourDisplayOptions:
             self.range_mode,
             self.minimum,
             self.maximum,
+            self.global_minimum,
+            self.global_maximum,
             self.symmetric,
             self.bands,
             self.palette,
@@ -40,7 +44,7 @@ def contour_display_options(
 ) -> ContourDisplayOptions:
     raw = dict(settings or {})
     range_mode = str(raw.get("contour_range_mode", "auto")).strip().lower()
-    if range_mode not in {"auto", "user"}:
+    if range_mode not in {"auto", "global", "user"}:
         range_mode = "auto"
 
     def optional_float(name: str) -> float | None:
@@ -74,6 +78,8 @@ def contour_display_options(
         range_mode=range_mode,
         minimum=optional_float("contour_min"),
         maximum=optional_float("contour_max"),
+        global_minimum=optional_float("contour_global_min"),
+        global_maximum=optional_float("contour_global_max"),
         symmetric=(
             False if magnitude else bool(raw.get("contour_symmetric", True))
         ),
@@ -110,11 +116,19 @@ def resolve_contour_range(
     ):
         low = float(options.minimum)
         high = float(options.maximum)
-        if low > high:
-            low, high = high, low
+    elif (
+        options.range_mode == "global"
+        and options.global_minimum is not None
+        and options.global_maximum is not None
+    ):
+        low = float(options.global_minimum)
+        high = float(options.global_maximum)
     else:
         low = min(finite)
         high = max(finite)
+
+    if low > high:
+        low, high = high, low
 
     if options.symmetric and not magnitude:
         limit = max(abs(low), abs(high))

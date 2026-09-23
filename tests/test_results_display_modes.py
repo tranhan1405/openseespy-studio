@@ -838,3 +838,59 @@ def test_specialized_cyclic_result_objects_focus_existing_views(qapp):
         panel.deleteLater()
         qapp.processEvents()
 
+
+
+def test_linked_frame_bar_tracks_motion_and_graph_markers(qapp):
+    panel = ResultsPanel()
+    result = {
+        "analysis": {"type": "Transient"},
+        "history": {
+            "time": [0.0, 0.1, 0.2],
+            "nodes": {
+                "1": {
+                    "disp": [
+                        [0.0, 0.0, 0.0],
+                        [0.1, 0.0, 0.0],
+                        [0.2, 0.0, 0.0],
+                    ],
+                    "reaction": [
+                        [0.0, 0.0, 0.0],
+                        [1.0, 0.0, 0.0],
+                        [2.0, 0.0, 0.0],
+                    ],
+                }
+            },
+        },
+        "final": {
+            "node_displacements": {"1": [0.2, 0.0, 0.0]},
+        },
+        "convergence": {"steps": []},
+        "modes": {},
+    }
+    captured: list[tuple[int, str]] = []
+    panel.result_frame_requested.connect(
+        lambda index, label: captured.append((int(index), str(label)))
+    )
+    try:
+        panel.set_result(result)
+        qapp.processEvents()
+
+        assert panel.has_result_frames()
+        assert not panel.frame_bar.isHidden()
+        assert panel.current_frame_index() == 2
+        assert panel.frame_slider.value() == 2
+        assert panel.motion_slider.value() == 2
+
+        panel._set_motion_index(1)
+        qapp.processEvents()
+
+        assert panel.current_frame_index() == 1
+        assert panel.frame_slider.value() == 1
+        assert panel.motion_slider.value() == 1
+        assert panel.history_plot._marker_index == 1
+        assert captured[-1][0] == 1
+        assert "t = 0.1 s" in captured[-1][1]
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import math
 from typing import Any
 
+from .postprocess import nodal_result_scalar
+
 
 @dataclass(frozen=True, slots=True)
 class MotionInfo:
@@ -351,3 +353,111 @@ def motion_frame(
         ),
         coordinate=factor,
     )
+
+
+def result_frame_payload(
+    result: dict[str, Any],
+    index: int,
+) -> dict[str, Any]:
+    """Build a lightweight result payload for one recorded analysis frame.
+
+    Only response families that are actually recorded at every step are
+    replaced. Other final-result families remain available for non-animated
+    views, but callers should animate only quantities present in this frame.
+    """
+    payload = dict(result or {})
+    history = payload.get("history", {})
+    if not isinstance(history, dict):
+        return payload
+
+    nodes = history.get("nodes", {})
+    if not isinstance(nodes, dict):
+        return payload
+
+    frame_index = max(0, int(index))
+    final = dict(payload.get("final", {}) or {})
+    displacements: dict[str, list[float]] = {}
+    reactions: dict[str, list[float]] = {}
+
+    for raw_tag, node_data in nodes.items():
+        if not isinstance(node_data, dict):
+            continue
+        tag = str(raw_tag)
+
+        disp_rows = node_data.get("disp", [])
+        if isinstance(disp_rows, list) and frame_index < len(disp_rows):
+            row = disp_rows[frame_index]
+            if isinstance(row, (list, tuple)):
+                displacements[tag] = [float(value) for value in row]
+
+        reaction_rows = node_data.get("reaction", [])
+        if (
+            isinstance(reaction_rows, list)
+            and frame_index < len(reaction_rows)
+        ):
+            row = reaction_rows[frame_index]
+            if isinstance(row, (list, tuple)):
+                reactions[tag] = [float(value) for value in row]
+
+    if displacements:
+        final["node_displacements"] = displacements
+    if reactions:
+        final["node_reactions"] = reactions
+
+    payload["final"] = final
+    payload["_frame_index"] = frame_index
+    times = history.get("time", [])
+    if isinstance(times, list) and frame_index < len(times):
+        try:
+            payload["_frame_coordinate"] = float(times[frame_index])
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return payload
+
+
+def nodal_history_contour_range(
+    result: dict[str, Any],
+    quantity: str,
+    component: str,
+    *,
+    node_tags: set[int] | None = None,
+) -> tuple[float, float] | None:
+    """Return the global min/max scalar over all recorded nodal frames."""
+    history = result.get("history", {}) if isinstance(result, dict) else {}
+    nodes = history.get("nodes", {}) if isinstance(history, dict) else {}
+    if not isinstance(nodes, dict):
+        return None
+
+    key = (
+        "reaction"
+        if str(quantity).strip().lower() == "reaction"
+        else "disp"
+    )
+    scoped = {int(tag) for tag in (node_tags or set())}
+    values: list[float] = []
+
+    for raw_tag, node_data in nodes.items():
+        try:
+            tag = int(raw_tag)
+        except (TypeError, ValueError):
+            continue
+        if scoped and tag not in scoped:
+            continue
+        if not isinstance(node_data, dict):
+            continue
+        rows = node_data.get(key, [])
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, (list, tuple)):
+                continue
+            try:
+                value = nodal_result_scalar(row, str(component))
+            except (TypeError, ValueError):
+                continue
+            if value is not None and math.isfinite(float(value)):
+                values.append(float(value))
+
+    if not values:
+        return None
+    return min(values), max(values)

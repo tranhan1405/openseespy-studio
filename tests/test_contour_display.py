@@ -50,3 +50,13 @@ def test_contour_options_clamp_invalid_band_count():
     high = contour_display_options({"contour_bands": 1000})
     assert low.bands == 3
     assert high.bands == 64
+
+
+def test_global_animation_range_uses_precomputed_history_limits():
+    options = contour_display_options({
+        "contour_range_mode": "global",
+        "contour_global_min": -3.0,
+        "contour_global_max": 7.0,
+        "contour_symmetric": False,
+    })
+    assert resolve_contour_range([-1.0, 1.0], options) == (-3.0, 7.0)

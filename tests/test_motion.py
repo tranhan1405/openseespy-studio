@@ -4,6 +4,8 @@ from openseespy_studio.motion import (
     available_modal_modes,
     motion_frame,
     motion_info,
+    nodal_history_contour_range,
+    result_frame_payload,
 )
 
 
@@ -146,3 +148,34 @@ def test_motion_index_is_clamped():
     frame = motion_frame(result, 999, info=info)
     assert frame.index == 2
     assert frame.vectors["1"] == [0.2, 0.0, 0.0]
+
+
+def test_result_frame_payload_exposes_recorded_nodal_response():
+    result = transient_result()
+    for node_data in result["history"]["nodes"].values():
+        node_data["reaction"] = [
+            [1.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [3.0, 0.0, 0.0],
+        ]
+
+    frame = result_frame_payload(result, 1)
+    assert frame["_frame_index"] == 1
+    assert frame["_frame_coordinate"] == 0.02
+    assert frame["final"]["node_displacements"]["1"][0] == 0.1
+    assert frame["final"]["node_reactions"]["2"][0] == 2.0
+
+
+def test_nodal_history_contour_range_scans_all_frames_and_scope():
+    result = transient_result()
+    assert nodal_history_contour_range(
+        result,
+        "Displacement",
+        "UX",
+    ) == (0.0, 0.2)
+    assert nodal_history_contour_range(
+        result,
+        "Displacement",
+        "UY",
+        node_tags={2},
+    ) == (-0.4, 0.0)

@@ -88,6 +88,8 @@ from ..postprocess import (
 
 
 class TimeHistoryPlot(QWidget):
+    point_selected = Signal(int)
+
     def __init__(
         self,
         parent=None,
@@ -102,6 +104,7 @@ class TimeHistoryPlot(QWidget):
         self._overlay_label = ""
         self._empty_message = str(empty_message)
         self._marker_index: int | None = None
+        self._screen_points: list[tuple[float, float, int]] = []
         self.setMinimumHeight(140)
 
     def set_series(self, x: list[float], y: list[float]) -> None:
@@ -140,6 +143,7 @@ class TimeHistoryPlot(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.fillRect(self.rect(), QColor("#ffffff"))
 
+        self._screen_points = []
         if len(self._x) < 2 or len(self._y) < 2:
             painter.setPen(QColor("#718195"))
             painter.drawText(self.rect(), Qt.AlignCenter, self._empty_message)
@@ -176,6 +180,16 @@ class TimeHistoryPlot(QWidget):
             py = bottom - (y - ymin) / (ymax - ymin) * (bottom - top)
             return QPointF(px, py)
 
+        self._screen_points = [
+            (
+                float(mapped.x()),
+                float(mapped.y()),
+                index,
+            )
+            for index, (x, y) in enumerate(zip(self._x, self._y))
+            for mapped in (point(x, y),)
+        ]
+
         painter.setPen(QPen(QColor("#2f80ed"), 2))
         previous = point(self._x[0], self._y[0])
         for x, y in zip(self._x[1:], self._y[1:]):
@@ -211,6 +225,13 @@ class TimeHistoryPlot(QWidget):
                 self._x[marker_index],
                 self._y[marker_index],
             )
+            cursor_pen = QPen(QColor("#c62828"), 1)
+            cursor_pen.setStyle(Qt.DashLine)
+            painter.setPen(cursor_pen)
+            painter.drawLine(
+                QPointF(marker.x(), float(top)),
+                QPointF(marker.x(), float(bottom)),
+            )
             painter.setPen(QPen(QColor("#c62828"), 2))
             painter.setBrush(QColor("#ffffff"))
             painter.drawEllipse(marker, 5.0, 5.0)
@@ -220,6 +241,29 @@ class TimeHistoryPlot(QWidget):
         painter.drawText(4, bottom, f"{ymin:.3g}")
         painter.drawText(left, self.height() - 7, f"{xmin:.3g}")
         painter.drawText(right - 35, self.height() - 7, f"{xmax:.3g}")
+
+    def mousePressEvent(self, event) -> None:
+        if (
+            event.button() == Qt.LeftButton
+            and self._screen_points
+        ):
+            position = event.position()
+            nearest = min(
+                self._screen_points,
+                key=lambda item: (
+                    (item[0] - float(position.x())) ** 2
+                    + (item[1] - float(position.y())) ** 2
+                ),
+            )
+            distance_sq = (
+                (nearest[0] - float(position.x())) ** 2
+                + (nearest[1] - float(position.y())) ** 2
+            )
+            if distance_sq <= 35.0 ** 2:
+                self.point_selected.emit(int(nearest[2]))
+                event.accept()
+                return
+        super().mousePressEvent(event)
 
 
 class CalibrationParetoPlot(QWidget):
@@ -910,6 +954,7 @@ class ResultsPanel(QWidget):
     deformation_requested = Signal(float, str, str, bool)
     mode_shape_requested = Signal(int, float, str, str, bool)
     motion_frame_requested = Signal(object, float, bool, float, str)
+    result_frame_requested = Signal(int, str)
     clear_overlay_requested = Signal()
     member_force_requested = Signal(str, float)
     node_contour_requested = Signal(str, str)
@@ -995,6 +1040,7 @@ class ResultsPanel(QWidget):
         self._build_calibration_tab()
         self._build_history_tab()
         self._build_motion_tab()
+        self._build_frame_bar(root)
 
         # QTabWidget normally derives its minimum from every hidden page.
         # Results pages contain wide tables, so without relaxing these hints
@@ -2539,6 +2585,9 @@ class ResultsPanel(QWidget):
         self.pushover_plot = TimeHistoryPlot(
             empty_message="No pushover capacity-curve data"
         )
+        self.pushover_plot.point_selected.connect(
+            self._select_frame_from_plot
+        )
         layout.addWidget(self.pushover_plot, 1)
         self.tabs.addTab(page, "Pushover Curve")
 
@@ -2590,6 +2639,9 @@ class ResultsPanel(QWidget):
 
         self.cyclic_plot = TimeHistoryPlot(
             empty_message="No cyclic hysteresis data"
+        )
+        self.cyclic_plot.point_selected.connect(
+            self._select_frame_from_plot
         )
         self.cyclic_plot.setMinimumHeight(220)
         curve_layout.addWidget(self.cyclic_plot, 1)
@@ -2886,6 +2938,74 @@ class ResultsPanel(QWidget):
 
         self.tabs.addTab(page, "Motion")
 
+    def _build_frame_bar(self, root: QVBoxLayout) -> None:
+        self.frame_bar = QWidget()
+        row = QHBoxLayout(self.frame_bar)
+        row.setContentsMargins(2, 2, 2, 2)
+        row.setSpacing(4)
+
+        row.addWidget(QLabel("Frame:"))
+        previous = QPushButton("◀")
+        previous.setToolTip("Previous result frame")
+        previous.clicked.connect(lambda: self._step_motion(-1))
+        row.addWidget(previous)
+
+        self.frame_play = QPushButton("▶ Play")
+        self.frame_play.setCheckable(True)
+        self.frame_play.toggled.connect(self._toggle_motion_playback)
+        row.addWidget(self.frame_play)
+
+        next_button = QPushButton("▶")
+        next_button.setToolTip("Next result frame")
+        next_button.clicked.connect(lambda: self._step_motion(1))
+        row.addWidget(next_button)
+
+        self.frame_slider = QSlider(Qt.Horizontal)
+        self.frame_slider.setRange(0, 0)
+        self.frame_slider.valueChanged.connect(self._frame_slider_changed)
+        row.addWidget(self.frame_slider, 1)
+
+        self.frame_coordinate = QLabel("Frame -")
+        self.frame_coordinate.setMinimumWidth(125)
+        row.addWidget(self.frame_coordinate)
+
+        self.frame_counter = QLabel("0 / 0")
+        row.addWidget(self.frame_counter)
+
+        self.frame_bar.hide()
+        root.addWidget(self.frame_bar, 0)
+
+    def current_frame_index(self) -> int:
+        return int(self._motion_frame_index)
+
+    def has_result_frames(self) -> bool:
+        return bool(
+            self._motion_info is not None
+            and int(self._motion_info.frame_count) > 0
+        )
+
+    def _frame_slider_changed(self, value: int) -> None:
+        self._set_motion_index(int(value))
+
+    def _select_frame_from_plot(self, index: int) -> None:
+        if self._motion_info is None:
+            return
+        count = int(self._motion_info.frame_count)
+        if 0 <= int(index) < count:
+            self._set_motion_index(int(index))
+
+    def _set_play_buttons(self, checked: bool) -> None:
+        for button in (
+            getattr(self, "motion_play", None),
+            getattr(self, "frame_play", None),
+        ):
+            if button is None:
+                continue
+            button.blockSignals(True)
+            button.setChecked(bool(checked))
+            button.setText("❚❚ Pause" if checked else "▶ Play")
+            button.blockSignals(False)
+
     def _motion_selected_mode(self) -> int | None:
         data = self.motion_source.currentData()
         try:
@@ -2895,10 +3015,7 @@ class ResultsPanel(QWidget):
 
     def _refresh_motion_controls(self) -> None:
         self._motion_timer.stop()
-        self.motion_play.blockSignals(True)
-        self.motion_play.setChecked(False)
-        self.motion_play.setText("▶ Play")
-        self.motion_play.blockSignals(False)
+        self._set_play_buttons(False)
 
         analysis = (
             self._result.get("analysis", {})
@@ -2929,23 +3046,37 @@ class ResultsPanel(QWidget):
             )
         self.motion_source.blockSignals(False)
 
-        self._motion_frame_index = 0
         self._motion_info = motion_info(
             self._result,
             mode=self._motion_selected_mode(),
             scan_reference=False,
         )
         count = int(self._motion_info.frame_count)
-        self.motion_slider.blockSignals(True)
-        self.motion_slider.setRange(0, max(0, count - 1))
-        self.motion_slider.setValue(0)
-        self.motion_slider.blockSignals(False)
-        self.motion_counter.setText(
-            f"{1 if count else 0} / {count}"
+        default_index = (
+            0
+            if self._motion_info.kind == "Modal"
+            else max(0, count - 1)
+        )
+        self._motion_frame_index = default_index
+        for slider in (self.motion_slider, self.frame_slider):
+            slider.blockSignals(True)
+            slider.setRange(0, max(0, count - 1))
+            slider.setValue(default_index)
+            slider.blockSignals(False)
+        counter = (
+            f"{default_index + 1 if count else 0} / {count}"
+        )
+        self.motion_counter.setText(counter)
+        self.frame_counter.setText(counter)
+        self.frame_coordinate.setText(
+            "Final frame" if count and default_index == count - 1 else "Frame"
         )
         enabled = count > 0
         self.motion_play.setEnabled(enabled)
         self.motion_slider.setEnabled(enabled)
+        self.frame_play.setEnabled(enabled)
+        self.frame_slider.setEnabled(enabled)
+        self.frame_bar.setVisible(enabled)
         self.motion_source.setEnabled(
             analysis_type == "Modal"
             and self.motion_source.count() > 1
@@ -2969,15 +3100,16 @@ class ResultsPanel(QWidget):
             scan_reference=False,
         )
         count = int(self._motion_info.frame_count)
-        self.motion_slider.blockSignals(True)
-        self.motion_slider.setRange(0, max(0, count - 1))
-        self.motion_slider.setValue(0)
-        self.motion_slider.blockSignals(False)
+        for slider in (self.motion_slider, self.frame_slider):
+            slider.blockSignals(True)
+            slider.setRange(0, max(0, count - 1))
+            slider.setValue(0)
+            slider.blockSignals(False)
+        self.frame_bar.setVisible(count > 0)
         self._emit_current_motion_frame()
 
     def _motion_slider_changed(self, value: int) -> None:
-        self._motion_frame_index = int(value)
-        self._emit_current_motion_frame()
+        self._set_motion_index(int(value))
 
     def _set_motion_index(self, index: int) -> None:
         if self._motion_info is None:
@@ -2987,10 +3119,13 @@ class ResultsPanel(QWidget):
             return
         target = max(0, min(int(index), count - 1))
         self._motion_frame_index = target
-        if self.motion_slider.value() != target:
-            self.motion_slider.setValue(target)
-        else:
-            self._emit_current_motion_frame()
+        for slider in (self.motion_slider, self.frame_slider):
+            if slider.value() == target:
+                continue
+            slider.blockSignals(True)
+            slider.setValue(target)
+            slider.blockSignals(False)
+        self._emit_current_motion_frame()
 
     def _step_motion(self, delta: int) -> None:
         if self._motion_info is None:
@@ -3032,11 +3167,7 @@ class ResultsPanel(QWidget):
 
     def stop_motion(self) -> None:
         self._motion_timer.stop()
-        if hasattr(self, "motion_play"):
-            self.motion_play.blockSignals(True)
-            self.motion_play.setChecked(False)
-            self.motion_play.setText("▶ Play")
-            self.motion_play.blockSignals(False)
+        self._set_play_buttons(False)
         self._sync_motion_markers(None)
 
     def _toggle_motion_playback(self, checked: bool) -> None:
@@ -3049,7 +3180,7 @@ class ResultsPanel(QWidget):
                 self.motion_play.setChecked(False)
                 self.motion_play.blockSignals(False)
                 return
-            self.motion_play.setText("❚❚ Pause")
+            self._set_play_buttons(True)
             speed = max(0.01, self._motion_speed_value())
             interval = max(16, int(round(40.0 / speed)))
             if self._motion_info.transient_dt is not None:
@@ -3065,7 +3196,7 @@ class ResultsPanel(QWidget):
             self._motion_timer.start()
         else:
             self._motion_timer.stop()
-            self.motion_play.setText("▶ Play")
+            self._set_play_buttons(False)
 
     def _advance_motion(self) -> None:
         if self._motion_info is None:
@@ -3088,7 +3219,8 @@ class ResultsPanel(QWidget):
                 target %= count
             else:
                 target = count - 1
-                self.motion_play.setChecked(False)
+                self._motion_timer.stop()
+                self._set_play_buttons(False)
         self._set_motion_index(target)
 
     def _sync_motion_markers(self, index: int | None) -> None:
@@ -3129,10 +3261,11 @@ class ResultsPanel(QWidget):
             mode=mode,
             info=self._motion_info,
         )
-        self.motion_counter.setText(
-            f"{frame.index + 1} / {frame.frame_count}"
-        )
+        counter = f"{frame.index + 1} / {frame.frame_count}"
+        self.motion_counter.setText(counter)
+        self.frame_counter.setText(counter)
         self.motion_info_label.setText(frame.label)
+        self.frame_coordinate.setText(frame.label)
         self._sync_motion_markers(
             None if self._motion_info.kind == "Modal" else frame.index
         )
@@ -3143,6 +3276,7 @@ class ResultsPanel(QWidget):
             float(self._motion_info.reference_magnitude or 0.0),
             frame.label,
         )
+        self.result_frame_requested.emit(int(frame.index), str(frame.label))
 
     def _build_specimen_tab(self) -> None:
         page = QWidget()
@@ -4033,6 +4167,9 @@ class ResultsPanel(QWidget):
         layout.addWidget(self.history_label)
 
         self.history_plot = TimeHistoryPlot()
+        self.history_plot.point_selected.connect(
+            self._select_frame_from_plot
+        )
         layout.addWidget(self.history_plot, 1)
         self.tabs.addTab(page, "Time History")
         self._update_history_controls()

@@ -86,6 +86,10 @@ from ..model import (
 )
 from ..mass_source import apply_mass_source, evaluate_mass_source
 from ..moment_curvature import build_moment_curvature_project
+from ..motion import (
+    nodal_history_contour_range,
+    result_frame_payload,
+)
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
 from ..test_column import build_test_column
 from ..result_catalog import (
@@ -1186,7 +1190,11 @@ class PropertiesPanel(QWidget):
         self.result_fiber_section.setRange(1, 100000)
 
         self.result_contour_range = QComboBox()
-        self.result_contour_range.addItem("Auto", "auto")
+        self.result_contour_range.addItem("Auto (Current Frame)", "auto")
+        self.result_contour_range.addItem(
+            "Global Animation",
+            "global",
+        )
         self.result_contour_range.addItem("User Defined", "user")
         self.result_contour_min = QDoubleSpinBox()
         self.result_contour_min.setRange(-1.0e30, 1.0e30)
@@ -2249,6 +2257,9 @@ class MainWindow(QMainWindow):
         )
         self.results_panel.motion_frame_requested.connect(
             self._show_motion_frame_result
+        )
+        self.results_panel.result_frame_requested.connect(
+            self._show_linked_result_frame
         )
         self.results_panel.member_force_requested.connect(
             self._show_member_force_result
@@ -4077,6 +4088,10 @@ class MainWindow(QMainWindow):
         if hasattr(self, "results_panel"):
             self.results_panel.stop_motion()
         self.viewport.clear_result_overlay()
+        self._active_linked_result_type = None
+        self._active_linked_result_options = {}
+        self._active_linked_node_scope = set()
+        self._active_linked_element_scope = set()
         self._active_result_display_kind = None
         self._set_result_display_controls_enabled(False)
         fit_action = self.actions.get("fit_result")
@@ -23077,6 +23092,40 @@ class MainWindow(QMainWindow):
         )
         menu.exec(QCursor.pos())
 
+    def _prepare_contour_animation_options(
+        self,
+        payload: dict[str, object],
+        result_type: str,
+        options: dict[str, object],
+        node_scope: set[int],
+    ) -> dict[str, object]:
+        prepared = dict(options)
+        if (
+            result_type in {"NodalDisplacement", "NodalReaction"}
+            and str(prepared.get("contour_range_mode", "auto")) == "global"
+        ):
+            quantity = (
+                "Reaction"
+                if result_type == "NodalReaction"
+                else "Displacement"
+            )
+            component = str(
+                prepared.get(
+                    "component",
+                    "FX" if quantity == "Reaction" else "|U|",
+                )
+            )
+            limits = nodal_history_contour_range(
+                payload,
+                quantity,
+                component,
+                node_tags=node_scope or None,
+            )
+            if limits is not None:
+                prepared["contour_global_min"] = float(limits[0])
+                prepared["contour_global_max"] = float(limits[1])
+        return prepared
+
     def _render_result_data(
         self,
         result: dict[str, object],
@@ -23096,8 +23145,19 @@ class MainWindow(QMainWindow):
         options = dict(settings or {})
         nodes = set(node_scope or ())
         elements = set(element_scope or ())
+        options = self._prepare_contour_animation_options(
+            payload,
+            str(result_type),
+            options,
+            nodes,
+        )
         options["_node_scope"] = sorted(nodes)
         options["_element_scope"] = sorted(elements)
+
+        self._active_linked_result_type = str(result_type)
+        self._active_linked_result_options = dict(options)
+        self._active_linked_node_scope = set(nodes)
+        self._active_linked_element_scope = set(elements)
 
         self._last_result = payload
         self._last_result_cache_key = result_cache_key
@@ -23172,6 +23232,11 @@ class MainWindow(QMainWindow):
                 cache_key=result_cache_key,
                 contour_options=options,
             )
+            if self.results_panel.has_result_frames():
+                self._show_linked_result_frame(
+                    self.results_panel.current_frame_index(),
+                    "",
+                )
         elif result_type == "MemberForce":
             self.viewport.show_member_force_diagram(
                 payload,
@@ -31380,6 +31445,12 @@ class MainWindow(QMainWindow):
         if not isinstance(vectors, dict) or not vectors:
             self.status_message.setText("No motion frame data available")
             return
+        if getattr(
+            self,
+            "_active_linked_result_type",
+            None,
+        ) in {"NodalDisplacement", "NodalReaction"}:
+            return
         self.viewport.show_motion_frame(
             vectors,
             scale=float(scale),
@@ -31387,6 +31458,80 @@ class MainWindow(QMainWindow):
             reference_magnitude=float(reference_magnitude),
         )
         self.status_message.setText(str(label))
+
+    def _show_linked_result_frame(
+        self,
+        index: int,
+        label: str,
+    ) -> None:
+        result_type = getattr(
+            self,
+            "_active_linked_result_type",
+            None,
+        )
+        if result_type not in {"NodalDisplacement", "NodalReaction"}:
+            return
+        if not self._last_result:
+            return
+
+        frame_payload = result_frame_payload(
+            self._last_result,
+            int(index),
+        )
+        options = dict(
+            getattr(self, "_active_linked_result_options", {}) or {}
+        )
+        nodes = set(
+            getattr(self, "_active_linked_node_scope", set()) or set()
+        )
+        elements = set(
+            getattr(self, "_active_linked_element_scope", set()) or set()
+        )
+        quantity = (
+            "Reaction"
+            if result_type == "NodalReaction"
+            else "Displacement"
+        )
+        component = str(
+            options.get(
+                "component",
+                "FX" if quantity == "Reaction" else "|U|",
+            )
+        )
+        final = frame_payload.get("final", {})
+        response_key = (
+            "node_reactions"
+            if quantity == "Reaction"
+            else "node_displacements"
+        )
+        responses = (
+            final.get(response_key, {})
+            if isinstance(final, dict)
+            else {}
+        )
+        if not isinstance(responses, dict) or not responses:
+            self.status_message.setText(
+                f"{quantity} contour has no recorded data at this frame."
+            )
+            return
+
+        self.viewport.show_node_contour(
+            frame_payload,
+            quantity,
+            component,
+            node_tags=nodes or None,
+            element_tags=elements or None,
+            cache_key=(
+                "linked-frame",
+                self._last_result_cache_key,
+                int(index),
+            ),
+            contour_options=options,
+        )
+        prefix = f"{label} · " if label else ""
+        self.status_message.setText(
+            f"{prefix}{quantity} {component} contour"
+        )
 
     def _show_node_contour_result(
         self,
