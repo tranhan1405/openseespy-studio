@@ -168,9 +168,10 @@ class MomentCurvatureDialog(QDialog):
                 self.section.setCurrentIndex(index)
         elif self.section.count() == 2:
             self.section.setCurrentIndex(1)
-        self.buttons.button(QDialogButtonBox.Ok).setEnabled(
-            self.section.count() > 1
-        )
+        if hasattr(self, "buttons"):
+            self.buttons.button(QDialogButtonBox.Ok).setEnabled(
+                self.section.count() > 1
+            )
 
     def _create_section_dependency(self) -> None:
         if not callable(self._new_section_callback):
