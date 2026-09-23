@@ -2119,6 +2119,7 @@ class AnalysisSettingsData:
     algorithm_initial: bool = False
     system_pivoting: bool = False
     gravity_algorithm: str = "Auto"
+    rayleigh_model: str = "TwoMode"
 
     def __post_init__(self) -> None:
         self.tag=_strict_int(self.tag, "Analysis tag"); self.name=str(self.name).strip() or f"Analysis {self.tag}"
@@ -2213,6 +2214,7 @@ class AnalysisSettingsData:
             "Analysis system_pivoting",
         )
         self.gravity_algorithm=str(self.gravity_algorithm or "Auto")
+        self.rayleigh_model=str(self.rayleigh_model or "TwoMode")
         numeric_values = (
             self.tolerance,
             self.load_increment,
@@ -2453,18 +2455,28 @@ class AnalysisSettingsData:
             and not 0.0 <= self.rayleigh_damping_ratio < 1.0
         ):
             raise ValueError("Rayleigh damping ratio must be in [0, 1).")
+        if self.rayleigh_model not in {"TwoMode", "SingleModeCommittedStiffness"}:
+            raise ValueError("Unsupported Rayleigh damping model.")
         if (
             self.analysis_type == "Transient"
             and self.rayleigh_damping_ratio > 0.0
-            and (self.rayleigh_mode_i < 1 or self.rayleigh_mode_j < 1)
+            and self.rayleigh_mode_i < 1
         ):
-            raise ValueError("Rayleigh damping modes must be positive.")
+            raise ValueError("Rayleigh damping mode i must be positive.")
         if (
             self.analysis_type == "Transient"
             and self.rayleigh_damping_ratio > 0.0
+            and self.rayleigh_model == "TwoMode"
+            and self.rayleigh_mode_j < 1
+        ):
+            raise ValueError("Rayleigh damping mode j must be positive.")
+        if (
+            self.analysis_type == "Transient"
+            and self.rayleigh_damping_ratio > 0.0
+            and self.rayleigh_model == "TwoMode"
             and self.rayleigh_mode_i == self.rayleigh_mode_j
         ):
-            raise ValueError("Rayleigh damping needs two different modes.")
+            raise ValueError("Two-mode Rayleigh damping needs two different modes.")
         if self.preload_gravity and self.gravity_steps < 1:
             raise ValueError("Gravity preload steps must be at least 1.")
         if (
@@ -2502,7 +2514,8 @@ class AnalysisSettingsData:
             "adaptive_cutback_factor","adaptive_min_factor",
             "adaptive_growth_factor","adaptive_easy_iterations",
             "adaptive_growth_after","live_convergence","show_external_console",
-            "algorithm_initial","system_pivoting","gravity_algorithm"
+            "algorithm_initial","system_pivoting","gravity_algorithm",
+            "rayleigh_model"
         )}
 
     @classmethod
