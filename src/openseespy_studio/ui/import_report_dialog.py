@@ -30,8 +30,14 @@ class ImportReportDialog(QDialog):
             if value
         ) or "No supported model objects were recovered."
 
+        linked = (
+            ", ".join(result.linked_files)
+            if result.linked_files
+            else "None"
+        )
         summary = QLabel(
-            f"<b>{result.source_name}</b><br>"
+            f"<b>Source file:</b> {result.source_name}<br>"
+            f"<b>Linked files read:</b> {linked}<br><br>"
             f"{counts}<br><br>"
             f"Errors: {result.error_count} &nbsp;&nbsp; "
             f"Warnings: {result.warning_count} &nbsp;&nbsp; "
