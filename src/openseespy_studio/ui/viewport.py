@@ -799,13 +799,10 @@ class ModelViewport(QWidget):
             factor = 10.0
         return factor * power
 
-    def _render_geometry_sketch_grid(self) -> None:
-        self._remove_overlay("geometry-sketch-grid")
-        if (
-            not self._geometry_sketch_grid_visible
-            or self._display_domain != "geometry"
-        ):
-            return
+    def _geometry_sketch_grid_spec(self) -> dict[str, float] | None:
+        """Return the visible sketch-grid lattice in local U/V coordinates."""
+        if not self._geometry_sketch_grid_visible:
+            return None
 
         local_points: list[tuple[float, float]] = []
         for point in self._points.values():
@@ -830,6 +827,72 @@ class ModelViewport(QWidget):
         end_u = math.ceil((center_u + half) / spacing) * spacing
         start_v = math.floor((center_v - half) / spacing) * spacing
         end_v = math.ceil((center_v + half) / spacing) * spacing
+        return {
+            "spacing": float(spacing),
+            "start_u": float(start_u),
+            "end_u": float(end_u),
+            "start_v": float(start_v),
+            "end_v": float(end_v),
+        }
+
+    def geometry_sketch_grid_snap(
+        self,
+        xyz,
+    ) -> tuple[tuple[float, float, float], float] | None:
+        """Return the nearest visible grid intersection for a workplane point."""
+        spec = self._geometry_sketch_grid_spec()
+        if spec is None:
+            return None
+        try:
+            u, v = self.geometry_world_to_local(xyz)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(u) or not math.isfinite(v):
+            return None
+
+        spacing = float(spec["spacing"])
+        if not math.isfinite(spacing) or spacing <= 0.0:
+            return None
+        epsilon = max(spacing * 1.0e-9, 1.0e-12)
+        if (
+            u < spec["start_u"] - epsilon
+            or u > spec["end_u"] + epsilon
+            or v < spec["start_v"] - epsilon
+            or v > spec["end_v"] + epsilon
+        ):
+            return None
+
+        snapped_u = round(u / spacing) * spacing
+        snapped_v = round(v / spacing) * spacing
+        if (
+            snapped_u < spec["start_u"] - epsilon
+            or snapped_u > spec["end_u"] + epsilon
+            or snapped_v < spec["start_v"] - epsilon
+            or snapped_v > spec["end_v"] + epsilon
+        ):
+            return None
+        point = self.geometry_local_to_world(snapped_u, snapped_v)
+        return (
+            tuple(float(value) for value in point),
+            spacing,
+        )
+
+    def _render_geometry_sketch_grid(self) -> None:
+        self._remove_overlay("geometry-sketch-grid")
+        if (
+            not self._geometry_sketch_grid_visible
+            or self._display_domain != "geometry"
+        ):
+            return
+
+        spec = self._geometry_sketch_grid_spec()
+        if spec is None:
+            return
+        spacing = float(spec["spacing"])
+        start_u = float(spec["start_u"])
+        end_u = float(spec["end_u"])
+        start_v = float(spec["start_v"])
+        end_v = float(spec["end_v"])
 
         points: list[tuple[float, float, float]] = []
         lines: list[int] = []
