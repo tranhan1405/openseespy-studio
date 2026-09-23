@@ -22807,6 +22807,39 @@ class MainWindow(QMainWindow):
     def _select_all_tree_nodes(self) -> None:
         self.selection.set_selection(nodes=set(self.model.nodes))
 
+    def _select_all_tree_items_by_kind(self, kind: str) -> None:
+        """Select every visible Model Tree item with the requested payload kind."""
+        matches: list[QTreeWidgetItem] = []
+
+        def visit(item: QTreeWidgetItem) -> None:
+            payload = item.data(0, Qt.UserRole)
+            if (
+                isinstance(payload, tuple)
+                and len(payload) == 2
+                and str(payload[0]) == str(kind)
+            ):
+                matches.append(item)
+            for index in range(item.childCount()):
+                visit(item.child(index))
+
+        root = self.tree.invisibleRootItem()
+        for index in range(root.childCount()):
+            visit(root.child(index))
+
+        previous = self.tree.blockSignals(True)
+        try:
+            self.tree.clearSelection()
+            for item in matches:
+                item.setSelected(True)
+            if matches:
+                self.tree.setCurrentItem(matches[0])
+        finally:
+            self.tree.blockSignals(previous)
+
+        if matches:
+            self.tree.scrollToItem(matches[0])
+        self._tree_selection_changed()
+
     def _select_all_tree_elements(
         self,
         element_type: str | None = None,
@@ -23390,6 +23423,13 @@ class MainWindow(QMainWindow):
         if kind == "points_root":
             create = menu.addAction("New Point...")
             create.triggered.connect(self._create_point_geometry)
+            select_all = menu.addAction("Select All Points")
+            select_all.setEnabled(bool(self.project.points))
+            select_all.triggered.connect(
+                lambda: self._select_all_tree_items_by_kind(
+                    "point_geometry"
+                )
+            )
             exec_menu()
             return
 
@@ -23507,6 +23547,13 @@ class MainWindow(QMainWindow):
             )
             create = menu.addAction("New Line by Input...")
             create.triggered.connect(self._create_line_geometry)
+            select_all = menu.addAction("Select All Lines")
+            select_all.setEnabled(bool(self.project.lines))
+            select_all.triggered.connect(
+                lambda: self._select_all_tree_items_by_kind(
+                    "line_geometry"
+                )
+            )
             exec_menu()
             return
 
@@ -23751,6 +23798,13 @@ class MainWindow(QMainWindow):
                 "Create Pressure from FE Shell Selection..."
             )
             pressure.triggered.connect(self._create_shell_pressure)
+            select_all = menu.addAction("Select All Surfaces")
+            select_all.setEnabled(bool(self.project.surfaces))
+            select_all.triggered.connect(
+                lambda: self._select_all_tree_items_by_kind(
+                    "surface_geometry"
+                )
+            )
             exec_menu()
             return
 
