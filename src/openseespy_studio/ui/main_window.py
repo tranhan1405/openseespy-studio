@@ -23111,6 +23111,131 @@ class MainWindow(QMainWindow):
                 for name, count in sorted(analysis_types.items())
             )
             self.properties_panel.set_properties("Analysis", rows)
+            return
+        if kind == "constraints_root":
+            constraint_types: dict[str, int] = {}
+            constrained_nodes: set[int] = set()
+            retained_nodes: set[int] = set()
+            for constraint in self.project.constraints.values():
+                key = str(constraint.constraint_type)
+                constraint_types[key] = constraint_types.get(key, 0) + 1
+                constrained_nodes.update(constraint.constrained_nodes)
+                retained_nodes.add(int(constraint.retained_node))
+            rows = [
+                ("Total Constraints", len(self.project.constraints)),
+                ("Constraint Types", len(constraint_types)),
+                ("Retained Nodes", len(retained_nodes)),
+                ("Constrained Nodes", len(constrained_nodes)),
+            ]
+            rows.extend(
+                (f"Type · {name}", count)
+                for name, count in sorted(constraint_types.items())
+            )
+            self.properties_panel.set_properties("Constraints", rows)
+            return
+        if kind == "recorders_root":
+            recorder_types: dict[str, int] = {}
+            target_count = 0
+            for recorder in self.project.recorders.values():
+                key = str(recorder.recorder_type)
+                recorder_types[key] = recorder_types.get(key, 0) + 1
+                target_count += len(recorder.target_tags)
+            rows = [
+                ("Total Recorders", len(self.project.recorders)),
+                ("Recorder Types", len(recorder_types)),
+                ("Total Targets", target_count),
+            ]
+            rows.extend(
+                (f"Type · {name}", count)
+                for name, count in sorted(recorder_types.items())
+            )
+            self.properties_panel.set_properties("Recorders", rows)
+            return
+        if kind == "mass_sources_root":
+            self_mass_count = sum(
+                1
+                for source in self.project.mass_sources.values()
+                if source.include_self_mass
+            )
+            referenced_patterns = {
+                int(pattern_tag)
+                for source in self.project.mass_sources.values()
+                for pattern_tag in source.load_factors
+            }
+            direction_sets = {
+                tuple(source.directions)
+                for source in self.project.mass_sources.values()
+            }
+            self.properties_panel.set_properties(
+                "Mass Sources",
+                [
+                    ("Total Mass Sources", len(self.project.mass_sources)),
+                    ("Include Self Mass", self_mass_count),
+                    ("Referenced Load Patterns", len(referenced_patterns)),
+                    ("Direction Sets", len(direction_sets)),
+                ],
+            )
+            return
+        if kind == "time_series_root":
+            ground_motion_series_tags = {
+                int(pattern.time_series_tag)
+                for pattern in self.project.load_patterns.values()
+                if pattern.pattern_type == "UniformExcitation"
+            }
+            standalone_series = {
+                tag: series
+                for tag, series in self.project.time_series.items()
+                if tag not in ground_motion_series_tags
+            }
+            series_types: dict[str, int] = {}
+            path_points = 0
+            for series in standalone_series.values():
+                key = str(series.series_type)
+                series_types[key] = series_types.get(key, 0) + 1
+                if series.series_type == "Path":
+                    path_points += len(series.values)
+            rows = [
+                ("Standalone Time Series", len(standalone_series)),
+                ("Series Types", len(series_types)),
+                ("Path Data Points", path_points),
+            ]
+            rows.extend(
+                (f"Type · {name}", count)
+                for name, count in sorted(series_types.items())
+            )
+            self.properties_panel.set_properties("Time Series", rows)
+            return
+        if kind == "load_patterns_root":
+            plain_tags = {
+                int(tag)
+                for tag, pattern in self.project.load_patterns.items()
+                if pattern.pattern_type == "Plain"
+            }
+            nodal_loads = sum(
+                1
+                for load in self.project.nodal_loads.values()
+                if int(load.pattern_tag) in plain_tags
+            )
+            prescribed = sum(
+                1
+                for displacement in
+                self.project.prescribed_displacements.values()
+                if int(displacement.pattern_tag) in plain_tags
+            )
+            element_loads = sum(
+                1
+                for load in self.project.element_loads.values()
+                if int(load.pattern_tag) in plain_tags
+            )
+            self.properties_panel.set_properties(
+                "Load Patterns",
+                [
+                    ("Plain Load Patterns", len(plain_tags)),
+                    ("Nodal Loads", nodal_loads),
+                    ("Prescribed Displacements", prescribed),
+                    ("Element Loads", element_loads),
+                ],
+            )
 
     def _populate_materials_root_context_menu(
         self,
@@ -24992,6 +25117,12 @@ class MainWindow(QMainWindow):
         if kind == "constraints_root":
             create_action = menu.addAction("New Constraint...")
             create_action.triggered.connect(self._create_constraint)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "constraints_root"
+                )
+            )
             exec_menu()
             return
 
@@ -25381,6 +25512,12 @@ class MainWindow(QMainWindow):
         if kind == "recorders_root":
             action = menu.addAction("New Recorder...")
             action.triggered.connect(self._create_recorder)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "recorders_root"
+                )
+            )
             exec_menu()
             return
 
@@ -25400,6 +25537,12 @@ class MainWindow(QMainWindow):
         if kind == "mass_sources_root":
             action = menu.addAction("New Mass Source...")
             action.triggered.connect(self._create_mass_source)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "mass_sources_root"
+                )
+            )
             exec_menu()
             return
 
@@ -25451,6 +25594,12 @@ class MainWindow(QMainWindow):
         if kind == "time_series_root":
             action = menu.addAction("New Time Series...")
             action.triggered.connect(self._create_time_series)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "time_series_root"
+                )
+            )
             exec_menu()
             return
 
@@ -25508,6 +25657,12 @@ class MainWindow(QMainWindow):
         if kind == "load_patterns_root":
             action = menu.addAction("New Load Pattern...")
             action.triggered.connect(self._create_load_pattern)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "load_patterns_root"
+                )
+            )
             exec_menu()
             return
 
