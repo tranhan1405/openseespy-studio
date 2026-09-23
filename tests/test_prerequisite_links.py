@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from openseespy_studio.ui.main_window import FrameGridPanel, MainWindow
 from openseespy_studio.ui.recorder_dialog import RecorderDialog
 from openseespy_studio.ui.analysis_dialog import AnalysisDialog
+from openseespy_studio.ui.calibration_dialog import CalibrationDialog
+from openseespy_studio.ui.constraint_dialog import ConstraintDialog
 from openseespy_studio.ui.geometry_dialogs import ElementDialog, TrussDialog
 from openseespy_studio.ui.line_geometry_dialog import LineGeometryDialog
 from openseespy_studio.ui.load_dialogs import (
@@ -592,6 +594,49 @@ def test_eighth_prerequisite_link_batch():
     dialog_index = moment.index("MomentCurvatureDialog(")
     assert "_ensure_prerequisite" not in moment[:dialog_index]
     assert "new_section_callback=self._create_section_dependency" in moment
+
+
+def test_ninth_prerequisite_link_batch():
+    calibration_source = inspect.getsource(CalibrationDialog)
+    assert "New Material..." in calibration_source
+    assert "new_material_callback" in calibration_source
+    assert "_create_material_dependency" in calibration_source
+
+    open_calibration = inspect.getsource(MainWindow._open_calibration)
+    assert (
+        "new_material_callback=self._create_material_dependency"
+        in open_calibration
+    )
+
+    constraint_source = inspect.getsource(ConstraintDialog)
+    assert "New Node..." in constraint_source
+    assert "Add New Node..." in constraint_source
+    assert "new_node_callback" in constraint_source
+
+    for method_name in ("_create_constraint", "_edit_constraint"):
+        source = inspect.getsource(getattr(MainWindow, method_name))
+        assert "new_node_callback=self._create_node_dependency" in source
+
+    helper_source = inspect.getsource(MainWindow._ensure_surface_meshes)
+    assert "Mesh Surface {tag} Now..." in helper_source
+    assert "_configure_surface_mesh(tag, generate=True)" in helper_source
+
+    pressure_source = inspect.getsource(
+        MainWindow._create_surface_pressure_for_surfaces
+    )
+    assert "_ensure_surface_meshes" in pressure_source
+    assert "Mesh the following Surface geometry first" not in pressure_source
+
+    edge_source = inspect.getsource(
+        MainWindow._manage_surface_edge_line_load
+    )
+    assert "_ensure_surface_meshes" in edge_source
+
+    recorder_source = inspect.getsource(
+        MainWindow._manage_surface_shell_recorder
+    )
+    assert "_ensure_surface_meshes" in recorder_source
+    assert "Mesh the Surface before creating" not in recorder_source
 
 
 def test_managed_surface_dependency_callbacks_are_wired():
