@@ -23004,6 +23004,7 @@ class MainWindow(QMainWindow):
                 "configure",
                 "activate",
                 "set active",
+                "set as active",
                 "run",
                 "evaluate",
                 "apply",
