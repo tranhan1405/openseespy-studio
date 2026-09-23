@@ -1992,6 +1992,7 @@ class _Importer:
             isinstance(value, ast.BinOp)
             and isinstance(value.op, ast.Pow)
             and isinstance(value.right, ast.Constant)
+            and isinstance(value.right.value, (int, float))
             and float(value.right.value) == 0.5
             and isinstance(value.left, ast.Subscript)
         ):
