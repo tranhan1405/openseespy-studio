@@ -25173,6 +25173,12 @@ class MainWindow(QMainWindow):
             self._activate_sketch_plane(int(value), look_at=True)
         elif kind == "sketch_plane_global":
             self._activate_global_sketch_plane(str(value), look_at=True)
+        elif kind == "point_geometry":
+            self._edit_point_geometry(int(value))
+        elif kind == "line_geometry":
+            self._edit_line_geometry(int(value))
+        elif kind == "surface_geometry":
+            self._edit_surface_geometry(int(value))
         elif kind == "material":
             self._edit_material(int(value))
         elif kind == "nd_material":
