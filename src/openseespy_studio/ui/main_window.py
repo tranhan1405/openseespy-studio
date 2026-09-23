@@ -24695,10 +24695,32 @@ class MainWindow(QMainWindow):
             exec_menu()
             return
 
+        if kind == "analysis_cyclic_protocol":
+            tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_cyclic_protocol_properties(tag)
+            )
+            edit = menu.addAction("Edit Analysis Settings...")
+            edit.triggered.connect(lambda: self._edit_analysis(tag))
+
+            active = menu.addAction("Set Active")
+            active.setEnabled(tag != self.project.active_analysis_tag)
+            active.triggered.connect(lambda: self._set_active_analysis(tag))
+            run = menu.addAction("Run This Analysis")
+            run.setEnabled(
+                self._analysis_process is None
+                or self._analysis_process.state() == QProcess.NotRunning
+            )
+            run.triggered.connect(
+                lambda: self._run_analysis_from_tree(tag)
+            )
+            exec_menu()
+            return
+
         if kind in {
             "analysis",
             "analysis_settings",
-            "analysis_cyclic_protocol",
         }:
             tag = int(value)
             properties = menu.addAction("Properties")
@@ -25386,7 +25408,11 @@ class MainWindow(QMainWindow):
             self._edit_element_load(int(value))
         elif kind == "mass_source":
             self._edit_mass_source(int(value))
-        elif kind in {"analysis", "analysis_settings"}:
+        elif kind in {
+            "analysis",
+            "analysis_settings",
+            "analysis_cyclic_protocol",
+        }:
             self._edit_analysis(int(value))
         elif kind == "job":
             self._activate_job_result(int(value))
