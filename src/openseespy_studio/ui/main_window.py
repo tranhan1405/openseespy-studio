@@ -24542,6 +24542,10 @@ class MainWindow(QMainWindow):
             "analysis_cyclic_protocol",
         }:
             tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_analysis_properties(tag)
+            )
             edit = menu.addAction("Edit Analysis Settings...")
             edit.triggered.connect(lambda: self._edit_analysis(tag))
 
@@ -24979,6 +24983,10 @@ class MainWindow(QMainWindow):
 
         if kind == "nd_material":
             tag = int(value)
+            properties_action = menu.addAction("Properties")
+            properties_action.triggered.connect(
+                lambda: self._show_nd_material_properties(tag)
+            )
             edit_action = menu.addAction("Edit...")
             edit_action.triggered.connect(
                 lambda: self._edit_nd_material(tag)
@@ -24992,6 +25000,10 @@ class MainWindow(QMainWindow):
 
         if kind == "material":
             tag = int(value)
+            properties_action = menu.addAction("Properties")
+            properties_action.triggered.connect(
+                lambda: self._show_material_properties(tag)
+            )
             edit_action = menu.addAction("Edit...")
             edit_action.triggered.connect(
                 lambda: self._edit_material(tag)
@@ -25018,6 +25030,10 @@ class MainWindow(QMainWindow):
 
         if kind == "section":
             tag = int(value)
+            properties_action = menu.addAction("Properties")
+            properties_action.triggered.connect(
+                lambda: self._show_section_properties(tag)
+            )
             edit_action = menu.addAction("Edit...")
             edit_action.triggered.connect(
                 lambda: self._edit_section(tag)
@@ -25042,6 +25058,10 @@ class MainWindow(QMainWindow):
 
         if kind == "transformation":
             tag = int(value)
+            properties_action = menu.addAction("Properties")
+            properties_action.triggered.connect(
+                lambda: self._show_transformation_properties(tag)
+            )
             edit_action = menu.addAction("Edit...")
             edit_action.triggered.connect(
                 lambda: self._edit_transformation(tag)
