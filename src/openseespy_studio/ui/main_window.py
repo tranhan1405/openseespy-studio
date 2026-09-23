@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLayout,
     QLineEdit,
     QMainWindow,
     QMessageBox,
@@ -1062,16 +1063,28 @@ class PropertiesPanel(QWidget):
         self.properties_scroll.setWidgetResizable(True)
         self.properties_scroll.setFrameShape(QFrame.NoFrame)
         self.properties_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarAsNeeded
+            Qt.ScrollBarAlwaysOff
         )
         self.properties_scroll.setVerticalScrollBarPolicy(
             Qt.ScrollBarAsNeeded
         )
-        properties_body = QWidget()
-        layout = QVBoxLayout(properties_body)
+
+        # QScrollArea only scrolls when its child cannot shrink to the
+        # viewport.  Keep the Properties body at least at its content-driven
+        # size hint so long result forms (Contour, Scope, Display, etc.)
+        # produce a real vertical overflow instead of being compressed.
+        self.properties_body = QWidget()
+        self.properties_body.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Minimum,
+        )
+        layout = QVBoxLayout(self.properties_body)
+        layout.setSizeConstraint(
+            QLayout.SizeConstraint.SetMinAndMaxSize
+        )
         layout.setContentsMargins(0, 0, 2, 0)
         layout.setSpacing(3)
-        self.properties_scroll.setWidget(properties_body)
+        self.properties_scroll.setWidget(self.properties_body)
         root_layout.addWidget(self.properties_scroll, 1)
 
         self.table = QTableWidget(0, 2)
@@ -1128,7 +1141,14 @@ class PropertiesPanel(QWidget):
         self.cyclic_protocol_view.hide()
 
         self.result_editor = QWidget()
+        self.result_editor.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Minimum,
+        )
         result_layout = QVBoxLayout(self.result_editor)
+        result_layout.setSizeConstraint(
+            QLayout.SizeConstraint.SetMinAndMaxSize
+        )
         result_layout.setContentsMargins(0, 0, 0, 0)
         result_layout.setSpacing(5)
 
