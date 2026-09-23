@@ -48,6 +48,7 @@ class OpenSeesImportResult:
     issues: list[ImportIssue] = field(default_factory=list)
     imported_counts: dict[str, int] = field(default_factory=dict)
     source_name: str = ""
+    linked_files: list[str] = field(default_factory=list)
 
     @property
     def error_count(self) -> int:
@@ -379,6 +380,7 @@ class _Importer:
         self._imported_local_modules: set[Path] = set()
         self._local_module_exports: dict[Path, dict[str, Any]] = {}
         self._virtual_path_series: dict[Path, list[float]] = {}
+        self._loaded_data_files: set[Path] = set()
         if self.source_path is not None:
             self._imported_local_modules.add(self.source_path)
         self.units = UnitSystem.from_mapping(units)
@@ -1494,6 +1496,7 @@ class _Importer:
 
         try:
             text = data_path.read_text(encoding="utf-8-sig")
+            self._loaded_data_files.add(data_path)
         except OSError as exc:
             self.issue(
                 "ERROR",
@@ -2639,6 +2642,7 @@ class _Importer:
             return None
         try:
             lines = path.read_text(encoding="utf-8-sig").splitlines()
+            self._loaded_data_files.add(path)
         except OSError as exc:
             self.issue(
                 "ERROR",
@@ -3867,6 +3871,25 @@ class _Importer:
                 f"Analysis settings were only partially recoverable: {exc}",
             )
 
+    def linked_file_names(self) -> list[str]:
+        """Return files actually read in addition to the primary source."""
+        paths = set(self._imported_local_modules)
+        paths.update(self._loaded_data_files)
+        if self.source_path is not None:
+            paths.discard(self.source_path)
+
+        names: list[str] = []
+        for path in sorted(paths, key=lambda item: str(item).lower()):
+            if self.source_dir is not None:
+                try:
+                    name = str(path.relative_to(self.source_dir))
+                except ValueError:
+                    name = path.name
+            else:
+                name = path.name
+            names.append(name.replace("\\", "/"))
+        return names
+
     def run(self) -> OpenSeesImportResult:
         try:
             tree = ast.parse(self.source, filename=self.source_name or "<import>")
@@ -3876,7 +3899,11 @@ class _Importer:
                 f"Line {exc.lineno}: {exc.msg}",
             )
             return OpenSeesImportResult(
-                self.project, self.issues, self.counts, self.source_name
+                self.project,
+                self.issues,
+                self.counts,
+                self.source_name,
+                self.linked_file_names(),
             )
 
         for stmt in tree.body:
@@ -3896,6 +3923,7 @@ class _Importer:
             self.issues,
             self.counts,
             self.source_name,
+            self.linked_file_names(),
         )
 
 
