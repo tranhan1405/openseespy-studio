@@ -347,6 +347,7 @@ class _Importer:
         self.analysis_metadata: dict[str, Any] = {}
         self.analysis_events: list[dict[str, Any]] = []
         self._deferred_modal_frequencies: dict[str, dict[str, Any]] = {}
+        self._load_const_event_index: int | None = None
         self._next_constraint = 1
         self._next_load = 1
         self._next_element_load = 1
@@ -1909,7 +1910,10 @@ class _Importer:
                 return
 
             args = self.call_args(node)
-            if command in {"wipe", "loadConst", "reactions"}:
+            if command == "loadConst":
+                self._load_const_event_index = len(self.analysis_events)
+                return
+            if command in {"wipe", "reactions"}:
                 return
             if command == "model":
                 ndm = int(self.flag_value(args, "-ndm", 3))
@@ -2814,6 +2818,7 @@ class _Importer:
             return
 
         staged_displacement = False
+        staged_transient = False
         staged_driver_tags: list[int] = []
         staged_preload_steps = 1
         staged_preload_algorithm = "Auto"
@@ -2881,6 +2886,47 @@ class _Importer:
                         prior_event.get("algorithm") or "Auto"
                     )
 
+            if (
+                final_start > 0
+                and state.get("analysis_kind") == "Transient"
+                and self._load_const_event_index is not None
+                and 0 < self._load_const_event_index <= final_start
+            ):
+                prior_index = self._load_const_event_index - 1
+                prior_event = self.analysis_events[prior_index]
+                if prior_event.get("analysis_kind") == "Static":
+                    prior_signature = _event_signature(prior_event)
+                    prior_start = prior_index
+                    while (
+                        prior_start > 0
+                        and _event_signature(self.analysis_events[prior_start - 1])
+                        == prior_signature
+                    ):
+                        prior_start -= 1
+
+                    prior_patterns = {
+                        int(tag)
+                        for tag in prior_event.get("pattern_tags", [])
+                    }
+                    final_patterns = {
+                        int(tag)
+                        for tag in final_event.get("pattern_tags", [])
+                    }
+                    new_patterns = sorted(final_patterns - prior_patterns)
+                    if prior_patterns and new_patterns:
+                        staged_transient = True
+                        staged_driver_tags = new_patterns
+                        staged_preload_steps = sum(
+                            max(1, int(event.get("steps", 1) or 1))
+                            for event in self.analysis_events[
+                                prior_start:self._load_const_event_index
+                            ]
+                        )
+                        staged_preload_algorithm = str(
+                            prior_event.get("algorithm") or "Auto"
+                        )
+
+        staged_preload = staged_displacement or staged_transient
         analysis_type = str(meta.get("type", ""))
         analysis_type_hint = str(
             state.get(
@@ -3020,13 +3066,13 @@ class _Importer:
             "preload_gravity": bool(
                 meta.get(
                     "preload_gravity",
-                    staged_displacement,
+                    staged_preload,
                 )
             ),
             "gravity_steps": int(
                 meta.get(
                     "gravity_steps",
-                    staged_preload_steps if staged_displacement else 10,
+                    staged_preload_steps if staged_preload else 10,
                 )
             ),
             "gravity_algorithm": str(
@@ -3034,7 +3080,7 @@ class _Importer:
                     "gravity_algorithm",
                     (
                         staged_preload_algorithm
-                        if staged_displacement
+                        if staged_preload
                         else "Auto"
                     ),
                 )
@@ -3043,7 +3089,7 @@ class _Importer:
                 int(value)
                 for value in meta.get(
                     "deferred_pattern_tags",
-                    staged_driver_tags if staged_displacement else [],
+                    staged_driver_tags if staged_preload else [],
                 )
             ],
             "num_modes": int(meta.get("num_modes", state.get("num_modes", 1))),
