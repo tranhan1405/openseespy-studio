@@ -26,21 +26,20 @@ def test_tree_geometry_branch_switches_to_geometry_only_domain():
 
 def test_geometry_tree_selection_does_not_select_generated_fe_elements():
     source = inspect.getsource(MainWindow._tree_selection_changed)
-    line_branch = source.split(
-        'elif kind == "line_geometry":', 1
-    )[1].split(
-        'elif kind == "surface_geometry":', 1
-    )[0]
-    surface_branch = source.split(
-        'elif kind == "surface_geometry":', 1
-    )[1].split(
-        'elif kind == "material":', 1
-    )[0]
 
-    assert "generated_element_tags" not in line_branch
-    assert "generated_element_tags" not in surface_branch
-    assert "elements.update" not in line_branch
-    assert "elements.update" not in surface_branch
+    assert 'elif kind in {"line_geometry", "line_mesh_recipe"}:' in source
+    assert 'elif kind in {"surface_geometry", "surface_mesh_recipe"}:' in source
+    geometry_clear = source.split(
+        "if geometry_mode:", 1
+    )[1].split(
+        "else:", 1
+    )[0]
+    assert "self.selection.set_selection(" in geometry_clear
+    assert "nodes=set()" in geometry_clear
+    assert "elements=set()" in geometry_clear
+    assert "generated_element_tags" not in source.split(
+        "selected_payload_kinds", 1
+    )[0]
 
 
 def test_viewport_domains_are_mutually_exclusive():
@@ -50,7 +49,7 @@ def test_viewport_domains_are_mutually_exclusive():
     assert '{"geometry", "fe"}' in setter
     assert 'self._display_domain == "geometry"' in render
     assert 'name="geometry-points"' in render
-    assert 'name=f"line-geometry-{line_tag}"' in render
+    assert 'name="line-geometry"' in render
     assert 'name="surface-geometry"' in render
     assert '"surface_tag"' in render
 
@@ -66,5 +65,5 @@ def test_viewport_domains_are_mutually_exclusive():
         'if not self._model.nodes:', 1
     )[1]
     assert 'name="geometry-points"' not in fe_branch
-    assert 'line-geometry-' not in fe_branch
+    assert 'name="line-geometry"' not in fe_branch
     assert 'name="surface-geometry"' not in fe_branch
