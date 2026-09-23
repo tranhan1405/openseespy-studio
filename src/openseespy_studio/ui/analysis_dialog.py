@@ -506,7 +506,7 @@ class AnalysisDialog(QDialog):
             lambda _checked: self._sync(self.kind.currentText())
         )
         self.damping_model.currentIndexChanged.connect(
-            self._update_visibility
+            lambda _index: self._sync(self.kind.currentText())
         )
         self.damping_ratio.valueChanged.connect(
             lambda _value: self._sync(self.kind.currentText())
