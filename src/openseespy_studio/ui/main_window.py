@@ -3989,6 +3989,7 @@ class MainWindow(QMainWindow):
             {"mesh_root"},
             {"fe_model_root"},
             {"loads_bc_root"},
+            {"analyses_root"},
         )
 
     def _set_loads_bc_display_context(self, enabled: bool) -> None:
@@ -5428,6 +5429,9 @@ class MainWindow(QMainWindow):
         loads_bc_root_selected = selected_payload_kinds == {
             "loads_bc_root"
         }
+        analyses_root_selected = selected_payload_kinds == {
+            "analyses_root"
+        }
 
         # Major display roots are navigation objects, not modeling commands.
         # Clicking one exits an in-progress sketch/pick/measure tool and
@@ -5437,6 +5441,7 @@ class MainWindow(QMainWindow):
             or mesh_root_selected
             or fe_model_root_selected
             or loads_bc_root_selected
+            or analyses_root_selected
         ):
             if self.viewport.interaction_tool() != "select":
                 self._activate_select_tool()
@@ -5468,6 +5473,7 @@ class MainWindow(QMainWindow):
                 {"geometry_root"},
                 {"mesh_root"},
                 {"fe_model_root"},
+                {"analyses_root"},
             )
         ):
             self._set_loads_bc_display_context(False)
@@ -5679,6 +5685,10 @@ class MainWindow(QMainWindow):
                 elif root_kind == "loads_bc_root":
                     self.status_message.setText(
                         "Loads & BCs overview · supports and load symbols"
+                    )
+                elif root_kind == "analyses_root":
+                    self.status_message.setText(
+                        "Analysis overview · solver setup on base FE model"
                     )
 
     def _wire_selection(self) -> None:
