@@ -23150,7 +23150,6 @@ class MainWindow(QMainWindow):
                 node_tags=nodes or None,
                 element_tags=elements or None,
                 cache_key=result_cache_key,
-                contour_options=options,
             )
         elif result_type in {"NodalDisplacement", "NodalReaction"}:
             quantity = (
@@ -23171,6 +23170,7 @@ class MainWindow(QMainWindow):
                 node_tags=nodes or None,
                 element_tags=elements or None,
                 cache_key=result_cache_key,
+                contour_options=options,
             )
         elif result_type == "MemberForce":
             self.viewport.show_member_force_diagram(
