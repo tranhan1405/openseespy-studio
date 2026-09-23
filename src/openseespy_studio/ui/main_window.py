@@ -2358,7 +2358,7 @@ class MainWindow(QMainWindow):
             "Distance",
             "ruler",
             self._activate_measure_distance,
-            "Measure distance and XYZ offsets with Geometry endpoint, midpoint, intersection and grid snapping",
+            "Measure distance and XYZ offsets with endpoint, midpoint, intersection, nearest-line, orthogonal and grid snapping",
             checkable=True,
         )
         self._make_action(
@@ -6493,7 +6493,7 @@ class MainWindow(QMainWindow):
         self.viewport.plotter.render()
         self.status_message.setText(
             (
-                "Measure Geometry: click first point/location · snap = endpoint / midpoint / intersection / grid"
+                "Measure Geometry: click first point/location · snap = endpoint / midpoint / intersection / nearest line / orthogonal / grid"
                 if geometry_mode
                 else "Measure Distance: click the first node"
             )
