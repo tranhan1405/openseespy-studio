@@ -358,6 +358,9 @@ def motion_frame(
 def result_frame_payload(
     result: dict[str, Any],
     index: int,
+    *,
+    include_displacements: bool = True,
+    include_reactions: bool = True,
 ) -> dict[str, Any]:
     """Build a lightweight result payload for one recorded analysis frame.
 
@@ -384,20 +387,22 @@ def result_frame_payload(
             continue
         tag = str(raw_tag)
 
-        disp_rows = node_data.get("disp", [])
-        if isinstance(disp_rows, list) and frame_index < len(disp_rows):
-            row = disp_rows[frame_index]
-            if isinstance(row, (list, tuple)):
-                displacements[tag] = [float(value) for value in row]
+        if include_displacements:
+            disp_rows = node_data.get("disp", [])
+            if isinstance(disp_rows, list) and frame_index < len(disp_rows):
+                row = disp_rows[frame_index]
+                if isinstance(row, (list, tuple)):
+                    displacements[tag] = [float(value) for value in row]
 
-        reaction_rows = node_data.get("reaction", [])
-        if (
-            isinstance(reaction_rows, list)
-            and frame_index < len(reaction_rows)
-        ):
-            row = reaction_rows[frame_index]
-            if isinstance(row, (list, tuple)):
-                reactions[tag] = [float(value) for value in row]
+        if include_reactions:
+            reaction_rows = node_data.get("reaction", [])
+            if (
+                isinstance(reaction_rows, list)
+                and frame_index < len(reaction_rows)
+            ):
+                row = reaction_rows[frame_index]
+                if isinstance(row, (list, tuple)):
+                    reactions[tag] = [float(value) for value in row]
 
     if displacements:
         final["node_displacements"] = displacements
