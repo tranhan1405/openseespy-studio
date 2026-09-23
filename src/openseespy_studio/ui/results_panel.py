@@ -3336,6 +3336,50 @@ class ResultsPanel(QWidget):
             0,
             min(self._motion_frame_index, count - 1),
         )
+        if (
+            bool(getattr(self, "_linked_contour_active", False))
+            and self._motion_info.kind != "Modal"
+        ):
+            frame_index = int(self._motion_frame_index)
+            history = (
+                self._result.get("history", {})
+                if isinstance(self._result, dict)
+                else {}
+            )
+            times = (
+                history.get("time", [])
+                if isinstance(history, dict)
+                else []
+            )
+            coordinate = None
+            if isinstance(times, list) and frame_index < len(times):
+                try:
+                    coordinate = float(times[frame_index])
+                except (TypeError, ValueError, OverflowError):
+                    coordinate = None
+
+            if self._motion_info.kind == "Transient" and coordinate is not None:
+                label = (
+                    f"Frame {frame_index + 1}/{count} · "
+                    f"t = {coordinate:.6g} s"
+                )
+            elif coordinate is not None:
+                label = (
+                    f"Step {frame_index + 1}/{count} · "
+                    f"coordinate = {coordinate:.6g}"
+                )
+            else:
+                label = f"Step {frame_index + 1}/{count}"
+
+            counter = f"{frame_index + 1} / {count}"
+            self.motion_counter.setText(counter)
+            self.frame_counter.setText(counter)
+            self.motion_info_label.setText(label)
+            self.frame_coordinate.setText(label)
+            self._sync_motion_markers(frame_index)
+            self.result_frame_requested.emit(frame_index, label)
+            return
+
         frame = motion_frame(
             self._result,
             self._motion_frame_index,
