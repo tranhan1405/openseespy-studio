@@ -3988,7 +3988,33 @@ class MainWindow(QMainWindow):
             {"geometry_root"},
             {"mesh_root"},
             {"fe_model_root"},
+            {"loads_bc_root"},
         )
+
+    def _set_loads_bc_display_context(self, enabled: bool) -> None:
+        """Show or hide load overlays used by the Loads & BCs tree context."""
+        enabled = bool(enabled)
+        availability = {
+            "show_nodal_loads": bool(self.project.nodal_loads),
+            "show_element_loads": bool(
+                self.project.element_loads
+                or self.project.surface_pressures
+            ),
+            "show_prescribed_displacements": bool(
+                self.project.prescribed_displacements
+            ),
+        }
+        option_names = {
+            "show_nodal_loads": "nodal_loads",
+            "show_element_loads": "element_loads",
+            "show_prescribed_displacements": "prescribed_displacements",
+        }
+        for action_key, option_name in option_names.items():
+            action = self.actions.get(action_key)
+            target = enabled and availability[action_key]
+            if action is not None:
+                action.setChecked(target)
+            self.viewport.set_display_option(option_name, target)
 
     def _build_status_bar(self) -> None:
         self.status_message = QLabel("Ready")
@@ -5399,6 +5425,9 @@ class MainWindow(QMainWindow):
         fe_model_root_selected = selected_payload_kinds == {
             "fe_model_root"
         }
+        loads_bc_root_selected = selected_payload_kinds == {
+            "loads_bc_root"
+        }
 
         # Major display roots are navigation objects, not modeling commands.
         # Clicking one exits an in-progress sketch/pick/measure tool and
@@ -5407,6 +5436,7 @@ class MainWindow(QMainWindow):
             geometry_root_selected
             or mesh_root_selected
             or fe_model_root_selected
+            or loads_bc_root_selected
         ):
             if self.viewport.interaction_tool() != "select":
                 self._activate_select_tool()
@@ -5423,6 +5453,24 @@ class MainWindow(QMainWindow):
             if mesh_overlay is not None:
                 mesh_overlay.setChecked(False)
             self.viewport.set_geometry_mesh_overlay_visible(False)
+
+        # Loads & BCs is a graphics context: supports are part of the base
+        # model scene, while loads and prescribed displacements are overlays.
+        # Entering the root shows the available overlays; returning to the
+        # main Model/Mesh/FE roots removes them so display context does not
+        # leak between major tree branches.
+        if loads_bc_root_selected:
+            self._set_loads_bc_display_context(True)
+        elif (
+            selected_payload_kinds
+            in (
+                {"model_root"},
+                {"geometry_root"},
+                {"mesh_root"},
+                {"fe_model_root"},
+            )
+        ):
+            self._set_loads_bc_display_context(False)
         line_geometry_tags = {
             int(item.data(0, Qt.UserRole)[1])
             for item in self.tree.selectedItems()
@@ -5627,6 +5675,10 @@ class MainWindow(QMainWindow):
                 elif root_kind == "fe_model_root":
                     self.status_message.setText(
                         "FE Model overview · base FE display"
+                    )
+                elif root_kind == "loads_bc_root":
+                    self.status_message.setText(
+                        "Loads & BCs overview · supports and load symbols"
                     )
 
     def _wire_selection(self) -> None:
