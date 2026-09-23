@@ -383,6 +383,8 @@ pattern('UniformExcitation', 2, 1, '-accel', 2)
     assert series.dt == 0.005
     assert series.factor == 386.0
     assert series.values == [0.0, 0.10, -0.20, 3.0e-2]
+    assert result.source_name == "cantilever_eq.py"
+    assert result.linked_files == ["A10000.dat"]
 
     pattern = result.project.load_patterns[2]
     assert pattern.pattern_type == "UniformExcitation"
@@ -541,6 +543,8 @@ mass(3, m, m, 0.0)
 
     assert result.error_count == 0
     assert result.project.model.nodes[3].mass[:3] == (5.0, 5.0, 0.0)
+    assert result.source_name == "earthquake.py"
+    assert result.linked_files == ["RCFrameGravity.py"]
     assert not any(
         issue.construct == "assignment"
         and issue.line == 5
@@ -588,6 +592,9 @@ timeSeries('Path', 2, '-filePath', record+'.dat', '-dt', dt, '-factor', 386.4)
     assert series.factor == 386.4
     assert series.values == [0.10, -0.20, 0.30, 0.00]
     assert result.imported_counts["Ground-motion records"] == 1
+    assert result.source_name == "earthquake.py"
+    assert result.linked_files == ["elCentro.at2", "ReadRecord.py"]
+    assert "elCentro.dat" not in result.linked_files
 
 
 def test_importer_recovers_bounded_transient_loop_and_direct_rayleigh(tmp_path):
