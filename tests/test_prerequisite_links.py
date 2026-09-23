@@ -670,3 +670,33 @@ def test_nodal_load_edit_no_longer_passes_element_load_only_keyword():
     assert "allowed_load_types=" not in source
     assert "new_pattern_callback=self._create_plain_pattern_dependency" in source
 
+def test_tenth_prerequisite_link_batch():
+    three_point_plane = inspect.getsource(
+        MainWindow._create_three_point_sketch_plane
+    )
+    assert "_ensure_geometry_point_count" in three_point_plane
+    assert "3," in three_point_plane
+    assert "Create at least three Geometry Points first." not in three_point_plane
+
+    line_preview = inspect.getsource(MainWindow._preview_line_mesh)
+    assert "Configure Line Mesh Now..." in line_preview
+    assert "_configure_line_mesh(tag, generate=False)" in line_preview
+    assert "before previewing." not in line_preview
+
+    line_select = inspect.getsource(MainWindow._select_line_generated_fe)
+    assert "Mesh Line Now..." in line_select
+    assert "_mesh_line_geometry(tag)" in line_select
+    assert "is not meshed." not in line_select
+
+    surface_quality = inspect.getsource(MainWindow._show_surface_quality_map)
+    assert "_ensure_surface_meshes" in surface_quality
+    assert 'title="Shell Mesh Quality"' in surface_quality
+    assert "before visualizing" not in surface_quality
+
+    surface_select = inspect.getsource(
+        MainWindow._select_generated_fe_for_surfaces
+    )
+    assert "_ensure_surface_meshes" in surface_select
+    assert 'title="Select Generated FE"' in surface_select
+    assert "has no live generated" not in surface_select
+
