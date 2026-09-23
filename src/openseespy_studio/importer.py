@@ -2263,10 +2263,38 @@ class _Importer:
     def _recognize_eigen_frequency_assignment(self, stmt: ast.Assign) -> bool:
         if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
             return False
-
+        target_name = stmt.targets[0].id
         value = stmt.value
-        subscript: ast.Subscript | None = None
 
+        if isinstance(value, ast.Call) and self.command_name(value) == "eigen":
+            try:
+                args = self.call_args(value)
+            except _Unresolved:
+                return False
+            if not args:
+                return False
+            try:
+                num_modes = int(args[-1])
+            except (TypeError, ValueError):
+                return False
+            solver = (
+                str(args[0])
+                if len(args) > 1 and isinstance(args[0], str)
+                else "-genBandArpack"
+            )
+            self._deferred_eigen_results[target_name] = {
+                "solver": solver,
+                "num_modes": num_modes,
+            }
+            self.env[target_name] = _UnknownValue(
+                f"runtime eigenvalues {target_name}"
+            )
+            self.analysis_state["modal"] = True
+            self.analysis_state["num_modes"] = num_modes
+            self.analysis_state["eigen_solver"] = solver
+            return True
+
+        subscript: ast.Subscript | None = None
         if (
             isinstance(value, ast.BinOp)
             and isinstance(value.op, ast.Pow)
@@ -2287,16 +2315,36 @@ class _Importer:
         ):
             subscript = value.args[0]
 
-        if subscript is None or not isinstance(subscript.value, ast.Call):
-            return False
-        if self.command_name(subscript.value) != "eigen":
+        if subscript is None:
             return False
 
-        try:
-            args = self.call_args(subscript.value)
-        except _Unresolved:
-            return False
-        if not args:
+        spec: dict[str, Any] | None = None
+        if isinstance(subscript.value, ast.Call):
+            if self.command_name(subscript.value) != "eigen":
+                return False
+            try:
+                args = self.call_args(subscript.value)
+            except _Unresolved:
+                return False
+            if not args:
+                return False
+            try:
+                num_modes = int(args[-1])
+            except (TypeError, ValueError):
+                return False
+            spec = {
+                "solver": (
+                    str(args[0])
+                    if len(args) > 1 and isinstance(args[0], str)
+                    else "-genBandArpack"
+                ),
+                "num_modes": num_modes,
+            }
+        elif isinstance(subscript.value, ast.Name):
+            spec = self._deferred_eigen_results.get(subscript.value.id)
+            if spec is None:
+                return False
+        else:
             return False
 
         index_node = subscript.slice
@@ -2304,28 +2352,108 @@ class _Importer:
             return False
         try:
             index = int(index_node.value)
-            num_modes = int(args[-1])
-        except (TypeError, ValueError):
+            num_modes = int(spec["num_modes"])
+        except (TypeError, ValueError, KeyError):
             return False
         if index < 0 or index >= num_modes:
             return False
 
-        solver = (
-            str(args[0])
-            if len(args) > 1 and isinstance(args[0], str)
-            else "-genBandArpack"
-        )
-        self._deferred_modal_frequencies[stmt.targets[0].id] = {
+        frequency_spec = {
             "mode": index + 1,
-            "solver": solver,
+            "solver": str(spec["solver"]),
             "num_modes": num_modes,
         }
+        self._deferred_modal_frequencies[target_name] = frequency_spec
+        self.env[target_name] = _UnknownValue(
+            f"runtime modal frequency {target_name}"
+        )
+        return True
+
+    def _recognize_rayleigh_coefficient_assignment(
+        self,
+        stmt: ast.Assign,
+    ) -> bool:
+        if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
+            return False
+        value = stmt.value
+        if (
+            not isinstance(value, ast.BinOp)
+            or not isinstance(value.op, ast.Div)
+            or not isinstance(value.right, ast.Name)
+        ):
+            return False
+        spec = self._deferred_modal_frequencies.get(value.right.id)
+        if spec is None:
+            return False
+        try:
+            numerator = float(self.eval.eval(value.left))
+        except (_Unresolved, TypeError, ValueError):
+            return False
+        if not math.isfinite(numerator) or numerator <= 0.0:
+            return False
+
+        target_name = stmt.targets[0].id
+        self._deferred_rayleigh_coefficients[target_name] = {
+            "damping_ratio": numerator / 2.0,
+            "mode": int(spec["mode"]),
+            "solver": str(spec["solver"]),
+        }
+        self.env[target_name] = _UnknownValue(
+            f"runtime Rayleigh coefficient {target_name}"
+        )
         return True
 
     def _recognize_single_mode_rayleigh(self, node: ast.Call) -> bool:
         if len(node.args) != 4:
             return False
 
+        model_by_index = {
+            1: "SingleModeCurrentStiffness",
+            2: "SingleModeInitialStiffness",
+            3: "SingleModeCommittedStiffness",
+        }
+
+        for coefficient_index in (1, 2, 3):
+            coefficient_arg = node.args[coefficient_index]
+            if not isinstance(coefficient_arg, ast.Name):
+                continue
+            coefficient_spec = self._deferred_rayleigh_coefficients.get(
+                coefficient_arg.id
+            )
+            if coefficient_spec is None:
+                continue
+
+            other_indices = [
+                index for index in range(4)
+                if index != coefficient_index
+            ]
+            try:
+                others = [
+                    float(self.eval.eval(node.args[index]))
+                    for index in other_indices
+                ]
+            except (_Unresolved, TypeError, ValueError):
+                continue
+            if any(abs(value) > 1.0e-15 for value in others):
+                continue
+
+            self.analysis_state["rayleigh_model"] = model_by_index[
+                coefficient_index
+            ]
+            self.analysis_state["rayleigh_damping_ratio"] = float(
+                coefficient_spec["damping_ratio"]
+            )
+            self.analysis_state["rayleigh_mode_i"] = int(
+                coefficient_spec["mode"]
+            )
+            self.analysis_state["eigen_solver"] = str(
+                coefficient_spec["solver"]
+            )
+            self.count("Rayleigh damping")
+            return True
+
+        # Backward-compatible direct expression:
+        # rayleigh(0, 0, 0, 2*zeta/omega_i)
         try:
             first_three = [float(self.eval.eval(arg)) for arg in node.args[:3]]
         except (_Unresolved, TypeError, ValueError):
@@ -3430,6 +3558,8 @@ class _Importer:
             if self._recognize_external_signal_assignment(stmt):
                 return
             if self._recognize_eigen_frequency_assignment(stmt):
+                return
+            if self._recognize_rayleigh_coefficient_assignment(stmt):
                 return
             probe_recovered = self._recognize_node_probe_calls(stmt.value)
             runtime_calls = self._runtime_calls_in(stmt.value)
