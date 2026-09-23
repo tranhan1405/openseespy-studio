@@ -479,9 +479,13 @@ class ModelViewport(QWidget):
         self.plotter.render()
 
     def set_geometry_sketch_plane_offset_from_point(self, xyz) -> None:
-        point = np.asarray(tuple(float(value) for value in xyz), dtype=float)
-        if point.shape != (3,) or not np.all(np.isfinite(point)):
+        raw_point = tuple(float(value) for value in xyz)
+        if (
+            len(raw_point) != 3
+            or not all(math.isfinite(value) for value in raw_point)
+        ):
             raise ValueError("Sketch plane point requires finite X, Y, Z.")
+        point = np.asarray(raw_point, dtype=float)
         signed = float(
             np.dot(
                 point - self._geometry_sketch_origin,
@@ -516,8 +520,27 @@ class ModelViewport(QWidget):
         y: int,
     ) -> tuple[float, float, float] | None:
         renderer = self.plotter.renderer
-        origin = self._geometry_sketch_origin
-        normal = self._geometry_sketch_normal
+        origin = getattr(self, "_geometry_sketch_origin", None)
+        normal = getattr(self, "_geometry_sketch_normal", None)
+        if origin is None or normal is None:
+            plane = getattr(self, "_geometry_sketch_plane", "xy")
+            offset = float(
+                getattr(self, "_geometry_sketch_plane_offset", 0.0)
+            )
+            legacy_frames = {
+                "xy": ((0.0, 0.0, offset), (0.0, 0.0, 1.0)),
+                "xz": ((0.0, offset, 0.0), (0.0, -1.0, 0.0)),
+                "yz": ((offset, 0.0, 0.0), (1.0, 0.0, 0.0)),
+            }
+            legacy_origin, legacy_normal = legacy_frames.get(
+                str(plane).strip().lower(),
+                legacy_frames["xy"],
+            )
+            origin = np.asarray(legacy_origin, dtype=float)
+            normal = np.asarray(legacy_normal, dtype=float)
+        else:
+            origin = np.asarray(origin, dtype=float)
+            normal = np.asarray(normal, dtype=float)
 
         def normalized_world(value) -> np.ndarray | None:
             if value is None or len(value) < 4:
@@ -539,10 +562,9 @@ class ModelViewport(QWidget):
 
         # When looking normal to the active workplane, all plane points share
         # one display depth. This is the most stable CAD-like unprojection.
-        if self._current_view in {
-            self._geometry_sketch_plane,
-            "sketch",
-        }:
+        current_view = getattr(self, "_current_view", "iso")
+        active_plane = getattr(self, "_geometry_sketch_plane", "xy")
+        if current_view in {active_plane, "sketch"}:
             renderer.SetWorldPoint(
                 float(origin[0]),
                 float(origin[1]),
