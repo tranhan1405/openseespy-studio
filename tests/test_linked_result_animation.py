@@ -91,3 +91,17 @@ def test_results_ribbon_exposes_frame_count_and_extrema_toggles():
     assert "max(5, min(100" in frame_limit
     assert "_sync_result_contour_ribbon_controls" in render
     assert "is_motion_playing" in toggle
+
+
+def test_transient_animation_uses_physical_time_clock():
+    advance = inspect.getsource(ResultsPanel._advance_motion)
+    times = inspect.getsource(ResultsPanel._transient_time_values)
+    sampling = inspect.getsource(ResultsPanel._rebuild_playback_frame_indices)
+
+    assert "time.monotonic()" in advance
+    assert "_motion_playback_time" in advance
+    assert "elapsed * max(0.01, self._motion_speed_value())" in advance
+    assert "history.get(\"time\"" in times
+    assert "values[index] <= values[index - 1]" in times
+    assert "uniformly in physical time" in sampling
+    assert "target_time" in sampling
