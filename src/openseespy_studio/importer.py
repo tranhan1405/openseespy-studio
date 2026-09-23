@@ -2502,6 +2502,117 @@ class _Importer:
             for child in ast.walk(function)
         )
 
+    @staticmethod
+    def _assigned_names_in_block(statements: list[ast.stmt]) -> set[str]:
+        names: set[str] = set()
+        for statement in statements:
+            for child in ast.walk(statement):
+                if not isinstance(child, ast.Assign):
+                    continue
+                for target in child.targets:
+                    names.update(_Importer._simple_target_names(target))
+        return names
+
+    def _recognize_local_numeric_signal_if(self, stmt: ast.If) -> bool:
+        """Safely recover local exists/open motion-loader blocks."""
+        test = stmt.test
+        if (
+            not isinstance(test, ast.Call)
+            or len(test.args) != 1
+            or test.keywords
+        ):
+            return False
+
+        is_exists = (
+            isinstance(test.func, ast.Name)
+            and test.func.id == "exists"
+        ) or (
+            isinstance(test.func, ast.Attribute)
+            and test.func.attr == "exists"
+        )
+        if not is_exists:
+            return False
+
+        try:
+            file_value = self.eval.eval(test.args[0])
+        except _Unresolved:
+            return False
+
+        body_names = self._assigned_names_in_block(stmt.body)
+        else_names = self._assigned_names_in_block(stmt.orelse)
+        candidates = body_names & else_names
+        if not candidates:
+            return False
+        preferred = sorted(
+            candidates,
+            key=lambda name: (
+                0
+                if any(
+                    token in name.lower()
+                    for token in ("motion", "accel", "signal", "record")
+                )
+                else 1,
+                name.lower(),
+            ),
+        )
+        target_name = preferred[0]
+
+        path = self._resolve_safe_source_relative_path(
+            stmt,
+            file_value,
+            "local ground-motion file",
+        )
+        if path is None:
+            return True
+
+        if not path.is_file():
+            self.env[target_name] = _UnknownValue(
+                f"missing local ground-motion file {path.name}"
+            )
+            self.issue(
+                "WARNING",
+                stmt,
+                "local ground-motion file",
+                f"{path.name} was not found beside the imported script. "
+                "The network/download fallback is intentionally not executed "
+                "during safe import; assign the motion file in Studio to "
+                "complete the excitation.",
+            )
+            return True
+
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except OSError as exc:
+            self.issue(
+                "ERROR",
+                stmt,
+                "local ground-motion file",
+                f"Could not read {path.name}: {exc}",
+            )
+            return True
+
+        values: list[float] = []
+        for line in text.splitlines():
+            body = line.split("#", 1)[0].replace(",", " ")
+            for token in body.split():
+                try:
+                    values.append(float(token))
+                except ValueError:
+                    continue
+        if not values:
+            self.issue(
+                "ERROR",
+                stmt,
+                "local ground-motion file",
+                f"{path.name} contains no numeric samples.",
+            )
+            return True
+
+        self.env[target_name] = values
+        self._loaded_data_files.add(path)
+        self.count("Ground-motion records")
+        return True
+
     def _recognize_external_signal_assignment(
         self,
         stmt: ast.Assign,
@@ -2526,6 +2637,13 @@ class _Importer:
             values = self.eval.eval(stmt.value.args[0])
         except _Unresolved:
             values = _UnknownValue("eqsig.AccSignal.values")
+        if isinstance(values, (list, tuple)):
+            try:
+                values = _SafeNumericVector(
+                    tuple(float(value) for value in values)
+                )
+            except (TypeError, ValueError):
+                values = _UnknownValue("eqsig.AccSignal.values")
         self.env[stmt.targets[0].id] = _SafeModuleNamespace({
             "values": values,
             "dt": dt,
@@ -3436,6 +3554,8 @@ class _Importer:
             return
 
         if isinstance(stmt, ast.If):
+            if self._recognize_local_numeric_signal_if(stmt):
+                return
             # SARE-generated scripts contain runtime-only _studio_* control
             # flow. Metadata already reconstructs those analyses, so preserve
             # the existing behavior and do not symbolically execute it.
