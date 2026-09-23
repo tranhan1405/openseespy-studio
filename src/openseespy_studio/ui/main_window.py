@@ -25179,6 +25179,10 @@ class MainWindow(QMainWindow):
             self._edit_line_geometry(int(value))
         elif kind == "surface_geometry":
             self._edit_surface_geometry(int(value))
+        elif kind == "node":
+            self._show_entity_properties("node", int(value))
+        elif kind == "element":
+            self._show_entity_properties("element", int(value))
         elif kind == "material":
             self._edit_material(int(value))
         elif kind == "nd_material":
