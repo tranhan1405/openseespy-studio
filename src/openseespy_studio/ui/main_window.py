@@ -5461,7 +5461,6 @@ class MainWindow(QMainWindow):
             self._show_recorder_properties(recorder_tag)
         elif solution_result_tag is not None:
             self._show_solution_result_properties(solution_result_tag)
-            self._evaluate_solution_result(solution_result_tag)
         elif solution_convergence_tag is not None:
             analysis = self.project.analyses.get(
                 solution_convergence_tag
