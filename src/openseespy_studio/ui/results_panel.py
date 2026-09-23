@@ -1231,7 +1231,31 @@ class ResultsPanel(QWidget):
         if kind == "PushoverCurve":
             self._select_tab("Pushover Curve")
             return
-        if kind == "CyclicHysteresis":
+        if kind in {
+            "CyclicHysteresis",
+            "CyclicBackbone",
+            "CyclicReversalMetrics",
+            "CyclicCycleMetrics",
+        }:
+            view = (
+                "backbone"
+                if kind == "CyclicBackbone"
+                else "hysteresis"
+            )
+            if hasattr(self, "cyclic_compare_view"):
+                index = self.cyclic_compare_view.findData(view)
+                if index >= 0:
+                    self.cyclic_compare_view.setCurrentIndex(index)
+
+            detail_index = {
+                "CyclicHysteresis": 0,
+                "CyclicBackbone": 0,
+                "CyclicReversalMetrics": 2,
+                "CyclicCycleMetrics": 3,
+            }[kind]
+            if hasattr(self, "cyclic_detail_tabs"):
+                self.cyclic_detail_tabs.setCurrentIndex(detail_index)
+
             self._select_tab("Cyclic Hysteresis")
             return
         if kind == "SpecimenResponse":
