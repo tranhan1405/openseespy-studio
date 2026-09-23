@@ -860,3 +860,55 @@ def test_fourteenth_prerequisite_link_batch():
     assert "remesh_surface_geometry(self.project, surface_tag)" in edit_point
     assert "Delete/remesh the generated FE mesh before moving it." not in edit_point
 
+def test_fifteenth_prerequisite_link_batch():
+    # 1: Editing a generated nodal load routes directly to its managed owner.
+    edit_nodal = inspect.getsource(MainWindow._edit_nodal_load)
+    assert "Edit Managed Edge Load Now..." in edit_nodal
+    assert "edge_load_tag=owner.tag" in edit_nodal
+    assert "Edit the Geometry Edge load instead." not in edit_nodal
+
+    # 2: Deleting a generated nodal load routes directly to managed removal.
+    delete_nodal = inspect.getsource(MainWindow._delete_nodal_load)
+    assert "Remove Managed Edge Load Now..." in delete_nodal
+    assert "edge_load_tag=owner.tag" in delete_nodal
+    assert "Remove the Geometry Edge load instead." not in delete_nodal
+
+    # 3: Editing a generated element load opens its exact managed pressure.
+    edit_element = inspect.getsource(MainWindow._edit_element_load)
+    assert "Edit Managed Pressure Now..." in edit_element
+    assert "pressure_tag=owner.tag" in edit_element
+    assert "Edit the Geometry Surface pressure instead." not in edit_element
+
+    # 4: Deleting a generated element load routes to exact managed pressure removal.
+    delete_element = inspect.getsource(MainWindow._delete_element_load)
+    assert "Remove Managed Pressure Now..." in delete_element
+    assert "pressure_tag=owner.tag" in delete_element
+    assert "Remove the Geometry Surface pressure instead." not in delete_element
+
+    # 5: Editing a generated recorder opens its exact managed recorder definition.
+    edit_recorder = inspect.getsource(MainWindow._edit_recorder)
+    assert "Edit Managed Recorder Now..." in edit_recorder
+    assert "recorder_tag=owner.tag" in edit_recorder
+    assert "Edit the Geometry Surface recorder instead." not in edit_recorder
+
+    edge_editor = inspect.getsource(MainWindow._manage_surface_edge_line_load)
+    assert "edge_load_tag: int | None = None" in edge_editor
+
+    edge_remove = inspect.getsource(MainWindow._remove_surface_edge_line_load)
+    assert "edge_load_tag: int | None = None" in edge_remove
+
+    pressure_editor = inspect.getsource(
+        MainWindow._create_surface_pressure_for_surfaces
+    )
+    assert "pressure_tag: int | None = None" in pressure_editor
+
+    pressure_remove = inspect.getsource(
+        MainWindow._remove_managed_surface_pressure
+    )
+    assert "pressure_tag: int | None = None" in pressure_remove
+
+    recorder_editor = inspect.getsource(
+        MainWindow._manage_surface_shell_recorder
+    )
+    assert "recorder_tag: int | None = None" in recorder_editor
+
