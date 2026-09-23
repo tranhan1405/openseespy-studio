@@ -2109,3 +2109,41 @@ def test_custom_sketch_plane_rectangle_creates_surface_on_plane():
         window.undo_stack.setClean()
         window.close()
         app.processEvents()
+
+
+
+def test_origin_oxyz_toggle_tracks_true_global_origin():
+    from PySide6.QtWidgets import QApplication
+
+    from openseespy_studio.ui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        window._new_model()
+        actors = window.viewport.plotter.renderer.actors
+        assert window.viewport.origin_axes_visible() is True
+        assert "origin-axes-o" in actors
+        assert "origin-axis-x" in actors
+        assert "origin-axis-y" in actors
+        assert "origin-axis-z" in actors
+
+        window._toggle_origin_axes(False)
+        actors = window.viewport.plotter.renderer.actors
+        assert window.viewport.origin_axes_visible() is False
+        assert "origin-axis-x" not in actors
+        assert "origin-axis-y" not in actors
+        assert "origin-axis-z" not in actors
+
+        window._toggle_origin_axes(True)
+        actors = window.viewport.plotter.renderer.actors
+        assert window.viewport.origin_axes_visible() is True
+        assert "origin-axes-o" in actors
+        assert "origin-axis-x" in actors
+        assert "origin-axis-y" in actors
+        assert "origin-axis-z" in actors
+    finally:
+        window._set_dirty(False)
+        window.undo_stack.setClean()
+        window.close()
+        app.processEvents()
