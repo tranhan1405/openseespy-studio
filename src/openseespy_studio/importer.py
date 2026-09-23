@@ -71,6 +71,14 @@ class _SafeModuleNamespace:
     values: dict[str, Any]
 
 
+@dataclass(frozen=True, slots=True)
+class _UnknownValue:
+    label: str
+
+    def __repr__(self) -> str:
+        return f"<unresolved {self.label}>"
+
+
 class _Unresolved(Exception):
     pass
 
@@ -121,6 +129,12 @@ class _SafeEvaluator:
 
     @staticmethod
     def _binary(op: ast.operator, left: Any, right: Any) -> Any:
+        if isinstance(left, _UnknownValue) or isinstance(right, _UnknownValue):
+            label = (
+                left.label if isinstance(left, _UnknownValue)
+                else right.label
+            )
+            return _UnknownValue(label)
         if isinstance(op, ast.Add):
             return left + right
         if isinstance(op, ast.Sub):
@@ -188,6 +202,8 @@ class _SafeEvaluator:
             )
         if isinstance(node, ast.UnaryOp):
             value = self.eval(node.operand)
+            if isinstance(value, _UnknownValue):
+                return value
             if isinstance(node.op, ast.UAdd):
                 return +value
             if isinstance(node.op, ast.USub):
@@ -219,8 +235,12 @@ class _SafeEvaluator:
             raise _Unresolved(type(node.op).__name__)
         if isinstance(node, ast.Compare):
             left = self.eval(node.left)
+            if isinstance(left, _UnknownValue):
+                raise _Unresolved(left.label)
             for op, comparator in zip(node.ops, node.comparators):
                 right = self.eval(comparator)
+                if isinstance(right, _UnknownValue):
+                    raise _Unresolved(right.label)
                 if not self._compare(op, left, right):
                     return False
                 left = right
@@ -229,10 +249,17 @@ class _SafeEvaluator:
             branch = node.body if self.eval(node.test) else node.orelse
             return self.eval(branch)
         if isinstance(node, ast.Subscript):
-            return self.eval(node.value)[self.eval(node.slice)]
+            value = self.eval(node.value)
+            if isinstance(value, _UnknownValue):
+                return value
+            return value[self.eval(node.slice)]
         if isinstance(node, ast.Attribute):
             if isinstance(node.value, ast.Name):
                 namespace = self.env.get(node.value.id)
+                if isinstance(namespace, _UnknownValue):
+                    return _UnknownValue(
+                        f"{namespace.label}.{node.attr}"
+                    )
                 if isinstance(namespace, _SafeModuleNamespace):
                     if node.attr in namespace.values:
                         return namespace.values[node.attr]
@@ -266,15 +293,32 @@ class _SafeEvaluator:
                 if name in self.SAFE_CALLS:
                     if any(keyword.arg is None for keyword in node.keywords):
                         raise _Unresolved("**kwargs")
-                    fn = self.SAFE_CALLS[name]
-                    return fn(
-                        *(self.eval(arg) for arg in node.args),
-                        **{
-                            keyword.arg: self.eval(keyword.value)
-                            for keyword in node.keywords
-                            if keyword.arg is not None
-                        },
+                    positional = [self.eval(arg) for arg in node.args]
+                    keyword_values = {
+                        keyword.arg: self.eval(keyword.value)
+                        for keyword in node.keywords
+                        if keyword.arg is not None
+                    }
+                    unknown = next(
+                        (
+                            value
+                            for value in [
+                                *positional,
+                                *keyword_values.values(),
+                            ]
+                            if isinstance(value, _UnknownValue)
+                        ),
+                        None,
                     )
+                    if unknown is not None:
+                        if name in {
+                            "list", "tuple", "sum", "sorted",
+                            "min", "max", "len", "abs",
+                        }:
+                            return _UnknownValue(unknown.label)
+                        raise _Unresolved(unknown.label)
+                    fn = self.SAFE_CALLS[name]
+                    return fn(*positional, **keyword_values)
                 if self.call_handler is not None:
                     return self.call_handler(node)
         raise _Unresolved(type(node).__name__)
@@ -351,6 +395,8 @@ class _Importer:
             "__name__": "__main__",
         }
         self.functions: dict[str, ast.FunctionDef] = {}
+        self.constant_classes: dict[str, _SafeModuleNamespace] = {}
+        self._executed_model_functions: set[str] = set()
         self.runtime_only_names: set[str] = set()
         self._call_depth = 0
         self._statement_steps = 0
@@ -1535,6 +1581,17 @@ class _Importer:
                 raise ValueError(
                     "UniformExcitation requires an -accel timeSeries tag"
                 )
+            if int(accel_tag) not in self.project.time_series:
+                self.issue(
+                    "WARNING",
+                    node,
+                    "UniformExcitation",
+                    f"Ground-motion time series {int(accel_tag)} could not be "
+                    "reconstructed; imported the structural model and analysis "
+                    "without this excitation. Assign/select the record in Studio.",
+                )
+                self.current_pattern = None
+                return
             item = LoadPatternData(
                 tag,
                 f"Imported UniformExcitation {tag}",
@@ -2194,13 +2251,134 @@ class _Importer:
             return result
         return set()
 
+    def _constant_class_namespace(
+        self,
+        stmt: ast.ClassDef,
+    ) -> _SafeModuleNamespace | None:
+        """Recover classes that are only used as simple constant namespaces."""
+        init = next(
+            (
+                child
+                for child in stmt.body
+                if isinstance(child, ast.FunctionDef)
+                and child.name == "__init__"
+            ),
+            None,
+        )
+        if init is None:
+            return None
+        arguments = [*init.args.posonlyargs, *init.args.args]
+        if (
+            len(arguments) != 1
+            or arguments[0].arg != "self"
+            or init.args.vararg is not None
+            or init.args.kwarg is not None
+            or init.args.kwonlyargs
+        ):
+            return None
+
+        values: dict[str, Any] = {}
+        for child in init.body:
+            if isinstance(child, ast.Pass):
+                continue
+            if (
+                not isinstance(child, ast.Assign)
+                or len(child.targets) != 1
+                or not isinstance(child.targets[0], ast.Attribute)
+                or not isinstance(child.targets[0].value, ast.Name)
+                or child.targets[0].value.id != "self"
+            ):
+                return None
+            try:
+                value = self.eval.eval(child.value)
+            except _Unresolved:
+                return None
+            if not self._safe_module_export_value(value):
+                return None
+            values[child.targets[0].attr] = value
+        return _SafeModuleNamespace(values) if values else None
+
+    def _function_contains_opensees_model(
+        self,
+        function: ast.FunctionDef,
+    ) -> bool:
+        for child in ast.walk(function):
+            if (
+                isinstance(child, ast.Call)
+                and self.command_name(child)
+                in {
+                    "model", "node", "element", "uniaxialMaterial",
+                    "nDMaterial", "section",
+                }
+            ):
+                return True
+        return False
+
+    def _recognize_external_signal_assignment(
+        self,
+        stmt: ast.Assign,
+    ) -> bool:
+        """Retain eqsig AccSignal dt without importing/executing eqsig."""
+        if (
+            len(stmt.targets) != 1
+            or not isinstance(stmt.targets[0], ast.Name)
+            or not isinstance(stmt.value, ast.Call)
+            or not isinstance(stmt.value.func, ast.Attribute)
+            or not isinstance(stmt.value.func.value, ast.Name)
+            or stmt.value.func.value.id != "eqsig"
+            or stmt.value.func.attr != "AccSignal"
+            or len(stmt.value.args) < 2
+        ):
+            return False
+        try:
+            dt = float(self.eval.eval(stmt.value.args[1]))
+        except (_Unresolved, TypeError, ValueError, OverflowError):
+            return False
+        try:
+            values = self.eval.eval(stmt.value.args[0])
+        except _Unresolved:
+            values = _UnknownValue("eqsig.AccSignal.values")
+        self.env[stmt.targets[0].id] = _SafeModuleNamespace({
+            "values": values,
+            "dt": dt,
+        })
+        if isinstance(values, _UnknownValue):
+            self.issue(
+                "WARNING",
+                stmt,
+                "eqsig.AccSignal",
+                "Ground-motion samples are external/unresolved; retained the "
+                "signal dt so structural model reconstruction can continue.",
+            )
+        self.count("External signal proxies")
+        return True
+
     def _call_custom_function(self, call: ast.Call) -> Any:
         if not isinstance(call.func, ast.Name):
             raise _Unresolved("custom call target")
         name = call.func.id
+        constant_namespace = self.constant_classes.get(name)
+        if constant_namespace is not None:
+            if call.args or call.keywords:
+                raise _Unresolved(
+                    f"constant namespace {name} does not accept arguments"
+                )
+            return constant_namespace
+
         function = self.functions.get(name)
         if function is None:
             raise _Unresolved(name)
+
+        is_model_builder = self._function_contains_opensees_model(function)
+        if is_model_builder and name in self._executed_model_functions:
+            self.issue(
+                "WARNING",
+                call,
+                "repeated model builder",
+                f"Skipped repeated call to {name}(); Studio imports the first "
+                "structural variant from comparison/parameter-study scripts.",
+            )
+            return _UnknownValue(f"{name}() repeated result")
         if self._call_depth >= self.MAX_CALL_DEPTH:
             raise _Unresolved(
                 f"function call depth exceeds {self.MAX_CALL_DEPTH}"
@@ -2257,6 +2435,8 @@ class _Importer:
 
         saved_env = dict(self.env)
         self._call_depth += 1
+        if is_model_builder:
+            self._executed_model_functions.add(name)
         self.env.update(bindings)
         try:
             try:
@@ -2733,12 +2913,23 @@ class _Importer:
                 final_time = candidate
                 break
         if final_time is None:
-            return False
-
-        total_steps = max(
-            1,
-            int(math.ceil(final_time / analysis_dt - 1.0e-12)),
-        )
+            total_steps = max(
+                1,
+                int(self.analysis_state.get("steps", 1) or 1),
+            )
+            self.issue(
+                "WARNING",
+                stmt,
+                "Transient duration",
+                "Transient analysis loop was recognized, but its final time "
+                "depends on unresolved external motion data. Imported a "
+                "placeholder step count; update duration/record before solving.",
+            )
+        else:
+            total_steps = max(
+                1,
+                int(math.ceil(final_time / analysis_dt - 1.0e-12)),
+            )
         has_initial_tangent_recovery = any(
             isinstance(child, ast.Call)
             and self.command_name(child) == "algorithm"
@@ -2919,6 +3110,8 @@ class _Importer:
 
         if isinstance(stmt, ast.Assign):
             if self._recognize_peer_read_record_assignment(stmt):
+                return
+            if self._recognize_external_signal_assignment(stmt):
                 return
             if self._recognize_eigen_frequency_assignment(stmt):
                 return
@@ -3181,13 +3374,29 @@ class _Importer:
         if isinstance(stmt, ast.Pass):
             return
 
-        if isinstance(stmt, (ast.AsyncFunctionDef, ast.ClassDef)):
+        if isinstance(stmt, ast.ClassDef):
+            namespace = self._constant_class_namespace(stmt)
+            if namespace is not None:
+                self.constant_classes[stmt.name] = namespace
+                self.count("Constant namespaces")
+                return
+            if not stmt.name.startswith("_studio_"):
+                self.issue(
+                    "UNSUPPORTED",
+                    stmt,
+                    "definition",
+                    "Only simple constant-only classes are reconstructed in "
+                    "safe import mode.",
+                )
+            return
+
+        if isinstance(stmt, ast.AsyncFunctionDef):
             if not getattr(stmt, "name", "").startswith("_studio_"):
                 self.issue(
                     "UNSUPPORTED",
                     stmt,
                     "definition",
-                    "Async functions and classes are not executed in safe import mode.",
+                    "Async functions are not executed in safe import mode.",
                 )
             return
 
