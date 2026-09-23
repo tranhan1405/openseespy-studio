@@ -443,8 +443,12 @@ def nodal_history_contour_range(
         else "disp"
     )
     scoped = {int(tag) for tag in (node_tags or set())}
-    values: list[float] = []
+    low: float | None = None
+    high: float | None = None
 
+    # Stream the extrema instead of materialising one scalar for every
+    # node/frame pair. Global Animation range is prepared once when the result
+    # view is activated, so memory stays O(1) even for long transient records.
     for raw_tag, node_data in nodes.items():
         try:
             tag = int(raw_tag)
@@ -464,9 +468,14 @@ def nodal_history_contour_range(
                 value = nodal_result_scalar(row, str(component))
             except (TypeError, ValueError):
                 continue
-            if value is not None and math.isfinite(float(value)):
-                values.append(float(value))
+            if value is None:
+                continue
+            number = float(value)
+            if not math.isfinite(number):
+                continue
+            low = number if low is None else min(low, number)
+            high = number if high is None else max(high, number)
 
-    if not values:
+    if low is None or high is None:
         return None
-    return min(values), max(values)
+    return low, high
