@@ -24,6 +24,7 @@ from .project import (
     ND_MATERIAL_PARAMETER_ORDER,
     NDMaterialData,
     nd_material_parameter_kind,
+    nd_material_requires_stage_update,
     NodalLoadData,
     PrescribedDisplacementData,
     ProjectDatabase,
@@ -617,6 +618,7 @@ class _Importer:
             "J2Plasticity": 6,
             "DruckerPrager": 12,
             "PressureIndependMultiYield": 6,
+            "PressureDependMultiYield": 15,
         }[kind]
         values = list(args[2:])
         if len(values) < required_count:
@@ -624,19 +626,37 @@ class _Importer:
                 f"{kind} needs at least {required_count} material arguments"
             )
 
+        custom_surface_index = {
+            "PressureIndependMultiYield": 9,
+            "PressureDependMultiYield": 15,
+        }.get(kind)
         if (
-            kind == "PressureIndependMultiYield"
-            and len(values) >= 10
-            and float(values[9]) < 0.0
+            custom_surface_index is not None
+            and len(values) > custom_surface_index
+            and float(values[custom_surface_index]) < 0.0
         ):
             self.issue(
                 "UNSUPPORTED",
                 node,
-                "PressureIndependMultiYield custom yield surfaces",
+                f"{kind} custom yield surfaces",
                 "SARE currently supports the automatic-surface form only. "
                 "Negative noYieldSurf with explicit (strain, modulus-ratio) "
                 "pairs is preserved as unsupported rather than imported "
                 "incorrectly.",
+            )
+            return
+
+        max_count = {
+            "PressureIndependMultiYield": 10,
+            "PressureDependMultiYield": 22,
+        }.get(kind)
+        if max_count is not None and len(values) > max_count:
+            self.issue(
+                "UNSUPPORTED",
+                node,
+                f"{kind} extra arguments",
+                f"SARE supports at most {max_count} material arguments "
+                "for the automatic-surface form.",
             )
             return
 
@@ -666,11 +686,11 @@ class _Importer:
             )
         )
         self.count("nD Materials")
-        if kind == "PressureIndependMultiYield":
+        if nd_material_requires_stage_update(kind):
             self.issue(
                 "WARNING",
                 node,
-                "PressureIndependMultiYield material stage",
+                f"{kind} material stage",
                 "The material definition was imported. OpenSees uses "
                 "updateMaterialStage to switch from elastic gravity loading "
                 "to elastoplastic response; that stage command is not stored "
