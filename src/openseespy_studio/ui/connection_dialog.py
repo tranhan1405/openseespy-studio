@@ -320,8 +320,10 @@ class ConnectionDialog(QDialog):
         dof_page = QWidget()
         dof_layout = QVBoxLayout(dof_page)
         hint = QLabel(
-            "DOF directions are local to the connection orientation. "
-            "Enable only the mechanisms intentionally represented by the spring."
+            "Direction IDs follow the selected OpenSees element convention. "
+            "For a 2D zeroLength/semi-rigid spring, RZ is dir 6; for a "
+            "2D twoNodeLink, RZ is dir 3. Enable only the mechanisms "
+            "intentionally represented by the connection."
         )
         hint.setWordWrap(True)
         dof_layout.addWidget(hint)
