@@ -233,7 +233,7 @@ def test_crack_principal_strain_and_main_window_wiring():
     assert shear_epsilon == pytest.approx(1.0e-4)
     assert abs(shear_theta) == pytest.approx(math.pi / 4.0)
 
-    dock_source = inspect.getsource(MainWindow._build_docks)
+    dock_source = inspect.getsource(MainWindow._build_bottom_docks)
     render_source = inspect.getsource(MainWindow._render_result_data)
     prereq_source = inspect.getsource(
         MainWindow._prepare_solution_result_prerequisites
