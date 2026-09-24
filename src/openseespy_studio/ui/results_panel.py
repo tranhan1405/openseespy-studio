@@ -4873,6 +4873,7 @@ class ResultsPanel(QWidget):
 
         self._result = dict(result or {})
         self._result_cache_key = cache_key
+        self._active_crack_element_scope = set()
         self._node_table_cache.clear()
         self._element_table_cache.clear()
         self._node_table_display_key = None
