@@ -681,6 +681,14 @@ def nd_material_to_openseespy(
             f"{value('DamageCte2'):g})"
         )
 
+    if material.material_type == "SmearedSteelDoubleLayer":
+        return (
+            "ops.nDMaterial('SmearedSteelDoubleLayer', "
+            f"{material.tag}, {int(round(value('mat1')))}, "
+            f"{int(round(value('mat2')))}, {value('ratio1'):g}, "
+            f"{value('ratio2'):g}, {value('orientation'):g})"
+        )
+
     raise ValueError(
         f"Unsupported nDMaterial type: {material.material_type}"
     )
