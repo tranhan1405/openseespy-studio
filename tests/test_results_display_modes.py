@@ -1039,3 +1039,15 @@ def test_display_ribbon_exposes_compact_background_menu():
     # restoring a hard-coded color.
     assert "_apply_background(render=False)" in reset_source
     assert "_apply_axes_widget()" in reset_source
+
+
+def test_nodal_contour_preserves_quad_shell_surfaces():
+    source = inspect.getsource(ModelViewport.show_node_contour)
+
+    assert "element.element_type in QUAD_ELEMENT_TYPES" in source
+    assert "element.node_tags()" in source
+    assert "quad_faces.extend" in source
+    assert 'faces=np.asarray(quad_faces' in source
+    assert '"result-shell-contour"' in source
+    assert '"show_edges": True' in source
+    assert "scoped_nodes.update(element.node_tags())" in source
