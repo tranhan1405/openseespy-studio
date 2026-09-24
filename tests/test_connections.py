@@ -2151,3 +2151,88 @@ def test_generic_joint_result_insert_defaults_beam_column_joint_to_total():
     assert 'connection.connection_type == "BeamColumnJoint"' in source
     assert 'result_settings["component"] = 4' in source
     assert '"connection_type" not in result_settings' in source
+
+
+def test_beam_column_joint_3d_blocks_external_displacement_result_query():
+    project = beam_column_joint_3d_project()
+    project.add_connection(ConnectionData(
+        tag=199,
+        name="3D external displacement guard",
+        connection_type="BeamColumnJoint",
+        node_i=101,
+        node_j=102,
+        parameters={
+            "external_nodes": [101, 102, 103, 104],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    ))
+    project.add_analysis(AnalysisSettingsData(
+        tag=1,
+        name="Static",
+        analysis_type="Static",
+        constraints_handler="Transformation",
+        steps=1,
+        load_increment=1.0,
+    ))
+
+    result = SolutionResultData(
+        tag=10,
+        analysis_tag=1,
+        name="Unsafe external displacement",
+        result_type="JointResponse",
+        element_scope=[199],
+        settings={
+            "response": "externalDisplacement",
+            "component": 1,
+        },
+    )
+    try:
+        project.add_solution_result(result)
+    except ValueError as exc:
+        assert "externalDisplacement is disabled" in str(exc)
+        assert "24 external DOFs" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected BeamColumnJoint3d externalDisplacement to be blocked"
+        )
+
+
+def test_beam_column_joint_2d_external_displacement_remains_available():
+    project = frame2d_project()
+    add_elastic_materials(project, 2, 13)
+    project.add_connection(ConnectionData(
+        tag=200,
+        name="2D external displacement",
+        connection_type="BeamColumnJoint",
+        node_i=11,
+        node_j=12,
+        parameters={
+            "external_nodes": [11, 12, 13, 10],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    ))
+    project.add_analysis(AnalysisSettingsData(
+        tag=1,
+        name="Static",
+        analysis_type="Static",
+        constraints_handler="Transformation",
+        steps=1,
+        load_increment=1.0,
+    ))
+    project.add_solution_result(SolutionResultData(
+        tag=11,
+        analysis_tag=1,
+        name="2D external displacement",
+        result_type="JointResponse",
+        element_scope=[200],
+        settings={
+            "response": "externalDisplacement",
+            "component": 12,
+        },
+    ))
+
+    assert project.solution_results[11].settings["component"] == 12
