@@ -186,7 +186,8 @@ class RCWallWizard(QWizard):
         page.setTitle("1 · Geometry & discretization")
         page.setSubTitle(
             "Planar 2D cantilever wall. V1 generates an ndm=2 / ndf=3 "
-            "MEFI model and replaces the current FE geometry."
+            "MEFI model. Choose Replace for a standalone wall or Append "
+            "to place a wall at a project-space origin."
         )
         layout = QVBoxLayout(page)
         form = QFormLayout()
@@ -247,7 +248,7 @@ class RCWallWizard(QWizard):
         layout.addStretch(1)
 
         self.wall_name.textChanged.connect(
-            lambda _text: self._mark_custom()
+            lambda _text: self._update_review()
         )
         self.replace_geometry.toggled.connect(
             lambda _checked: self._update_review()
