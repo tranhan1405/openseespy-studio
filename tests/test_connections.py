@@ -500,3 +500,73 @@ ops.element('Joint2D', 30, 10, 11, 12, 13, 130, 1, 0)
     assert connection.parameters["interface_materials"] == [0, 0, 0, 0]
     assert connection.parameters["large_disp"] == 0
     assert connection.parameters["imported_center_node_tag"] == 130
+
+
+def test_plain_analysis_rejected_when_joint2d_exists():
+    project = frame2d_project()
+    project.add_connection(
+        ConnectionData(
+            tag=35,
+            name="Joint before analysis",
+            connection_type="Joint2D",
+            node_i=10,
+            node_j=11,
+            parameters={
+                "external_nodes": [10, 11, 12, 13],
+                "panel_material": 1,
+                "interface_materials": [0, 0, 0, 0],
+                "large_disp": 0,
+            },
+        )
+    )
+    analysis = AnalysisSettingsData(
+        tag=1,
+        name="Bad Plain analysis",
+        analysis_type="Static",
+        constraints_handler="Plain",
+    )
+
+    try:
+        project.add_analysis(analysis)
+    except ValueError as exc:
+        assert "Joint2D" in str(exc)
+        assert "Transformation" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected Plain analysis with Joint2D to be rejected"
+        )
+
+
+def test_joint2d_rejected_when_plain_analysis_already_exists():
+    project = frame2d_project()
+    project.add_analysis(
+        AnalysisSettingsData(
+            tag=1,
+            name="Existing Plain analysis",
+            analysis_type="Static",
+            constraints_handler="Plain",
+        )
+    )
+    connection = ConnectionData(
+        tag=36,
+        name="Joint after analysis",
+        connection_type="Joint2D",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "panel_material": 1,
+            "interface_materials": [0, 0, 0, 0],
+            "large_disp": 0,
+        },
+    )
+
+    try:
+        project.add_connection(connection)
+    except ValueError as exc:
+        assert "Joint2D" in str(exc)
+        assert "Transformation" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected Joint2D with existing Plain analysis to be rejected"
+        )
