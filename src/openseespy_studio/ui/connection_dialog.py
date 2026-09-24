@@ -182,10 +182,12 @@ class ConnectionDialog(QDialog):
         default_to_ground: bool = False,
         node_positions: dict[int, tuple[float, float, float]] | None = None,
         units=None,
+        ndm: int = 3,
+        ndf: int = 6,
         parent=None,
     ):
         super().__init__(parent)
-        self.setWindowTitle("Zero-Length Element Research Builder")
+        self.setWindowTitle("Connection / Joint Builder")
         self.setModal(True)
         self.resize(760, 720)
         self.materials = dict(materials)
@@ -199,15 +201,26 @@ class ConnectionDialog(QDialog):
         ] = []
         self.node_positions = dict(node_positions or {})
         self.units = dict(units or {})
+        self.ndm = int(ndm)
+        self.ndf = int(ndf)
+        self.display_dof_labels = list(self.DOF_LABELS)
+        if self.ndm == 2 and self.ndf == 3:
+            self.display_dof_labels = [
+                ("UX", "In-plane translation X"),
+                ("UY", "In-plane translation Y"),
+                ("RZ", "Out-of-plane rotation"),
+                ("—", "Not available in this 2D model"),
+                ("—", "Not available in this 2D model"),
+                ("—", "Not available in this 2D model"),
+            ]
 
         root = QVBoxLayout(self)
 
         intro = QLabel(
-            "Create zeroLength, zeroLengthSection, or twoNodeLink elements. "
-            "zeroLength/twoNodeLink assign UniaxialMaterials by local DOF; "
-            "zeroLengthSection assigns one complete Section object such as "
-            "Elastic or Fiber. Sections can be created or edited directly "
-            "from the Section tab."
+            "Create idealized frame connections and nonlinear joint models: "
+            "Rigid, Pinned, Semi-Rigid, zeroLength/twoNodeLink, Joint2D, "
+            "or a Gupta-Krawinkler steel panel-zone macro. "
+            "Use the dedicated tabs below for material, section, and joint data."
         )
         intro.setWordWrap(True)
         intro.setStyleSheet(
@@ -236,16 +249,29 @@ class ConnectionDialog(QDialog):
 
         self.connection_type = QComboBox()
         self.connection_type.addItems([
+            "rigid",
+            "pinned",
+            "semiRigid",
             "zeroLength",
             "zeroLengthSection",
             "twoNodeLink",
+            "Joint2D",
+            "KrawinklerPanelZone",
         ])
         if connection:
             self.connection_type.setCurrentText(connection.connection_type)
 
         self.preset = QComboBox()
         for label, dofs in self.PRESETS:
-            self.preset.addItem(label, tuple(dofs))
+            adjusted = tuple(dofs)
+            if self.ndm == 2 and self.ndf == 3:
+                if label == "Rotational hinge RZ":
+                    adjusted = (3,)
+                elif label == "Planar joint UX-UY-RZ":
+                    adjusted = (1, 2, 3)
+                elif label == "Full 6-DOF spring":
+                    adjusted = (1, 2, 3)
+            self.preset.addItem(label, adjusted)
 
         self.to_ground = QCheckBox("Create coincident fixed ground node")
         self.to_ground.setChecked(
@@ -286,10 +312,11 @@ class ConnectionDialog(QDialog):
         setup_layout.addWidget(self.node_status)
 
         type_hint = QLabel(
-            "<b>zeroLength</b>: assign UniaxialMaterials by local DOF. "
-            "<b>zeroLengthSection</b>: assign one Section object; Node I/J "
-            "must be coincident. <b>twoNodeLink</b>: use when the end nodes "
-            "are physically separated."
+            "<b>Rigid</b>: rigidLink beam. <b>Pinned</b>: translations tied, "
+            "rotation released. <b>Semi-Rigid</b>: zeroLength spring with "
+            "selected rotational/translational material DOFs. "
+            "<b>Joint2D</b> and <b>KrawinklerPanelZone</b> use the Joint / "
+            "Panel Zone tab and are currently intended for 2D frames."
         )
         type_hint.setWordWrap(True)
         type_hint.setStyleSheet("color: #637487;")
@@ -316,9 +343,10 @@ class ConnectionDialog(QDialog):
         self.new_material_buttons: list[QPushButton] = []
         self.chain_buttons: list[QPushButton] = []
 
-        for dof, (label, meaning) in enumerate(self.DOF_LABELS, start=1):
+        for dof, (label, meaning) in enumerate(self.display_dof_labels, start=1):
             row = QHBoxLayout()
             check = QCheckBox("Active")
+            check.setEnabled(dof <= self.ndf)
             combo = QComboBox()
             for tag in sorted(self.materials):
                 material = self.materials[tag]
@@ -428,6 +456,138 @@ class ConnectionDialog(QDialog):
         section_layout.addStretch(1)
         self.section_page = section_page
         self.section_tab_index = self.tabs.addTab(section_page, "Section")
+
+        # Joint / panel-zone assignment tab.
+        joint_page = QWidget()
+        joint_layout = QVBoxLayout(joint_page)
+
+        joint_nodes_group = QGroupBox(
+            "External nodes · order: Left → Top → Right → Bottom"
+        )
+        joint_nodes_form = QFormLayout(joint_nodes_group)
+        saved_external = (
+            list(connection.parameters.get("external_nodes", ()))
+            if connection is not None
+            else []
+        )
+        candidate_nodes = sorted(self.node_positions)
+        while len(saved_external) < 4:
+            index = len(saved_external)
+            fallback = (
+                candidate_nodes[index]
+                if index < len(candidate_nodes)
+                else (initial_node_i if index % 2 == 0 else initial_node_j)
+            )
+            saved_external.append(int(fallback))
+        self.joint_node_spins: list[QSpinBox] = []
+        for label, value in zip(
+            ("Left", "Top", "Right", "Bottom"),
+            saved_external[:4],
+        ):
+            spin = QSpinBox()
+            spin.setRange(0, 2_147_483_647)
+            spin.setValue(int(value))
+            self.joint_node_spins.append(spin)
+            joint_nodes_form.addRow(f"{label} node:", spin)
+        joint_layout.addWidget(joint_nodes_group)
+
+        joint_material_group = QGroupBox("Joint materials")
+        joint_material_form = QFormLayout(joint_material_group)
+        self.panel_material_combo = QComboBox()
+        self.panel_material_combo.addItem("Select panel material...", None)
+        for tag in sorted(self.materials):
+            material = self.materials[tag]
+            self.panel_material_combo.addItem(
+                f"{tag} - {material.name}",
+                int(tag),
+            )
+        saved_panel = (
+            connection.parameters.get("panel_material")
+            if connection is not None
+            else None
+        )
+        panel_index = self.panel_material_combo.findData(saved_panel)
+        if panel_index >= 0:
+            self.panel_material_combo.setCurrentIndex(panel_index)
+        joint_material_form.addRow(
+            "Panel shear / rotational material:",
+            self.panel_material_combo,
+        )
+
+        saved_interfaces = (
+            list(connection.parameters.get(
+                "interface_materials",
+                (0, 0, 0, 0),
+            ))
+            if connection is not None
+            else [0, 0, 0, 0]
+        )
+        self.interface_material_combos: list[QComboBox] = []
+        for index in range(4):
+            combo = QComboBox()
+            combo.addItem("Rigid interface (0)", 0)
+            for tag in sorted(self.materials):
+                material = self.materials[tag]
+                combo.addItem(
+                    f"{tag} - {material.name}",
+                    int(tag),
+                )
+            wanted = (
+                saved_interfaces[index]
+                if index < len(saved_interfaces)
+                else 0
+            )
+            combo_index = combo.findData(int(wanted))
+            if combo_index >= 0:
+                combo.setCurrentIndex(combo_index)
+            self.interface_material_combos.append(combo)
+            joint_material_form.addRow(
+                f"Joint2D interface Mat{index + 1}:",
+                combo,
+            )
+
+        self.large_disp = QComboBox()
+        self.large_disp.addItem("0 · small deformation", 0)
+        self.large_disp.addItem("1 · large deformation", 1)
+        self.large_disp.addItem("2 · large deformation + length correction", 2)
+        saved_large_disp = (
+            int(connection.parameters.get("large_disp", 0))
+            if connection is not None
+            else 0
+        )
+        large_index = self.large_disp.findData(saved_large_disp)
+        if large_index >= 0:
+            self.large_disp.setCurrentIndex(large_index)
+        joint_material_form.addRow("Joint2D formulation:", self.large_disp)
+        joint_layout.addWidget(joint_material_group)
+
+        kraw_group = QGroupBox("Krawinkler stiff panel-boundary members")
+        kraw_form = QFormLayout(kraw_group)
+        params = connection.parameters if connection is not None else {}
+        self.rigid_a = _float_spin(float(params.get("rigid_A", 0.0)))
+        self.rigid_e = _float_spin(float(params.get("rigid_E", 0.0)))
+        self.rigid_i = _float_spin(float(params.get("rigid_I", 0.0)))
+        for spin in (self.rigid_a, self.rigid_e, self.rigid_i):
+            spin.setMinimum(0.0)
+        kraw_form.addRow("Rigid-link A:", self.rigid_a)
+        kraw_form.addRow("Rigid-link E:", self.rigid_e)
+        kraw_form.addRow("Rigid-link Iz:", self.rigid_i)
+        kraw_hint = QLabel(
+            "For KrawinklerPanelZone, enter deliberately stiff elastic-member "
+            "properties in the active project unit system. The panel material "
+            "defines the nonlinear shear-distortion spring."
+        )
+        kraw_hint.setWordWrap(True)
+        kraw_hint.setStyleSheet("color: #637487;")
+        kraw_form.addRow(kraw_hint)
+        joint_layout.addWidget(kraw_group)
+        joint_layout.addStretch(1)
+
+        self.joint_page = joint_page
+        self.joint_tab_index = self.tabs.addTab(
+            joint_page,
+            "Joint / Panel Zone",
+        )
 
         # Orientation tab.
         orient_page = QWidget()
@@ -623,19 +783,74 @@ class ConnectionDialog(QDialog):
         self._refresh_section_combo(select_tag=staged.tag)
 
     def _connection_type_changed(self, _text: str) -> None:
-        section_mode = (
-            self.connection_type.currentText() == "zeroLengthSection"
-        )
-        self.preset.setEnabled(not section_mode)
-        self.tabs.setTabEnabled(self.dof_tab_index, not section_mode)
+        connection_type = self.connection_type.currentText()
+        section_mode = connection_type == "zeroLengthSection"
+        spring_mode = connection_type in {
+            "zeroLength",
+            "twoNodeLink",
+            "semiRigid",
+        }
+        joint_mode = connection_type in {
+            "Joint2D",
+            "KrawinklerPanelZone",
+        }
+        kinematic_mode = connection_type in {"rigid", "pinned"}
+
+        self.preset.setEnabled(spring_mode)
+        self.tabs.setTabEnabled(self.dof_tab_index, spring_mode)
         self.tabs.setTabEnabled(self.section_tab_index, section_mode)
+        self.tabs.setTabEnabled(self.joint_tab_index, joint_mode)
         self.new_section_button.setEnabled(section_mode)
         self.edit_section_button.setEnabled(section_mode)
         self.section_combo.setEnabled(section_mode)
-        if section_mode:
+
+        self.to_ground.setEnabled(
+            connection_type in {
+                "zeroLength",
+                "zeroLengthSection",
+                "semiRigid",
+            }
+        )
+        if not self.to_ground.isEnabled():
+            self.to_ground.setChecked(False)
+
+        self.node_i.setEnabled(not joint_mode)
+        self.node_j.setEnabled(
+            not joint_mode and not self.to_ground.isChecked()
+        )
+
+        joint2d_mode = connection_type == "Joint2D"
+        kraw_mode = connection_type == "KrawinklerPanelZone"
+        for combo in self.interface_material_combos:
+            combo.setEnabled(joint2d_mode)
+        self.large_disp.setEnabled(joint2d_mode)
+        for spin in (self.rigid_a, self.rigid_e, self.rigid_i):
+            spin.setEnabled(kraw_mode)
+
+        if joint_mode:
+            self.tabs.setCurrentIndex(self.joint_tab_index)
+        elif section_mode:
             self.tabs.setCurrentIndex(self.section_tab_index)
-        elif self.tabs.currentIndex() == self.section_tab_index:
+        elif spring_mode and self.tabs.currentIndex() in {
+            self.section_tab_index,
+            self.joint_tab_index,
+        }:
             self.tabs.setCurrentIndex(self.dof_tab_index)
+        elif kinematic_mode and self.tabs.currentIndex() in {
+            self.section_tab_index,
+            self.joint_tab_index,
+            self.dof_tab_index,
+        }:
+            self.tabs.setCurrentIndex(0)
+
+        if connection_type == "semiRigid":
+            target = 3 if self.ndm == 2 and self.ndf == 3 else min(6, self.ndf)
+            for dof, check in enumerate(self.dof_checks, start=1):
+                if dof <= self.ndf and not any(
+                    item.isChecked() for item in self.dof_checks
+                ):
+                    check.setChecked(dof == target)
+
         self._update_node_status()
 
     def _preset_changed(self, index: int) -> None:
@@ -800,11 +1015,18 @@ class ConnectionDialog(QDialog):
         ]
 
     def _sync_dof_row(self, index: int, checked: bool) -> None:
-        self.material_combos[index].setEnabled(bool(checked))
+        available = index < self.ndf
+        self.material_combos[index].setEnabled(bool(checked) and available)
+        self.new_material_buttons[index].setEnabled(available)
+        self.chain_buttons[index].setEnabled(available)
         self.test_buttons[index].setEnabled(
-            bool(checked) and self.material_combos[index].currentData() is not None
+            bool(checked)
+            and available
+            and self.material_combos[index].currentData() is not None
         )
-        self.material_type_labels[index].setEnabled(bool(checked))
+        self.material_type_labels[index].setEnabled(
+            bool(checked) and available
+        )
 
     def _sync_material_type(self, index: int) -> None:
         combo = self.material_combos[index]
@@ -875,6 +1097,8 @@ class ConnectionDialog(QDialog):
         zero_length = self.connection_type.currentText() in {
             "zeroLength",
             "zeroLengthSection",
+            "semiRigid",
+            "pinned",
         }
         if zero_length and distance > 1.0e-7:
             self.node_status.setText(
@@ -994,14 +1218,23 @@ class ConnectionDialog(QDialog):
     def spec(self) -> dict:
         connection_type = self.connection_type.currentText()
         section_mode = connection_type == "zeroLengthSection"
+        spring_mode = connection_type in {
+            "zeroLength",
+            "twoNodeLink",
+            "semiRigid",
+        }
+        joint_mode = connection_type in {
+            "Joint2D",
+            "KrawinklerPanelZone",
+        }
 
         materials_by_dof: dict[int, int] = {}
-        if not section_mode:
+        if spring_mode:
             for dof, (check, combo) in enumerate(
                 zip(self.dof_checks, self.material_combos),
                 start=1,
             ):
-                if not check.isChecked():
+                if dof > self.ndf or not check.isChecked():
                     continue
                 material_tag = combo.currentData()
                 if material_tag is None:
@@ -1026,7 +1259,7 @@ class ConnectionDialog(QDialog):
                     f"Section {section_tag} is not available."
                 )
 
-        if connection_type == "zeroLength":
+        if connection_type in {"zeroLength", "semiRigid"}:
             bond_tags = sorted(
                 material_tag
                 for material_tag in materials_by_dof.values()
@@ -1039,9 +1272,7 @@ class ConnectionDialog(QDialog):
                 raise ValueError(
                     "Bond_SP01 represents rebar stress-slip for strain "
                     "penetration and should be used in a Fiber zeroLengthSection, "
-                    "not directly as a force-deformation zeroLength DOF. "
-                    "Use a calibrated Pinching4/Hysteretic macro spring here "
-                    "or a zeroLengthSection."
+                    "not directly as a force-deformation spring DOF."
                 )
 
         x, y = self._axis_values()
@@ -1055,7 +1286,12 @@ class ConnectionDialog(QDialog):
             )
 
         if (
-            connection_type in {"zeroLength", "zeroLengthSection"}
+            connection_type in {
+                "zeroLength",
+                "zeroLengthSection",
+                "semiRigid",
+                "pinned",
+            }
             and not self.to_ground.isChecked()
         ):
             a = self._node_position(self.node_i.value())
@@ -1070,25 +1306,93 @@ class ConnectionDialog(QDialog):
                         f"Current separation is {distance:.6g}."
                     )
 
+        parameters: dict[str, object] = {}
+        node_i = self.node_i.value()
+        node_j = self.node_j.value()
+        referenced_materials: dict[int, int] = dict(materials_by_dof)
+
+        if joint_mode:
+            external_nodes = [
+                spin.value() for spin in self.joint_node_spins
+            ]
+            if len(set(external_nodes)) != 4:
+                raise ValueError(
+                    "Joint / panel-zone external nodes must be four distinct tags."
+                )
+            panel_tag = self.panel_material_combo.currentData()
+            if panel_tag is None:
+                raise ValueError(
+                    f"{connection_type} requires a panel material."
+                )
+            panel_tag = int(panel_tag)
+            parameters["external_nodes"] = external_nodes
+            parameters["panel_material"] = panel_tag
+            node_i, node_j = external_nodes[0], external_nodes[1]
+            referenced_materials[100] = panel_tag
+
+            if connection_type == "Joint2D":
+                interfaces = [
+                    int(combo.currentData() or 0)
+                    for combo in self.interface_material_combos
+                ]
+                parameters["interface_materials"] = interfaces
+                parameters["large_disp"] = int(
+                    self.large_disp.currentData()
+                )
+                for index, material_tag in enumerate(interfaces, start=101):
+                    if material_tag > 0:
+                        referenced_materials[index] = material_tag
+            else:
+                rigid_a = float(self.rigid_a.value())
+                rigid_e = float(self.rigid_e.value())
+                rigid_i = float(self.rigid_i.value())
+                if min(rigid_a, rigid_e, rigid_i) <= 0.0:
+                    raise ValueError(
+                        "KrawinklerPanelZone requires positive rigid-link "
+                        "A, E, and Iz values."
+                    )
+                parameters.update({
+                    "rigid_A": rigid_a,
+                    "rigid_E": rigid_e,
+                    "rigid_I": rigid_i,
+                })
+
+        pending_materials = (
+            self._pending_materials_in_use(referenced_materials)
+            if referenced_materials
+            else []
+        )
+
         return {
             "tag": self.tag.value(),
             "name": self.name.text().strip()
             or f"Connection {self.tag.value()}",
             "connection_type": connection_type,
-            "node_i": self.node_i.value(),
-            "node_j": self.node_j.value(),
-            "to_ground": self.to_ground.isChecked(),
+            "node_i": node_i,
+            "node_j": node_j,
+            "to_ground": (
+                self.to_ground.isChecked()
+                if connection_type in {
+                    "zeroLength",
+                    "zeroLengthSection",
+                    "semiRigid",
+                }
+                else False
+            ),
             "materials_by_dof": materials_by_dof,
             "section_tag": section_tag,
             "orient_x": x,
             "orient_y": y,
             "do_rayleigh": self.do_rayleigh.isChecked(),
-            "pending_materials": self._pending_materials_in_use(
-                materials_by_dof
-            ) if not section_mode else [
-                MaterialData.from_dict(material.to_dict())
-                for material in self.pending_materials
-            ],
+            "parameters": parameters,
+            "pending_materials": (
+                pending_materials
+                if not section_mode
+                else [
+                    MaterialData.from_dict(material.to_dict())
+                    for material in self.pending_materials
+                ]
+            ),
             "pending_section_operations": [
                 (
                     operation,
@@ -1101,19 +1405,26 @@ class ConnectionDialog(QDialog):
         }
 
     def _validate_and_accept(self) -> None:
-        if (
-            self.connection_type.currentText() != "zeroLengthSection"
-            and not self.materials
-        ):
-            self.tabs.setCurrentIndex(self.dof_tab_index)
-            if self.new_material_buttons:
-                self.new_material_buttons[0].setFocus()
+        connection_type = self.connection_type.currentText()
+        needs_uniaxial = connection_type in {
+            "zeroLength",
+            "twoNodeLink",
+            "semiRigid",
+            "Joint2D",
+            "KrawinklerPanelZone",
+        }
+        if needs_uniaxial and not self.materials:
+            target_tab = (
+                self.joint_tab_index
+                if connection_type in {"Joint2D", "KrawinklerPanelZone"}
+                else self.dof_tab_index
+            )
+            self.tabs.setCurrentIndex(target_tab)
             QMessageBox.information(
                 self,
-                "ZeroLength / Link Builder",
-                "This connection needs a UniaxialMaterial. "
-                "Use New... beside the intended DOF to create and assign "
-                "one without leaving this builder.",
+                "Connection / Joint Builder",
+                "This connection type needs at least one UniaxialMaterial. "
+                "Create a material first or use New... in the DOF Materials tab.",
             )
             return
         try:
@@ -1121,8 +1432,9 @@ class ConnectionDialog(QDialog):
         except ValueError as exc:
             QMessageBox.warning(
                 self,
-                "ZeroLength / Link Builder",
+                "Connection / Joint Builder",
                 str(exc),
             )
             return
         self.accept()
+
