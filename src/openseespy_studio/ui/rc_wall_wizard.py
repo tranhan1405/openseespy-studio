@@ -212,6 +212,8 @@ class RCWallWizard(QWizard):
         self.height = _double(2209.8, 1.0e-9)
         self.thickness = _double(152.4, 1.0e-9)
         self.boundary_width = _double(228.6, 1.0e-9)
+        self.origin_x = _double(0.0)
+        self.origin_y = _double(0.0)
         self.vertical_elements = QSpinBox()
         self.vertical_elements.setRange(1, 1000)
         self.vertical_elements.setValue(7)
@@ -224,6 +226,8 @@ class RCWallWizard(QWizard):
         form.addRow(f"Wall height [{length}]:", self.height)
         form.addRow(f"Wall thickness [{length}]:", self.thickness)
         form.addRow(f"Boundary width each side [{length}]:", self.boundary_width)
+        form.addRow(f"Origin X [{length}]:", self.origin_x)
+        form.addRow(f"Origin Y [{length}]:", self.origin_y)
         form.addRow("MEFI rows over height:", self.vertical_elements)
         form.addRow("Macro-fibers per MEFI element:", self.macro_fibers)
         layout.addLayout(form)
@@ -254,6 +258,8 @@ class RCWallWizard(QWizard):
             self.height,
             self.thickness,
             self.boundary_width,
+            self.origin_x,
+            self.origin_y,
             self.vertical_elements,
             self.macro_fibers,
         ):
@@ -455,6 +461,8 @@ class RCWallWizard(QWizard):
         self.height.setValue(self._from_mm(2209.8))
         self.thickness.setValue(self._from_mm(152.4))
         self.boundary_width.setValue(self._from_mm(228.6))
+        self.origin_x.setValue(0.0)
+        self.origin_y.setValue(0.0)
         self.vertical_elements.setValue(7)
         self.macro_fibers.setValue(8)
 
@@ -503,6 +511,8 @@ class RCWallWizard(QWizard):
             height=float(self.height.value()),
             thickness=thickness,
             boundary_width=float(self.boundary_width.value()),
+            origin_x=float(self.origin_x.value()),
+            origin_y=float(self.origin_y.value()),
             vertical_elements=int(self.vertical_elements.value()),
             macro_fibers=int(self.macro_fibers.value()),
             steel_E=self._stress_store(self.steel_E.value()),
@@ -632,6 +642,8 @@ class RCWallWizard(QWizard):
                 f"Name: {self.wall_name.text().strip() or 'RC Wall'}<br>"
                 f"Geometry: {width:g} × {self.height.value():g} × "
                 f"{self.thickness.value():g} {self.units.length}<br>"
+                f"Origin: ({self.origin_x.value():g}, "
+                f"{self.origin_y.value():g}) {self.units.length}<br>"
                 f"Vertical MEFI elements: {self.vertical_elements.value()}<br>"
                 f"Macro-fibers: {count} · web fiber width "
                 f"{web_width:g} {self.units.length}<br>"
