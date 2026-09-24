@@ -834,9 +834,12 @@ class ConnectionDialog(QDialog):
         bcj_factor_form.addRow("Height factor:", self.bcj_height_factor)
         bcj_factor_form.addRow("Width factor:", self.bcj_width_factor)
         self.bcj_factor_hint = QLabel(
-            "Default = 1.0. In 2D these factors scale the effective "
-            "joint height/width. The current OpenSees 3D implementation "
-            "ignores them, so SARE fixes both to 1.0 in 3D."
+            "Default = 1.0. In 2D the factors scale the effective joint "
+            "height/width directly. In the current OpenSees 3D source the "
+            "factors are retained in the internal spring formulation, while "
+            "setDomain computes elemHeight/elemWidth with unit geometric "
+            "scale. Non-default 3D values are preserved; review this upstream "
+            "behavior when using them."
         )
         self.bcj_factor_hint.setWordWrap(True)
         self.bcj_factor_hint.setStyleSheet("color: #637487;")
@@ -1304,11 +1307,7 @@ class ConnectionDialog(QDialog):
         self.new_joint_material_button.setEnabled(joint_mode)
         self.joint2d_material_group.setEnabled(joint2d_mode)
         self.bcj_group.setEnabled(bcj_mode)
-        bcj_factors_supported = bcj_mode and self.ndm == 2
-        self.bcj_factor_group.setEnabled(bcj_factors_supported)
-        if bcj_mode and self.ndm == 3:
-            self.bcj_height_factor.setValue(1.0)
-            self.bcj_width_factor.setValue(1.0)
+        self.bcj_factor_group.setEnabled(bcj_mode)
         self.lehigh_group.setEnabled(lehigh_mode)
         self.kraw_group.setEnabled(kraw_mode)
         for combo in self.interface_material_combos:
