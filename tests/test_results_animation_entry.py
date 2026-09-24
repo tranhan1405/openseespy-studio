@@ -59,24 +59,29 @@ def test_animation_is_inline_in_results_viewer_not_a_separate_tab():
     assert 'root.addWidget(self.motion_page)' in source
     assert 'self.tabs.addTab(page, "Animation")' not in source
     assert 'self._select_tab("Animation")' not in source
-    assert 'QLabel("Frames:")' in source
+    assert 'QLabel("Frame Rate:")' in source
+    assert 'setSuffix(" fps")' in source
     assert 'QLabel("Frame:")' in source
     assert 'QPushButton("■ Stop")' in source
 
 
-def test_animation_frame_budget_samples_long_history_without_data_loss():
+def test_animation_keeps_every_result_frame_and_fps_controls_playback_only():
     panel = ResultsPanel()
     try:
-        panel.set_result(_transient_result(101), cache_key=("job", 1))
+        panel.set_result(_transient_result(1000), cache_key=("job", 1))
         panel.show_solution_result("NodalDisplacement", {"component": "UX"})
 
         assert panel.motion_page.isHidden() is False
-        assert panel._motion_source_frame_count == 101
-        assert panel._motion_display_frame_count == 60
-        assert panel.motion_slider.maximum() == 59
-        assert panel.motion_frame_spin.maximum() == 60
+        assert panel._motion_source_frame_count == 1000
+        assert panel._motion_display_frame_count == 1000
+        assert panel.motion_slider.maximum() == 999
+        assert panel.motion_frame_spin.maximum() == 1000
         assert panel._motion_source_index(0) == 0
-        assert panel._motion_source_index(59) == 100
+        assert panel._motion_source_index(999) == 999
+
+        panel.motion_frame_rate.setValue(20)
+        assert panel._motion_timer_interval_ms() == 50
+        assert panel._motion_display_frame_count == 1000
     finally:
         panel.close()
         panel.deleteLater()
@@ -94,7 +99,7 @@ def test_pause_updates_displacement_table_to_current_result_frame():
         panel._sync_paused_motion_values()
 
         assert panel.node_table.item(0, 1).text() == f"{float(source_index):.6g}"
-        assert "animation frame 31/60" in panel.node_frame_status.text()
+        assert "animation frame 31/101" in panel.node_frame_status.text()
         assert f"result frame {source_index + 1}/101" in panel.node_frame_status.text()
     finally:
         panel.close()
