@@ -529,6 +529,86 @@ class RCWallWizard(QWizard):
             replace_geometry=bool(self.replace_geometry.isChecked()),
         )
 
+    def validateCurrentPage(self) -> bool:
+        try:
+            page = self.currentId()
+            if page == 0:
+                width = float(self.width.value())
+                height = float(self.height.value())
+                thickness = float(self.thickness.value())
+                boundary = float(self.boundary_width.value())
+                if min(width, height, thickness) <= 0.0:
+                    raise ValueError(
+                        "Wall width, height and thickness must be positive."
+                    )
+                if not 0.0 < boundary < 0.5 * width:
+                    raise ValueError(
+                        "Boundary width must be positive and smaller than "
+                        "half the wall width."
+                    )
+                if (
+                    not self.replace_geometry.isChecked()
+                    and (
+                        int(self.project.model.ndm),
+                        int(self.project.model.ndf),
+                    ) != (2, 3)
+                ):
+                    raise ValueError(
+                        "Append mode requires the current project domain to "
+                        "be ndm=2 / ndf=3."
+                    )
+            elif page == 1:
+                if self.unconfined_layer.value() >= self.thickness.value():
+                    raise ValueError(
+                        "Boundary unconfined layer must be smaller than "
+                        "the wall thickness."
+                    )
+                if (
+                    self.eps_web.value() >= 0.0
+                    or self.eps_boundary.value() >= 0.0
+                ):
+                    raise ValueError(
+                        "Concrete peak compression strains must be negative."
+                    )
+                if (
+                    self.fc_web.value() <= 0.0
+                    or self.fc_boundary.value() <= 0.0
+                ):
+                    raise ValueError(
+                        "Concrete compressive strengths must be positive "
+                        "magnitudes in the wizard."
+                    )
+            elif page == 2:
+                if min(
+                    self.steel_E.value(),
+                    self.fy_x.value(),
+                    self.fy_y_web.value(),
+                    self.fy_y_boundary.value(),
+                ) <= 0.0:
+                    raise ValueError(
+                        "Steel modulus and yield strengths must be positive."
+                    )
+                for widget, label in (
+                    (self.rho_x_web, "Web rho-x"),
+                    (self.rho_y_web, "Web rho-y"),
+                    (self.rho_x_boundary, "Boundary rho-x"),
+                    (self.rho_y_boundary, "Boundary rho-y"),
+                ):
+                    if not 0.0 <= widget.value() <= 100.0:
+                        raise ValueError(
+                            f"{label} must be between 0 and 100%."
+                        )
+            else:
+                self.data()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "RC Wall Wizard",
+                str(exc),
+            )
+            return False
+        return super().validateCurrentPage()
+
     def _update_review(self) -> None:
         if not hasattr(self, "review"):
             return
@@ -542,18 +622,26 @@ class RCWallWizard(QWizard):
             mapping = (
                 "[B] " + " ".join("[W]" for _ in range(web_count)) + " [B]"
             )
+            mode = (
+                "Replace current FE model"
+                if self.replace_geometry.isChecked()
+                else "Append to current 2D model"
+            )
             text = (
                 "<b>RC Wall V1 · MEFI / RCLMS</b><br><br>"
+                f"Name: {self.wall_name.text().strip() or 'RC Wall'}<br>"
                 f"Geometry: {width:g} × {self.height.value():g} × "
                 f"{self.thickness.value():g} {self.units.length}<br>"
                 f"Vertical MEFI elements: {self.vertical_elements.value()}<br>"
                 f"Macro-fibers: {count} · web fiber width "
                 f"{web_width:g} {self.units.length}<br>"
-                f"Mapping: <code>{mapping}</code><br><br>"
+                f"Mapping: <code>{mapping}</code><br>"
+                f"Mode: {mode}<br><br>"
                 "Generate chain:<br>"
                 "5 uniaxial materials → 4 nD materials → "
                 "2 RCLMS sections → MEFI wall mesh<br><br>"
-                "Base: both bottom nodes fixed in UX, UY and RZ."
+                "Base: both bottom nodes fixed in UX, UY and RZ.<br>"
+                "Named selections: Base · Top · MEFI."
             )
             if not valid:
                 text += (
