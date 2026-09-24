@@ -260,6 +260,10 @@ class ConnectionDialog(QDialog):
         ])
         if connection:
             self.connection_type.setCurrentText(connection.connection_type)
+        else:
+            # Preserve the existing general-purpose connection workflow.
+            # Users can switch explicitly to Rigid / Pinned / Joint models.
+            self.connection_type.setCurrentText("zeroLength")
 
         self.preset = QComboBox()
         for label, dofs in self.PRESETS:
@@ -281,13 +285,13 @@ class ConnectionDialog(QDialog):
         )
 
         self.node_i = QSpinBox()
-        self.node_i.setRange(1, 2_147_483_647)
+        self.node_i.setRange(0, 2_147_483_647)
         self.node_i.setValue(
             connection.node_i if connection else initial_node_i
         )
 
         self.node_j = QSpinBox()
-        self.node_j.setRange(1, 2_147_483_647)
+        self.node_j.setRange(0, 2_147_483_647)
         self.node_j.setValue(
             connection.node_j if connection else initial_node_j
         )
@@ -299,7 +303,7 @@ class ConnectionDialog(QDialog):
 
         form.addRow("Tag:", self.tag)
         form.addRow("Name:", self.name)
-        form.addRow("Element type:", self.connection_type)
+        form.addRow("Connection model:", self.connection_type)
         form.addRow("Research preset:", self.preset)
         form.addRow("Node I:", self.node_i)
         form.addRow("Node J:", self.node_j)
