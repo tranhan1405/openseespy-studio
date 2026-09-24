@@ -296,7 +296,10 @@ class NDMaterialDialog(QDialog):
             parameters=parameters,
             source=(
                 deepcopy(self._initial_material.source)
-                if self._initial_material is not None
+                if (
+                    self._initial_material is not None
+                    and self._initial_material.material_type == material_type
+                )
                 else {}
             ),
         )
