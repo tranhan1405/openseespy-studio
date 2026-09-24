@@ -862,21 +862,35 @@ def connection_to_openseespy(
         panel_material = int(connection.parameters["panel_material"])
         large_disp = int(connection.parameters.get("large_disp", 0))
         center_var = f"_sare_joint2d_center_{connection.tag}"
+        imported_center = connection.parameters.get("imported_center_node_tag")
+        center_arg = (
+            str(int(imported_center))
+            if imported_center is not None
+            else center_var
+        )
         args = ", ".join(str(tag) for tag in nodes)
         command_args = [
-            f"ops.element('Joint2D', {connection.tag}, {args}, {center_var}"
+            f"ops.element('Joint2D', {connection.tag}, {args}, {center_arg}"
         ]
         if any(interface):
             command_args.append(
                 ", " + ", ".join(str(tag) for tag in interface)
             )
         command_args.append(f", {panel_material}, {large_disp})")
-        return "\n".join([
+        lines = [
             f"# Joint2D connection {connection.tag}: external nodes are "
             "clockwise/counter-clockwise around the joint.",
-            f"{center_var} = max(list(ops.getNodeTags()) or [0]) + 1",
-            "".join(command_args),
-        ])
+        ]
+        if imported_center is None:
+            lines.append(
+                f"{center_var} = max(list(ops.getNodeTags()) or [0]) + 1"
+            )
+        else:
+            lines.append(
+                f"# Preserved imported Joint2D center-node tag {center_arg}"
+            )
+        lines.append("".join(command_args))
+        return "\n".join(lines)
 
     if connection_type == "KrawinklerPanelZone":
         nodes = [
