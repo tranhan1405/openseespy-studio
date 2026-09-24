@@ -1103,12 +1103,14 @@ SECTION_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "ElasticMembranePlate": ("E", "nu", "h", "rho", "EpModifier"),
     "PlateFiber": ("h",),
     "LayeredShell": (),
+    "RCLMS": (),
 }
 SHELL_SECTION_TYPES = {
     "ElasticMembranePlate",
     "PlateFiber",
     "LayeredShell",
 }
+MEMBRANE_SECTION_TYPES = {"RCLMS"}
 
 
 SECTION_DEFAULTS: dict[str, dict[str, float]] = {
@@ -1134,6 +1136,7 @@ SECTION_DEFAULTS: dict[str, dict[str, float]] = {
         "h": 0.20,
     },
     "LayeredShell": {},
+    "RCLMS": {},
 }
 
 
