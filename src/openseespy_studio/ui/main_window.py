@@ -23325,7 +23325,11 @@ class MainWindow(QMainWindow):
                 ("Node 4 · Bar Slip Top", "node4BarSlipT", 1),
                 ("Node 4 · Interface Shear", "node4InterfaceShear", 1),
                 ("Internal Displacement", "internalDisplacement", 1),
-                ("External Displacement", "externalDisplacement", 1),
+                *(
+                    [("External Displacement", "externalDisplacement", 1)]
+                    if int(self.model.ndm) == 2
+                    else []
+                ),
             ]
         labels = {
             "deformation": "Deformation / Rotation",
