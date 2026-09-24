@@ -779,6 +779,7 @@ def connection_to_openseespy(
     ndm: int = 3,
     ndf: int = 6,
     reserved_element_tag_max: int = 0,
+    reserved_node_tag_max: int = 0,
 ) -> str:
     """Generate OpenSeesPy for one SARE connection/joint object."""
     ox = ", ".join(f"{value:g}" for value in connection.orient_x)
@@ -883,7 +884,10 @@ def connection_to_openseespy(
         ]
         if imported_center is None:
             lines.append(
-                f"{center_var} = max(list(ops.getNodeTags()) or [0]) + 1"
+                (
+                f"{center_var} = max((list(ops.getNodeTags()) or [0]) + "
+                f"[{int(reserved_node_tag_max)}]) + 1"
+            )
             )
         else:
             lines.append(
@@ -920,7 +924,10 @@ def connection_to_openseespy(
             f"{p}_xr = float({p}_right[0])",
             f"{p}_yt = float({p}_top[1])",
             f"{p}_yb = float({p}_bottom[1])",
-            f"{p}_nbase = max(list(ops.getNodeTags()) or [0]) + 1",
+            (
+                f"{p}_nbase = max((list(ops.getNodeTags()) or [0]) + "
+                f"[{int(reserved_node_tag_max)}]) + 1"
+            ),
             f"{p}_tlh, {p}_tlv = {p}_nbase, {p}_nbase + 1",
             f"{p}_trh, {p}_trv = {p}_nbase + 2, {p}_nbase + 3",
             f"{p}_brv, {p}_brh = {p}_nbase + 4, {p}_nbase + 5",
@@ -4786,6 +4793,29 @@ def to_openseespy(
             "implemented by the Studio generator; element not generated."
         )
 
+    connection_values = list((connections or {}).values())
+    reserved_connection_element_max = max(
+        set(model.elements) | set((connections or {}).keys()),
+        default=0,
+    )
+    explicit_joint_center_tags = {
+        int(connection.parameters["imported_center_node_tag"])
+        for connection in connection_values
+        if (
+            connection.connection_type == "Joint2D"
+            and connection.parameters.get("imported_center_node_tag") is not None
+        )
+    }
+    reserved_connection_node_max = max(
+        set(model.nodes) | explicit_joint_center_tags,
+        default=0,
+    )
+    krawinkler_internal_element_count = 8 * sum(
+        1
+        for connection in connection_values
+        if connection.connection_type == "KrawinklerPanelZone"
+    )
+
     if connections:
         lines.extend(["", "# Connections / springs / links"])
         for tag in sorted(connections):
@@ -4794,10 +4824,8 @@ def to_openseespy(
                     connections[tag],
                     ndm=model.ndm,
                     ndf=model.ndf,
-                    reserved_element_tag_max=max(
-                        set(model.elements) | set(connections),
-                        default=0,
-                    ),
+                    reserved_element_tag_max=reserved_connection_element_max,
+                    reserved_node_tag_max=reserved_connection_node_max,
                 )
             )
 
@@ -4816,7 +4844,14 @@ def to_openseespy(
 
     reserved_element_tags = set(model.elements)
     reserved_element_tags.update((connections or {}).keys())
-    next_surface_tag = max(reserved_element_tags, default=0) + 1
+    # Krawinkler macros create eight hidden elasticBeamColumn elements each,
+    # immediately above the public model/connection element-tag ceiling.
+    # Keep later generated SurfaceLoad helper elements above that range.
+    next_surface_tag = (
+        max(reserved_element_tags, default=0)
+        + krawinkler_internal_element_count
+        + 1
+    )
     surface_pressure_tags: dict[int, int] = {}
     for load in sorted(
         (element_loads or {}).values(),
