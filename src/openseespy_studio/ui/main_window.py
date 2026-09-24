@@ -4037,11 +4037,15 @@ class MainWindow(QMainWindow):
             self._background_swatch_style(
                 self._background_custom_bottom
             )
+            if custom_solid or custom_gradient
+            else ""
         )
         self.background_top_button.setStyleSheet(
             self._background_swatch_style(
                 self._background_custom_top
             )
+            if custom_gradient
+            else ""
         )
 
         if apply:
