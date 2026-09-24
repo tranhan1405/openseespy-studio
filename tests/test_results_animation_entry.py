@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 from openseespy_studio.result_catalog import result_choices_for_analysis
 from openseespy_studio.project import AnalysisSettingsData
 from openseespy_studio.ui.results_panel import ResultsPanel, TimeHistoryPlot
+from openseespy_studio.ui.viewport import ModelViewport
 
 
 _APP = QApplication.instance() or QApplication([])
@@ -108,3 +109,14 @@ def test_time_history_marker_draws_vertical_tracker_and_point():
     assert "QPointF(marker.x(), top)" in source
     assert "QPointF(marker.x(), bottom)" in source
     assert "painter.drawEllipse(marker, 5.0, 5.0)" in source
+
+
+def test_motion_frame_keeps_displacement_contour_scale_visible():
+    source = inspect.getsource(ModelViewport.show_motion_frame)
+
+    assert 'scalars="magnitude"' in source
+    assert 'cmap="turbo"' in source
+    assert 'clim=(0.0, scalar_upper)' in source
+    assert 'scalar_bar_args={"title": scalar_title}' in source
+    assert 'point_data["magnitude"]' in source
+    assert 'show_scalar_bar=not bool(element_points)' in source
