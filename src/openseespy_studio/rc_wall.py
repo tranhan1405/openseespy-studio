@@ -189,6 +189,46 @@ def _validate(spec: RCWallSpec) -> None:
             raise ValueError(f"{name} must be a reinforcement ratio in [0, 1].")
 
 
+def _validate_append_location(
+    project: ProjectDatabase,
+    spec: RCWallSpec,
+) -> None:
+    if spec.replace_geometry or not project.model.nodes:
+        return
+
+    rows = int(spec.vertical_elements)
+    candidate_points = []
+    for row in range(rows + 1):
+        y = float(spec.origin_y) + float(spec.height) * row / rows
+        candidate_points.extend([
+            (float(spec.origin_x), y, 0.0),
+            (float(spec.origin_x) + float(spec.width), y, 0.0),
+        ])
+
+    coordinates = [
+        tuple(float(value) for value in node.xyz)
+        for node in project.model.nodes.values()
+    ]
+    span = max(
+        float(spec.width),
+        float(spec.height),
+        1.0,
+    )
+    tolerance2 = (1.0e-9 * span) ** 2
+    for point in candidate_points:
+        for existing in coordinates:
+            distance2 = sum(
+                (point[index] - existing[index]) ** 2
+                for index in range(3)
+            )
+            if distance2 <= tolerance2:
+                raise ValueError(
+                    "Append wall geometry overlaps an existing model node "
+                    f"near ({point[0]:g}, {point[1]:g}). Change Origin X/Y "
+                    "or use Replace mode."
+                )
+
+
 def _unique_selection_name(
     project: ProjectDatabase,
     base: str,
@@ -219,6 +259,8 @@ def build_rc_wall(
         raise ValueError(
             "Appending an RC Wall Wizard V1 wall requires an ndm=2/ndf=3 model."
         )
+
+    _validate_append_location(project, spec)
 
     material_tags = _next_tags(project.materials, 5)
     sx, syw, syb, c_web, c_bound = material_tags
