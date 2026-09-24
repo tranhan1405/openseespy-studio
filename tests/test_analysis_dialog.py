@@ -306,6 +306,8 @@ def test_static_displacement_control_only_serializes_preload_while_supported():
 def test_cpu_execution_controls_enable_thread_count_only_for_multithread():
     dialog = AnalysisDialog(analysis_type="Static")
     try:
+        assert _shown(dialog.execution_mode)
+        assert _shown(dialog.num_threads)
         assert dialog.execution_mode.currentText() == "Auto"
         assert not dialog.num_threads.isEnabled()
 
