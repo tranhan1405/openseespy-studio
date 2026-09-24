@@ -541,6 +541,10 @@ class ShellSectionDialog(QDialog):
         for combo in (self.plate_material, self.layer_material):
             combo.clear()
             for tag, material in sorted(self._all_nd_materials().items()):
+                if not nd_material_supports_plate_fiber(
+                    material.material_type
+                ):
+                    continue
                 combo.addItem(
                     f"{tag} - {material.name} ({material.material_type})",
                     int(tag),
