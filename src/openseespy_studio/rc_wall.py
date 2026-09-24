@@ -15,10 +15,12 @@ from .project import (
 class RCWallSpec:
     """Planar 2D reinforced-concrete wall built with RCLMS + MEFI."""
 
-    width: float = 1220.0
-    height: float = 2209.8
-    thickness: float = 152.4
-    boundary_width: float = 228.6
+    # Lengths are in the project length unit. Defaults match SARE's
+    # standard metre-based project and the RW-A20 wall geometry.
+    width: float = 1.220
+    height: float = 2.2098
+    thickness: float = 0.1524
+    boundary_width: float = 0.2286
     vertical_elements: int = 7
     macro_fibers: int = 8
 
@@ -52,8 +54,8 @@ class RCWallSpec:
     rho_x_boundary: float = 0.0082
     rho_y_boundary: float = 0.0323
 
-    boundary_unconfined_thickness: float = 50.8
-    boundary_confined_thickness: float = 101.6
+    boundary_unconfined_thickness: float = 0.0508
+    boundary_confined_thickness: float = 0.1016
 
     name: str = "RC Wall"
     replace_geometry: bool = True
