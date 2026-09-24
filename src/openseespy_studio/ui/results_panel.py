@@ -3053,18 +3053,19 @@ class ResultsPanel(QWidget):
         )
         source_row.addWidget(self.motion_auto_scale)
 
-        source_row.addWidget(QLabel("Frames:"))
-        self.motion_frames = QSpinBox()
-        self.motion_frames.setRange(2, 500)
-        self.motion_frames.setValue(60)
-        self.motion_frames.setToolTip(
-            "Maximum animation frames. Long histories are sampled evenly; "
-            "solver result data are unchanged."
+        source_row.addWidget(QLabel("Frame Rate:"))
+        self.motion_frame_rate = QSpinBox()
+        self.motion_frame_rate.setRange(1, 120)
+        self.motion_frame_rate.setValue(30)
+        self.motion_frame_rate.setSuffix(" fps")
+        self.motion_frame_rate.setToolTip(
+            "Playback frame rate only. This does not change, sample, or "
+            "truncate the result frame count."
         )
-        self.motion_frames.valueChanged.connect(
-            self._motion_frame_budget_changed
+        self.motion_frame_rate.valueChanged.connect(
+            self._update_motion_timer
         )
-        source_row.addWidget(self.motion_frames)
+        source_row.addWidget(self.motion_frame_rate)
         layout.addLayout(source_row)
 
         transport = QHBoxLayout()
@@ -3194,12 +3195,17 @@ class ResultsPanel(QWidget):
         ):
             self.motion_play.setChecked(True)
 
-    def _motion_frame_budget_value(self) -> int:
+    @staticmethod
+    def _motion_generated_frame_count() -> int:
+        """Frame count used only for synthetic modal/final interpolation."""
+        return 60
+
+    def _motion_frame_rate_value(self) -> int:
         return max(
-            2,
-            int(self.motion_frames.value())
-            if hasattr(self, "motion_frames")
-            else 60,
+            1,
+            int(self.motion_frame_rate.value())
+            if hasattr(self, "motion_frame_rate")
+            else 30,
         )
 
     def _motion_source_index(self, display_index: int) -> int:
@@ -3213,16 +3219,18 @@ class ResultsPanel(QWidget):
         )
 
     def _configure_motion_frames(self, *, reset: bool) -> None:
-        budget = self._motion_frame_budget_value()
+        generated_frames = self._motion_generated_frame_count()
         self._motion_info = motion_info(
             self._result,
             mode=self._motion_selected_mode(),
-            modal_frames=budget,
-            fallback_frames=budget,
+            modal_frames=generated_frames,
+            fallback_frames=generated_frames,
             scan_reference=False,
         )
         source_count = int(self._motion_info.frame_count)
-        display_count = min(source_count, budget) if source_count > 0 else 0
+        # Result histories are never downsampled for animation. If a job has
+        # 1000 result frames, the transport exposes frames 1..1000.
+        display_count = source_count if source_count > 0 else 0
         self._motion_source_frame_count = source_count
         self._motion_display_frame_count = display_count
 
@@ -3250,24 +3258,6 @@ class ResultsPanel(QWidget):
         self.motion_frame_spin.blockSignals(False)
         self.motion_counter.setText(f"/ {display_count}")
 
-    def _motion_frame_budget_changed(self, *_args) -> None:
-        old_source = self._motion_source_index(self._motion_frame_index)
-        self._configure_motion_frames(reset=False)
-        if (
-            self._motion_source_frame_count > 1
-            and self._motion_display_frame_count > 1
-        ):
-            target = int(
-                round(
-                    old_source
-                    * (self._motion_display_frame_count - 1)
-                    / (self._motion_source_frame_count - 1)
-                )
-            )
-            self._set_motion_index(target)
-        else:
-            self._emit_current_motion_frame()
-
     def _motion_frame_spin_changed(self, value: int) -> None:
         self._set_motion_index(int(value) - 1)
 
@@ -3277,16 +3267,7 @@ class ResultsPanel(QWidget):
             or self._motion_info.transient_dt is None
         ):
             return None
-        dt = float(self._motion_info.transient_dt)
-        if (
-            self._motion_source_frame_count > 1
-            and self._motion_display_frame_count > 1
-        ):
-            dt *= (
-                (self._motion_source_frame_count - 1)
-                / (self._motion_display_frame_count - 1)
-            )
-        return dt
+        return float(self._motion_info.transient_dt)
 
     def _motion_selected_mode(self) -> int | None:
         data = self.motion_source.currentData()
@@ -3351,9 +3332,9 @@ class ResultsPanel(QWidget):
         )
         self.motion_info_label.setText(
             (
-                f"{analysis_type or 'Analysis'} · displaying {count} frame(s) "
-                f"from {self._motion_source_frame_count} result frame(s) · "
-                "tables update on Pause."
+                f"{analysis_type or 'Analysis'} · {count} frame(s) · "
+                f"{self._motion_frame_rate_value()} fps · "
+                "all result frames retained · tables update on Pause."
                 if count > 0
                 else "No deformation history or modal vectors are "
                 "available for result animation."
@@ -3409,24 +3390,18 @@ class ResultsPanel(QWidget):
         except (TypeError, ValueError):
             return 1.0
 
+    def _motion_timer_interval_ms(self) -> int:
+        fps = float(self._motion_frame_rate_value())
+        speed = max(0.01, self._motion_speed_value())
+        effective_fps = max(0.1, fps * speed)
+        return max(1, int(round(1000.0 / effective_fps)))
+
     def _update_motion_timer(self, *_args) -> None:
         if not self._motion_timer.isActive():
             return
-        speed = max(0.01, self._motion_speed_value())
-        interval = max(16, int(round(40.0 / speed)))
-        if (
-            self._motion_info is not None
-            and self._motion_effective_dt() is not None
-        ):
-            dt = float(self._motion_effective_dt() or 0.0)
-            if dt > 0.0 and dt / speed > 0.04:
-                interval = max(
-                    16,
-                    int(round(1000.0 * dt / speed)),
-                )
-            else:
-                interval = 40
-        self._motion_timer.setInterval(interval)
+        self._motion_timer.setInterval(
+            self._motion_timer_interval_ms()
+        )
 
     def stop_motion(self) -> None:
         self._motion_timer.stop()
@@ -3448,18 +3423,9 @@ class ResultsPanel(QWidget):
                 self.motion_play.blockSignals(False)
                 return
             self.motion_play.setText("❚❚ Pause")
-            speed = max(0.01, self._motion_speed_value())
-            interval = max(16, int(round(40.0 / speed)))
-            if self._motion_effective_dt() is not None:
-                dt = float(self._motion_effective_dt() or 0.0)
-                if dt > 0.0 and dt / speed > 0.04:
-                    interval = max(
-                        16,
-                        int(round(1000.0 * dt / speed)),
-                    )
-                else:
-                    interval = 40
-            self._motion_timer.setInterval(interval)
+            self._motion_timer.setInterval(
+                self._motion_timer_interval_ms()
+            )
             self._motion_timer.start()
             if hasattr(self, "node_frame_status"):
                 self.node_frame_status.setText(
@@ -3478,15 +3444,9 @@ class ResultsPanel(QWidget):
         if count <= 0:
             return
 
-        increment = 1
-        dt = self._motion_effective_dt()
-        speed = max(0.01, self._motion_speed_value())
-        if dt is not None and dt > 0.0:
-            desired = 0.04 * speed
-            if desired >= dt:
-                increment = max(1, int(round(desired / dt)))
-
-        target = self._motion_frame_index + increment
+        # Playback rate controls time between frames, never how many
+        # result frames exist or how many indices are skipped.
+        target = self._motion_frame_index + 1
         if target >= count:
             if self.motion_loop.isChecked():
                 target %= count
@@ -3607,8 +3567,8 @@ class ResultsPanel(QWidget):
             self._motion_info = motion_info(
                 self._result,
                 mode=mode,
-                modal_frames=self._motion_frame_budget_value(),
-                fallback_frames=self._motion_frame_budget_value(),
+                modal_frames=self._motion_generated_frame_count(),
+                fallback_frames=self._motion_generated_frame_count(),
                 scan_reference=True,
             )
         count = int(self._motion_display_frame_count)
@@ -3634,8 +3594,8 @@ class ResultsPanel(QWidget):
             self._result,
             source_index,
             mode=mode,
-            modal_frames=self._motion_frame_budget_value(),
-            fallback_frames=self._motion_frame_budget_value(),
+            modal_frames=self._motion_generated_frame_count(),
+            fallback_frames=self._motion_generated_frame_count(),
             info=self._motion_info,
         )
         self.motion_counter.setText(f"/ {count}")
