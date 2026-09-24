@@ -1748,3 +1748,131 @@ def test_joint_force_deformation_request_adds_paired_response():
     )
 
     assert specs[97]["responses"] == ["force", "deformation"]
+
+
+def beam_column_joint_3d_project() -> ProjectDatabase:
+    model = StructuralModel()
+    model.ndm = 3
+    model.ndf = 6
+    # Four coplanar nodes: Node 1↔3 is the joint-height chord and
+    # Node 2↔4 is the joint-width chord.
+    model.add_node(101, 0.0, 0.0, -1.0)
+    model.add_node(102, 1.0, 0.0, 0.0)
+    model.add_node(103, 0.0, 0.0, 1.0)
+    model.add_node(104, -1.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+    for tag in range(1, 14):
+        project.add_material(elastic_material(tag))
+    return project
+
+
+def test_beam_column_joint_supports_native_3d_six_dof_formulation():
+    project = beam_column_joint_3d_project()
+    connection = ConnectionData(
+        tag=190,
+        name="3D RC beam-column joint",
+        connection_type="BeamColumnJoint",
+        node_i=101,
+        node_j=102,
+        parameters={
+            "external_nodes": [101, 102, 103, 104],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    )
+
+    project.add_connection(connection)
+    script = connection_to_openseespy(
+        connection,
+        ndm=3,
+        ndf=6,
+    )
+
+    assert project.connections[190].parameters["external_nodes"] == [
+        101, 102, 103, 104
+    ]
+    assert (
+        "ops.element('beamColumnJoint', 190, 101, 102, 103, 104, "
+        + ", ".join(str(tag) for tag in range(1, 14))
+        + ")"
+        in script
+    )
+
+
+def test_beam_column_joint_3d_rejects_nonorthogonal_opposite_chords():
+    project = beam_column_joint_3d_project()
+    # Preserve the common midpoint but skew the 2↔4 chord so it is no
+    # longer perpendicular to the 1↔3 height chord.
+    project.model.nodes[102].xyz = (1.0, 0.0, 0.5)
+    project.model.nodes[104].xyz = (-1.0, 0.0, -0.5)
+    connection = ConnectionData(
+        tag=191,
+        name="Skew 3D joint",
+        connection_type="BeamColumnJoint",
+        node_i=101,
+        node_j=102,
+        parameters={
+            "external_nodes": [101, 102, 103, 104],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    )
+
+    try:
+        project.add_connection(connection)
+    except ValueError as exc:
+        assert "perpendicular" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected a nonorthogonal 3D BeamColumnJoint to be rejected"
+        )
+
+
+def test_beam_column_joint_3d_blocks_ignored_geometry_factors():
+    project = beam_column_joint_3d_project()
+    connection = ConnectionData(
+        tag=192,
+        name="3D ignored factor guard",
+        connection_type="BeamColumnJoint",
+        node_i=101,
+        node_j=102,
+        parameters={
+            "external_nodes": [101, 102, 103, 104],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 0.8,
+            "width_factor": 1.0,
+        },
+    )
+
+    try:
+        project.add_connection(connection)
+    except ValueError as exc:
+        assert "ignores height/width factors" in str(exc)
+        assert "1.0" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected non-default 3D BeamColumnJoint factors to be rejected"
+        )
+
+
+def test_beam_column_joint_deformation_vector_has_four_named_components():
+    # OpenSees BeamColumnJoint deformation response returns four values:
+    # bar-slip, interface shear, shear panel, and total joint deformation.
+    result = SolutionResultData(
+        tag=100,
+        analysis_tag=1,
+        name="Total joint deformation",
+        result_type="JointResponse",
+        element_scope=[190],
+        settings={
+            "response": "deformation",
+            "component": 4,
+            "connection_type": "BeamColumnJoint",
+            "curve_mode": "history",
+        },
+    )
+
+    assert result.settings["response"] == "deformation"
+    assert result.settings["component"] == 4
