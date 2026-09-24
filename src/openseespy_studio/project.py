@@ -1610,6 +1610,19 @@ SUPPORTED_CONNECTION_TYPES: tuple[str, ...] = (
     "KrawinklerPanelZone",
 )
 
+# Only these connection records create a real OpenSees element tag.
+# rigid -> rigidLink and pinned -> equalDOF are MPC/kinematic relations,
+# so they must never be exposed to Element recorders/results.
+ELEMENT_BACKED_CONNECTION_TYPES: tuple[str, ...] = (
+    "semiRigid",
+    "zeroLength",
+    "zeroLengthSection",
+    "twoNodeLink",
+    "Joint2D",
+    "KrawinklerPanelZone",
+)
+
+
 
 @dataclass
 class ConnectionData:
@@ -8466,7 +8479,11 @@ class ProjectDatabase:
                     + f" are not available for ndf={self.model.ndf}."
                 )
             return
-        valid_elements = set(self.model.elements) | set(self.connections)
+        valid_elements = set(self.model.elements) | {
+            tag
+            for tag, connection in self.connections.items()
+            if connection.connection_type in ELEMENT_BACKED_CONNECTION_TYPES
+        }
         missing = [tag for tag in recorder.target_tags if tag not in valid_elements]
         if missing:
             raise ValueError(
@@ -8542,7 +8559,11 @@ class ProjectDatabase:
     def prune_recorders(self) -> list[int]:
         removed: list[int] = []
         valid_nodes = set(self.model.nodes)
-        valid_elements = set(self.model.elements) | set(self.connections)
+        valid_elements = set(self.model.elements) | {
+            connection_tag
+            for connection_tag, connection in self.connections.items()
+            if connection.connection_type in ELEMENT_BACKED_CONNECTION_TYPES
+        }
         for tag, recorder in list(self.recorders.items()):
             valid = valid_nodes if recorder.recorder_type == "Node" else valid_elements
             recorder.target_tags = [item for item in recorder.target_tags if item in valid]
@@ -8554,7 +8575,11 @@ class ProjectDatabase:
     def prune_solution_results(self) -> list[int]:
         removed: list[int] = []
         valid_nodes = set(self.model.nodes)
-        valid_elements = set(self.model.elements) | set(self.connections)
+        valid_elements = set(self.model.elements) | {
+            connection_tag
+            for connection_tag, connection in self.connections.items()
+            if connection.connection_type in ELEMENT_BACKED_CONNECTION_TYPES
+        }
         for tag, result in list(self.solution_results.items()):
             node_scoped = bool(result.node_scope)
             element_scoped = bool(result.element_scope)
