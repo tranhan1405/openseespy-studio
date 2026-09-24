@@ -525,6 +525,11 @@ ND_MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "J2Plasticity": (
         "K", "G", "sig0", "sigInf", "delta", "H",
     ),
+    "DruckerPrager": (
+        "K", "G", "sigmaY", "rho", "rhoBar",
+        "Kinf", "Ko", "delta1", "delta2", "H",
+        "theta", "density", "atmPressure",
+    ),
 }
 
 ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
@@ -553,6 +558,21 @@ ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
         "delta": "dimensionless",
         "H": "stress",
     },
+    "DruckerPrager": {
+        "K": "stress",
+        "G": "stress",
+        "sigmaY": "stress",
+        "rho": "dimensionless",
+        "rhoBar": "dimensionless",
+        "Kinf": "stress",
+        "Ko": "stress",
+        "delta1": "dimensionless",
+        "delta2": "dimensionless",
+        "H": "stress",
+        "theta": "dimensionless",
+        "density": "density",
+        "atmPressure": "stress",
+    },
 }
 
 ND_MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
@@ -580,6 +600,21 @@ ND_MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
         "sigInf": 3.50e8,
         "delta": 16.0,
         "H": 1.0e9,
+    },
+    "DruckerPrager": {
+        "K": 1.0e8,
+        "G": 5.0e7,
+        "sigmaY": 1.0e5,
+        "rho": 0.10,
+        "rhoBar": 0.10,
+        "Kinf": 0.0,
+        "Ko": 0.0,
+        "delta1": 0.0,
+        "delta2": 0.0,
+        "H": 0.0,
+        "theta": 1.0,
+        "density": 0.0,
+        "atmPressure": 101325.0,
     },
 }
 
@@ -672,6 +707,30 @@ class NDMaterialData:
                     raise ValueError(
                         f"J2Plasticity {key} cannot be negative."
                     )
+        elif self.material_type == "DruckerPrager":
+            for key in ("K", "G", "sigmaY", "atmPressure"):
+                if self.parameters[key] <= 0.0:
+                    raise ValueError(
+                        f"DruckerPrager {key} must be positive."
+                    )
+            for key in ("Kinf", "Ko", "delta1", "delta2", "H", "density"):
+                if self.parameters[key] < 0.0:
+                    raise ValueError(
+                        f"DruckerPrager {key} cannot be negative."
+                    )
+            rho = self.parameters["rho"]
+            rho_bar = self.parameters["rhoBar"]
+            if rho < 0.0:
+                raise ValueError("DruckerPrager rho cannot be negative.")
+            if not 0.0 <= rho_bar <= rho:
+                raise ValueError(
+                    "DruckerPrager rhoBar must satisfy 0 <= rhoBar <= rho."
+                )
+            theta = self.parameters["theta"]
+            if not 0.0 <= theta <= 1.0:
+                raise ValueError(
+                    "DruckerPrager theta must satisfy 0 <= theta <= 1."
+                )
         if not isinstance(self.source, dict):
             raise ValueError("nDMaterial source metadata must be an object.")
         self.source = deepcopy(self.source)
