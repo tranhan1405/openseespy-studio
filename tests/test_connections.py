@@ -4,6 +4,7 @@ from openseespy_studio.generator import (
     to_openseespy,
 )
 from openseespy_studio.model import StructuralModel
+from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.project import (
     AnalysisSettingsData,
     ConnectionData,
@@ -473,3 +474,29 @@ def test_joint_external_node_edit_revalidates_joint_geometry():
         assert "bisect" in str(exc)
     else:
         raise AssertionError("Expected edited external node to invalidate Joint2D")
+
+
+def test_importer_recovers_native_joint2d():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+ops.node(10, 0.0, 0.0)
+ops.node(11, 1.0, 1.0)
+ops.node(12, 2.0, 0.0)
+ops.node(13, 1.0, -1.0)
+ops.uniaxialMaterial('Elastic', 1, 1000.0)
+ops.element('Joint2D', 30, 10, 11, 12, 13, 130, 1, 0)
+"""
+    result = import_openseespy_source(
+        source,
+        source_name="joint2d_import.py",
+    )
+
+    assert 30 in result.project.connections
+    connection = result.project.connections[30]
+    assert connection.connection_type == "Joint2D"
+    assert connection.parameters["external_nodes"] == [10, 11, 12, 13]
+    assert connection.parameters["panel_material"] == 1
+    assert connection.parameters["interface_materials"] == [0, 0, 0, 0]
+    assert connection.parameters["large_disp"] == 0
+    assert connection.parameters["imported_center_node_tag"] == 130
