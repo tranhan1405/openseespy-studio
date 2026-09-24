@@ -1530,6 +1530,7 @@ class PropertiesPanel(QWidget):
             "MemberForce",
             "ShellForce",
             "ShellDeformation",
+            "CrackPattern",
             "FiberStress",
             "FiberStrain",
             "HingeState",
@@ -2214,6 +2215,9 @@ class MainWindow(QMainWindow):
         )
         self.results_panel.motion_frame_requested.connect(
             self._show_motion_frame_result
+        )
+        self.results_panel.crack_frame_requested.connect(
+            self._show_crack_frame_result
         )
         self.results_panel.member_force_requested.connect(
             self._show_member_force_result
@@ -23856,7 +23860,29 @@ class MainWindow(QMainWindow):
         nodes = set(self.selection.nodes)
         elements = set(self.selection.elements)
 
-        if kind in {"ShellForce", "ShellDeformation"}:
+        if kind == "CrackPattern":
+            mefi_tags = sorted(
+                int(tag)
+                for tag, element in self.model.elements.items()
+                if element.element_type == "MEFI"
+            )
+            if not mefi_tags:
+                QMessageBox.information(
+                    self,
+                    "Crack Pattern",
+                    "Crack Pattern requires MEFI / RCLMS reinforced-concrete "
+                    "elements. Create an RC Wall with the RC Wall Wizard "
+                    "before inserting this result.",
+                )
+                return None
+            selected_mefi = {
+                int(tag)
+                for tag in elements
+                if int(tag) in mefi_tags
+            }
+            elements = selected_mefi or set(mefi_tags)
+
+        elif kind in {"ShellForce", "ShellDeformation"}:
             shell_tags = sorted(
                 int(tag)
                 for tag, element in self.model.elements.items()
@@ -24963,6 +24989,14 @@ class MainWindow(QMainWindow):
             self.viewport.show_shell_deformation_contour(
                 payload,
                 str(options.get("component", "Exx")),
+                element_tags=elements or None,
+                cache_key=result_cache_key,
+            )
+        elif result_type == "CrackPattern":
+            self.viewport.show_crack_pattern(
+                payload,
+                accumulate=bool(options.get("accumulate", False)),
+                line_scale=float(options.get("line_scale", 0.82)),
                 element_tags=elements or None,
                 cache_key=result_cache_key,
             )
@@ -33297,6 +33331,50 @@ class MainWindow(QMainWindow):
             float(scale),
         )
         self.status_message.setText(str(label))
+
+    def _show_crack_frame_result(
+        self,
+        frame_index: int,
+        accumulate: bool,
+        line_scale: float,
+        element_scope: object,
+    ) -> None:
+        if not self._last_result:
+            self.status_message.setText(
+                "No crack-pattern result data available"
+            )
+            return
+
+        elements: set[int] = set()
+        if isinstance(element_scope, (list, tuple, set)):
+            for raw_tag in element_scope:
+                try:
+                    elements.add(int(raw_tag))
+                except (TypeError, ValueError):
+                    continue
+
+        frame = int(frame_index)
+        self.viewport.show_crack_pattern(
+            self._last_result,
+            frame_index=None if frame < 0 else frame,
+            accumulate=bool(accumulate),
+            line_scale=float(line_scale),
+            element_tags=elements or None,
+            cache_key=self._last_result_cache_key,
+        )
+        state_label = (
+            "accumulated crack history"
+            if accumulate
+            else "active crack pattern"
+        )
+        frame_label = (
+            "final state"
+            if frame < 0
+            else f"frame {frame + 1}"
+        )
+        self.status_message.setText(
+            f"Showing {state_label} · {frame_label}"
+        )
 
     def _show_node_contour_result(
         self,
