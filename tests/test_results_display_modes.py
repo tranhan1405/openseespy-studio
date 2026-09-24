@@ -1051,3 +1051,14 @@ def test_nodal_contour_preserves_quad_shell_surfaces():
     assert '"result-shell-contour"' in source
     assert '"show_edges": True' in source
     assert "scoped_nodes.update(element.node_tags())" in source
+
+
+def test_animation_preserves_quad_shell_topology():
+    source = inspect.getsource(ModelViewport.show_motion_frame)
+
+    assert "element.element_type in QUAD_ELEMENT_TYPES" in source
+    assert "node_tags = element.node_tags()" in source
+    assert "element_faces.extend" in source
+    assert "mesh.faces = np.asarray" in source
+    assert "show_edges=bool(element_faces)" in source
+    assert "element_node_tags.extend(node_tags)" in source
