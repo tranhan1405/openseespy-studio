@@ -826,9 +826,13 @@ CONNECTION_HISTORY_RESPONSES: dict[str, tuple[str, ...]] = {
         "internalDisplacement",
         "externalDisplacement",
     ),
-    # Public LehighJoint2D documentation does not enumerate recorder
-    # queries; retain best-effort generic force/deformation histories.
-    "LehighJoint2D": ("force", "deformation"),
+    # Source-verified LehighJoint2d::setResponse aliases.
+    "LehighJoint2D": (
+        "globalForce",
+        "localForce",
+        "basicForces",
+        "Deformation",
+    ),
     "KrawinklerPanelZone": ("force", "deformation"),
 }
 
@@ -3733,6 +3737,8 @@ def build_joint_response_specs(
         "basicDisplacement": "basicForce",
         "localForce": "localDisplacement",
         "localDisplacement": "localForce",
+        "basicForces": "Deformation",
+        "Deformation": "basicForces",
     }
 
     for result in (solution_results or {}).values():
