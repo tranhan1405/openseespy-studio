@@ -9702,8 +9702,13 @@ class ProjectDatabase:
                 connection.connection_type,
                 set(),
             )
+            default_response = (
+                "force"
+                if connection.connection_type == "CoupledZeroLength"
+                else "deformation"
+            )
             response = str(
-                result.settings.get("response", "deformation")
+                result.settings.get("response", default_response)
             )
             if response not in allowed_responses:
                 raise ValueError(
