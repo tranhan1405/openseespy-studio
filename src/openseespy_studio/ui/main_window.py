@@ -21922,6 +21922,62 @@ class MainWindow(QMainWindow):
             )
             return
 
+        result_settings = dict(settings or {})
+        if str(result_type) == "JointResponse":
+            if len(element_scope) != 1:
+                QMessageBox.warning(
+                    self,
+                    "Joint Response",
+                    "Select exactly one Connection / Joint target.",
+                )
+                return
+            connection_tag = int(next(iter(element_scope)))
+            connection = self.project.connections.get(connection_tag)
+            if connection is None:
+                QMessageBox.warning(
+                    self,
+                    "Joint Response",
+                    "Joint Response requires a Connection / Joint target.",
+                )
+                return
+            allowed = set(
+                CONNECTION_RECORDER_RESPONSES.get(
+                    connection.connection_type,
+                    set(),
+                )
+            )
+            preferred = (
+                "deformation",
+                "shearPanel",
+                "force",
+                "basicForce",
+                "localForce",
+                "basicDisplacement",
+                "localDisplacement",
+            )
+            requested = str(result_settings.get("response", ""))
+            if requested not in allowed:
+                requested = next(
+                    (
+                        response
+                        for response in preferred
+                        if response in allowed
+                    ),
+                    sorted(allowed)[0] if allowed else "",
+                )
+            if not requested:
+                QMessageBox.warning(
+                    self,
+                    "Joint Response",
+                    f"{connection.connection_type} has no supported "
+                    "Joint Response query.",
+                )
+                return
+            result_settings["response"] = requested
+            result_settings.setdefault("component", 1)
+            result_settings.setdefault("curve_mode", "history")
+            result_settings["connection_type"] = connection.connection_type
+
         before = self.project.to_dict()
         result = SolutionResultData(
             tag=self.project.next_solution_result_tag(),
