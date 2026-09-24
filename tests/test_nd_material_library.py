@@ -22,6 +22,7 @@ from openseespy_studio.nd_material_library import (
 )
 from openseespy_studio.project import (
     NDMaterialData,
+    nd_material_supported_formulations,
     nd_material_supports_plate_fiber,
 )
 from openseespy_studio.ui.main_window import MainWindow
@@ -45,15 +46,16 @@ def _record(model: str):
     )
 
 
-def test_verified_nd_library_baseline_has_four_supported_models():
+def test_verified_nd_library_baseline_has_five_supported_models():
     records = load_verified_nd_material_library()
 
-    assert len(records) == 4
+    assert len(records) == 5
     assert {record.model for record in records} == {
         "ElasticIsotropic",
         "ElasticOrthotropic",
         "J2Plasticity",
         "DruckerPrager",
+        "PressureIndependMultiYield",
     }
     assert all(record.is_verified for record in records)
     assert all(record.is_starter_template for record in records)
@@ -83,6 +85,20 @@ def test_verified_nd_library_declares_formulation_compatibility():
     )
     assert not nd_material_supports_plate_fiber("DruckerPrager")
 
+    multi_yield = _record("PressureIndependMultiYield")
+    assert multi_yield.compatibility == (
+        "PlaneStrain",
+        "ThreeDimensional",
+    )
+    assert not nd_material_supports_plate_fiber(
+        "PressureIndependMultiYield"
+    )
+
+    for record in records:
+        assert set(record.compatibility) == set(
+            nd_material_supported_formulations(record.model)
+        )
+
 
 def test_nd_library_facets_and_combined_filters():
     records = load_verified_nd_material_library()
@@ -90,6 +106,7 @@ def test_nd_library_facets_and_combined_filters():
 
     assert facets["family"] == (
         "Elastic continuum",
+        "Multi-yield soil",
         "Plastic continuum",
         "Pressure-sensitive plasticity",
     )
@@ -246,7 +263,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert dialog.add_button.isEnabled()
         assert dialog.material_data().tag == 11
         assert dialog.material_data().source["status"] == "verified"
-        assert dialog.result_count.text() == "4 / 4 shown"
+        assert dialog.result_count.text() == "5 / 5 shown"
         assert dialog.copy_command.isEnabled()
         assert dialog.command_preview.text() == (
             "ops.nDMaterial('ElasticIsotropic', "
@@ -257,7 +274,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert model_index >= 0
         dialog.model_filter.setCurrentIndex(model_index)
         _APP.processEvents()
-        assert dialog.result_count.text() == "1 / 4 shown"
+        assert dialog.result_count.text() == "1 / 5 shown"
         assert dialog.material_data().material_type == "J2Plasticity"
 
         dialog.clear_filters.click()
@@ -266,7 +283,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert behavior_index >= 0
         dialog.behavior_filter.setCurrentIndex(behavior_index)
         _APP.processEvents()
-        assert dialog.result_count.text() == "1 / 4 shown"
+        assert dialog.result_count.text() == "1 / 5 shown"
         assert (
             dialog.material_data().material_type
             == "ElasticOrthotropic"
@@ -280,7 +297,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert formulation_index >= 0
         dialog.compatibility_filter.setCurrentIndex(formulation_index)
         _APP.processEvents()
-        assert dialog.result_count.text() == "1 / 4 shown"
+        assert dialog.result_count.text() == "1 / 5 shown"
         assert (
             dialog.material_data().material_type
             == "ElasticOrthotropic"
@@ -306,13 +323,13 @@ def test_nd_library_dialog_browses_and_filters_records():
 
         dialog.search.setText("definitely-no-such-material")
         _APP.processEvents()
-        assert dialog.result_count.text() == "0 / 4 shown"
+        assert dialog.result_count.text() == "0 / 5 shown"
         assert not dialog.add_button.isEnabled()
         assert not dialog.copy_command.isEnabled()
 
         dialog.clear_filters.click()
         _APP.processEvents()
-        assert dialog.result_count.text() == "4 / 4 shown"
+        assert dialog.result_count.text() == "5 / 5 shown"
         assert "Verified against source: 2026-09-24" in dialog.source.text()
 
         dialog.copy_citation.click()
@@ -333,6 +350,97 @@ def test_nd_library_dialog_browses_and_filters_records():
         dialog.close()
         dialog.deleteLater()
         _APP.processEvents()
+
+
+def test_pressure_independ_multi_yield_library_and_generator():
+    record = _record("PressureIndependMultiYield")
+    material = nd_material_from_library_record(record, tag=41)
+
+    assert material.parameters["nd"] == 2.0
+    assert material.parameters["rho"] == 1500.0
+    assert material.parameters["noYieldSurf"] == 20.0
+    assert "updateMaterialStage" in " ".join(record.limitations)
+
+    command = nd_material_to_openseespy(
+        material,
+        {"length": "m", "force": "kN", "time": "s"},
+    )
+    assert command == (
+        "ops.nDMaterial('PressureIndependMultiYield', 41, "
+        "2, 1.5, 60000, 300000, 37, 0.1, 0, 80, 0, 20)"
+    )
+
+
+def test_pressure_independ_multi_yield_editor_and_validation():
+    dialog = NDMaterialDialog(
+        next_tag=42,
+        units={"length": "m", "force": "kN", "time": "s"},
+    )
+    try:
+        index = dialog.material_type.findData(
+            "PressureIndependMultiYield"
+        )
+        assert index >= 0
+        dialog.material_type.setCurrentIndex(index)
+        _APP.processEvents()
+
+        material = dialog.material_data()
+        assert material.material_type == "PressureIndependMultiYield"
+        assert material.parameters["nd"] == 2.0
+        assert material.parameters["noYieldSurf"] == 20.0
+        assert "updateMaterialStage" in dialog.note.text()
+        assert "custom surface pairs" in dialog.note.text()
+
+        nd_widget = dialog._parameter_widgets["nd"]
+        surf_widget = dialog._parameter_widgets["noYieldSurf"]
+        assert nd_widget.decimals() == 0
+        assert surf_widget.decimals() == 0
+        assert surf_widget.minimum() == 1.0
+        assert surf_widget.maximum() == 39.0
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+    bad = dict(_record("PressureIndependMultiYield").parameters_si)
+    bad["noYieldSurf"] = -10.0
+    try:
+        NDMaterialData(
+            tag=43,
+            name="Invalid custom surfaces",
+            material_type="PressureIndependMultiYield",
+            parameters=bad,
+        )
+    except ValueError as exc:
+        assert "noYieldSurf" in str(exc)
+        assert "not supported" in str(exc)
+    else:
+        raise AssertionError(
+            "Negative custom noYieldSurf should be rejected."
+        )
+
+
+def test_nd_library_rejects_core_compatibility_drift(monkeypatch):
+    raw = asdict(_record("PressureIndependMultiYield"))
+    raw["compatibility"].append("PlateFiber")
+    payload = {
+        "schema_version": 1,
+        "records": [raw],
+    }
+    monkeypatch.setattr(
+        nd_library,
+        "_resource_text",
+        lambda: json.dumps(payload),
+    )
+
+    try:
+        nd_library.load_verified_nd_material_library()
+    except ValueError as exc:
+        assert "core formulations" in str(exc)
+    else:
+        raise AssertionError(
+            "Library/core compatibility drift should be rejected."
+        )
 
 
 def test_drucker_prager_library_generates_unit_safe_command():
