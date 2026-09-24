@@ -2012,6 +2012,7 @@ def analysis_to_openseespy(
     frame_element_tags: list[int] | None = None,
     truss_element_tags: list[int] | None = None,
     shell_element_tags: list[int] | None = None,
+    mefi_crack_specs: dict[int, dict[str, object]] | None = None,
     support_node_tags: list[int] | None = None,
     plain_pattern_tags: list[int] | None = None,
     monitor_node: int | None = None,
@@ -2033,6 +2034,10 @@ def analysis_to_openseespy(
     frame_element_tags = list(frame_element_tags or [])
     truss_element_tags = list(truss_element_tags or [])
     shell_element_tags = list(shell_element_tags or [])
+    mefi_crack_specs = {
+        int(tag): dict(spec)
+        for tag, spec in (mefi_crack_specs or {}).items()
+    }
     support_node_tags = list(support_node_tags or [])
     plain_pattern_tags = list(plain_pattern_tags or [])
     fiber_response_specs = dict(fiber_response_specs or {})
@@ -2079,6 +2084,16 @@ def analysis_to_openseespy(
     section_response_history = {
         key: {'force': [], 'deformation': []}
         for key in section_response_catalog
+    }
+    mefi_panel_history = {
+        str(tag): {
+            str(int(panel.get("panel", index))): []
+            for index, panel in enumerate(
+                spec.get("panels", ()),
+                start=1,
+            )
+        }
+        for tag, spec in sorted(mefi_crack_specs.items())
     }
     system_command = (
         "ops.system('SparseGeneral', '-piv')"
@@ -2230,6 +2245,10 @@ def analysis_to_openseespy(
         "    'specimen': " + repr(specimen_response_spec) + ",",
         "    'moment_curvature': " + repr(moment_curvature_spec) + ",",
         "    'section_responses': " + repr(section_response_catalog) + ",",
+        "    'mefi_crack_specs': " + repr({
+            str(tag): dict(spec)
+            for tag, spec in sorted(mefi_crack_specs.items())
+        }) + ",",
         "    'final': {},",
         "    'convergence': {",
         f"        'test': {settings.test!r},",
@@ -2250,6 +2269,7 @@ def analysis_to_openseespy(
         "'base_reactions': [], 'nodes': {}, "
         "'moment_curvature': {'force': [], 'deformation': []}, "
         "'section_responses': " + repr(section_response_history) + ", "
+        "'mefi_panel_strains': " + repr(mefi_panel_history) + ", "
         "'joints': " + repr(joint_response_history) + ", "
         "'specimen': {"
         "'section_force': [], 'section_deformation': [], "
@@ -2269,6 +2289,7 @@ def analysis_to_openseespy(
         f"_studio_frame_element_tags = {frame_element_tags!r}",
         f"_studio_truss_element_tags = {truss_element_tags!r}",
         f"_studio_shell_element_tags = {shell_element_tags!r}",
+        f"_studio_mefi_crack_specs = {mefi_crack_specs!r}",
         f"_studio_support_node_tags = {support_node_tags!r}",
         f"_studio_plain_pattern_tags = {plain_pattern_tags!r}",
         f"_studio_fiber_response_specs = {fiber_response_specs!r}",
@@ -3397,6 +3418,47 @@ def analysis_to_openseespy(
         "_studio_reaction_row)"
     )
     lines.append(
+        "    for _studio_mefi_tag, _studio_mefi_spec in "
+        "_studio_mefi_crack_specs.items():"
+    )
+    lines.append(
+        "        _studio_mefi_key = str(int(_studio_mefi_tag))"
+    )
+    lines.append(
+        "        _studio_mefi_history = "
+        "_studio_results['history']['mefi_panel_strains']"
+        ".get(_studio_mefi_key, {})"
+    )
+    lines.append(
+        "        for _studio_panel in "
+        "_studio_mefi_spec.get('panels', []):"
+    )
+    lines.append(
+        "            _studio_panel_no = int(_studio_panel.get('panel', 0))"
+    )
+    lines.append(
+        "            _studio_panel_key = str(_studio_panel_no)"
+    )
+    lines.append("            try:")
+    lines.append(
+        "                _studio_panel_strain = ops.eleResponse("
+        "int(_studio_mefi_tag), 'RCPanel', _studio_panel_no, "
+        "'panel_strain') or []"
+    )
+    lines.append(
+        "                _studio_panel_strain = "
+        "[float(v) for v in _studio_panel_strain[:3]]"
+    )
+    lines.append("            except Exception:")
+    lines.append("                _studio_panel_strain = []")
+    lines.append(
+        "            if _studio_panel_key in _studio_mefi_history:"
+    )
+    lines.append(
+        "                _studio_mefi_history[_studio_panel_key].append("
+        "_studio_panel_strain)"
+    )
+    lines.append(
         "    _studio_disp = "
         "[float(v) for v in ops.nodeDisp(_studio_monitor_node)]"
     )
@@ -3830,6 +3892,25 @@ def analysis_to_openseespy(
         "            'Exx', 'Eyy', 'Gxy', 'Kxx', 'Kyy', 'Kxy', 'Gxz', 'Gyz'",
         "        ],",
         "    }",
+        "_studio_mefi_panel_strains = {}",
+        "for _studio_mefi_tag, _studio_mefi_spec in _studio_mefi_crack_specs.items():",
+        "    _studio_mefi_key = str(int(_studio_mefi_tag))",
+        "    _studio_mefi_panel_strains[_studio_mefi_key] = {}",
+        "    for _studio_panel in _studio_mefi_spec.get('panels', []):",
+        "        _studio_panel_no = int(_studio_panel.get('panel', 0))",
+        "        try:",
+        "            _studio_panel_strain = ops.eleResponse(",
+        "                int(_studio_mefi_tag), 'RCPanel', _studio_panel_no,",
+        "                'panel_strain'",
+        "            ) or []",
+        "            _studio_panel_strain = [",
+        "                float(v) for v in _studio_panel_strain[:3]",
+        "            ]",
+        "        except Exception:",
+        "            _studio_panel_strain = []",
+        "        _studio_mefi_panel_strains[_studio_mefi_key][",
+        "            str(_studio_panel_no)",
+        "        ] = _studio_panel_strain",
         "_studio_element_fiber_responses = {}",
         "for _studio_element_raw, _studio_spec in "
         "_studio_fiber_response_specs.items():",
@@ -3902,6 +3983,7 @@ def analysis_to_openseespy(
         "    'element_section_forces': _studio_element_section_forces,",
         "    'shell_section_forces': _studio_shell_section_forces,",
         "    'shell_section_deformations': _studio_shell_section_deformations,",
+        "    'mefi_panel_strains': _studio_mefi_panel_strains,",
         "    'element_fiber_responses': _studio_element_fiber_responses,",
         "    'load_factors': _studio_load_factors,",
         "}",
@@ -3930,6 +4012,68 @@ def transformation_to_openseespy(
         f"ops.geomTransf('{transformation.transformation_type}', "
         f"{transformation.tag}, {x:g}, {y:g}, {z:g})"
     )
+
+
+
+def build_mefi_crack_specs(
+    model: StructuralModel,
+    *,
+    sections: dict[int, SectionData] | None,
+    nd_materials: dict[int, NDMaterialData] | None,
+) -> dict[int, dict[str, object]]:
+    """Describe MEFI RC panels and their concrete cracking thresholds.
+
+    RCLMS exposes panel_strain for each MEFI RCPanel. The concrete
+    OrthotropicRAConcrete.ecr parameter is the model tensile cracking strain,
+    so SARE retains it per macro-fiber instead of inventing a GUI-only
+    threshold.
+    """
+    section_map = sections or {}
+    material_map = nd_materials or {}
+    specs: dict[int, dict[str, object]] = {}
+
+    for tag, element in sorted(model.elements.items()):
+        if element.element_type != "MEFI":
+            continue
+        widths = list(element.mefi_widths)
+        section_tags = list(element.mefi_section_tags)
+        if not widths or len(widths) != len(section_tags):
+            continue
+
+        panels: list[dict[str, object]] = []
+        for panel_no, (width, section_tag) in enumerate(
+            zip(widths, section_tags),
+            start=1,
+        ):
+            threshold_values: list[float] = []
+            section = section_map.get(int(section_tag))
+            if section is not None and section.section_type == "RCLMS":
+                for layer in section.shell_layers:
+                    material = material_map.get(int(layer.material_tag))
+                    if (
+                        material is not None
+                        and material.material_type == "OrthotropicRAConcrete"
+                    ):
+                        ecr = float(material.parameters.get("ecr", 0.0))
+                        if ecr > 0.0 and math.isfinite(ecr):
+                            threshold_values.append(ecr)
+
+            panels.append({
+                "panel": int(panel_no),
+                "width": float(width),
+                "section_tag": int(section_tag),
+                "cracking_strain": (
+                    min(threshold_values) if threshold_values else None
+                ),
+            })
+
+        if panels:
+            specs[int(tag)] = {
+                "source": "MEFI RCPanel panel_strain",
+                "panels": panels,
+            }
+
+    return specs
 
 
 def build_joint_response_specs(
@@ -5747,6 +5891,11 @@ def to_openseespy(
             solution_results=solution_results,
             active_analysis=active,
         )
+        mefi_crack_specs = build_mefi_crack_specs(
+            model,
+            sections=sections,
+            nd_materials=nd_materials,
+        )
 
         response_spectrum_components = _response_spectrum_sources(
             active,
@@ -5782,6 +5931,7 @@ def to_openseespy(
                     for tag, element in model.elements.items()
                     if element.element_type in SHELL_ELEMENT_TYPES
                 ),
+                mefi_crack_specs=mefi_crack_specs,
                 support_node_tags=support_node_tags,
                 plain_pattern_tags=sorted(
                     tag
