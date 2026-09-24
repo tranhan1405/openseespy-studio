@@ -318,7 +318,11 @@ def load_verified_nd_material_library(
 def nd_material_library_facets(
     records: tuple[NDMaterialLibraryRecord, ...] | None = None,
 ) -> dict[str, tuple[str, ...]]:
-    source = records or load_verified_nd_material_library()
+    source = (
+        load_verified_nd_material_library()
+        if records is None
+        else records
+    )
     return {
         "family": tuple(sorted({record.family for record in source})),
         "model": tuple(sorted({record.model for record in source})),
@@ -344,7 +348,11 @@ def filter_verified_nd_material_library(
     behavior: str = "",
     compatibility: str = "",
 ) -> tuple[NDMaterialLibraryRecord, ...]:
-    source = records or load_verified_nd_material_library()
+    source = (
+        load_verified_nd_material_library()
+        if records is None
+        else records
+    )
     query_text = str(query).strip().lower()
     family_text = str(family).strip()
     model_text = str(model).strip()
