@@ -1583,8 +1583,8 @@ class ConnectionData:
             raise ValueError(
                 f"Unsupported connection type: {self.connection_type}"
             )
-        if self.node_i <= 0 or self.node_j <= 0:
-            raise ValueError("Connection node tags must be positive.")
+        if self.node_i < 0 or self.node_j < 0:
+            raise ValueError("Connection node tags must be non-negative.")
         if (
             self.generated_ground_node is not None
             and self.generated_ground_node <= 0
