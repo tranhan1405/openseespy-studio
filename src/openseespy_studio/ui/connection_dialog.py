@@ -215,8 +215,9 @@ class ConnectionDialog(QDialog):
         intro = QLabel(
             "Create idealized frame connections and nonlinear joint models: "
             "Rigid, Pinned, Semi-Rigid, zeroLength/twoNodeLink, Joint2D, "
-            "or a Gupta-Krawinkler steel panel-zone macro. "
-            "Use the dedicated tabs below for material, section, and joint data."
+            "RC BeamColumnJoint, LehighJoint2D, or a Gupta-Krawinkler "
+            "steel panel-zone macro. Use the dedicated tabs below for "
+            "material, section, and joint data."
         )
         intro.setWordWrap(True)
         intro.setStyleSheet(
@@ -535,9 +536,8 @@ class ConnectionDialog(QDialog):
         joint_page = QWidget()
         joint_layout = QVBoxLayout(joint_page)
 
-        joint_nodes_group = QGroupBox(
-            "External nodes · order: Left → Top → Right → Bottom"
-        )
+        joint_nodes_group = QGroupBox("External joint nodes")
+        self.joint_nodes_group = joint_nodes_group
         joint_nodes_form = QFormLayout(joint_nodes_group)
         saved_external = (
             list(connection.parameters.get("external_nodes", ()))
@@ -1250,8 +1250,32 @@ class ConnectionDialog(QDialog):
             spin.setEnabled(kraw_mode)
 
         if kraw_mode:
-            labels = ("Left node:", "Top node:", "Right node:", "Bottom node:")
+            self.joint_nodes_group.setTitle(
+                "External nodes · Left → Top → Right → Bottom"
+            )
+            labels = (
+                "Left node:",
+                "Top node:",
+                "Right node:",
+                "Bottom node:",
+            )
+        elif lehigh_mode:
+            self.joint_nodes_group.setTitle(
+                "External nodes · Node 1 → 4 counter-clockwise"
+            )
+            labels = ("Node 1:", "Node 2:", "Node 3:", "Node 4:")
+        elif bcj_mode:
+            self.joint_nodes_group.setTitle(
+                "External nodes · opposite chords 1↔3 and 2↔4"
+            )
+            labels = ("Node 1:", "Node 2:", "Node 3:", "Node 4:")
+        elif joint2d_mode:
+            self.joint_nodes_group.setTitle(
+                "External nodes · cyclic clockwise or counter-clockwise"
+            )
+            labels = ("Node 1:", "Node 2:", "Node 3:", "Node 4:")
         else:
+            self.joint_nodes_group.setTitle("External joint nodes")
             labels = ("Node 1:", "Node 2:", "Node 3:", "Node 4:")
         for label_widget, text_value in zip(
             self.joint_node_labels,
