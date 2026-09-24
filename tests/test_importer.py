@@ -846,3 +846,130 @@ ops.analyze(100, 0.001)
     assert analysis.rayleigh_mode_i == 1
     assert analysis.rayleigh_mode_j == 2
     assert analysis.eigen_solver == "-fullGenLapack"
+
+
+def test_importer_reads_nonlinear_mdof_example_with_companion_motion(tmp_path):
+    motion = tmp_path / "el_centro.th"
+    motion.write_text(
+        "0.0\n0.10\n-0.05\n0.02\n",
+        encoding="utf-8",
+    )
+    source_path = tmp_path / "nonlinear_mdof.py"
+    source = """
+import openseespy.opensees as ops
+import numpy as np
+
+m = 1
+s = 1
+kN = 1
+g = 9.81*m/s**2
+mm = 1e-3*m
+Ton = kN*s**2/m
+
+N = 3
+h = 0.05
+dt = 0.02
+dt_out = 0.001
+tFinal = 35
+m1 = 0.1*Ton
+m2 = 0.1*Ton
+m3 = 0.1*Ton
+Py1 = 0.55*kN
+Py2 = 0.45*kN
+Py3 = 0.30*kN
+K1 = 60*kN/m
+K2 = 50*kN/m
+K3 = 30*kN/m
+b = 0.01
+
+ops.wipe()
+ops.model('basic', '-ndm', 1, '-ndf', 1)
+ops.node(0, 0)
+ops.node(1, 0, '-mass', m1)
+ops.node(2, 0, '-mass', m2)
+ops.node(3, 0, '-mass', m3)
+ops.fix(0, 1)
+ops.uniaxialMaterial('Steel01', 1, Py1, K1, b)
+ops.uniaxialMaterial('Steel01', 2, Py2, K2, b)
+ops.uniaxialMaterial('Steel01', 3, Py3, K3, b)
+ops.element('zeroLength', 1, 0, 1, '-mat', 1, '-dir', 1, '-doRayleigh', 1)
+ops.element('zeroLength', 2, 1, 2, '-mat', 2, '-dir', 1, '-doRayleigh', 1)
+ops.element('zeroLength', 3, 2, 3, '-mat', 3, '-dir', 1, '-doRayleigh', 1)
+
+w1, w2, w3 = np.array(ops.eigen('-fullGenLapack', 3))**0.5
+a0 = 2*h*w1*w2/(w1+w2)
+a1 = 2*h/(w1+w2)
+ops.rayleigh(a0, 0.0, 0.0, a1)
+
+load_tag = 1
+pattern_tag = 1
+direc = 1
+ops.timeSeries(
+    'Path', load_tag, '-dt', dt,
+    '-filePath', r'./el_centro.th', '-factor', g
+)
+ops.pattern('UniformExcitation', pattern_tag, direc, '-accel', load_tag)
+
+ops.recorder(
+    'Node', '-file', r'./Relative_disp.out',
+    '-time', '-dT', dt_out, '-node', 1, 2, 3, '-dof', 1, 'disp'
+)
+ops.recorder(
+    'Node', '-file', r'./Relative_accel.out',
+    '-time', '-dT', dt_out, '-node', 1, 2, 3, '-dof', 1, 'accel'
+)
+ops.recorder(
+    'Node', '-file', r'./Absolute_accel.out',
+    '-timeSeries', load_tag, '-time', '-dT', dt_out,
+    '-node', 0, 1, 2, 3, '-dof', 1, 'accel'
+)
+ops.recorder(
+    'Element', '-file', r'./Element_force.out',
+    '-time', '-dT', dt_out, '-ele', 1, 2, 3, 'localForce'
+)
+
+ops.wipeAnalysis()
+ops.algorithm('Newton')
+ops.system('BandGen')
+ops.numberer('Plain')
+ops.constraints('Plain')
+ops.integrator('Newmark', 0.5, 0.25)
+ops.analysis('Transient')
+ops.test('NormUnbalance', 1.0e-12, 100)
+num_steps = int(tFinal/dt_out+1)
+ops.analyze(num_steps, dt_out)
+ops.wipe()
+
+rD = np.genfromtxt(r'./Relative_disp.out', usecols=[1, 2, 3]).T
+"""
+    source_path.write_text(source, encoding="utf-8")
+
+    result = import_openseespy_source(
+        source,
+        source_name=source_path.name,
+        source_path=source_path,
+        units={"length": "m", "force": "kN", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    assert result.project.model.ndm == 1
+    assert result.project.model.ndf == 1
+    assert set(result.project.model.nodes) == {0, 1, 2, 3}
+    assert set(result.project.connections) == {1, 2, 3}
+    assert result.project.model.nodes[1].mass == (0.1,)
+    assert result.project.time_series[1].dt == 0.02
+    assert result.project.time_series[1].factor == 9.81
+    assert result.project.time_series[1].values == [0.0, 0.10, -0.05, 0.02]
+    assert result.project.load_patterns[1].pattern_type == "UniformExcitation"
+    assert len(result.project.recorders) == 4
+    assert result.project.recorders[3].target_tags == [0, 1, 2, 3]
+
+    analysis = next(iter(result.project.analyses.values()))
+    assert analysis.analysis_type == "Transient"
+    assert analysis.integrator == "Newmark"
+    assert analysis.steps == 35001
+    assert analysis.dt == 0.001
+    assert analysis.rayleigh_model == "TwoMode"
+    assert analysis.rayleigh_damping_ratio == 0.05
+    assert analysis.rayleigh_mode_i == 1
+    assert analysis.rayleigh_mode_j == 2
