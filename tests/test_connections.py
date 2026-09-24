@@ -2570,6 +2570,8 @@ def test_connection_dialog_exposes_coupled_zero_length_rules():
     spec_source = inspect.getsource(ConnectionDialog.spec)
 
     assert '"CoupledZeroLength"' in init_source
+    assert 'if connection_type in {"zeroLength", "semiRigid"}' in direction_source
+    assert 'if connection_type == "CoupledZeroLength"' in direction_source
     assert 'return labels, {1, 2, 3}' in direction_source
     assert "exactly two active" in spec_source
     assert "one UniaxialMaterial shared" in spec_source
