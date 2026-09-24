@@ -206,7 +206,7 @@ class RCWallWizard(QWizard):
 
         self.wall_name = QLineEdit("RC Wall")
         self.replace_geometry = QCheckBox(
-            "Replace current FE geometry and model-linked analysis data"
+            "Replace current model geometry and model-linked data"
         )
         self.replace_geometry.setChecked(True)
         form.addRow("Wall name:", self.wall_name)
