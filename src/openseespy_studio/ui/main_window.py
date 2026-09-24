@@ -4881,8 +4881,6 @@ class MainWindow(QMainWindow):
             if issue.severity == "ERROR"
         }
         try:
-            self.selection.clear()
-            self._reset_runtime_results()
             result = build_rc_wall(
                 self.project,
                 spec,
@@ -4927,6 +4925,8 @@ class MainWindow(QMainWindow):
             self._refresh_all()
             return
 
+        self.selection.clear()
+        self._reset_runtime_results()
         self.model = self.project.model
         named = ", ".join(result.selection_set_names)
         self._refresh_all(
