@@ -793,7 +793,7 @@ BEAM_COLUMN_JOINT_COMPONENT_RESPONSES: frozenset[str] = frozenset({
 CONNECTION_HISTORY_RESPONSES: dict[str, tuple[str, ...]] = {
     "semiRigid": ("force", "deformation"),
     "zeroLength": ("force", "deformation"),
-    "zeroLengthSection": ("force", "deformation"),
+    "zeroLengthSection": ("force", "deformation", "stiff"),
     "twoNodeLink": (
         "force",
         "localForce",
@@ -806,6 +806,7 @@ CONNECTION_HISTORY_RESPONSES: dict[str, tuple[str, ...]] = {
         "deformation",
         "centralNode",
         "size",
+        "stiffness",
         "defoANDforce",
     ),
     "BeamColumnJoint": (
