@@ -949,15 +949,31 @@ def connection_to_openseespy(
     )
 
     if connection_type == "semiRigid":
-        # Preserve frame-joint translational compatibility unless the user
-        # deliberately assigns a translational spring in that direction.
-        tied_translations = [
+        # Semi-rigid means only the explicitly spring-backed mechanisms may
+        # deform. Every other nodal DOF remains rigidly compatible.
+        #
+        # zeroLength uses physical direction 6 for RZ in a 2D/3-DOF model,
+        # while the corresponding nodal DOF is 3; translate that one special
+        # case before constructing equalDOF.
+        if int(ndm) == 2 and int(ndf) == 3:
+            direction_to_nodal_dof = {1: 1, 2: 2, 6: 3}
+        else:
+            direction_to_nodal_dof = {
+                direction: direction
+                for direction in range(1, min(int(ndf), 6) + 1)
+            }
+        spring_nodal_dofs = {
+            direction_to_nodal_dof[direction]
+            for direction in directions
+            if direction in direction_to_nodal_dof
+        }
+        tied_dofs = [
             dof
-            for dof in range(1, min(int(ndm), int(ndf)) + 1)
-            if dof not in directions
+            for dof in range(1, int(ndf) + 1)
+            if dof not in spring_nodal_dofs
         ]
-        if tied_translations:
-            dof_text = ", ".join(str(dof) for dof in tied_translations)
+        if tied_dofs:
+            dof_text = ", ".join(str(dof) for dof in tied_dofs)
             return "\n".join([
                 (
                     f"ops.equalDOF({connection.node_i}, "
