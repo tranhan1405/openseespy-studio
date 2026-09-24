@@ -2398,3 +2398,178 @@ def test_connection_joint_tab_is_scrollable():
     assert "self.joint_scroll.setWidget(joint_page)" in source
     assert "self.tabs.addTab(" in source
     assert "self.joint_scroll," in source
+
+
+def test_coupled_zero_length_requires_two_directions_and_one_material():
+    connection = ConnectionData(
+        tag=300,
+        name="Coupled UX-RZ",
+        connection_type="CoupledZeroLength",
+        node_i=1,
+        node_j=2,
+        materials_by_dof={1: 1, 3: 1},
+    )
+    assert connection.materials_by_dof == {1: 1, 3: 1}
+
+    try:
+        ConnectionData(
+            tag=301,
+            name="Too few directions",
+            connection_type="CoupledZeroLength",
+            node_i=1,
+            node_j=2,
+            materials_by_dof={1: 1},
+        )
+    except ValueError as exc:
+        assert "exactly two coupled directions" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected CoupledZeroLength with one direction to fail"
+        )
+
+    try:
+        ConnectionData(
+            tag=302,
+            name="Two different materials",
+            connection_type="CoupledZeroLength",
+            node_i=1,
+            node_j=2,
+            materials_by_dof={1: 1, 3: 2},
+        )
+    except ValueError as exc:
+        assert "one UniaxialMaterial" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected CoupledZeroLength with two materials to fail"
+        )
+
+
+def test_coupled_zero_length_2d_uses_nodal_direction_3_for_rz():
+    project = frame2d_project()
+    connection = ConnectionData(
+        tag=303,
+        name="Coupled UX-RZ",
+        connection_type="CoupledZeroLength",
+        node_i=1,
+        node_j=2,
+        materials_by_dof={1: 1, 3: 1},
+        do_rayleigh=True,
+    )
+    project.add_connection(connection)
+
+    script = connection_to_openseespy(connection, ndm=2, ndf=3)
+
+    assert script == (
+        "ops.element('CoupledZeroLength', 303, 1, 2, 1, 3, 1, 1)"
+    )
+    assert "'-orient'" not in script
+    assert "'-dir'" not in script
+
+    invalid = ConnectionData(
+        tag=304,
+        name="Invalid planar dir 6",
+        connection_type="CoupledZeroLength",
+        node_i=1,
+        node_j=2,
+        materials_by_dof={1: 1, 6: 1},
+    )
+    try:
+        project.add_connection(invalid)
+    except ValueError as exc:
+        assert "Allowed directions: [1, 2, 3]" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected planar CoupledZeroLength direction 6 to fail"
+        )
+
+
+def test_coupled_zero_length_requires_coincident_nodes():
+    project = base_project()
+    connection = ConnectionData(
+        tag=305,
+        name="Separated coupled spring",
+        connection_type="CoupledZeroLength",
+        node_i=1,
+        node_j=2,
+        materials_by_dof={1: 1, 2: 1},
+    )
+
+    try:
+        project.add_connection(connection)
+    except ValueError as exc:
+        assert "coincident" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected separated CoupledZeroLength nodes to fail"
+        )
+
+
+def test_importer_recovers_coupled_zero_length():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+ops.node(1, 0.0, 0.0)
+ops.node(2, 0.0, 0.0)
+ops.uniaxialMaterial('Elastic', 1, 1000.0)
+ops.element('CoupledZeroLength', 306, 1, 2, 1, 3, 1, 1)
+"""
+    result = import_openseespy_source(
+        source,
+        source_name="coupled_zero_length.py",
+    )
+
+    connection = result.project.connections[306]
+    assert connection.connection_type == "CoupledZeroLength"
+    assert connection.materials_by_dof == {1: 1, 3: 1}
+    assert connection.do_rayleigh is True
+
+
+def test_coupled_zero_length_recorder_allows_force_only():
+    project = frame2d_project()
+    project.add_connection(ConnectionData(
+        tag=307,
+        name="Coupled recorder target",
+        connection_type="CoupledZeroLength",
+        node_i=1,
+        node_j=2,
+        materials_by_dof={1: 1, 2: 1},
+    ))
+    project.add_recorder(RecorderData(
+        tag=308,
+        name="Coupled force",
+        recorder_type="Element",
+        target_tags=[307],
+        response="force",
+    ))
+    assert project.recorders[308].response == "force"
+
+    bad = RecorderData(
+        tag=309,
+        name="Unsupported coupled deformation",
+        recorder_type="Element",
+        target_tags=[307],
+        response="deformation",
+    )
+    try:
+        project.add_recorder(bad)
+    except ValueError as exc:
+        assert "CoupledZeroLength" in str(exc)
+        assert "deformation" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected unsupported CoupledZeroLength deformation recorder to fail"
+        )
+
+
+def test_connection_dialog_exposes_coupled_zero_length_rules():
+    import inspect
+    from openseespy_studio.ui.connection_dialog import ConnectionDialog
+
+    init_source = inspect.getsource(ConnectionDialog.__init__)
+    direction_source = inspect.getsource(ConnectionDialog._direction_profile)
+    spec_source = inspect.getsource(ConnectionDialog.spec)
+
+    assert '"CoupledZeroLength"' in init_source
+    assert 'return labels, {1, 2, 3}' in direction_source
+    assert "exactly two active" in spec_source
+    assert "one UniaxialMaterial shared" in spec_source
