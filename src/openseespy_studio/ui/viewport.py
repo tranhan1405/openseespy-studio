@@ -93,6 +93,9 @@ class ModelViewport(QWidget):
         self._lines: dict[int, LineGeometryData] = {}
         self._surfaces: dict[int, SurfaceGeometryData] = {}
         self._display_domain = "fe"
+        self._background_preset = "ANSYS Gradient"
+        self._background_bottom = "#f2f5f8"
+        self._background_top = "#e1e8ef"
         self._geometry_mesh_overlay_visible = False
         self._surface_orientation_tags: set[int] = set()
         self._units: dict[str, str] = {
@@ -760,7 +763,7 @@ class ModelViewport(QWidget):
         self.plotter.add_mesh(
             pv.PolyData([origin]),
             name="origin-axes-o",
-            color="#20262e",
+            color=self._background_foreground_color(),
             render_points_as_spheres=True,
             point_size=10,
             pickable=False,
@@ -782,7 +785,7 @@ class ModelViewport(QWidget):
             [origin],
             ["O"],
             name="origin-axis-label-o",
-            text_color="#20262e",
+            text_color=self._background_foreground_color(),
             font_size=11,
             always_visible=True,
         )
@@ -938,7 +941,7 @@ class ModelViewport(QWidget):
         self.plotter.add_mesh(
             mesh,
             name="geometry-sketch-grid",
-            color="#cfd8e3",
+            color=self._background_grid_color(),
             line_width=1.0,
             opacity=0.55,
             pickable=False,
@@ -1909,15 +1912,129 @@ class ModelViewport(QWidget):
         else:
             window.showFullScreen()
 
-    def _reset_scene(self) -> None:
-        self.plotter.set_background("#f2f5f8", top="#e1e8ef")
+    @staticmethod
+    def background_style_spec(
+        preset: str,
+        *,
+        custom_bottom: str = "#f2f5f8",
+        custom_top: str = "#e1e8ef",
+    ) -> tuple[str, str | None]:
+        preset = str(preset or "ANSYS Gradient")
+        styles: dict[str, tuple[str, str | None]] = {
+            "Light": ("#f2f5f8", None),
+            "Dark": ("#20262e", None),
+            "ANSYS Gradient": ("#f2f5f8", "#e1e8ef"),
+            "Publication White": ("#ffffff", None),
+            "Custom Solid": (str(custom_bottom), None),
+            "Custom Gradient": (
+                str(custom_bottom),
+                str(custom_top),
+            ),
+        }
+        if preset not in styles:
+            raise ValueError(f"Unsupported viewport background: {preset}")
+        return styles[preset]
+
+    @staticmethod
+    def _hex_luminance(value: str) -> float:
+        text = str(value).strip().lstrip("#")
+        if len(text) != 6:
+            return 1.0
+        try:
+            red = int(text[0:2], 16) / 255.0
+            green = int(text[2:4], 16) / 255.0
+            blue = int(text[4:6], 16) / 255.0
+        except ValueError:
+            return 1.0
+        return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+    def _background_is_dark(self) -> bool:
+        bottom, top = self.background_style_spec(
+            self._background_preset,
+            custom_bottom=self._background_bottom,
+            custom_top=self._background_top,
+        )
+        values = [self._hex_luminance(bottom)]
+        if top is not None:
+            values.append(self._hex_luminance(top))
+        return sum(values) / len(values) < 0.45
+
+    def _background_foreground_color(self) -> str:
+        return "#e8edf2" if self._background_is_dark() else "#29445e"
+
+    def _background_grid_color(self) -> str:
+        return "#66727f" if self._background_is_dark() else "#cfd8e3"
+
+    def background_style(self) -> dict[str, str]:
+        return {
+            "preset": self._background_preset,
+            "bottom": self._background_bottom,
+            "top": self._background_top,
+        }
+
+    def set_background_style(
+        self,
+        preset: str,
+        *,
+        custom_bottom: str | None = None,
+        custom_top: str | None = None,
+        render: bool = True,
+    ) -> None:
+        preset = str(preset or "ANSYS Gradient")
+        # Validate before mutating the current display state.
+        self.background_style_spec(
+            preset,
+            custom_bottom=custom_bottom or self._background_bottom,
+            custom_top=custom_top or self._background_top,
+        )
+        self._background_preset = preset
+        if custom_bottom is not None:
+            self._background_bottom = str(custom_bottom)
+        if custom_top is not None:
+            self._background_top = str(custom_top)
+
+        self._apply_background(render=False)
+        self._apply_axes_widget()
+
+        if self._origin_axes_visible:
+            self._render_origin_axes()
+        if (
+            self._geometry_sketch_grid_visible
+            and self._display_domain == "geometry"
+        ):
+            self._render_geometry_sketch_grid()
+        if render:
+            self.plotter.render()
+
+    def _apply_background(self, *, render: bool = False) -> None:
+        bottom, top = self.background_style_spec(
+            self._background_preset,
+            custom_bottom=self._background_bottom,
+            custom_top=self._background_top,
+        )
+        if top is None:
+            self.plotter.set_background(bottom)
+        else:
+            self.plotter.set_background(bottom, top=top)
+        if render:
+            self.plotter.render()
+
+    def _apply_axes_widget(self) -> None:
+        try:
+            self.plotter.hide_axes()
+        except Exception:
+            pass
         self.plotter.add_axes(
             line_width=2,
-            color="#29445e",
+            color=self._background_foreground_color(),
             xlabel="X",
             ylabel="Y",
             zlabel="Z",
         )
+
+    def _reset_scene(self) -> None:
+        self._apply_background(render=False)
+        self._apply_axes_widget()
 
     @staticmethod
     def _normalized_model_representation(value: str) -> str:
@@ -5232,7 +5349,11 @@ class ModelViewport(QWidget):
             [self._model.nodes[tag].xyz for tag in tags],
             [str(tag) for tag in tags],
             name="display-node-numbers",
-            text_color="#0b5cad",
+            text_color=(
+                "#63b3ff"
+                if self._background_is_dark()
+                else "#0b5cad"
+            ),
             font_size=10,
             always_visible=True,
         )
@@ -5264,7 +5385,11 @@ class ModelViewport(QWidget):
             points,
             labels,
             name="display-element-numbers",
-            text_color="#7a3d00",
+            text_color=(
+                "#ffb15c"
+                if self._background_is_dark()
+                else "#7a3d00"
+            ),
             font_size=10,
             always_visible=True,
         )
