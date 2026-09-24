@@ -60,14 +60,78 @@ FIXITY_PRESETS: dict[str, Tuple[int, ...]] = {
 }
 
 
-def classify_fixity(values: Iterable[int]) -> str:
+def dof_labels_for_model(ndm: int, ndf: int) -> tuple[str, ...]:
+    """Return OpenSees nodal DOF labels for a model dimension/DOF count."""
+    ndm = _strict_int(ndm, "Model ndm")
+    ndf = _strict_int(ndf, "Model ndf")
+    if ndm == 2:
+        if ndf <= 2:
+            return ("UX", "UY")[:ndf]
+        if ndf == 3:
+            return ("UX", "UY", "RZ")
+        base = ("UX", "UY", "RZ")
+        return base + tuple(f"DOF {index}" for index in range(4, ndf + 1))
+    if ndm == 3:
+        labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+        return labels[:ndf]
+    return tuple(f"DOF {index}" for index in range(1, ndf + 1))
+
+
+def dof_is_rotation(ndm: int, ndf: int, dof: int) -> bool:
+    dof = _strict_int(dof, "DOF")
+    labels = dof_labels_for_model(ndm, ndf)
+    return 1 <= dof <= len(labels) and labels[dof - 1].startswith("R")
+
+
+def fixity_presets_for_model(
+    ndm: int,
+    ndf: int,
+) -> dict[str, Tuple[int, ...]]:
+    """Return support presets that are representable by this OpenSees model."""
+    ndm = _strict_int(ndm, "Model ndm")
+    ndf = _strict_int(ndf, "Model ndf")
+    if (ndm, ndf) == (3, 6):
+        return dict(FIXITY_PRESETS)
+    if (ndm, ndf) == (2, 3):
+        return {
+            "Fixed": (1, 1, 1),
+            "Pinned": (1, 1, 0),
+            "Roller X": (0, 1, 0),
+            "Roller Y": (1, 0, 0),
+        }
+    if (ndm, ndf) == (2, 2):
+        return {
+            "Fixed": (1, 1),
+            "Roller X": (0, 1),
+            "Roller Y": (1, 0),
+        }
+    if (ndm, ndf) == (3, 3):
+        return {
+            "Fixed": (1, 1, 1),
+            "Roller X": (0, 1, 1),
+            "Roller Y": (1, 0, 1),
+            "Roller Z": (1, 1, 0),
+        }
+    return {"Fixed": (1,) * ndf}
+
+
+def classify_fixity(
+    values: Iterable[int],
+    *,
+    ndm: int | None = None,
+) -> str:
     fixity = tuple(
         _strict_int(value, "Fixity value")
         for value in values
     )
     if not any(fixity):
         return "Free"
-    for name, preset in FIXITY_PRESETS.items():
+    presets = (
+        fixity_presets_for_model(ndm, len(fixity))
+        if ndm is not None
+        else FIXITY_PRESETS
+    )
+    for name, preset in presets.items():
         if fixity == preset:
             return name
     return "Custom"

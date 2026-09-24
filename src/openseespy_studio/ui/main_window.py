@@ -82,6 +82,8 @@ from ..model import (
     SHELL_ELEMENT_TYPES,
     StructuralModel,
     classify_fixity,
+    dof_is_rotation,
+    dof_labels_for_model,
     shell_surface_geometry,
 )
 from ..mass_source import apply_mass_source, evaluate_mass_source
@@ -5138,7 +5140,10 @@ class MainWindow(QMainWindow):
         root.addChild(loads_bc_root)
 
         constrained_nodes = {
-            tag: classify_fixity(node.fixity)
+            tag: classify_fixity(
+                node.fixity,
+                ndm=self.model.ndm,
+            )
             for tag, node in self.model.nodes.items()
             if any(node.fixity)
         }
@@ -5266,9 +5271,15 @@ class MainWindow(QMainWindow):
                 ]
                 if displacement.pattern_tag != tag:
                     continue
-                dof_label = ("UX", "UY", "UZ", "RX", "RY", "RZ")[
-                    displacement.dof - 1
-                ]
+                dof_labels = dof_labels_for_model(
+                    self.model.ndm,
+                    self.model.ndf,
+                )
+                dof_label = (
+                    dof_labels[displacement.dof - 1]
+                    if 1 <= displacement.dof <= len(dof_labels)
+                    else f"DOF {displacement.dof}"
+                )
                 displacement_item = QTreeWidgetItem([
                     f"Prescribed {dof_label}: {displacement.name} "
                     f"[{displacement.tag}] → Node {displacement.node_tag}"
@@ -9322,7 +9333,10 @@ class MainWindow(QMainWindow):
             )
             node_fields_editable = not managed_ground_connections
             unit_system = UnitSystem.from_mapping(self.project.units)
-            dof_labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")[:self.model.ndf]
+            dof_labels = dof_labels_for_model(
+                self.model.ndm,
+                self.model.ndf,
+            )
             rows = [
                 ("Tag", tag),
                 (
@@ -9338,7 +9352,13 @@ class MainWindow(QMainWindow):
                 ("Z", f"{node.xyz[2]:g}", {
                     "id": "z", "editable": node_fields_editable, "kind": "float",
                 }),
-                ("Support", classify_fixity(node.fixity)),
+                (
+                    "Support",
+                    classify_fixity(
+                        node.fixity,
+                        ndm=self.model.ndm,
+                    ),
+                ),
                 ("Fixity", node.fixity),
             ]
             for index, label in enumerate(dof_labels):
@@ -10368,7 +10388,12 @@ class MainWindow(QMainWindow):
         }
         initial = next(iter(fixities)) if len(fixities) == 1 else None
 
-        dialog = RestraintDialog(initial=initial, parent=self)
+        dialog = RestraintDialog(
+            initial=initial,
+            parent=self,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
+        )
         if not dialog.exec():
             return
 
@@ -10382,9 +10407,17 @@ class MainWindow(QMainWindow):
                 0 <= dof_index < len(fixity)
                 and bool(fixity[dof_index])
             ):
+                labels = dof_labels_for_model(
+                    self.model.ndm,
+                    self.model.ndf,
+                )
+                label = (
+                    labels[dof_index]
+                    if 0 <= dof_index < len(labels)
+                    else f"DOF {dof_index + 1}"
+                )
                 conflicts.append(
-                    f"Node {displacement.node_tag} "
-                    f"{('UX','UY','UZ','RX','RY','RZ')[dof_index]}"
+                    f"Node {displacement.node_tag} {label}"
                 )
         if conflicts:
             QMessageBox.warning(
@@ -10406,7 +10439,10 @@ class MainWindow(QMainWindow):
             self._refresh_all()
             QMessageBox.warning(self, "Support / Restraint", str(exc))
             return
-        support_type = classify_fixity(fixity)
+        support_type = classify_fixity(
+            fixity,
+            ndm=self.model.ndm,
+        )
         self._refresh_all(
             f"Applied {support_type} restraint to {len(updated)} node(s)"
         )
@@ -11340,6 +11376,7 @@ class MainWindow(QMainWindow):
             plain,
             next_tag=self.project.next_prescribed_displacement_tag(),
             node_tag=node_tag,
+            ndm=self.model.ndm,
             ndf=self.model.ndf,
             units=self.project.units,
             new_pattern_callback=self._create_plain_pattern_dependency,
@@ -11403,6 +11440,7 @@ class MainWindow(QMainWindow):
         dialog = PrescribedDisplacementDialog(
             plain,
             displacement=displacement,
+            ndm=self.model.ndm,
             ndf=self.model.ndf,
             units=self.project.units,
             new_pattern_callback=self._create_plain_pattern_dependency,
@@ -11451,11 +11489,25 @@ class MainWindow(QMainWindow):
         displacement = self.project.prescribed_displacements.get(tag)
         if displacement is None:
             return
-        dof_label = ("UX", "UY", "UZ", "RX", "RY", "RZ")[
-            displacement.dof - 1
-        ]
+        dof_labels = dof_labels_for_model(
+            self.model.ndm,
+            self.model.ndf,
+        )
+        dof_label = (
+            dof_labels[displacement.dof - 1]
+            if 1 <= displacement.dof <= len(dof_labels)
+            else f"DOF {displacement.dof}"
+        )
         unit_system = UnitSystem.from_mapping(self.project.units)
-        unit = unit_system.length if displacement.dof <= 3 else "rad"
+        unit = (
+            "rad"
+            if dof_is_rotation(
+                self.model.ndm,
+                self.model.ndf,
+                displacement.dof,
+            )
+            else unit_system.length
+        )
         pattern = self.project.load_patterns.get(
             displacement.pattern_tag
         )
@@ -12250,7 +12302,12 @@ class MainWindow(QMainWindow):
             edge_index = labels.index(label) + 1
         existing = existing_by_edge.get(edge_index)
         initial = existing.fixity if existing is not None else None
-        dialog = RestraintDialog(initial=initial, parent=self)
+        dialog = RestraintDialog(
+            initial=initial,
+            parent=self,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
+        )
         if not dialog.exec():
             return
         fixity = tuple(int(value) for value in dialog.fixity())
@@ -21215,16 +21272,38 @@ class MainWindow(QMainWindow):
                 return job
         return None
 
-    @staticmethod
-    def _node_probe_component_labels(quantity: str) -> tuple[str, ...]:
+    def _node_probe_component_labels(
+        self,
+        quantity: str,
+    ) -> tuple[str, ...]:
+        dof_labels = dof_labels_for_model(
+            self.model.ndm,
+            self.model.ndf,
+        )
+
+        def mapped(
+            translation_prefix: str,
+            rotation_prefix: str,
+        ) -> tuple[str, ...]:
+            values: list[str] = []
+            for index, label in enumerate(dof_labels, start=1):
+                if label.startswith("U"):
+                    values.append(translation_prefix + label[1:])
+                elif label.startswith("R"):
+                    values.append(rotation_prefix + label[1:])
+                else:
+                    values.append(f"DOF {index}")
+            return tuple(values)
+
         return {
-            "Displacement": ("UX", "UY", "UZ", "RX", "RY", "RZ"),
-            "Velocity": ("VX", "VY", "VZ", "WX", "WY", "WZ"),
-            "Acceleration": (
-                "AX", "AY", "AZ", "AlphaX", "AlphaY", "AlphaZ"
-            ),
-            "Reaction": ("FX", "FY", "FZ", "MX", "MY", "MZ"),
-        }.get(str(quantity), ("DOF 1",))
+            "Displacement": tuple(dof_labels),
+            "Velocity": mapped("V", "W"),
+            "Acceleration": mapped("A", "Alpha"),
+            "Reaction": mapped("F", "M"),
+        }.get(
+            str(quantity),
+            tuple(f"DOF {i}" for i in range(1, self.model.ndf + 1)),
+        )
 
     def _create_node_probe(
         self,
@@ -23819,7 +23898,10 @@ class MainWindow(QMainWindow):
             tag
             for tag, node in self.model.nodes.items()
             if any(node.fixity)
-            and classify_fixity(node.fixity) == str(support_type)
+            and classify_fixity(
+                node.fixity,
+                ndm=self.model.ndm,
+            ) == str(support_type)
         }
         self.selection.set_selection(nodes=tags)
 
@@ -24406,7 +24488,12 @@ class MainWindow(QMainWindow):
             for node in self.model.nodes.values():
                 if not any(node.fixity):
                     continue
-                key = str(classify_fixity(node.fixity))
+                key = str(
+                    classify_fixity(
+                        node.fixity,
+                        ndm=self.model.ndm,
+                    )
+                )
                 support_types[key] = support_types.get(key, 0) + 1
             rows = [
                 ("Supported Nodes", sum(support_types.values())),
@@ -24695,7 +24782,10 @@ class MainWindow(QMainWindow):
             tag
             for tag, node in self.model.nodes.items()
             if any(node.fixity)
-            and classify_fixity(node.fixity) == target
+            and classify_fixity(
+                node.fixity,
+                ndm=self.model.ndm,
+            ) == target
         }
         restrained_dofs = sum(
             sum(int(value) for value in self.model.nodes[tag].fixity)
@@ -26602,7 +26692,10 @@ class MainWindow(QMainWindow):
                 tag
                 for tag, node in self.model.nodes.items()
                 if any(node.fixity)
-                and classify_fixity(node.fixity) == support_type
+                and classify_fixity(
+                    node.fixity,
+                    ndm=self.model.ndm,
+                ) == support_type
             }
             properties = menu.addAction("Properties")
             properties.triggered.connect(

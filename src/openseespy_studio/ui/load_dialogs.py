@@ -17,6 +17,7 @@ from ..ground_motion_library import (
     pga_in_g,
     record_preset,
 )
+from ..model import dof_is_rotation, dof_labels_for_model
 from ..project import ElementLoadData, LoadPatternData, NodalLoadData, PrescribedDisplacementData, TimeSeriesData
 from ..units import UnitSystem
 
@@ -756,6 +757,7 @@ class PrescribedDisplacementDialog(QDialog):
         *,
         next_tag=1,
         node_tag=1,
+        ndm=3,
         ndf=6,
         units=None,
         allowed_load_types=None,
@@ -766,7 +768,9 @@ class PrescribedDisplacementDialog(QDialog):
         self.setWindowTitle("Prescribed Displacement Editor")
         self.setModal(True)
         self.unit_system = UnitSystem.from_mapping(units)
+        self.ndm = int(ndm)
         self.ndf = max(1, min(6, int(ndf)))
+        self._dof_labels = dof_labels_for_model(self.ndm, self.ndf)
         self._patterns = dict(patterns)
         self._new_pattern_callback = new_pattern_callback
 
@@ -806,7 +810,7 @@ class PrescribedDisplacementDialog(QDialog):
         )
 
         self.dof = QComboBox()
-        for dof, label in enumerate(self.DOF_LABELS[: self.ndf], start=1):
+        for dof, label in enumerate(self._dof_labels, start=1):
             self.dof.addItem(f"{label} (DOF {dof})", dof)
         if displacement:
             index = self.dof.findData(displacement.dof)
@@ -860,12 +864,10 @@ class PrescribedDisplacementDialog(QDialog):
 
     def _sync_value_label(self, *_args) -> None:
         dof = int(self.dof.currentData() or 1)
-        if dof <= 3:
-            label = (
-                f"Value [{self.unit_system.length}]:"
-            )
-        else:
+        if dof_is_rotation(self.ndm, self.ndf, dof):
             label = "Value [rad]:"
+        else:
+            label = f"Value [{self.unit_system.length}]:"
         self.value_label.setText(label)
 
     def data(self) -> PrescribedDisplacementData:

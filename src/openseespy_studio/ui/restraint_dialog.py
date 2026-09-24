@@ -11,36 +11,54 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ..model import FIXITY_PRESETS
+from ..model import (
+    dof_labels_for_model,
+    fixity_presets_for_model,
+)
 
 
 class RestraintDialog(QDialog):
-    DOF_LABELS = ("UX", "UY", "UZ", "RX", "RY", "RZ")
-
-    def __init__(self, initial=None, parent=None):
+    def __init__(
+        self,
+        initial=None,
+        parent=None,
+        *,
+        ndm=3,
+        ndf=6,
+    ):
         super().__init__(parent)
         self.setWindowTitle("Support / Restraint")
         self.setModal(True)
         self.resize(360, 330)
+
+        self.ndm = int(ndm)
+        self.ndf = int(ndf)
+        self._dof_labels = dof_labels_for_model(self.ndm, self.ndf)
+        self._presets = fixity_presets_for_model(self.ndm, self.ndf)
+        self._preset_display = {
+            name: (
+                f"{name} (free U{name[-1]})"
+                if name.startswith("Roller ")
+                else name
+            )
+            for name in self._presets
+        }
 
         root = QVBoxLayout(self)
 
         form = QFormLayout()
         self.preset = QComboBox()
         self._preset_names = [
-            "Fixed",
-            "Pinned",
-            "Roller X (free UX)",
-            "Roller Y (free UY)",
-            "Roller Z (free UZ)",
-            "Custom",
-        ]
+            self._preset_display[name]
+            for name in self._presets
+        ] + ["Custom"]
         self.preset.addItems(self._preset_names)
         form.addRow("Preset:", self.preset)
         root.addLayout(form)
 
         hint = QLabel(
-            "Checked DOF = restrained. Roller axis is the free translation direction."
+            "Checked DOF = restrained. Labels follow the active OpenSees "
+            f"model (ndm={self.ndm}, ndf={self.ndf})."
         )
         hint.setWordWrap(True)
         root.addWidget(hint)
@@ -48,7 +66,7 @@ class RestraintDialog(QDialog):
         group = QGroupBox("Degrees of freedom")
         dof_form = QFormLayout(group)
         self.checks: list[QCheckBox] = []
-        for label in self.DOF_LABELS:
+        for label in self._dof_labels:
             check = QCheckBox("Restrained")
             self.checks.append(check)
             dof_form.addRow(f"{label}:", check)
@@ -67,43 +85,39 @@ class RestraintDialog(QDialog):
 
         if initial is not None:
             values = tuple(int(v) for v in initial)
-            matched = None
-            for name, fixity in FIXITY_PRESETS.items():
-                if values == fixity:
-                    matched = name
-                    break
+            matched = next(
+                (
+                    name
+                    for name, fixity in self._presets.items()
+                    if values == fixity
+                ),
+                None,
+            )
             if matched is None:
                 self.preset.setCurrentText("Custom")
                 self._set_checks(values)
             else:
-                label = {
-                    "Fixed": "Fixed",
-                    "Pinned": "Pinned",
-                    "Roller X": "Roller X (free UX)",
-                    "Roller Y": "Roller Y (free UY)",
-                    "Roller Z": "Roller Z (free UZ)",
-                }[matched]
+                label = self._preset_display[matched]
                 self.preset.setCurrentText(label)
                 self._preset_changed(label)
         else:
-            self.preset.setCurrentText("Fixed")
-            self._preset_changed("Fixed")
+            self.preset.setCurrentText(
+                self._preset_display.get("Fixed", "Custom")
+            )
+            self._preset_changed(self.preset.currentText())
 
     def _preset_changed(self, label: str) -> None:
-        mapping = {
-            "Fixed": FIXITY_PRESETS["Fixed"],
-            "Pinned": FIXITY_PRESETS["Pinned"],
-            "Roller X (free UX)": FIXITY_PRESETS["Roller X"],
-            "Roller Y (free UY)": FIXITY_PRESETS["Roller Y"],
-            "Roller Z (free UZ)": FIXITY_PRESETS["Roller Z"],
-        }
-        if label in mapping:
-            self._set_checks(mapping[label])
+        for name, display in self._preset_display.items():
+            if label == display:
+                self._set_checks(self._presets[name])
+                return
 
     def _set_checks(self, fixity) -> None:
+        values = tuple(int(value) for value in fixity)
         self._updating = True
         try:
-            for check, value in zip(self.checks, fixity):
+            for index, check in enumerate(self.checks):
+                value = values[index] if index < len(values) else 0
                 check.setChecked(bool(value))
         finally:
             self._updating = False
@@ -112,26 +126,24 @@ class RestraintDialog(QDialog):
         if self._updating:
             return
         values = self.fixity()
-        for name, preset in FIXITY_PRESETS.items():
-            if values == preset:
-                label = {
-                    "Fixed": "Fixed",
-                    "Pinned": "Pinned",
-                    "Roller X": "Roller X (free UX)",
-                    "Roller Y": "Roller Y (free UY)",
-                    "Roller Z": "Roller Z (free UZ)",
-                }[name]
-                self._updating = True
-                try:
-                    self.preset.setCurrentText(label)
-                finally:
-                    self._updating = False
-                return
+        matched = next(
+            (
+                name
+                for name, preset in self._presets.items()
+                if values == preset
+            ),
+            None,
+        )
         self._updating = True
         try:
-            self.preset.setCurrentText("Custom")
+            self.preset.setCurrentText(
+                self._preset_display[matched]
+                if matched is not None
+                else "Custom"
+            )
         finally:
             self._updating = False
 
     def fixity(self) -> tuple[int, ...]:
         return tuple(1 if check.isChecked() else 0 for check in self.checks)
+
