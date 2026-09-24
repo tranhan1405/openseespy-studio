@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "library_name": "SARE Verified nD Material Library",
+  "policy": {
+    "description": "Official OpenSees model definitions and compatibility are source-verified. Numerical starter values are engineering initialization values, not calibrated material datasets.",
+    "insertion_rule": "Only models implemented by SARE core may be inserted."
+  },
+  "records": [
+    {
+      "id": "opensees-elastic-isotropic-starter",
+      "family": "Elastic continuum",
+      "material": "Generic isotropic elastic continuum",
+      "model": "ElasticIsotropic",
+      "preset_name": "Elastic Isotropic · Starter",
+      "parameters_si": {
+        "E": 200000000000,
+        "nu": 0.3,
+        "rho": 0
+      },
+      "verified_parameters": [
+        "E",
+        "nu",
+        "rho"
+      ],
+      "behavior": [
+        "Elastic",
+        "Isotropic",
+        "Rate independent"
+      ],
+      "compatibility": [
+        "ThreeDimensional",
+        "PlaneStrain",
+        "Plane Stress",
+        "AxiSymmetric",
+        "PlateFiber"
+      ],
+      "applicability": [
+        "Linear isotropic continuum response",
+        "Shell PlateFiber when used through a PlateFiber-compatible section/material formulation"
+      ],
+      "limitations": [
+        "Starter E, nu and rho are not a calibrated material dataset.",
+        "Replace starter values with project-specific verified properties before research/design use."
+      ],
+      "primary_reference": {
+        "type": "official_documentation",
+        "title": "Elastic Isotropic Material — OpenSees Documentation",
+        "authors": "OpenSees",
+        "url": "https://opensees.github.io/OpenSeesDocumentation/user/manual/material/ndMaterials/ElasticIsotropic.html",
+        "doi": ""
+      },
+      "parameter_evidence": {
+        "location": "Official command argument table and formulation note",
+        "note": "The source verifies parameter meanings, optional density, and supported formulations. Numerical starter values are SARE initialization values."
+      },
+      "verification": {
+        "status": "verified",
+        "model_definition_checked": true,
+        "compatibility_checked": true,
+        "units_checked": true,
+        "parameter_status": "starter_template"
+      },
+      "source_units": {
+        "E": "Pa",
+        "nu": "dimensionless",
+        "rho": "kg/m^3"
+      }
+    },
+    {
+      "id": "opensees-elastic-orthotropic-starter",
+      "family": "Elastic continuum",
+      "material": "Generic orthotropic elastic continuum",
+      "model": "ElasticOrthotropic",
+      "preset_name": "Elastic Orthotropic · Starter",
+      "parameters_si": {
+        "Ex": 200000000000,
+        "Ey": 200000000000,
+        "Ez": 200000000000,
+        "nu_xy": 0.3,
+        "nu_yz": 0.3,
+        "nu_zx": 0.3,
+        "Gxy": 76923000000,
+        "Gyz": 76923000000,
+        "Gzx": 76923000000,
+        "rho": 0
+      },
+      "verified_parameters": [
+        "Ex",
+        "Ey",
+        "Ez",
+        "nu_xy",
+        "nu_yz",
+        "nu_zx",
+        "Gxy",
+        "Gyz",
+        "Gzx",
+        "rho"
+      ],
+      "behavior": [
+        "Elastic",
+        "Orthotropic",
+        "Rate independent"
+      ],
+      "compatibility": [
+        "ThreeDimensional",
+        "PlaneStrain",
+        "Plane Stress",
+        "AxiSymmetric",
+        "BeamFiber",
+        "PlateFiber"
+      ],
+      "applicability": [
+        "Linear orthotropic continuum response",
+        "Directional elastic properties",
+        "Shell PlateFiber formulation"
+      ],
+      "limitations": [
+        "Starter properties are intentionally isotropic-like for safe initialization and are not a calibrated orthotropic material.",
+        "Replace all directional constants with a mutually consistent project-specific property set."
+      ],
+      "primary_reference": {
+        "type": "official_documentation",
+        "title": "Elastic Orthotropic Material — OpenSees Documentation",
+        "authors": "OpenSees",
+        "url": "https://opensees.github.io/OpenSeesDocumentation/user/manual/material/ndMaterials/ElasticOrthotropic.html",
+        "doi": ""
+      },
+      "parameter_evidence": {
+        "location": "Official command argument table and formulation note",
+        "note": "The source verifies directional moduli, Poisson ratios, shear moduli, optional density, and supported formulations. Numerical starter values are SARE initialization values."
+      },
+      "verification": {
+        "status": "verified",
+        "model_definition_checked": true,
+        "compatibility_checked": true,
+        "units_checked": true,
+        "parameter_status": "starter_template"
+      },
+      "source_units": {
+        "Ex": "Pa",
+        "Ey": "Pa",
+        "Ez": "Pa",
+        "nu_xy": "dimensionless",
+        "nu_yz": "dimensionless",
+        "nu_zx": "dimensionless",
+        "Gxy": "Pa",
+        "Gyz": "Pa",
+        "Gzx": "Pa",
+        "rho": "kg/m^3"
+      }
+    },
+    {
+      "id": "opensees-j2-plasticity-starter",
+      "family": "Plastic continuum",
+      "material": "Generic von Mises continuum",
+      "model": "J2Plasticity",
+      "preset_name": "J2 Plasticity · Starter",
+      "parameters_si": {
+        "K": 166670000000,
+        "G": 76923000000,
+        "sig0": 250000000,
+        "sigInf": 350000000,
+        "delta": 16,
+        "H": 1000000000
+      },
+      "verified_parameters": [
+        "K",
+        "G",
+        "sig0",
+        "sigInf",
+        "delta",
+        "H"
+      ],
+      "behavior": [
+        "Elasto-plastic",
+        "J2 / von Mises",
+        "Isotropic hardening",
+        "Rate independent starter"
+      ],
+      "compatibility": [
+        "ThreeDimensional",
+        "PlaneStrain",
+        "Plane Stress",
+        "AxiSymmetric",
+        "PlateFiber"
+      ],
+      "applicability": [
+        "Pressure-insensitive metal plasticity",
+        "Continuum and PlateFiber formulations supported by OpenSees"
+      ],
+      "limitations": [
+        "Starter yielding/hardening values are not a calibrated metal dataset.",
+        "Calibrate K, G, yield and hardening parameters for the actual material.",
+        "This SARE baseline uses the six-argument rate-independent form currently supported by the generator/importer."
+      ],
+      "primary_reference": {
+        "type": "official_documentation",
+        "title": "J2 Plasticity Material — OpenSees Documentation",
+        "authors": "OpenSees",
+        "url": "https://opensees.github.io/OpenSeesDocumentation/user/manual/material/ndMaterials/J2Plasticity.html",
+        "doi": ""
+      },
+      "parameter_evidence": {
+        "location": "Official command syntax, argument table, theory and formulation note",
+        "note": "The source verifies the six active SARE parameters and supported formulations. Numerical starter values are SARE initialization values."
+      },
+      "verification": {
+        "status": "verified",
+        "model_definition_checked": true,
+        "compatibility_checked": true,
+        "units_checked": true,
+        "parameter_status": "starter_template"
+      },
+      "source_units": {
+        "K": "Pa",
+        "G": "Pa",
+        "sig0": "Pa",
+        "sigInf": "Pa",
+        "delta": "dimensionless",
+        "H": "Pa"
+      }
+    }
+  ]
+}
