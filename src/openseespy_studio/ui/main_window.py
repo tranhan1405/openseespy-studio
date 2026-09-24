@@ -30028,8 +30028,13 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "nd_materials_root":
+            library_action = menu.addAction("Open nD Material Library...")
+            library_action.triggered.connect(
+                self._show_nd_material_library
+            )
             create_action = menu.addAction("New nD Material...")
             create_action.triggered.connect(self._create_nd_material)
+            menu.addSeparator()
             properties = menu.addAction("Properties")
             properties.triggered.connect(
                 lambda: self._show_tree_root_properties(
