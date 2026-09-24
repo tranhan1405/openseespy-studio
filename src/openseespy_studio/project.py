@@ -2704,6 +2704,10 @@ class AnalysisSettingsData:
     response_spectrum_component_y: bool = True
     response_spectrum_rotd50: bool = True
     response_spectrum_rotd100: bool = True
+    # CPU/thread execution controls. Keep these at the end so existing
+    # positional AnalysisSettingsData construction remains backward compatible.
+    execution_mode: str = "Auto"
+    num_threads: int = 1
 
     def __post_init__(self) -> None:
         self.tag=_strict_int(self.tag, "Analysis tag"); self.name=str(self.name).strip() or f"Analysis {self.tag}"
@@ -2832,6 +2836,11 @@ class AnalysisSettingsData:
             self.response_spectrum_rotd100,
             "Response spectrum RotD100 output",
         )
+        self.execution_mode = str(self.execution_mode or "Auto")
+        self.num_threads = _strict_int(
+            self.num_threads,
+            "Analysis number of threads",
+        )
         numeric_values = (
             self.tolerance,
             self.load_increment,
@@ -2865,6 +2874,18 @@ class AnalysisSettingsData:
         if any(not math.isfinite(value) for value in numeric_values):
             raise ValueError("Analysis numeric settings must be finite.")
         if self.tag<=0: raise ValueError("Analysis tag must be positive.")
+        if self.execution_mode not in {
+            "Auto",
+            "Single Thread",
+            "Multi-thread",
+        }:
+            raise ValueError(
+                "Execution mode must be Auto, Single Thread, or Multi-thread."
+            )
+        if self.num_threads < 1:
+            raise ValueError("Analysis number of threads must be at least 1.")
+        if self.execution_mode == "Single Thread":
+            self.num_threads = 1
         if self.analysis_type not in {"Static","Pushover","Cyclic","Transient","Modal","Response Spectrum"}:
             raise ValueError(f"Unsupported analysis type: {self.analysis_type}")
         default_integrators = {
@@ -3220,7 +3241,8 @@ class AnalysisSettingsData:
             "response_spectrum_t2_step","response_spectrum_t2_end",
             "response_spectrum_t3_step","response_spectrum_t3_end",
             "response_spectrum_component_x","response_spectrum_component_y",
-            "response_spectrum_rotd50","response_spectrum_rotd100"
+            "response_spectrum_rotd50","response_spectrum_rotd100",
+            "execution_mode","num_threads"
         )}
 
     @classmethod
