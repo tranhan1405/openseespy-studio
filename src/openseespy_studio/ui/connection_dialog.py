@@ -1227,6 +1227,17 @@ class ConnectionDialog(QDialog):
         if not self.to_ground.isEnabled():
             self.to_ground.setChecked(False)
 
+        rayleigh_supported = connection_type in {
+            "zeroLength",
+            "zeroLengthSection",
+            "semiRigid",
+            "twoNodeLink",
+            "KrawinklerPanelZone",
+        }
+        self.do_rayleigh.setEnabled(rayleigh_supported)
+        if not rayleigh_supported:
+            self.do_rayleigh.setChecked(False)
+
         self.node_i.setEnabled(not joint_mode)
         self.node_j.setEnabled(
             not joint_mode and not self.to_ground.isChecked()
@@ -2108,7 +2119,17 @@ class ConnectionDialog(QDialog):
             "section_tag": section_tag,
             "orient_x": x,
             "orient_y": y,
-            "do_rayleigh": self.do_rayleigh.isChecked(),
+            "do_rayleigh": (
+                self.do_rayleigh.isChecked()
+                if connection_type in {
+                    "zeroLength",
+                    "zeroLengthSection",
+                    "semiRigid",
+                    "twoNodeLink",
+                    "KrawinklerPanelZone",
+                }
+                else False
+            ),
             "parameters": parameters,
             "pending_materials": (
                 pending_materials
@@ -2136,6 +2157,8 @@ class ConnectionDialog(QDialog):
             "twoNodeLink",
             "semiRigid",
             "Joint2D",
+            "BeamColumnJoint",
+            "LehighJoint2D",
             "KrawinklerPanelZone",
         }
         if needs_uniaxial and not self.materials:
