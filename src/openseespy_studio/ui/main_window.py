@@ -1112,6 +1112,8 @@ class PropertiesPanel(QWidget):
         result_layout.setSpacing(5)
 
         self.result_form = QFormLayout()
+        self.result_form.setContentsMargins(0, 0, 0, 0)
+        self.result_form.setSpacing(5)
         self.result_name = QLineEdit()
         self.result_analysis = QLineEdit()
         self.result_analysis.setReadOnly(True)
@@ -1204,8 +1206,26 @@ class PropertiesPanel(QWidget):
         )
         for label, widget in rows:
             self.result_form.addRow(label + ":", widget)
-        result_layout.addLayout(self.result_form)
-        result_layout.addStretch(1)
+
+        self.result_scroll_content = QWidget()
+        result_scroll_layout = QVBoxLayout(self.result_scroll_content)
+        result_scroll_layout.setContentsMargins(0, 0, 4, 0)
+        result_scroll_layout.setSpacing(0)
+        result_scroll_layout.addLayout(self.result_form)
+        result_scroll_layout.addStretch(1)
+
+        self.result_scroll = QScrollArea()
+        self.result_scroll.setWidgetResizable(True)
+        self.result_scroll.setFrameShape(QFrame.NoFrame)
+        self.result_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarAlwaysOff
+        )
+        self.result_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded
+        )
+        self.result_scroll.setMinimumSize(0, 0)
+        self.result_scroll.setWidget(self.result_scroll_content)
+        result_layout.addWidget(self.result_scroll, 1)
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
