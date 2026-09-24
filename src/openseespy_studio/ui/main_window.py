@@ -4857,9 +4857,10 @@ class MainWindow(QMainWindow):
                 "Replace Current FE Model",
                 (
                     "RC Wall Wizard is set to Replace mode.\n\n"
-                    "Existing FE nodes/elements and model-linked loads, "
-                    "constraints, recorders, analyses and results will be "
-                    "cleared. Material/section libraries are preserved.\n\n"
+                    "Existing Sketch/Geometry objects, FE nodes/elements "
+                    "and model-linked loads, constraints, recorders, analyses "
+                    "and results will be cleared. Material/nDMaterial/section "
+                    "libraries are preserved.\n\n"
                     "Continue and generate the wall?"
                 ),
                 QMessageBox.Yes | QMessageBox.No,
