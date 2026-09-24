@@ -364,6 +364,7 @@ class _Importer:
         self.analysis_metadata: dict[str, Any] = {}
         self.analysis_events: list[dict[str, Any]] = []
         self._deferred_modal_frequencies: dict[str, dict[str, Any]] = {}
+        self._deferred_assignments: dict[str, ast.AST] = {}
         self._load_const_event_index: int | None = None
         self._pending_node_probes: set[tuple[str, int, int]] = set()
         self._next_constraint = 1
@@ -1979,6 +1980,8 @@ class _Importer:
             if command == "rayleigh":
                 if self._recognize_single_mode_rayleigh(node):
                     return
+                if self._recognize_two_mode_rayleigh(node):
+                    return
                 if self._recognize_direct_rayleigh(node):
                     return
                 args = self.call_args(node)
@@ -2090,10 +2093,61 @@ class _Importer:
             self.issue("ERROR", node, command, str(exc))
 
     def _recognize_eigen_frequency_assignment(self, stmt: ast.Assign) -> bool:
-        if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
+        if len(stmt.targets) != 1:
             return False
 
+        target = stmt.targets[0]
         value = stmt.value
+
+        # Common NumPy pattern:
+        # w1, w2, w3 = np.array(ops.eigen('-fullGenLapack', 3))**0.5
+        if isinstance(target, (ast.Tuple, ast.List)):
+            if (
+                isinstance(value, ast.BinOp)
+                and isinstance(value.op, ast.Pow)
+                and isinstance(value.right, ast.Constant)
+                and isinstance(value.right.value, (int, float))
+                and float(value.right.value) == 0.5
+                and isinstance(value.left, ast.Call)
+                and isinstance(value.left.func, ast.Attribute)
+                and value.left.func.attr == "array"
+                and len(value.left.args) == 1
+                and isinstance(value.left.args[0], ast.Call)
+                and self.command_name(value.left.args[0]) == "eigen"
+            ):
+                eigen_call = value.left.args[0]
+                try:
+                    args = self.call_args(eigen_call)
+                    num_modes = int(args[-1])
+                except (_Unresolved, TypeError, ValueError, IndexError):
+                    return False
+                names = [
+                    child.id
+                    for child in target.elts
+                    if isinstance(child, ast.Name)
+                ]
+                if len(names) != len(target.elts) or not names:
+                    return False
+                solver = (
+                    str(args[0])
+                    if len(args) > 1 and isinstance(args[0], str)
+                    else "-genBandArpack"
+                )
+                for index, name in enumerate(names):
+                    if index >= num_modes:
+                        break
+                    self._deferred_modal_frequencies[name] = {
+                        "mode": index + 1,
+                        "solver": solver,
+                        "num_modes": num_modes,
+                    }
+                self.analysis_state["eigen_solver"] = solver
+                return True
+            return False
+
+        if not isinstance(target, ast.Name):
+            return False
+
         subscript: ast.Subscript | None = None
 
         if (
@@ -2144,11 +2198,84 @@ class _Importer:
             if len(args) > 1 and isinstance(args[0], str)
             else "-genBandArpack"
         )
-        self._deferred_modal_frequencies[stmt.targets[0].id] = {
+        self._deferred_modal_frequencies[target.id] = {
             "mode": index + 1,
             "solver": solver,
             "num_modes": num_modes,
         }
+        return True
+
+    def _deferred_expression(self, node: ast.AST) -> ast.AST:
+        if isinstance(node, ast.Name):
+            return self._deferred_assignments.get(node.id, node)
+        return node
+
+    @staticmethod
+    def _frequency_pair_from_sum(node: ast.AST) -> tuple[str, str] | None:
+        if not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Add):
+            return None
+        if not isinstance(node.left, ast.Name) or not isinstance(node.right, ast.Name):
+            return None
+        if node.left.id == node.right.id:
+            return None
+        return node.left.id, node.right.id
+
+    def _recognize_two_mode_rayleigh(self, node: ast.Call) -> bool:
+        if len(node.args) != 4:
+            return False
+        try:
+            middle = [
+                float(self.eval.eval(node.args[1])),
+                float(self.eval.eval(node.args[2])),
+            ]
+        except (_Unresolved, TypeError, ValueError):
+            return False
+        if any(abs(value) > 1.0e-15 for value in middle):
+            return False
+
+        alpha_expr = self._deferred_expression(node.args[0])
+        beta_expr = self._deferred_expression(node.args[3])
+        if not (
+            isinstance(alpha_expr, ast.BinOp)
+            and isinstance(alpha_expr.op, ast.Div)
+            and isinstance(beta_expr, ast.BinOp)
+            and isinstance(beta_expr.op, ast.Div)
+        ):
+            return False
+
+        alpha_pair = self._frequency_pair_from_sum(alpha_expr.right)
+        beta_pair = self._frequency_pair_from_sum(beta_expr.right)
+        if alpha_pair is None or beta_pair is None:
+            return False
+        if set(alpha_pair) != set(beta_pair):
+            return False
+        if not all(name in self._deferred_modal_frequencies for name in beta_pair):
+            return False
+
+        try:
+            numerator = float(self.eval.eval(beta_expr.left))
+        except (_Unresolved, TypeError, ValueError):
+            return False
+        zeta = numerator / 2.0
+        if not math.isfinite(zeta) or not 0.0 <= zeta < 1.0:
+            return False
+
+        alpha_names = {
+            child.id
+            for child in ast.walk(alpha_expr.left)
+            if isinstance(child, ast.Name)
+        }
+        if not set(beta_pair).issubset(alpha_names):
+            return False
+
+        left_spec = self._deferred_modal_frequencies[beta_pair[0]]
+        right_spec = self._deferred_modal_frequencies[beta_pair[1]]
+        self.analysis_state["rayleigh_model"] = "TwoMode"
+        self.analysis_state["rayleigh_damping_ratio"] = zeta
+        self.analysis_state["rayleigh_mode_i"] = int(left_spec["mode"])
+        self.analysis_state["rayleigh_mode_j"] = int(right_spec["mode"])
+        self.analysis_state["eigen_solver"] = str(left_spec["solver"])
+        self.count("Rayleigh damping")
         return True
 
     def _recognize_single_mode_rayleigh(self, node: ast.Call) -> bool:
@@ -3024,6 +3151,17 @@ class _Importer:
                     target.id for target in stmt.targets
                     if isinstance(target, ast.Name)
                 ]
+                symbolic_modal_names = {
+                    child.id
+                    for child in ast.walk(stmt.value)
+                    if (
+                        isinstance(child, ast.Name)
+                        and child.id in self._deferred_modal_frequencies
+                    )
+                }
+                if len(names) == 1 and symbolic_modal_names:
+                    self._deferred_assignments[names[0]] = stmt.value
+                    return
                 if (
                     not self._studio_source
                     and (
