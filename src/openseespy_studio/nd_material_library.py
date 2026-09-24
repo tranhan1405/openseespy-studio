@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 import json
+import math
 from importlib import resources
 from typing import Any
 
@@ -61,6 +62,21 @@ class NDMaterialLibraryRecord:
             == "starter_template"
         )
 
+    @property
+    def searchable_text(self) -> str:
+        parts = (
+            self.id,
+            self.family,
+            self.material,
+            self.model,
+            self.preset_name,
+            *self.behavior,
+            *self.compatibility,
+            *self.applicability,
+            *self.limitations,
+        )
+        return " ".join(str(value) for value in parts).lower()
+
     def source_metadata(self) -> dict[str, Any]:
         return {
             "library": "SARE verified nD material library",
@@ -110,12 +126,73 @@ def _validate_reference(
         )
 
 
+def _validate_parameter_values(
+    model: str,
+    parameters: dict[str, float],
+    record_id: str,
+) -> None:
+    for key, value in parameters.items():
+        if not math.isfinite(value):
+            raise ValueError(
+                f"Official nD material record {record_id!r} has "
+                f"non-finite parameter {key!r}."
+            )
+
+    positive = {
+        "ElasticIsotropic": ("E",),
+        "ElasticOrthotropic": (
+            "Ex", "Ey", "Ez", "Gxy", "Gyz", "Gzx",
+        ),
+        "J2Plasticity": ("K", "G"),
+    }.get(model, ())
+    for key in positive:
+        if parameters[key] <= 0.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                f"{key} > 0."
+            )
+
+    if "rho" in parameters and parameters["rho"] < 0.0:
+        raise ValueError(
+            f"Official nD material record {record_id!r} requires rho >= 0."
+        )
+
+    if model == "ElasticIsotropic":
+        nu = parameters["nu"]
+        if not (-1.0 < nu < 0.5):
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "-1 < nu < 0.5."
+            )
+
+    if model == "J2Plasticity":
+        for key in ("sig0", "sigInf", "delta", "H"):
+            if parameters[key] < 0.0:
+                raise ValueError(
+                    f"Official nD material record {record_id!r} requires "
+                    f"{key} >= 0."
+                )
+
+
 def _record_from_dict(raw: dict[str, Any]) -> NDMaterialLibraryRecord:
     record_id = str(raw.get("id", "")).strip()
     if not record_id:
         raise ValueError("nD material library record has no id.")
 
+    family = str(raw.get("family", "")).strip()
+    material = str(raw.get("material", "")).strip()
     model = str(raw.get("model", "")).strip()
+    preset_name = str(raw.get("preset_name", "")).strip()
+    for label, value in (
+        ("family", family),
+        ("material", material),
+        ("preset_name", preset_name),
+    ):
+        if not value:
+            raise ValueError(
+                f"nD material library record {record_id!r} has no {label}."
+            )
+
     expected = ND_MATERIAL_PARAMETER_ORDER.get(model)
     if expected is None:
         raise ValueError(
@@ -146,6 +223,8 @@ def _record_from_dict(raw: dict[str, Any]) -> NDMaterialLibraryRecord:
         str(key): float(value)
         for key, value in dict(raw.get("parameters_si", {})).items()
     }
+    _validate_parameter_values(model, parameters, record_id)
+
     expected_set = set(expected)
     actual_set = set(parameters)
     if actual_set != expected_set:
@@ -171,6 +250,17 @@ def _record_from_dict(raw: dict[str, Any]) -> NDMaterialLibraryRecord:
             "active model parameter as verified."
         )
 
+    behavior = tuple(
+        str(value).strip()
+        for value in raw.get("behavior", [])
+        if str(value).strip()
+    )
+    if not behavior:
+        raise ValueError(
+            f"Official nD material record {record_id!r} has no "
+            "behavior metadata."
+        )
+
     compatibility = tuple(
         str(value).strip()
         for value in raw.get("compatibility", [])
@@ -184,15 +274,13 @@ def _record_from_dict(raw: dict[str, Any]) -> NDMaterialLibraryRecord:
 
     return NDMaterialLibraryRecord(
         id=record_id,
-        family=str(raw.get("family", "")).strip(),
-        material=str(raw.get("material", "")).strip(),
+        family=family,
+        material=material,
         model=model,
-        preset_name=str(raw.get("preset_name", "")).strip(),
+        preset_name=preset_name,
         parameters_si=parameters,
         verified_parameters=verified_parameters,
-        behavior=tuple(
-            str(value) for value in raw.get("behavior", [])
-        ),
+        behavior=behavior,
         compatibility=compatibility,
         applicability=tuple(
             str(value) for value in raw.get("applicability", [])
@@ -225,6 +313,59 @@ def load_verified_nd_material_library(
     if len(ids) != len(set(ids)):
         raise ValueError("Duplicate nD-material-library record id.")
     return records
+
+
+def nd_material_library_facets(
+    records: tuple[NDMaterialLibraryRecord, ...] | None = None,
+) -> dict[str, tuple[str, ...]]:
+    source = records or load_verified_nd_material_library()
+    return {
+        "family": tuple(sorted({record.family for record in source})),
+        "model": tuple(sorted({record.model for record in source})),
+        "behavior": tuple(sorted({
+            value
+            for record in source
+            for value in record.behavior
+        })),
+        "compatibility": tuple(sorted({
+            value
+            for record in source
+            for value in record.compatibility
+        })),
+    }
+
+
+def filter_verified_nd_material_library(
+    records: tuple[NDMaterialLibraryRecord, ...] | None = None,
+    *,
+    query: str = "",
+    family: str = "",
+    model: str = "",
+    behavior: str = "",
+    compatibility: str = "",
+) -> tuple[NDMaterialLibraryRecord, ...]:
+    source = records or load_verified_nd_material_library()
+    query_text = str(query).strip().lower()
+    family_text = str(family).strip()
+    model_text = str(model).strip()
+    behavior_text = str(behavior).strip()
+    compatibility_text = str(compatibility).strip()
+
+    return tuple(
+        record
+        for record in source
+        if (not query_text or query_text in record.searchable_text)
+        and (not family_text or record.family == family_text)
+        and (not model_text or record.model == model_text)
+        and (
+            not behavior_text
+            or behavior_text in record.behavior
+        )
+        and (
+            not compatibility_text
+            or compatibility_text in record.compatibility
+        )
+    )
 
 
 def nd_material_from_library_record(
