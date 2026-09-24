@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 44
+PROJECT_FORMAT_VERSION = 45
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -3301,6 +3301,21 @@ class RecorderData:
                 "size",
                 "stiffness",
                 "defoANDforce",
+                "internalDisplacement",
+                "externalDisplacement",
+                "node1BarSlipL",
+                "node1BarSlipR",
+                "node1InterfaceShear",
+                "node2BarSlipB",
+                "node2BarSlipT",
+                "node2InterfaceShear",
+                "node3BarSlipL",
+                "node3BarSlipR",
+                "node3InterfaceShear",
+                "node4BarSlipB",
+                "node4BarSlipT",
+                "node4InterfaceShear",
+                "shearPanel",
             }:
                 raise ValueError("Unsupported Element recorder response.")
         elif self.recorder_type == "Section":
