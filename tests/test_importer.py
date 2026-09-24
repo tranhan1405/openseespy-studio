@@ -745,3 +745,46 @@ reaction_x = nodeReaction(1, 1)
     assert reaction.settings["node"] == 1
     assert reaction.settings["dof"] == 1
     assert result.imported_counts["Node probes"] == 2
+
+
+def test_importer_recovers_1d_zero_length_mdof_with_node_zero_and_inline_mass():
+    source = """
+import openseespy.opensees as ops
+
+m1 = 0.1
+m2 = 0.2
+m3 = 0.3
+ops.wipe()
+ops.model('basic', '-ndm', 1, '-ndf', 1)
+ops.node(0, 0)
+ops.node(1, 0, '-mass', m1)
+ops.node(2, 0, '-mass', m2)
+ops.node(3, 0, '-mass', m3)
+ops.fix(0, 1)
+ops.uniaxialMaterial('Steel01', 1, 0.55, 60.0, 0.01)
+ops.uniaxialMaterial('Steel01', 2, 0.45, 50.0, 0.01)
+ops.uniaxialMaterial('Steel01', 3, 0.30, 30.0, 0.01)
+ops.element('zeroLength', 1, 0, 1, '-mat', 1, '-dir', 1, '-doRayleigh', 1)
+ops.element('zeroLength', 2, 1, 2, '-mat', 2, '-dir', 1, '-doRayleigh', 1)
+ops.element('zeroLength', 3, 2, 3, '-mat', 3, '-dir', 1, '-doRayleigh', 1)
+ops.wipe()
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="nonlinear_mdof.py",
+        units={"length": "m", "force": "kN", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    assert result.project.model.ndm == 1
+    assert result.project.model.ndf == 1
+    assert set(result.project.model.nodes) == {0, 1, 2, 3}
+    assert result.project.model.nodes[0].fixity == (1,)
+    assert result.project.model.nodes[1].mass == (0.1,)
+    assert result.project.model.nodes[2].mass == (0.2,)
+    assert result.project.model.nodes[3].mass == (0.3,)
+    assert set(result.project.connections) == {1, 2, 3}
+    assert result.project.connections[1].node_i == 0
+    assert result.project.connections[1].materials_by_dof == {1: 1}
+    assert result.project.connections[1].do_rayleigh is True
