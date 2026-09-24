@@ -693,7 +693,7 @@ ND_MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
         "liquefac2": 0.01,
         "liquefac3": 1.0,
         "noYieldSurf": 20.0,
-        "e": 0.7,
+        "e": 0.6,
         "cs1": 0.9,
         "cs2": 0.02,
         "cs3": 0.7,
