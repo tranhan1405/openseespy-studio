@@ -211,8 +211,15 @@ class TimeHistoryPlot(QWidget):
                 self._x[marker_index],
                 self._y[marker_index],
             )
+            tracker_pen = QPen(QColor("#c62828"), 1)
+            tracker_pen.setStyle(Qt.DashLine)
+            painter.setPen(tracker_pen)
+            painter.drawLine(
+                QPointF(marker.x(), top),
+                QPointF(marker.x(), bottom),
+            )
             painter.setPen(QPen(QColor("#c62828"), 2))
-            painter.setBrush(QColor("#ffffff"))
+            painter.setBrush(QColor("#c62828"))
             painter.drawEllipse(marker, 5.0, 5.0)
 
         painter.setPen(QColor("#526579"))
@@ -949,6 +956,8 @@ class ResultsPanel(QWidget):
         self._motion_timer.timeout.connect(self._advance_motion)
         self._motion_info = None
         self._motion_frame_index = 0
+        self._motion_source_frame_count = 0
+        self._motion_display_frame_count = 0
         self._calibration_rows: list[dict[str, Any]] = []
         self._cyclic_experiment_dataset: dict[str, Any] = {}
         self._cyclic_experiment_path = ""
@@ -996,6 +1005,7 @@ class ResultsPanel(QWidget):
         self._build_calibration_tab()
         self._build_history_tab()
         self._build_motion_tab()
+        root.addWidget(self.motion_page)
 
         # QTabWidget normally derives its minimum from every hidden page.
         # Results pages contain wide tables, so without relaxing these hints
@@ -1035,6 +1045,8 @@ class ResultsPanel(QWidget):
                 return
 
     def show_jobs(self) -> None:
+        if hasattr(self, "motion_page"):
+            self.motion_page.setVisible(False)
         self._select_tab("Jobs")
 
     def show_solution_result(
@@ -1044,6 +1056,17 @@ class ResultsPanel(QWidget):
     ) -> None:
         options = dict(settings or {})
         kind = str(result_type)
+
+        if hasattr(self, "motion_page"):
+            self.motion_page.setVisible(
+                kind in {
+                    "DeformedShape",
+                    "NodalDisplacement",
+                    "ModeShape",
+                    "Motion",
+                }
+                and self._motion_display_frame_count > 0
+            )
 
         if kind == "DeformedShape":
             scale = options.get("scale", 10.0)
@@ -1323,7 +1346,22 @@ class ResultsPanel(QWidget):
                 self.motion_auto_scale.setChecked(
                     bool(options.get("auto_scale"))
                 )
-            self._select_tab("Animation")
+            analysis = (
+                self._result.get("analysis", {})
+                if isinstance(self._result, dict)
+                else {}
+            )
+            analysis_type = (
+                str(analysis.get("type", ""))
+                if isinstance(analysis, dict)
+                else ""
+            )
+            self._select_tab(
+                "Mode Shape" if analysis_type == "Modal" else "Deformation"
+            )
+            self.motion_page.setVisible(
+                self._motion_display_frame_count > 0
+            )
             self._emit_current_motion_frame()
             return
         if kind == "Convergence":
@@ -1749,6 +1787,12 @@ class ResultsPanel(QWidget):
         row.addWidget(clear)
         row.addStretch(1)
         layout.addLayout(row)
+
+        self.node_frame_status = QLabel(
+            "Values: final result · animation values update on Pause."
+        )
+        self.node_frame_status.setWordWrap(True)
+        layout.addWidget(self.node_frame_status)
 
         self.node_table = QTableWidget(0, 7)
         self.node_table.setHorizontalHeaderLabels(
@@ -2991,6 +3035,19 @@ class ResultsPanel(QWidget):
             self._emit_current_motion_frame
         )
         source_row.addWidget(self.motion_auto_scale)
+
+        source_row.addWidget(QLabel("Frames:"))
+        self.motion_frames = QSpinBox()
+        self.motion_frames.setRange(2, 500)
+        self.motion_frames.setValue(60)
+        self.motion_frames.setToolTip(
+            "Maximum animation frames. Long histories are sampled evenly; "
+            "solver result data are unchanged."
+        )
+        self.motion_frames.valueChanged.connect(
+            self._motion_frame_budget_changed
+        )
+        source_row.addWidget(self.motion_frames)
         layout.addLayout(source_row)
 
         transport = QHBoxLayout()
@@ -3004,15 +3061,27 @@ class ResultsPanel(QWidget):
         self.motion_play.toggled.connect(self._toggle_motion_playback)
         transport.addWidget(self.motion_play)
 
-        clear = QPushButton("Clear")
-        clear.clicked.connect(self.stop_motion)
-        clear.clicked.connect(self.clear_overlay_requested.emit)
-        transport.addWidget(clear)
+        self.motion_stop = QPushButton("■ Stop")
+        self.motion_stop.setToolTip(
+            "Stop playback and keep the current frame displayed."
+        )
+        self.motion_stop.clicked.connect(self.stop_motion)
+        transport.addWidget(self.motion_stop)
 
         next_button = QPushButton("▶")
         next_button.setToolTip("Next motion frame")
         next_button.clicked.connect(lambda: self._step_motion(1))
         transport.addWidget(next_button)
+
+        transport.addWidget(QLabel("Frame:"))
+        self.motion_frame_spin = QSpinBox()
+        self.motion_frame_spin.setRange(1, 1)
+        self.motion_frame_spin.valueChanged.connect(
+            self._motion_frame_spin_changed
+        )
+        transport.addWidget(self.motion_frame_spin)
+        self.motion_counter = QLabel("/ 0")
+        transport.addWidget(self.motion_counter)
 
         transport.addWidget(QLabel("Speed:"))
         self.motion_speed = QComboBox()
@@ -3041,24 +3110,29 @@ class ResultsPanel(QWidget):
         slider_row = QHBoxLayout()
         self.motion_slider = QSlider(Qt.Horizontal)
         self.motion_slider.setRange(0, 0)
+        self.motion_slider.setToolTip(
+            "Drag the round handle to scrub the current animation frame."
+        )
+        self.motion_slider.setStyleSheet(
+            "QSlider::groove:horizontal { height: 4px; }"
+            "QSlider::handle:horizontal { width: 14px; margin: -5px 0; "
+            "border-radius: 7px; }"
+        )
         self.motion_slider.valueChanged.connect(
             self._motion_slider_changed
         )
         slider_row.addWidget(self.motion_slider, 1)
-        self.motion_counter = QLabel("0 / 0")
-        slider_row.addWidget(self.motion_counter)
         layout.addLayout(slider_row)
 
         self.motion_info_label = QLabel(
-            "Run or select an analysis result to animate deformation. "
-            "Animation can also be opened directly from Deformation, "
-            "Mode Shape, or Node Results."
+            "Result animation · values/tables are frozen during Play and "
+            "synchronized to the current frame on Pause."
         )
         self.motion_info_label.setWordWrap(True)
         layout.addWidget(self.motion_info_label)
-        layout.addStretch(1)
 
-        self.tabs.addTab(page, "Animation")
+        self.motion_page = page
+        self.motion_page.setVisible(False)
 
     def _open_animation(
         self,
@@ -3084,14 +3158,110 @@ class ResultsPanel(QWidget):
             if not self.motion_auto_scale.isChecked():
                 self.motion_scale.setValue(self.deformation_scale.value())
 
-        self._select_tab("Animation")
+        self.motion_page.setVisible(
+            self._motion_display_frame_count > 0
+        )
         self._emit_current_motion_frame()
         if (
             autoplay
             and self._motion_info is not None
-            and int(self._motion_info.frame_count) > 1
+            and self._motion_display_frame_count > 1
         ):
             self.motion_play.setChecked(True)
+
+    def _motion_frame_budget_value(self) -> int:
+        return max(
+            2,
+            int(self.motion_frames.value())
+            if hasattr(self, "motion_frames")
+            else 60,
+        )
+
+    def _motion_source_index(self, display_index: int) -> int:
+        source_count = max(0, int(self._motion_source_frame_count))
+        display_count = max(0, int(self._motion_display_frame_count))
+        if source_count <= 1 or display_count <= 1:
+            return 0
+        index = max(0, min(int(display_index), display_count - 1))
+        return int(
+            round(index * (source_count - 1) / (display_count - 1))
+        )
+
+    def _configure_motion_frames(self, *, reset: bool) -> None:
+        budget = self._motion_frame_budget_value()
+        self._motion_info = motion_info(
+            self._result,
+            mode=self._motion_selected_mode(),
+            modal_frames=budget,
+            fallback_frames=budget,
+            scan_reference=False,
+        )
+        source_count = int(self._motion_info.frame_count)
+        display_count = min(source_count, budget) if source_count > 0 else 0
+        self._motion_source_frame_count = source_count
+        self._motion_display_frame_count = display_count
+
+        if reset:
+            self._motion_frame_index = 0
+        elif display_count > 0:
+            self._motion_frame_index = min(
+                self._motion_frame_index,
+                display_count - 1,
+            )
+        else:
+            self._motion_frame_index = 0
+
+        self.motion_slider.blockSignals(True)
+        self.motion_slider.setRange(0, max(0, display_count - 1))
+        self.motion_slider.setValue(self._motion_frame_index)
+        self.motion_slider.blockSignals(False)
+
+        self.motion_frame_spin.blockSignals(True)
+        self.motion_frame_spin.setRange(1, max(1, display_count))
+        self.motion_frame_spin.setValue(
+            self._motion_frame_index + 1 if display_count else 1
+        )
+        self.motion_frame_spin.setEnabled(display_count > 0)
+        self.motion_frame_spin.blockSignals(False)
+        self.motion_counter.setText(f"/ {display_count}")
+
+    def _motion_frame_budget_changed(self, *_args) -> None:
+        old_source = self._motion_source_index(self._motion_frame_index)
+        self._configure_motion_frames(reset=False)
+        if (
+            self._motion_source_frame_count > 1
+            and self._motion_display_frame_count > 1
+        ):
+            target = int(
+                round(
+                    old_source
+                    * (self._motion_display_frame_count - 1)
+                    / (self._motion_source_frame_count - 1)
+                )
+            )
+            self._set_motion_index(target)
+        else:
+            self._emit_current_motion_frame()
+
+    def _motion_frame_spin_changed(self, value: int) -> None:
+        self._set_motion_index(int(value) - 1)
+
+    def _motion_effective_dt(self) -> float | None:
+        if (
+            self._motion_info is None
+            or self._motion_info.transient_dt is None
+        ):
+            return None
+        dt = float(self._motion_info.transient_dt)
+        if (
+            self._motion_source_frame_count > 1
+            and self._motion_display_frame_count > 1
+        ):
+            dt *= (
+                (self._motion_source_frame_count - 1)
+                / (self._motion_display_frame_count - 1)
+            )
+        return dt
 
     def _motion_selected_mode(self) -> int | None:
         data = self.motion_source.currentData()
@@ -3136,20 +3306,8 @@ class ResultsPanel(QWidget):
             )
         self.motion_source.blockSignals(False)
 
-        self._motion_frame_index = 0
-        self._motion_info = motion_info(
-            self._result,
-            mode=self._motion_selected_mode(),
-            scan_reference=False,
-        )
-        count = int(self._motion_info.frame_count)
-        self.motion_slider.blockSignals(True)
-        self.motion_slider.setRange(0, max(0, count - 1))
-        self.motion_slider.setValue(0)
-        self.motion_slider.blockSignals(False)
-        self.motion_counter.setText(
-            f"{1 if count else 0} / {count}"
-        )
+        self._configure_motion_frames(reset=True)
+        count = int(self._motion_display_frame_count)
         enabled = count > 0
         self.motion_play.setEnabled(enabled)
         self.motion_slider.setEnabled(enabled)
@@ -3167,41 +3325,40 @@ class ResultsPanel(QWidget):
         )
         self.motion_info_label.setText(
             (
-                f"{analysis_type or 'Analysis'} motion available · "
-                f"{count} frame(s). Open or play Motion to display it."
+                f"{analysis_type or 'Analysis'} · displaying {count} frame(s) "
+                f"from {self._motion_source_frame_count} result frame(s) · "
+                "tables update on Pause."
                 if count > 0
                 else "No deformation history or modal vectors are "
-                "available for motion playback."
+                "available for result animation."
             )
         )
+        if not enabled:
+            self.motion_page.setVisible(False)
         self._sync_motion_markers(None)
 
     def _motion_source_changed(self, *_args) -> None:
-        self._motion_frame_index = 0
-        self._motion_info = motion_info(
-            self._result,
-            mode=self._motion_selected_mode(),
-            scan_reference=False,
-        )
-        count = int(self._motion_info.frame_count)
-        self.motion_slider.blockSignals(True)
-        self.motion_slider.setRange(0, max(0, count - 1))
-        self.motion_slider.setValue(0)
-        self.motion_slider.blockSignals(False)
+        self._configure_motion_frames(reset=True)
         self._emit_current_motion_frame()
 
     def _motion_slider_changed(self, value: int) -> None:
         self._motion_frame_index = int(value)
+        self.motion_frame_spin.blockSignals(True)
+        self.motion_frame_spin.setValue(self._motion_frame_index + 1)
+        self.motion_frame_spin.blockSignals(False)
         self._emit_current_motion_frame()
 
     def _set_motion_index(self, index: int) -> None:
         if self._motion_info is None:
             return
-        count = int(self._motion_info.frame_count)
+        count = int(self._motion_display_frame_count)
         if count <= 0:
             return
         target = max(0, min(int(index), count - 1))
         self._motion_frame_index = target
+        self.motion_frame_spin.blockSignals(True)
+        self.motion_frame_spin.setValue(target + 1)
+        self.motion_frame_spin.blockSignals(False)
         if self.motion_slider.value() != target:
             self.motion_slider.setValue(target)
         else:
@@ -3210,7 +3367,7 @@ class ResultsPanel(QWidget):
     def _step_motion(self, delta: int) -> None:
         if self._motion_info is None:
             return
-        count = int(self._motion_info.frame_count)
+        count = int(self._motion_display_frame_count)
         if count <= 0:
             return
         target = self._motion_frame_index + int(delta)
@@ -3233,9 +3390,9 @@ class ResultsPanel(QWidget):
         interval = max(16, int(round(40.0 / speed)))
         if (
             self._motion_info is not None
-            and self._motion_info.transient_dt is not None
+            and self._motion_effective_dt() is not None
         ):
-            dt = float(self._motion_info.transient_dt)
+            dt = float(self._motion_effective_dt() or 0.0)
             if dt > 0.0 and dt / speed > 0.04:
                 interval = max(
                     16,
@@ -3252,13 +3409,13 @@ class ResultsPanel(QWidget):
             self.motion_play.setChecked(False)
             self.motion_play.setText("▶ Play")
             self.motion_play.blockSignals(False)
-        self._sync_motion_markers(None)
+        self._sync_paused_motion_values()
 
     def _toggle_motion_playback(self, checked: bool) -> None:
         if checked:
             if (
                 self._motion_info is None
-                or self._motion_info.frame_count <= 0
+                or self._motion_display_frame_count <= 0
             ):
                 self.motion_play.blockSignals(True)
                 self.motion_play.setChecked(False)
@@ -3267,8 +3424,8 @@ class ResultsPanel(QWidget):
             self.motion_play.setText("❚❚ Pause")
             speed = max(0.01, self._motion_speed_value())
             interval = max(16, int(round(40.0 / speed)))
-            if self._motion_info.transient_dt is not None:
-                dt = float(self._motion_info.transient_dt)
+            if self._motion_effective_dt() is not None:
+                dt = float(self._motion_effective_dt() or 0.0)
                 if dt > 0.0 and dt / speed > 0.04:
                     interval = max(
                         16,
@@ -3278,19 +3435,25 @@ class ResultsPanel(QWidget):
                     interval = 40
             self._motion_timer.setInterval(interval)
             self._motion_timer.start()
+            if hasattr(self, "node_frame_status"):
+                self.node_frame_status.setText(
+                    "Values frozen during playback · Pause to update the "
+                    "current displacement frame."
+                )
         else:
             self._motion_timer.stop()
             self.motion_play.setText("▶ Play")
+            self._sync_paused_motion_values()
 
     def _advance_motion(self) -> None:
         if self._motion_info is None:
             return
-        count = int(self._motion_info.frame_count)
+        count = int(self._motion_display_frame_count)
         if count <= 0:
             return
 
         increment = 1
-        dt = self._motion_info.transient_dt
+        dt = self._motion_effective_dt()
         speed = max(0.01, self._motion_speed_value())
         if dt is not None and dt > 0.0:
             desired = 0.04 * speed
@@ -3305,6 +3468,80 @@ class ResultsPanel(QWidget):
                 target = count - 1
                 self.motion_play.setChecked(False)
         self._set_motion_index(target)
+
+    def _sync_paused_motion_values(self) -> None:
+        if (
+            not hasattr(self, "node_frame_status")
+            or self._motion_info is None
+            or self._motion_info.kind == "Modal"
+        ):
+            return
+        history = (
+            self._result.get("history", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        nodes = history.get("nodes", {}) if isinstance(history, dict) else {}
+        if not isinstance(nodes, dict) or not nodes:
+            return
+
+        source_index = self._motion_source_index(
+            self._motion_frame_index
+        )
+        if self.node_quantity.currentText() != "Displacement":
+            self.node_frame_status.setText(
+                f"Animation paused at frame "
+                f"{self._motion_frame_index + 1}/"
+                f"{self._motion_display_frame_count}."
+            )
+            return
+
+        rows: list[tuple[str, ...]] = []
+        for tag in sorted(nodes, key=lambda value: int(value)):
+            node_data = nodes.get(tag, {})
+            disp = (
+                node_data.get("disp", [])
+                if isinstance(node_data, dict)
+                else []
+            )
+            if not isinstance(disp, list) or source_index >= len(disp):
+                continue
+            values = list(disp[source_index])
+            while len(values) < 6:
+                values.append(0.0)
+            rows.append(
+                (
+                    str(tag),
+                    *(f"{float(value):.6g}" for value in values[:6]),
+                )
+            )
+
+        if rows:
+            headers = ["Node", "UX", "UY", "UZ", "RX", "RY", "RZ"]
+            self.node_table.setUpdatesEnabled(False)
+            try:
+                self.node_table.setHorizontalHeaderLabels(headers)
+                self.node_table.setRowCount(len(rows))
+                for row_index, values in enumerate(rows):
+                    for column, value in enumerate(values):
+                        self.node_table.setItem(
+                            row_index,
+                            column,
+                            QTableWidgetItem(value),
+                        )
+            finally:
+                self.node_table.setUpdatesEnabled(True)
+            self._node_table_display_key = (
+                f"Displacement@frame:{source_index}"
+            )
+
+        self.node_frame_status.setText(
+            f"Values: animation frame "
+            f"{self._motion_frame_index + 1}/"
+            f"{self._motion_display_frame_count} "
+            f"(result frame {source_index + 1}/"
+            f"{self._motion_source_frame_count})."
+        )
 
     def _sync_motion_markers(self, index: int | None) -> None:
         self.history_plot.set_marker(index)
@@ -3322,11 +3559,13 @@ class ResultsPanel(QWidget):
             self._motion_info = motion_info(
                 self._result,
                 mode=mode,
+                modal_frames=self._motion_frame_budget_value(),
+                fallback_frames=self._motion_frame_budget_value(),
                 scan_reference=True,
             )
-        count = int(self._motion_info.frame_count)
+        count = int(self._motion_display_frame_count)
         if count <= 0:
-            self.motion_counter.setText("0 / 0")
+            self.motion_counter.setText("/ 0")
             self.motion_info_label.setText(
                 "No deformation history or modal vectors are available "
                 "for motion playback."
@@ -3338,18 +3577,23 @@ class ResultsPanel(QWidget):
             0,
             min(self._motion_frame_index, count - 1),
         )
+        source_index = self._motion_source_index(
+            self._motion_frame_index
+        )
         frame = motion_frame(
             self._result,
-            self._motion_frame_index,
+            source_index,
             mode=mode,
+            modal_frames=self._motion_frame_budget_value(),
+            fallback_frames=self._motion_frame_budget_value(),
             info=self._motion_info,
         )
-        self.motion_counter.setText(
-            f"{frame.index + 1} / {frame.frame_count}"
+        self.motion_counter.setText(f"/ {count}")
+        self.motion_info_label.setText(
+            f"Frame {self._motion_frame_index + 1}/{count} · {frame.label}"
         )
-        self.motion_info_label.setText(frame.label)
         self._sync_motion_markers(
-            None if self._motion_info.kind == "Modal" else frame.index
+            None if self._motion_info.kind == "Modal" else source_index
         )
         self.motion_frame_requested.emit(
             frame.vectors,
@@ -5371,6 +5615,12 @@ class ResultsPanel(QWidget):
         finally:
             self.node_table.setUpdatesEnabled(True)
         self._node_table_display_key = display_key
+        if hasattr(self, "node_frame_status"):
+            self.node_frame_status.setText(
+                "Values: final displacement result."
+                if displacement
+                else "Values: final reaction result."
+            )
 
     def _populate_element_table(self) -> None:
         component = self.element_quantity.currentText()
