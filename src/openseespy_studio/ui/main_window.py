@@ -417,15 +417,19 @@ QComboBox {
     min-height: 24px;
     border: 1px solid #afc2d6;
     border-radius: 3px;
-    background: #f2f7fc;
+    background: #eaf4ff;
     color: #25394c;
     padding: 1px 5px;
 }
 QComboBox:hover {
-    background: #e7f1fc;
+    background: #ddeeff;
     border-color: #86b4e7;
 }
-QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+    border: 1px solid #2f80ed;
+}
+QComboBox:focus {
+    background: #d5e9ff;
     border: 1px solid #2f80ed;
 }
 QLineEdit:read-only {
