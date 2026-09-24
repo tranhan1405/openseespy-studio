@@ -2012,6 +2012,9 @@ def analysis_to_openseespy(
     frame_element_tags: list[int] | None = None,
     truss_element_tags: list[int] | None = None,
     shell_element_tags: list[int] | None = None,
+    frame_history_tags: list[int] | None = None,
+    shell_force_history_tags: list[int] | None = None,
+    shell_deformation_history_tags: list[int] | None = None,
     mefi_crack_specs: dict[int, dict[str, object]] | None = None,
     support_node_tags: list[int] | None = None,
     plain_pattern_tags: list[int] | None = None,
@@ -2034,6 +2037,15 @@ def analysis_to_openseespy(
     frame_element_tags = list(frame_element_tags or [])
     truss_element_tags = list(truss_element_tags or [])
     shell_element_tags = list(shell_element_tags or [])
+    frame_history_tags = sorted({
+        int(tag) for tag in (frame_history_tags or [])
+    })
+    shell_force_history_tags = sorted({
+        int(tag) for tag in (shell_force_history_tags or [])
+    })
+    shell_deformation_history_tags = sorted({
+        int(tag) for tag in (shell_deformation_history_tags or [])
+    })
     mefi_crack_specs = {
         int(tag): dict(spec)
         for tag, spec in (mefi_crack_specs or {}).items()
@@ -2094,6 +2106,15 @@ def analysis_to_openseespy(
             )
         }
         for tag, spec in sorted(mefi_crack_specs.items())
+    }
+    frame_force_history = {
+        str(tag): [] for tag in frame_history_tags
+    }
+    shell_force_history = {
+        str(tag): [] for tag in shell_force_history_tags
+    }
+    shell_deformation_history = {
+        str(tag): [] for tag in shell_deformation_history_tags
     }
     system_command = (
         "ops.system('SparseGeneral', '-piv')"
@@ -2267,6 +2288,9 @@ def analysis_to_openseespy(
         f"{monitor_node}, 'control_dof': {settings.control_dof}, "
         "'displacement': [], 'base_shear': [], "
         "'base_reactions': [], 'nodes': {}, "
+        "'element_local_forces': " + repr(frame_force_history) + ", "
+        "'shell_section_forces': " + repr(shell_force_history) + ", "
+        "'shell_section_deformations': " + repr(shell_deformation_history) + ", "
         "'moment_curvature': {'force': [], 'deformation': []}, "
         "'section_responses': " + repr(section_response_history) + ", "
         "'mefi_panel_strains': " + repr(mefi_panel_history) + ", "
@@ -2289,6 +2313,9 @@ def analysis_to_openseespy(
         f"_studio_frame_element_tags = {frame_element_tags!r}",
         f"_studio_truss_element_tags = {truss_element_tags!r}",
         f"_studio_shell_element_tags = {shell_element_tags!r}",
+        f"_studio_frame_history_tags = {frame_history_tags!r}",
+        f"_studio_shell_force_history_tags = {shell_force_history_tags!r}",
+        f"_studio_shell_deformation_history_tags = {shell_deformation_history_tags!r}",
         f"_studio_mefi_crack_specs = {mefi_crack_specs!r}",
         f"_studio_support_node_tags = {support_node_tags!r}",
         f"_studio_plain_pattern_tags = {plain_pattern_tags!r}",
@@ -3416,6 +3443,81 @@ def analysis_to_openseespy(
     lines.append(
         "        _studio_node_history['reaction'].append("
         "_studio_reaction_row)"
+    )
+    lines.append("    for _studio_element in _studio_frame_history_tags:")
+    lines.append("        try:")
+    lines.append(
+        "            _studio_local = ops.eleResponse("
+        "_studio_element, 'localForce') or []"
+    )
+    lines.append(
+        "            _studio_local = [float(v) for v in _studio_local]"
+    )
+    lines.append("        except Exception:")
+    lines.append("            _studio_local = []")
+    lines.append(
+        "        _studio_results['history']['element_local_forces']"
+        "[str(_studio_element)].append(_studio_local)"
+    )
+    lines.append("    for _studio_element in _studio_shell_force_history_tags:")
+    lines.append("        _studio_gp_rows = []")
+    lines.append("        for _studio_gp in range(1, 5):")
+    lines.append("            try:")
+    lines.append(
+        "                _studio_row = ops.eleResponse("
+        "_studio_element, 'material', _studio_gp, 'force') or []"
+    )
+    lines.append(
+        "                _studio_row = [float(v) for v in _studio_row]"
+    )
+    lines.append("            except Exception:")
+    lines.append("                _studio_row = []")
+    lines.append("            _studio_gp_rows.append(_studio_row)")
+    lines.append(
+        "        _studio_valid_rows = ["
+        "row for row in _studio_gp_rows if len(row) >= 8]"
+    )
+    lines.append("        _studio_average = []")
+    lines.append("        if _studio_valid_rows:")
+    lines.append(
+        "            _studio_average = ["
+        "sum(row[index] for row in _studio_valid_rows) "
+        "/ len(_studio_valid_rows) for index in range(8)]"
+    )
+    lines.append(
+        "        _studio_results['history']['shell_section_forces']"
+        "[str(_studio_element)].append(_studio_average)"
+    )
+    lines.append(
+        "    for _studio_element in _studio_shell_deformation_history_tags:"
+    )
+    lines.append("        _studio_gp_rows = []")
+    lines.append("        for _studio_gp in range(1, 5):")
+    lines.append("            try:")
+    lines.append(
+        "                _studio_row = ops.eleResponse("
+        "_studio_element, 'material', _studio_gp, 'deformation') or []"
+    )
+    lines.append(
+        "                _studio_row = [float(v) for v in _studio_row]"
+    )
+    lines.append("            except Exception:")
+    lines.append("                _studio_row = []")
+    lines.append("            _studio_gp_rows.append(_studio_row)")
+    lines.append(
+        "        _studio_valid_rows = ["
+        "row for row in _studio_gp_rows if len(row) >= 8]"
+    )
+    lines.append("        _studio_average = []")
+    lines.append("        if _studio_valid_rows:")
+    lines.append(
+        "            _studio_average = ["
+        "sum(row[index] for row in _studio_valid_rows) "
+        "/ len(_studio_valid_rows) for index in range(8)]"
+    )
+    lines.append(
+        "        _studio_results['history']['shell_section_deformations']"
+        "[str(_studio_element)].append(_studio_average)"
     )
     lines.append(
         "    for _studio_mefi_tag, _studio_mefi_spec in "
@@ -5897,6 +5999,51 @@ def to_openseespy(
             nd_materials=nd_materials,
         )
 
+        frame_tags = sorted(
+            tag
+            for tag, element in model.elements.items()
+            if element.element_type in {
+                "elasticBeamColumn",
+                "forceBeamColumn",
+                "dispBeamColumn",
+            }
+        )
+        shell_tags = sorted(
+            tag
+            for tag, element in model.elements.items()
+            if element.element_type in SHELL_ELEMENT_TYPES
+        )
+        frame_history_tags: set[int] = set()
+        shell_force_history_tags: set[int] = set()
+        shell_deformation_history_tags: set[int] = set()
+        for result_request in (solution_results or {}).values():
+            if int(getattr(result_request, "analysis_tag", -1)) != int(active.tag):
+                continue
+            result_type = str(
+                getattr(result_request, "result_type", "")
+            )
+            scope = {
+                int(tag)
+                for tag in (
+                    getattr(result_request, "element_scope", ()) or ()
+                )
+            }
+            if result_type == "MemberForce":
+                candidates = set(frame_tags)
+                frame_history_tags.update(
+                    (scope & candidates) if scope else candidates
+                )
+            elif result_type == "ShellForce":
+                candidates = set(shell_tags)
+                shell_force_history_tags.update(
+                    (scope & candidates) if scope else candidates
+                )
+            elif result_type == "ShellDeformation":
+                candidates = set(shell_tags)
+                shell_deformation_history_tags.update(
+                    (scope & candidates) if scope else candidates
+                )
+
         response_spectrum_components = _response_spectrum_sources(
             active,
             load_patterns,
@@ -5912,24 +6059,17 @@ def to_openseespy(
                 ndm=model.ndm,
                 node_tags=sorted(model.nodes),
                 element_tags=result_element_tags,
-                frame_element_tags=sorted(
-                    tag
-                    for tag, element in model.elements.items()
-                    if element.element_type in {
-                        "elasticBeamColumn",
-                        "forceBeamColumn",
-                        "dispBeamColumn",
-                    }
-                ),
+                frame_element_tags=frame_tags,
                 truss_element_tags=sorted(
                     tag
                     for tag, element in model.elements.items()
                     if element.element_type == "truss"
                 ),
-                shell_element_tags=sorted(
-                    tag
-                    for tag, element in model.elements.items()
-                    if element.element_type in SHELL_ELEMENT_TYPES
+                shell_element_tags=shell_tags,
+                frame_history_tags=sorted(frame_history_tags),
+                shell_force_history_tags=sorted(shell_force_history_tags),
+                shell_deformation_history_tags=sorted(
+                    shell_deformation_history_tags
                 ),
                 mefi_crack_specs=mefi_crack_specs,
                 support_node_tags=support_node_tags,
