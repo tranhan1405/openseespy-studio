@@ -108,6 +108,16 @@ class NDMaterialLibraryDialog(QDialog):
         )
         filters.addWidget(self.model_filter)
 
+        filters.addWidget(QLabel("Behavior"))
+        self.behavior_filter = QComboBox()
+        self.behavior_filter.addItem("All", "")
+        for value in self._facets["behavior"]:
+            self.behavior_filter.addItem(value, value)
+        self.behavior_filter.currentIndexChanged.connect(
+            lambda _index: self._apply_filter()
+        )
+        filters.addWidget(self.behavior_filter)
+
         filters.addWidget(QLabel("Formulation"))
         self.compatibility_filter = QComboBox()
         self.compatibility_filter.addItem("All", "")
@@ -197,6 +207,14 @@ class NDMaterialLibraryDialog(QDialog):
         self.open_source = QPushButton("Open Official Source")
         self.open_source.clicked.connect(self._open_source)
         source_row.addWidget(self.open_source)
+        self.copy_citation = QPushButton("Copy Citation")
+        self.copy_citation.setEnabled(False)
+        self.copy_citation.clicked.connect(self._copy_citation)
+        source_row.addWidget(self.copy_citation)
+        self.copy_source_url = QPushButton("Copy Source URL")
+        self.copy_source_url.setEnabled(False)
+        self.copy_source_url.clicked.connect(self._copy_source_url)
+        source_row.addWidget(self.copy_source_url)
         right_layout.addLayout(source_row)
 
         preview_title = QLabel("OpenSeesPy Preview")
@@ -296,6 +314,7 @@ class NDMaterialLibraryDialog(QDialog):
         self.search.clear()
         self.family_filter.setCurrentIndex(0)
         self.model_filter.setCurrentIndex(0)
+        self.behavior_filter.setCurrentIndex(0)
         self.compatibility_filter.setCurrentIndex(0)
         self._apply_filter()
 
@@ -305,6 +324,7 @@ class NDMaterialLibraryDialog(QDialog):
             query=self.search.text(),
             family=str(self.family_filter.currentData() or ""),
             model=str(self.model_filter.currentData() or ""),
+            behavior=str(self.behavior_filter.currentData() or ""),
             compatibility=str(
                 self.compatibility_filter.currentData() or ""
             ),
@@ -352,6 +372,8 @@ class NDMaterialLibraryDialog(QDialog):
         self._selected_record = record
         self.add_button.setEnabled(bool(record and record.is_verified))
         self.open_source.setEnabled(bool(record and record.source_url))
+        self.copy_citation.setEnabled(bool(record and record.citation_text))
+        self.copy_source_url.setEnabled(bool(record and record.source_url))
 
         self.parameter_table.setRowCount(0)
         if record is None:
@@ -360,6 +382,8 @@ class NDMaterialLibraryDialog(QDialog):
             self.compatibility.clear()
             self.scope.clear()
             self.source.clear()
+            self.copy_citation.setEnabled(False)
+            self.copy_source_url.setEnabled(False)
             self.command_preview.clear()
             self.copy_command.setEnabled(False)
             return
@@ -422,6 +446,8 @@ class NDMaterialLibraryDialog(QDialog):
             + str(reference.get("title", ""))
             + "\nEvidence: "
             + str(evidence.get("location", ""))
+            + "\nVerified against source: "
+            + record.verification_date
         )
 
         try:
@@ -450,6 +476,18 @@ class NDMaterialLibraryDialog(QDialog):
         if not command or command.startswith("Preview unavailable:"):
             return
         QApplication.clipboard().setText(command)
+
+    def _copy_citation(self) -> None:
+        record = self._selected_record
+        if record is None or not record.citation_text:
+            return
+        QApplication.clipboard().setText(record.citation_text)
+
+    def _copy_source_url(self) -> None:
+        record = self._selected_record
+        if record is None or not record.source_url:
+            return
+        QApplication.clipboard().setText(record.source_url)
 
     def _open_source(self) -> None:
         record = self._selected_record
