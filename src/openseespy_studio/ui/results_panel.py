@@ -4813,6 +4813,8 @@ class ResultsPanel(QWidget):
                 "basicDisplacement": "basicForce",
                 "localForce": "localDisplacement",
                 "localDisplacement": "localForce",
+                "basicForces": "Deformation",
+                "Deformation": "basicForces",
             }
             paired_response = pair_map.get(response)
             paired_rows = (
