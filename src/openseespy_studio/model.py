@@ -18,7 +18,9 @@ SHELL_ELEMENT_TYPES = {
     "ShellDKGQ",
     "ShellNLDKGQ",
 }
-SUPPORTED_ELEMENT_TYPES = FRAME_ELEMENT_TYPES | SHELL_ELEMENT_TYPES | {
+MEMBRANE_ELEMENT_TYPES = {"MEFI"}
+QUAD_ELEMENT_TYPES = SHELL_ELEMENT_TYPES | MEMBRANE_ELEMENT_TYPES
+SUPPORTED_ELEMENT_TYPES = FRAME_ELEMENT_TYPES | QUAD_ELEMENT_TYPES | {
     "truss",
 }
 
@@ -203,13 +205,19 @@ class Element:
     shell_no_eas: bool = False
     shell_drilling_stab: float | None = None
     shell_drilling_nl: bool = False
+    mefi_widths: tuple[float, ...] = ()
+    mefi_section_tags: tuple[int, ...] = ()
 
     @property
     def is_shell(self) -> bool:
         return self.element_type in SHELL_ELEMENT_TYPES
 
+    @property
+    def is_quad(self) -> bool:
+        return self.element_type in QUAD_ELEMENT_TYPES
+
     def node_tags(self) -> tuple[int, ...]:
-        if self.is_shell:
+        if self.is_quad:
             if self.k is None or self.l is None:
                 return (self.i, self.j)
             return (self.i, self.j, self.k, self.l)
