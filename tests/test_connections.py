@@ -774,12 +774,13 @@ def test_semi_rigid_remains_an_element_recorder_target():
         name="Semi-rigid force",
         recorder_type="Element",
         target_tags=[22],
-        response="globalForce",
+        response="force",
     )
 
     project.add_recorder(recorder)
 
     assert project.recorders[3].target_tags == [22]
+    assert project.recorders[3].response == "force"
 
 
 def test_editing_semi_rigid_to_rigid_prunes_element_recorder():
