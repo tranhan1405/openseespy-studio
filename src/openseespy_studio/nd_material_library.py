@@ -177,6 +177,9 @@ def _validate_parameter_values(
         "PressureIndependMultiYield": (
             "refShearModul", "refBulkModul", "refPress",
         ),
+        "PressureDependMultiYield": (
+            "refShearModul", "refBulkModul", "refPress", "pa",
+        ),
     }.get(model, ())
     for key in positive:
         if parameters[key] <= 0.0:
@@ -258,6 +261,44 @@ def _validate_parameter_values(
                 f"Official nD material record {record_id!r} requires "
                 "pressDependCoe >= 0."
             )
+        surfaces = parameters["noYieldSurf"]
+        if not surfaces.is_integer() or not 1.0 <= surfaces < 40.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "automatic noYieldSurf to be an integer from 1 to 39."
+            )
+
+    if model == "PressureDependMultiYield":
+        if parameters["nd"] not in {2.0, 3.0}:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "nd to be 2 or 3."
+            )
+        if parameters["rho"] < 0.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires rho >= 0."
+            )
+        if parameters["peakShearStra"] <= 0.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "peakShearStra > 0."
+            )
+        for key in ("frictionAng", "PTAng"):
+            if not 0.0 <= parameters[key] < 90.0:
+                raise ValueError(
+                    f"Official nD material record {record_id!r} requires "
+                    f"0 <= {key} < 90."
+                )
+        for key in (
+            "pressDependCoe", "contrac", "dilat1", "dilat2",
+            "liquefac1", "liquefac2", "liquefac3", "e",
+            "cs1", "cs2", "cs3", "c",
+        ):
+            if parameters[key] < 0.0:
+                raise ValueError(
+                    f"Official nD material record {record_id!r} requires "
+                    f"{key} >= 0."
+                )
         surfaces = parameters["noYieldSurf"]
         if not surfaces.is_integer() or not 1.0 <= surfaces < 40.0:
             raise ValueError(
