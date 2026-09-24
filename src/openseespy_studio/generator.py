@@ -1707,6 +1707,7 @@ def analysis_to_openseespy(
     response_spectrum_gravity: float = 9.80665,
     requires_joint2d_handler: bool = False,
     requires_offset_rigid_handler: bool = False,
+    krawinkler_panel_zone_tags: list[int] | None = None,
 ) -> list[str]:
     ndm = int(ndm)
     translational_dofs = tuple(range(1, max(ndm, 0) + 1))
@@ -1727,6 +1728,9 @@ def analysis_to_openseespy(
         dict(component)
         for component in (response_spectrum_components or [])
     ]
+    krawinkler_panel_zone_tags = sorted({
+        int(tag) for tag in (krawinkler_panel_zone_tags or [])
+    })
     section_response_catalog = {
         str(spec.get('key', f'response:{index}')): dict(spec)
         for index, spec in enumerate(section_response_specs)
@@ -2168,6 +2172,29 @@ def analysis_to_openseespy(
                 "ops.rayleigh(_studio_alpha_m, 0.0, 0.0, _studio_beta_k)",
                 "",
             ])
+
+    if (
+        settings.analysis_type == "Transient"
+        and krawinkler_panel_zone_tags
+        and (
+            settings.rayleigh_damping_ratio > 0.0
+            or _studio_has_direct_rayleigh
+        )
+    ):
+        lines.append(
+            "# Exclude Krawinkler rigid panel-boundary members from "
+            "Rayleigh damping"
+        )
+        for panel_tag in krawinkler_panel_zone_tags:
+            p = f"_sare_pz_{panel_tag}"
+            internal_tags = ", ".join(
+                f"{p}_ebase + {index}" for index in range(8)
+            )
+            lines.append(
+                f"ops.region({panel_tag}, '-eleOnly', {internal_tags}, "
+                "'-rayleigh', 0.0, 0.0, 0.0, 0.0)"
+            )
+        lines.append("")
 
     if settings.analysis_type == "Modal":
         lines.append(
@@ -5254,6 +5281,11 @@ def to_openseespy(
                     )
                     for connection in (connections or {}).values()
                 ),
+                krawinkler_panel_zone_tags=[
+                    int(tag)
+                    for tag, connection in (connections or {}).items()
+                    if connection.connection_type == "KrawinklerPanelZone"
+                ],
             )
         )
 
