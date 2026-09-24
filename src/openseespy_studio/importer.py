@@ -1409,6 +1409,33 @@ class _Importer:
             self.count("Elements")
             return
 
+        if kind in {"CoupledZeroLength", "coupledZeroLength"}:
+            if len(args) not in {7, 8}:
+                raise ValueError(
+                    "CoupledZeroLength needs two nodes, two directions, one "
+                    "material tag, and an optional Rayleigh flag."
+                )
+            dirn1 = int(args[4])
+            dirn2 = int(args[5])
+            material_tag = int(args[6])
+            do_rayleigh = bool(int(args[7])) if len(args) == 8 else False
+            self.project.add_connection(
+                ConnectionData(
+                    tag=tag,
+                    name=f"Imported CoupledZeroLength {tag}",
+                    connection_type="CoupledZeroLength",
+                    node_i=ni,
+                    node_j=nj,
+                    materials_by_dof={
+                        dirn1: material_tag,
+                        dirn2: material_tag,
+                    },
+                    do_rayleigh=do_rayleigh,
+                )
+            )
+            self.count("Elements")
+            return
+
         if kind in {"zeroLength", "twoNodeLink"}:
             rest = args[4:]
             mats = [int(value) for value in self.flag_values(rest, "-mat")]
