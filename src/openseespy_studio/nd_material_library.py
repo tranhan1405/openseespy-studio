@@ -172,6 +172,7 @@ def _validate_parameter_values(
             "Ex", "Ey", "Ez", "Gxy", "Gyz", "Gzx",
         ),
         "J2Plasticity": ("K", "G"),
+        "DruckerPrager": ("K", "G", "sigmaY", "atmPressure"),
     }.get(model, ())
     for key in positive:
         if parameters[key] <= 0.0:
@@ -200,6 +201,28 @@ def _validate_parameter_values(
                     f"Official nD material record {record_id!r} requires "
                     f"{key} >= 0."
                 )
+
+    if model == "DruckerPrager":
+        for key in ("Kinf", "Ko", "delta1", "delta2", "H", "density"):
+            if parameters[key] < 0.0:
+                raise ValueError(
+                    f"Official nD material record {record_id!r} requires "
+                    f"{key} >= 0."
+                )
+        if parameters["rho"] < 0.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires rho >= 0."
+            )
+        if not 0.0 <= parameters["rhoBar"] <= parameters["rho"]:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "0 <= rhoBar <= rho."
+            )
+        if not 0.0 <= parameters["theta"] <= 1.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "0 <= theta <= 1."
+            )
 
 
 def _record_from_dict(raw: dict[str, Any]) -> NDMaterialLibraryRecord:
