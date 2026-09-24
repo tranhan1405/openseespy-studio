@@ -175,7 +175,10 @@ class NDMaterialDialog(QDialog):
         )
 
     def _parameter_label(self, material_type: str, key: str) -> str:
-        base = self.PARAMETER_LABELS.get(key, key)
+        if material_type == "DruckerPrager" and key == "rho":
+            base = "Frictional strength parameter ρ"
+        else:
+            base = self.PARAMETER_LABELS.get(key, key)
         kind = nd_material_parameter_kind(material_type, key)
         if kind == "stress":
             return f"{base} [{self.unit_system.engineering_stress_label}]:"
