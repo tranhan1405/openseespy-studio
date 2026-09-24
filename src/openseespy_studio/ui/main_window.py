@@ -193,6 +193,7 @@ from .import_report_dialog import ImportReportDialog
 from .load_dialogs import ElementLoadDialog, GroundMotionDialog, LoadPatternDialog, MassDialog, NodalLoadDialog, PrescribedDisplacementDialog, TimeSeriesDialog
 from .material_dialog import MaterialDialog
 from .material_library_dialog import MaterialLibraryDialog
+from .nd_material_library_dialog import NDMaterialLibraryDialog
 from .mass_source_dialog import MassSourceDialog
 from .model_check_dialog import ModelCheckDialog
 from .moment_curvature_dialog import MomentCurvatureDialog
@@ -2655,6 +2656,21 @@ class MainWindow(QMainWindow):
             "material-library",
             self._show_material_library,
             "Browse verified sources and insert a material into this project",
+        )
+        self._make_action(
+            "nd_material_library",
+            "nD Material Library...",
+            "nd-materials-root",
+            self._show_nd_material_library,
+            "Browse verified OpenSees nD material models and insert one "
+            "into this project",
+        )
+        self._make_action(
+            "new_nd_material",
+            "New nD Material...",
+            "nd-materials-root",
+            self._create_nd_material,
+            "Create an OpenSees nDMaterial definition",
         )
         self._make_action(
             "new_section",
@@ -16563,6 +16579,43 @@ class MainWindow(QMainWindow):
         self._show_material_properties(material.tag)
         self._record_project_change(
             f"Add verified material {material.tag}",
+            before,
+        )
+
+    def _show_nd_material_library(self) -> None:
+        try:
+            dialog = NDMaterialLibraryDialog(
+                next_tag=self.project.next_nd_material_tag(),
+                units=self.project.units,
+                parent=self,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "nD Material Library",
+                "Could not load the verified nD material library:\n\n"
+                + str(exc),
+            )
+            return
+
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            material = dialog.material_data()
+            self.project.add_nd_material(material)
+        except ValueError as exc:
+            QMessageBox.warning(self, "nD Material Library", str(exc))
+            return
+
+        self._refresh_project_metadata(
+            f"Added verified {material.material_type} nDMaterial "
+            f"{material.tag} from library"
+        )
+        self._show_nd_material_properties(material.tag)
+        self._record_project_change(
+            f"Add verified nD material {material.tag}",
             before,
         )
 
