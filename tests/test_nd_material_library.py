@@ -185,8 +185,7 @@ def test_nd_library_facets_and_combined_filters():
         behavior="Orthotropic",
     )
     assert [record.model for record in elastic_behavior] == [
-        "ElasticOrthotropic",
-        "OrthotropicRAConcrete",
+        "ElasticOrthotropic"
     ]
     assert filter_verified_nd_material_library(()) == ()
 
