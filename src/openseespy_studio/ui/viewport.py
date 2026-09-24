@@ -34,6 +34,7 @@ from ..deformed_geometry import (
     section_axis_strength_labels,
 )
 from ..model import (
+    QUAD_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     StructuralModel,
     classify_fixity,
@@ -2192,7 +2193,7 @@ class ModelViewport(QWidget):
             return "material", self._element_material_tag(element)
         return "uniform", (
             "shell"
-            if element.element_type in SHELL_ELEMENT_TYPES
+            if element.element_type in QUAD_ELEMENT_TYPES
             else "column"
             if element.group == "column"
             else "beam"
@@ -2724,7 +2725,7 @@ class ModelViewport(QWidget):
         cell_tags: list[int] = []
         for tag in tags:
             element = model.elements.get(int(tag))
-            if element is None or element.element_type in SHELL_ELEMENT_TYPES:
+            if element is None or element.element_type in QUAD_ELEMENT_TYPES:
                 continue
             node_i = model.nodes.get(element.i)
             node_j = model.nodes.get(element.j)
@@ -2757,7 +2758,7 @@ class ModelViewport(QWidget):
             element = model.elements.get(int(tag))
             if (
                 element is None
-                or element.element_type not in SHELL_ELEMENT_TYPES
+                or element.element_type not in QUAD_ELEMENT_TYPES
                 or element.k is None
                 or element.l is None
             ):
@@ -2796,7 +2797,7 @@ class ModelViewport(QWidget):
 
         for tag in tags:
             element = model.elements.get(int(tag))
-            if element is None or element.element_type in SHELL_ELEMENT_TYPES:
+            if element is None or element.element_type in QUAD_ELEMENT_TYPES:
                 continue
             node_i = model.nodes.get(element.i)
             node_j = model.nodes.get(element.j)
@@ -2941,7 +2942,7 @@ class ModelViewport(QWidget):
         shell_tags = [
             tag
             for tag in visible_tags
-            if self._model.elements[tag].element_type in SHELL_ELEMENT_TYPES
+            if self._model.elements[tag].element_type in QUAD_ELEMENT_TYPES
         ]
         line_tags = [
             tag
@@ -6777,7 +6778,7 @@ class ModelViewport(QWidget):
             ):
                 continue
 
-            if element.element_type in SHELL_ELEMENT_TYPES:
+            if element.element_type in QUAD_ELEMENT_TYPES:
                 if len(element_node_tags) != 4:
                     continue
                 shell_points: list[tuple[float, float, float]] = []
