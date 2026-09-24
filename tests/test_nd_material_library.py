@@ -152,6 +152,31 @@ def test_nd_material_editor_preserves_library_provenance():
         _APP.processEvents()
 
 
+def test_nd_material_editor_clears_provenance_if_model_type_changes():
+    material = nd_material_from_library_record(
+        _record("J2Plasticity"),
+        tag=13,
+    )
+    dialog = NDMaterialDialog(
+        next_tag=13,
+        material=material,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    try:
+        index = dialog.material_type.findData("ElasticIsotropic")
+        assert index >= 0
+        dialog.material_type.setCurrentIndex(index)
+        _APP.processEvents()
+
+        updated = dialog.material_data()
+        assert updated.material_type == "ElasticIsotropic"
+        assert updated.source == {}
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+
 def test_model_ribbon_and_menu_expose_nd_material_library():
     source = inspect.getsource(MainWindow._build_actions_and_ribbon)
 
