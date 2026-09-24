@@ -13,6 +13,7 @@ from openseespy_studio.project import (
     MaterialData,
     ProjectDatabase,
     RecorderData,
+    SolutionResultData,
 )
 
 
@@ -1527,8 +1528,6 @@ def test_joint_response_validates_target_and_response_query():
         cyclic_increment=0.005,
     ))
 
-    from openseespy_studio.project import SolutionResultData
-
     result = SolutionResultData(
         tag=1,
         analysis_tag=1,
@@ -1563,7 +1562,7 @@ def test_joint_response_validates_target_and_response_query():
         )
 
 
-def test_generated_analysis_captures_joint_histories_without_recorder():
+def test_generated_analysis_captures_requested_joint_histories_only():
     project = frame2d_project()
     add_elastic_materials(project, 2, 13)
     project.add_connection(ConnectionData(
@@ -1588,6 +1587,18 @@ def test_generated_analysis_captures_joint_histories_without_recorder():
         load_increment=1.0,
     )
     project.add_analysis(analysis)
+    project.add_solution_result(SolutionResultData(
+        tag=1,
+        analysis_tag=1,
+        name="Panel loop",
+        result_type="JointResponse",
+        element_scope=[95],
+        settings={
+            "response": "shearPanel",
+            "component": 1,
+            "curve_mode": "force_deformation",
+        },
+    ))
 
     script = to_openseespy(
         project.model,
@@ -1595,16 +1606,56 @@ def test_generated_analysis_captures_joint_histories_without_recorder():
         connections=project.connections,
         analyses=project.analyses,
         active_analysis_tag=project.active_analysis_tag,
+        solution_results=project.solution_results,
     )
 
     assert "'joints':" in script
     assert "_studio_joint_response_specs" in script
     assert "'shearPanel'" in script
     assert (
-        "ops.eleResponse(_studio_joint_tag, _studio_joint_response)"
+        "ops.eleResponse(_studio_joint_tag, _studio_joint_response, "
+        "'stressStrain')"
         in script
     )
 
+
+def test_joint_history_capture_is_absent_without_joint_result_request():
+    project = frame2d_project()
+    add_elastic_materials(project, 2, 13)
+    project.add_connection(ConnectionData(
+        tag=96,
+        name="Unrequested joint",
+        connection_type="BeamColumnJoint",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    ))
+    project.add_analysis(AnalysisSettingsData(
+        tag=1,
+        name="Static",
+        analysis_type="Static",
+        constraints_handler="Transformation",
+        steps=1,
+        load_increment=1.0,
+    ))
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        connections=project.connections,
+        analyses=project.analyses,
+        active_analysis_tag=project.active_analysis_tag,
+        solution_results=project.solution_results,
+    )
+
+    # The generic runtime scaffold exists, but no joint tag/response is
+    # requested and therefore no per-step eleResponse work is scheduled.
+    assert "_studio_joint_response_specs = {}" in script
 
 def test_beam_column_joint_component_recorder_adds_stress_strain_query():
     recorder = RecorderData(
@@ -1649,3 +1700,51 @@ def test_generated_joint_history_uses_stress_strain_for_rc_components():
         in script
     )
     assert "'shearPanel'" in script
+
+
+def test_joint_force_deformation_request_adds_paired_response():
+    project = frame2d_project()
+    project.add_connection(ConnectionData(
+        tag=97,
+        name="Panel spring",
+        connection_type="KrawinklerPanelZone",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "panel_material": 1,
+            "rigid_A": 1000.0,
+            "rigid_E": 2.0e11,
+            "rigid_I": 1000.0,
+        },
+    ))
+    analysis = AnalysisSettingsData(
+        tag=1,
+        name="Static",
+        analysis_type="Static",
+        constraints_handler="Transformation",
+        steps=1,
+        load_increment=1.0,
+    )
+    project.add_analysis(analysis)
+    project.add_solution_result(SolutionResultData(
+        tag=1,
+        analysis_tag=1,
+        name="Panel M-rotation",
+        result_type="JointResponse",
+        element_scope=[97],
+        settings={
+            "response": "force",
+            "curve_mode": "force_deformation",
+        },
+    ))
+
+    from openseespy_studio.generator import build_joint_response_specs
+
+    specs = build_joint_response_specs(
+        connections=project.connections,
+        solution_results=project.solution_results,
+        active_analysis=analysis,
+    )
+
+    assert specs[97]["responses"] == ["force", "deformation"]
