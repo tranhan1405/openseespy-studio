@@ -577,47 +577,53 @@ class ConnectionDialog(QDialog):
                     + saved_external[:left_index]
                 )
             else:
-                center = tuple(
-                    sum(
-                        float(self.node_positions[tag][axis])
-                        for tag in saved_external
-                    ) / 4.0
-                    for axis in range(3)
-                )
-                vectors = {
-                    tag: tuple(
-                        float(self.node_positions[tag][axis]) - center[axis]
+                try:
+                    center = tuple(
+                        sum(
+                            float(self.node_positions[tag][axis])
+                            for tag in saved_external
+                        ) / 4.0
                         for axis in range(3)
                     )
-                    for tag in saved_external
-                }
-                first = max(
-                    saved_external,
-                    key=lambda tag: _norm(vectors[tag]),
-                )
-                e1 = _unit(vectors[first])
-                candidates = [
-                    (
-                        _norm(_cross(e1, vectors[tag])),
-                        tag,
+                    vectors = {
+                        tag: tuple(
+                            float(self.node_positions[tag][axis])
+                            - center[axis]
+                            for axis in range(3)
+                        )
+                        for tag in saved_external
+                    }
+                    first = max(
+                        saved_external,
+                        key=lambda tag: _norm(vectors[tag]),
                     )
-                    for tag in saved_external
-                    if tag != first
-                ]
-                _cross_norm, second = max(candidates)
-                normal = _unit(_cross(e1, vectors[second]))
-                e2 = _unit(_cross(normal, e1))
-                saved_external.sort(
-                    key=lambda tag: math.atan2(
-                        _dot(vectors[tag], e2),
-                        _dot(vectors[tag], e1),
+                    e1 = _unit(vectors[first])
+                    candidates = [
+                        (
+                            _norm(_cross(e1, vectors[tag])),
+                            tag,
+                        )
+                        for tag in saved_external
+                        if tag != first
+                    ]
+                    _cross_norm, second = max(candidates)
+                    normal = _unit(_cross(e1, vectors[second]))
+                    e2 = _unit(_cross(normal, e1))
+                    saved_external.sort(
+                        key=lambda tag: math.atan2(
+                            _dot(vectors[tag], e2),
+                            _dot(vectors[tag], e1),
+                        )
                     )
-                )
-                start = saved_external.index(min(saved_external))
-                saved_external = (
-                    saved_external[start:]
-                    + saved_external[:start]
-                )
+                    start = saved_external.index(min(saved_external))
+                    saved_external = (
+                        saved_external[start:]
+                        + saved_external[:start]
+                    )
+                except (ValueError, ZeroDivisionError):
+                    # Let project validation report the precise geometry
+                    # problem when the user presses OK.
+                    saved_external = sorted(saved_external)
         candidate_nodes = sorted(self.node_positions)
         while len(saved_external) < 4:
             index = len(saved_external)
@@ -824,13 +830,14 @@ class ConnectionDialog(QDialog):
         self.bcj_width_factor.setMinimum(1.0e-12)
         bcj_factor_form.addRow("Height factor:", self.bcj_height_factor)
         bcj_factor_form.addRow("Width factor:", self.bcj_width_factor)
-        bcj_factor_hint = QLabel(
-            "Default = 1.0. Factors scale the effective tension-compression "
-            "couple distances used by the RC joint formulation."
+        self.bcj_factor_hint = QLabel(
+            "Default = 1.0. In 2D these factors scale the effective "
+            "joint height/width. The current OpenSees 3D implementation "
+            "ignores them, so SARE fixes both to 1.0 in 3D."
         )
-        bcj_factor_hint.setWordWrap(True)
-        bcj_factor_hint.setStyleSheet("color: #637487;")
-        bcj_factor_form.addRow(bcj_factor_hint)
+        self.bcj_factor_hint.setWordWrap(True)
+        self.bcj_factor_hint.setStyleSheet("color: #637487;")
+        bcj_factor_form.addRow(self.bcj_factor_hint)
         joint_layout.addWidget(bcj_group)
         joint_layout.addWidget(bcj_factor_group)
         self.bcj_group = bcj_group
@@ -1294,7 +1301,11 @@ class ConnectionDialog(QDialog):
         self.new_joint_material_button.setEnabled(joint_mode)
         self.joint2d_material_group.setEnabled(joint2d_mode)
         self.bcj_group.setEnabled(bcj_mode)
-        self.bcj_factor_group.setEnabled(bcj_mode)
+        bcj_factors_supported = bcj_mode and self.ndm == 2
+        self.bcj_factor_group.setEnabled(bcj_factors_supported)
+        if bcj_mode and self.ndm == 3:
+            self.bcj_height_factor.setValue(1.0)
+            self.bcj_width_factor.setValue(1.0)
         self.lehigh_group.setEnabled(lehigh_mode)
         self.kraw_group.setEnabled(kraw_mode)
         for combo in self.interface_material_combos:
