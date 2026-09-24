@@ -6685,7 +6685,34 @@ class ProjectDatabase:
         *,
         candidate_constraint: ConstraintData | None = None,
         ignore_constraint_tags: set[int] | None = None,
+        candidate_connection: ConnectionData | None = None,
+        ignore_connection_tags: set[int] | None = None,
     ) -> None:
+        ignored_connections = {
+            int(tag) for tag in (ignore_connection_tags or set())
+        }
+        has_joint2d = any(
+            (
+                int(tag) not in ignored_connections
+                and connection.connection_type == "Joint2D"
+            )
+            for tag, connection in self.connections.items()
+        )
+        if (
+            candidate_connection is not None
+            and candidate_connection.connection_type == "Joint2D"
+        ):
+            has_joint2d = True
+        if (
+            has_joint2d
+            and analysis.constraints_handler != "Transformation"
+        ):
+            raise ValueError(
+                "Joint2D connections require the Transformation constraint "
+                "handler in SARE. Change Analysis > Constraints Handler to "
+                "Transformation before using Joint2D."
+            )
+
         ignored = {
             int(tag) for tag in (ignore_constraint_tags or set())
         }
@@ -7113,6 +7140,11 @@ class ProjectDatabase:
                 f"Connection tag {connection.tag} already exists."
             )
         self._validate_connection(connection)
+        for analysis in self.analyses.values():
+            self._validate_analysis_constraint_handler_compatibility(
+                analysis,
+                candidate_connection=connection,
+            )
         self.connections[connection.tag] = connection
 
     def update_connection(
@@ -7136,6 +7168,12 @@ class ProjectDatabase:
                 f"Connection tag {connection.tag} already exists."
             )
         self._validate_connection(connection)
+        for analysis in self.analyses.values():
+            self._validate_analysis_constraint_handler_compatibility(
+                analysis,
+                candidate_connection=connection,
+                ignore_connection_tags={original_tag},
+            )
         self.connections.pop(original_tag)
         self.connections[connection.tag] = connection
         if connection.tag != original_tag:
