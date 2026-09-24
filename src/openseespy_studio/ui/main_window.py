@@ -22785,6 +22785,15 @@ class MainWindow(QMainWindow):
                     if tag == self.project.active_analysis_tag
                     else "No",
                 ),
+                ("CPU execution", settings.execution_mode),
+                (
+                    "Threads",
+                    (
+                        settings.num_threads
+                        if settings.execution_mode != "Auto"
+                        else "Runtime default"
+                    ),
+                ),
                 ("Spectrum type", settings.response_spectrum_mode),
                 (
                     "Ground-motion pattern(s)",
