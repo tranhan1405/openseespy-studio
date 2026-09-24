@@ -3093,6 +3093,22 @@ class MainWindow(QMainWindow):
             action.setEnabled(False)
         self.actions["result_deformed"].setChecked(True)
         self._make_action(
+            "result_min_max",
+            "Min / Max",
+            "plot",
+            lambda checked=False: self.viewport.set_motion_extrema_visible(
+                bool(checked)
+            ),
+            (
+                "Show frame-local minimum and maximum displacement markers "
+                "on animated contour results"
+            ),
+            checkable=True,
+        )
+        # Extrema labels are opt-in because updating point labels every frame
+        # is visually busy and adds rendering cost on large models.
+        self.actions["result_min_max"].setChecked(False)
+        self._make_action(
             "fit_result",
             "Fit Result",
             "result-fit",
@@ -3117,6 +3133,7 @@ class MainWindow(QMainWindow):
             self.actions["result_deformed"],
             self.actions["result_both"],
             self.actions["result_undeformed"],
+            self.actions["result_min_max"],
         ])
         menus["Results"].addAction(self.actions["fit_result"])
         menus["Results"].addAction(self.actions["clear_result"])
@@ -3595,6 +3612,7 @@ class MainWindow(QMainWindow):
                 "result_deformed",
                 "result_both",
                 "result_undeformed",
+                "result_min_max",
             ),
             widgets=(self.result_scale_ribbon,),
         )
