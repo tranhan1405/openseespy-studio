@@ -219,14 +219,14 @@ def test_semi_rigid_2d_connection_exports_zero_length_rz_spring():
         connection_type="semiRigid",
         node_i=1,
         node_j=2,
-        materials_by_dof={3: 1},
+        materials_by_dof={6: 1},
     )
 
     line = connection_to_openseespy(connection, ndm=2, ndf=3)
 
     assert "ops.equalDOF(1, 2, 1, 2)" in line
     assert "ops.element('zeroLength', 22, 1, 2" in line
-    assert "'-mat', 1, '-dir', 3" in line
+    assert "'-mat', 1, '-dir', 6" in line
 
 
 def test_joint2d_round_trip_and_generator():
@@ -295,7 +295,7 @@ def test_krawinkler_panel_zone_generator_builds_expected_macro():
     assert script.count("ops.equalDOF(") == 4
     assert (
         "ops.element('zeroLength', 40, "
-        "_sare_pz_40_tlh, _sare_pz_40_tlv, '-mat', 1, '-dir', 3"
+        "_sare_pz_40_tlh, _sare_pz_40_tlv, '-mat', 1, '-dir', 6"
         in script
     )
     assert "ops.geomTransf('Linear', _sare_pz_40_tr)" in script
@@ -570,3 +570,86 @@ def test_joint2d_rejected_when_plain_analysis_already_exists():
         raise AssertionError(
             "Expected Joint2D with existing Plain analysis to be rejected"
         )
+
+
+def test_zero_length_2d_uses_direction_6_for_rz():
+    project = frame2d_project()
+    connection = ConnectionData(
+        tag=50,
+        name="2D zeroLength RZ",
+        connection_type="zeroLength",
+        node_i=1,
+        node_j=2,
+        materials_by_dof={6: 1},
+    )
+
+    project.add_connection(connection)
+    script = connection_to_openseespy(
+        connection,
+        ndm=2,
+        ndf=3,
+    )
+
+    assert "'-dir', 6" in script
+
+
+def test_zero_length_2d_rejects_direction_3_as_out_of_plane_translation():
+    project = frame2d_project()
+    connection = ConnectionData(
+        tag=51,
+        name="Wrong 2D zeroLength direction",
+        connection_type="zeroLength",
+        node_i=1,
+        node_j=2,
+        materials_by_dof={3: 1},
+    )
+
+    try:
+        project.add_connection(connection)
+    except ValueError as exc:
+        assert "Allowed directions" in str(exc)
+        assert "[1, 2, 6]" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected 2D zeroLength direction 3 to be rejected"
+        )
+
+
+def test_two_node_link_2d_uses_direction_3_for_rz():
+    project = frame2d_project()
+    # twoNodeLink can be finite length, so use separated external nodes.
+    connection = ConnectionData(
+        tag=52,
+        name="2D twoNodeLink RZ",
+        connection_type="twoNodeLink",
+        node_i=10,
+        node_j=12,
+        materials_by_dof={3: 1},
+    )
+
+    project.add_connection(connection)
+    script = connection_to_openseespy(
+        connection,
+        ndm=2,
+        ndf=3,
+    )
+
+    assert "'-dir', 3" in script
+
+
+def test_importer_accepts_2d_zero_length_rz_direction_6():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+ops.node(1, 0.0, 0.0)
+ops.node(2, 0.0, 0.0)
+ops.uniaxialMaterial('Elastic', 1, 1000.0)
+ops.element('zeroLength', 20, 1, 2, '-mat', 1, '-dir', 6)
+"""
+    result = import_openseespy_source(
+        source,
+        source_name="zero_length_rz_2d.py",
+    )
+
+    assert 20 in result.project.connections
+    assert result.project.connections[20].materials_by_dof == {6: 1}
