@@ -1323,7 +1323,7 @@ class ResultsPanel(QWidget):
                 self.motion_auto_scale.setChecked(
                     bool(options.get("auto_scale"))
                 )
-            self._select_tab("Motion")
+            self._select_tab("Animation")
             self._emit_current_motion_frame()
             return
         if kind == "Convergence":
@@ -1553,6 +1553,14 @@ class ResultsPanel(QWidget):
         self.deformation_scale.setValue(10.0)
         row.addWidget(self.deformation_scale)
         self.deformation_show_button = QPushButton("Show")
+        self.deformation_animate_button = QPushButton("▶ Animate")
+        self.deformation_animate_button.setToolTip(
+            "Animate deformation over analysis time/steps using the shared "
+            "Animation controls."
+        )
+        self.deformation_animate_button.clicked.connect(
+            lambda: self._open_animation(source="deformation")
+        )
         clear = QPushButton("Clear")
         self.deformation_show_button.clicked.connect(
             lambda: self.deformation_requested.emit(
@@ -1564,6 +1572,7 @@ class ResultsPanel(QWidget):
         )
         clear.clicked.connect(self.clear_overlay_requested.emit)
         row.addWidget(self.deformation_show_button)
+        row.addWidget(self.deformation_animate_button)
         row.addWidget(clear)
         row.addStretch(1)
         layout.addLayout(row)
@@ -1630,7 +1639,15 @@ class ResultsPanel(QWidget):
         row.addWidget(self.mode_scale)
         self.mode_show_button = QPushButton("Show Mode")
         self.mode_show_button.clicked.connect(self._emit_mode)
+        self.mode_animate_button = QPushButton("▶ Animate Mode")
+        self.mode_animate_button.setToolTip(
+            "Animate the selected mode shape with the shared Animation controls."
+        )
+        self.mode_animate_button.clicked.connect(
+            lambda: self._open_animation(source="mode")
+        )
         row.addWidget(self.mode_show_button)
+        row.addWidget(self.mode_animate_button)
         row.addStretch(1)
         layout.addLayout(row)
 
@@ -1718,9 +1735,17 @@ class ResultsPanel(QWidget):
                 self.node_contour_component.currentText(),
             )
         )
+        self.node_animate_button = QPushButton("▶ Animate")
+        self.node_animate_button.setToolTip(
+            "Animate the nodal deformation history for the current result set."
+        )
+        self.node_animate_button.clicked.connect(
+            lambda: self._open_animation(source="node")
+        )
         clear = QPushButton("Clear")
         clear.clicked.connect(self.clear_overlay_requested.emit)
         row.addWidget(show)
+        row.addWidget(self.node_animate_button)
         row.addWidget(clear)
         row.addStretch(1)
         layout.addLayout(row)
@@ -1741,6 +1766,10 @@ class ResultsPanel(QWidget):
 
     def _node_quantity_changed(self, quantity: str) -> None:
         self.node_contour_component.clear()
+        if hasattr(self, "node_animate_button"):
+            self.node_animate_button.setVisible(
+                str(quantity) == "Displacement"
+            )
         if str(quantity) == "Reaction":
             self.node_contour_component.addItems(
                 ["|F|", "FX", "FY", "FZ", "|M|", "MX", "MY", "MZ"]
@@ -3021,13 +3050,48 @@ class ResultsPanel(QWidget):
         layout.addLayout(slider_row)
 
         self.motion_info_label = QLabel(
-            "Run or select an analysis result to animate deformation."
+            "Run or select an analysis result to animate deformation. "
+            "Animation can also be opened directly from Deformation, "
+            "Mode Shape, or Node Results."
         )
         self.motion_info_label.setWordWrap(True)
         layout.addWidget(self.motion_info_label)
         layout.addStretch(1)
 
-        self.tabs.addTab(page, "Motion")
+        self.tabs.addTab(page, "Animation")
+
+    def _open_animation(
+        self,
+        *,
+        source: str = "",
+        autoplay: bool = True,
+    ) -> None:
+        """Open the shared animation transport from an applicable result."""
+        source = str(source)
+        if source == "mode" and hasattr(self, "mode_combo"):
+            raw_mode = self.mode_combo.currentData()
+            if raw_mode is not None:
+                try:
+                    mode = int(raw_mode)
+                except (TypeError, ValueError):
+                    mode = None
+                if mode is not None:
+                    index = self.motion_source.findData(mode)
+                    if index >= 0:
+                        self.motion_source.setCurrentIndex(index)
+        elif source == "deformation" and hasattr(self, "deformation_scale"):
+            # Keep a manual deformation scale consistent when Auto is off.
+            if not self.motion_auto_scale.isChecked():
+                self.motion_scale.setValue(self.deformation_scale.value())
+
+        self._select_tab("Animation")
+        self._emit_current_motion_frame()
+        if (
+            autoplay
+            and self._motion_info is not None
+            and int(self._motion_info.frame_count) > 1
+        ):
+            self.motion_play.setChecked(True)
 
     def _motion_selected_mode(self) -> int | None:
         data = self.motion_source.currentData()
@@ -3089,6 +3153,14 @@ class ResultsPanel(QWidget):
         enabled = count > 0
         self.motion_play.setEnabled(enabled)
         self.motion_slider.setEnabled(enabled)
+        for button_name in (
+            "deformation_animate_button",
+            "mode_animate_button",
+            "node_animate_button",
+        ):
+            button = getattr(self, button_name, None)
+            if button is not None:
+                button.setEnabled(enabled)
         self.motion_source.setEnabled(
             analysis_type == "Modal"
             and self.motion_source.count() > 1
