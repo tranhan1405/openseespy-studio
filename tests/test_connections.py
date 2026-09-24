@@ -2115,7 +2115,12 @@ def test_beam_column_joint_total_result_menu_targets_component_four():
         },
     )
 
-    choices = MainWindow._joint_response_choices(None, connection)
+    holder = type(
+        "WindowStub",
+        (),
+        {"model": StructuralModel(ndm=2, ndf=3)},
+    )()
+    choices = MainWindow._joint_response_choices(holder, connection)
     total = next(
         item for item in choices
         if item[0] == "Total Joint Deformation"
