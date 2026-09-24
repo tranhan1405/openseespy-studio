@@ -3112,11 +3112,51 @@ class ModelViewport(QWidget):
                 )
                 return
 
-            if connection.connection_type in {
-                "BeamColumnJoint",
-                "LehighJoint2D",
-            }:
-                is_rc = connection.connection_type == "BeamColumnJoint"
+            if connection.connection_type == "BeamColumnJoint":
+                points = np.asarray(joint_points, dtype=float)
+                faces = np.asarray([4, 0, 1, 2, 3], dtype=np.int64)
+                glyph = pv.PolyData(points, faces)
+                self.plotter.add_mesh(
+                    glyph,
+                    name=f"connection-beam-column-joint-{connection.tag}",
+                    color="#00897b",
+                    opacity=0.22,
+                    edge_color="#00695c",
+                    show_edges=True,
+                    line_width=3,
+                    pickable=False,
+                    render=False,
+                )
+                # Make the two physical opposite-node chords explicit:
+                # Node 1↔3 controls joint height, Node 2↔4 controls width.
+                for suffix, start, end in (
+                    ("13", joint_points[0], joint_points[2]),
+                    ("24", joint_points[1], joint_points[3]),
+                ):
+                    self.plotter.add_mesh(
+                        pv.Line(start, end),
+                        name=(
+                            f"connection-beam-column-joint-chord-"
+                            f"{suffix}-{connection.tag}"
+                        ),
+                        color="#00695c",
+                        line_width=3,
+                        pickable=False,
+                        render=False,
+                    )
+                self.plotter.add_mesh(
+                    pv.Sphere(
+                        radius=size * 0.22,
+                        center=center,
+                    ),
+                    name=f"connection-joint-center-{connection.tag}",
+                    color="#00695c",
+                    pickable=False,
+                    render=False,
+                )
+                return
+
+            if connection.connection_type == "LehighJoint2D":
                 glyph = pv.Cube(
                     center=center,
                     x_length=x_length,
@@ -3125,14 +3165,10 @@ class ModelViewport(QWidget):
                 )
                 self.plotter.add_mesh(
                     glyph,
-                    name=(
-                        f"connection-beam-column-joint-{connection.tag}"
-                        if is_rc
-                        else f"connection-lehigh-joint-{connection.tag}"
-                    ),
-                    color="#00897b" if is_rc else "#3949ab",
+                    name=f"connection-lehigh-joint-{connection.tag}",
+                    color="#3949ab",
                     opacity=0.22,
-                    edge_color="#00695c" if is_rc else "#283593",
+                    edge_color="#283593",
                     show_edges=True,
                     line_width=3,
                     pickable=False,
@@ -3144,7 +3180,7 @@ class ModelViewport(QWidget):
                         center=center,
                     ),
                     name=f"connection-joint-center-{connection.tag}",
-                    color="#00695c" if is_rc else "#283593",
+                    color="#283593",
                     pickable=False,
                     render=False,
                 )
