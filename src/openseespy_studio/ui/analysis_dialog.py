@@ -108,7 +108,7 @@ class AnalysisDialog(QDialog):
             analysis.num_threads if analysis else detected_threads
         )
         self._last_multi_threads = max(
-            2,
+            1,
             int(
                 analysis.num_threads
                 if analysis is not None and analysis.num_threads > 1
