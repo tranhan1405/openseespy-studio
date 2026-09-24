@@ -196,6 +196,19 @@ def result_choices_for_analysis(
 
     choices.append(
         ResultChoice(
+            "Concrete Results",
+            "Crack Pattern",
+            "CrackPattern",
+            "Crack Pattern",
+            {
+                "accumulate": False,
+                "line_scale": 0.82,
+            },
+        )
+    )
+
+    choices.append(
+        ResultChoice(
             "Nonlinear Results",
             "1D Column / Specimen Response",
             "SpecimenResponse",
