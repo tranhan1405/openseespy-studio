@@ -973,3 +973,47 @@ rD = np.genfromtxt(r'./Relative_disp.out', usecols=[1, 2, 3]).T
     assert analysis.rayleigh_damping_ratio == 0.05
     assert analysis.rayleigh_mode_i == 1
     assert analysis.rayleigh_mode_j == 2
+
+
+def test_importer_recovers_additional_nd_material_types():
+    source = """
+import openseespy.opensees as ops
+
+ops.nDMaterial(
+    'ElasticOrthotropic', 21,
+    40.0e9, 12.0e9, 8.0e9,
+    0.25, 0.30, 0.20,
+    5.0e9, 3.0e9, 4.0e9,
+    600.0
+)
+ops.nDMaterial(
+    'J2Plasticity', 22,
+    166.67e9, 76.923e9,
+    250.0e6, 350.0e6,
+    16.0, 1.0e9
+)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="ndmaterials.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    assert result.unsupported_count == 0
+
+    orthotropic = result.project.nd_materials[21]
+    assert orthotropic.material_type == "ElasticOrthotropic"
+    assert orthotropic.parameters["Ex"] == 40.0e9
+    assert orthotropic.parameters["nu_xy"] == 0.25
+    assert orthotropic.parameters["Gzx"] == 4.0e9
+    assert orthotropic.parameters["rho"] == 600.0
+
+    j2 = result.project.nd_materials[22]
+    assert j2.material_type == "J2Plasticity"
+    assert j2.parameters["K"] == 166.67e9
+    assert j2.parameters["sig0"] == 250.0e6
+    assert j2.parameters["sigInf"] == 350.0e6
+    assert j2.parameters["delta"] == 16.0
+    assert j2.parameters["H"] == 1.0e9
