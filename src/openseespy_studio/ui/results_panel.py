@@ -1069,6 +1069,7 @@ class ResultsPanel(QWidget):
                         "NodalDisplacement",
                         "ModeShape",
                         "Motion",
+                        "ForceDisplacement",
                     }
                     or probe_time_history
                 )
@@ -1248,6 +1249,14 @@ class ResultsPanel(QWidget):
                     self.force_disp_force_dof.setCurrentIndex(index)
 
             self._update_force_displacement_controls()
+            if hasattr(self, "force_disp_animate_button"):
+                self.force_disp_animate_button.setEnabled(
+                    self._motion_display_frame_count > 0
+                )
+            if hasattr(self, "motion_page"):
+                self.motion_page.setVisible(
+                    self._motion_display_frame_count > 0
+                )
             self._select_tab("Force–Displacement")
             return
         if kind == "SectionResponse":
@@ -2172,6 +2181,16 @@ class ResultsPanel(QWidget):
             self._update_force_displacement_plot
         )
         controls.addWidget(self.force_disp_force_dof)
+
+        self.force_disp_animate_button = QPushButton("▶ Animate")
+        self.force_disp_animate_button.setToolTip(
+            "Animate the structural response and track the current "
+            "force-displacement point in red."
+        )
+        self.force_disp_animate_button.clicked.connect(
+            lambda: self._open_animation(source="force_displacement")
+        )
+        controls.addWidget(self.force_disp_animate_button)
 
         export = QPushButton("Export CSV")
         export.clicked.connect(self._export_force_displacement_csv)
@@ -3326,6 +3345,7 @@ class ResultsPanel(QWidget):
             "mode_animate_button",
             "node_animate_button",
             "history_animate_button",
+            "force_disp_animate_button",
         ):
             button = getattr(self, button_name, None)
             if button is not None:
@@ -3535,6 +3555,7 @@ class ResultsPanel(QWidget):
 
     def _sync_motion_markers(self, index: int | None) -> None:
         self.history_plot.set_marker(index)
+        self.force_disp_plot.set_marker(index)
         self.pushover_plot.set_marker(index)
         self.cyclic_plot.set_marker(index)
 
