@@ -1191,6 +1191,17 @@ class ResultsPanel(QWidget):
                 int(tag)
                 for tag in options.get("_element_scope", [])
             }
+            if self._motion_display_frame_count > 0:
+                final_index = self._motion_display_frame_count - 1
+                self._motion_frame_index = final_index
+                self.motion_frame_spin.blockSignals(True)
+                self.motion_slider.blockSignals(True)
+                try:
+                    self.motion_frame_spin.setValue(final_index + 1)
+                    self.motion_slider.setValue(final_index)
+                finally:
+                    self.motion_frame_spin.blockSignals(False)
+                    self.motion_slider.blockSignals(False)
             self._select_tab("Crack Pattern")
             return
 
