@@ -2235,6 +2235,8 @@ class ResultsPanel(QWidget):
         element_count = 0
         panel_count = 0
         cracked_count = 0
+        max_ratio = 0.0
+        valid_ratio_count = 0
         max_frames = 0
 
         if isinstance(specs, dict):
@@ -2285,6 +2287,9 @@ class ResultsPanel(QWidget):
                         else None
                     )
                     cracked = ratio is not None and ratio >= 1.0
+                    if ratio is not None and math.isfinite(ratio):
+                        valid_ratio_count += 1
+                        max_ratio = max(max_ratio, float(ratio))
                     if cracked:
                         cracked_count += 1
                     panel_history = (
@@ -2325,9 +2330,14 @@ class ResultsPanel(QWidget):
                 )
 
         if panel_count:
+            ratio_text = (
+                f"max epsilon1/epsilon_cr = {max_ratio:.3f}"
+                if valid_ratio_count
+                else "no valid panel-strain ratio"
+            )
             self.crack_summary.setText(
                 f"{element_count} MEFI element(s) · {panel_count} RC panel(s) · "
-                f"{cracked_count} cracked at final state · "
+                f"{cracked_count} cracked at final state · {ratio_text} · "
                 f"{max_frames} history frame(s)."
             )
         else:
