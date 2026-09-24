@@ -851,3 +851,23 @@ def test_generator_rejects_stale_element_recorder_on_rigid_connection():
         raise AssertionError(
             "Generator should reject an Element recorder targeting rigidLink"
         )
+
+
+def test_semi_rigid_3d_ties_all_non_spring_dofs():
+    connection = ConnectionData(
+        tag=23,
+        name="3D semi-rigid RZ",
+        connection_type="semiRigid",
+        node_i=1,
+        node_j=2,
+        materials_by_dof={6: 1},
+    )
+
+    script = connection_to_openseespy(
+        connection,
+        ndm=3,
+        ndf=6,
+    )
+
+    assert "ops.equalDOF(1, 2, 1, 2, 3, 4, 5)" in script
+    assert "'-dir', 6" in script
