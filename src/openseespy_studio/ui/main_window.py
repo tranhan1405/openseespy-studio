@@ -23364,9 +23364,10 @@ class MainWindow(QMainWindow):
                 else None
             ),
         )
-        self.status_message.setText(
-            f"Evaluated result: {result_object.name}"
-        )
+        if result_object.result_type != "CrackPattern":
+            self.status_message.setText(
+                f"Evaluated result: {result_object.name}"
+            )
         self._show_solution_result_properties(result_object.tag)
 
     def _evaluate_all_solution_results(self, analysis_tag: int) -> None:
@@ -25108,13 +25109,26 @@ class MainWindow(QMainWindow):
                 cache_key=result_cache_key,
             )
         elif result_type == "CrackPattern":
-            self.viewport.show_crack_pattern(
+            crack_stats = self.viewport.show_crack_pattern(
                 payload,
                 accumulate=bool(options.get("accumulate", False)),
                 line_scale=float(options.get("line_scale", 0.82)),
                 element_tags=elements or None,
                 cache_key=result_cache_key,
             )
+            crack_panels = int(crack_stats.get("panels", 0))
+            crack_valid = int(crack_stats.get("valid_panels", 0))
+            crack_count = int(crack_stats.get("cracked", 0))
+            crack_ratio = float(crack_stats.get("max_ratio", 0.0))
+            if crack_valid <= 0:
+                self.status_message.setText(
+                    "Crack Pattern · no valid MEFI panel-strain data"
+                )
+            else:
+                self.status_message.setText(
+                    f"Crack Pattern · {crack_count}/{crack_panels} cracked · "
+                    f"max epsilon1/epsilon_cr = {crack_ratio:.3f}"
+                )
         elif result_type == "HingeState":
             self.viewport.show_hinge_states(
                 payload,
@@ -33456,7 +33470,7 @@ class MainWindow(QMainWindow):
                     continue
 
         frame = int(frame_index)
-        self.viewport.show_crack_pattern(
+        crack_stats = self.viewport.show_crack_pattern(
             self._last_result,
             frame_index=None if frame < 0 else frame,
             accumulate=bool(accumulate),
@@ -33474,9 +33488,21 @@ class MainWindow(QMainWindow):
             if frame < 0
             else f"frame {frame + 1}"
         )
-        self.status_message.setText(
-            f"Showing {state_label} · {frame_label}"
-        )
+        crack_panels = int(crack_stats.get("panels", 0))
+        crack_valid = int(crack_stats.get("valid_panels", 0))
+        crack_count = int(crack_stats.get("cracked", 0))
+        crack_ratio = float(crack_stats.get("max_ratio", 0.0))
+        if crack_valid <= 0:
+            self.status_message.setText(
+                f"{state_label} · {frame_label} · "
+                "no valid MEFI panel-strain data"
+            )
+        else:
+            self.status_message.setText(
+                f"{state_label} · {frame_label} · "
+                f"{crack_count}/{crack_panels} cracked · "
+                f"max epsilon1/epsilon_cr = {crack_ratio:.3f}"
+            )
 
     def _show_node_contour_result(
         self,
