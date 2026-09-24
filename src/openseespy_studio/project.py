@@ -542,6 +542,12 @@ ND_MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
         "liquefac1", "liquefac2", "liquefac3", "noYieldSurf",
         "e", "cs1", "cs2", "cs3", "pa", "c",
     ),
+    "ASDConcrete3D": (
+        "E", "nu", "rho", "fc", "ft", "implex", "Kc", "cdf",
+    ),
+    "OrthotropicRAConcrete": (
+        "conc", "ecr", "ec", "rho", "DamageCte1", "DamageCte2",
+    ),
 }
 
 ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
@@ -620,6 +626,24 @@ ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
         "cs3": "dimensionless",
         "pa": "stress",
         "c": "stress",
+    },
+    "ASDConcrete3D": {
+        "E": "stress",
+        "nu": "dimensionless",
+        "rho": "density",
+        "fc": "stress",
+        "ft": "stress",
+        "implex": "dimensionless",
+        "Kc": "dimensionless",
+        "cdf": "dimensionless",
+    },
+    "OrthotropicRAConcrete": {
+        "conc": "dimensionless",
+        "ecr": "dimensionless",
+        "ec": "dimensionless",
+        "rho": "density",
+        "DamageCte1": "dimensionless",
+        "DamageCte2": "dimensionless",
     },
 }
 
@@ -700,6 +724,24 @@ ND_MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
         "pa": 1.01e5,
         "c": 3.0e2,
     },
+    "ASDConcrete3D": {
+        "E": 3.0e10,
+        "nu": 0.20,
+        "rho": 2400.0,
+        "fc": 3.0e7,
+        "ft": 3.0e6,
+        "implex": 0.0,
+        "Kc": 2.0 / 3.0,
+        "cdf": 0.0,
+    },
+    "OrthotropicRAConcrete": {
+        "conc": 1.0,
+        "ecr": 8.0e-5,
+        "ec": -0.002,
+        "rho": 0.0,
+        "DamageCte1": 0.14,
+        "DamageCte2": 0.6,
+    },
 }
 
 
@@ -729,6 +771,8 @@ ND_MATERIAL_FORMULATIONS: dict[str, tuple[str, ...]] = {
     "DruckerPrager": ("ThreeDimensional", "PlaneStrain"),
     "PressureIndependMultiYield": ("ThreeDimensional", "PlaneStrain"),
     "PressureDependMultiYield": ("ThreeDimensional", "PlaneStrain"),
+    "ASDConcrete3D": ("ThreeDimensional",),
+    "OrthotropicRAConcrete": ("Plane Stress",),
 }
 
 
@@ -931,6 +975,64 @@ class NDMaterialData:
                     "integer from 1 to 39. Custom negative surface counts "
                     "are not supported by SARE yet."
                 )
+        elif self.material_type == "ASDConcrete3D":
+            if self.parameters["E"] <= 0.0:
+                raise ValueError(
+                    "ASDConcrete3D elastic modulus E must be positive."
+                )
+            if not -1.0 < self.parameters["nu"] < 0.5:
+                raise ValueError(
+                    "ASDConcrete3D Poisson ratio must satisfy -1 < nu < 0.5."
+                )
+            if self.parameters["rho"] < 0.0:
+                raise ValueError(
+                    "ASDConcrete3D density rho cannot be negative."
+                )
+            if self.parameters["fc"] <= 0.0:
+                raise ValueError(
+                    "ASDConcrete3D compressive strength fc must be positive."
+                )
+            if self.parameters["ft"] < 0.0:
+                raise ValueError(
+                    "ASDConcrete3D tensile strength ft cannot be negative."
+                )
+            if self.parameters["implex"] not in {0.0, 1.0}:
+                raise ValueError(
+                    "ASDConcrete3D implex must be 0 (implicit) or 1 (IMPL-EX)."
+                )
+            kc = self.parameters["Kc"]
+            if not 0.5 < kc <= 1.0:
+                raise ValueError(
+                    "ASDConcrete3D Kc must satisfy 0.5 < Kc <= 1."
+                )
+            if self.parameters["cdf"] < 0.0:
+                raise ValueError(
+                    "ASDConcrete3D cdf cannot be negative."
+                )
+        elif self.material_type == "OrthotropicRAConcrete":
+            conc = self.parameters["conc"]
+            if not conc.is_integer() or conc <= 0.0:
+                raise ValueError(
+                    "OrthotropicRAConcrete conc must be a positive "
+                    "uniaxial material tag."
+                )
+            if self.parameters["ecr"] <= 0.0:
+                raise ValueError(
+                    "OrthotropicRAConcrete ecr must be positive."
+                )
+            if self.parameters["ec"] >= 0.0:
+                raise ValueError(
+                    "OrthotropicRAConcrete ec must be negative."
+                )
+            if self.parameters["rho"] < 0.0:
+                raise ValueError(
+                    "OrthotropicRAConcrete density rho cannot be negative."
+                )
+            for key in ("DamageCte1", "DamageCte2"):
+                if self.parameters[key] < 0.0:
+                    raise ValueError(
+                        f"OrthotropicRAConcrete {key} cannot be negative."
+                    )
         if not isinstance(self.source, dict):
             raise ValueError("nDMaterial source metadata must be an object.")
         self.source = deepcopy(self.source)
