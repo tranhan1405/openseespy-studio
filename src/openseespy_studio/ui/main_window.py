@@ -20517,11 +20517,22 @@ class MainWindow(QMainWindow):
 
         from ..material_chain import describe_material_chain
 
-        dof_labels = (
-            ("UX", "UY", "RZ")
-            if self.model.ndm == 2 and self.model.ndf == 3
-            else ("UX", "UY", "UZ", "RX", "RY", "RZ")
-        )
+        if self.model.ndm == 2 and self.model.ndf == 3:
+            if connection.connection_type in {"zeroLength", "semiRigid"}:
+                direction_labels = {1: "UX", 2: "UY", 6: "RZ"}
+            elif connection.connection_type == "twoNodeLink":
+                direction_labels = {1: "UX", 2: "UY", 3: "RZ"}
+            else:
+                direction_labels = {}
+        else:
+            direction_labels = {
+                1: "UX",
+                2: "UY",
+                3: "UZ",
+                4: "RX",
+                5: "RY",
+                6: "RZ",
+            }
         material_text = []
         for dof in sorted(connection.materials_by_dof):
             material_tag = connection.materials_by_dof[dof]
@@ -20535,8 +20546,13 @@ class MainWindow(QMainWindow):
                 item.material_type for item in chain
             )
             suffix = f" [{chain_text}]" if len(chain) > 1 else ""
+            direction_label = direction_labels.get(
+                dof,
+                f"dir {dof}",
+            )
             material_text.append(
-                f"{dof_labels[dof - 1]} → {material_tag} - {name}{suffix}"
+                f"{direction_label} (dir {dof}) → "
+                f"{material_tag} - {name}{suffix}"
             )
 
         rows: list[tuple[str, object]] = [
