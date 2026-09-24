@@ -312,7 +312,7 @@ class _Importer:
         "equalDOF", "rigidLink", "rigidDiaphragm",
         "timeSeries", "pattern", "load",
         "constraints", "numberer", "system", "test", "algorithm",
-        "integrator", "analysis", "analyze", "eigen",
+        "integrator", "analysis", "analyze", "eigen", "setNumThreads",
         "rayleigh", "loadConst", "reactions", "recorder", "eleLoad", "sp",
     }
 
@@ -2104,11 +2104,21 @@ class _Importer:
                     "rayleigh_beta_k_init",
                     "rayleigh_beta_k_comm",
                     "eigen_solver",
+                    "execution_mode",
+                    "num_threads",
                 )
                 if key in self.analysis_state
             }
             self.analysis_state.clear()
             self.analysis_state.update(preserved)
+        elif command == "setNumThreads" and args:
+            num_threads = int(args[0])
+            if num_threads < 1:
+                raise ValueError("setNumThreads requires a positive integer.")
+            self.analysis_state["num_threads"] = num_threads
+            self.analysis_state["execution_mode"] = (
+                "Single Thread" if num_threads == 1 else "Multi-thread"
+            )
         elif command in {"constraints", "numberer"} and args:
             self.analysis_state[command] = str(args[0])
         elif command == "system" and args:
@@ -2274,6 +2284,7 @@ class _Importer:
             elif command in {
                 "constraints", "numberer", "system", "test", "algorithm",
                 "integrator", "analysis", "analyze", "eigen", "wipeAnalysis",
+                "setNumThreads",
             }:
                 self.analysis_command(command, args)
         except _Unresolved as exc:
@@ -3948,6 +3959,18 @@ class _Importer:
                 meta.get("adaptive_growth_after", 3)
             ),
             "live_convergence": bool(meta.get("live_convergence", False)),
+            "execution_mode": str(
+                meta.get(
+                    "execution_mode",
+                    state.get("execution_mode", "Auto"),
+                )
+            ),
+            "num_threads": int(
+                meta.get(
+                    "num_threads",
+                    state.get("num_threads", 1),
+                )
+            ),
         }
 
         integrator = state.get("integrator")
