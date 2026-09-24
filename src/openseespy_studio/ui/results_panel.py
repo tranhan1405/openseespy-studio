@@ -1058,13 +1058,20 @@ class ResultsPanel(QWidget):
         kind = str(result_type)
 
         if hasattr(self, "motion_page"):
+            probe_time_history = (
+                kind == "TimeHistory"
+                and bool(options.get("probe", False))
+            )
             self.motion_page.setVisible(
-                kind in {
-                    "DeformedShape",
-                    "NodalDisplacement",
-                    "ModeShape",
-                    "Motion",
-                }
+                (
+                    kind in {
+                        "DeformedShape",
+                        "NodalDisplacement",
+                        "ModeShape",
+                        "Motion",
+                    }
+                    or probe_time_history
+                )
                 and self._motion_display_frame_count > 0
             )
 
@@ -1297,6 +1304,16 @@ class ResultsPanel(QWidget):
                     index = -1
                 if 0 <= index < self.history_dof.count():
                     self.history_dof.setCurrentIndex(index)
+            is_probe = bool(options.get("probe", False))
+            if hasattr(self, "history_animate_button"):
+                self.history_animate_button.setVisible(is_probe)
+                self.history_animate_button.setEnabled(
+                    is_probe and self._motion_display_frame_count > 0
+                )
+            if hasattr(self, "motion_page"):
+                self.motion_page.setVisible(
+                    is_probe and self._motion_display_frame_count > 0
+                )
             self._select_tab("Time History")
             return
         if kind == "ModeShape":
@@ -3315,6 +3332,7 @@ class ResultsPanel(QWidget):
             "deformation_animate_button",
             "mode_animate_button",
             "node_animate_button",
+            "history_animate_button",
         ):
             button = getattr(self, button_name, None)
             if button is not None:
@@ -4478,6 +4496,16 @@ class ResultsPanel(QWidget):
             self._update_history_plot
         )
         row.addWidget(self.history_dof)
+
+        self.history_animate_button = QPushButton("▶ Animate")
+        self.history_animate_button.setToolTip(
+            "Animate the model deformation while tracking the current node "
+            "probe on this time-history graph."
+        )
+        self.history_animate_button.clicked.connect(
+            lambda: self._open_animation(source="history")
+        )
+        row.addWidget(self.history_animate_button)
 
         export = QPushButton("Export CSV")
         export.clicked.connect(self._export_history_csv)
