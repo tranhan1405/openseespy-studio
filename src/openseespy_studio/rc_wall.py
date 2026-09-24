@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 import math
 
 from .project import (
@@ -90,9 +90,9 @@ def _next_tags(store: dict[int, object], count: int) -> list[int]:
 
 def _validate(spec: RCWallSpec) -> None:
     numeric_values = {
-        name: float(value)
-        for name, value in vars(spec).items()
-        if isinstance(value, (int, float))
+        item.name: float(getattr(spec, item.name))
+        for item in fields(spec)
+        if isinstance(getattr(spec, item.name), (int, float))
     }
     non_finite = [
         name for name, value in numeric_values.items()
