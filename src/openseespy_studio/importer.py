@@ -612,6 +612,117 @@ class _Importer:
             return
 
         keys = ND_MATERIAL_PARAMETER_ORDER[kind]
+        values = list(args[2:])
+
+        if kind == "ASDConcrete3D":
+            if len(values) < 2:
+                raise ValueError(
+                    "ASDConcrete3D needs at least E and nu."
+                )
+            params = dict(ND_MATERIAL_DEFAULTS[kind])
+            params["E"] = self.stress_to_pa(float(values[0]))
+            params["nu"] = float(values[1])
+            index = 2
+            scalar_flags = {
+                "-rho": "rho",
+                "-fc": "fc",
+                "-ft": "ft",
+                "-Kc": "Kc",
+                "-cdf": "cdf",
+            }
+            while index < len(values):
+                flag = values[index]
+                if flag == "-implex":
+                    params["implex"] = 1.0
+                    index += 1
+                    continue
+                if not isinstance(flag, str) or flag not in scalar_flags:
+                    self.issue(
+                        "UNSUPPORTED",
+                        node,
+                        "ASDConcrete3D advanced options",
+                        "SARE currently imports the scalar starter profile "
+                        "only: -rho, -fc, -ft, -implex, -Kc and -cdf. "
+                        "Custom backbone, crack-plane, rate, tangent and "
+                        "regularization options are preserved as unsupported.",
+                    )
+                    return
+                if index + 1 >= len(values):
+                    raise ValueError(
+                        f"ASDConcrete3D flag {flag} requires a value."
+                    )
+                key = scalar_flags[flag]
+                raw = float(values[index + 1])
+                dimension = nd_material_parameter_kind(kind, key)
+                if dimension == "stress":
+                    params[key] = self.stress_to_pa(raw)
+                elif dimension == "density":
+                    params[key] = (
+                        raw
+                        * self.units.mass_unit_kg
+                        / (self.units.length_to_m ** 3)
+                    )
+                else:
+                    params[key] = raw
+                index += 2
+            self.project.add_nd_material(
+                NDMaterialData(
+                    tag,
+                    f"Imported {kind} {tag}",
+                    kind,
+                    parameters=params,
+                )
+            )
+            self.count("nD Materials")
+            return
+
+        if kind == "OrthotropicRAConcrete":
+            if len(values) < 4:
+                raise ValueError(
+                    "OrthotropicRAConcrete needs conc, ecr, ec and rho."
+                )
+            params = dict(ND_MATERIAL_DEFAULTS[kind])
+            params["conc"] = float(values[0])
+            params["ecr"] = float(values[1])
+            params["ec"] = float(values[2])
+            params["rho"] = (
+                float(values[3])
+                * self.units.mass_unit_kg
+                / (self.units.length_to_m ** 3)
+            )
+            index = 4
+            damage_flags = {
+                "-damageCte1": "DamageCte1",
+                "-damageCte2": "DamageCte2",
+            }
+            while index < len(values):
+                flag = values[index]
+                if not isinstance(flag, str) or flag not in damage_flags:
+                    self.issue(
+                        "UNSUPPORTED",
+                        node,
+                        "OrthotropicRAConcrete options",
+                        "SARE supports only -damageCte1 and -damageCte2 "
+                        "after the four required arguments.",
+                    )
+                    return
+                if index + 1 >= len(values):
+                    raise ValueError(
+                        f"OrthotropicRAConcrete flag {flag} requires a value."
+                    )
+                params[damage_flags[flag]] = float(values[index + 1])
+                index += 2
+            self.project.add_nd_material(
+                NDMaterialData(
+                    tag,
+                    f"Imported {kind} {tag}",
+                    kind,
+                    parameters=params,
+                )
+            )
+            self.count("nD Materials")
+            return
+
         required_count = {
             "ElasticIsotropic": 2,
             "ElasticOrthotropic": 9,
@@ -620,7 +731,6 @@ class _Importer:
             "PressureIndependMultiYield": 6,
             "PressureDependMultiYield": 15,
         }[kind]
-        values = list(args[2:])
         if len(values) < required_count:
             raise ValueError(
                 f"{kind} needs at least {required_count} material arguments"
