@@ -10652,6 +10652,13 @@ class ProjectDatabase:
             project._validate_surface_pressure(surface_pressure)
         for surface_recorder in project.surface_recorders.values():
             project._validate_surface_recorder(surface_recorder)
+        # BeamColumnJoint has strict node/material semantics and may exist
+        # in older SARE files created before those guards were added.
+        # Revalidate it on project load so invalid legacy geometry cannot be
+        # silently exported to OpenSees.
+        for connection in project.connections.values():
+            if connection.connection_type == "BeamColumnJoint":
+                project._validate_connection(connection)
 
         if (
             project.active_analysis_tag is not None
