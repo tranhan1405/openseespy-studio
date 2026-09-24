@@ -6976,6 +6976,8 @@ class ModelViewport(QWidget):
         quantity: str,
         component: str,
         *,
+        display_mode: str = "deformed_only",
+        deformation_scale: float = 10.0,
         node_tags: set[int] | None = None,
         element_tags: set[int] | None = None,
         cache_key: object | None = None,
@@ -6986,11 +6988,17 @@ class ModelViewport(QWidget):
 
         quantity = str(quantity)
         component = str(component)
+        display_mode = self._normalized_deformation_display_mode(
+            display_mode
+        )
+        deformation_scale = float(deformation_scale)
         view_key = self._result_view_key(
             cache_key,
             "node-contour",
             quantity,
             component,
+            display_mode,
+            deformation_scale,
             self._result_scope_key(node_tags),
             self._result_scope_key(element_tags),
         )
@@ -7011,6 +7019,30 @@ class ModelViewport(QWidget):
         if not isinstance(data, dict) or not data:
             self.clear_result_overlay()
             return
+
+        displacement_data = final.get("node_displacements", {})
+        if not isinstance(displacement_data, dict):
+            displacement_data = {}
+
+        def point_for(tag: int) -> tuple[float, float, float]:
+            node = self._model.nodes[tag]
+            if display_mode == "undeformed_only":
+                return tuple(float(value) for value in node.xyz)
+            raw = displacement_data.get(
+                str(tag),
+                displacement_data.get(tag, (0.0, 0.0, 0.0)),
+            )
+            values = list(raw) if isinstance(raw, (list, tuple)) else []
+            while len(values) < 3:
+                values.append(0.0)
+            dx = float(values[0])
+            dy = float(values[1])
+            dz = 0.0 if self._model.ndm == 2 else float(values[2])
+            return (
+                float(node.xyz[0]) + deformation_scale * dx,
+                float(node.xyz[1]) + deformation_scale * dy,
+                float(node.xyz[2]) + deformation_scale * dz,
+            )
 
         def value_for(tag: int) -> float | None:
             raw = data.get(str(tag), data.get(tag))
@@ -7051,7 +7083,7 @@ class ModelViewport(QWidget):
             if node_i is None or node_j is None:
                 continue
             index = len(points)
-            points.extend((node_i.xyz, node_j.xyz))
+            points.extend((point_for(element.i), point_for(element.j)))
             scalars.extend((float(value_i), float(value_j)))
             lines.extend((2, index, index + 1))
 
@@ -7073,7 +7105,7 @@ class ModelViewport(QWidget):
             value = value_for(tag)
             if node is None or value is None:
                 continue
-            node_points.append(node.xyz)
+            node_points.append(point_for(tag))
             node_scalars.append(float(value))
 
         if not points and not node_points:
@@ -7144,6 +7176,10 @@ class ModelViewport(QWidget):
 
         self._remember_result_view(view_key, entries)
         self._result_overlay_active = True
+        self.set_undeformed_model_visible(
+            display_mode == "both",
+            render=False,
+        )
         self.plotter.render()
 
     def show_hinge_states(
@@ -7795,11 +7831,15 @@ class ModelViewport(QWidget):
         scale: float = 1.0,
         auto_scale: bool = True,
         reference_magnitude: float = 0.0,
+        display_mode: str = "deformed_only",
     ) -> None:
         """Update a persistent deformation overlay for animation playback."""
         if self._model is None or not self._model.nodes:
             return
 
+        display_mode = self._normalized_deformation_display_mode(
+            display_mode
+        )
         visible_elements = tuple(sorted(self._visible_element_tags()))
         visible_nodes = tuple(sorted(self._visible_node_tags()))
         reference = abs(float(reference_magnitude))
@@ -7936,6 +7976,8 @@ class ModelViewport(QWidget):
 
         def displaced(tag: int) -> tuple[float, float, float]:
             node = self._model.nodes[tag]
+            if display_mode == "undeformed_only":
+                return tuple(float(value) for value in node.xyz)
             dx, dy, dz = vector_components(tag)
             return (
                 node.xyz[0] + effective_scale * dx,
@@ -7997,6 +8039,10 @@ class ModelViewport(QWidget):
 
         self._result_overlay_active = True
         self._active_result_view_key = None
+        self.set_undeformed_model_visible(
+            display_mode == "both",
+            render=False,
+        )
         self.plotter.render()
 
     def show_deformed_shape(
