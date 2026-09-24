@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -292,6 +294,11 @@ class NDMaterialDialog(QDialog):
             or f"{material_type} {self.tag.value()}",
             material_type=material_type,
             parameters=parameters,
+            source=(
+                deepcopy(self._initial_material.source)
+                if self._initial_material is not None
+                else {}
+            ),
         )
 
     def _accept(self) -> None:
