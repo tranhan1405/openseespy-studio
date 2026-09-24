@@ -158,7 +158,7 @@ from ..line_mesher import (
 )
 from ..section_response import section_response_sources
 from ..response_spectrum import build_period_grid
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LineGeometryData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SketchPlaneData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, CONNECTION_RECORDER_RESPONSES, material_parameter_kind, ND_MATERIAL_PARAMETER_ORDER, nd_material_parameter_kind
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LineGeometryData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SketchPlaneData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, MEMBRANE_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, CONNECTION_RECORDER_RESPONSES, material_parameter_kind, ND_MATERIAL_PARAMETER_ORDER, nd_material_parameter_kind
 from ..runtime import (
     build_worker_pythonpath,
     opensees_material_requires_runtime_probe,
@@ -210,6 +210,7 @@ from .line_geometry_dialog import LineGeometryDialog, PointGeometryDialog
 from .transformation_dialog import TransformationDialog
 from .test_column_dialog import TestColumnWizard
 from .rc_wall_wizard import RCWallWizard
+from .rclms_section_dialog import RCLMSSectionDialog
 from .icons import studio_icon
 from .results_panel import ResultsPanel
 from .restraint_dialog import RestraintDialog
@@ -5737,7 +5738,9 @@ class MainWindow(QMainWindow):
             ])
             section_icon = (
                 "shell-section"
-                if section.section_type in SHELL_SECTION_TYPES
+                if section.section_type in (
+                    SHELL_SECTION_TYPES | MEMBRANE_SECTION_TYPES
+                )
                 else "section"
             )
             item.setIcon(0, studio_icon(section_icon))
@@ -19976,10 +19979,11 @@ class MainWindow(QMainWindow):
             self._show_surface_geometry_properties(int(tag))
 
     def _frame_sections(self) -> dict[int, SectionData]:
+        excluded = SHELL_SECTION_TYPES | MEMBRANE_SECTION_TYPES
         return {
             int(tag): section
             for tag, section in self.project.sections.items()
-            if section.section_type not in SHELL_SECTION_TYPES
+            if section.section_type not in excluded
         }
 
     def _shell_sections(self) -> dict[int, SectionData]:
@@ -20056,6 +20060,39 @@ class MainWindow(QMainWindow):
             before,
         )
 
+    def _edit_rclms_section(self, tag: int) -> None:
+        section = self.project.sections.get(int(tag))
+        if section is None or section.section_type != "RCLMS":
+            return
+        dialog = RCLMSSectionDialog(
+            section=section,
+            nd_materials=self.project.nd_materials,
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            updated = dialog.section_data()
+            self.project.update_section(tag, updated)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "RCLMS Section", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_project_metadata(
+            f"Updated RCLMS section {updated.tag}"
+        )
+        self._show_section_properties(updated.tag)
+        self._record_project_change(
+            f"Edit RCLMS section {tag}",
+            before,
+        )
+
     def _create_section(self) -> None:
         dialog = SectionDialog(
             self.project.materials,
@@ -20095,6 +20132,9 @@ class MainWindow(QMainWindow):
             return
         if section.section_type in SHELL_SECTION_TYPES:
             self._edit_shell_section(tag)
+            return
+        if section.section_type == "RCLMS":
+            self._edit_rclms_section(tag)
             return
 
         dialog = SectionDialog(
