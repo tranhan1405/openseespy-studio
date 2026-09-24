@@ -1,0 +1,246 @@
+from __future__ import annotations
+
+from copy import deepcopy
+from dataclasses import dataclass
+import json
+from importlib import resources
+from typing import Any
+
+from .project import (
+    ND_MATERIAL_PARAMETER_ORDER,
+    NDMaterialData,
+)
+
+
+_LIBRARY_RESOURCE = (
+    "resources",
+    "materials",
+    "verified_nd_library.json",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class NDMaterialLibraryRecord:
+    id: str
+    family: str
+    material: str
+    model: str
+    preset_name: str
+    parameters_si: dict[str, float]
+    verified_parameters: tuple[str, ...]
+    behavior: tuple[str, ...]
+    compatibility: tuple[str, ...]
+    applicability: tuple[str, ...]
+    limitations: tuple[str, ...]
+    primary_reference: dict[str, Any]
+    parameter_evidence: dict[str, Any]
+    verification: dict[str, Any]
+    source_units: dict[str, str]
+
+    @property
+    def source_url(self) -> str:
+        return str(self.primary_reference.get("url", "")).strip()
+
+    @property
+    def doi(self) -> str:
+        return str(self.primary_reference.get("doi", "")).strip()
+
+    @property
+    def is_verified(self) -> bool:
+        return (
+            str(self.verification.get("status", "")).lower() == "verified"
+            and bool(self.verification.get("model_definition_checked"))
+            and bool(self.verification.get("compatibility_checked"))
+            and bool(self.verification.get("units_checked"))
+        )
+
+    @property
+    def is_starter_template(self) -> bool:
+        return (
+            str(self.verification.get("parameter_status", "")).lower()
+            == "starter_template"
+        )
+
+    def source_metadata(self) -> dict[str, Any]:
+        return {
+            "library": "SARE verified nD material library",
+            "record_id": self.id,
+            "status": "verified" if self.is_verified else "unverified",
+            "family": self.family,
+            "material": self.material,
+            "model": self.model,
+            "preset_name": self.preset_name,
+            "behavior": list(self.behavior),
+            "compatibility": list(self.compatibility),
+            "applicability": list(self.applicability),
+            "limitations": list(self.limitations),
+            "verified_parameters": list(self.verified_parameters),
+            "primary_reference": deepcopy(self.primary_reference),
+            "parameter_evidence": deepcopy(self.parameter_evidence),
+            "verification": deepcopy(self.verification),
+            "source_units": deepcopy(self.source_units),
+        }
+
+
+def _resource_text() -> str:
+    root = resources.files("openseespy_studio")
+    resource = root
+    for part in _LIBRARY_RESOURCE:
+        resource = resource.joinpath(part)
+    return resource.read_text(encoding="utf-8")
+
+
+def _validate_reference(
+    reference: dict[str, Any],
+    record_id: str,
+) -> None:
+    if not str(reference.get("title", "")).strip():
+        raise ValueError(
+            f"Verified nD material record {record_id!r} has no source title."
+        )
+    if not str(reference.get("url", "")).strip():
+        raise ValueError(
+            f"Verified nD material record {record_id!r} has no source URL."
+        )
+    source_type = str(reference.get("type", "")).strip().lower()
+    if source_type == "journal" and not str(reference.get("doi", "")).strip():
+        raise ValueError(
+            f"Verified nD material record {record_id!r} has a journal "
+            "source without a DOI."
+        )
+
+
+def _record_from_dict(raw: dict[str, Any]) -> NDMaterialLibraryRecord:
+    record_id = str(raw.get("id", "")).strip()
+    if not record_id:
+        raise ValueError("nD material library record has no id.")
+
+    model = str(raw.get("model", "")).strip()
+    expected = ND_MATERIAL_PARAMETER_ORDER.get(model)
+    if expected is None:
+        raise ValueError(
+            f"nD material library record {record_id!r} uses unsupported "
+            f"model {model!r}."
+        )
+
+    reference = dict(raw.get("primary_reference", {}))
+    verification = dict(raw.get("verification", {}))
+    _validate_reference(reference, record_id)
+
+    if str(verification.get("status", "")).lower() != "verified":
+        raise ValueError(
+            f"Official nD material record {record_id!r} is not verified."
+        )
+    for flag in (
+        "model_definition_checked",
+        "compatibility_checked",
+        "units_checked",
+    ):
+        if not bool(verification.get(flag)):
+            raise ValueError(
+                f"Official nD material record {record_id!r} is missing "
+                f"verification flag {flag!r}."
+            )
+
+    parameters = {
+        str(key): float(value)
+        for key, value in dict(raw.get("parameters_si", {})).items()
+    }
+    expected_set = set(expected)
+    actual_set = set(parameters)
+    if actual_set != expected_set:
+        missing = sorted(expected_set - actual_set)
+        extra = sorted(actual_set - expected_set)
+        details: list[str] = []
+        if missing:
+            details.append("missing " + ", ".join(missing))
+        if extra:
+            details.append("unexpected " + ", ".join(extra))
+        raise ValueError(
+            f"Official nD material record {record_id!r} does not exactly "
+            f"match {model} parameters: " + "; ".join(details)
+        )
+
+    verified_parameters = tuple(
+        str(value)
+        for value in raw.get("verified_parameters", [])
+    )
+    if set(verified_parameters) != expected_set:
+        raise ValueError(
+            f"Official nD material record {record_id!r} must list every "
+            "active model parameter as verified."
+        )
+
+    compatibility = tuple(
+        str(value).strip()
+        for value in raw.get("compatibility", [])
+        if str(value).strip()
+    )
+    if not compatibility:
+        raise ValueError(
+            f"Official nD material record {record_id!r} has no "
+            "compatibility metadata."
+        )
+
+    return NDMaterialLibraryRecord(
+        id=record_id,
+        family=str(raw.get("family", "")).strip(),
+        material=str(raw.get("material", "")).strip(),
+        model=model,
+        preset_name=str(raw.get("preset_name", "")).strip(),
+        parameters_si=parameters,
+        verified_parameters=verified_parameters,
+        behavior=tuple(
+            str(value) for value in raw.get("behavior", [])
+        ),
+        compatibility=compatibility,
+        applicability=tuple(
+            str(value) for value in raw.get("applicability", [])
+        ),
+        limitations=tuple(
+            str(value) for value in raw.get("limitations", [])
+        ),
+        primary_reference=reference,
+        parameter_evidence=dict(raw.get("parameter_evidence", {})),
+        verification=verification,
+        source_units={
+            str(key): str(value)
+            for key, value in dict(raw.get("source_units", {})).items()
+        },
+    )
+
+
+def load_verified_nd_material_library(
+) -> tuple[NDMaterialLibraryRecord, ...]:
+    payload = json.loads(_resource_text())
+    if int(payload.get("schema_version", 0)) != 1:
+        raise ValueError(
+            "Unsupported SARE nD-material-library schema version."
+        )
+    records = tuple(
+        _record_from_dict(dict(raw))
+        for raw in payload.get("records", [])
+    )
+    ids = [record.id for record in records]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Duplicate nD-material-library record id.")
+    return records
+
+
+def nd_material_from_library_record(
+    record: NDMaterialLibraryRecord,
+    *,
+    tag: int,
+    name: str | None = None,
+) -> NDMaterialData:
+    if not record.is_verified:
+        raise ValueError(
+            "Only verified nD material library records can be inserted."
+        )
+    return NDMaterialData(
+        tag=tag,
+        name=name or record.preset_name or f"{record.material} · {record.model}",
+        material_type=record.model,
+        parameters=dict(record.parameters_si),
+        source=record.source_metadata(),
+    )
