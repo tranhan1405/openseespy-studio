@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 import inspect
+import json
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -11,9 +13,12 @@ from openseespy_studio.generator import (
     nd_material_source_comments,
     nd_material_to_openseespy,
 )
+from openseespy_studio import nd_material_library as nd_library
 from openseespy_studio.nd_material_library import (
+    filter_verified_nd_material_library,
     load_verified_nd_material_library,
     nd_material_from_library_record,
+    nd_material_library_facets,
 )
 from openseespy_studio.project import NDMaterialData
 from openseespy_studio.ui.main_window import MainWindow
@@ -56,6 +61,56 @@ def test_verified_nd_library_declares_plate_fiber_compatibility():
         "PlateFiber" in record.compatibility
         for record in records
     )
+
+
+def test_nd_library_facets_and_combined_filters():
+    records = load_verified_nd_material_library()
+    facets = nd_material_library_facets(records)
+
+    assert facets["family"] == (
+        "Elastic continuum",
+        "Plastic continuum",
+    )
+    assert "PlateFiber" in facets["compatibility"]
+    assert "BeamFiber" in facets["compatibility"]
+    assert "ElasticOrthotropic" in facets["model"]
+
+    beam_fiber = filter_verified_nd_material_library(
+        records,
+        family="Elastic continuum",
+        compatibility="BeamFiber",
+    )
+    assert [record.model for record in beam_fiber] == [
+        "ElasticOrthotropic"
+    ]
+
+    j2 = filter_verified_nd_material_library(
+        records,
+        query="pressure-insensitive",
+    )
+    assert [record.model for record in j2] == ["J2Plasticity"]
+    assert filter_verified_nd_material_library(()) == ()
+
+
+def test_nd_library_rejects_invalid_physical_parameters(monkeypatch):
+    raw = asdict(_record("ElasticIsotropic"))
+    raw["parameters_si"]["E"] = -1.0
+    payload = {
+        "schema_version": 1,
+        "records": [raw],
+    }
+    monkeypatch.setattr(
+        nd_library,
+        "_resource_text",
+        lambda: json.dumps(payload),
+    )
+
+    try:
+        nd_library.load_verified_nd_material_library()
+    except ValueError as exc:
+        assert "E > 0" in str(exc)
+    else:
+        raise AssertionError("Invalid E should be rejected.")
 
 
 def test_nd_library_insert_carries_traceable_source_metadata():
@@ -109,7 +164,35 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert dialog.add_button.isEnabled()
         assert dialog.material_data().tag == 11
         assert dialog.material_data().source["status"] == "verified"
+        assert dialog.result_count.text() == "3 / 3 shown"
+        assert dialog.copy_command.isEnabled()
+        assert dialog.command_preview.text() == (
+            "ops.nDMaterial('ElasticIsotropic', "
+            "11, 200000, 0.3, 0)"
+        )
 
+        model_index = dialog.model_filter.findData("J2Plasticity")
+        assert model_index >= 0
+        dialog.model_filter.setCurrentIndex(model_index)
+        _APP.processEvents()
+        assert dialog.result_count.text() == "1 / 3 shown"
+        assert dialog.material_data().material_type == "J2Plasticity"
+
+        dialog.clear_filters.click()
+        _APP.processEvents()
+        formulation_index = dialog.compatibility_filter.findData(
+            "BeamFiber"
+        )
+        assert formulation_index >= 0
+        dialog.compatibility_filter.setCurrentIndex(formulation_index)
+        _APP.processEvents()
+        assert dialog.result_count.text() == "1 / 3 shown"
+        assert (
+            dialog.material_data().material_type
+            == "ElasticOrthotropic"
+        )
+
+        dialog.clear_filters.click()
         dialog.search.setText("J2")
         _APP.processEvents()
 
@@ -125,6 +208,22 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert all(
             "J2Plasticity" in text
             for text in visible_models
+        )
+
+        dialog.search.setText("definitely-no-such-material")
+        _APP.processEvents()
+        assert dialog.result_count.text() == "0 / 3 shown"
+        assert not dialog.add_button.isEnabled()
+        assert not dialog.copy_command.isEnabled()
+
+        dialog.clear_filters.click()
+        _APP.processEvents()
+        assert dialog.result_count.text() == "3 / 3 shown"
+        dialog.copy_command.click()
+        _APP.processEvents()
+        assert (
+            QApplication.clipboard().text()
+            == dialog.command_preview.text()
         )
     finally:
         dialog.close()
