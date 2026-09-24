@@ -530,6 +530,11 @@ ND_MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
         "Kinf", "Ko", "delta1", "delta2", "H",
         "theta", "density", "atmPressure",
     ),
+    "PressureIndependMultiYield": (
+        "nd", "rho", "refShearModul", "refBulkModul",
+        "cohesi", "peakShearStra", "frictionAng", "refPress",
+        "pressDependCoe", "noYieldSurf",
+    ),
 }
 
 ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
@@ -572,6 +577,18 @@ ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
         "theta": "dimensionless",
         "density": "density",
         "atmPressure": "stress",
+    },
+    "PressureIndependMultiYield": {
+        "nd": "dimensionless",
+        "rho": "density",
+        "refShearModul": "stress",
+        "refBulkModul": "stress",
+        "cohesi": "stress",
+        "peakShearStra": "dimensionless",
+        "frictionAng": "dimensionless",
+        "refPress": "stress",
+        "pressDependCoe": "dimensionless",
+        "noYieldSurf": "dimensionless",
     },
 }
 
@@ -616,6 +633,18 @@ ND_MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
         "density": 0.0,
         "atmPressure": 101325.0,
     },
+    "PressureIndependMultiYield": {
+        "nd": 2.0,
+        "rho": 1500.0,
+        "refShearModul": 6.0e7,
+        "refBulkModul": 3.0e8,
+        "cohesi": 3.7e4,
+        "peakShearStra": 0.10,
+        "frictionAng": 0.0,
+        "refPress": 8.0e4,
+        "pressDependCoe": 0.0,
+        "noYieldSurf": 20.0,
+    },
 }
 
 
@@ -629,12 +658,35 @@ def nd_material_parameter_kind(
     ).get(str(parameter), "dimensionless")
 
 
+ND_MATERIAL_FORMULATIONS: dict[str, tuple[str, ...]] = {
+    "ElasticIsotropic": (
+        "ThreeDimensional", "PlaneStrain", "Plane Stress",
+        "AxiSymmetric", "PlateFiber",
+    ),
+    "ElasticOrthotropic": (
+        "ThreeDimensional", "PlaneStrain", "Plane Stress",
+        "AxiSymmetric", "BeamFiber", "PlateFiber",
+    ),
+    "J2Plasticity": (
+        "ThreeDimensional", "PlaneStrain", "Plane Stress",
+        "AxiSymmetric", "PlateFiber",
+    ),
+    "DruckerPrager": ("ThreeDimensional", "PlaneStrain"),
+    "PressureIndependMultiYield": ("ThreeDimensional", "PlaneStrain"),
+}
+
+
+def nd_material_supported_formulations(
+    material_type: str,
+) -> tuple[str, ...]:
+    return ND_MATERIAL_FORMULATIONS.get(str(material_type), ())
+
+
 def nd_material_supports_plate_fiber(material_type: str) -> bool:
-    return str(material_type) in {
-        "ElasticIsotropic",
-        "ElasticOrthotropic",
-        "J2Plasticity",
-    }
+    return (
+        "PlateFiber"
+        in nd_material_supported_formulations(material_type)
+    )
 
 
 @dataclass
@@ -730,6 +782,46 @@ class NDMaterialData:
             if not 0.0 <= theta <= 1.0:
                 raise ValueError(
                     "DruckerPrager theta must satisfy 0 <= theta <= 1."
+                )
+        elif self.material_type == "PressureIndependMultiYield":
+            nd = self.parameters["nd"]
+            if nd not in {2.0, 3.0}:
+                raise ValueError(
+                    "PressureIndependMultiYield nd must be 2 or 3."
+                )
+            if self.parameters["rho"] < 0.0:
+                raise ValueError(
+                    "PressureIndependMultiYield rho cannot be negative."
+                )
+            for key in ("refShearModul", "refBulkModul", "refPress"):
+                if self.parameters[key] <= 0.0:
+                    raise ValueError(
+                        f"PressureIndependMultiYield {key} must be positive."
+                    )
+            if self.parameters["cohesi"] < 0.0:
+                raise ValueError(
+                    "PressureIndependMultiYield cohesi cannot be negative."
+                )
+            if self.parameters["peakShearStra"] <= 0.0:
+                raise ValueError(
+                    "PressureIndependMultiYield peakShearStra must be positive."
+                )
+            friction = self.parameters["frictionAng"]
+            if not 0.0 <= friction < 90.0:
+                raise ValueError(
+                    "PressureIndependMultiYield frictionAng must satisfy "
+                    "0 <= frictionAng < 90 degrees."
+                )
+            if self.parameters["pressDependCoe"] < 0.0:
+                raise ValueError(
+                    "PressureIndependMultiYield pressDependCoe cannot be negative."
+                )
+            surfaces = self.parameters["noYieldSurf"]
+            if not surfaces.is_integer() or not 1.0 <= surfaces < 40.0:
+                raise ValueError(
+                    "PressureIndependMultiYield noYieldSurf must be an "
+                    "integer from 1 to 39. Custom negative surface counts "
+                    "are not supported by SARE yet."
                 )
         if not isinstance(self.source, dict):
             raise ValueError("nDMaterial source metadata must be an object.")
