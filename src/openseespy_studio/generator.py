@@ -1626,6 +1626,7 @@ def analysis_to_openseespy(
     response_spectrum_components: list[dict[str, object]] | None = None,
     response_spectrum_gravity: float = 9.80665,
     requires_joint2d_handler: bool = False,
+    requires_offset_rigid_handler: bool = False,
 ) -> list[str]:
     ndm = int(ndm)
     translational_dofs = tuple(range(1, max(ndm, 0) + 1))
@@ -1719,7 +1720,13 @@ def analysis_to_openseespy(
     monitor_node = int(monitor_node or (node_tags[0] if node_tags else 1))
 
     effective_constraints_handler = settings.constraints_handler
-    if requires_joint2d_handler and effective_constraints_handler != "Transformation":
+    requires_transformation_handler = bool(
+        requires_joint2d_handler or requires_offset_rigid_handler
+    )
+    if (
+        requires_transformation_handler
+        and effective_constraints_handler != "Transformation"
+    ):
         effective_constraints_handler = "Transformation"
 
     lines = [
@@ -1842,9 +1849,16 @@ def analysis_to_openseespy(
         f"_studio_section_response_specs = {section_response_catalog!r}",
         f"_studio_monitor_node = {monitor_node}",
         (
-            "# Joint2D requires Transformation/Penalty; SARE uses "
-            f"{effective_constraints_handler} for this generated analysis."
+            (
+                "# Joint2D requires Transformation/Penalty; SARE uses "
+                f"{effective_constraints_handler} for this generated analysis."
+            )
             if requires_joint2d_handler
+            else (
+                "# Offset rigidLink beam requires a general MP handler; "
+                f"SARE uses {effective_constraints_handler}."
+            )
+            if requires_offset_rigid_handler
             else f"# Constraint handler: {effective_constraints_handler}"
         ),
         f"ops.constraints('{effective_constraints_handler}')",
@@ -5093,6 +5107,21 @@ def to_openseespy(
                 response_spectrum_gravity=response_spectrum_gravity,
                 requires_joint2d_handler=any(
                     connection.connection_type == "Joint2D"
+                    for connection in (connections or {}).values()
+                ),
+                requires_offset_rigid_handler=any(
+                    (
+                        connection.connection_type == "rigid"
+                        and connection.node_i in model.nodes
+                        and connection.node_j in model.nodes
+                        and any(
+                            abs(float(a) - float(b)) > 1.0e-12
+                            for a, b in zip(
+                                model.nodes[connection.node_i].xyz,
+                                model.nodes[connection.node_j].xyz,
+                            )
+                        )
+                    )
                     for connection in (connections or {}).values()
                 ),
             )
