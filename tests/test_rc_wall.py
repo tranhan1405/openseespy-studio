@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import math
 import os
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QWizard
 from openseespy_studio.generator import build_mefi_crack_specs, to_openseespy
 from openseespy_studio.project import AnalysisSettingsData, ProjectDatabase
 from openseespy_studio.rc_wall import RCWallSpec, build_rc_wall
+import openseespy_studio.ui.main_window as main_window_module
 from openseespy_studio.ui.main_window import MainWindow
 from openseespy_studio.ui.rc_wall_wizard import RCWallWizard
 from openseespy_studio.ui.rclms_section_dialog import RCLMSSectionDialog
@@ -500,3 +502,73 @@ def test_rc_wall_replace_validation_ignores_preexisting_error_keys():
     assert "existing_error_keys" in generated_block
     assert "not in existing_error_keys" in generated_block
     assert "spec.replace_geometry\n                        or" not in generated_block
+
+
+def test_rc_wall_mainwindow_handler_builds_live_project(monkeypatch):
+    project = ProjectDatabase()
+
+    class _FakeWizard:
+        def __init__(self, _project, parent=None):
+            assert _project is project
+
+        def exec(self):
+            return int(QDialog.DialogCode.Accepted)
+
+        def data(self):
+            return RCWallSpec()
+
+    class _FakeViewport:
+        def __init__(self):
+            self.domain = None
+            self.view = None
+            self.plotter = SimpleNamespace(render=lambda: None)
+
+        def set_display_domain(self, domain):
+            self.domain = domain
+
+        def set_view(self, view, render=True):
+            self.view = view
+
+        def fit_view(self):
+            return None
+
+        def _visible_element_tags(self):
+            return set(project.model.elements)
+
+        def show_all(self):
+            return None
+
+    selected = {}
+    selection = SimpleNamespace(
+        clear=lambda: selected.clear(),
+        set_selection=lambda **kwargs: selected.update(kwargs),
+    )
+    viewport = _FakeViewport()
+
+    holder = SimpleNamespace(
+        project=project,
+        model=project.model,
+        selection=selection,
+        viewport=viewport,
+        _reset_runtime_results=lambda: None,
+        _reset_sketch_plane_context=lambda: None,
+        _activate_select_tool=lambda: None,
+        _refresh_tree=lambda: None,
+        _refresh_all=lambda *_args, **_kwargs: None,
+        _record_project_change=lambda *_args, **_kwargs: None,
+        _log=lambda *_args, **_kwargs: None,
+        status_message=SimpleNamespace(setText=lambda *_args: None),
+        status_counts=SimpleNamespace(setText=lambda *_args: None),
+    )
+
+    monkeypatch.setattr(main_window_module, "RCWallWizard", _FakeWizard)
+
+    MainWindow._show_rc_wall_wizard(holder)
+
+    assert holder.model is project.model
+    assert len(project.model.nodes) == 16
+    assert len(project.model.elements) == 7
+    assert {element.element_type for element in project.model.elements.values()} == {"MEFI"}
+    assert viewport.domain == "fe"
+    assert viewport.view == "xy"
+    assert selected["elements"] == set(project.model.elements)
