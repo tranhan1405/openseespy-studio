@@ -6,7 +6,7 @@ from types import MethodType, SimpleNamespace
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QTreeWidget
+from PySide6.QtWidgets import QApplication, QScrollArea, QTreeWidget
 
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import AnalysisSettingsData, ProjectDatabase
@@ -130,3 +130,29 @@ def test_cyclic_protocol_properties_use_table_and_plot():
     ]
     assert "Node 4" in panel.cyclic_protocol_summary.text()
     assert "DOF 1" in panel.cyclic_protocol_summary.text()
+
+
+def test_result_properties_editor_has_vertical_scroll_with_fixed_actions():
+    panel = PropertiesPanel()
+    try:
+        assert isinstance(panel.result_scroll, QScrollArea)
+        assert panel.result_scroll.widgetResizable()
+        assert (
+            panel.result_scroll.verticalScrollBarPolicy()
+            == Qt.ScrollBarAsNeeded
+        )
+        assert (
+            panel.result_scroll.horizontalScrollBarPolicy()
+            == Qt.ScrollBarAlwaysOff
+        )
+        assert panel.result_scroll.widget() is panel.result_scroll_content
+        assert not panel.result_scroll_content.isAncestorOf(
+            panel.result_apply_button
+        )
+        assert not panel.result_scroll_content.isAncestorOf(
+            panel.result_evaluate_button
+        )
+    finally:
+        panel.close()
+        panel.deleteLater()
+        _APP.processEvents()
