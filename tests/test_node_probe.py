@@ -68,3 +68,19 @@ def test_node_probe_time_history_exposes_shared_animation_transport():
     assert 'options.get("probe", False)' in show_source
     assert 'self.history_animate_button.setVisible(is_probe)' in show_source
     assert 'self.motion_page.setVisible(' in show_source
+
+
+def test_animation_shows_frame_local_min_max_without_changing_scalar_range():
+    extrema_source = inspect.getsource(ModelViewport._update_motion_extrema)
+    motion_source = inspect.getsource(ModelViewport.show_motion_frame)
+    clear_source = inspect.getsource(ModelViewport.clear_result_overlay)
+
+    assert '"MAX {max_value:.4g}' in extrema_source
+    assert '"MIN {min_value:.4g}' in extrema_source
+    assert 'text_color="#c62828"' in extrema_source
+    assert 'text_color="#1565c0"' in extrema_source
+    assert 'show_scalar_bar=False' in extrema_source
+    assert 'self._update_motion_extrema(' in motion_source
+    assert 'clim=(0.0, scalar_upper)' in motion_source
+    assert '"motion-max-label"' in clear_source
+    assert '"motion-min-label"' in clear_source
