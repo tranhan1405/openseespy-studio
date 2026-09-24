@@ -7,9 +7,12 @@ from openseespy_studio.ui.viewport import ModelViewport
 
 
 def test_tree_geometry_branch_switches_to_geometry_only_domain():
-    source = inspect.getsource(MainWindow._tree_selection_changed)
+    mapping = inspect.getsource(
+        MainWindow._tree_selection_display_context
+    )
+    selection = inspect.getsource(MainWindow._tree_selection_changed)
 
-    assert "geometry_tree_kinds" in source
+    assert "geometry_kinds" in mapping
     for kind in (
         "geometry_root",
         "points_root",
@@ -19,9 +22,10 @@ def test_tree_geometry_branch_switches_to_geometry_only_domain():
         "line_geometry",
         "surface_geometry",
     ):
-        assert f'"{kind}"' in source
-    assert "self.viewport.set_display_domain(" in source
-    assert '"geometry" if geometry_mode else "fe"' in source
+        assert f'"{kind}"' in mapping
+    assert 'return "geometry", "Geometry"' in mapping
+    assert "self._tree_selection_display_context(" in selection
+    assert "self.viewport.set_display_domain(display_domain)" in selection
 
 
 def test_geometry_tree_selection_does_not_select_generated_fe_elements():

@@ -287,11 +287,11 @@ def test_line_mesh_ui_exposes_preview_remesh_delete_audit_and_fe_bridge():
     assert "Select Generated FE" in context
     assert 'menu.addAction("Audit Mesh Integrity")' in context
     assert "Mesh Quality..." in context
-    assert "Reverse Line Direction" in context
+    assert "Reverse Direction" in context
     assert "Copy This Mesh / FE Recipe" in context
     assert '"Generate Mesh"' in context
     assert "Audit Line Network Connectivity" in context
-    assert "Inspect Line Network Intersections..." in context
+    assert "Inspect Network Intersections..." in context
     assert "Conform / Heal Line Network" in context
     assert "remesh_line_geometry" in edit
     assert "line_mesh_preview_points" in preview
@@ -1433,8 +1433,8 @@ def test_line_intersection_preview_and_preprocessor_actions_are_exposed():
 
     assert "Trim / Extend This Line to Other Selected Line..." in context
     assert "Merge" in context and "Collinear Lines" in context
-    assert "Divide Geometry Line..." in context
-    assert "Copy / Offset Geometry Line..." in context
+    assert "Divide Line..." in context
+    assert "Copy / Offset Line..." in context
     assert "Clear Intersection Preview" in context
     assert "trim_extend_line_to_line" in trim
     assert "merge_collinear_lines" in merge
@@ -1502,20 +1502,23 @@ def test_mesh_tree_owns_mesh_lifecycle_commands():
     assert "Configure Surface Mesh / Shell Recipe..." in context
 
 
-def test_geometry_line_context_has_no_mesh_lifecycle_commands():
+def test_geometry_line_context_separates_geometry_and_mesh_workflows():
     context = inspect.getsource(MainWindow._show_tree_context_menu)
     start = context.index('if kind == "line_geometry":')
     end = context.index('if kind == "surfaces_root":', start)
     line_block = context[start:end]
 
     assert "Edit Line Geometry..." in line_block
-    assert "Divide Geometry Line..." in line_block
+    assert 'modify_menu = menu.addMenu("Modify Geometry")' in line_block
+    assert "Divide Line..." in line_block
     assert "Trim / Extend This Line to Other Selected Line..." in line_block
-    assert "Generate Line Mesh..." not in line_block
-    assert "Remesh Line" not in line_block
-    assert "Delete Generated Line Mesh" not in line_block
-    assert "Configure Mesh / FE Recipe..." not in line_block
-    assert "Mesh Quality..." not in line_block
+    assert 'mesh_menu = menu.addMenu("Mesh / FE")' in line_block
+    assert "Configure Line Mesh / FE Recipe..." in line_block
+    assert '"Generate Mesh"' in line_block
+    assert '"Remesh"' in line_block
+    assert "Preview Mesh" in line_block
+    assert "Select Generated FE" in line_block
+    assert "Delete Generated Mesh" not in line_block
 
 
 def test_geometry_surface_context_has_no_mesh_lifecycle_commands():
@@ -2217,9 +2220,11 @@ def test_geometry_view_change_cannot_leave_sketch_on_edge_on_old_plane():
 def test_geometry_tree_switch_to_fe_domain_exits_active_sketch():
     tree_change = inspect.getsource(MainWindow._tree_selection_changed)
 
+    assert "self._tree_selection_display_context(" in tree_change
+    assert 'geometry_mode = display_domain == "geometry"' in tree_change
     assert "not geometry_mode and self._geometry_sketch_tool_active()" in tree_change
     assert "self._activate_select_tool()" in tree_change
-    assert '"geometry" if geometry_mode else "fe"' in tree_change
+    assert "self.viewport.set_display_domain(display_domain)" in tree_change
 
 
 def test_geometry_double_click_finishes_sketch_instead_of_editing_entity():
