@@ -1017,3 +1017,32 @@ ops.nDMaterial(
     assert j2.parameters["sigInf"] == 350.0e6
     assert j2.parameters["delta"] == 16.0
     assert j2.parameters["H"] == 1.0e9
+
+
+def test_importer_recovers_set_num_threads():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+ops.node(1, 0.0, 0.0)
+ops.fix(1, 1, 1, 1)
+ops.setNumThreads(6)
+ops.constraints('Plain')
+ops.numberer('RCM')
+ops.system('UmfPack')
+ops.test('NormDispIncr', 1e-8, 20)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+ops.analyze(1)
+"""
+    imported = import_openseespy_source(
+        source,
+        source_name="threaded_static.py",
+    )
+
+    assert imported.error_count == 0
+    analysis = imported.project.analyses[
+        imported.project.active_analysis_tag
+    ]
+    assert analysis.execution_mode == "Multi-thread"
+    assert analysis.num_threads == 6
