@@ -5346,6 +5346,14 @@ class ResultsPanel(QWidget):
                 "averaged over available Gauss points for contour/table "
                 "summaries. Gauss-point sub-tabs retain each response."
             )
+        self._active_solution_kind = ""
+        self._active_crack_element_scope.clear()
+        self.crack_accumulate.setChecked(False)
+        self.crack_line_scale.setValue(0.82)
+        self.crack_table.setRowCount(0)
+        self.crack_summary.setText(
+            "No MEFI crack result data are loaded."
+        )
         self.fiber_element.clear()
         self.fiber_section.clear()
         self.fiber_plot.set_response({}, "stress")
