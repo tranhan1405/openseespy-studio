@@ -4667,6 +4667,25 @@ class ResultsPanel(QWidget):
                 f"C{index + 1}"
                 for index in range(len(labels), count)
             ]
+        if (
+            connection_type == "LehighJoint2D"
+            and response in {"basicForces", "Deformation"}
+        ):
+            labels = [
+                "Horizontal extension",
+                "Vertical extension",
+                "Shear distortion",
+                "Beam flexure",
+                "Column flexure",
+                "Asymmetric beam flexure",
+                "Asymmetric column flexure",
+                "Beam varying shear distortion",
+                "Column varying shear distortion",
+            ]
+            return labels[:count] + [
+                f"C{index + 1}"
+                for index in range(len(labels), count)
+            ]
         if connection_type == "BeamColumnJoint" and response in {
             "shearPanel",
             "node1BarSlipL",
