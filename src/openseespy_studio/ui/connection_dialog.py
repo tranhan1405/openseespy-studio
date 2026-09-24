@@ -252,6 +252,8 @@ class ConnectionDialog(QDialog):
             "zeroLengthSection",
             "twoNodeLink",
             "Joint2D",
+            "BeamColumnJoint",
+            "LehighJoint2D",
             "KrawinklerPanelZone",
         ])
         if connection:
@@ -308,9 +310,10 @@ class ConnectionDialog(QDialog):
             "rotation released. <b>Semi-Rigid</b>: zeroLength spring with "
             "selected rotational/translational material DOFs. "
             "<b>TwoNodeLink</b>: geometry controls local X by default; enable "
-            "orientation override only when needed. <b>Joint2D</b> and "
-            "<b>KrawinklerPanelZone</b> use the Joint / Panel Zone tab and "
-            "are currently intended for 2D frames."
+            "orientation override only when needed. <b>Joint2D</b>, "
+            "<b>BeamColumnJoint</b>, <b>LehighJoint2D</b>, and "
+            "<b>KrawinklerPanelZone</b> use the Joint / Panel Zone tab. "
+            "The SARE wrappers are currently restricted to 2D frames."
         )
         type_hint.setWordWrap(True)
         type_hint.setStyleSheet("color: #637487;")
@@ -581,6 +584,7 @@ class ConnectionDialog(QDialog):
             )
             saved_external.append(int(fallback))
         self.joint_node_spins: list[QSpinBox] = []
+        self.joint_node_labels: list[QLabel] = []
         for label, value in zip(
             ("Left", "Top", "Right", "Bottom"),
             saved_external[:4],
@@ -588,8 +592,10 @@ class ConnectionDialog(QDialog):
             spin = QSpinBox()
             spin.setRange(0, 2_147_483_647)
             spin.setValue(int(value))
+            row_label = QLabel(f"{label} node:")
+            self.joint_node_labels.append(row_label)
             self.joint_node_spins.append(spin)
-            joint_nodes_form.addRow(f"{label} node:", spin)
+            joint_nodes_form.addRow(row_label, spin)
         joint_layout.addWidget(joint_nodes_group)
 
         self.joint_center_tag = QSpinBox()
@@ -611,9 +617,10 @@ class ConnectionDialog(QDialog):
         )
 
         joint_order_hint = QLabel(
-            "When four nodes are preselected, SARE orders them cyclically "
-            "and starts from the left-most node. Verify Left → Top → Right → "
-            "Bottom before creating a Krawinkler panel zone."
+            "When four nodes are preselected, SARE orders them cyclically. "
+            "Krawinkler uses Left → Top → Right → Bottom. LehighJoint2D "
+            "requires Node 1 → 4 counter-clockwise. Verify the preview/order "
+            "before creating the joint."
         )
         joint_order_hint.setWordWrap(True)
         joint_order_hint.setStyleSheet("color: #637487;")
@@ -688,6 +695,143 @@ class ConnectionDialog(QDialog):
             self.large_disp.setCurrentIndex(large_index)
         joint_material_form.addRow("Joint2D formulation:", self.large_disp)
         joint_layout.addWidget(joint_material_group)
+        self.joint2d_material_group = joint_material_group
+
+        # RC BeamColumnJoint · 13 physical component materials.
+        bcj_group = QGroupBox("BeamColumnJoint · RC component materials")
+        bcj_layout = QHBoxLayout(bcj_group)
+        bcj_left = QFormLayout()
+        bcj_right = QFormLayout()
+        bcj_layout.addLayout(bcj_left, 1)
+        bcj_layout.addLayout(bcj_right, 1)
+        bcj_labels = (
+            "N1 bar-slip left",
+            "N1 bar-slip right",
+            "N1 interface shear",
+            "N2 bar-slip bottom",
+            "N2 bar-slip top",
+            "N2 interface shear",
+            "N3 bar-slip left",
+            "N3 bar-slip right",
+            "N3 interface shear",
+            "N4 bar-slip bottom",
+            "N4 bar-slip top",
+            "N4 interface shear",
+            "Shear panel",
+        )
+        saved_bcj = (
+            list(connection.parameters.get("component_materials", ()))
+            if (
+                connection is not None
+                and connection.connection_type == "BeamColumnJoint"
+            )
+            else []
+        )
+        self.bcj_material_combos: list[QComboBox] = []
+        for index, label in enumerate(bcj_labels):
+            combo = QComboBox()
+            combo.addItem("Select material...", None)
+            for material_tag in sorted(self.materials):
+                material = self.materials[material_tag]
+                combo.addItem(
+                    f"{material_tag} - {material.name}",
+                    int(material_tag),
+                )
+            if index < len(saved_bcj):
+                wanted = int(saved_bcj[index])
+                combo_index = combo.findData(wanted)
+                if combo_index >= 0:
+                    combo.setCurrentIndex(combo_index)
+            self.bcj_material_combos.append(combo)
+            target_form = bcj_left if index < 7 else bcj_right
+            target_form.addRow(f"Mat{index + 1} · {label}:", combo)
+
+        bcj_factor_group = QGroupBox("BeamColumnJoint geometry factors")
+        bcj_factor_form = QFormLayout(bcj_factor_group)
+        bcj_params = (
+            connection.parameters
+            if (
+                connection is not None
+                and connection.connection_type == "BeamColumnJoint"
+            )
+            else {}
+        )
+        self.bcj_height_factor = _float_spin(
+            float(bcj_params.get("height_factor", 1.0))
+        )
+        self.bcj_width_factor = _float_spin(
+            float(bcj_params.get("width_factor", 1.0))
+        )
+        self.bcj_height_factor.setMinimum(1.0e-12)
+        self.bcj_width_factor.setMinimum(1.0e-12)
+        bcj_factor_form.addRow("Height factor:", self.bcj_height_factor)
+        bcj_factor_form.addRow("Width factor:", self.bcj_width_factor)
+        bcj_factor_hint = QLabel(
+            "Default = 1.0. Factors scale the effective tension-compression "
+            "couple distances used by the RC joint formulation."
+        )
+        bcj_factor_hint.setWordWrap(True)
+        bcj_factor_hint.setStyleSheet("color: #637487;")
+        bcj_factor_form.addRow(bcj_factor_hint)
+        joint_layout.addWidget(bcj_group)
+        joint_layout.addWidget(bcj_factor_group)
+        self.bcj_group = bcj_group
+        self.bcj_factor_group = bcj_factor_group
+
+        # LehighJoint2D · nine deformation-mode materials.
+        lehigh_group = QGroupBox("LehighJoint2D · deformation-mode materials")
+        lehigh_layout = QHBoxLayout(lehigh_group)
+        lehigh_left = QFormLayout()
+        lehigh_right = QFormLayout()
+        lehigh_layout.addLayout(lehigh_left, 1)
+        lehigh_layout.addLayout(lehigh_right, 1)
+        lehigh_labels = (
+            "Horizontal extension",
+            "Vertical extension",
+            "Shear distortion",
+            "Beam flexure",
+            "Column flexure",
+            "Asymmetric beam flexure",
+            "Asymmetric column flexure",
+            "Beam varying shear distortion",
+            "Column varying shear distortion",
+        )
+        saved_lehigh = (
+            list(connection.parameters.get("mode_materials", ()))
+            if (
+                connection is not None
+                and connection.connection_type == "LehighJoint2D"
+            )
+            else []
+        )
+        self.lehigh_material_combos: list[QComboBox] = []
+        for index, label in enumerate(lehigh_labels):
+            combo = QComboBox()
+            combo.addItem("Select material...", None)
+            for material_tag in sorted(self.materials):
+                material = self.materials[material_tag]
+                combo.addItem(
+                    f"{material_tag} - {material.name}",
+                    int(material_tag),
+                )
+            if index < len(saved_lehigh):
+                wanted = int(saved_lehigh[index])
+                combo_index = combo.findData(wanted)
+                if combo_index >= 0:
+                    combo.setCurrentIndex(combo_index)
+            self.lehigh_material_combos.append(combo)
+            target_form = lehigh_left if index < 5 else lehigh_right
+            target_form.addRow(f"Mat{index + 1} · {label}:", combo)
+        lehigh_hint = QLabel(
+            "Node order must be counter-clockwise. Mat3 is the panel shear "
+            "distortion mode; the remaining modes represent extension, "
+            "flexure, asymmetry, and varying shear."
+        )
+        lehigh_hint.setWordWrap(True)
+        lehigh_hint.setStyleSheet("color: #637487;")
+        lehigh_layout.addWidget(lehigh_hint)
+        joint_layout.addWidget(lehigh_group)
+        self.lehigh_group = lehigh_group
 
         kraw_group = QGroupBox("Krawinkler stiff panel-boundary members")
         kraw_form = QFormLayout(kraw_group)
@@ -709,6 +853,7 @@ class ConnectionDialog(QDialog):
         kraw_hint.setStyleSheet("color: #637487;")
         kraw_form.addRow(kraw_hint)
         joint_layout.addWidget(kraw_group)
+        self.kraw_group = kraw_group
         joint_layout.addStretch(1)
 
         self.joint_page = joint_page
@@ -1043,6 +1188,8 @@ class ConnectionDialog(QDialog):
         }
         joint_mode = connection_type in {
             "Joint2D",
+            "BeamColumnJoint",
+            "LehighJoint2D",
             "KrawinklerPanelZone",
         }
         kinematic_mode = connection_type in {"rigid", "pinned"}
@@ -1072,13 +1219,58 @@ class ConnectionDialog(QDialog):
         )
 
         joint2d_mode = connection_type == "Joint2D"
+        bcj_mode = connection_type == "BeamColumnJoint"
+        lehigh_mode = connection_type == "LehighJoint2D"
         kraw_mode = connection_type == "KrawinklerPanelZone"
+        self.joint2d_material_group.setEnabled(joint2d_mode)
+        self.bcj_group.setEnabled(bcj_mode)
+        self.bcj_factor_group.setEnabled(bcj_mode)
+        self.lehigh_group.setEnabled(lehigh_mode)
+        self.kraw_group.setEnabled(kraw_mode)
         for combo in self.interface_material_combos:
             combo.setEnabled(joint2d_mode)
         self.large_disp.setEnabled(joint2d_mode)
         self.joint_center_tag.setEnabled(joint2d_mode)
         for spin in (self.rigid_a, self.rigid_e, self.rigid_i):
             spin.setEnabled(kraw_mode)
+
+        if kraw_mode:
+            labels = ("Left node:", "Top node:", "Right node:", "Bottom node:")
+        else:
+            labels = ("Node 1:", "Node 2:", "Node 3:", "Node 4:")
+        for label_widget, text_value in zip(
+            self.joint_node_labels,
+            labels,
+        ):
+            label_widget.setText(text_value)
+
+        if lehigh_mode:
+            current_tags = [spin.value() for spin in self.joint_node_spins]
+            if (
+                len(set(current_tags)) == 4
+                and all(tag in self.node_positions for tag in current_tags)
+            ):
+                points = [self.node_positions[tag] for tag in current_tags]
+                signed_area2 = sum(
+                    float(points[index][0])
+                    * float(points[(index + 1) % 4][1])
+                    - float(points[(index + 1) % 4][0])
+                    * float(points[index][1])
+                    for index in range(4)
+                )
+                if signed_area2 < 0.0:
+                    # Preserve Node 1 and reverse traversal to obtain CCW.
+                    reordered = [
+                        current_tags[0],
+                        current_tags[3],
+                        current_tags[2],
+                        current_tags[1],
+                    ]
+                    for spin, tag in zip(
+                        self.joint_node_spins,
+                        reordered,
+                    ):
+                        spin.setValue(int(tag))
 
         if joint_mode:
             self.tabs.setCurrentIndex(self.joint_tab_index)
@@ -1515,6 +1707,8 @@ class ConnectionDialog(QDialog):
         }
         joint_mode = connection_type in {
             "Joint2D",
+            "BeamColumnJoint",
+            "LehighJoint2D",
             "KrawinklerPanelZone",
         }
 
@@ -1654,20 +1848,20 @@ class ConnectionDialog(QDialog):
             ]
             if len(set(external_nodes)) != 4:
                 raise ValueError(
-                    "Joint / panel-zone external nodes must be four distinct tags."
+                    "Joint external nodes must be four distinct tags."
                 )
-            panel_tag = self.panel_material_combo.currentData()
-            if panel_tag is None:
-                raise ValueError(
-                    f"{connection_type} requires a panel material."
-                )
-            panel_tag = int(panel_tag)
             parameters["external_nodes"] = external_nodes
-            parameters["panel_material"] = panel_tag
             node_i, node_j = external_nodes[0], external_nodes[1]
-            referenced_materials[100] = panel_tag
 
             if connection_type == "Joint2D":
+                panel_tag = self.panel_material_combo.currentData()
+                if panel_tag is None:
+                    raise ValueError(
+                        "Joint2D requires a panel material."
+                    )
+                panel_tag = int(panel_tag)
+                parameters["panel_material"] = panel_tag
+                referenced_materials[100] = panel_tag
                 interfaces = [
                     int(combo.currentData() or 0)
                     for combo in self.interface_material_combos
@@ -1680,10 +1874,60 @@ class ConnectionDialog(QDialog):
                     parameters["imported_center_node_tag"] = int(
                         self.joint_center_tag.value()
                     )
-                for index, material_tag in enumerate(interfaces, start=101):
+                for index, material_tag in enumerate(
+                    interfaces,
+                    start=101,
+                ):
                     if material_tag > 0:
                         referenced_materials[index] = material_tag
+
+            elif connection_type == "BeamColumnJoint":
+                component_materials: list[int] = []
+                for index, combo in enumerate(
+                    self.bcj_material_combos,
+                    start=1,
+                ):
+                    material_tag = combo.currentData()
+                    if material_tag is None:
+                        raise ValueError(
+                            "BeamColumnJoint requires all 13 component "
+                            f"materials; Mat{index} is not assigned."
+                        )
+                    component_materials.append(int(material_tag))
+                    referenced_materials[200 + index] = int(material_tag)
+                parameters["component_materials"] = component_materials
+                parameters["height_factor"] = float(
+                    self.bcj_height_factor.value()
+                )
+                parameters["width_factor"] = float(
+                    self.bcj_width_factor.value()
+                )
+
+            elif connection_type == "LehighJoint2D":
+                mode_materials: list[int] = []
+                for index, combo in enumerate(
+                    self.lehigh_material_combos,
+                    start=1,
+                ):
+                    material_tag = combo.currentData()
+                    if material_tag is None:
+                        raise ValueError(
+                            "LehighJoint2D requires all 9 deformation-mode "
+                            f"materials; Mat{index} is not assigned."
+                        )
+                    mode_materials.append(int(material_tag))
+                    referenced_materials[300 + index] = int(material_tag)
+                parameters["mode_materials"] = mode_materials
+
             else:
+                panel_tag = self.panel_material_combo.currentData()
+                if panel_tag is None:
+                    raise ValueError(
+                        "KrawinklerPanelZone requires a panel material."
+                    )
+                panel_tag = int(panel_tag)
+                parameters["panel_material"] = panel_tag
+                referenced_materials[100] = panel_tag
                 rigid_a = float(self.rigid_a.value())
                 rigid_e = float(self.rigid_e.value())
                 rigid_i = float(self.rigid_i.value())
@@ -1757,7 +2001,12 @@ class ConnectionDialog(QDialog):
         if needs_uniaxial and not self.materials:
             target_tab = (
                 self.joint_tab_index
-                if connection_type in {"Joint2D", "KrawinklerPanelZone"}
+                if connection_type in {
+                    "Joint2D",
+                    "BeamColumnJoint",
+                    "LehighJoint2D",
+                    "KrawinklerPanelZone",
+                }
                 else self.dof_tab_index
             )
             self.tabs.setCurrentIndex(target_tab)
