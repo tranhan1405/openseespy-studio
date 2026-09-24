@@ -648,6 +648,39 @@ def nd_material_to_openseespy(
             f"{material.tag}, {', '.join(rendered)})"
         )
 
+    if material.material_type == "ASDConcrete3D":
+        args = [
+            "'ASDConcrete3D'",
+            str(material.tag),
+            f"{value('E'):g}",
+            f"{value('nu'):g}",
+            "'-rho'",
+            f"{value('rho'):g}",
+            "'-fc'",
+            f"{value('fc'):g}",
+            "'-ft'",
+            f"{value('ft'):g}",
+        ]
+        if value("implex") >= 0.5:
+            args.append("'-implex'")
+        args.extend([
+            "'-Kc'",
+            f"{value('Kc'):g}",
+            "'-cdf'",
+            f"{value('cdf'):g}",
+        ])
+        return "ops.nDMaterial(" + ", ".join(args) + ")"
+
+    if material.material_type == "OrthotropicRAConcrete":
+        return (
+            "ops.nDMaterial('OrthotropicRAConcrete', "
+            f"{material.tag}, {int(round(value('conc')))}, "
+            f"{value('ecr'):g}, {value('ec'):g}, {value('rho'):g}, "
+            "'-damageCte1', "
+            f"{value('DamageCte1'):g}, '-damageCte2', "
+            f"{value('DamageCte2'):g})"
+        )
+
     raise ValueError(
         f"Unsupported nDMaterial type: {material.material_type}"
     )
