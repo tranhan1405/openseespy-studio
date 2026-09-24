@@ -208,11 +208,14 @@ def test_crack_pattern_result_restores_controls_and_reports_panels(qapp):
         assert panel.crack_table.item(0, 5).text() == "Cracked"
         assert "1 cracked at final state" in panel.crack_summary.text()
         assert not panel.motion_page.isHidden()
+        assert panel._motion_frame_index == 1
+        assert panel.motion_slider.value() == 1
 
         captured.clear()
         panel._crack_controls_changed()
         qapp.processEvents()
         assert captured
+        assert captured[-1][0] == 1
         assert captured[-1][1:] == (True, pytest.approx(0.65), [10])
     finally:
         panel.close()
