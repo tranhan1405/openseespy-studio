@@ -55,7 +55,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 43
+PROJECT_FORMAT_VERSION = 44
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -1600,9 +1600,14 @@ class ConstraintData:
 
 
 SUPPORTED_CONNECTION_TYPES: tuple[str, ...] = (
+    "rigid",
+    "pinned",
+    "semiRigid",
     "zeroLength",
     "zeroLengthSection",
     "twoNodeLink",
+    "Joint2D",
+    "KrawinklerPanelZone",
 )
 
 
@@ -1621,6 +1626,7 @@ class ConnectionData:
     section_tag: int | None = None
     generated_section_tag: int | None = None
     generated_constraint_tag: int | None = None
+    parameters: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Connection tag")
@@ -1677,6 +1683,7 @@ class ConnectionData:
                 "Connection generated constraint tag",
             )
         )
+        self.parameters = dict(self.parameters or {})
 
         if self.tag <= 0:
             raise ValueError("Connection tag must be a positive integer.")
@@ -1719,11 +1726,82 @@ class ConnectionData:
                     "zeroLengthSection uses one Section object, not "
                     "materials_by_dof."
                 )
+        elif self.connection_type in {"rigid", "pinned", "Joint2D", "KrawinklerPanelZone"}:
+            if self.materials_by_dof:
+                raise ValueError(
+                    f"{self.connection_type} does not use materials_by_dof."
+                )
         else:
             if not self.materials_by_dof:
                 raise ValueError("Connection needs at least one active DOF.")
             if any(dof < 1 or dof > 6 for dof in self.materials_by_dof):
                 raise ValueError("Connection DOFs must be in the range 1..6.")
+
+        if self.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
+            external_nodes = self.parameters.get("external_nodes", ())
+            if not isinstance(external_nodes, (list, tuple)) or len(external_nodes) != 4:
+                raise ValueError(
+                    f"{self.connection_type} requires four external_nodes."
+                )
+            external_nodes = tuple(
+                _strict_int(tag, "Joint external node")
+                for tag in external_nodes
+            )
+            if len(set(external_nodes)) != 4:
+                raise ValueError("Joint external nodes must be four distinct tags.")
+            self.parameters["external_nodes"] = list(external_nodes)
+
+            panel_material = _strict_int(
+                self.parameters.get("panel_material", 0),
+                "Joint panel material",
+            )
+            if panel_material <= 0:
+                raise ValueError(
+                    f"{self.connection_type} requires a panel material."
+                )
+            self.parameters["panel_material"] = panel_material
+
+        if self.connection_type == "Joint2D":
+            interface_materials = self.parameters.get(
+                "interface_materials",
+                (0, 0, 0, 0),
+            )
+            if (
+                not isinstance(interface_materials, (list, tuple))
+                or len(interface_materials) != 4
+            ):
+                raise ValueError(
+                    "Joint2D interface_materials must contain four tags."
+                )
+            normalized_interface = tuple(
+                _strict_int(tag, "Joint2D interface material")
+                for tag in interface_materials
+            )
+            if any(tag < 0 for tag in normalized_interface):
+                raise ValueError(
+                    "Joint2D interface material tags must be zero or positive."
+                )
+            self.parameters["interface_materials"] = list(
+                normalized_interface
+            )
+            large_disp = _strict_int(
+                self.parameters.get("large_disp", 0),
+                "Joint2D large displacement flag",
+            )
+            if large_disp not in {0, 1, 2}:
+                raise ValueError(
+                    "Joint2D large_disp must be 0, 1, or 2."
+                )
+            self.parameters["large_disp"] = large_disp
+
+        if self.connection_type == "KrawinklerPanelZone":
+            for key in ("rigid_A", "rigid_E", "rigid_I"):
+                value = float(self.parameters.get(key, 0.0))
+                if not math.isfinite(value) or value <= 0.0:
+                    raise ValueError(
+                        f"KrawinklerPanelZone requires positive {key}."
+                    )
+                self.parameters[key] = value
         if len(self.orient_x) != 3 or len(self.orient_y) != 3:
             raise ValueError("Connection orientation vectors need 3 values.")
         if any(
@@ -1771,6 +1849,7 @@ class ConnectionData:
             "section_tag": self.section_tag,
             "generated_section_tag": self.generated_section_tag,
             "generated_constraint_tag": self.generated_constraint_tag,
+            "parameters": dict(self.parameters),
         }
 
     @classmethod
@@ -1797,6 +1876,7 @@ class ConnectionData:
             section_tag=data.get("section_tag"),
             generated_section_tag=data.get("generated_section_tag"),
             generated_constraint_tag=data.get("generated_constraint_tag"),
+            parameters=dict(data.get("parameters", {})),
         )
 
 
@@ -6862,16 +6942,22 @@ class ProjectDatabase:
                 "Generated ground node must be one of the connection "
                 "endpoint nodes."
             )
-        missing_nodes = [
-            tag
-            for tag in (connection.node_i, connection.node_j)
-            if tag not in self.model.nodes
-        ]
+
+        referenced_nodes = {connection.node_i, connection.node_j}
+        if connection.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
+            referenced_nodes.update(
+                int(tag)
+                for tag in connection.parameters.get("external_nodes", ())
+            )
+        missing_nodes = sorted(
+            tag for tag in referenced_nodes if tag not in self.model.nodes
+        )
         if missing_nodes:
             raise ValueError(
                 "Connection references missing node tag(s): "
                 + ", ".join(map(str, missing_nodes))
             )
+
         invalid_dofs = sorted(
             dof
             for dof in connection.materials_by_dof
@@ -6883,16 +6969,32 @@ class ProjectDatabase:
                 + ", ".join(map(str, invalid_dofs))
                 + f" are not available for ndf={self.model.ndf}."
             )
-        missing_materials = sorted({
+
+        referenced_materials = set(connection.materials_by_dof.values())
+        if connection.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
+            referenced_materials.add(
+                int(connection.parameters.get("panel_material", 0))
+            )
+        if connection.connection_type == "Joint2D":
+            referenced_materials.update(
+                int(tag)
+                for tag in connection.parameters.get(
+                    "interface_materials",
+                    (),
+                )
+                if int(tag) > 0
+            )
+        missing_materials = sorted(
             material_tag
-            for material_tag in connection.materials_by_dof.values()
-            if material_tag not in self.materials
-        })
+            for material_tag in referenced_materials
+            if material_tag > 0 and material_tag not in self.materials
+        )
         if missing_materials:
             raise ValueError(
                 "Connection references missing material tag(s): "
                 + ", ".join(map(str, missing_materials))
             )
+
         if (
             connection.connection_type == "zeroLengthSection"
             and connection.section_tag not in self.sections
@@ -6902,14 +7004,26 @@ class ProjectDatabase:
                 f"{connection.section_tag}."
             )
 
-        if connection.connection_type in {"zeroLength", "zeroLengthSection"}:
+        if connection.connection_type in {
+            "zeroLength",
+            "zeroLengthSection",
+            "semiRigid",
+            "pinned",
+        }:
             a = self.model.nodes[connection.node_i].xyz
             b = self.model.nodes[connection.node_j].xyz
             distance2 = sum((x - y) ** 2 for x, y in zip(a, b))
             if distance2 > 1.0e-14:
                 raise ValueError(
-                    "zeroLength connection nodes must be coincident. "
-                    "Use twoNodeLink for separated nodes."
+                    f"{connection.connection_type} connection nodes must be "
+                    "coincident. Use rigid/twoNodeLink for separated nodes."
+                )
+
+        if connection.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
+            if int(self.model.ndm) != 2 or int(self.model.ndf) != 3:
+                raise ValueError(
+                    f"{connection.connection_type} currently requires a "
+                    "2D frame model (ndm=2, ndf=3)."
                 )
 
     def add_connection(self, connection: ConnectionData) -> None:
@@ -7102,11 +7216,27 @@ class ProjectDatabase:
 
     def connections_using_material(self, material_tag: int) -> list[int]:
         material_tag = _strict_int(material_tag, "Material tag")
-        return sorted(
-            connection.tag
-            for connection in self.connections.values()
-            if material_tag in connection.materials_by_dof.values()
-        )
+        used: list[int] = []
+        for connection in self.connections.values():
+            tags = set(connection.materials_by_dof.values())
+            if connection.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
+                panel_tag = int(
+                    connection.parameters.get("panel_material", 0)
+                )
+                if panel_tag > 0:
+                    tags.add(panel_tag)
+            if connection.connection_type == "Joint2D":
+                tags.update(
+                    int(tag)
+                    for tag in connection.parameters.get(
+                        "interface_materials",
+                        (),
+                    )
+                    if int(tag) > 0
+                )
+            if material_tag in tags:
+                used.append(connection.tag)
+        return sorted(used)
 
     def prune_selection_sets(self) -> None:
         valid_nodes = set(self.model.nodes)
@@ -7119,10 +7249,19 @@ class ProjectDatabase:
         removed: list[int] = []
         existing_nodes = set(self.model.nodes)
         for tag, connection in list(self.connections.items()):
-            if (
-                connection.node_i not in existing_nodes
-                or connection.node_j not in existing_nodes
-            ):
+            referenced_nodes = {
+                connection.node_i,
+                connection.node_j,
+            }
+            if connection.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
+                referenced_nodes.update(
+                    int(node_tag)
+                    for node_tag in connection.parameters.get(
+                        "external_nodes",
+                        (),
+                    )
+                )
+            if any(node_tag not in existing_nodes for node_tag in referenced_nodes):
                 self.remove_connection(tag, cleanup_ground=True)
                 removed.append(tag)
         return sorted(removed)
