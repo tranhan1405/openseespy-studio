@@ -7638,7 +7638,13 @@ class ModelViewport(QWidget):
 
         visible_elements = tuple(sorted(self._visible_element_tags()))
         visible_nodes = tuple(sorted(self._visible_node_tags()))
-        topology_key = (visible_elements, visible_nodes)
+        reference = abs(float(reference_magnitude))
+        scalar_upper = max(reference, 1.0e-15)
+        topology_key = (
+            visible_elements,
+            visible_nodes,
+            scalar_upper,
+        )
 
         if self._motion_topology_key != topology_key:
             self.clear_result_overlay(render=False)
@@ -7670,13 +7676,26 @@ class ModelViewport(QWidget):
                     np.asarray(element_points, dtype=float)
                 )
                 mesh.lines = np.asarray(element_lines, dtype=np.int64)
+                mesh.point_data["magnitude"] = np.zeros(
+                    len(element_points),
+                    dtype=float,
+                )
+                length_unit = str(self._units.get("length", "")).strip()
+                scalar_title = (
+                    f"Displacement magnitude [{length_unit}]"
+                    if length_unit
+                    else "Displacement magnitude"
+                )
                 self.plotter.add_mesh(
                     mesh,
                     name="motion-overlay",
-                    color="#d94848",
+                    scalars="magnitude",
+                    cmap="turbo",
+                    clim=(0.0, scalar_upper),
                     line_width=5,
                     render_lines_as_tubes=True,
                     pickable=False,
+                    scalar_bar_args={"title": scalar_title},
                     render=False,
                 )
                 self._motion_element_mesh = mesh
@@ -7694,13 +7713,27 @@ class ModelViewport(QWidget):
                 node_mesh = pv.PolyData(
                     np.asarray(node_points, dtype=float)
                 )
+                node_mesh.point_data["magnitude"] = np.zeros(
+                    len(node_points),
+                    dtype=float,
+                )
+                length_unit = str(self._units.get("length", "")).strip()
+                scalar_title = (
+                    f"Displacement magnitude [{length_unit}]"
+                    if length_unit
+                    else "Displacement magnitude"
+                )
                 self.plotter.add_mesh(
                     node_mesh,
                     name="motion-nodes",
-                    color="#d94848",
+                    scalars="magnitude",
+                    cmap="turbo",
+                    clim=(0.0, scalar_upper),
                     render_points_as_spheres=True,
                     point_size=7,
                     pickable=False,
+                    show_scalar_bar=not bool(element_points),
+                    scalar_bar_args={"title": scalar_title},
                     render=False,
                 )
                 self._motion_node_mesh = node_mesh
@@ -7709,7 +7742,6 @@ class ModelViewport(QWidget):
             self._motion_topology_key = topology_key
 
         effective_scale = float(scale)
-        reference = abs(float(reference_magnitude))
         if auto_scale and reference > 1.0e-15:
             low, high = self._model.bounds()
             span = max(
@@ -7720,8 +7752,7 @@ class ModelViewport(QWidget):
             )
             effective_scale *= 0.12 * span / reference
 
-        def displaced(tag: int) -> tuple[float, float, float]:
-            node = self._model.nodes[tag]
+        def vector_components(tag: int) -> tuple[float, float, float]:
             raw = vectors.get(
                 str(tag),
                 vectors.get(tag, (0.0, 0.0, 0.0)),
@@ -7729,11 +7760,23 @@ class ModelViewport(QWidget):
             values = list(raw) if raw is not None else []
             while len(values) < 3:
                 values.append(0.0)
+            dx = float(values[0])
+            dy = float(values[1])
+            dz = 0.0 if self._model.ndm == 2 else float(values[2])
+            return dx, dy, dz
+
+        def displaced(tag: int) -> tuple[float, float, float]:
+            node = self._model.nodes[tag]
+            dx, dy, dz = vector_components(tag)
             return (
-                node.xyz[0] + effective_scale * float(values[0]),
-                node.xyz[1] + effective_scale * float(values[1]),
-                node.xyz[2] + effective_scale * float(values[2]),
+                node.xyz[0] + effective_scale * dx,
+                node.xyz[1] + effective_scale * dy,
+                node.xyz[2] + effective_scale * dz,
             )
+
+        def displacement_magnitude(tag: int) -> float:
+            dx, dy, dz = vector_components(tag)
+            return math.sqrt(dx * dx + dy * dy + dz * dz)
 
         if self._motion_element_mesh is not None:
             self._motion_element_mesh.points = np.asarray(
@@ -7743,9 +7786,23 @@ class ModelViewport(QWidget):
                 ],
                 dtype=float,
             )
+            self._motion_element_mesh.point_data["magnitude"] = np.asarray(
+                [
+                    displacement_magnitude(tag)
+                    for tag in self._motion_element_node_tags
+                ],
+                dtype=float,
+            )
         if self._motion_node_mesh is not None:
             self._motion_node_mesh.points = np.asarray(
                 [displaced(tag) for tag in self._motion_node_tags],
+                dtype=float,
+            )
+            self._motion_node_mesh.point_data["magnitude"] = np.asarray(
+                [
+                    displacement_magnitude(tag)
+                    for tag in self._motion_node_tags
+                ],
                 dtype=float,
             )
 
