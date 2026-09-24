@@ -1078,6 +1078,9 @@ class ResultsPanel(QWidget):
                         "DeformedShape",
                         "NodalDisplacement",
                         "NodalReaction",
+                        "MemberForce",
+                        "ShellForce",
+                        "ShellDeformation",
                         "ModeShape",
                         "Motion",
                         "ForceDisplacement",
@@ -1147,6 +1150,8 @@ class ResultsPanel(QWidget):
             except (TypeError, ValueError):
                 pass
             self._select_tab("Member Forces")
+            if self._motion_display_frame_count > 0:
+                self._set_motion_index(self._motion_display_frame_count - 1)
             return
 
         if kind == "ShellForce":
@@ -1160,6 +1165,8 @@ class ResultsPanel(QWidget):
             )
             self.shell_detail_tabs.setCurrentIndex(tab)
             self._select_tab("Shell Results")
+            if self._motion_display_frame_count > 0:
+                self._set_motion_index(self._motion_display_frame_count - 1)
             return
 
         if kind == "ShellDeformation":
@@ -1173,6 +1180,8 @@ class ResultsPanel(QWidget):
             )
             self.shell_detail_tabs.setCurrentIndex(tab)
             self._select_tab("Shell Results")
+            if self._motion_display_frame_count > 0:
+                self._set_motion_index(self._motion_display_frame_count - 1)
             return
 
         if kind == "CrackPattern":
@@ -1204,6 +1213,10 @@ class ResultsPanel(QWidget):
                     self.motion_frame_spin.blockSignals(False)
                     self.motion_slider.blockSignals(False)
             self._select_tab("Crack Pattern")
+            if self._motion_display_frame_count > 0:
+                self._sync_crack_table_frame(
+                    self._motion_source_index(self._motion_frame_index)
+                )
             return
 
         if kind in {"FiberStress", "FiberStrain"}:
@@ -2021,9 +2034,18 @@ class ResultsPanel(QWidget):
                 self.member_force_scale.value(),
             )
         )
+        self.member_animate_button = QPushButton("▶ Animate")
+        self.member_animate_button.setToolTip(
+            "Animate deformation while the member-force table follows "
+            "the active result frame."
+        )
+        self.member_animate_button.clicked.connect(
+            lambda: self._open_animation(source="member")
+        )
         clear = QPushButton("Clear")
         clear.clicked.connect(self.clear_overlay_requested.emit)
         controls.addWidget(show)
+        controls.addWidget(self.member_animate_button)
         controls.addWidget(clear)
         controls.addStretch(1)
         layout.addLayout(controls)
@@ -2058,10 +2080,24 @@ class ResultsPanel(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
+        shell_controls = QHBoxLayout()
+        self.shell_animate_button = QPushButton("▶ Animate")
+        self.shell_animate_button.setToolTip(
+            "Animate deformation while shell force/strain summary tables "
+            "follow the active result frame."
+        )
+        self.shell_animate_button.clicked.connect(
+            lambda: self._open_animation(source="shell")
+        )
+        shell_controls.addWidget(self.shell_animate_button)
+        shell_controls.addStretch(1)
+        layout.addLayout(shell_controls)
+
         self.shell_info = QLabel(
             "Shell section resultants are averaged over available Gauss "
-            "points for contour/table summaries. The Gauss Points sub-tab "
-            "retains each integration-point response."
+            "points for contour/table summaries. During animation the "
+            "summary tables follow the active frame; Gauss-point detail "
+            "remains the final-state table."
         )
         self.shell_info.setWordWrap(True)
         layout.addWidget(self.shell_info)
@@ -2216,6 +2252,15 @@ class ResultsPanel(QWidget):
             self._crack_controls_changed
         )
         controls.addWidget(self.crack_line_scale)
+        self.crack_animate_button = QPushButton("▶ Animate")
+        self.crack_animate_button.setToolTip(
+            "Animate crack evolution and synchronize the panel table "
+            "with the current frame."
+        )
+        self.crack_animate_button.clicked.connect(
+            lambda: self._open_animation(source="crack")
+        )
+        controls.addWidget(self.crack_animate_button)
         controls.addStretch(1)
         layout.addLayout(controls)
 
@@ -2231,7 +2276,7 @@ class ResultsPanel(QWidget):
                 "Element",
                 "Panel",
                 "epsilon_cr",
-                "epsilon_1 final",
+                "epsilon_1 state",
                 "epsilon_1/epsilon_cr",
                 "State",
             ]
@@ -2427,6 +2472,10 @@ class ResultsPanel(QWidget):
             )
         else:
             source_index = -1
+        if self._motion_display_frame_count > 0:
+            self._sync_crack_table_frame(
+                self._motion_source_index(self._motion_frame_index)
+            )
         self.crack_frame_requested.emit(
             int(source_index),
             bool(self.crack_accumulate.isChecked()),
@@ -3573,8 +3622,8 @@ class ResultsPanel(QWidget):
         layout.addLayout(slider_row)
 
         self.motion_info_label = QLabel(
-            "Result animation · values/tables are frozen during Play and "
-            "synchronized to the current frame on Pause."
+            "Result animation · applicable result tables follow the "
+            "current frame live."
         )
         self.motion_info_label.setWordWrap(True)
         layout.addWidget(self.motion_info_label)
@@ -3745,6 +3794,9 @@ class ResultsPanel(QWidget):
             "deformation_animate_button",
             "mode_animate_button",
             "node_animate_button",
+            "member_animate_button",
+            "shell_animate_button",
+            "crack_animate_button",
             "history_animate_button",
             "force_disp_animate_button",
         ):
@@ -3759,7 +3811,7 @@ class ResultsPanel(QWidget):
             (
                 f"{analysis_type or 'Analysis'} · {count} frame(s) · "
                 f"{self._motion_frame_rate_value()} fps · "
-                "all result frames retained · node tables update live."
+                "all result frames retained · active result tables update live."
                 if count > 0
                 else "No deformation history or modal vectors are "
                 "available for result animation."
@@ -3850,7 +3902,7 @@ class ResultsPanel(QWidget):
             self.motion_play.setChecked(False)
             self.motion_play.setText("▶ Play")
             self.motion_play.blockSignals(False)
-        self._sync_motion_node_values()
+        self._sync_active_motion_table()
 
     def _toggle_motion_playback(self, checked: bool) -> None:
         if checked:
@@ -3917,6 +3969,338 @@ class ResultsPanel(QWidget):
 
         if target != self._motion_frame_index:
             self._set_motion_index(target)
+
+    def _sync_active_motion_table(
+        self,
+        source_index: int | None = None,
+    ) -> None:
+        """Synchronize the active result table to one solver frame."""
+        if source_index is None and self._motion_display_frame_count > 0:
+            source_index = self._motion_source_index(
+                self._motion_frame_index
+            )
+        if source_index is None:
+            return
+        kind = self._active_solution_kind
+        if kind in {"NodalDisplacement", "NodalReaction"}:
+            self._sync_motion_node_values(source_index)
+        elif kind == "MemberForce":
+            self._sync_member_force_frame(source_index)
+        elif kind in {"ShellForce", "ShellDeformation"}:
+            self._sync_shell_frame(source_index)
+        elif kind == "CrackPattern":
+            self._sync_crack_table_frame(source_index)
+
+    def _sync_member_force_frame(self, source_index: int) -> None:
+        history = (
+            self._result.get("history", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        force_history = (
+            history.get("element_local_forces", {})
+            if isinstance(history, dict)
+            else {}
+        )
+        if not isinstance(force_history, dict) or not force_history:
+            self.element_info.setText(
+                "No member-force history was captured for this result "
+                "request. Re-run the analysis with Member Force in Solution."
+            )
+            return
+
+        component = self.element_quantity.currentText()
+        rows: list[tuple[int, float, float, float]] = []
+        for raw_tag in sorted(force_history, key=lambda value: int(value)):
+            series = force_history.get(raw_tag, [])
+            if not isinstance(series, list) or source_index >= len(series):
+                continue
+            raw = series[source_index]
+            ends = component_end_resultants(
+                raw if isinstance(raw, (list, tuple)) else [],
+                component,
+            )
+            if ends is None:
+                continue
+            value_i = float(ends[0])
+            value_j = float(ends[1])
+            rows.append((
+                int(raw_tag),
+                value_i,
+                value_j,
+                max(abs(value_i), abs(value_j)),
+            ))
+
+        self.element_table.setUpdatesEnabled(False)
+        try:
+            self.element_table.setRowCount(len(rows))
+            for row, (tag, value_i, value_j, maximum) in enumerate(rows):
+                item = self.element_table.item(row, 0)
+                if item is None:
+                    item = QTableWidgetItem()
+                    self.element_table.setItem(row, 0, item)
+                item.setText(str(tag))
+                item.setData(Qt.UserRole, tag)
+                for column, value in enumerate(
+                    (value_i, value_j, maximum),
+                    start=1,
+                ):
+                    cell = self.element_table.item(row, column)
+                    if cell is None:
+                        cell = QTableWidgetItem()
+                        self.element_table.setItem(row, column, cell)
+                    cell.setText(f"{value:.6g}")
+        finally:
+            self.element_table.setUpdatesEnabled(True)
+
+        self._element_table_display_key = (
+            f"{component}@frame:{source_index}"
+        )
+        self.element_info.setText(
+            f"{component}: {len(rows)} member(s) · live animation "
+            f"frame {self._motion_frame_index + 1}/"
+            f"{self._motion_display_frame_count} · "
+            f"result frame {source_index + 1}/"
+            f"{self._motion_source_frame_count}."
+        )
+
+    def _sync_shell_frame(self, source_index: int) -> None:
+        history = (
+            self._result.get("history", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        is_force = self._active_solution_kind == "ShellForce"
+        key = (
+            "shell_section_forces"
+            if is_force
+            else "shell_section_deformations"
+        )
+        data = history.get(key, {}) if isinstance(history, dict) else {}
+        if not isinstance(data, dict) or not data:
+            self.shell_info.setText(
+                "No shell history was captured for this result request. "
+                "Re-run the analysis with this Shell result in Solution."
+            )
+            return
+
+        rows: list[tuple[int, list[float]]] = []
+        for raw_tag in sorted(data, key=lambda value: int(value)):
+            series = data.get(raw_tag, [])
+            if not isinstance(series, list) or source_index >= len(series):
+                continue
+            values = series[source_index]
+            if not isinstance(values, (list, tuple)) or len(values) < 8:
+                continue
+            try:
+                rows.append((
+                    int(raw_tag),
+                    [float(values[index]) for index in range(8)],
+                ))
+            except (TypeError, ValueError):
+                continue
+
+        groups = (
+            {
+                "Membrane": (0, 1, 2),
+                "Bending": (3, 4, 5),
+                "Shear": (6, 7),
+            }
+            if is_force
+            else {
+                "Membrane Strain": (0, 1, 2),
+                "Curvature": (3, 4, 5),
+                "Shear Strain": (6, 7),
+            }
+        )
+        for title, indices in groups.items():
+            table = self.shell_tables[title]
+            table.setUpdatesEnabled(False)
+            try:
+                table.setRowCount(len(rows))
+                for row_index, (tag, values) in enumerate(rows):
+                    cell = table.item(row_index, 0)
+                    if cell is None:
+                        cell = QTableWidgetItem()
+                        table.setItem(row_index, 0, cell)
+                    cell.setText(str(tag))
+                    for column, component_index in enumerate(
+                        indices,
+                        start=1,
+                    ):
+                        cell = table.item(row_index, column)
+                        if cell is None:
+                            cell = QTableWidgetItem()
+                            table.setItem(row_index, column, cell)
+                        cell.setText(
+                            f"{values[component_index]:.6g}"
+                        )
+            finally:
+                table.setUpdatesEnabled(True)
+
+        label = "force" if is_force else "deformation"
+        self.shell_info.setText(
+            f"{len(rows)} shell element(s) · live {label} summary · "
+            f"animation frame {self._motion_frame_index + 1}/"
+            f"{self._motion_display_frame_count} · result frame "
+            f"{source_index + 1}/{self._motion_source_frame_count}. "
+            "Gauss-point detail remains final-state."
+        )
+
+    def _sync_crack_table_frame(self, source_index: int) -> None:
+        specs = (
+            self._result.get("mefi_crack_specs", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        history = (
+            self._result.get("history", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        history_panels = (
+            history.get("mefi_panel_strains", {})
+            if isinstance(history, dict)
+            else {}
+        )
+        if not isinstance(specs, dict) or not isinstance(
+            history_panels,
+            dict,
+        ):
+            return
+
+        accumulate = bool(self.crack_accumulate.isChecked())
+        rows: list[tuple[str, ...]] = []
+        cracked_count = 0
+        valid_count = 0
+        max_ratio = 0.0
+        panel_count = 0
+        element_count = 0
+
+        for raw_tag, spec in sorted(
+            specs.items(),
+            key=lambda item: int(item[0]),
+        ):
+            tag = int(raw_tag)
+            if (
+                self._active_crack_element_scope
+                and tag not in self._active_crack_element_scope
+            ):
+                continue
+            if not isinstance(spec, dict):
+                continue
+            element_count += 1
+            element_history = history_panels.get(str(tag), {})
+            panels = spec.get("panels", [])
+            if not isinstance(element_history, dict) or not isinstance(
+                panels,
+                list,
+            ):
+                continue
+
+            for index, panel in enumerate(panels, start=1):
+                if not isinstance(panel, dict):
+                    continue
+                panel_count += 1
+                panel_no = int(panel.get("panel", index))
+                series = element_history.get(str(panel_no), [])
+                if not isinstance(series, list) or not series:
+                    candidates = []
+                else:
+                    capped = min(source_index, len(series) - 1)
+                    candidates = (
+                        series[: capped + 1]
+                        if accumulate
+                        else [series[capped]]
+                    )
+                try:
+                    threshold = float(panel.get("cracking_strain"))
+                except (TypeError, ValueError):
+                    threshold = math.nan
+
+                best_epsilon: float | None = None
+                best_ratio: float | None = None
+                for values in candidates:
+                    epsilon_1 = self._crack_principal_strain(values)
+                    if (
+                        epsilon_1 is None
+                        or not math.isfinite(threshold)
+                        or threshold <= 0.0
+                    ):
+                        continue
+                    ratio = epsilon_1 / threshold
+                    if best_ratio is None or ratio > best_ratio:
+                        best_ratio = float(ratio)
+                        best_epsilon = float(epsilon_1)
+
+                if best_ratio is not None:
+                    valid_count += 1
+                    max_ratio = max(max_ratio, best_ratio)
+                cracked = best_ratio is not None and best_ratio >= 1.0
+                if cracked:
+                    cracked_count += 1
+                rows.append((
+                    str(tag),
+                    str(panel_no),
+                    (
+                        f"{threshold:.6g}"
+                        if math.isfinite(threshold)
+                        else "-"
+                    ),
+                    (
+                        f"{best_epsilon:.6g}"
+                        if best_epsilon is not None
+                        else "-"
+                    ),
+                    (
+                        f"{best_ratio:.3f}"
+                        if best_ratio is not None
+                        else "-"
+                    ),
+                    "Cracked" if cracked else "Below epsilon_cr",
+                ))
+
+        self.crack_table.setUpdatesEnabled(False)
+        try:
+            self.crack_table.setHorizontalHeaderLabels([
+                "Element",
+                "Panel",
+                "epsilon_cr",
+                (
+                    "epsilon_1 max<=frame"
+                    if accumulate
+                    else "epsilon_1 frame"
+                ),
+                "epsilon_1/epsilon_cr",
+                "State",
+            ])
+            self.crack_table.setRowCount(len(rows))
+            for row_index, values in enumerate(rows):
+                for column, value in enumerate(values):
+                    cell = self.crack_table.item(row_index, column)
+                    if cell is None:
+                        cell = QTableWidgetItem()
+                        self.crack_table.setItem(
+                            row_index,
+                            column,
+                            cell,
+                        )
+                    cell.setText(value)
+        finally:
+            self.crack_table.setUpdatesEnabled(True)
+
+        ratio_text = (
+            f"max epsilon1/epsilon_cr = {max_ratio:.3f}"
+            if valid_count
+            else "no valid panel strain"
+        )
+        state_label = "accumulated" if accumulate else "active"
+        self.crack_summary.setText(
+            f"{element_count} MEFI element(s) · {panel_count} RC panel(s) · "
+            f"{cracked_count} cracked · {state_label} frame "
+            f"{self._motion_frame_index + 1}/"
+            f"{self._motion_display_frame_count} · {ratio_text}."
+        )
 
     def _sync_motion_node_values(
         self,
@@ -4108,11 +4492,7 @@ class ResultsPanel(QWidget):
         self._sync_motion_markers(
             None if self._motion_info.kind == "Modal" else source_index
         )
-        if self._active_solution_kind in {
-            "NodalDisplacement",
-            "NodalReaction",
-        }:
-            self._sync_motion_node_values(source_index)
+        self._sync_active_motion_table(source_index)
         if self._active_solution_kind == "CrackPattern":
             self.crack_frame_requested.emit(
                 int(source_index),
