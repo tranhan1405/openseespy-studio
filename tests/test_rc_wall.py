@@ -6,7 +6,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialog, QWizard
 
 from openseespy_studio.generator import build_mefi_crack_specs, to_openseespy
 from openseespy_studio.project import AnalysisSettingsData, ProjectDatabase
@@ -450,3 +450,53 @@ def test_rc_wall_wizard_converts_benchmark_geometry_to_project_units():
         dialog.close()
         dialog.deleteLater()
         _APP.processEvents()
+
+
+def test_rc_wall_action_callback_accepts_qaction_checked_argument():
+    signature = inspect.signature(MainWindow._show_rc_wall_wizard)
+    parameters = list(signature.parameters.values())
+
+    assert [parameter.name for parameter in parameters[:2]] == [
+        "self",
+        "checked",
+    ]
+    assert parameters[1].default is False
+
+
+def test_rc_wall_wizard_finish_accepts_benchmark_preset():
+    wizard = RCWallWizard(ProjectDatabase())
+    try:
+        wizard.show()
+        _APP.processEvents()
+
+        while wizard.currentId() < 3:
+            previous = wizard.currentId()
+            wizard.next()
+            _APP.processEvents()
+            assert wizard.currentId() == previous + 1
+
+        finish = wizard.button(QWizard.WizardButton.FinishButton)
+        assert finish is not None
+        assert finish.isEnabled()
+
+        finish.click()
+        _APP.processEvents()
+
+        assert wizard.result() == QDialog.DialogCode.Accepted
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_rc_wall_replace_validation_ignores_preexisting_error_keys():
+    source = inspect.getsource(MainWindow._show_rc_wall_wizard)
+
+    generated_block = source.split(
+        "generated_errors = [", 1
+    )[1].split(
+        "if generated_errors:", 1
+    )[0]
+    assert "existing_error_keys" in generated_block
+    assert "not in existing_error_keys" in generated_block
+    assert "spec.replace_geometry\n                        or" not in generated_block
