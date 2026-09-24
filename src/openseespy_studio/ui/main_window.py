@@ -156,7 +156,7 @@ from ..line_mesher import (
 )
 from ..section_response import section_response_sources
 from ..response_spectrum import build_period_grid
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LineGeometryData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SketchPlaneData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind, ND_MATERIAL_PARAMETER_ORDER, nd_material_parameter_kind
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LineGeometryData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SketchPlaneData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, CONNECTION_RECORDER_RESPONSES, material_parameter_kind, ND_MATERIAL_PARAMETER_ORDER, nd_material_parameter_kind
 from ..runtime import (
     build_worker_pythonpath,
     opensees_material_requires_runtime_probe,
@@ -22959,6 +22959,47 @@ class MainWindow(QMainWindow):
 
         return nodes, elements
 
+    def _connection_recorder_response_options(
+        self,
+        element_tags: set[int] | list[int] | tuple[int, ...],
+    ) -> list[str] | None:
+        tags = {int(tag) for tag in element_tags}
+        if not tags or any(tag in self.model.elements for tag in tags):
+            return None
+        connections = [
+            self.project.connections.get(tag)
+            for tag in sorted(tags)
+        ]
+        if any(connection is None for connection in connections):
+            return None
+        allowed_sets = [
+            set(
+                CONNECTION_RECORDER_RESPONSES.get(
+                    connection.connection_type,
+                    set(),
+                )
+            )
+            for connection in connections
+            if connection is not None
+        ]
+        if not allowed_sets:
+            return None
+        common = set.intersection(*allowed_sets)
+        preferred = (
+            "force",
+            "deformation",
+            "localForce",
+            "basicForce",
+            "localDisplacement",
+            "basicDisplacement",
+            "stiff",
+            "centralNode",
+            "size",
+            "stiffness",
+            "defoANDforce",
+        )
+        return [response for response in preferred if response in common]
+
     def _create_recorder(self) -> None:
         if (
             not self.model.nodes
@@ -22977,6 +23018,9 @@ class MainWindow(QMainWindow):
             initial_node_tags=initial_nodes,
             initial_element_tags=initial_elements,
             target_creator=self._recorder_target_creator,
+            element_response_options=(
+                self._connection_recorder_response_options(initial_elements)
+            ),
             parent=self,
         )
         if not dialog.exec():
@@ -23030,6 +23074,13 @@ class MainWindow(QMainWindow):
         dialog = RecorderDialog(
             recorder=recorder,
             target_creator=self._recorder_target_creator,
+            element_response_options=(
+                self._connection_recorder_response_options(
+                    recorder.target_tags
+                )
+                if recorder.recorder_type == "Element"
+                else None
+            ),
             parent=self,
         )
         if not dialog.exec():
