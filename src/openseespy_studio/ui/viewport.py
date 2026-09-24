@@ -7621,7 +7621,7 @@ class ModelViewport(QWidget):
         element_tags: set[int] | None = None,
         cache_key: object | None = None,
     ) -> None:
-        """Show a nodal displacement or reaction scalar on the frame mesh."""
+        """Show a nodal displacement/reaction scalar on line and quad meshes."""
         if self._model is None:
             return
 
@@ -7641,9 +7641,7 @@ class ModelViewport(QWidget):
             self._result_scope_key(node_tags),
             self._result_scope_key(element_tags),
         )
-        # Member-force views include sparse numeric labels. Rebuild this
-        # lightweight overlay so labels stay in sync with the active result,
-        # component, scope, and scale instead of restoring only cached meshes.
+
         final = result.get("final", {}) if isinstance(result, dict) else {}
         if not isinstance(final, dict):
             self.clear_result_overlay()
@@ -7692,9 +7690,13 @@ class ModelViewport(QWidget):
             except ValueError:
                 return None
 
-        points: list[tuple[float, float, float]] = []
-        lines: list[int] = []
-        scalars: list[float] = []
+        line_points: list[tuple[float, float, float]] = []
+        line_cells: list[int] = []
+        line_scalars: list[float] = []
+
+        quad_points: list[tuple[float, float, float]] = []
+        quad_faces: list[int] = []
+        quad_scalars: list[float] = []
 
         visible_elements = set(self._visible_element_tags())
         if element_tags:
@@ -7703,9 +7705,9 @@ class ModelViewport(QWidget):
             visible_elements = {
                 tag
                 for tag in visible_elements
-                if (
-                    self._model.elements[tag].i in node_tags
-                    and self._model.elements[tag].j in node_tags
+                if all(
+                    node_tag in node_tags
+                    for node_tag in self._model.elements[tag].node_tags()
                 )
             }
 
@@ -7713,18 +7715,46 @@ class ModelViewport(QWidget):
             element = self._model.elements.get(tag)
             if element is None:
                 continue
-            value_i = value_for(element.i)
-            value_j = value_for(element.j)
+
+            element_nodes = element.node_tags()
+            if element.element_type in QUAD_ELEMENT_TYPES:
+                if len(element_nodes) != 4:
+                    continue
+                values = [value_for(node_tag) for node_tag in element_nodes]
+                if any(value is None for value in values):
+                    continue
+                if any(
+                    self._model.nodes.get(node_tag) is None
+                    for node_tag in element_nodes
+                ):
+                    continue
+                base = len(quad_points)
+                quad_points.extend(
+                    point_for(node_tag)
+                    for node_tag in element_nodes
+                )
+                quad_scalars.extend(float(value) for value in values)
+                quad_faces.extend(
+                    (4, base, base + 1, base + 2, base + 3)
+                )
+                continue
+
+            if len(element_nodes) < 2:
+                continue
+            node_i, node_j = element_nodes[:2]
+            value_i = value_for(node_i)
+            value_j = value_for(node_j)
             if value_i is None or value_j is None:
                 continue
-            node_i = self._model.nodes.get(element.i)
-            node_j = self._model.nodes.get(element.j)
-            if node_i is None or node_j is None:
+            if (
+                self._model.nodes.get(node_i) is None
+                or self._model.nodes.get(node_j) is None
+            ):
                 continue
-            index = len(points)
-            points.extend((point_for(element.i), point_for(element.j)))
-            scalars.extend((float(value_i), float(value_j)))
-            lines.extend((2, index, index + 1))
+            index = len(line_points)
+            line_points.extend((point_for(node_i), point_for(node_j)))
+            line_scalars.extend((float(value_i), float(value_j)))
+            line_cells.extend((2, index, index + 1))
 
         node_points: list[tuple[float, float, float]] = []
         node_scalars: list[float] = []
@@ -7736,7 +7766,7 @@ class ModelViewport(QWidget):
             for element_tag in element_tags:
                 element = self._model.elements.get(element_tag)
                 if element is not None:
-                    scoped_nodes.update((element.i, element.j))
+                    scoped_nodes.update(element.node_tags())
             visible_nodes.intersection_update(scoped_nodes)
 
         for tag in sorted(visible_nodes):
@@ -7747,11 +7777,11 @@ class ModelViewport(QWidget):
             node_points.append(point_for(tag))
             node_scalars.append(float(value))
 
-        if not points and not node_points:
+        if not line_points and not quad_points and not node_points:
             self.clear_result_overlay()
             return
 
-        all_values = scalars + node_scalars
+        all_values = line_scalars + quad_scalars + node_scalars
         magnitude = component.startswith("|")
         cmap = "turbo" if magnitude else "coolwarm"
         clim = None
@@ -7768,26 +7798,59 @@ class ModelViewport(QWidget):
             "title": f"{quantity} {component}",
         }
 
-        if points:
-            mesh = pv.PolyData(np.asarray(points, dtype=float))
-            mesh.lines = np.asarray(lines, dtype=np.int64)
-            mesh.point_data[scalar_name] = np.asarray(scalars, dtype=float)
-            mesh_kwargs = {
+        if quad_points:
+            quad_mesh = pv.PolyData(
+                np.asarray(quad_points, dtype=float),
+                faces=np.asarray(quad_faces, dtype=np.int64),
+                deep=True,
+            )
+            quad_mesh.point_data[scalar_name] = np.asarray(
+                quad_scalars,
+                dtype=float,
+            )
+            quad_kwargs = {
+                "name": "result-shell-contour",
+                "scalars": scalar_name,
+                "cmap": cmap,
+                "show_edges": True,
+                "edge_color": "#263746",
+                "line_width": 1,
+                "smooth_shading": False,
+                "pickable": False,
+                "scalar_bar_args": scalar_bar_args,
+                "render": False,
+            }
+            if clim is not None:
+                quad_kwargs["clim"] = clim
+            self.plotter.add_mesh(quad_mesh, **quad_kwargs)
+            cache_kwargs = dict(quad_kwargs)
+            cache_kwargs.pop("render", None)
+            entries.append((quad_mesh, cache_kwargs))
+
+        if line_points:
+            line_mesh = pv.PolyData(np.asarray(line_points, dtype=float))
+            line_mesh.lines = np.asarray(line_cells, dtype=np.int64)
+            line_mesh.point_data[scalar_name] = np.asarray(
+                line_scalars,
+                dtype=float,
+            )
+            line_kwargs = {
                 "name": "result-contour",
                 "scalars": scalar_name,
                 "cmap": cmap,
                 "line_width": 7,
                 "render_lines_as_tubes": True,
                 "pickable": False,
+                "show_scalar_bar": not bool(quad_points),
                 "scalar_bar_args": scalar_bar_args,
                 "render": False,
             }
             if clim is not None:
-                mesh_kwargs["clim"] = clim
-            self.plotter.add_mesh(mesh, **mesh_kwargs)
-            cache_kwargs = dict(mesh_kwargs)
+                line_kwargs["clim"] = clim
+            self.plotter.add_mesh(line_mesh, **line_kwargs)
+            cache_kwargs = dict(line_kwargs)
             cache_kwargs.pop("render", None)
-            entries.append((mesh, cache_kwargs))
+            entries.append((line_mesh, cache_kwargs))
 
         if node_points:
             node_mesh = pv.PolyData(np.asarray(node_points, dtype=float))
@@ -7802,7 +7865,7 @@ class ModelViewport(QWidget):
                 "render_points_as_spheres": True,
                 "point_size": 9,
                 "pickable": False,
-                "show_scalar_bar": not bool(points),
+                "show_scalar_bar": not bool(quad_points or line_points),
                 "scalar_bar_args": scalar_bar_args,
                 "render": False,
             }
