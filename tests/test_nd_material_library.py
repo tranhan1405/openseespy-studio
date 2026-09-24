@@ -28,7 +28,10 @@ from openseespy_studio.ui.main_window import MainWindow
 from openseespy_studio.ui.nd_material_library_dialog import (
     NDMaterialLibraryDialog,
 )
-from openseespy_studio.ui.shell_dialog import NDMaterialDialog
+from openseespy_studio.ui.shell_dialog import (
+    NDMaterialDialog,
+    ShellSectionDialog,
+)
 
 
 _APP = QApplication.instance() or QApplication([])
@@ -254,7 +257,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert model_index >= 0
         dialog.model_filter.setCurrentIndex(model_index)
         _APP.processEvents()
-        assert dialog.result_count.text() == "1 / 3 shown"
+        assert dialog.result_count.text() == "1 / 4 shown"
         assert dialog.material_data().material_type == "J2Plasticity"
 
         dialog.clear_filters.click()
@@ -263,7 +266,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert behavior_index >= 0
         dialog.behavior_filter.setCurrentIndex(behavior_index)
         _APP.processEvents()
-        assert dialog.result_count.text() == "1 / 3 shown"
+        assert dialog.result_count.text() == "1 / 4 shown"
         assert (
             dialog.material_data().material_type
             == "ElasticOrthotropic"
@@ -277,7 +280,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert formulation_index >= 0
         dialog.compatibility_filter.setCurrentIndex(formulation_index)
         _APP.processEvents()
-        assert dialog.result_count.text() == "1 / 3 shown"
+        assert dialog.result_count.text() == "1 / 4 shown"
         assert (
             dialog.material_data().material_type
             == "ElasticOrthotropic"
@@ -388,6 +391,40 @@ def test_drucker_prager_parameter_validation():
         assert "rhoBar" in str(exc)
     else:
         raise AssertionError("rhoBar > rho should be rejected.")
+
+
+def test_shell_workflow_guards_non_plate_fiber_materials():
+    source = inspect.getsource(ShellSectionDialog._new_nd_material)
+    assert "nd_material_supports_plate_fiber" in source
+    assert "not compatible with" in source
+    assert "PlateFiber shell sections" in source
+
+
+def test_drucker_prager_editor_uses_frictional_rho_label():
+    dialog = NDMaterialDialog(
+        next_tag=34,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    try:
+        index = dialog.material_type.findData("DruckerPrager")
+        dialog.material_type.setCurrentIndex(index)
+        _APP.processEvents()
+
+        labels = [
+            dialog.parameter_form.itemAt(
+                row,
+                dialog.parameter_form.LabelRole,
+            ).widget().text()
+            for row in range(dialog.parameter_form.rowCount())
+        ]
+        assert any(
+            "Frictional strength parameter" in label
+            for label in labels
+        )
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
 
 
 def test_nd_material_editor_preserves_library_provenance():
