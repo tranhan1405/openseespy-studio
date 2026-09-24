@@ -796,7 +796,9 @@ class AnalysisDialog(QDialog):
         staged=push or cyclic or transient or static_dc
 
         # Identity and core solver configuration are common to every analysis.
-        common={"tag","name","kind"}
+        common={
+            "tag","name","kind","execution_mode","num_threads"
+        }
         if not response_spectrum:
             common.update({
                 "constraints","numberer","system",
