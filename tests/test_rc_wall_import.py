@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openseespy_studio.generator import to_openseespy
+from openseespy_studio.generator import build_mefi_crack_specs, to_openseespy
 from openseespy_studio.importer import import_openseespy_source
 
 
@@ -85,6 +85,18 @@ ops.element(
     )
     assert result.project.sections[10].section_type == "RCLMS"
     assert result.project.sections[11].section_type == "RCLMS"
+
+    crack_specs = build_mefi_crack_specs(
+        result.project.model,
+        sections=result.project.sections,
+        nd_materials=result.project.nd_materials,
+    )
+    assert 1 in crack_specs
+    assert len(crack_specs[1]["panels"]) == 8
+    assert all(
+        panel["cracking_strain"] == 0.00008
+        for panel in crack_specs[1]["panels"]
+    )
 
     element = result.project.model.elements[1]
     assert element.element_type == "MEFI"
