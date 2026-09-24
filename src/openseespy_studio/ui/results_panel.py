@@ -3931,7 +3931,7 @@ class ResultsPanel(QWidget):
         else:
             self._motion_timer.stop()
             self.motion_play.setText("▶ Play")
-            self._sync_paused_motion_values()
+            self._sync_active_motion_table()
 
     def _advance_motion(self) -> None:
         if self._motion_info is None:
