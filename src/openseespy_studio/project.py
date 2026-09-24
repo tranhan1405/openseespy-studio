@@ -1623,12 +1623,12 @@ ELEMENT_BACKED_CONNECTION_TYPES: tuple[str, ...] = (
 )
 
 CONNECTION_RECORDER_RESPONSES: dict[str, set[str]] = {
-    "semiRigid": {"force", "deformation", "globalForce"},
-    "zeroLength": {"force", "deformation", "globalForce"},
-    "zeroLengthSection": {"force", "deformation", "stiff", "globalForce"},
+    # semiRigid is exported as a zeroLength element.
+    "semiRigid": {"force", "deformation"},
+    "zeroLength": {"force", "deformation"},
+    "zeroLengthSection": {"force", "deformation", "stiff"},
     "twoNodeLink": {
         "force",
-        "globalForce",
         "localForce",
         "basicForce",
         "localDisplacement",
@@ -1643,7 +1643,7 @@ CONNECTION_RECORDER_RESPONSES: dict[str, set[str]] = {
         "defoANDforce",
     },
     # The public Krawinkler object exposes its zeroLength panel spring tag.
-    "KrawinklerPanelZone": {"force", "deformation", "globalForce"},
+    "KrawinklerPanelZone": {"force", "deformation"},
 }
 
 
