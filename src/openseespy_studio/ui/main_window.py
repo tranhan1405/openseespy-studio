@@ -1674,17 +1674,28 @@ def _dock_toggle_action(
     return action
 
 
-def tree_selection_drives_fe_navigation(
-    selected_payload_kinds: set[str],
+def tree_item_drives_fe_navigation(
+    payload_kind: str,
+    ancestor_kinds: set[str],
 ) -> bool:
-    """Return True only for direct FE Node/Element tree selections.
+    """Return True only for Node/Element items inside FE entity branches."""
+    kind = str(payload_kind)
+    ancestors = {str(value) for value in ancestor_kinds}
+    if kind == "node":
+        return "nodes_root" in ancestors
+    if kind == "element":
+        return "elements_root" in ancestors
+    return False
 
-    Model-tree objects may reference FE entities for viewport highlighting,
-    but those references must never steal tree focus or scroll navigation from
-    the object the user actually clicked.
-    """
-    kinds = {str(kind) for kind in selected_payload_kinds}
-    return bool(kinds) and kinds.issubset({"node", "element"})
+
+def tree_selection_drives_fe_navigation(
+    selected_items: list[tuple[str, set[str]]],
+) -> bool:
+    """Return True only when every selected item is a canonical FE entity."""
+    return bool(selected_items) and all(
+        tree_item_drives_fe_navigation(kind, ancestors)
+        for kind, ancestors in selected_items
+    )
 
 
 class MainWindow(QMainWindow):
@@ -5607,6 +5618,7 @@ class MainWindow(QMainWindow):
         connection_tag: int | None = None
         element_type_group: str | None = None
         boundary_group: str | None = None
+        boundary_node_tag: int | None = None
         connection_group: str | None = None
         time_series_tag: int | None = None
         load_pattern_tag: int | None = None
@@ -5632,14 +5644,30 @@ class MainWindow(QMainWindow):
         show_jobs_root = False
 
         selected_payload_kinds: set[str] = set()
+        selected_navigation_items: list[tuple[str, set[str]]] = []
         for item in self.tree.selectedItems():
             payload = item.data(0, Qt.UserRole)
             if not payload:
                 continue
             kind, tag = payload
             selected_payload_kinds.add(str(kind))
+            ancestor_kinds: set[str] = set()
+            parent = item.parent()
+            while parent is not None:
+                parent_payload = parent.data(0, Qt.UserRole)
+                if (
+                    isinstance(parent_payload, tuple)
+                    and len(parent_payload) == 2
+                ):
+                    ancestor_kinds.add(str(parent_payload[0]))
+                parent = parent.parent()
+            selected_navigation_items.append(
+                (str(kind), ancestor_kinds)
+            )
             if kind == "node":
                 nodes.add(tag)
+                if "boundary_root" in ancestor_kinds:
+                    boundary_node_tag = int(tag)
             elif kind == "element":
                 elements.add(tag)
             elif kind == "set":
@@ -5914,7 +5942,7 @@ class MainWindow(QMainWindow):
         # highlighting, but must keep tree focus and Properties on the object
         # the user clicked.
         direct_fe_navigation = tree_selection_drives_fe_navigation(
-            selected_payload_kinds
+            selected_navigation_items
         )
         if geometry_mode:
             # Geometry selection is owned by the Model Tree, not by the
@@ -6003,6 +6031,11 @@ class MainWindow(QMainWindow):
             self._show_element_type_group_properties(element_type_group)
         elif boundary_group is not None:
             self._show_boundary_group_properties(boundary_group)
+        elif boundary_node_tag is not None:
+            # A support entry is a reference to an FE node. Show the node's
+            # editable restraint properties without transferring tree focus
+            # to FE Model > Nodes.
+            self._show_entity_properties("node", boundary_node_tag)
         elif connection_group is not None:
             self._show_connection_group_properties(connection_group)
         elif solution_root_tag is not None:
