@@ -1291,6 +1291,61 @@ class _Importer:
             self.count("Elements")
             return
 
+        if kind == "beamColumnJoint":
+            if len(args) not in {19, 21}:
+                raise ValueError(
+                    "beamColumnJoint needs four nodes, 13 material tags, "
+                    "and optional height/width factors."
+                )
+            external_nodes = [int(value) for value in args[2:6]]
+            component_materials = [
+                int(value) for value in args[6:19]
+            ]
+            parameters: dict[str, Any] = {
+                "external_nodes": external_nodes,
+                "component_materials": component_materials,
+                "height_factor": 1.0,
+                "width_factor": 1.0,
+            }
+            if len(args) == 21:
+                parameters["height_factor"] = float(args[19])
+                parameters["width_factor"] = float(args[20])
+            self.project.add_connection(
+                ConnectionData(
+                    tag=tag,
+                    name=f"Imported BeamColumnJoint {tag}",
+                    connection_type="BeamColumnJoint",
+                    node_i=external_nodes[0],
+                    node_j=external_nodes[1],
+                    parameters=parameters,
+                )
+            )
+            self.count("Elements")
+            return
+
+        if kind == "LehighJoint2D":
+            if len(args) != 15:
+                raise ValueError(
+                    "LehighJoint2D needs four nodes and nine material tags."
+                )
+            external_nodes = [int(value) for value in args[2:6]]
+            mode_materials = [int(value) for value in args[6:15]]
+            self.project.add_connection(
+                ConnectionData(
+                    tag=tag,
+                    name=f"Imported LehighJoint2D {tag}",
+                    connection_type="LehighJoint2D",
+                    node_i=external_nodes[0],
+                    node_j=external_nodes[1],
+                    parameters={
+                        "external_nodes": external_nodes,
+                        "mode_materials": mode_materials,
+                    },
+                )
+            )
+            self.count("Elements")
+            return
+
         if kind == "Joint2D":
             if len(args) < 9:
                 raise ValueError(
