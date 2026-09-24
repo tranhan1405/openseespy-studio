@@ -2324,3 +2324,113 @@ def test_geometry_measure_accepts_free_plane_locations():
         window.undo_stack.setClean()
         window.close()
         app.processEvents()
+
+
+def test_rw_a20_100kn_load_exceeds_mefi_cracking_strain_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    wall = build_rc_wall(project, RCWallSpec())
+
+    series = {
+        1: TimeSeriesData(1, "Lateral", "Linear", factor=1.0)
+    }
+    patterns = {
+        1: LoadPatternData(
+            1,
+            "Lateral",
+            "Plain",
+            time_series_tag=1,
+        )
+    }
+    loads = {
+        1: NodalLoadData(
+            1,
+            "Top left lateral",
+            pattern_tag=1,
+            node_tag=wall.top_node_tags[0],
+            values=(50000.0, 0.0, 0.0),
+        ),
+        2: NodalLoadData(
+            2,
+            "Top right lateral",
+            pattern_tag=1,
+            node_tag=wall.top_node_tags[1],
+            values=(50000.0, 0.0, 0.0),
+        ),
+    }
+    analysis = AnalysisSettingsData(
+        1,
+        "RW-A20 100 kN crack check",
+        analysis_type="Static",
+        constraints_handler="Transformation",
+        numberer="RCM",
+        system="UmfPack",
+        test="NormDispIncr",
+        tolerance=1.0e-8,
+        max_iterations=100,
+        algorithm="Newton",
+        integrator="LoadControl",
+        steps=100,
+        load_increment=0.01,
+        control_node=wall.top_node_tags[1],
+        control_dof=1,
+        recovery=True,
+        adaptive_step=False,
+        live_convergence=False,
+    )
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        time_series=series,
+        load_patterns=patterns,
+        nodal_loads=loads,
+        analyses={1: analysis},
+        active_analysis_tag=1,
+        nd_materials=project.nd_materials,
+        units=project.units,
+    )
+    script_path = tmp_path / "rw-a20-100kn-crack.py"
+    result_path = tmp_path / "rw-a20-100kn-crack-result.json"
+    script_path.write_text(script, encoding="utf-8")
+
+    exit_code = run_script(script_path, result_path)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0, payload.get("error", "")
+    assert payload["status"] == "completed"
+    results = payload["results"]
+    specs = results["mefi_crack_specs"]
+    final = results["final"]["mefi_panel_strains"]
+
+    ratios = []
+    for element_key, spec in specs.items():
+        element_rows = final.get(str(element_key), {})
+        for index, panel in enumerate(spec.get("panels", []), start=1):
+            threshold = panel.get("cracking_strain")
+            values = element_rows.get(
+                str(int(panel.get("panel", index))),
+                [],
+            )
+            if threshold is None or len(values) < 3:
+                continue
+            ex, ey, gxy = map(float, values[:3])
+            average = 0.5 * (ex + ey)
+            radius = (
+                (0.5 * (ex - ey)) ** 2
+                + (0.5 * gxy) ** 2
+            ) ** 0.5
+            epsilon_1 = average + radius
+            ratios.append(epsilon_1 / float(threshold))
+
+    assert ratios, "No MEFI crack ratios were captured."
+    assert max(ratios) >= 1.0, (
+        "Expected the 100 kN RW-A20 check to exceed the configured "
+        f"cracking strain; max epsilon1/epsilon_cr={max(ratios):.6g}"
+    )
