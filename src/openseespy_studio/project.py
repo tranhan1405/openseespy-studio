@@ -6116,6 +6116,18 @@ class ProjectDatabase:
                     for dof, material_tag
                     in connection.materials_by_dof.items()
                 }
+                if connection.connection_type == "BeamColumnJoint":
+                    connection.parameters["component_materials"] = [
+                        (
+                            material.tag
+                            if int(material_tag) == original_tag
+                            else int(material_tag)
+                        )
+                        for material_tag in connection.parameters.get(
+                            "component_materials",
+                            (),
+                        )
+                    ]
             for recorder in self.recorders.values():
                 if (
                     recorder.recorder_type == "Fiber"
@@ -6132,11 +6144,7 @@ class ProjectDatabase:
             for element in self.model.elements.values()
             if element.truss_material_tag == tag
         )
-        dependent_connections = sorted(
-            connection.tag
-            for connection in self.connections.values()
-            if tag in connection.materials_by_dof.values()
-        )
+        dependent_connections = self.connections_using_material(tag)
         dependent_recorders = sorted(
             recorder.tag
             for recorder in self.recorders.values()
@@ -9680,6 +9688,45 @@ class ProjectDatabase:
                     "Allowed: "
                     + ", ".join(sorted(allowed_responses))
                 )
+            if connection.connection_type == "BeamColumnJoint":
+                component = _strict_int(
+                    result.settings.get("component", 1),
+                    "BeamColumnJoint result component",
+                )
+                material_queries = {
+                    "shearPanel",
+                    "node1BarSlipL",
+                    "node1BarSlipR",
+                    "node1InterfaceShear",
+                    "node2BarSlipB",
+                    "node2BarSlipT",
+                    "node2InterfaceShear",
+                    "node3BarSlipL",
+                    "node3BarSlipR",
+                    "node3InterfaceShear",
+                    "node4BarSlipB",
+                    "node4BarSlipT",
+                    "node4InterfaceShear",
+                }
+                if response == "deformation":
+                    maximum_component = 4
+                elif response in material_queries:
+                    # SARE requests stressStrain from the delegated
+                    # UniaxialMaterial: [stress/force, strain/deformation].
+                    maximum_component = 2
+                elif response == "internalDisplacement":
+                    maximum_component = 4
+                elif response == "externalDisplacement":
+                    maximum_component = (
+                        12 if int(self.model.ndm) == 2 else 24
+                    )
+                else:
+                    maximum_component = 1
+                if not 1 <= component <= maximum_component:
+                    raise ValueError(
+                        f"BeamColumnJoint response {response!r} component "
+                        f"{component} is outside 1..{maximum_component}."
+                    )
 
         def setting_int(name: str) -> int | None:
             if name not in result.settings:
