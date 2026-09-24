@@ -765,7 +765,10 @@ class ConnectionDialog(QDialog):
         self.joint2d_material_group = joint_material_group
 
         # RC BeamColumnJoint · 13 physical component materials.
-        bcj_group = QGroupBox("BeamColumnJoint · RC component materials")
+        bcj_group = QGroupBox(
+            "BeamColumnJoint · RC component materials "
+            "(N1 Bottom · N2 Right · N3 Top · N4 Left)"
+        )
         bcj_layout = QHBoxLayout(bcj_group)
         bcj_left = QFormLayout()
         bcj_right = QFormLayout()
@@ -1335,8 +1338,8 @@ class ConnectionDialog(QDialog):
         elif bcj_mode:
             self.joint_nodes_group.setTitle(
                 (
-                    "External nodes · N1 Top → N2 Right → "
-                    "N3 Bottom → N4 Left"
+                    "External nodes · N1 Bottom → N2 Right → "
+                    "N3 Top → N4 Left"
                     if self.ndm == 2
                     else (
                         "External nodes · N1↔N3 height/column chord · "
@@ -1393,7 +1396,10 @@ class ConnectionDialog(QDialog):
                             self.node_positions[tag][0]
                         ),
                     )
-                    ordered = [top, right, bottom, left]
+                    # Match the BeamColumnJoint convention used in
+                    # the OpenSees reference figure/example:
+                    # N1 = bottom, N2 = right, N3 = top, N4 = left.
+                    ordered = [bottom, right, top, left]
                     if len(set(ordered)) == 4:
                         for spin, tag in zip(
                             self.joint_node_spins,
@@ -1403,8 +1409,9 @@ class ConnectionDialog(QDialog):
                 else:
                     # Start from the current cyclic order, then make the
                     # opposite chord with the strongest global-Z alignment
-                    # Node 1↔3. This matches the usual vertical-column
-                    # convention while preserving a cyclic node sequence.
+                    # Node 1↔3. Keep Node 1 on the lower end of that chord,
+                    # matching the BeamColumnJoint reference convention,
+                    # while preserving a cyclic node sequence.
                     cycle = list(current_tags)
                     pair_13 = (cycle[0], cycle[2])
                     pair_24 = (cycle[1], cycle[3])
@@ -1432,7 +1439,7 @@ class ConnectionDialog(QDialog):
                         ]
                     a = self.node_positions[cycle[0]]
                     c = self.node_positions[cycle[2]]
-                    if float(c[2]) > float(a[2]):
+                    if float(a[2]) > float(c[2]):
                         cycle = [
                             cycle[2],
                             cycle[3],
