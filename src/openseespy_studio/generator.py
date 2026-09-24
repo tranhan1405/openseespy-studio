@@ -10,7 +10,7 @@ from .beam_loads import (
 )
 from .units import UnitSystem
 from .model import SHELL_ELEMENT_TYPES, StructuralModel
-from .project import MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, nd_material_parameter_kind, resolve_transformation_vecxz
+from .project import ELEMENT_BACKED_CONNECTION_TYPES, MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, nd_material_parameter_kind, resolve_transformation_vecxz
 from .section_response import automatic_moment_curvature_spec, build_section_response_specs
 from .response_spectrum import build_period_grid
 
@@ -4989,7 +4989,12 @@ def to_openseespy(
             else min(model.nodes, default=1)
         )
         result_element_tags = sorted(
-            set(model.elements) | set((connections or {}).keys())
+            set(model.elements)
+            | {
+                tag
+                for tag, connection in (connections or {}).items()
+                if connection.connection_type in ELEMENT_BACKED_CONNECTION_TYPES
+            }
         )
         support_node_tags = sorted(
             tag
