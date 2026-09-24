@@ -3052,6 +3052,90 @@ class ModelViewport(QWidget):
         """Draw a schematic connection glyph without changing FE geometry."""
         if self._model is None:
             return
+
+        joint_types = {"Joint2D", "KrawinklerPanelZone"}
+        external_nodes = []
+        if connection.connection_type in joint_types:
+            external_nodes = [
+                int(tag)
+                for tag in connection.parameters.get("external_nodes", ())
+                if int(tag) in self._model.nodes
+            ]
+            if len(external_nodes) != 4:
+                return
+            joint_points = [
+                self._model.nodes[tag].xyz
+                for tag in external_nodes
+            ]
+            center = tuple(
+                sum(float(point[index]) for point in joint_points) / 4.0
+                for index in range(3)
+            )
+            xs = [float(point[0]) for point in joint_points]
+            ys = [float(point[1]) for point in joint_points]
+            x_length = max(max(xs) - min(xs), size * 1.8)
+            y_length = max(max(ys) - min(ys), size * 1.8)
+            thickness = max(size * 0.24, 1.0e-6)
+
+            if connection.connection_type == "Joint2D":
+                glyph = pv.Cube(
+                    center=center,
+                    x_length=x_length,
+                    y_length=y_length,
+                    z_length=thickness,
+                )
+                self.plotter.add_mesh(
+                    glyph,
+                    name=f"connection-joint2d-{connection.tag}",
+                    color="#7e57c2",
+                    opacity=0.26,
+                    edge_color="#5e35b1",
+                    show_edges=True,
+                    line_width=3,
+                    pickable=False,
+                    render=False,
+                )
+                self.plotter.add_mesh(
+                    pv.Sphere(
+                        radius=size * 0.24,
+                        center=center,
+                    ),
+                    name=f"connection-joint2d-center-{connection.tag}",
+                    color="#5e35b1",
+                    pickable=False,
+                    render=False,
+                )
+                return
+
+            glyph = pv.Cube(
+                center=center,
+                x_length=x_length,
+                y_length=y_length,
+                z_length=thickness,
+            )
+            self.plotter.add_mesh(
+                glyph,
+                name=f"connection-panel-zone-{connection.tag}",
+                color="#ef6c00",
+                opacity=0.20,
+                edge_color="#e65100",
+                show_edges=True,
+                line_width=4,
+                pickable=False,
+                render=False,
+            )
+            self.plotter.add_mesh(
+                pv.Sphere(
+                    radius=size * 0.22,
+                    center=center,
+                ),
+                name=f"connection-panel-zone-center-{connection.tag}",
+                color="#e65100",
+                pickable=False,
+                render=False,
+            )
+            return
+
         if (
             connection.node_i not in self._model.nodes
             or connection.node_j not in self._model.nodes
@@ -3064,6 +3148,50 @@ class ModelViewport(QWidget):
             (float(x) + float(y)) * 0.5
             for x, y in zip(a, b)
         )
+
+        if connection.connection_type == "rigid":
+            if tuple(a) != tuple(b):
+                self.plotter.add_mesh(
+                    pv.Line(a, b),
+                    name=f"connection-rigid-line-{connection.tag}",
+                    color="#37474f",
+                    line_width=8,
+                    render_lines_as_tubes=True,
+                    pickable=False,
+                    render=False,
+                )
+            self.plotter.add_mesh(
+                pv.Cube(
+                    center=center,
+                    x_length=size * 0.72,
+                    y_length=size * 0.72,
+                    z_length=size * 0.72,
+                ),
+                name=f"connection-rigid-{connection.tag}",
+                color="#455a64",
+                edge_color="#263238",
+                show_edges=True,
+                pickable=False,
+                render=False,
+            )
+            return
+
+        if connection.connection_type == "pinned":
+            self.plotter.add_mesh(
+                pv.Sphere(
+                    radius=size * 0.44,
+                    center=center,
+                    theta_resolution=14,
+                    phi_resolution=10,
+                ),
+                name=f"connection-pin-{connection.tag}",
+                color="#f5f5f5",
+                edge_color="#37474f",
+                show_edges=True,
+                pickable=False,
+                render=False,
+            )
+            return
 
         if connection.connection_type == "twoNodeLink":
             self.plotter.add_mesh(
@@ -3086,7 +3214,7 @@ class ModelViewport(QWidget):
             )
             return
 
-        if connection.connection_type == "zeroLength":
+        if connection.connection_type in {"zeroLength", "semiRigid"}:
             spring = self._polyline_mesh(
                 self._zero_length_spring_points(
                     center,
@@ -3098,7 +3226,11 @@ class ModelViewport(QWidget):
                 self.plotter.add_mesh(
                     spring,
                     name=f"connection-spring-{connection.tag}",
-                    color="#8e44ad",
+                    color=(
+                        "#1565c0"
+                        if connection.connection_type == "semiRigid"
+                        else "#8e44ad"
+                    ),
                     line_width=4,
                     render_lines_as_tubes=True,
                     pickable=False,
@@ -3110,14 +3242,17 @@ class ModelViewport(QWidget):
                     center=center,
                 ),
                 name=f"connection-spring-center-{connection.tag}",
-                color="#6c3483",
+                color=(
+                    "#0d47a1"
+                    if connection.connection_type == "semiRigid"
+                    else "#6c3483"
+                ),
                 pickable=False,
                 render=False,
             )
             return
 
-        # zeroLengthSection: use a compact joint/hinge glyph so it remains
-        # visually distinct from a directional zeroLength spring.
+        # zeroLengthSection: compact joint/hinge glyph.
         self.plotter.add_mesh(
             pv.Sphere(
                 radius=size * 0.58,
