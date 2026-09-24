@@ -1062,3 +1062,53 @@ def test_animation_preserves_quad_shell_topology():
     assert "mesh.faces = np.asarray" in source
     assert "show_edges=bool(element_faces)" in source
     assert "element_node_tags.extend(node_tags)" in source
+
+
+def test_crack_pattern_renderer_is_high_contrast_and_diagnostic():
+    source = inspect.getsource(ModelViewport.show_crack_pattern)
+
+    assert '"valid_panels": 0' in source
+    assert '"cracked": 0' in source
+    assert '"max_ratio": 0.0' in source
+    assert '"color": "#c62828"' in source
+    assert '"line_width": 7' in source
+    assert '"lighting": False' in source
+    assert "return stats" in source
+
+
+def test_crack_summary_reports_max_cracking_ratio(qapp):
+    panel = ResultsPanel()
+    result = {
+        "analysis": {"type": "Static"},
+        "mefi_crack_specs": {
+            "1": {
+                "panels": [
+                    {
+                        "panel": 1,
+                        "width": 1.0,
+                        "section_tag": 1,
+                        "cracking_strain": 1.0e-4,
+                    }
+                ]
+            }
+        },
+        "history": {
+            "mefi_panel_strains": {
+                "1": {"1": [[2.0e-4, 0.0, 0.0]]}
+            }
+        },
+        "final": {
+            "mefi_panel_strains": {
+                "1": {"1": [2.0e-4, 0.0, 0.0]}
+            }
+        },
+        "modes": {},
+    }
+    try:
+        panel.set_result(result)
+        assert "1 cracked at final state" in panel.crack_summary.text()
+        assert "max epsilon1/epsilon_cr = 2.000" in panel.crack_summary.text()
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
