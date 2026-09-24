@@ -10,6 +10,7 @@ from openseespy_studio.project import (
     ConnectionData,
     MaterialData,
     ProjectDatabase,
+    RecorderData,
 )
 
 
@@ -705,3 +706,148 @@ def test_coincident_rigid_connection_can_coexist_with_plain_handler():
     project.add_connection(connection)
 
     assert project.connections[61].connection_type == "rigid"
+
+
+def three_basic_connection_project() -> ProjectDatabase:
+    model = StructuralModel(name="Basic connection models", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    model.add_node(3, 0.0, 0.0, 0.0)
+    model.add_node(4, 0.0, 0.0, 0.0)
+    project = ProjectDatabase(model=model)
+    project.add_material(elastic_material())
+    project.add_connection(ConnectionData(
+        tag=20,
+        name="Rigid",
+        connection_type="rigid",
+        node_i=1,
+        node_j=2,
+    ))
+    project.add_connection(ConnectionData(
+        tag=21,
+        name="Pinned",
+        connection_type="pinned",
+        node_i=1,
+        node_j=3,
+    ))
+    project.add_connection(ConnectionData(
+        tag=22,
+        name="Semi-rigid RZ",
+        connection_type="semiRigid",
+        node_i=1,
+        node_j=4,
+        materials_by_dof={6: 1},
+    ))
+    return project
+
+
+def test_rigid_and_pinned_are_not_element_recorder_targets():
+    project = three_basic_connection_project()
+
+    for recorder_tag, connection_tag in ((1, 20), (2, 21)):
+        recorder = RecorderData(
+            tag=recorder_tag,
+            name=f"Bad recorder {connection_tag}",
+            recorder_type="Element",
+            target_tags=[connection_tag],
+            response="globalForce",
+        )
+        try:
+            project.add_recorder(recorder)
+        except ValueError as exc:
+            assert "MPC constraints" in str(exc)
+            assert str(connection_tag) in str(exc)
+        else:
+            raise AssertionError(
+                "Rigid/Pinned connection should not be accepted as "
+                "an Element recorder target"
+            )
+
+
+def test_semi_rigid_remains_an_element_recorder_target():
+    project = three_basic_connection_project()
+    recorder = RecorderData(
+        tag=3,
+        name="Semi-rigid force",
+        recorder_type="Element",
+        target_tags=[22],
+        response="globalForce",
+    )
+
+    project.add_recorder(recorder)
+
+    assert project.recorders[3].target_tags == [22]
+
+
+def test_editing_semi_rigid_to_rigid_prunes_element_recorder():
+    project = three_basic_connection_project()
+    project.add_recorder(RecorderData(
+        tag=4,
+        name="Spring force",
+        recorder_type="Element",
+        target_tags=[22],
+        response="globalForce",
+    ))
+
+    project.update_connection(
+        22,
+        ConnectionData(
+            tag=22,
+            name="Now rigid",
+            connection_type="rigid",
+            node_i=1,
+            node_j=2,
+        ),
+    )
+
+    assert 4 not in project.recorders
+
+
+def test_generated_analysis_element_scope_excludes_rigid_and_pinned():
+    project = three_basic_connection_project()
+    analysis = AnalysisSettingsData(
+        tag=1,
+        name="Static",
+        analysis_type="Static",
+        constraints_handler="Transformation",
+    )
+    project.add_analysis(analysis)
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        connections=project.connections,
+        analyses=project.analyses,
+        active_analysis_tag=project.active_analysis_tag,
+    )
+
+    assert "ops.rigidLink('beam', 1, 2)" in script
+    assert "ops.equalDOF(1, 3, 1, 2)" in script
+    assert "ops.element('zeroLength', 22, 1, 4" in script
+    assert "_studio_element_tags = [22]" in script
+
+
+def test_generator_rejects_stale_element_recorder_on_rigid_connection():
+    project = three_basic_connection_project()
+    stale = RecorderData(
+        tag=5,
+        name="Legacy rigid recorder",
+        recorder_type="Element",
+        target_tags=[20],
+        response="globalForce",
+    )
+
+    try:
+        to_openseespy(
+            project.model,
+            materials=project.materials,
+            connections=project.connections,
+            recorders={5: stale},
+        )
+    except ValueError as exc:
+        assert "non-element" in str(exc)
+        assert "20" in str(exc)
+    else:
+        raise AssertionError(
+            "Generator should reject an Element recorder targeting rigidLink"
+        )
