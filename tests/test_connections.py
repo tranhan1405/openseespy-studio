@@ -125,7 +125,8 @@ def test_connection_generator_orders_materials_by_dof():
 
     assert "'-mat', 1, 2, 3" in line
     assert "'-dir', 1, 3, 6" in line
-    assert "'-doRayleigh', 1" in line
+    assert "'-doRayleigh'" in line
+    assert "'-doRayleigh', 1" not in line
 
 
 def test_full_script_contains_connection():
@@ -1171,3 +1172,102 @@ def test_krawinkler_public_tag_records_panel_spring_deformation():
 
     assert "'-ele', 77" in commands
     assert "'deformation'" in commands
+
+
+def test_joint_internal_nodes_respect_reserved_imported_center_tag():
+    project = frame2d_project()
+    # Separate joint cross so both macro types can coexist in the same test.
+    project.model.add_node(20, 10.0, 0.0, 0.0)
+    project.model.add_node(21, 11.0, 1.0, 0.0)
+    project.model.add_node(22, 12.0, 0.0, 0.0)
+    project.model.add_node(23, 11.0, -1.0, 0.0)
+
+    panel_zone = ConnectionData(
+        tag=40,
+        name="Panel zone before imported Joint2D",
+        connection_type="KrawinklerPanelZone",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "panel_material": 1,
+            "rigid_A": 1000.0,
+            "rigid_E": 2.0e11,
+            "rigid_I": 1000.0,
+        },
+    )
+    imported_joint = ConnectionData(
+        tag=80,
+        name="Imported center reservation",
+        connection_type="Joint2D",
+        node_i=20,
+        node_j=21,
+        parameters={
+            "external_nodes": [20, 21, 22, 23],
+            "panel_material": 1,
+            "interface_materials": [0, 0, 0, 0],
+            "large_disp": 0,
+            "imported_center_node_tag": 130,
+        },
+    )
+    project.add_connection(panel_zone)
+    project.add_connection(imported_joint)
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        connections=project.connections,
+    )
+
+    assert (
+        "_sare_pz_40_nbase = max((list(ops.getNodeTags()) or [0]) + [130]) + 1"
+        in script
+    )
+    assert "ops.element('Joint2D', 80, 20, 21, 22, 23, 130, 1, 0)" in script
+
+
+def test_two_imported_joint2d_center_tags_must_be_unique():
+    project = frame2d_project()
+    project.model.add_node(20, 10.0, 0.0, 0.0)
+    project.model.add_node(21, 11.0, 1.0, 0.0)
+    project.model.add_node(22, 12.0, 0.0, 0.0)
+    project.model.add_node(23, 11.0, -1.0, 0.0)
+
+    project.add_connection(ConnectionData(
+        tag=81,
+        name="Joint A",
+        connection_type="Joint2D",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "panel_material": 1,
+            "interface_materials": [0, 0, 0, 0],
+            "large_disp": 0,
+            "imported_center_node_tag": 150,
+        },
+    ))
+
+    duplicate = ConnectionData(
+        tag=82,
+        name="Joint B",
+        connection_type="Joint2D",
+        node_i=20,
+        node_j=21,
+        parameters={
+            "external_nodes": [20, 21, 22, 23],
+            "panel_material": 1,
+            "interface_materials": [0, 0, 0, 0],
+            "large_disp": 0,
+            "imported_center_node_tag": 150,
+        },
+    )
+    try:
+        project.add_connection(duplicate)
+    except ValueError as exc:
+        assert "already reserved" in str(exc)
+        assert "150" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected duplicate imported Joint2D center tag to fail"
+        )
