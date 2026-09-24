@@ -243,6 +243,16 @@ def result_choices_for_analysis(
 
     choices.append(
         ResultChoice(
+            "Connections & Joints",
+            "Connection / Joint Response",
+            "JointResponse",
+            "Connection / Joint Response",
+            {"response": "deformation", "component": 1},
+        )
+    )
+
+    choices.append(
+        ResultChoice(
             "Charts / History",
             "Force–Displacement",
             "ForceDisplacement",
