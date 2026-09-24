@@ -173,6 +173,9 @@ def _validate_parameter_values(
         ),
         "J2Plasticity": ("K", "G"),
         "DruckerPrager": ("K", "G", "sigmaY", "atmPressure"),
+        "PressureIndependMultiYield": (
+            "refShearModul", "refBulkModul", "refPress",
+        ),
     }.get(model, ())
     for key in positive:
         if parameters[key] <= 0.0:
@@ -222,6 +225,43 @@ def _validate_parameter_values(
             raise ValueError(
                 f"Official nD material record {record_id!r} requires "
                 "0 <= theta <= 1."
+            )
+
+    if model == "PressureIndependMultiYield":
+        if parameters["nd"] not in {2.0, 3.0}:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "nd to be 2 or 3."
+            )
+        if parameters["rho"] < 0.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires rho >= 0."
+            )
+        if parameters["cohesi"] < 0.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "cohesi >= 0."
+            )
+        if parameters["peakShearStra"] <= 0.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "peakShearStra > 0."
+            )
+        if not 0.0 <= parameters["frictionAng"] < 90.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "0 <= frictionAng < 90."
+            )
+        if parameters["pressDependCoe"] < 0.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "pressDependCoe >= 0."
+            )
+        surfaces = parameters["noYieldSurf"]
+        if not surfaces.is_integer() or not 1.0 <= surfaces < 40.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "automatic noYieldSurf to be an integer from 1 to 39."
             )
 
 
