@@ -405,7 +405,7 @@ QPushButton#MoreButton {
     max-width: 28px;
     padding: 0;
 }
-QSpinBox, QDoubleSpinBox, QComboBox {
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     min-height: 24px;
     border: 1px solid #bcc7d2;
     border-radius: 3px;
@@ -413,8 +413,28 @@ QSpinBox, QDoubleSpinBox, QComboBox {
     color: #25394c;
     padding: 1px 5px;
 }
-QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
     border: 1px solid #2f80ed;
+}
+QLineEdit:read-only {
+    background: #e8ebef;
+    color: #707b86;
+    border-color: #c8ced5;
+}
+QLineEdit:disabled,
+QSpinBox:disabled,
+QDoubleSpinBox:disabled,
+QComboBox:disabled {
+    background: #e3e6ea;
+    color: #7b858f;
+    border-color: #c5cbd2;
+}
+QComboBox:disabled::drop-down {
+    border-left-color: #c5cbd2;
+    background: #dde1e5;
+}
+QCheckBox:disabled {
+    color: #8a929a;
 }
 QCheckBox {
     spacing: 6px;
