@@ -1674,6 +1674,19 @@ def _dock_toggle_action(
     return action
 
 
+def tree_selection_drives_fe_navigation(
+    selected_payload_kinds: set[str],
+) -> bool:
+    """Return True only for direct FE Node/Element tree selections.
+
+    Model-tree objects may reference FE entities for viewport highlighting,
+    but those references must never steal tree focus or scroll navigation from
+    the object the user actually clicked.
+    """
+    kinds = {str(kind) for kind in selected_payload_kinds}
+    return bool(kinds) and kinds.issubset({"node", "element"})
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -5892,30 +5905,49 @@ class MainWindow(QMainWindow):
         ):
             self._active_solution_result_tag = None
 
-        # Tree selection is intentionally passive for saved results.
-        # Result scopes are restored only when the user explicitly evaluates
-        # or shows a result, so selecting a result node must not preserve a
-        # stale FE selection from the previously selected model object.
-        result_restores_scope = False
-        if not result_restores_scope:
-            if geometry_mode:
-                # Geometry selection is owned by the Model Tree, not by the
-                # FE SelectionManager. Clear stale FE selection silently so
-                # its changed signal cannot erase the Geometry tree selection.
-                self.selection.blockSignals(True)
-                try:
-                    self.selection.set_selection(
-                        nodes=set(),
-                        elements=set(),
-                    )
-                finally:
-                    self.selection.blockSignals(False)
-                self.viewport.set_selection(set(), set())
-            else:
+        # FE selection and tree navigation are deliberately decoupled.
+        #
+        # Only clicking actual FE Node/Element items is allowed to let the
+        # SelectionManager drive Model Tree selection/scrolling. Other tree
+        # objects (Probe, Result, Recorder, Constraint, Connection, Mass,
+        # Named Selection, etc.) may reference FE entities for viewport
+        # highlighting, but must keep tree focus and Properties on the object
+        # the user clicked.
+        direct_fe_navigation = tree_selection_drives_fe_navigation(
+            selected_payload_kinds
+        )
+        if geometry_mode:
+            # Geometry selection is owned by the Model Tree, not by the
+            # FE SelectionManager. Clear stale FE selection silently so its
+            # changed signal cannot erase the Geometry tree selection.
+            self.selection.blockSignals(True)
+            try:
+                self.selection.set_selection(
+                    nodes=set(),
+                    elements=set(),
+                )
+            finally:
+                self.selection.blockSignals(False)
+            self.viewport.set_selection(set(), set())
+        elif direct_fe_navigation:
+            self.selection.set_selection(
+                nodes=nodes,
+                elements=elements,
+            )
+        else:
+            # Keep the reference scope available to selection-dependent tools
+            # and highlight it in the viewport, but suppress _selection_changed
+            # because that callback owns FE-tree navigation and would otherwise
+            # clear the current object and scroll to Nodes/Elements.
+            self.selection.blockSignals(True)
+            try:
                 self.selection.set_selection(
                     nodes=nodes,
                     elements=elements,
                 )
+            finally:
+                self.selection.blockSignals(False)
+            self.viewport.set_selection(nodes, elements)
 
         if sketch_plane_tag is not None:
             self._show_sketch_plane_properties(sketch_plane_tag)
