@@ -773,6 +773,49 @@ def constraint_to_openseespy(
     )
 
 
+CONNECTION_HISTORY_RESPONSES: dict[str, tuple[str, ...]] = {
+    "semiRigid": ("force", "deformation"),
+    "zeroLength": ("force", "deformation"),
+    "zeroLengthSection": ("force", "deformation"),
+    "twoNodeLink": (
+        "force",
+        "localForce",
+        "basicForce",
+        "localDisplacement",
+        "basicDisplacement",
+    ),
+    "Joint2D": (
+        "force",
+        "deformation",
+        "centralNode",
+        "size",
+        "defoANDforce",
+    ),
+    "BeamColumnJoint": (
+        "deformation",
+        "shearPanel",
+        "node1BarSlipL",
+        "node1BarSlipR",
+        "node1InterfaceShear",
+        "node2BarSlipB",
+        "node2BarSlipT",
+        "node2InterfaceShear",
+        "node3BarSlipL",
+        "node3BarSlipR",
+        "node3InterfaceShear",
+        "node4BarSlipB",
+        "node4BarSlipT",
+        "node4InterfaceShear",
+        "internalDisplacement",
+        "externalDisplacement",
+    ),
+    # Public LehighJoint2D documentation does not enumerate recorder
+    # queries; retain best-effort generic force/deformation histories.
+    "LehighJoint2D": ("force", "deformation"),
+    "KrawinklerPanelZone": ("force", "deformation"),
+}
+
+
 def connection_to_openseespy(
     connection: ConnectionData,
     *,
@@ -1751,6 +1794,7 @@ def analysis_to_openseespy(
     requires_joint2d_handler: bool = False,
     requires_offset_rigid_handler: bool = False,
     krawinkler_panel_zone_tags: list[int] | None = None,
+    joint_response_specs: dict[int, dict[str, object]] | None = None,
 ) -> list[str]:
     ndm = int(ndm)
     translational_dofs = tuple(range(1, max(ndm, 0) + 1))
@@ -1774,6 +1818,30 @@ def analysis_to_openseespy(
     krawinkler_panel_zone_tags = sorted({
         int(tag) for tag in (krawinkler_panel_zone_tags or [])
     })
+    joint_response_specs = {
+        int(tag): dict(spec)
+        for tag, spec in (joint_response_specs or {}).items()
+    }
+    joint_response_catalog = {
+        str(tag): {
+            "connection_type": str(spec.get("connection_type", "")),
+            "responses": [
+                str(response)
+                for response in spec.get("responses", ())
+            ],
+        }
+        for tag, spec in sorted(joint_response_specs.items())
+    }
+    joint_response_history = {
+        key: {
+            "connection_type": str(spec.get("connection_type", "")),
+            "responses": {
+                response: []
+                for response in spec.get("responses", ())
+            },
+        }
+        for key, spec in joint_response_catalog.items()
+    }
     section_response_catalog = {
         str(spec.get('key', f'response:{index}')): dict(spec)
         for index, spec in enumerate(section_response_specs)
@@ -1950,6 +2018,7 @@ def analysis_to_openseespy(
         "'base_reactions': [], 'nodes': {}, "
         "'moment_curvature': {'force': [], 'deformation': []}, "
         "'section_responses': " + repr(section_response_history) + ", "
+        "'joints': " + repr(joint_response_history) + ", "
         "'specimen': {"
         "'section_force': [], 'section_deformation': [], "
         "'base_fibers': [], 'interface_force': [], "
@@ -1974,6 +2043,7 @@ def analysis_to_openseespy(
         f"_studio_specimen_response_spec = {specimen_response_spec!r}",
         f"_studio_moment_curvature_spec = {moment_curvature_spec!r}",
         f"_studio_section_response_specs = {section_response_catalog!r}",
+        f"_studio_joint_response_specs = {joint_response_catalog!r}",
         f"_studio_monitor_node = {monitor_node}",
         (
             (
@@ -3172,6 +3242,45 @@ def analysis_to_openseespy(
     )
     lines.append(
         "        _studio_sr_history['deformation'].append(_studio_sr_def)"
+    )
+    lines.append(
+        "    for _studio_joint_key, _studio_joint_spec in "
+        "_studio_joint_response_specs.items():"
+    )
+    lines.append(
+        "        _studio_joint_history = "
+        "_studio_results['history']['joints'][_studio_joint_key]"
+    )
+    lines.append(
+        "        _studio_joint_tag = int(_studio_joint_key)"
+    )
+    lines.append(
+        "        for _studio_joint_response in "
+        "_studio_joint_spec.get('responses', []):"
+    )
+    lines.append("            try:")
+    lines.append(
+        "                _studio_joint_value = ops.eleResponse("
+        "_studio_joint_tag, _studio_joint_response)"
+    )
+    lines.append(
+        "                if isinstance(_studio_joint_value, (list, tuple)):"
+    )
+    lines.append(
+        "                    _studio_joint_row = "
+        "[float(v) for v in _studio_joint_value]"
+    )
+    lines.append("                elif _studio_joint_value is None:")
+    lines.append("                    _studio_joint_row = []")
+    lines.append("                else:")
+    lines.append(
+        "                    _studio_joint_row = [float(_studio_joint_value)]"
+    )
+    lines.append("            except Exception:")
+    lines.append("                _studio_joint_row = []")
+    lines.append(
+        "            _studio_joint_history['responses']"
+        "[_studio_joint_response].append(_studio_joint_row)"
     )
     lines.append("    if _studio_specimen_response_spec:")
     lines.append(
@@ -5329,6 +5438,20 @@ def to_openseespy(
                     for tag, connection in (connections or {}).items()
                     if connection.connection_type == "KrawinklerPanelZone"
                 ],
+                joint_response_specs={
+                    int(tag): {
+                        "connection_type": connection.connection_type,
+                        "responses": list(
+                            CONNECTION_HISTORY_RESPONSES.get(
+                                connection.connection_type,
+                                (),
+                            )
+                        ),
+                    }
+                    for tag, connection in (connections or {}).items()
+                    if connection.connection_type
+                    in CONNECTION_HISTORY_RESPONSES
+                },
             )
         )
 
