@@ -2139,3 +2139,15 @@ def test_results_panel_labels_beam_column_joint_deformation_components():
         "Shear-panel contribution",
         "Total joint deformation",
     ]
+
+
+def test_generic_joint_result_insert_defaults_beam_column_joint_to_total():
+    import inspect
+    from openseespy_studio.ui.main_window import MainWindow
+
+    source = inspect.getsource(MainWindow._insert_solution_result)
+
+    assert 'generic_joint_request' in source
+    assert 'connection.connection_type == "BeamColumnJoint"' in source
+    assert 'result_settings["component"] = 4' in source
+    assert '"connection_type" not in result_settings' in source
