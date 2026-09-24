@@ -656,6 +656,71 @@
         "DamageCte1": "dimensionless",
         "DamageCte2": "dimensionless"
       }
+    },
+    {
+      "id": "opensees-smeared-steel-double-layer-starter",
+      "family": "RC membrane reinforcement",
+      "material": "Orthogonal smeared reinforcing-steel layers",
+      "model": "SmearedSteelDoubleLayer",
+      "preset_name": "Smeared Steel Double Layer · 1% Starter",
+      "parameters_si": {
+        "mat1": 1,
+        "mat2": 2,
+        "ratio1": 0.01,
+        "ratio2": 0.01,
+        "orientation": 0
+      },
+      "verified_parameters": [
+        "mat1",
+        "mat2",
+        "ratio1",
+        "ratio2",
+        "orientation"
+      ],
+      "behavior": [
+        "Reinforcing steel",
+        "Plane stress",
+        "Orthogonal smeared layers",
+        "Membrane reinforcement"
+      ],
+      "compatibility": [
+        "Plane Stress"
+      ],
+      "applicability": [
+        "Distributed horizontal and vertical reinforcement in RC membrane models",
+        "RCLMS / MEFI reinforced-concrete wall workflows"
+      ],
+      "limitations": [
+        "mat1 and mat2 are dependency tags and must reference existing uniaxial steel materials.",
+        "The 1% ratios are starter placeholders; use project reinforcement ratios for analysis.",
+        "The implementation does not itself apply embedded-bar yield-strength or hardening reductions."
+      ],
+      "primary_reference": {
+        "type": "official_documentation",
+        "title": "SmearedSteelDoubleLayer Material — OpenSees Documentation",
+        "authors": "OpenSees / F. Rojas / M.J. Núñez",
+        "url": "https://opensees.github.io/OpenSeesDocumentation/user/manual/material/ndMaterials/SmearedSteelDoubleLayer.html",
+        "doi": ""
+      },
+      "parameter_evidence": {
+        "location": "Official command syntax, parameter table, notes and Python example",
+        "note": "The official example uses uniaxial tags 1/1, reinforcement ratios 0.01/0.01 and orientation 0.0 rad. SARE uses distinct placeholder tags 1/2 so the two reinforcement directions remain explicit dependencies."
+      },
+      "verification": {
+        "status": "verified",
+        "model_definition_checked": true,
+        "compatibility_checked": true,
+        "units_checked": true,
+        "parameter_status": "starter_template",
+        "checked_on": "2026-09-24"
+      },
+      "source_units": {
+        "mat1": "uniaxial material tag",
+        "mat2": "uniaxial material tag",
+        "ratio1": "dimensionless",
+        "ratio2": "dimensionless",
+        "orientation": "radian"
+      }
     }
   ]
 }
