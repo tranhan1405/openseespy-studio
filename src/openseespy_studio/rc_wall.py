@@ -19,7 +19,7 @@ class RCWallSpec:
     height: float = 2209.8
     thickness: float = 152.4
     boundary_width: float = 228.6
-    vertical_elements: int = 9
+    vertical_elements: int = 7
     macro_fibers: int = 8
 
     # Benchmark-inspired constitutive inputs, stored in SI stress units.
