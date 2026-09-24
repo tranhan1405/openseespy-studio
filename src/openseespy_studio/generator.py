@@ -773,6 +773,23 @@ def constraint_to_openseespy(
     )
 
 
+BEAM_COLUMN_JOINT_COMPONENT_RESPONSES: frozenset[str] = frozenset({
+    "node1BarSlipL",
+    "node1BarSlipR",
+    "node1InterfaceShear",
+    "node2BarSlipB",
+    "node2BarSlipT",
+    "node2InterfaceShear",
+    "node3BarSlipL",
+    "node3BarSlipR",
+    "node3InterfaceShear",
+    "node4BarSlipB",
+    "node4BarSlipT",
+    "node4InterfaceShear",
+    "shearPanel",
+})
+
+
 CONNECTION_HISTORY_RESPONSES: dict[str, tuple[str, ...]] = {
     "semiRigid": ("force", "deformation"),
     "zeroLength": ("force", "deformation"),
@@ -1346,7 +1363,13 @@ def recorder_to_openseespy(recorder: RecorderData) -> list[str]:
         f"{path!r}{time_args}, '-ele', {targets}"
     )
     if recorder.recorder_type == "Element":
-        lines.append(prefix + f", {recorder.response!r})")
+        if recorder.response in BEAM_COLUMN_JOINT_COMPONENT_RESPONSES:
+            lines.append(
+                prefix
+                + f", {recorder.response!r}, 'stressStrain')"
+            )
+        else:
+            lines.append(prefix + f", {recorder.response!r})")
         return lines
     if recorder.recorder_type == "Shell":
         lines.append(
@@ -3260,7 +3283,19 @@ def analysis_to_openseespy(
     )
     lines.append("            try:")
     lines.append(
-        "                _studio_joint_value = ops.eleResponse("
+        "                if ("
+        "_studio_joint_spec.get('connection_type') == 'BeamColumnJoint' "
+        "and _studio_joint_response in "
+        + repr(sorted(BEAM_COLUMN_JOINT_COMPONENT_RESPONSES))
+        + "):"
+    )
+    lines.append(
+        "                    _studio_joint_value = ops.eleResponse("
+        "_studio_joint_tag, _studio_joint_response, 'stressStrain')"
+    )
+    lines.append("                else:")
+    lines.append(
+        "                    _studio_joint_value = ops.eleResponse("
         "_studio_joint_tag, _studio_joint_response)"
     )
     lines.append(
