@@ -309,6 +309,21 @@ class RCWallWizard(QWizard):
         )
         form.addRow(note)
 
+        for widget in (
+            self.fc_web,
+            self.eps_web,
+            self.fc_boundary,
+            self.eps_boundary,
+            self.ft,
+            self.cracking_strain,
+            self.damage1,
+            self.damage2,
+            self.unconfined_layer,
+        ):
+            widget.valueChanged.connect(
+                lambda _value: self._mark_custom()
+            )
+
         self.addPage(page)
 
     def _build_reinforcement_page(self) -> None:
@@ -355,6 +370,20 @@ class RCWallWizard(QWizard):
         )
         form.addRow(note)
 
+        for widget in (
+            self.steel_E,
+            self.fy_x,
+            self.fy_y_web,
+            self.fy_y_boundary,
+            self.rho_x_web,
+            self.rho_y_web,
+            self.rho_x_boundary,
+            self.rho_y_boundary,
+        ):
+            widget.valueChanged.connect(
+                lambda _value: self._mark_custom()
+            )
+
         self.addPage(page)
 
     def _build_review_page(self) -> None:
@@ -385,14 +414,43 @@ class RCWallWizard(QWizard):
         layout.addStretch(1)
         self.addPage(page)
 
+    def _mark_custom(self) -> None:
+        if self._applying_preset:
+            return
+        custom_index = self.preset.findData("custom")
+        if custom_index >= 0 and self.preset.currentIndex() != custom_index:
+            self.preset.blockSignals(True)
+            self.preset.setCurrentIndex(custom_index)
+            self.preset.blockSignals(False)
+        self._update_review()
+
+    def _geometry_changed(self) -> None:
+        self._mark_custom()
+        self._update_preview()
+
     def _preset_changed(self, *_args) -> None:
         if self.preset.currentData() == "rw-a20":
             self._apply_rw_a20_preset()
+        else:
+            self._update_preview()
+            self._update_review()
+
+    def _update_preview(self) -> None:
+        if not hasattr(self, "preview"):
+            return
+        self.preview.set_wall(
+            width=float(self.width.value()),
+            height=float(self.height.value()),
+            boundary=float(self.boundary_width.value()),
+            rows=int(self.vertical_elements.value()),
+            fibers=int(self.macro_fibers.value()),
+        )
 
     def _from_mm(self, value_mm: float) -> float:
         return float(value_mm) * 0.001 / self.units.length_to_m
 
     def _apply_rw_a20_preset(self) -> None:
+        self._applying_preset = True
         self.width.setValue(self._from_mm(1220.0))
         self.height.setValue(self._from_mm(2209.8))
         self.thickness.setValue(self._from_mm(152.4))
@@ -418,6 +476,13 @@ class RCWallWizard(QWizard):
         self.rho_y_web.setValue(0.27)
         self.rho_x_boundary.setValue(0.82)
         self.rho_y_boundary.setValue(3.23)
+        self._applying_preset = False
+        benchmark_index = self.preset.findData("rw-a20")
+        if benchmark_index >= 0:
+            self.preset.blockSignals(True)
+            self.preset.setCurrentIndex(benchmark_index)
+            self.preset.blockSignals(False)
+        self._update_preview()
         self._update_review()
 
     def data(self) -> RCWallSpec:
@@ -460,8 +525,8 @@ class RCWallWizard(QWizard):
             rho_y_boundary=float(self.rho_y_boundary.value()) / 100.0,
             boundary_unconfined_thickness=unconfined,
             boundary_confined_thickness=confined,
-            name="RC Wall",
-            replace_geometry=True,
+            name=self.wall_name.text().strip() or "RC Wall",
+            replace_geometry=bool(self.replace_geometry.isChecked()),
         )
 
     def _update_review(self) -> None:
