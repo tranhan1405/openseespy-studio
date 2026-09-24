@@ -1,9 +1,11 @@
 from openseespy_studio.generator import (
+    analysis_to_openseespy,
     connection_to_openseespy,
     to_openseespy,
 )
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
+    AnalysisSettingsData,
     ConnectionData,
     MaterialData,
     ProjectDatabase,
@@ -369,3 +371,24 @@ def test_krawinkler_internal_element_tags_reserve_future_connection_tags():
     )
 
     assert "+ [75]) + 1" in script
+
+
+def test_joint2d_forces_compatible_constraint_handler_on_export():
+    settings = AnalysisSettingsData(
+        tag=1,
+        name="Joint analysis",
+        analysis_type="Static",
+        constraints_handler="Plain",
+    )
+
+    lines = analysis_to_openseespy(
+        settings,
+        ndm=2,
+        node_tags=[1],
+        requires_joint2d_handler=True,
+    )
+    script = "\n".join(lines)
+
+    assert "ops.constraints('Transformation')" in script
+    assert "'constraints_handler': 'Transformation'" in script
+    assert "Joint2D requires Transformation/Penalty" in script
