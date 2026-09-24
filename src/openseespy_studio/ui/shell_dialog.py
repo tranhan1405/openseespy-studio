@@ -61,6 +61,7 @@ class NDMaterialDialog(QDialog):
         ("Elastic isotropic", "ElasticIsotropic"),
         ("Elastic orthotropic", "ElasticOrthotropic"),
         ("J2 plasticity (von Mises)", "J2Plasticity"),
+        ("Drucker-Prager", "DruckerPrager"),
     )
 
     PARAMETER_LABELS = {
@@ -82,6 +83,15 @@ class NDMaterialDialog(QDialog):
         "sigInf": "Saturation yield stress σ∞",
         "delta": "Exponential hardening δ",
         "H": "Linear hardening H",
+        "sigmaY": "Yield stress σY",
+        "rhoBar": "Plastic volume parameter ρbar",
+        "Kinf": "Isotropic hardening K∞",
+        "Ko": "Initial isotropic hardening K0",
+        "delta1": "Isotropic hardening δ1",
+        "delta2": "Tension softening δ2",
+        "theta": "Hardening mix θ",
+        "density": "Mass density",
+        "atmPressure": "Atmospheric pressure",
     }
 
     def __init__(
@@ -239,8 +249,14 @@ class NDMaterialDialog(QDialog):
                 low, high, decimals = -0.999999, 0.499999, 6
             elif key in {"nu_xy", "nu_yz", "nu_zx"}:
                 low, high, decimals = -0.999999, 0.999999, 6
-            elif key == "delta":
+            elif key in {"delta", "delta1", "delta2"}:
                 low, decimals = 0.0, 8
+            elif material_type == "DruckerPrager" and key in {
+                "rho", "rhoBar", "theta",
+            }:
+                low, decimals = 0.0, 8
+                if key == "theta":
+                    high = 1.0
 
             widget = _float_spin(
                 shown,
@@ -266,12 +282,19 @@ class NDMaterialDialog(QDialog):
                 "PlateFiber formulation, so it can be used by SARE shell "
                 "sections."
             )
-        else:
+        elif material_type == "J2Plasticity":
             text = (
                 "Von Mises J2 plasticity with saturation plus linear "
                 "isotropic hardening. K and G define the elastic response; "
                 "σ0, σ∞, δ and H define yielding/hardening. OpenSees "
                 "provides a PlateFiber formulation."
+            )
+        else:
+            text = (
+                "Drucker-Prager pressure-sensitive plasticity. OpenSees "
+                "documents ThreeDimensional and PlaneStrain formulations "
+                "only; it is intentionally not available for PlateFiber "
+                "shell sections in SARE."
             )
         self.note.setText(text)
 
