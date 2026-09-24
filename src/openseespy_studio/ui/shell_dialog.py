@@ -333,7 +333,10 @@ class NDMaterialDialog(QDialog):
                 elif key == "ecr":
                     low = 0.0
                 elif key == "ec":
-                    high = -1.0e-12
+                    # QDoubleSpinBox displays 8 decimals here; -1e-12 rounds
+                    # to -0.0 and effectively exposes zero even though the
+                    # material contract requires a strictly negative strain.
+                    high = -1.0e-8
                 elif key in {"DamageCte1", "DamageCte2"}:
                     low = 0.0
             elif material_type == "SmearedSteelDoubleLayer":
