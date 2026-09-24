@@ -66,6 +66,7 @@ class NDMaterialDialog(QDialog):
         ("Pressure-dependent multi-yield", "PressureDependMultiYield"),
         ("ASD concrete 3D", "ASDConcrete3D"),
         ("Orthotropic rotating-angle concrete", "OrthotropicRAConcrete"),
+        ("Smeared steel double layer", "SmearedSteelDoubleLayer"),
     )
 
     PARAMETER_LABELS = {
@@ -128,6 +129,11 @@ class NDMaterialDialog(QDialog):
         "ec": "Compression peak strain ec",
         "DamageCte1": "Cyclic compression damage constant 1",
         "DamageCte2": "Cyclic compression damage constant 2",
+        "mat1": "Uniaxial steel tag, direction 1",
+        "mat2": "Uniaxial steel tag, direction 2",
+        "ratio1": "Reinforcement ratio ρ1",
+        "ratio2": "Reinforcement ratio ρ2",
+        "orientation": "Layer orientation [rad]",
     }
 
     def __init__(
@@ -330,6 +336,11 @@ class NDMaterialDialog(QDialog):
                     high = -1.0e-12
                 elif key in {"DamageCte1", "DamageCte2"}:
                     low = 0.0
+            elif material_type == "SmearedSteelDoubleLayer":
+                if key in {"mat1", "mat2"}:
+                    low, high, decimals = 1.0, 2_147_483_647.0, 0
+                elif key in {"ratio1", "ratio2"}:
+                    low, high = 0.0, 1.0
 
             widget = _float_spin(
                 shown,
@@ -397,13 +408,20 @@ class NDMaterialDialog(QDialog):
                 "Custom backbone lists, crack planes, viscosity and automatic "
                 "regularization are intentionally left unsupported in V1."
             )
-        else:
+        elif material_type == "OrthotropicRAConcrete":
             text = (
                 "Orthotropic rotating-angle plane-stress concrete layer for "
                 "RC wall/membrane formulations. 'Referenced uniaxial concrete "
                 "tag' must point to an existing concrete uniaxial material "
                 "(for example Concrete02 or Concrete06). Cyclic compression "
                 "damage constants default to the OpenSees values 0.14 and 0.6."
+            )
+        else:
+            text = (
+                "Two orthogonal smeared reinforcement layers for RC membrane "
+                "models. mat1/mat2 reference existing uniaxial steel materials; "
+                "ratio1/ratio2 are reinforcement ratios and orientation is in "
+                "radians. This material is intended for RCLMS/MEFI workflows."
             )
         self.note.setText(text)
 
