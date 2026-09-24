@@ -588,6 +588,74 @@
         "Kc": "dimensionless",
         "cdf": "dimensionless"
       }
+    },
+    {
+      "id": "opensees-orthotropic-ra-concrete-example-starter",
+      "family": "RC membrane concrete",
+      "material": "Orthotropic rotating-angle concrete layer",
+      "model": "OrthotropicRAConcrete",
+      "preset_name": "Orthotropic RA Concrete · Example Starter",
+      "parameters_si": {
+        "conc": 1,
+        "ecr": 0.00008,
+        "ec": -0.002,
+        "rho": 0,
+        "DamageCte1": 0.14,
+        "DamageCte2": 0.6
+      },
+      "verified_parameters": [
+        "conc",
+        "ecr",
+        "ec",
+        "rho",
+        "DamageCte1",
+        "DamageCte2"
+      ],
+      "behavior": [
+        "Concrete",
+        "Orthotropic rotating-angle",
+        "Plane stress",
+        "Cyclic compression damage"
+      ],
+      "compatibility": [
+        "Plane Stress"
+      ],
+      "applicability": [
+        "RC wall or membrane concrete layers",
+        "ReinforcedConcreteLayeredMembraneSection / RCLMS and related wall formulations"
+      ],
+      "limitations": [
+        "The conc field is a dependency tag, not a concrete constitutive law. It must reference an existing uniaxial concrete material such as Concrete02 or Concrete06.",
+        "The starter uses conc tag 1 as a placeholder; change it to a valid project material tag when necessary.",
+        "The model is a plane-stress concrete layer and is not a PlateFiber shell material."
+      ],
+      "primary_reference": {
+        "type": "official_documentation",
+        "title": "OrthotropicRAConcrete Material — OpenSees Documentation",
+        "authors": "OpenSees / F. Rojas / M.J. Núñez",
+        "url": "https://opensees.github.io/OpenSeesDocumentation/user/manual/material/ndMaterials/OrthotropicRAConcrete.html",
+        "doi": ""
+      },
+      "parameter_evidence": {
+        "location": "Official command syntax, parameter table, notes and Python example",
+        "note": "The official example uses conc tag 1, ecr=0.00008, ec=-0.002 and rho=0.0. Damage constants default to 0.14 and 0.6. SARE validates that the referenced uniaxial material exists before insertion into the project."
+      },
+      "verification": {
+        "status": "verified",
+        "model_definition_checked": true,
+        "compatibility_checked": true,
+        "units_checked": true,
+        "parameter_status": "starter_template",
+        "checked_on": "2026-09-24"
+      },
+      "source_units": {
+        "conc": "uniaxial material tag",
+        "ecr": "strain",
+        "ec": "strain",
+        "rho": "kg/m^3",
+        "DamageCte1": "dimensionless",
+        "DamageCte2": "dimensionless"
+      }
     }
   ]
 }
