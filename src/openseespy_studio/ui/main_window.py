@@ -3022,6 +3022,8 @@ class MainWindow(QMainWindow):
         model_menu = menus["Model"]
         model_menu.addAction(self.actions["material_library"])
         model_menu.addAction(self.actions["new_material"])
+        model_menu.addAction(self.actions["nd_material_library"])
+        model_menu.addAction(self.actions["new_nd_material"])
         model_menu.addAction(self.actions["new_section"])
         model_menu.addAction(self.actions["new_shell_section"])
         model_menu.addAction(self.actions["new_transformation"])
@@ -3623,6 +3625,8 @@ class MainWindow(QMainWindow):
             small=(
                 "material_library",
                 "new_material",
+                "nd_material_library",
+                "new_nd_material",
                 "new_shell_section",
                 "new_transformation",
             ),
