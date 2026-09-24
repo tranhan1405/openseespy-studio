@@ -58,7 +58,8 @@
         "model_definition_checked": true,
         "compatibility_checked": true,
         "units_checked": true,
-        "parameter_status": "starter_template"
+        "parameter_status": "starter_template",
+        "checked_on": "2026-09-24"
       },
       "source_units": {
         "E": "Pa",
@@ -134,7 +135,8 @@
         "model_definition_checked": true,
         "compatibility_checked": true,
         "units_checked": true,
-        "parameter_status": "starter_template"
+        "parameter_status": "starter_template",
+        "checked_on": "2026-09-24"
       },
       "source_units": {
         "Ex": "Pa",
@@ -209,7 +211,8 @@
         "model_definition_checked": true,
         "compatibility_checked": true,
         "units_checked": true,
-        "parameter_status": "starter_template"
+        "parameter_status": "starter_template",
+        "checked_on": "2026-09-24"
       },
       "source_units": {
         "K": "Pa",
