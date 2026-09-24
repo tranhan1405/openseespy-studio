@@ -1481,6 +1481,29 @@ def analysis_to_openseespy(
         total_steps = len(spectrum_periods)
     else:
         total_steps = settings.steps
+
+    # Solver output is a UI transport, not the result database. Bound the
+    # number of progress messages for long analyses and disable per-iteration
+    # OpenSees printing when the step count is large. Full convergence data
+    # are still collected from ops.testNorms() and stored in _studio_results.
+    ui_target_updates = 400
+    ui_stride = max(
+        1,
+        (max(int(total_steps), 1) + ui_target_updates - 1)
+        // ui_target_updates,
+    )
+    live_stream_step_limit = 2000
+    stream_live_convergence = bool(
+        settings.live_convergence
+        and int(total_steps) <= live_stream_step_limit
+    )
+    ui_throttled = bool(
+        int(total_steps) > ui_target_updates
+        or (
+            settings.live_convergence
+            and not stream_live_convergence
+        )
+    )
     if monitor_node is None and (
         settings.analysis_type in {"Pushover", "Cyclic"}
         or (
@@ -1983,7 +2006,7 @@ def analysis_to_openseespy(
         lines.append("print('Eigenvalues:', _studio_eigenvalues)")
         return lines
 
-    _studio_print_flag = 1 if settings.live_convergence else 0
+    _studio_print_flag = 1 if stream_live_convergence else 0
     if settings.algorithm != "Linear":
         lines.append(
             f"ops.test('{settings.test}', {settings.tolerance:g}, "
@@ -2079,7 +2102,9 @@ def analysis_to_openseespy(
         f"integrator={settings.integrator!r}, "
         f"algorithm=_studio_primary_algorithm, "
         f"test={settings.test!r}, tolerance={settings.tolerance:g}, "
-        f"live_convergence={settings.live_convergence!r}, "
+        f"live_convergence={stream_live_convergence!r}, "
+        f"live_convergence_requested={settings.live_convergence!r}, "
+        f"ui_stride={ui_stride}, ui_throttled={ui_throttled!r}, "
         f"adaptive_step={settings.adaptive_step!r})"
     )
     if settings.adaptive_step:
@@ -2151,10 +2176,17 @@ def analysis_to_openseespy(
         lines.append("    _studio_cutbacks = 0")
         lines.append("    _studio_had_recovery = False")
         lines.append(
-            "    _studio_emit('step_start', step=_studio_step_no, "
+            "    if "
+            f"{stream_live_convergence!r} or "
+            "_studio_step_no == 1 or "
+            f"_studio_step_no == {total_steps} or "
+            f"_studio_step_no % {ui_stride} == 0:"
+        )
+        lines.append(
+            "        _studio_emit('step_start', step=_studio_step_no, "
             f"total={total_steps}, algorithm=_studio_primary_algorithm, "
             f"test={settings.test!r}, tolerance={settings.tolerance:g}, "
-            f"live_convergence={settings.live_convergence!r}, "
+            f"live_convergence={stream_live_convergence!r}, "
             "adaptive_step=True, "
             "increment=_studio_nominal_increment, "
             "step_size=_studio_adaptive_size)"
@@ -2483,10 +2515,17 @@ def analysis_to_openseespy(
         lines.append("    _studio_step_no = _studio_step + 1")
         lines.append("    _studio_attempts = []")
         lines.append(
-            "    _studio_emit('step_start', step=_studio_step_no, "
+            "    if "
+            f"{stream_live_convergence!r} or "
+            "_studio_step_no == 1 or "
+            f"_studio_step_no == {total_steps} or "
+            f"_studio_step_no % {ui_stride} == 0:"
+        )
+        lines.append(
+            "        _studio_emit('step_start', step=_studio_step_no, "
             f"total={total_steps}, algorithm=_studio_primary_algorithm, "
             f"test={settings.test!r}, tolerance={settings.tolerance:g}, "
-            f"live_convergence={settings.live_convergence!r})"
+            f"live_convergence={stream_live_convergence!r})"
         )
         if settings.analysis_type == "Cyclic":
             lines.append(
@@ -2911,7 +2950,12 @@ def analysis_to_openseespy(
         f"if len(_studio_disp) >= {settings.control_dof} else 0.0"
     )
     lines.append(
-        "    _studio_emit('progress', step=_studio_step_no, "
+        "    if _studio_step_no == 1 or "
+        f"_studio_step_no == {total_steps} or "
+        f"_studio_step_no % {ui_stride} == 0:"
+    )
+    lines.append(
+        "        _studio_emit('progress', step=_studio_step_no, "
         f"total={total_steps}, "
         f"percent=100.0 * _studio_step_no / {total_steps}, "
         "algorithm=_studio_active_algorithm, "

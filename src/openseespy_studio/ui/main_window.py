@@ -1709,6 +1709,12 @@ class MainWindow(QMainWindow):
         self._analysis_log_path: str | None = None
         self._analysis_stdout_buffer = ""
         self._analysis_stderr_buffer = ""
+        # Heavy nonlinear/transient jobs can produce thousands of solver
+        # lines per second. Queue expensive Qt/log updates and flush them on
+        # a fixed UI cadence instead of repainting for every line.
+        self._analysis_console_queue: list[str] = []
+        self._analysis_log_queue: list[str] = []
+        self._analysis_console_omitted = 0
         self._analysis_external_console = False
         self._external_log_paths: list[str] = []
         self._analysis_stop_requested = False
@@ -1746,7 +1752,7 @@ class MainWindow(QMainWindow):
         self._geometry_line_edit_operation = "trim"
         self._geometry_batch_subject_tags: list[int] = []
         self._job_ui_timer = QTimer(self)
-        self._job_ui_timer.setInterval(1000)
+        self._job_ui_timer.setInterval(250)
         self._job_ui_timer.timeout.connect(self._refresh_running_job_ui)
 
         self.setCorner(Qt.BottomLeftCorner, Qt.LeftDockWidgetArea)
@@ -2052,6 +2058,9 @@ class MainWindow(QMainWindow):
         )
         self.console.setReadOnly(True)
         self.console.setFont(QFont("Consolas", 9))
+        # Keep the visible console bounded. The complete output remains in
+        # the per-Job log file.
+        self.console.setMaximumBlockCount(5000)
         console_dock.setWidget(self.console)
         self.splitDockWidget(script_dock, console_dock, Qt.Horizontal)
 
@@ -30404,6 +30413,9 @@ class MainWindow(QMainWindow):
         self._analysis_log_path = log_path
         self._analysis_stdout_buffer = ""
         self._analysis_stderr_buffer = ""
+        self._analysis_console_queue.clear()
+        self._analysis_log_queue.clear()
+        self._analysis_console_omitted = 0
         self._analysis_external_console = bool(
             settings.show_external_console
         )
@@ -30583,9 +30595,11 @@ class MainWindow(QMainWindow):
         norm = payload.get("norm")
 
         if event == "start":
+            throttled = bool(payload.get("ui_throttled", False))
             return (
                 f"[Job] Solver started · {payload.get('analysis_type', '')} "
                 f"· total={total} · algorithm={algorithm}"
+                + (" · UI stream throttled" if throttled else "")
             )
 
         if event == "step_start":
@@ -30714,6 +30728,7 @@ class MainWindow(QMainWindow):
                     test=str(payload.get("test", "") or ""),
                     tolerance=payload.get("tolerance"),
                     algorithm=str(payload.get("algorithm", "") or ""),
+                    refresh=False,
                 )
                 self.results_dock.show()
                 self.results_dock.raise_()
@@ -30738,6 +30753,7 @@ class MainWindow(QMainWindow):
                     algorithm=algorithm_label,
                     test=str(payload.get("test", "") or ""),
                     tolerance=payload.get("tolerance"),
+                    refresh=False,
                 )
         elif event == "progress":
             step = int(payload.get("step", 0) or 0)
@@ -30765,16 +30781,23 @@ class MainWindow(QMainWindow):
                 and bool(self._live_convergence_context.get("enabled"))
             ):
                 self.results_panel.update_live_analysis_coordinate(
-                    payload.get("time")
+                    payload.get("time"),
+                    refresh=False,
                 )
-                self.results_panel.finish_live_convergence("CONVERGED")
+                self.results_panel.finish_live_convergence(
+                    "CONVERGED",
+                    refresh=False,
+                )
         elif event == "convergence_failed":
             job.message = (
                 f"Step {payload.get('step')}: "
                 f"{payload.get('algorithm')} failed; recovering"
             )
             if bool(self._live_convergence_context.get("enabled")):
-                self.results_panel.finish_live_convergence("RECOVERING")
+                self.results_panel.finish_live_convergence(
+                    "RECOVERING",
+                    refresh=False,
+                )
         elif event == "fallback":
             job.message = (
                 f"Trying {payload.get('algorithm')} "
@@ -30793,13 +30816,19 @@ class MainWindow(QMainWindow):
                 f"at step {payload.get('step')}"
             )
             if bool(self._live_convergence_context.get("enabled")):
-                self.results_panel.finish_live_convergence("RECOVERED")
+                self.results_panel.finish_live_convergence(
+                    "RECOVERED",
+                    refresh=False,
+                )
         elif event == "failed":
             job.message = (
                 f"Convergence failed at step {payload.get('step')}"
             )
             if bool(self._live_convergence_context.get("enabled")):
-                self.results_panel.finish_live_convergence("FAILED")
+                self.results_panel.finish_live_convergence(
+                    "FAILED",
+                    refresh=False,
+                )
 
         elif event == "cutback":
             old_size = float(payload.get("old_size", 0.0) or 0.0)
@@ -30812,7 +30841,10 @@ class MainWindow(QMainWindow):
                 payload.get("algorithm", "") or ""
             )
             if bool(self._live_convergence_context.get("enabled")):
-                self.results_panel.finish_live_convergence("CUTBACK")
+                self.results_panel.finish_live_convergence(
+                    "CUTBACK",
+                    refresh=False,
+                )
                 self.results_panel.begin_live_convergence_attempt(
                     f"{payload.get('algorithm', '-')} · CUTBACK |Δ|={new_size:.6g}"
                 )
@@ -30840,13 +30872,14 @@ class MainWindow(QMainWindow):
             )
             if bool(self._live_convergence_context.get("enabled")):
                 self.results_panel.mark_live_substep_converged(
-                    payload.get("time")
+                    payload.get("time"),
+                    refresh=False,
                 )
                 self.results_panel.begin_live_convergence_attempt(
                     f"{payload.get('algorithm', '-')} · |Δ|={next_size:.6g}"
                 )
 
-        self.results_panel.add_or_update_job(job)
+        # Running Job widgets are refreshed by _job_ui_timer.
 
     def _handle_solver_line(
         self,
@@ -30883,6 +30916,7 @@ class MainWindow(QMainWindow):
                         )
                         or ""
                     ),
+                    refresh=False,
                 )
 
         prefix = "[STUDIO_EVENT] "
@@ -30898,8 +30932,11 @@ class MainWindow(QMainWindow):
         if is_stderr:
             display = "[stderr] " + display
 
-        self.console.appendPlainText(display)
-        self._append_analysis_log(display + "\n")
+        self._analysis_log_queue.append(display + "\n")
+        if len(self._analysis_console_queue) < 400:
+            self._analysis_console_queue.append(display)
+        else:
+            self._analysis_console_omitted += 1
 
     def _consume_solver_text(
         self,
@@ -30921,6 +30958,22 @@ class MainWindow(QMainWindow):
                 is_stderr=is_stderr,
             )
 
+    def _flush_analysis_output(self) -> None:
+        if self._analysis_console_queue or self._analysis_console_omitted:
+            lines = list(self._analysis_console_queue)
+            if self._analysis_console_omitted:
+                lines.append(
+                    f"... {self._analysis_console_omitted} additional solver "
+                    "line(s) kept in the full Job log ..."
+                )
+            self.console.appendPlainText("\n".join(lines))
+            self._analysis_console_queue.clear()
+            self._analysis_console_omitted = 0
+
+        if self._analysis_log_queue:
+            self._append_analysis_log("".join(self._analysis_log_queue))
+            self._analysis_log_queue.clear()
+
     def _flush_solver_buffers(self) -> None:
         for attribute, is_stderr in (
             ("_analysis_stdout_buffer", False),
@@ -30933,6 +30986,7 @@ class MainWindow(QMainWindow):
                     is_stderr=is_stderr,
                 )
             setattr(self, attribute, "")
+        self._flush_analysis_output()
 
     def _refresh_running_job_ui(self) -> None:
         if self._current_job_id is None:
@@ -30941,8 +30995,12 @@ class MainWindow(QMainWindow):
         job = self._jobs.get(self._current_job_id)
         if job is None:
             self._job_ui_timer.stop()
+            self._flush_analysis_output()
             return
+        self._flush_analysis_output()
         self.results_panel.add_or_update_job(job)
+        if bool(self._live_convergence_context.get("enabled")):
+            self.results_panel.refresh_live_convergence_display()
 
     def _stop_analysis(self) -> None:
         process = self._analysis_process

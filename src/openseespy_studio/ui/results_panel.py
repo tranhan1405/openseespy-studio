@@ -4622,6 +4622,7 @@ class ResultsPanel(QWidget):
         test: str,
         tolerance: float | None,
         algorithm: str,
+        refresh: bool = True,
     ) -> None:
         self._live_convergence_attempts = []
         self._live_convergence_step = 0
@@ -4637,7 +4638,8 @@ class ResultsPanel(QWidget):
         self._live_coordinate_x = [0.0]
         self._live_coordinate_y = [0.0]
         self.tabs.setCurrentWidget(self.convergence_page)
-        self._refresh_live_convergence_plots()
+        if refresh:
+            self._refresh_live_convergence_plots()
         self.live_convergence_status.setText(
             f"RUNNING · {self._live_convergence_test or 'Convergence test'} "
             f"· primary {algorithm or '-'}"
@@ -4651,6 +4653,7 @@ class ResultsPanel(QWidget):
         algorithm: str,
         test: str = "",
         tolerance: float | None = None,
+        refresh: bool = True,
     ) -> None:
         self._live_convergence_step = int(step)
         self._live_convergence_total = int(total)
@@ -4662,7 +4665,8 @@ class ResultsPanel(QWidget):
         self._live_convergence_attempts = [
             {"algorithm": str(algorithm), "values": []}
         ]
-        self._refresh_live_convergence_plots()
+        if refresh:
+            self._refresh_live_convergence_plots()
         self.live_convergence_status.setText(
             f"RUNNING · Step {step}/{total} · {algorithm} · "
             f"{self._live_convergence_test or 'test'}"
@@ -4697,6 +4701,7 @@ class ResultsPanel(QWidget):
         tolerance: float | None = None,
         test: str = "",
         algorithm: str = "",
+        refresh: bool = True,
     ) -> None:
         if tolerance is not None:
             self._live_convergence_tolerance = float(tolerance)
@@ -4726,29 +4731,33 @@ class ResultsPanel(QWidget):
             )
             self._live_trace_norm.append(float(norm))
         self._live_attempt_iteration = local_iteration
-        self._refresh_live_convergence_plots()
+        if refresh:
+            self._refresh_live_convergence_plots()
 
-        tol = self._live_convergence_tolerance
-        status = (
-            "CONVERGED"
-            if tol is not None and norm <= tol
-            else "ITERATING"
-        )
-        self.live_convergence_status.setText(
-            f"{status} · Step {self._live_convergence_step}/"
-            f"{self._live_convergence_total} · "
-            f"{attempt.get('algorithm', algorithm or '-')} · "
-            f"iter {iteration} · norm={norm:.3e}"
-            + (
-                f" · tol={tol:.3e}"
-                if tol is not None
-                else ""
+        if refresh:
+            tol = self._live_convergence_tolerance
+            status = (
+                "CONVERGED"
+                if tol is not None and norm <= tol
+                else "ITERATING"
             )
-        )
+            self.live_convergence_status.setText(
+                f"{status} · Step {self._live_convergence_step}/"
+                f"{self._live_convergence_total} · "
+                f"{attempt.get('algorithm', algorithm or '-')} · "
+                f"iter {iteration} · norm={norm:.3e}"
+                + (
+                    f" · tol={tol:.3e}"
+                    if tol is not None
+                    else ""
+                )
+            )
 
     def mark_live_substep_converged(
         self,
         coordinate: float | None = None,
+        *,
+        refresh: bool = True,
     ) -> None:
         if self._live_cumulative_iteration <= 0:
             return
@@ -4767,11 +4776,14 @@ class ResultsPanel(QWidget):
                 ):
                     self._live_coordinate_x.append(marker)
                     self._live_coordinate_y.append(value)
-        self._refresh_live_convergence_plots()
+        if refresh:
+            self._refresh_live_convergence_plots()
 
     def update_live_analysis_coordinate(
         self,
         coordinate: float | None,
+        *,
+        refresh: bool = True,
     ) -> None:
         if coordinate is None or self._live_cumulative_iteration <= 0:
             return
@@ -4788,12 +4800,18 @@ class ResultsPanel(QWidget):
         ):
             self._live_coordinate_x.append(marker)
             self._live_coordinate_y.append(value)
-            self._refresh_live_convergence_plots()
+            if refresh:
+                self._refresh_live_convergence_plots()
 
     def set_live_convergence_message(self, message: str) -> None:
         self.live_convergence_status.setText(str(message))
 
-    def finish_live_convergence(self, status: str) -> None:
+    def finish_live_convergence(
+        self,
+        status: str,
+        *,
+        refresh: bool = True,
+    ) -> None:
         if self._live_convergence_step <= 0:
             return
         final_status = str(status)
@@ -4809,10 +4827,39 @@ class ResultsPanel(QWidget):
             and len(self._live_convergence_attempts) > 1
         ):
             final_status = "RECOVERED"
-        self._refresh_live_convergence_plots()
+        if refresh:
+            self._refresh_live_convergence_plots()
         self.live_convergence_status.setText(
             f"{final_status} · Step {self._live_convergence_step}/"
             f"{self._live_convergence_total}"
+        )
+
+    def refresh_live_convergence_display(self) -> None:
+        """Redraw live convergence plots on the throttled UI cadence."""
+        self._refresh_live_convergence_plots()
+        if not self._live_convergence_attempts:
+            return
+        attempt = self._live_convergence_attempts[-1]
+        values = attempt.get("values", [])
+        if not values:
+            return
+        iteration, norm = values[-1]
+        tol = self._live_convergence_tolerance
+        status = (
+            "CONVERGED"
+            if tol is not None and float(norm) <= tol
+            else "ITERATING"
+        )
+        self.live_convergence_status.setText(
+            f"{status} · Step {self._live_convergence_step}/"
+            f"{self._live_convergence_total} · "
+            f"{attempt.get('algorithm', '-')} · "
+            f"iter {int(iteration)} · norm={float(norm):.3e}"
+            + (
+                f" · tol={tol:.3e}"
+                if tol is not None
+                else ""
+            )
         )
 
     def add_or_update_job(self, job: JobRecord) -> None:
