@@ -43,7 +43,14 @@ class RCWallWizard(QWizard):
         self.units = UnitSystem.from_mapping(project.units)
         self.setWindowTitle("RC Wall Wizard · MEFI / RCLMS")
         self.resize(760, 650)
-        self.setOption(QWizard.NoBackButtonOnStartPage, True)
+        self.setOption(
+            QWizard.WizardOption.NoBackButtonOnStartPage,
+            True,
+        )
+        self.setButtonText(
+            QWizard.WizardButton.FinishButton,
+            "Generate Wall",
+        )
 
         self._build_geometry_page()
         self._build_concrete_page()
