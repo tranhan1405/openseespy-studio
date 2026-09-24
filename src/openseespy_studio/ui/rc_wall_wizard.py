@@ -249,15 +249,18 @@ class RCWallWizard(QWizard):
         layout.addStretch(1)
         self.addPage(page)
 
-    def _preset_changed(self) -> None:
+    def _preset_changed(self, *_args) -> None:
         if self.preset.currentData() == "rw-a20":
             self._apply_rw_a20_preset()
 
+    def _from_mm(self, value_mm: float) -> float:
+        return float(value_mm) * 0.001 / self.units.length_to_m
+
     def _apply_rw_a20_preset(self) -> None:
-        self.width.setValue(1220.0)
-        self.height.setValue(2209.8)
-        self.thickness.setValue(152.4)
-        self.boundary_width.setValue(228.6)
+        self.width.setValue(self._from_mm(1220.0))
+        self.height.setValue(self._from_mm(2209.8))
+        self.thickness.setValue(self._from_mm(152.4))
+        self.boundary_width.setValue(self._from_mm(228.6))
         self.vertical_elements.setValue(9)
         self.macro_fibers.setValue(8)
 
@@ -269,7 +272,7 @@ class RCWallWizard(QWizard):
         self.cracking_strain.setValue(0.00008)
         self.damage1.setValue(0.175)
         self.damage2.setValue(0.5)
-        self.unconfined_layer.setValue(50.8)
+        self.unconfined_layer.setValue(self._from_mm(50.8))
 
         self.steel_E.setValue(self._stress_display(200.0e9))
         self.fy_x.setValue(self._stress_display(469.93e6))
