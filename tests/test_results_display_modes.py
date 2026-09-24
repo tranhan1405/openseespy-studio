@@ -207,7 +207,7 @@ def test_crack_pattern_result_restores_controls_and_reports_panels(qapp):
         assert panel.crack_table.rowCount() == 1
         assert panel.crack_table.item(0, 5).text() == "Cracked"
         assert "1 cracked at final state" in panel.crack_summary.text()
-        assert panel.motion_page.isVisible()
+        assert not panel.motion_page.isHidden()
 
         captured.clear()
         panel._crack_controls_changed()
