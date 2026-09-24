@@ -1622,6 +1622,31 @@ ELEMENT_BACKED_CONNECTION_TYPES: tuple[str, ...] = (
     "KrawinklerPanelZone",
 )
 
+CONNECTION_RECORDER_RESPONSES: dict[str, set[str]] = {
+    "semiRigid": {"force", "deformation", "globalForce"},
+    "zeroLength": {"force", "deformation", "globalForce"},
+    "zeroLengthSection": {"force", "deformation", "stiff", "globalForce"},
+    "twoNodeLink": {
+        "force",
+        "globalForce",
+        "localForce",
+        "basicForce",
+        "localDisplacement",
+        "basicDisplacement",
+    },
+    "Joint2D": {
+        "force",
+        "deformation",
+        "centralNode",
+        "size",
+        "stiffness",
+        "defoANDforce",
+    },
+    # The public Krawinkler object exposes its zeroLength panel spring tag.
+    "KrawinklerPanelZone": {"force", "deformation", "globalForce"},
+}
+
+
 
 
 @dataclass
@@ -1815,6 +1840,77 @@ class ConnectionData:
                         f"KrawinklerPanelZone requires positive {key}."
                     )
                 self.parameters[key] = value
+
+        if self.connection_type == "twoNodeLink":
+            # Historical SARE projects always emitted -orient. Preserve that
+            # behavior unless a newer project explicitly stores False.
+            orientation_override = self.parameters.get(
+                "orientation_override",
+                True,
+            )
+            self.parameters["orientation_override"] = _strict_bool(
+                orientation_override,
+                "twoNodeLink orientation_override",
+            )
+
+            p_delta = self.parameters.get("p_delta", ())
+            if p_delta is None:
+                p_delta = ()
+            if not isinstance(p_delta, (list, tuple)):
+                raise ValueError("twoNodeLink p_delta must be a list.")
+            p_delta_values = [float(value) for value in p_delta]
+            if len(p_delta_values) not in {0, 2, 4}:
+                raise ValueError(
+                    "twoNodeLink p_delta must contain 2 values for 2D or "
+                    "4 values for 3D."
+                )
+            if any(
+                not math.isfinite(value) or value < 0.0
+                for value in p_delta_values
+            ):
+                raise ValueError(
+                    "twoNodeLink p_delta values must be finite and non-negative."
+                )
+            if len(p_delta_values) == 2 and sum(p_delta_values) > 1.0 + 1.0e-12:
+                raise ValueError(
+                    "twoNodeLink 2D p_delta end-moment ratios must sum to <= 1."
+                )
+            if len(p_delta_values) == 4 and (
+                p_delta_values[0] + p_delta_values[1] > 1.0 + 1.0e-12
+                or p_delta_values[2] + p_delta_values[3] > 1.0 + 1.0e-12
+            ):
+                raise ValueError(
+                    "twoNodeLink 3D p_delta end-moment ratio pairs must "
+                    "each sum to <= 1."
+                )
+            self.parameters["p_delta"] = p_delta_values
+
+            shear_dist = self.parameters.get("shear_dist", ())
+            if shear_dist is None:
+                shear_dist = ()
+            if not isinstance(shear_dist, (list, tuple)):
+                raise ValueError("twoNodeLink shear_dist must be a list.")
+            shear_values = [float(value) for value in shear_dist]
+            if len(shear_values) not in {0, 1, 2}:
+                raise ValueError(
+                    "twoNodeLink shear_dist must contain 1 value for 2D or "
+                    "2 values for 3D."
+                )
+            if any(
+                not math.isfinite(value) or not 0.0 <= value <= 1.0
+                for value in shear_values
+            ):
+                raise ValueError(
+                    "twoNodeLink shear_dist values must be within [0, 1]."
+                )
+            self.parameters["shear_dist"] = shear_values
+
+            link_mass = float(self.parameters.get("mass", 0.0))
+            if not math.isfinite(link_mass) or link_mass < 0.0:
+                raise ValueError(
+                    "twoNodeLink mass must be finite and non-negative."
+                )
+            self.parameters["mass"] = link_mass
         if len(self.orient_x) != 3 or len(self.orient_y) != 3:
             raise ValueError("Connection orientation vectors need 3 values.")
         if any(
@@ -3083,7 +3179,20 @@ class RecorderData:
             if not self.dofs or any(dof not in range(1, 7) for dof in self.dofs):
                 raise ValueError("Node recorder DOFs must be in 1..6.")
         elif self.recorder_type == "Element":
-            if self.response not in {"globalForce", "localForce"}:
+            if self.response not in {
+                "globalForce",
+                "localForce",
+                "force",
+                "deformation",
+                "basicForce",
+                "localDisplacement",
+                "basicDisplacement",
+                "stiff",
+                "centralNode",
+                "size",
+                "stiffness",
+                "defoANDforce",
+            }:
                 raise ValueError("Unsupported Element recorder response.")
         elif self.recorder_type == "Section":
             if self.response not in {"force", "deformation"}:
@@ -7056,6 +7165,22 @@ class ProjectDatabase:
         else:
             allowed_directions = set()
 
+        if connection.connection_type == "twoNodeLink":
+            p_delta = list(connection.parameters.get("p_delta", ()))
+            shear_dist = list(connection.parameters.get("shear_dist", ()))
+            expected_p_delta = 2 if int(self.model.ndm) == 2 else 4
+            expected_shear = 1 if int(self.model.ndm) == 2 else 2
+            if p_delta and len(p_delta) != expected_p_delta:
+                raise ValueError(
+                    f"twoNodeLink in {self.model.ndm}D requires "
+                    f"{expected_p_delta} p_delta ratio value(s)."
+                )
+            if shear_dist and len(shear_dist) != expected_shear:
+                raise ValueError(
+                    f"twoNodeLink in {self.model.ndm}D requires "
+                    f"{expected_shear} shear_dist value(s)."
+                )
+
         invalid_dofs = sorted(
             direction
             for direction in connection_directions
@@ -8511,6 +8636,28 @@ class ProjectDatabase:
                 "Recorder references missing element tag(s): "
                 + ", ".join(map(str, missing))
             )
+        if recorder.recorder_type == "Element":
+            connection_targets = [
+                self.connections[tag]
+                for tag in recorder.target_tags
+                if tag in self.connections
+            ]
+            incompatible_responses = sorted({
+                connection.connection_type
+                for connection in connection_targets
+                if recorder.response not in CONNECTION_RECORDER_RESPONSES.get(
+                    connection.connection_type,
+                    set(),
+                )
+            })
+            if incompatible_responses:
+                raise ValueError(
+                    f"Element recorder response {recorder.response!r} is not "
+                    "supported by connection type(s): "
+                    + ", ".join(incompatible_responses)
+                    + "."
+                )
+
         if recorder.recorder_type == "Shell":
             incompatible = [
                 tag
