@@ -6860,7 +6860,9 @@ class ProjectDatabase:
         self.sections.pop(tag, None)
 
     def _validate_section_materials(self, section: SectionData) -> None:
-        if section.section_type in {"PlateFiber", "LayeredShell"}:
+        if section.section_type in {
+            "PlateFiber", "LayeredShell", "RCLMS",
+        }:
             missing_nd = sorted(
                 tag
                 for tag in section.shell_nd_material_tags()
@@ -6872,6 +6874,25 @@ class ProjectDatabase:
                     "nDMaterial tag(s): "
                     + ", ".join(map(str, missing_nd))
                 )
+            if section.section_type == "RCLMS":
+                steel = self.nd_materials[int(section.nd_material_tag)]
+                if steel.material_type != "SmearedSteelDoubleLayer":
+                    raise ValueError(
+                        "RCLMS reinforcing layer must use "
+                        "SmearedSteelDoubleLayer."
+                    )
+                invalid_concrete = [
+                    int(layer.material_tag)
+                    for layer in section.shell_layers
+                    if self.nd_materials[
+                        int(layer.material_tag)
+                    ].material_type != "OrthotropicRAConcrete"
+                ]
+                if invalid_concrete:
+                    raise ValueError(
+                        "RCLMS concrete layers must use "
+                        "OrthotropicRAConcrete nDMaterials."
+                    )
             return
 
         if section.section_type == "Elastic":
