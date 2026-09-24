@@ -918,6 +918,7 @@ class ResultsPanel(QWidget):
     deformation_requested = Signal(float, str, str, bool)
     mode_shape_requested = Signal(int, float, str, str, bool)
     motion_frame_requested = Signal(object, float, bool, float, str)
+    crack_frame_requested = Signal(int, bool, float, object)
     clear_overlay_requested = Signal()
     member_force_requested = Signal(str, float)
     node_contour_requested = Signal(str, str)
@@ -968,6 +969,8 @@ class ResultsPanel(QWidget):
         self._response2000_dataset: dict[str, Any] = {}
         self._response2000_path = ""
         self._response2000_source_name = ""
+        self._active_solution_kind = ""
+        self._active_crack_element_scope: set[int] = set()
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 5, 6, 5)
@@ -996,6 +999,7 @@ class ResultsPanel(QWidget):
         self._build_node_tab()
         self._build_element_tab()
         self._build_shell_tab()
+        self._build_crack_tab()
         self._build_fiber_tab()
         self._build_hinge_tab()
         self._build_force_displacement_tab()
@@ -1049,6 +1053,7 @@ class ResultsPanel(QWidget):
                 return
 
     def show_jobs(self) -> None:
+        self._active_solution_kind = ""
         if hasattr(self, "motion_page"):
             self.motion_page.setVisible(False)
         self._select_tab("Jobs")
@@ -1060,6 +1065,7 @@ class ResultsPanel(QWidget):
     ) -> None:
         options = dict(settings or {})
         kind = str(result_type)
+        self._active_solution_kind = kind
 
         if hasattr(self, "motion_page"):
             probe_time_history = (
@@ -1074,6 +1080,7 @@ class ResultsPanel(QWidget):
                         "ModeShape",
                         "Motion",
                         "ForceDisplacement",
+                        "CrackPattern",
                     }
                     or probe_time_history
                 )
@@ -1165,6 +1172,26 @@ class ResultsPanel(QWidget):
             )
             self.shell_detail_tabs.setCurrentIndex(tab)
             self._select_tab("Shell Results")
+            return
+
+        if kind == "CrackPattern":
+            accumulate = bool(options.get("accumulate", False))
+            line_scale = options.get("line_scale", 0.82)
+            self.crack_accumulate.blockSignals(True)
+            self.crack_line_scale.blockSignals(True)
+            try:
+                self.crack_accumulate.setChecked(accumulate)
+                self.crack_line_scale.setValue(float(line_scale))
+            except (TypeError, ValueError):
+                self.crack_line_scale.setValue(0.82)
+            finally:
+                self.crack_accumulate.blockSignals(False)
+                self.crack_line_scale.blockSignals(False)
+            self._active_crack_element_scope = {
+                int(tag)
+                for tag in options.get("_element_scope", [])
+            }
+            self._select_tab("Crack Pattern")
             return
 
         if kind in {"FiberStress", "FiberStrain"}:
@@ -2068,6 +2095,251 @@ class ResultsPanel(QWidget):
         self.shell_detail_tabs.addTab(def_host, "Deformation Gauss Points")
 
         self.tabs.addTab(page, "Shell Results")
+
+
+    def _build_crack_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+
+        self.crack_info = QLabel(
+            "MEFI / RCLMS crack visualization uses the RCPanel panel_strain "
+            "response. A line appears when maximum principal tensile strain "
+            "reaches the OrthotropicRAConcrete cracking strain epsilon_cr."
+        )
+        self.crack_info.setWordWrap(True)
+        layout.addWidget(self.crack_info)
+
+        controls = QHBoxLayout()
+        self.crack_accumulate = QCheckBox("Accumulate crack history")
+        self.crack_accumulate.setToolTip(
+            "Keep the largest crack-opening state reached up to the current "
+            "animation frame instead of showing only active cracks."
+        )
+        self.crack_accumulate.toggled.connect(
+            self._crack_controls_changed
+        )
+        controls.addWidget(self.crack_accumulate)
+
+        controls.addWidget(QLabel("Line length:"))
+        self.crack_line_scale = QDoubleSpinBox()
+        self.crack_line_scale.setRange(0.05, 1.0)
+        self.crack_line_scale.setSingleStep(0.05)
+        self.crack_line_scale.setDecimals(2)
+        self.crack_line_scale.setValue(0.82)
+        self.crack_line_scale.setSuffix(" x panel")
+        self.crack_line_scale.valueChanged.connect(
+            self._crack_controls_changed
+        )
+        controls.addWidget(self.crack_line_scale)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.crack_summary = QLabel(
+            "No MEFI crack result data are loaded."
+        )
+        self.crack_summary.setWordWrap(True)
+        layout.addWidget(self.crack_summary)
+
+        self.crack_table = QTableWidget(0, 6)
+        self.crack_table.setHorizontalHeaderLabels(
+            [
+                "Element",
+                "Panel",
+                "epsilon_cr",
+                "epsilon_1 final",
+                "epsilon_1/epsilon_cr",
+                "State",
+            ]
+        )
+        self.crack_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.crack_table.horizontalHeader().setStretchLastSection(True)
+        self.crack_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.crack_table.setSelectionBehavior(
+            QAbstractItemView.SelectRows
+        )
+        layout.addWidget(self.crack_table, 1)
+
+        note = QLabel(
+            "Crack lines are a smeared-crack visualization, not explicit "
+            "geometric discontinuities. Use the animation controls below to "
+            "inspect crack evolution through converged analysis frames."
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        self.tabs.addTab(page, "Crack Pattern")
+
+    @staticmethod
+    def _crack_principal_strain(values: object) -> float | None:
+        if not isinstance(values, (list, tuple)) or len(values) < 3:
+            return None
+        try:
+            ex = float(values[0])
+            ey = float(values[1])
+            gxy = float(values[2])
+        except (TypeError, ValueError):
+            return None
+        if not all(math.isfinite(value) for value in (ex, ey, gxy)):
+            return None
+        average = 0.5 * (ex + ey)
+        radius = math.sqrt(
+            (0.5 * (ex - ey)) ** 2 + (0.5 * gxy) ** 2
+        )
+        return average + radius
+
+    def _populate_crack_summary(self) -> None:
+        specs = (
+            self._result.get("mefi_crack_specs", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        final = (
+            self._result.get("final", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        panel_data = (
+            final.get("mefi_panel_strains", {})
+            if isinstance(final, dict)
+            else {}
+        )
+        history = (
+            self._result.get("history", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        history_panels = (
+            history.get("mefi_panel_strains", {})
+            if isinstance(history, dict)
+            else {}
+        )
+
+        rows: list[tuple[str, ...]] = []
+        element_count = 0
+        panel_count = 0
+        cracked_count = 0
+        max_frames = 0
+
+        if isinstance(specs, dict):
+            for raw_tag, spec in sorted(
+                specs.items(),
+                key=lambda item: int(item[0]),
+            ):
+                if not isinstance(spec, dict):
+                    continue
+                element_count += 1
+                element_key = str(raw_tag)
+                panels = spec.get("panels", [])
+                if not isinstance(panels, list):
+                    continue
+                element_final = (
+                    panel_data.get(element_key, {})
+                    if isinstance(panel_data, dict)
+                    else {}
+                )
+                element_history = (
+                    history_panels.get(element_key, {})
+                    if isinstance(history_panels, dict)
+                    else {}
+                )
+                for index, panel in enumerate(panels, start=1):
+                    if not isinstance(panel, dict):
+                        continue
+                    panel_count += 1
+                    panel_no = int(panel.get("panel", index))
+                    panel_key = str(panel_no)
+                    try:
+                        threshold = float(panel.get("cracking_strain"))
+                    except (TypeError, ValueError):
+                        threshold = math.nan
+                    values = (
+                        element_final.get(panel_key, [])
+                        if isinstance(element_final, dict)
+                        else []
+                    )
+                    epsilon_1 = self._crack_principal_strain(values)
+                    ratio = (
+                        epsilon_1 / threshold
+                        if (
+                            epsilon_1 is not None
+                            and math.isfinite(threshold)
+                            and threshold > 0.0
+                        )
+                        else None
+                    )
+                    cracked = ratio is not None and ratio >= 1.0
+                    if cracked:
+                        cracked_count += 1
+                    panel_history = (
+                        element_history.get(panel_key, [])
+                        if isinstance(element_history, dict)
+                        else []
+                    )
+                    if isinstance(panel_history, list):
+                        max_frames = max(max_frames, len(panel_history))
+                    rows.append((
+                        str(raw_tag),
+                        str(panel_no),
+                        (
+                            f"{threshold:.6g}"
+                            if math.isfinite(threshold)
+                            else "-"
+                        ),
+                        (
+                            f"{epsilon_1:.6g}"
+                            if epsilon_1 is not None
+                            else "-"
+                        ),
+                        (
+                            f"{ratio:.3f}"
+                            if ratio is not None
+                            else "-"
+                        ),
+                        "Cracked" if cracked else "Below epsilon_cr",
+                    ))
+
+        self.crack_table.setRowCount(len(rows))
+        for row_index, values in enumerate(rows):
+            for column, value in enumerate(values):
+                self.crack_table.setItem(
+                    row_index,
+                    column,
+                    QTableWidgetItem(value),
+                )
+
+        if panel_count:
+            self.crack_summary.setText(
+                f"{element_count} MEFI element(s) · {panel_count} RC panel(s) · "
+                f"{cracked_count} cracked at final state · "
+                f"{max_frames} history frame(s)."
+            )
+        else:
+            self.crack_summary.setText(
+                "No MEFI/RCLMS crack instrumentation is available in this "
+                "result."
+            )
+
+    def _crack_controls_changed(self, *_args) -> None:
+        if self._active_solution_kind != "CrackPattern":
+            return
+        if self._motion_display_frame_count > 0:
+            source_index = self._motion_source_index(
+                self._motion_frame_index
+            )
+        else:
+            source_index = -1
+        self.crack_frame_requested.emit(
+            int(source_index),
+            bool(self.crack_accumulate.isChecked()),
+            float(self.crack_line_scale.value()),
+            sorted(self._active_crack_element_scope),
+        )
 
     def _build_fiber_tab(self) -> None:
         page = QWidget()
@@ -3699,6 +3971,14 @@ class ResultsPanel(QWidget):
         self._sync_motion_markers(
             None if self._motion_info.kind == "Modal" else source_index
         )
+        if self._active_solution_kind == "CrackPattern":
+            self.crack_frame_requested.emit(
+                int(source_index),
+                bool(self.crack_accumulate.isChecked()),
+                float(self.crack_line_scale.value()),
+                sorted(self._active_crack_element_scope),
+            )
+            return
         self.motion_frame_requested.emit(
             frame.vectors,
             float(self.motion_scale.value()),
@@ -5787,6 +6067,7 @@ class ResultsPanel(QWidget):
         self._populate_node_table()
         self._populate_element_table()
         self._populate_shell_results()
+        self._populate_crack_summary()
         self._populate_fiber_elements()
         self._populate_hinge_table()
         self._populate_history_nodes()
