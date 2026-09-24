@@ -3046,7 +3046,7 @@ class ResultsPanel(QWidget):
         )
         source_row.addWidget(self.motion_scale)
 
-        self.motion_auto_scale = QCheckBox("Auto")
+        self.motion_auto_scale = QCheckBox("Auto Scale")
         self.motion_auto_scale.setChecked(True)
         self.motion_auto_scale.toggled.connect(
             self._emit_current_motion_frame
@@ -3122,6 +3122,10 @@ class ResultsPanel(QWidget):
         ):
             self.motion_speed.addItem(label, speed)
         self.motion_speed.setCurrentIndex(2)
+        self.motion_speed.setToolTip(
+            "Playback multiplier applied to Frame Rate. It never changes "
+            "the total number of result frames."
+        )
         self.motion_speed.currentIndexChanged.connect(
             self._update_motion_timer
         )
