@@ -7406,6 +7406,21 @@ class ProjectDatabase:
                     "BeamColumnJoint requires either a 2D frame "
                     "(ndm=2, ndf=3) or a 3D frame (ndm=3, ndf=6)."
                 )
+            if ndm == 3 and (
+                abs(
+                    float(connection.parameters.get("height_factor", 1.0))
+                    - 1.0
+                ) > 1.0e-12
+                or abs(
+                    float(connection.parameters.get("width_factor", 1.0))
+                    - 1.0
+                ) > 1.0e-12
+            ):
+                raise ValueError(
+                    "BeamColumnJoint3d in the current OpenSees implementation "
+                    "ignores height/width factors. Use 1.0 for both factors "
+                    "in 3D."
+                )
 
             external_tags = [
                 int(tag)
