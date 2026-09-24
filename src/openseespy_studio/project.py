@@ -535,6 +535,13 @@ ND_MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
         "cohesi", "peakShearStra", "frictionAng", "refPress",
         "pressDependCoe", "noYieldSurf",
     ),
+    "PressureDependMultiYield": (
+        "nd", "rho", "refShearModul", "refBulkModul",
+        "frictionAng", "peakShearStra", "refPress",
+        "pressDependCoe", "PTAng", "contrac", "dilat1", "dilat2",
+        "liquefac1", "liquefac2", "liquefac3", "noYieldSurf",
+        "e", "cs1", "cs2", "cs3", "pa", "c",
+    ),
 }
 
 ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
@@ -589,6 +596,30 @@ ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
         "refPress": "stress",
         "pressDependCoe": "dimensionless",
         "noYieldSurf": "dimensionless",
+    },
+    "PressureDependMultiYield": {
+        "nd": "dimensionless",
+        "rho": "density",
+        "refShearModul": "stress",
+        "refBulkModul": "stress",
+        "frictionAng": "dimensionless",
+        "peakShearStra": "dimensionless",
+        "refPress": "stress",
+        "pressDependCoe": "dimensionless",
+        "PTAng": "dimensionless",
+        "contrac": "dimensionless",
+        "dilat1": "dimensionless",
+        "dilat2": "dimensionless",
+        "liquefac1": "stress",
+        "liquefac2": "dimensionless",
+        "liquefac3": "dimensionless",
+        "noYieldSurf": "dimensionless",
+        "e": "dimensionless",
+        "cs1": "dimensionless",
+        "cs2": "dimensionless",
+        "cs3": "dimensionless",
+        "pa": "stress",
+        "c": "stress",
     },
 }
 
@@ -645,6 +676,30 @@ ND_MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
         "pressDependCoe": 0.0,
         "noYieldSurf": 20.0,
     },
+    "PressureDependMultiYield": {
+        "nd": 2.0,
+        "rho": 1900.0,
+        "refShearModul": 7.5e7,
+        "refBulkModul": 2.0e8,
+        "frictionAng": 33.0,
+        "peakShearStra": 0.10,
+        "refPress": 8.0e4,
+        "pressDependCoe": 0.5,
+        "PTAng": 27.0,
+        "contrac": 0.07,
+        "dilat1": 0.4,
+        "dilat2": 2.0,
+        "liquefac1": 1.0e4,
+        "liquefac2": 0.01,
+        "liquefac3": 1.0,
+        "noYieldSurf": 20.0,
+        "e": 0.7,
+        "cs1": 0.9,
+        "cs2": 0.02,
+        "cs3": 0.7,
+        "pa": 1.01e5,
+        "c": 3.0e2,
+    },
 }
 
 
@@ -673,6 +728,7 @@ ND_MATERIAL_FORMULATIONS: dict[str, tuple[str, ...]] = {
     ),
     "DruckerPrager": ("ThreeDimensional", "PlaneStrain"),
     "PressureIndependMultiYield": ("ThreeDimensional", "PlaneStrain"),
+    "PressureDependMultiYield": ("ThreeDimensional", "PlaneStrain"),
 }
 
 
@@ -680,6 +736,16 @@ def nd_material_supported_formulations(
     material_type: str,
 ) -> tuple[str, ...]:
     return ND_MATERIAL_FORMULATIONS.get(str(material_type), ())
+
+
+ND_MATERIAL_STAGE_UPDATE_TYPES = {
+    "PressureIndependMultiYield",
+    "PressureDependMultiYield",
+}
+
+
+def nd_material_requires_stage_update(material_type: str) -> bool:
+    return str(material_type) in ND_MATERIAL_STAGE_UPDATE_TYPES
 
 
 def nd_material_supports_plate_fiber(material_type: str) -> bool:
@@ -820,6 +886,48 @@ class NDMaterialData:
             if not surfaces.is_integer() or not 1.0 <= surfaces < 40.0:
                 raise ValueError(
                     "PressureIndependMultiYield noYieldSurf must be an "
+                    "integer from 1 to 39. Custom negative surface counts "
+                    "are not supported by SARE yet."
+                )
+        elif self.material_type == "PressureDependMultiYield":
+            nd = self.parameters["nd"]
+            if nd not in {2.0, 3.0}:
+                raise ValueError(
+                    "PressureDependMultiYield nd must be 2 or 3."
+                )
+            if self.parameters["rho"] < 0.0:
+                raise ValueError(
+                    "PressureDependMultiYield rho cannot be negative."
+                )
+            for key in ("refShearModul", "refBulkModul", "refPress", "pa"):
+                if self.parameters[key] <= 0.0:
+                    raise ValueError(
+                        f"PressureDependMultiYield {key} must be positive."
+                    )
+            if self.parameters["peakShearStra"] <= 0.0:
+                raise ValueError(
+                    "PressureDependMultiYield peakShearStra must be positive."
+                )
+            for key in ("frictionAng", "PTAng"):
+                angle = self.parameters[key]
+                if not 0.0 <= angle < 90.0:
+                    raise ValueError(
+                        f"PressureDependMultiYield {key} must satisfy "
+                        f"0 <= {key} < 90 degrees."
+                    )
+            for key in (
+                "pressDependCoe", "contrac", "dilat1", "dilat2",
+                "liquefac1", "liquefac2", "liquefac3", "e",
+                "cs1", "cs2", "cs3", "c",
+            ):
+                if self.parameters[key] < 0.0:
+                    raise ValueError(
+                        f"PressureDependMultiYield {key} cannot be negative."
+                    )
+            surfaces = self.parameters["noYieldSurf"]
+            if not surfaces.is_integer() or not 1.0 <= surfaces < 40.0:
+                raise ValueError(
+                    "PressureDependMultiYield noYieldSurf must be an "
                     "integer from 1 to 39. Custom negative surface counts "
                     "are not supported by SARE yet."
                 )
