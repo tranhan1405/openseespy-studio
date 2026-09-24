@@ -922,7 +922,7 @@ def test_clear_all_resets_dense_result_state(qapp):
         assert "1D-column research metrics" in panel.cyclic_research_info.text()
 
         assert panel.motion_slider.maximum() == 0
-        assert panel.motion_counter.text() == "0 / 0"
+        assert panel.motion_counter.text() == "/ 0"
         assert not panel.motion_play.isEnabled()
     finally:
         panel.close()
