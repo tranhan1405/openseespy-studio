@@ -965,7 +965,7 @@ class ConnectionDialog(QDialog):
         self._sync_material_type(index)
 
     def _build_dof_chain(self, index: int) -> None:
-        label = self.DOF_LABELS[index][0]
+        label = self.display_dof_labels[index][0]
         dialog = MaterialChainDialog(
             self.materials,
             units=self.units,
