@@ -64,6 +64,10 @@ def dof_labels_for_model(ndm: int, ndf: int) -> tuple[str, ...]:
     """Return OpenSees nodal DOF labels for a model dimension/DOF count."""
     ndm = _strict_int(ndm, "Model ndm")
     ndf = _strict_int(ndf, "Model ndf")
+    if ndm == 1:
+        return ("UX",)[:ndf] + tuple(
+            f"DOF {index}" for index in range(2, ndf + 1)
+        )
     if ndm == 2:
         if ndf <= 2:
             return ("UX", "UY")[:ndf]
@@ -146,8 +150,8 @@ class Node:
 
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Node tag")
-        if self.tag <= 0:
-            raise ValueError("Node tag must be a positive integer.")
+        if self.tag < 0:
+            raise ValueError("Node tag must be a non-negative integer.")
 
         self.xyz = tuple(float(value) for value in self.xyz)
         if len(self.xyz) != 3:
@@ -473,8 +477,8 @@ class StructuralModel:
         self.name = str(self.name).strip() or "Untitled"
         self.ndm = _strict_int(self.ndm, "Model ndm")
         self.ndf = _strict_int(self.ndf, "Model ndf")
-        if self.ndm not in {2, 3}:
-            raise ValueError("Model ndm must be 2 or 3.")
+        if self.ndm not in {1, 2, 3}:
+            raise ValueError("Model ndm must be 1, 2, or 3.")
         if self.ndf < 1 or self.ndf > 6:
             raise ValueError("Model ndf must be between 1 and 6.")
 
@@ -484,8 +488,8 @@ class StructuralModel:
 
     def add_node(self, tag: int, x: float, y: float, z: float = 0.0) -> Node:
         tag = _strict_int(tag, "Node tag")
-        if tag <= 0:
-            raise ValueError("Node tag must be a positive integer.")
+        if tag < 0:
+            raise ValueError("Node tag must be a non-negative integer.")
         if tag in self.nodes:
             raise ValueError(f"Node tag {tag} already exists")
         xyz = (float(x), float(y), float(z))
