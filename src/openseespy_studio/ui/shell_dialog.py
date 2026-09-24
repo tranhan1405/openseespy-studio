@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QStackedWidget,
     QTableWidget,
@@ -24,7 +25,10 @@ from PySide6.QtWidgets import (
 from ..model import SHELL_ELEMENT_TYPES
 from ..project import (
     ND_MATERIAL_DEFAULTS,
+    ND_MATERIAL_PARAMETER_ORDER,
     NDMaterialData,
+    nd_material_parameter_kind,
+    nd_material_supports_plate_fiber,
     SECTION_DEFAULTS,
     SHELL_SECTION_TYPES,
     SectionData,
@@ -49,7 +53,34 @@ def _float_spin(
 
 
 class NDMaterialDialog(QDialog):
-    """Small shell-focused editor for OpenSees nDMaterial definitions."""
+    """Editor for shell-compatible OpenSees nDMaterial definitions."""
+
+    MATERIAL_TYPES = (
+        ("Elastic isotropic", "ElasticIsotropic"),
+        ("Elastic orthotropic", "ElasticOrthotropic"),
+        ("J2 plasticity (von Mises)", "J2Plasticity"),
+    )
+
+    PARAMETER_LABELS = {
+        "E": "Elastic modulus E",
+        "nu": "Poisson ratio ν",
+        "rho": "Density ρ",
+        "Ex": "Elastic modulus Ex",
+        "Ey": "Elastic modulus Ey",
+        "Ez": "Elastic modulus Ez",
+        "nu_xy": "Poisson ratio νxy",
+        "nu_yz": "Poisson ratio νyz",
+        "nu_zx": "Poisson ratio νzx",
+        "Gxy": "Shear modulus Gxy",
+        "Gyz": "Shear modulus Gyz",
+        "Gzx": "Shear modulus Gzx",
+        "K": "Bulk modulus K",
+        "G": "Shear modulus G",
+        "sig0": "Initial yield stress σ0",
+        "sigInf": "Saturation yield stress σ∞",
+        "delta": "Exponential hardening δ",
+        "H": "Linear hardening H",
+    }
 
     def __init__(
         self,
@@ -64,71 +95,58 @@ class NDMaterialDialog(QDialog):
             "Edit nD Material" if material is not None else "New nD Material"
         )
         self.setModal(True)
-        self.setMinimumWidth(420)
+        self.setMinimumSize(500, 520)
         self.unit_system = UnitSystem.from_mapping(units)
-        defaults = ND_MATERIAL_DEFAULTS["ElasticIsotropic"]
-        p = material.parameters if material is not None else defaults
+        self._initial_material = material
+        self._parameter_widgets: dict[str, QDoubleSpinBox] = {}
 
         root = QVBoxLayout(self)
-        form = QFormLayout()
-        root.addLayout(form)
 
+        header = QFormLayout()
         self.tag = QSpinBox()
         self.tag.setRange(1, 2_147_483_647)
         self.tag.setValue(
             material.tag if material is not None else int(next_tag)
         )
-        form.addRow("Tag:", self.tag)
+        header.addRow("Tag:", self.tag)
 
+        initial_type = (
+            material.material_type
+            if material is not None
+            else "ElasticIsotropic"
+        )
         self.name = QLineEdit(
             material.name
             if material is not None
-            else f"ElasticIsotropic {int(next_tag)}"
+            else f"{initial_type} {int(next_tag)}"
         )
-        form.addRow("Name:", self.name)
+        header.addRow("Name:", self.name)
 
         self.material_type = QComboBox()
-        self.material_type.addItem("ElasticIsotropic")
-        form.addRow("OpenSees nDMaterial:", self.material_type)
+        for label, value in self.MATERIAL_TYPES:
+            self.material_type.addItem(label, value)
+        index = self.material_type.findData(initial_type)
+        if index >= 0:
+            self.material_type.setCurrentIndex(index)
+        header.addRow("OpenSees nDMaterial:", self.material_type)
+        root.addLayout(header)
 
-        self.elastic_modulus = _float_spin(
-            self.unit_system.engineering_stress_from_pa(
-                float(p.get("E", defaults["E"]))
-            ),
-            low=1.0e-12,
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self.parameter_host = QWidget()
+        self.parameter_form = QFormLayout(self.parameter_host)
+        self.parameter_form.setFieldGrowthPolicy(
+            QFormLayout.AllNonFixedFieldsGrow
         )
-        form.addRow(
-            f"E [{self.unit_system.engineering_stress_label}]:",
-            self.elastic_modulus,
-        )
+        scroll.setWidget(self.parameter_host)
+        root.addWidget(scroll, 1)
 
-        self.poisson = _float_spin(
-            float(p.get("nu", defaults["nu"])),
-            low=-0.999999,
-            high=0.499999,
-            decimals=6,
+        self.note = QLabel()
+        self.note.setWordWrap(True)
+        self.note.setStyleSheet(
+            "padding: 7px; background: #eef4fb; color: #40566c;"
         )
-        form.addRow("Poisson ratio ν:", self.poisson)
-
-        self.density = _float_spin(
-            self.unit_system.engineering_density_from_kg_per_m3(
-                float(p.get("rho", defaults["rho"]))
-            ),
-            low=0.0,
-        )
-        form.addRow(
-            f"Density ρ [{self.unit_system.engineering_density_label}]:",
-            self.density,
-        )
-
-        note = QLabel(
-            "nD materials are stored separately from uniaxial materials. "
-            "The first nonlinear-shell family uses ElasticIsotropic; more "
-            "constitutive nD models can be added without changing the "
-            "uniaxial Material Library."
-        )
-        note.setWordWrap(True)
-        root.addWidget(note)
+        root.addWidget(self.note)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
@@ -137,21 +155,143 @@ class NDMaterialDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
 
+        self.material_type.currentIndexChanged.connect(
+            self._material_type_changed
+        )
+        self._rebuild_parameters(
+            material.parameters if material is not None else None
+        )
+
+    def _parameter_label(self, material_type: str, key: str) -> str:
+        base = self.PARAMETER_LABELS.get(key, key)
+        kind = nd_material_parameter_kind(material_type, key)
+        if kind == "stress":
+            return f"{base} [{self.unit_system.engineering_stress_label}]:"
+        if kind == "density":
+            return (
+                f"{base} "
+                f"[{self.unit_system.engineering_density_label}]:"
+            )
+        return base + ":"
+
+    def _display_value(
+        self,
+        material_type: str,
+        key: str,
+        value: float,
+    ) -> float:
+        kind = nd_material_parameter_kind(material_type, key)
+        if kind == "stress":
+            return self.unit_system.engineering_stress_from_pa(value)
+        if kind == "density":
+            return self.unit_system.engineering_density_from_kg_per_m3(
+                value
+            )
+        return value
+
+    def _stored_value(
+        self,
+        material_type: str,
+        key: str,
+        value: float,
+    ) -> float:
+        kind = nd_material_parameter_kind(material_type, key)
+        if kind == "stress":
+            return self.unit_system.engineering_stress_to_pa(value)
+        if kind == "density":
+            return self.unit_system.engineering_density_to_kg_per_m3(
+                value
+            )
+        return value
+
+    def _clear_parameter_form(self) -> None:
+        while self.parameter_form.rowCount():
+            self.parameter_form.removeRow(0)
+        self._parameter_widgets.clear()
+
+    def _rebuild_parameters(
+        self,
+        supplied: dict[str, float] | None = None,
+    ) -> None:
+        material_type = str(self.material_type.currentData())
+        defaults = ND_MATERIAL_DEFAULTS[material_type]
+        values = dict(defaults)
+        if supplied:
+            values.update({
+                key: float(value)
+                for key, value in supplied.items()
+                if key in values
+            })
+
+        self._clear_parameter_form()
+        for key in ND_MATERIAL_PARAMETER_ORDER[material_type]:
+            kind = nd_material_parameter_kind(material_type, key)
+            stored = float(values[key])
+            shown = self._display_value(material_type, key, stored)
+            low = -1.0e20
+            high = 1.0e20
+            decimals = 8
+            if kind in {"stress", "density"}:
+                low = 0.0
+            if key == "nu":
+                low, high, decimals = -0.999999, 0.499999, 6
+            elif key in {"nu_xy", "nu_yz", "nu_zx"}:
+                low, high, decimals = -0.999999, 0.999999, 6
+            elif key == "delta":
+                low, decimals = 0.0, 8
+
+            widget = _float_spin(
+                shown,
+                low=low,
+                high=high,
+                decimals=decimals,
+            )
+            self._parameter_widgets[key] = widget
+            self.parameter_form.addRow(
+                self._parameter_label(material_type, key),
+                widget,
+            )
+
+        if material_type == "ElasticIsotropic":
+            text = (
+                "Linear isotropic continuum material. Available in OpenSees "
+                "including PlateFiber formulation for shell sections."
+            )
+        elif material_type == "ElasticOrthotropic":
+            text = (
+                "Linear orthotropic continuum material with independent "
+                "directional elastic and shear moduli. OpenSees provides a "
+                "PlateFiber formulation, so it can be used by SARE shell "
+                "sections."
+            )
+        else:
+            text = (
+                "Von Mises J2 plasticity with saturation plus linear "
+                "isotropic hardening. K and G define the elastic response; "
+                "σ0, σ∞, δ and H define yielding/hardening. OpenSees "
+                "provides a PlateFiber formulation."
+            )
+        self.note.setText(text)
+
+    def _material_type_changed(self, *_args) -> None:
+        self._rebuild_parameters()
+
     def material_data(self) -> NDMaterialData:
+        material_type = str(self.material_type.currentData())
+        parameters = {
+            key: self._stored_value(
+                material_type,
+                key,
+                self._parameter_widgets[key].value(),
+            )
+            for key in ND_MATERIAL_PARAMETER_ORDER[material_type]
+        }
         return NDMaterialData(
             tag=self.tag.value(),
             name=self.name.text().strip()
-            or f"ElasticIsotropic {self.tag.value()}",
-            material_type="ElasticIsotropic",
-            parameters={
-                "E": self.unit_system.engineering_stress_to_pa(
-                    self.elastic_modulus.value()
-                ),
-                "nu": self.poisson.value(),
-                "rho": self.unit_system.engineering_density_to_kg_per_m3(
-                    self.density.value()
-                ),
-            },
+            or f"{material_type} {self.tag.value()}",
+            material_type=material_type,
+            parameters=parameters,
         )
 
     def _accept(self) -> None:
