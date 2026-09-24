@@ -1178,11 +1178,7 @@ class ConnectionDialog(QDialog):
             return labels, set()
 
         if self.ndm == 2 and self.ndf == 3:
-            if connection_type in {
-            "zeroLength",
-            "CoupledZeroLength",
-            "semiRigid",
-        }:
+            if connection_type in {"zeroLength", "semiRigid"}:
                 # OpenSees zeroLength directions are local physical axes:
                 # 1/2/3 = translations X/Y/Z; 4/5/6 = rotations X/Y/Z.
                 # Therefore planar RZ is direction 6 even though the node's
