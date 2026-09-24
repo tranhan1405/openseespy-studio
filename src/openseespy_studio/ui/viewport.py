@@ -1913,6 +1913,22 @@ class ModelViewport(QWidget):
             window.showFullScreen()
 
     @staticmethod
+    def _normalized_background_color(
+        value: str,
+        fallback: str,
+    ) -> str:
+        text = str(value or "").strip()
+        if text.startswith("#"):
+            text = text[1:]
+        if len(text) != 6:
+            return str(fallback)
+        try:
+            int(text, 16)
+        except ValueError:
+            return str(fallback)
+        return "#" + text.lower()
+
+    @staticmethod
     def background_style_spec(
         preset: str,
         *,
@@ -1920,15 +1936,23 @@ class ModelViewport(QWidget):
         custom_top: str = "#e1e8ef",
     ) -> tuple[str, str | None]:
         preset = str(preset or "ANSYS Gradient")
+        custom_bottom = ModelViewport._normalized_background_color(
+            custom_bottom,
+            "#f2f5f8",
+        )
+        custom_top = ModelViewport._normalized_background_color(
+            custom_top,
+            "#e1e8ef",
+        )
         styles: dict[str, tuple[str, str | None]] = {
             "Light": ("#f2f5f8", None),
             "Dark": ("#20262e", None),
             "ANSYS Gradient": ("#f2f5f8", "#e1e8ef"),
             "Publication White": ("#ffffff", None),
-            "Custom Solid": (str(custom_bottom), None),
+            "Custom Solid": (custom_bottom, None),
             "Custom Gradient": (
-                str(custom_bottom),
-                str(custom_top),
+                custom_bottom,
+                custom_top,
             ),
         }
         if preset not in styles:
@@ -1989,9 +2013,15 @@ class ModelViewport(QWidget):
         )
         self._background_preset = preset
         if custom_bottom is not None:
-            self._background_bottom = str(custom_bottom)
+            self._background_bottom = self._normalized_background_color(
+                custom_bottom,
+                "#f2f5f8",
+            )
         if custom_top is not None:
-            self._background_top = str(custom_top)
+            self._background_top = self._normalized_background_color(
+                custom_top,
+                "#e1e8ef",
+            )
 
         self._apply_background(render=False)
         self._apply_axes_widget()
