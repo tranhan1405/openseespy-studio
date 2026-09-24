@@ -1006,6 +1006,15 @@ ops.nDMaterial(
     0.0, 0.0, 0.0, 0.0, 0.0,
     0.5, 1900.0
 )
+ops.nDMaterial(
+    'PressureIndependMultiYield', 25,
+    2, 1500.0, 60.0e6, 300.0e6, 37.0e3, 0.10
+)
+ops.nDMaterial(
+    'PressureIndependMultiYield', 26,
+    3, 1800.0, 150.0e6, 750.0e6, 75.0e3, 0.10,
+    0.0, 80.0e3, 0.0, 30
+)
 """
 
     result = import_openseespy_source(
@@ -1045,6 +1054,54 @@ ops.nDMaterial(
     assert drucker_default_atm.parameters["theta"] == 0.5
     assert drucker_default_atm.parameters["density"] == 1900.0
     assert drucker_default_atm.parameters["atmPressure"] == 101325.0
+
+    pimy_default = result.project.nd_materials[25]
+    assert pimy_default.material_type == "PressureIndependMultiYield"
+    assert pimy_default.parameters["nd"] == 2.0
+    assert pimy_default.parameters["rho"] == 1500.0
+    assert pimy_default.parameters["refShearModul"] == 60.0e6
+    assert pimy_default.parameters["frictionAng"] == 0.0
+    assert pimy_default.parameters["refPress"] == 100.0e3
+    assert pimy_default.parameters["pressDependCoe"] == 0.0
+    assert pimy_default.parameters["noYieldSurf"] == 20.0
+
+    pimy_full = result.project.nd_materials[26]
+    assert pimy_full.parameters["nd"] == 3.0
+    assert pimy_full.parameters["rho"] == 1800.0
+    assert pimy_full.parameters["refPress"] == 80.0e3
+    assert pimy_full.parameters["noYieldSurf"] == 30.0
+    assert any(
+        issue.construct == "PressureIndependMultiYield material stage"
+        for issue in result.issues
+    )
+
+
+def test_importer_rejects_custom_pressure_independ_surfaces():
+    source = """
+import openseespy.opensees as ops
+
+ops.nDMaterial(
+    'PressureIndependMultiYield', 61,
+    2, 1500.0, 60.0e6, 300.0e6, 37.0e3, 0.10,
+    0.0, 80.0e3, 0.0, -3,
+    0.001, 0.9, 0.01, 0.5, 0.10, 0.1
+)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="custom_pimy.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert 61 not in result.project.nd_materials
+    assert result.unsupported_count == 1
+    issue = next(
+        item
+        for item in result.issues
+        if "custom yield surfaces" in item.construct
+    )
+    assert "automatic-surface form only" in issue.message
 
 
 def test_importer_recovers_set_num_threads():
