@@ -72,6 +72,73 @@ def test_rc_wall_builder_matches_rw_wall_only_topology():
     assert project.model.nodes[2].fixity == (1, 1, 1)
 
 
+def test_rc_wall_builder_creates_named_analysis_selections():
+    project, result = _benchmark_project()
+
+    assert result.selection_set_names == (
+        "RC Wall · Base",
+        "RC Wall · Top",
+        "RC Wall · MEFI",
+    )
+    base = project.selection_sets[result.selection_set_names[0]]
+    top = project.selection_sets[result.selection_set_names[1]]
+    wall = project.selection_sets[result.selection_set_names[2]]
+
+    assert base.node_tags == {1, 2}
+    assert top.node_tags == {15, 16}
+    assert wall.element_tags == set(result.element_tags)
+
+
+def test_rc_wall_append_mode_respects_origin_and_preserves_model():
+    project = ProjectDatabase()
+    project.model.ndm = 2
+    project.model.ndf = 3
+    project.model.add_node(1, -5.0, -5.0, 0.0)
+
+    spec = RCWallSpec(
+        width=1.2,
+        height=2.4,
+        thickness=0.2,
+        boundary_width=0.2,
+        origin_x=3.0,
+        origin_y=4.0,
+        vertical_elements=2,
+        macro_fibers=4,
+        boundary_unconfined_thickness=0.05,
+        boundary_confined_thickness=0.15,
+        replace_geometry=False,
+        name="Appended Wall",
+    )
+    result = build_rc_wall(project, spec)
+
+    assert 1 in project.model.nodes
+    assert project.model.nodes[1].xyz == (-5.0, -5.0, 0.0)
+    first_left = project.model.nodes[result.node_tags[0]]
+    first_right = project.model.nodes[result.node_tags[1]]
+    top_left = project.model.nodes[result.node_tags[-2]]
+    assert first_left.xyz == (3.0, 4.0, 0.0)
+    assert first_right.xyz == (4.2, 4.0, 0.0)
+    assert top_left.xyz == (3.0, 6.4, 0.0)
+    assert "Appended Wall · Top" in project.selection_sets
+
+
+def test_rc_wall_rejects_invalid_material_input_before_mutation():
+    project = ProjectDatabase()
+    before = project.to_dict()
+    spec = RCWallSpec(
+        steel_E=0.0,
+    )
+
+    try:
+        build_rc_wall(project, spec)
+    except ValueError as exc:
+        assert "steel_E" in str(exc)
+    else:
+        raise AssertionError("Non-positive steel modulus should be rejected.")
+
+    assert project.to_dict() == before
+
+
 def test_rc_wall_builder_creates_expected_material_chain():
     project, result = _benchmark_project()
 
@@ -212,6 +279,36 @@ def test_rclms_section_from_wizard_is_editable():
             updated.shell_total_thickness(),
             152.4,
         )
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+
+def test_rc_wall_wizard_custom_mode_and_origin_roundtrip():
+    project = ProjectDatabase()
+    project.model.ndm = 2
+    project.model.ndf = 3
+    dialog = RCWallWizard(project)
+    try:
+        assert dialog.preset.currentData() == "rw-a20"
+        dialog.width.setValue(dialog.width.value() * 1.1)
+        _APP.processEvents()
+        assert dialog.preset.currentData() == "custom"
+
+        dialog.wall_name.setText("Wall B")
+        dialog.replace_geometry.setChecked(False)
+        dialog.origin_x.setValue(3.5)
+        dialog.origin_y.setValue(-1.25)
+        _APP.processEvents()
+
+        spec = dialog.data()
+        assert spec.name == "Wall B"
+        assert not spec.replace_geometry
+        assert math.isclose(spec.origin_x, 3.5)
+        assert math.isclose(spec.origin_y, -1.25)
+        assert "Append to current 2D model" in dialog.review.text()
+        assert "Named selections" in dialog.review.text()
     finally:
         dialog.close()
         dialog.deleteLater()
