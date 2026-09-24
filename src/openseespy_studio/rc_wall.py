@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 
 from .project import (
     MaterialData,
     NDMaterialData,
     ProjectDatabase,
     SectionData,
+    SelectionSetData,
     ShellLayerData,
 )
 
@@ -71,6 +73,7 @@ class RCWallBuildResult:
     web_section_tag: int = 0
     boundary_section_tag: int = 0
     top_node_tags: tuple[int, int] = (0, 0)
+    selection_set_names: tuple[str, ...] = ()
 
 
 def _next_tags(store: dict[int, object], count: int) -> list[int]:
@@ -84,6 +87,20 @@ def _next_tags(store: dict[int, object], count: int) -> list[int]:
 
 
 def _validate(spec: RCWallSpec) -> None:
+    numeric_values = {
+        name: float(value)
+        for name, value in vars(spec).items()
+        if isinstance(value, (int, float))
+    }
+    non_finite = [
+        name for name, value in numeric_values.items()
+        if not math.isfinite(value)
+    ]
+    if non_finite:
+        raise ValueError(
+            "RC wall inputs must be finite: " + ", ".join(non_finite) + "."
+        )
+
     if spec.width <= 0.0 or spec.height <= 0.0 or spec.thickness <= 0.0:
         raise ValueError("RC wall width, height and thickness must be positive.")
     if not 0.0 < spec.boundary_width < 0.5 * spec.width:
@@ -106,6 +123,60 @@ def _validate(spec: RCWallSpec) -> None:
             "Boundary unconfined + confined concrete thickness must equal "
             "the wall thickness."
         )
+    if (
+        spec.boundary_unconfined_thickness <= 0.0
+        or spec.boundary_confined_thickness <= 0.0
+    ):
+        raise ValueError(
+            "Boundary unconfined and confined layer thicknesses must "
+            "both be positive."
+        )
+
+    for name, value in (
+        ("steel_E", spec.steel_E),
+        ("steel_fx", spec.steel_fx),
+        ("steel_fy_web", spec.steel_fy_web),
+        ("steel_fy_boundary", spec.steel_fy_boundary),
+    ):
+        if float(value) <= 0.0:
+            raise ValueError(f"{name} must be positive.")
+
+    for name, value in (
+        ("steel_bx", spec.steel_bx),
+        ("steel_by_web", spec.steel_by_web),
+        ("steel_by_boundary", spec.steel_by_boundary),
+        ("concrete_ft", spec.concrete_ft),
+        ("concrete_ets_web", spec.concrete_ets_web),
+        ("concrete_ets_boundary", spec.concrete_ets_boundary),
+        ("damage_cte1", spec.damage_cte1),
+        ("damage_cte2", spec.damage_cte2),
+    ):
+        if float(value) < 0.0:
+            raise ValueError(f"{name} cannot be negative.")
+
+    for name, value in (
+        ("concrete_fc_web", spec.concrete_fc_web),
+        ("concrete_fc_boundary", spec.concrete_fc_boundary),
+        ("concrete_eps_web", spec.concrete_eps_web),
+        ("concrete_eps_boundary", spec.concrete_eps_boundary),
+        ("concrete_epsu_web", spec.concrete_epsu_web),
+        ("concrete_epsu_boundary", spec.concrete_epsu_boundary),
+    ):
+        if float(value) >= 0.0:
+            raise ValueError(f"{name} must be negative for compression.")
+
+    for name, value in (
+        ("concrete_fcu_web", spec.concrete_fcu_web),
+        ("concrete_fcu_boundary", spec.concrete_fcu_boundary),
+    ):
+        if float(value) > 0.0:
+            raise ValueError(f"{name} cannot be positive.")
+
+    if not 0.0 <= float(spec.concrete_lambda) <= 1.0:
+        raise ValueError("concrete_lambda must satisfy 0 <= lambda <= 1.")
+    if float(spec.cracking_strain) <= 0.0:
+        raise ValueError("cracking_strain must be positive.")
+
     for name, value in (
         ("rho_x_web", spec.rho_x_web),
         ("rho_y_web", spec.rho_y_web),
@@ -114,6 +185,19 @@ def _validate(spec: RCWallSpec) -> None:
     ):
         if not 0.0 <= float(value) <= 1.0:
             raise ValueError(f"{name} must be a reinforcement ratio in [0, 1].")
+
+
+def _unique_selection_name(
+    project: ProjectDatabase,
+    base: str,
+) -> str:
+    candidate = str(base).strip() or "RC Wall"
+    if candidate not in project.selection_sets:
+        return candidate
+    index = 2
+    while f"{candidate} {index}" in project.selection_sets:
+        index += 1
+    return f"{candidate} {index}"
 
 
 def build_rc_wall(
@@ -359,6 +443,30 @@ def build_rc_wall(
         )
         element_tags.append(tag)
 
+    selection_set_names = (
+        _unique_selection_name(project, f"{spec.name} · Base"),
+        _unique_selection_name(project, f"{spec.name} · Top"),
+        _unique_selection_name(project, f"{spec.name} · MEFI"),
+    )
+    project.add_selection_set(
+        SelectionSetData(
+            selection_set_names[0],
+            node_tags={node_tags[0], node_tags[1]},
+        )
+    )
+    project.add_selection_set(
+        SelectionSetData(
+            selection_set_names[1],
+            node_tags={node_tags[-2], node_tags[-1]},
+        )
+    )
+    project.add_selection_set(
+        SelectionSetData(
+            selection_set_names[2],
+            element_tags=set(element_tags),
+        )
+    )
+
     return RCWallBuildResult(
         node_tags=node_tags,
         element_tags=element_tags,
@@ -368,4 +476,5 @@ def build_rc_wall(
         web_section_tag=web_section,
         boundary_section_tag=boundary_section,
         top_node_tags=(node_tags[-2], node_tags[-1]),
+        selection_set_names=selection_set_names,
     )
