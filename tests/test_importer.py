@@ -925,7 +925,7 @@ ops.recorder(
 )
 ops.recorder(
     'Element', '-file', r'./Element_force.out',
-    '-time', '-dT', dt_out, '-ele', 1, 2, 3, 'localForce'
+    '-time', '-dT', dt_out, '-ele', 1, 2, 3, 'force'
 )
 
 ops.wipeAnalysis()
