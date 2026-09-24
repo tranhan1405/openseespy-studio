@@ -1109,7 +1109,6 @@ class ConnectionDialog(QDialog):
             select_material_tag=material.tag,
         )
         self.dof_checks[index].setChecked(True)
-        self.connection_type.setCurrentText("zeroLength")
         self._sync_material_type(index)
 
     def _build_dof_chain(self, index: int) -> None:
@@ -1133,7 +1132,6 @@ class ConnectionDialog(QDialog):
             select_material_tag=result.final_tag,
         )
         self.dof_checks[index].setChecked(True)
-        self.connection_type.setCurrentText("zeroLength")
         self._sync_material_type(index)
 
     def _pending_materials_in_use(
