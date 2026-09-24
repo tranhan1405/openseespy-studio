@@ -1831,6 +1831,19 @@ class ConnectionData:
                     "Joint2D large_disp must be 0, 1, or 2."
                 )
             self.parameters["large_disp"] = large_disp
+            imported_center = self.parameters.get(
+                "imported_center_node_tag"
+            )
+            if imported_center is not None:
+                imported_center = _strict_int(
+                    imported_center,
+                    "Joint2D imported center node tag",
+                )
+                if imported_center <= 0:
+                    raise ValueError(
+                        "Joint2D imported center node tag must be positive."
+                    )
+                self.parameters["imported_center_node_tag"] = imported_center
 
         if self.connection_type == "KrawinklerPanelZone":
             for key in ("rigid_A", "rigid_E", "rigid_I"):
@@ -7253,6 +7266,40 @@ class ProjectDatabase:
                     "2D frame model (ndm=2, ndf=3)."
                 )
 
+            if connection.connection_type == "Joint2D":
+                imported_center = connection.parameters.get(
+                    "imported_center_node_tag"
+                )
+                if imported_center is not None:
+                    imported_center = int(imported_center)
+                    if imported_center in self.model.nodes:
+                        raise ValueError(
+                            "Joint2D center node tag "
+                            f"{imported_center} already exists in the model; "
+                            "NodeC must be reserved for the Joint2D element."
+                        )
+                    duplicate_center = sorted(
+                        int(tag)
+                        for tag, other in self.connections.items()
+                        if (
+                            other.connection_type == "Joint2D"
+                            and int(
+                                other.parameters.get(
+                                    "imported_center_node_tag",
+                                    -1,
+                                )
+                            ) == imported_center
+                            and int(tag) != int(connection.tag)
+                        )
+                    )
+                    if duplicate_center:
+                        raise ValueError(
+                            "Joint2D center node tag "
+                            f"{imported_center} is already reserved by "
+                            "Joint2D connection(s): "
+                            + ", ".join(map(str, duplicate_center))
+                        )
+
             external_tags = [
                 int(tag)
                 for tag in connection.parameters["external_nodes"]
@@ -8656,6 +8703,21 @@ class ProjectDatabase:
                     "supported by connection type(s): "
                     + ", ".join(incompatible_responses)
                     + "."
+                )
+
+            structural_targets = [
+                tag for tag in recorder.target_tags
+                if tag in self.model.elements
+            ]
+            if (
+                structural_targets
+                and recorder.response not in {"globalForce", "localForce"}
+            ):
+                raise ValueError(
+                    f"Element recorder response {recorder.response!r} is "
+                    "reserved for connection-specific elements; structural "
+                    "frame/truss targets currently support globalForce or "
+                    "localForce in the generic Element recorder."
                 )
 
         if recorder.recorder_type == "Shell":
