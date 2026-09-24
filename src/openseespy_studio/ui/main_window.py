@@ -4995,6 +4995,8 @@ class MainWindow(QMainWindow):
             "zeroLengthSection": "ZeroLength Section",
             "twoNodeLink": "Two-Node Link",
             "Joint2D": "Joint2D",
+            "BeamColumnJoint": "RC Beam-Column Joint",
+            "LehighJoint2D": "Lehigh Joint2D",
             "KrawinklerPanelZone": "Krawinkler Panel Zone",
         }
         connection_groups: dict[str, QTreeWidgetItem] = {}
@@ -5578,6 +5580,7 @@ class MainWindow(QMainWindow):
                     "ResponseSpectrum": "result-response-spectrum",
                     "SpecimenResponse": "result-specimen-response",
                     "SectionResponse": "result-section-response",
+                    "JointResponse": "results",
                     "FiberStress": "result-fiber-stress",
                     "FiberStrain": "result-fiber-strain",
                     "HingeState": "result-hinge-state",
@@ -5609,6 +5612,7 @@ class MainWindow(QMainWindow):
                     "ResponseSpectrum": "result-response-spectrum",
                     "SpecimenResponse": "result-specimen-response",
                     "SectionResponse": "result-section-response",
+                    "JointResponse": "results",
                     "FiberStress": "result-fiber-stress",
                     "FiberStrain": "result-fiber-strain",
                     "HingeState": "result-hinge-state",
@@ -5688,6 +5692,7 @@ class MainWindow(QMainWindow):
                     "ResponseSpectrum": "result-response-spectrum",
                     "SpecimenResponse": "result-specimen-response",
                     "SectionResponse": "result-section-response",
+                    "JointResponse": "results",
                     "FiberStress": "result-fiber-stress",
                     "FiberStrain": "result-fiber-strain",
                     "HingeState": "result-hinge-state",
@@ -5832,13 +5837,20 @@ class MainWindow(QMainWindow):
                 connection = self.project.connections.get(connection_tag)
                 if connection is not None:
                     elements.add(connection_tag)
+                    connection_nodes = (
+                        connection.parameters.get("external_nodes", ())
+                        if connection.connection_type in {
+                            "Joint2D",
+                            "BeamColumnJoint",
+                            "LehighJoint2D",
+                            "KrawinklerPanelZone",
+                        }
+                        else (connection.node_i, connection.node_j)
+                    )
                     nodes.update(
-                        node_tag
-                        for node_tag in (
-                            int(connection.node_i),
-                            int(connection.node_j),
-                        )
-                        if node_tag in self.model.nodes
+                        int(node_tag)
+                        for node_tag in connection_nodes
+                        if int(node_tag) in self.model.nodes
                     )
             elif kind == "element_type_group":
                 element_type_group = str(tag)
@@ -20618,27 +20630,37 @@ class MainWindow(QMainWindow):
                 ),
             ])
 
-        if connection.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
+        if connection.connection_type in {
+            "Joint2D",
+            "BeamColumnJoint",
+            "LehighJoint2D",
+            "KrawinklerPanelZone",
+        }:
             external_nodes = connection.parameters.get("external_nodes", [])
+            node_order = (
+                "Left / Top / Right / Bottom"
+                if connection.connection_type == "KrawinklerPanelZone"
+                else "Node 1 / Node 2 / Node 3 / Node 4"
+            )
+            rows.append((
+                "External nodes",
+                node_order + " = "
+                + " / ".join(str(tag) for tag in external_nodes),
+            ))
+
+        if connection.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
             panel_tag = connection.parameters.get("panel_material")
             panel = self.project.materials.get(
                 int(panel_tag)
             ) if panel_tag is not None else None
-            rows.extend([
+            rows.append((
+                "Panel material",
                 (
-                    "External nodes",
-                    "Left / Top / Right / Bottom = "
-                    + " / ".join(str(tag) for tag in external_nodes),
+                    f"{panel_tag} - {panel.name}"
+                    if panel is not None
+                    else str(panel_tag)
                 ),
-                (
-                    "Panel material",
-                    (
-                        f"{panel_tag} - {panel.name}"
-                        if panel is not None
-                        else str(panel_tag)
-                    ),
-                ),
-            ])
+            ))
 
         if connection.connection_type == "Joint2D":
             rows.extend([
@@ -20665,6 +20687,59 @@ class MainWindow(QMainWindow):
                     "Large displacement",
                     connection.parameters.get("large_disp", 0),
                 ),
+            ])
+        elif connection.connection_type == "BeamColumnJoint":
+            labels = (
+                "N1 slip L", "N1 slip R", "N1 interface shear",
+                "N2 slip B", "N2 slip T", "N2 interface shear",
+                "N3 slip L", "N3 slip R", "N3 interface shear",
+                "N4 slip B", "N4 slip T", "N4 interface shear",
+                "Shear panel",
+            )
+            materials = connection.parameters.get(
+                "component_materials", ()
+            )
+            component_text = []
+            for label, material_tag in zip(labels, materials):
+                material = self.project.materials.get(int(material_tag))
+                component_text.append(
+                    f"{label}: {material_tag}"
+                    + (f" - {material.name}" if material is not None else "")
+                )
+            rows.extend([
+                ("Component materials", "; ".join(component_text) or "-"),
+                (
+                    "Height factor",
+                    connection.parameters.get("height_factor", 1.0),
+                ),
+                (
+                    "Width factor",
+                    connection.parameters.get("width_factor", 1.0),
+                ),
+            ])
+        elif connection.connection_type == "LehighJoint2D":
+            labels = (
+                "Horizontal extension",
+                "Vertical extension",
+                "Shear distortion",
+                "Beam flexure",
+                "Column flexure",
+                "Asym. beam flexure",
+                "Asym. column flexure",
+                "Beam varying shear",
+                "Column varying shear",
+            )
+            materials = connection.parameters.get("mode_materials", ())
+            mode_text = []
+            for label, material_tag in zip(labels, materials):
+                material = self.project.materials.get(int(material_tag))
+                mode_text.append(
+                    f"{label}: {material_tag}"
+                    + (f" - {material.name}" if material is not None else "")
+                )
+            rows.extend([
+                ("Node order", "Counter-clockwise"),
+                ("Mode materials", "; ".join(mode_text) or "-"),
             ])
         elif connection.connection_type == "KrawinklerPanelZone":
             rows.extend([
@@ -21665,6 +21740,61 @@ class MainWindow(QMainWindow):
             return
         component = labels[dof - 1]
 
+        result_settings = dict(settings or {})
+        if str(result_type) == "JointResponse":
+            if len(element_scope) != 1:
+                QMessageBox.warning(
+                    self,
+                    "Joint Response",
+                    "Select exactly one Connection / Joint target.",
+                )
+                return
+            connection_tag = int(next(iter(element_scope)))
+            connection = self.project.connections.get(connection_tag)
+            if connection is None:
+                QMessageBox.warning(
+                    self,
+                    "Joint Response",
+                    "Joint Response requires a Connection / Joint target.",
+                )
+                return
+            allowed = set(
+                CONNECTION_RECORDER_RESPONSES.get(
+                    connection.connection_type,
+                    set(),
+                )
+            )
+            preferred = (
+                "deformation",
+                "shearPanel",
+                "force",
+                "basicForce",
+                "localForce",
+                "basicDisplacement",
+                "localDisplacement",
+            )
+            requested = str(result_settings.get("response", ""))
+            if requested not in allowed:
+                requested = next(
+                    (
+                        response
+                        for response in preferred
+                        if response in allowed
+                    ),
+                    sorted(allowed)[0] if allowed else "",
+                )
+            if not requested:
+                QMessageBox.warning(
+                    self,
+                    "Joint Response",
+                    f"{connection.connection_type} has no supported "
+                    "Joint Response query.",
+                )
+                return
+            result_settings["response"] = requested
+            result_settings.setdefault("component", 1)
+            result_settings["connection_type"] = connection.connection_type
+
         before = self.project.to_dict()
         result = SolutionResultData(
             tag=self.project.next_solution_result_tag(),
@@ -21755,7 +21885,7 @@ class MainWindow(QMainWindow):
             result_type=str(result_type),
             node_scope=sorted(node_scope),
             element_scope=sorted(element_scope),
-            settings=dict(settings or {}),
+            settings=result_settings,
         )
         try:
             self.project.add_solution_result(result)
@@ -22927,6 +23057,57 @@ class MainWindow(QMainWindow):
                 return None
             elements = {tag}
 
+        elif kind == "JointResponse":
+            connection_tags = sorted(
+                int(tag)
+                for tag, connection in self.project.connections.items()
+                if connection.connection_type not in {"rigid", "pinned"}
+            )
+            if not connection_tags:
+                if not self._ensure_prerequisite(
+                    title="Connection / Joint Response",
+                    message=(
+                        "Joint Response requires an element-backed Connection "
+                        "or Joint. Create one now?"
+                    ),
+                    action_label="Create Connection / Joint Now...",
+                    available=lambda: any(
+                        connection.connection_type not in {"rigid", "pinned"}
+                        for connection in self.project.connections.values()
+                    ),
+                    creator=self._create_connection,
+                ):
+                    return None
+                connection_tags = sorted(
+                    int(tag)
+                    for tag, connection in self.project.connections.items()
+                    if connection.connection_type not in {"rigid", "pinned"}
+                )
+            selected = [
+                tag for tag in sorted(elements)
+                if tag in connection_tags
+            ]
+            if not selected:
+                tag = self._choose_existing_prerequisite_tag(
+                    title="Connection / Joint Response",
+                    label="Choose a Connection / Joint target:",
+                    tags=connection_tags,
+                )
+                if tag is None:
+                    return None
+                selected = [tag]
+            elements = {selected[0]}
+            connection = self.project.connections[selected[0]]
+            external_nodes = connection.parameters.get(
+                "external_nodes",
+                (connection.node_i, connection.node_j),
+            )
+            nodes = {
+                int(node_tag)
+                for node_tag in external_nodes
+                if int(node_tag) in self.model.nodes
+            }
+
         elif kind == "SpecimenResponse":
             specimen_tags = sorted(
                 int(tag)
@@ -22959,6 +23140,96 @@ class MainWindow(QMainWindow):
 
         return nodes, elements
 
+    def _joint_response_choices(
+        self,
+        connection: ConnectionData,
+    ) -> list[tuple[str, str]]:
+        response = connection.connection_type
+        if response == "BeamColumnJoint":
+            return [
+                ("Total Joint Deformation", "deformation"),
+                ("Shear Panel", "shearPanel"),
+                ("Node 1 · Bar Slip Left", "node1BarSlipL"),
+                ("Node 1 · Bar Slip Right", "node1BarSlipR"),
+                ("Node 1 · Interface Shear", "node1InterfaceShear"),
+                ("Node 2 · Bar Slip Bottom", "node2BarSlipB"),
+                ("Node 2 · Bar Slip Top", "node2BarSlipT"),
+                ("Node 2 · Interface Shear", "node2InterfaceShear"),
+                ("Node 3 · Bar Slip Left", "node3BarSlipL"),
+                ("Node 3 · Bar Slip Right", "node3BarSlipR"),
+                ("Node 3 · Interface Shear", "node3InterfaceShear"),
+                ("Node 4 · Bar Slip Bottom", "node4BarSlipB"),
+                ("Node 4 · Bar Slip Top", "node4BarSlipT"),
+                ("Node 4 · Interface Shear", "node4InterfaceShear"),
+                ("Internal Displacement", "internalDisplacement"),
+                ("External Displacement", "externalDisplacement"),
+            ]
+        labels = {
+            "deformation": "Deformation / Rotation",
+            "force": "Force / Moment",
+            "localForce": "Local Force",
+            "basicForce": "Basic Force",
+            "localDisplacement": "Local Displacement",
+            "basicDisplacement": "Basic Displacement",
+            "centralNode": "Central Node Response",
+            "size": "Joint Size",
+            "stiffness": "Joint Stiffness",
+            "defoANDforce": "Deformation + Force",
+        }
+        allowed = CONNECTION_RECORDER_RESPONSES.get(response, set())
+        ordered = (
+            "deformation",
+            "force",
+            "basicForce",
+            "localForce",
+            "basicDisplacement",
+            "localDisplacement",
+            "centralNode",
+            "size",
+            "stiffness",
+            "defoANDforce",
+        )
+        return [
+            (labels.get(query, query), query)
+            for query in ordered
+            if query in allowed
+        ]
+
+    def _insert_connection_joint_result(
+        self,
+        connection_tag: int,
+        response: str,
+        label: str | None = None,
+    ) -> None:
+        connection = self.project.connections.get(int(connection_tag))
+        if connection is None:
+            return
+        analysis_tag = self.project.active_analysis_tag
+        if (
+            analysis_tag is None
+            or int(analysis_tag) not in self.project.analyses
+        ):
+            self._create_analysis()
+            analysis_tag = self.project.active_analysis_tag
+        if (
+            analysis_tag is None
+            or int(analysis_tag) not in self.project.analyses
+        ):
+            return
+        self.selection.set_selection(elements={int(connection_tag)})
+        self._insert_solution_result(
+            int(analysis_tag),
+            "JointResponse",
+            (
+                f"{connection.name} · {label or response}"
+            ),
+            {
+                "response": str(response),
+                "component": 1,
+                "connection_type": connection.connection_type,
+            },
+        )
+
     def _connection_recorder_response_options(
         self,
         element_tags: set[int] | list[int] | tuple[int, ...],
@@ -22988,10 +23259,25 @@ class MainWindow(QMainWindow):
         preferred = (
             "force",
             "deformation",
+            "shearPanel",
             "localForce",
             "basicForce",
             "localDisplacement",
             "basicDisplacement",
+            "internalDisplacement",
+            "externalDisplacement",
+            "node1BarSlipL",
+            "node1BarSlipR",
+            "node1InterfaceShear",
+            "node2BarSlipB",
+            "node2BarSlipT",
+            "node2InterfaceShear",
+            "node3BarSlipL",
+            "node3BarSlipR",
+            "node3InterfaceShear",
+            "node4BarSlipB",
+            "node4BarSlipT",
+            "node4InterfaceShear",
             "stiff",
             "centralNode",
             "size",
@@ -27097,6 +27383,8 @@ class MainWindow(QMainWindow):
                     connection.parameters.get("external_nodes", ())
                     if connection.connection_type in {
                         "Joint2D",
+                        "BeamColumnJoint",
+                        "LehighJoint2D",
                         "KrawinklerPanelZone",
                     }
                     else (connection.node_i, connection.node_j)
@@ -27492,6 +27780,8 @@ class MainWindow(QMainWindow):
                         connection.parameters.get("external_nodes", ())
                         if connection.connection_type in {
                             "Joint2D",
+                            "BeamColumnJoint",
+                            "LehighJoint2D",
                             "KrawinklerPanelZone",
                         }
                         else (connection.node_i, connection.node_j)
@@ -27529,6 +27819,28 @@ class MainWindow(QMainWindow):
             )
 
             menu.addSeparator()
+            joint_result_menu = menu.addMenu("Insert Joint Result")
+            joint_result_choices = (
+                self._joint_response_choices(connection)
+                if connection is not None
+                and connection.connection_type not in {"rigid", "pinned"}
+                else []
+            )
+            joint_result_menu.setEnabled(bool(joint_result_choices))
+            for result_label, response_query in joint_result_choices:
+                action = joint_result_menu.addAction(result_label)
+                action.triggered.connect(
+                    lambda checked=False,
+                    connection_tag=tag,
+                    response=response_query,
+                    label=result_label:
+                    self._insert_connection_joint_result(
+                        connection_tag,
+                        response,
+                        label,
+                    )
+                )
+
             recorder_action = menu.addAction("Create Element Recorder...")
             recorder_action.setEnabled(
                 connection is not None
