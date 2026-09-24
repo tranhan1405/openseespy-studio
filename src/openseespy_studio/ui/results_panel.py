@@ -3811,7 +3811,8 @@ class ResultsPanel(QWidget):
             (
                 f"{analysis_type or 'Analysis'} · {count} frame(s) · "
                 f"{self._motion_frame_rate_value()} fps · "
-                "all result frames retained · active result tables update live."
+                "all result frames retained · node tables update live · "
+                "scoped member/shell/crack tables update live."
                 if count > 0
                 else "No deformation history or modal vectors are "
                 "available for result animation."
@@ -3969,6 +3970,10 @@ class ResultsPanel(QWidget):
 
         if target != self._motion_frame_index:
             self._set_motion_index(target)
+
+    def _sync_paused_motion_values(self) -> None:
+        """Compatibility alias for the former pause-only table sync."""
+        self._sync_active_motion_table()
 
     def _sync_active_motion_table(
         self,
@@ -4295,9 +4300,18 @@ class ResultsPanel(QWidget):
             else "no valid panel strain"
         )
         state_label = "accumulated" if accumulate else "active"
+        is_final = (
+            self._motion_source_frame_count > 0
+            and source_index >= self._motion_source_frame_count - 1
+        )
+        cracked_text = (
+            f"{cracked_count} cracked at final state"
+            if is_final
+            else f"{cracked_count} cracked"
+        )
         self.crack_summary.setText(
             f"{element_count} MEFI element(s) · {panel_count} RC panel(s) · "
-            f"{cracked_count} cracked · {state_label} frame "
+            f"{cracked_text} · {state_label} frame "
             f"{self._motion_frame_index + 1}/"
             f"{self._motion_display_frame_count} · {ratio_text}."
         )
