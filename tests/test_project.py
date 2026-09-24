@@ -2034,7 +2034,7 @@ def test_project_delete_entities_cascades_node_dependencies():
             "Element recorder",
             "Element",
             target_tags=[10],
-            response="force",
+            response="globalForce",
         )
     )
     project.selection_sets["Delete"] = SelectionSetData(
@@ -2205,7 +2205,7 @@ def test_project_remove_connection_prunes_element_recorder():
             "Connection force",
             "Element",
             target_tags=[10],
-            response="globalForce",
+            response="force",
         )
     )
 
