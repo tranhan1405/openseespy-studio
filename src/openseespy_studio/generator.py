@@ -778,6 +778,7 @@ def connection_to_openseespy(
     *,
     ndm: int = 3,
     ndf: int = 6,
+    reserved_element_tag_max: int = 0,
 ) -> str:
     """Generate OpenSeesPy for one SARE connection/joint object."""
     ox = ", ".join(f"{value:g}" for value in connection.orient_x)
@@ -879,7 +880,7 @@ def connection_to_openseespy(
             f"ops.geomTransf('Linear', {p}_tr)",
             (
                 f"{p}_ebase = max((list(ops.getEleTags()) or [0]) + "
-                f"[{connection.tag}]) + 1"
+                f"[{max(connection.tag, int(reserved_element_tag_max))}]) + 1"
             ),
             (
                 f"ops.element('elasticBeamColumn', {p}_ebase + 0, "
@@ -937,18 +938,35 @@ def connection_to_openseespy(
     mat_text = ", ".join(str(tag) for tag in materials)
     dir_text = ", ".join(str(dof) for dof in directions)
 
-    element_type = (
-        "zeroLength"
-        if connection_type == "semiRigid"
-        else connection_type
-    )
-    return (
-        f"ops.element('{element_type}', {connection.tag}, "
+    element_line = (
+        f"ops.element('"
+        f"{'zeroLength' if connection_type == 'semiRigid' else connection_type}"
+        f"', {connection.tag}, "
         f"{connection.node_i}, {connection.node_j}, "
         f"'-mat', {mat_text}, '-dir', {dir_text}, "
         f"'-orient', {ox}, {oy}, "
         f"'-doRayleigh', {1 if connection.do_rayleigh else 0})"
     )
+
+    if connection_type == "semiRigid":
+        # Preserve frame-joint translational compatibility unless the user
+        # deliberately assigns a translational spring in that direction.
+        tied_translations = [
+            dof
+            for dof in range(1, min(int(ndm), int(ndf)) + 1)
+            if dof not in directions
+        ]
+        if tied_translations:
+            dof_text = ", ".join(str(dof) for dof in tied_translations)
+            return "\n".join([
+                (
+                    f"ops.equalDOF({connection.node_i}, "
+                    f"{connection.node_j}, {dof_text})"
+                ),
+                element_line,
+            ])
+
+    return element_line
 
 
 def time_series_to_openseespy(series: TimeSeriesData) -> str:
@@ -4678,6 +4696,10 @@ def to_openseespy(
                     connections[tag],
                     ndm=model.ndm,
                     ndf=model.ndf,
+                    reserved_element_tag_max=max(
+                        set(model.elements) | set(connections),
+                        default=0,
+                    ),
                 )
             )
 
