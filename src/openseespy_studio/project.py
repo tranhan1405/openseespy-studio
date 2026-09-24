@@ -2874,7 +2874,12 @@ class RecorderData:
             raise ValueError(f"Unsupported recorder type: {self.recorder_type}")
         if not self.target_tags:
             raise ValueError("Recorder must target at least one node or element.")
-        if any(tag <= 0 for tag in self.target_tags):
+        if self.recorder_type == "Node":
+            if any(tag < 0 for tag in self.target_tags):
+                raise ValueError(
+                    "Node recorder target tags must be non-negative."
+                )
+        elif any(tag <= 0 for tag in self.target_tags):
             raise ValueError("Recorder target tags must be positive.")
         if not self.file_name:
             self.file_name = f"recorders/recorder_{self.tag}.out"
