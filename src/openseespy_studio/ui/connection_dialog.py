@@ -671,9 +671,12 @@ class ConnectionDialog(QDialog):
 
         joint_order_hint = QLabel(
             "When four nodes are preselected, SARE orders them cyclically. "
-            "Krawinkler uses Left → Top → Right → Bottom. LehighJoint2D "
-            "requires Node 1 → 4 counter-clockwise. Verify the preview/order "
-            "before creating the joint."
+            "BeamColumnJoint2D uses N1 Bottom → N2 Right → N3 Top → N4 Left; "
+            "BeamColumnJoint3D uses N1↔N3 as the height/column chord and "
+            "N2↔N4 as the width/beam chord. Krawinkler uses Left → Top → "
+            "Right → Bottom. LehighJoint2D requires Node 1 → 4 "
+            "counter-clockwise. Verify the preview/order before creating "
+            "the joint."
         )
         joint_order_hint.setWordWrap(True)
         joint_order_hint.setStyleSheet("color: #637487;")
@@ -766,8 +769,7 @@ class ConnectionDialog(QDialog):
 
         # RC BeamColumnJoint · 13 physical component materials.
         bcj_group = QGroupBox(
-            "BeamColumnJoint · RC component materials "
-            "(N1 Bottom · N2 Right · N3 Top · N4 Left)"
+            "BeamColumnJoint · RC component materials"
         )
         bcj_layout = QHBoxLayout(bcj_group)
         bcj_left = QFormLayout()
@@ -1310,6 +1312,14 @@ class ConnectionDialog(QDialog):
         self.new_joint_material_button.setEnabled(joint_mode)
         self.joint2d_material_group.setEnabled(joint2d_mode)
         self.bcj_group.setEnabled(bcj_mode)
+        self.bcj_group.setTitle(
+            "BeamColumnJoint · RC component materials "
+            + (
+                "(N1 Bottom · N2 Right · N3 Top · N4 Left)"
+                if self.ndm == 2
+                else "(N1↔N3 height chord · N2↔N4 width chord)"
+            )
+        )
         self.bcj_factor_group.setEnabled(bcj_mode)
         self.lehigh_group.setEnabled(lehigh_mode)
         self.kraw_group.setEnabled(kraw_mode)
