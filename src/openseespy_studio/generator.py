@@ -773,11 +773,34 @@ def constraint_to_openseespy(
     )
 
 
-def connection_to_openseespy(connection: ConnectionData) -> str:
+def connection_to_openseespy(
+    connection: ConnectionData,
+    *,
+    ndm: int = 3,
+    ndf: int = 6,
+) -> str:
+    """Generate OpenSeesPy for one SARE connection/joint object."""
     ox = ", ".join(f"{value:g}" for value in connection.orient_x)
     oy = ", ".join(f"{value:g}" for value in connection.orient_y)
+    connection_type = connection.connection_type
 
-    if connection.connection_type == "zeroLengthSection":
+    if connection_type == "rigid":
+        return (
+            "ops.rigidLink('beam', "
+            f"{connection.node_i}, {connection.node_j})"
+        )
+
+    if connection_type == "pinned":
+        translational_dofs = tuple(
+            range(1, min(max(int(ndm), 1), int(ndf)) + 1)
+        )
+        dof_text = ", ".join(str(dof) for dof in translational_dofs)
+        return (
+            f"ops.equalDOF({connection.node_i}, {connection.node_j}, "
+            f"{dof_text})"
+        )
+
+    if connection_type == "zeroLengthSection":
         return (
             "ops.element('zeroLengthSection', "
             f"{connection.tag}, {connection.node_i}, {connection.node_j}, "
@@ -785,13 +808,142 @@ def connection_to_openseespy(connection: ConnectionData) -> str:
             f"'-doRayleigh', {1 if connection.do_rayleigh else 0})"
         )
 
+    if connection_type == "Joint2D":
+        nodes = [
+            int(tag)
+            for tag in connection.parameters["external_nodes"]
+        ]
+        interface = [
+            int(tag)
+            for tag in connection.parameters.get(
+                "interface_materials",
+                (0, 0, 0, 0),
+            )
+        ]
+        panel_material = int(connection.parameters["panel_material"])
+        large_disp = int(connection.parameters.get("large_disp", 0))
+        center_var = f"_sare_joint2d_center_{connection.tag}"
+        args = ", ".join(str(tag) for tag in nodes)
+        mats = ", ".join(str(tag) for tag in interface)
+        return "\n".join([
+            f"# Joint2D connection {connection.tag}: external nodes are "
+            "clockwise/counter-clockwise around the joint.",
+            f"{center_var} = max(list(ops.getNodeTags()) or [0]) + 1",
+            (
+                f"ops.element('Joint2D', {connection.tag}, {args}, "
+                f"{center_var}, {mats}, {panel_material}, {large_disp})"
+            ),
+        ])
+
+    if connection_type == "KrawinklerPanelZone":
+        nodes = [
+            int(tag)
+            for tag in connection.parameters["external_nodes"]
+        ]
+        left, top, right, bottom = nodes
+        panel_material = int(connection.parameters["panel_material"])
+        rigid_a = float(connection.parameters["rigid_A"])
+        rigid_e = float(connection.parameters["rigid_E"])
+        rigid_i = float(connection.parameters["rigid_I"])
+        p = f"_sare_pz_{connection.tag}"
+        rayleigh = 1 if connection.do_rayleigh else 0
+
+        # The macro follows the Gupta-Krawinkler topology used by the
+        # OpenSees panel-zone example: eight very-stiff elastic frame
+        # segments, translational equalDOF constraints at all four corners,
+        # and one zeroLength rotational spring at one duplicated corner.
+        return "\n".join([
+            f"# Krawinkler panel-zone macro {connection.tag}",
+            f"{p}_left = ops.nodeCoord({left})",
+            f"{p}_top = ops.nodeCoord({top})",
+            f"{p}_right = ops.nodeCoord({right})",
+            f"{p}_bottom = ops.nodeCoord({bottom})",
+            f"{p}_xl = float({p}_left[0])",
+            f"{p}_xr = float({p}_right[0])",
+            f"{p}_yt = float({p}_top[1])",
+            f"{p}_yb = float({p}_bottom[1])",
+            f"{p}_nbase = max(list(ops.getNodeTags()) or [0]) + 1",
+            f"{p}_tlh, {p}_tlv = {p}_nbase, {p}_nbase + 1",
+            f"{p}_trh, {p}_trv = {p}_nbase + 2, {p}_nbase + 3",
+            f"{p}_brv, {p}_brh = {p}_nbase + 4, {p}_nbase + 5",
+            f"{p}_blh, {p}_blv = {p}_nbase + 6, {p}_nbase + 7",
+            f"ops.node({p}_tlh, {p}_xl, {p}_yt)",
+            f"ops.node({p}_tlv, {p}_xl, {p}_yt)",
+            f"ops.node({p}_trh, {p}_xr, {p}_yt)",
+            f"ops.node({p}_trv, {p}_xr, {p}_yt)",
+            f"ops.node({p}_brv, {p}_xr, {p}_yb)",
+            f"ops.node({p}_brh, {p}_xr, {p}_yb)",
+            f"ops.node({p}_blh, {p}_xl, {p}_yb)",
+            f"ops.node({p}_blv, {p}_xl, {p}_yb)",
+            f"{p}_tr = max(list(ops.getCrdTransfTags()) or [0]) + 1",
+            f"ops.geomTransf('Linear', {p}_tr)",
+            (
+                f"{p}_ebase = max((list(ops.getEleTags()) or [0]) + "
+                f"[{connection.tag}]) + 1"
+            ),
+            (
+                f"ops.element('elasticBeamColumn', {p}_ebase + 0, "
+                f"{p}_tlh, {top}, {rigid_a:g}, {rigid_e:g}, "
+                f"{rigid_i:g}, {p}_tr)"
+            ),
+            (
+                f"ops.element('elasticBeamColumn', {p}_ebase + 1, "
+                f"{top}, {p}_trh, {rigid_a:g}, {rigid_e:g}, "
+                f"{rigid_i:g}, {p}_tr)"
+            ),
+            (
+                f"ops.element('elasticBeamColumn', {p}_ebase + 2, "
+                f"{p}_trv, {right}, {rigid_a:g}, {rigid_e:g}, "
+                f"{rigid_i:g}, {p}_tr)"
+            ),
+            (
+                f"ops.element('elasticBeamColumn', {p}_ebase + 3, "
+                f"{right}, {p}_brv, {rigid_a:g}, {rigid_e:g}, "
+                f"{rigid_i:g}, {p}_tr)"
+            ),
+            (
+                f"ops.element('elasticBeamColumn', {p}_ebase + 4, "
+                f"{p}_brh, {bottom}, {rigid_a:g}, {rigid_e:g}, "
+                f"{rigid_i:g}, {p}_tr)"
+            ),
+            (
+                f"ops.element('elasticBeamColumn', {p}_ebase + 5, "
+                f"{bottom}, {p}_blh, {rigid_a:g}, {rigid_e:g}, "
+                f"{rigid_i:g}, {p}_tr)"
+            ),
+            (
+                f"ops.element('elasticBeamColumn', {p}_ebase + 6, "
+                f"{p}_blv, {left}, {rigid_a:g}, {rigid_e:g}, "
+                f"{rigid_i:g}, {p}_tr)"
+            ),
+            (
+                f"ops.element('elasticBeamColumn', {p}_ebase + 7, "
+                f"{left}, {p}_tlv, {rigid_a:g}, {rigid_e:g}, "
+                f"{rigid_i:g}, {p}_tr)"
+            ),
+            f"ops.equalDOF({p}_tlh, {p}_tlv, 1, 2)",
+            f"ops.equalDOF({p}_trh, {p}_trv, 1, 2)",
+            f"ops.equalDOF({p}_brv, {p}_brh, 1, 2)",
+            f"ops.equalDOF({p}_blh, {p}_blv, 1, 2)",
+            (
+                f"ops.element('zeroLength', {connection.tag}, "
+                f"{p}_tlh, {p}_tlv, '-mat', {panel_material}, "
+                f"'-dir', 3, '-doRayleigh', {rayleigh})"
+            ),
+        ])
+
     directions = sorted(connection.materials_by_dof)
     materials = [connection.materials_by_dof[dof] for dof in directions]
-
     mat_text = ", ".join(str(tag) for tag in materials)
     dir_text = ", ".join(str(dof) for dof in directions)
+
+    element_type = (
+        "zeroLength"
+        if connection_type == "semiRigid"
+        else connection_type
+    )
     return (
-        f"ops.element('{connection.connection_type}', {connection.tag}, "
+        f"ops.element('{element_type}', {connection.tag}, "
         f"{connection.node_i}, {connection.node_j}, "
         f"'-mat', {mat_text}, '-dir', {dir_text}, "
         f"'-orient', {ox}, {oy}, "
@@ -4521,7 +4673,13 @@ def to_openseespy(
     if connections:
         lines.extend(["", "# Connections / springs / links"])
         for tag in sorted(connections):
-            lines.append(connection_to_openseespy(connections[tag]))
+            lines.append(
+                connection_to_openseespy(
+                    connections[tag],
+                    ndm=model.ndm,
+                    ndf=model.ndf,
+                )
+            )
 
     if time_series:
         lines.extend(["", "# Time series"])
