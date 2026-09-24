@@ -222,6 +222,96 @@
         "delta": "dimensionless",
         "H": "Pa"
       }
+    },
+    {
+      "id": "opensees-drucker-prager-starter",
+      "family": "Pressure-sensitive plasticity",
+      "material": "Generic Drucker-Prager continuum",
+      "model": "DruckerPrager",
+      "preset_name": "Drucker-Prager · Starter",
+      "parameters_si": {
+        "K": 100000000,
+        "G": 50000000,
+        "sigmaY": 100000,
+        "rho": 0.1,
+        "rhoBar": 0.1,
+        "Kinf": 0,
+        "Ko": 0,
+        "delta1": 0,
+        "delta2": 0,
+        "H": 0,
+        "theta": 1,
+        "density": 0,
+        "atmPressure": 101325
+      },
+      "verified_parameters": [
+        "K",
+        "G",
+        "sigmaY",
+        "rho",
+        "rhoBar",
+        "Kinf",
+        "Ko",
+        "delta1",
+        "delta2",
+        "H",
+        "theta",
+        "density",
+        "atmPressure"
+      ],
+      "behavior": [
+        "Elasto-plastic",
+        "Pressure sensitive",
+        "Drucker-Prager",
+        "Rate independent starter"
+      ],
+      "compatibility": [
+        "ThreeDimensional",
+        "PlaneStrain"
+      ],
+      "applicability": [
+        "Pressure-sensitive continuum plasticity",
+        "3D solid and plane-strain formulations supported by OpenSees"
+      ],
+      "limitations": [
+        "Starter values are not a calibrated soil or geomaterial dataset.",
+        "Not compatible with PlateFiber shell sections.",
+        "Calibrate strength, hardening and volumetric parameters for the actual material."
+      ],
+      "primary_reference": {
+        "type": "official_documentation",
+        "title": "Drucker Prager Material — OpenSees Documentation",
+        "authors": "OpenSees",
+        "url": "https://opensees.github.io/OpenSeesDocumentation/user/manual/material/ndMaterials/DruckerPrager.html",
+        "doi": ""
+      },
+      "parameter_evidence": {
+        "location": "Official command syntax, parameter table, formulation note and theory",
+        "note": "The source verifies the 12 required parameters, optional atmospheric pressure, admissible rhoBar/theta ranges, and ThreeDimensional/PlaneStrain formulations. Numerical starter values are SARE initialization values."
+      },
+      "verification": {
+        "status": "verified",
+        "model_definition_checked": true,
+        "compatibility_checked": true,
+        "units_checked": true,
+        "parameter_status": "starter_template",
+        "checked_on": "2026-09-24"
+      },
+      "source_units": {
+        "K": "Pa",
+        "G": "Pa",
+        "sigmaY": "Pa",
+        "rho": "dimensionless",
+        "rhoBar": "dimensionless",
+        "Kinf": "Pa",
+        "Ko": "Pa",
+        "delta1": "dimensionless",
+        "delta2": "dimensionless",
+        "H": "Pa",
+        "theta": "dimensionless",
+        "density": "kg/m^3",
+        "atmPressure": "Pa"
+      }
     }
   ]
 }
