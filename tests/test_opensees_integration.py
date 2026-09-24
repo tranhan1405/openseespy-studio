@@ -2350,14 +2350,14 @@ def test_rw_a20_100kn_load_exceeds_mefi_cracking_strain_in_real_opensees(
             "Top left lateral",
             pattern_tag=1,
             node_tag=wall.top_node_tags[0],
-            values=(50000.0, 0.0, 0.0),
+            values=(50000.0, 0.0, 0.0, 0.0, 0.0, 0.0),
         ),
         2: NodalLoadData(
             2,
             "Top right lateral",
             pattern_tag=1,
             node_tag=wall.top_node_tags[1],
-            values=(50000.0, 0.0, 0.0),
+            values=(50000.0, 0.0, 0.0, 0.0, 0.0, 0.0),
         ),
     }
     analysis = AnalysisSettingsData(
