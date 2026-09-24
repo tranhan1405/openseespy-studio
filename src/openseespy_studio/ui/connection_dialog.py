@@ -475,6 +475,36 @@ class ConnectionDialog(QDialog):
             if connection is not None
             else [int(tag) for tag in (initial_joint_nodes or ())[:4]]
         )
+        if (
+            connection is None
+            and len(saved_external) == 4
+            and all(tag in self.node_positions for tag in saved_external)
+        ):
+            center_x = sum(
+                float(self.node_positions[tag][0])
+                for tag in saved_external
+            ) / 4.0
+            center_y = sum(
+                float(self.node_positions[tag][1])
+                for tag in saved_external
+            ) / 4.0
+            saved_external.sort(
+                key=lambda tag: math.atan2(
+                    float(self.node_positions[tag][1]) - center_y,
+                    float(self.node_positions[tag][0]) - center_x,
+                ),
+                reverse=True,
+            )
+            left_index = min(
+                range(4),
+                key=lambda index: float(
+                    self.node_positions[saved_external[index]][0]
+                ),
+            )
+            saved_external = (
+                saved_external[left_index:]
+                + saved_external[:left_index]
+            )
         candidate_nodes = sorted(self.node_positions)
         while len(saved_external) < 4:
             index = len(saved_external)
@@ -495,6 +525,14 @@ class ConnectionDialog(QDialog):
             self.joint_node_spins.append(spin)
             joint_nodes_form.addRow(f"{label} node:", spin)
         joint_layout.addWidget(joint_nodes_group)
+        joint_order_hint = QLabel(
+            "When four nodes are preselected, SARE orders them cyclically "
+            "and starts from the left-most node. Verify Left → Top → Right → "
+            "Bottom before creating a Krawinkler panel zone."
+        )
+        joint_order_hint.setWordWrap(True)
+        joint_order_hint.setStyleSheet("color: #637487;")
+        joint_layout.addWidget(joint_order_hint)
 
         joint_material_group = QGroupBox("Joint materials")
         joint_material_form = QFormLayout(joint_material_group)
