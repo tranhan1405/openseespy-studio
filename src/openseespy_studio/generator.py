@@ -929,7 +929,7 @@ def connection_to_openseespy(
             (
                 f"ops.element('zeroLength', {connection.tag}, "
                 f"{p}_tlh, {p}_tlv, '-mat', {panel_material}, "
-                f"'-dir', 3, '-doRayleigh', {rayleigh})"
+                f"'-dir', 6, '-doRayleigh', {rayleigh})"
             ),
         ])
 
