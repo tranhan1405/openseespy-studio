@@ -66,6 +66,26 @@ def test_static_and_transient_catalogs_exclude_specialized_curves():
 
 
 
+
+def test_nonmodal_catalog_exposes_concrete_crack_pattern():
+    for analysis_type in ("Static", "Transient", "Pushover", "Cyclic"):
+        choices = result_choices_for_analysis(analysis_type)
+        crack = next(
+            choice
+            for choice in choices
+            if choice.result_type == "CrackPattern"
+        )
+        assert crack.category == "Concrete Results"
+        assert crack.settings["accumulate"] is False
+        assert crack.settings["line_scale"] == 0.82
+
+
+def test_modal_and_response_spectrum_catalogs_exclude_crack_pattern():
+    assert "CrackPattern" not in _types("Modal")
+    assert "CrackPattern" not in _types("Response Spectrum")
+
+
+
 def test_section_response_catalog_is_capability_gated():
     available = {
         choice.result_type
