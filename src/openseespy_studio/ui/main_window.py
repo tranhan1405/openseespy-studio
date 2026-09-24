@@ -3817,21 +3817,6 @@ class MainWindow(QMainWindow):
             )
         )
 
-        self.background_combo = QComboBox()
-        self.background_combo.addItems([
-            "Light",
-            "Dark",
-            "ANSYS Gradient",
-            "Publication White",
-            "Custom Solid",
-            "Custom Gradient",
-        ])
-        self.background_combo.setFixedWidth(168)
-        self.background_combo.setToolTip(
-            "Viewport background preset. Publication White is intended for "
-            "clean screenshots and figures."
-        )
-
         background_settings = QSettings(
             LEGACY_SETTINGS_ORGANIZATION,
             LEGACY_SETTINGS_APPLICATION,
@@ -3842,8 +3827,18 @@ class MainWindow(QMainWindow):
                 "ANSYS Gradient",
             )
         )
-        if self.background_combo.findText(saved_background) < 0:
+        valid_backgrounds = {
+            "Light",
+            "Dark",
+            "ANSYS Gradient",
+            "Publication White",
+            "Custom Solid",
+            "Custom Gradient",
+        }
+        if saved_background not in valid_backgrounds:
             saved_background = "ANSYS Gradient"
+        self._background_preset = saved_background
+
         raw_background_bottom = QColor(
             str(
                 background_settings.value(
@@ -3870,49 +3865,68 @@ class MainWindow(QMainWindow):
             if raw_background_top.isValid()
             else "#e1e8ef"
         )
-        self.background_combo.setCurrentText(saved_background)
 
-        self.background_bottom_button = QPushButton("Base...")
-        self.background_bottom_button.setFixedWidth(82)
-        self.background_bottom_button.setToolTip(
-            "Choose the solid/background base color."
+        self.background_button = QToolButton()
+        self.background_button.setObjectName("RibbonLargeButton")
+        self.background_button.setText("Background")
+        self.background_button.setIcon(studio_icon("display"))
+        self.background_button.setIconSize(QSize(28, 28))
+        self.background_button.setToolButtonStyle(
+            Qt.ToolButtonTextUnderIcon
         )
-        self.background_top_button = QPushButton("Top...")
-        self.background_top_button.setFixedWidth(82)
-        self.background_top_button.setToolTip(
-            "Choose the top color for Custom Gradient."
+        self.background_button.setPopupMode(QToolButton.InstantPopup)
+        self.background_button.setAutoRaise(True)
+        self.background_button.setToolTip(
+            "Choose the viewport background. Publication White is intended "
+            "for clean screenshots and figures."
         )
-        background_colors = QWidget()
-        background_colors_layout = QHBoxLayout(background_colors)
-        background_colors_layout.setContentsMargins(0, 0, 0, 0)
-        background_colors_layout.setSpacing(2)
-        background_colors_layout.addWidget(self.background_bottom_button)
-        background_colors_layout.addWidget(self.background_top_button)
 
-        self.background_reset_button = QPushButton("Reset Background")
-        self.background_reset_button.setFixedWidth(168)
+        background_menu = QMenu(self.background_button)
+        self.background_preset_actions: dict[str, QAction] = {}
+        for preset in (
+            "Light",
+            "Dark",
+            "ANSYS Gradient",
+            "Publication White",
+        ):
+            action = QAction(preset, self)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, value=preset:
+                self._set_viewport_background_preset(value)
+            )
+            background_menu.addAction(action)
+            self.background_preset_actions[preset] = action
 
-        background_holder = QWidget()
-        background_layout = QVBoxLayout(background_holder)
-        background_layout.setContentsMargins(1, 1, 1, 1)
-        background_layout.setSpacing(2)
-        background_layout.addWidget(self.background_combo)
-        background_layout.addWidget(background_colors)
-        background_layout.addWidget(self.background_reset_button)
+        background_menu.addSeparator()
 
-        self.background_combo.currentTextChanged.connect(
-            self._change_viewport_background
+        custom_solid = QAction("Custom Solid...", self)
+        custom_solid.setCheckable(True)
+        custom_solid.triggered.connect(
+            self._choose_custom_solid_background
         )
-        self.background_bottom_button.clicked.connect(
-            lambda: self._choose_viewport_background_color("bottom")
+        background_menu.addAction(custom_solid)
+        self.background_preset_actions["Custom Solid"] = custom_solid
+
+        custom_gradient = QAction("Custom Gradient...", self)
+        custom_gradient.setCheckable(True)
+        custom_gradient.triggered.connect(
+            self._choose_custom_gradient_background
         )
-        self.background_top_button.clicked.connect(
-            lambda: self._choose_viewport_background_color("top")
-        )
-        self.background_reset_button.clicked.connect(
+        background_menu.addAction(custom_gradient)
+        self.background_preset_actions[
+            "Custom Gradient"
+        ] = custom_gradient
+
+        background_menu.addSeparator()
+        reset_background = QAction("Reset to ANSYS Gradient", self)
+        reset_background.triggered.connect(
             self._reset_viewport_background
         )
-        self._sync_background_ribbon_controls(apply=True)
+        background_menu.addAction(reset_background)
+
+        self.background_button.setMenu(background_menu)
+        self._sync_background_menu(apply=True)
 
         display_page = RibbonPage()
         add_group(
@@ -3933,7 +3947,7 @@ class MainWindow(QMainWindow):
         add_group(
             display_page,
             "Appearance",
-            widgets=(background_holder,),
+            widgets=(self.background_button,),
         )
         add_group(
             display_page,
@@ -4002,17 +4016,6 @@ class MainWindow(QMainWindow):
         brand = BrandWidget()
         ribbon.addWidget(brand)
 
-    @staticmethod
-    def _background_swatch_style(color: str) -> str:
-        qcolor = QColor(str(color))
-        if not qcolor.isValid():
-            qcolor = QColor("#f2f5f8")
-        text = "#ffffff" if qcolor.lightnessF() < 0.45 else "#20262e"
-        return (
-            f"background: {qcolor.name()}; color: {text}; "
-            "border: 1px solid #8f9baa;"
-        )
-
     def _save_background_preferences(self) -> None:
         settings = QSettings(
             LEGACY_SETTINGS_ORGANIZATION,
@@ -4020,7 +4023,7 @@ class MainWindow(QMainWindow):
         )
         settings.setValue(
             "display/backgroundPreset",
-            self.background_combo.currentText(),
+            self._background_preset,
         )
         settings.setValue(
             "display/backgroundBottom",
@@ -4031,87 +4034,100 @@ class MainWindow(QMainWindow):
             self._background_custom_top,
         )
 
-    def _sync_background_ribbon_controls(
+    def _sync_background_menu(
         self,
         *,
         apply: bool = False,
     ) -> None:
-        combo = getattr(self, "background_combo", None)
-        if combo is None:
-            return
-        preset = combo.currentText()
-        custom_solid = preset == "Custom Solid"
-        custom_gradient = preset == "Custom Gradient"
+        actions = getattr(self, "background_preset_actions", {})
+        for preset, action in actions.items():
+            action.blockSignals(True)
+            try:
+                action.setChecked(preset == self._background_preset)
+            finally:
+                action.blockSignals(False)
 
-        self.background_bottom_button.setEnabled(
-            custom_solid or custom_gradient
-        )
-        self.background_top_button.setEnabled(custom_gradient)
-        self.background_bottom_button.setText("Base...")
-        self.background_top_button.setText("Top...")
-        self.background_bottom_button.setStyleSheet(
-            self._background_swatch_style(
-                self._background_custom_bottom
+        button = getattr(self, "background_button", None)
+        if button is not None:
+            button.setToolTip(
+                "Viewport background: "
+                f"{self._background_preset}. Click to change."
             )
-            if custom_solid or custom_gradient
-            else ""
-        )
-        self.background_top_button.setStyleSheet(
-            self._background_swatch_style(
-                self._background_custom_top
-            )
-            if custom_gradient
-            else ""
-        )
 
         if apply:
             self.viewport.set_background_style(
-                preset,
+                self._background_preset,
                 custom_bottom=self._background_custom_bottom,
                 custom_top=self._background_custom_top,
             )
 
-    def _change_viewport_background(self, _preset: str) -> None:
-        self._sync_background_ribbon_controls(apply=True)
+    def _set_viewport_background_preset(self, preset: str) -> None:
+        self._background_preset = str(preset)
+        self._sync_background_menu(apply=True)
         self._save_background_preferences()
         self.status_message.setText(
-            f"Viewport background: {self.background_combo.currentText()}"
+            f"Viewport background: {self._background_preset}"
         )
 
-    def _choose_viewport_background_color(self, which: str) -> None:
-        which = str(which)
-        current = (
-            self._background_custom_top
-            if which == "top"
-            else self._background_custom_bottom
-        )
+    def _choose_custom_solid_background(
+        self,
+        _checked: bool = False,
+    ) -> None:
         color = QColorDialog.getColor(
-            QColor(current),
+            QColor(self._background_custom_bottom),
             self,
-            (
-                "Viewport Gradient Top Color"
-                if which == "top"
-                else "Viewport Background Color"
-            ),
+            "Viewport Background Color",
         )
         if not color.isValid():
+            self._sync_background_menu()
             return
-        if which == "top":
-            self._background_custom_top = color.name()
-        else:
-            self._background_custom_bottom = color.name()
-        self._sync_background_ribbon_controls(apply=True)
+        self._background_custom_bottom = color.name()
+        self._background_preset = "Custom Solid"
+        self._sync_background_menu(apply=True)
         self._save_background_preferences()
+        self.status_message.setText(
+            "Viewport background: Custom Solid"
+        )
 
-    def _reset_viewport_background(self) -> None:
+    def _choose_custom_gradient_background(
+        self,
+        _checked: bool = False,
+    ) -> None:
+        bottom = QColorDialog.getColor(
+            QColor(self._background_custom_bottom),
+            self,
+            "Viewport Gradient Base Color",
+        )
+        if not bottom.isValid():
+            self._sync_background_menu()
+            return
+
+        top = QColorDialog.getColor(
+            QColor(self._background_custom_top),
+            self,
+            "Viewport Gradient Top Color",
+        )
+        if not top.isValid():
+            self._sync_background_menu()
+            return
+
+        self._background_custom_bottom = bottom.name()
+        self._background_custom_top = top.name()
+        self._background_preset = "Custom Gradient"
+        self._sync_background_menu(apply=True)
+        self._save_background_preferences()
+        self.status_message.setText(
+            "Viewport background: Custom Gradient"
+        )
+
+    def _reset_viewport_background(
+        self,
+        _checked: bool = False,
+    ) -> None:
         self._background_custom_bottom = "#f2f5f8"
         self._background_custom_top = "#e1e8ef"
-        self.background_combo.blockSignals(True)
-        try:
-            self.background_combo.setCurrentText("ANSYS Gradient")
-        finally:
-            self.background_combo.blockSignals(False)
-        self._sync_background_ribbon_controls(apply=True)
+        self._background_preset = "ANSYS Gradient"
+        self._sync_background_menu(apply=True)
         self._save_background_preferences()
         self.status_message.setText(
             "Viewport background reset to ANSYS Gradient"
