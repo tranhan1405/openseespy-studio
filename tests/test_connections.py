@@ -2236,3 +2236,25 @@ def test_beam_column_joint_2d_external_displacement_remains_available():
     ))
 
     assert project.solution_results[11].settings["component"] == 12
+
+
+def test_beam_column_joint_ui_uses_opensees_reference_node_order():
+    import inspect
+    from openseespy_studio.ui.connection_dialog import ConnectionDialog
+
+    source = inspect.getsource(ConnectionDialog._connection_type_changed)
+
+    assert "N1 Bottom → N2 Right → " in source
+    assert "N3 Top → N4 Left" in source
+    assert "ordered = [bottom, right, top, left]" in source
+    assert "ordered = [top, right, bottom, left]" not in source
+
+
+def test_beam_column_joint_ui_puts_node1_on_lower_3d_height_chord_end():
+    import inspect
+    from openseespy_studio.ui.connection_dialog import ConnectionDialog
+
+    source = inspect.getsource(ConnectionDialog._connection_type_changed)
+
+    assert "if float(a[2]) > float(c[2]):" in source
+    assert "if float(c[2]) > float(a[2]):" not in source
