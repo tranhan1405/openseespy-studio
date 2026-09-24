@@ -4932,6 +4932,17 @@ class MainWindow(QMainWindow):
         self.selection.clear()
         self._reset_runtime_results()
         self.model = self.project.model
+
+        # RC Wall is an FE-model generator. If the wizard was launched while
+        # Geometry was the active graphics domain, draw_model() would keep
+        # rendering Geometry only and the successfully generated MEFI wall
+        # would appear to be missing. Force the post-generation context back
+        # to FE and clear any stale sketch-plane interaction state.
+        if spec.replace_geometry:
+            self._reset_sketch_plane_context()
+        self._activate_select_tool()
+        self.viewport.set_display_domain("fe")
+
         named = ", ".join(result.selection_set_names)
         self._refresh_all(
             f"Created {spec.name} · {len(result.node_tags)} nodes · "
@@ -4940,13 +4951,14 @@ class MainWindow(QMainWindow):
             f"named selections: {named}"
         )
         self.selection.set_selection(
-            nodes=set(result.top_node_tags)
+            elements=set(result.element_tags)
         )
         self._record_project_change(
             f"Create RC wall {spec.name} with MEFI/RCLMS",
             before,
         )
-        self.viewport.set_view("xy")
+        self.viewport.set_view("xy", render=False)
+        self.viewport.fit_view()
 
     def _show_test_column_wizard(self) -> None:
         dialog = TestColumnWizard(
