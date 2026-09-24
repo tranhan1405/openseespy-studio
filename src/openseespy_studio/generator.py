@@ -4314,6 +4314,10 @@ def to_openseespy(
             )
             if tag is not None
         }
+        if element.element_type == "MEFI":
+            referenced_sections.update(
+                int(tag) for tag in element.mefi_section_tags
+            )
         missing = sorted(
             tag for tag in referenced_sections
             if section_catalog is not None and tag not in section_catalog
@@ -5030,6 +5034,61 @@ def to_openseespy(
     ])
     for tag in sorted(model.elements):
         e = model.elements[tag]
+
+        if e.element_type == "MEFI":
+            if e.k is None or e.l is None:
+                lines.append(
+                    f"# ERROR: MEFI element {tag} is missing K/L nodes; "
+                    "element not generated."
+                )
+                continue
+            if not e.mefi_widths or (
+                len(e.mefi_widths) != len(e.mefi_section_tags)
+            ):
+                lines.append(
+                    f"# ERROR: MEFI element {tag} has invalid macro-fiber "
+                    "width/section arrays; element not generated."
+                )
+                continue
+            missing = [
+                int(section_tag)
+                for section_tag in e.mefi_section_tags
+                if (
+                    sections is None
+                    or int(section_tag) not in sections
+                )
+            ]
+            if missing:
+                lines.append(
+                    f"# ERROR: MEFI element {tag} references missing "
+                    "RCLMS section tag(s): "
+                    + ", ".join(map(str, sorted(set(missing))))
+                )
+                continue
+            incompatible = [
+                int(section_tag)
+                for section_tag in e.mefi_section_tags
+                if sections[int(section_tag)].section_type != "RCLMS"
+            ]
+            if incompatible:
+                lines.append(
+                    f"# ERROR: MEFI element {tag} requires RCLMS sections; "
+                    "element not generated."
+                )
+                continue
+            widths = ", ".join(
+                f"{float(value):g}" for value in e.mefi_widths
+            )
+            sec_tags = ", ".join(
+                str(int(value)) for value in e.mefi_section_tags
+            )
+            lines.append(
+                "ops.element('MEFI', "
+                f"{tag}, {e.i}, {e.j}, {e.k}, {e.l}, "
+                f"{len(e.mefi_widths)}, '-width', {widths}, "
+                f"'-sec', {sec_tags})"
+            )
+            continue
 
         if e.element_type in SHELL_ELEMENT_TYPES:
             if e.section_tag is None:
