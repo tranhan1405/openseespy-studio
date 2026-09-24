@@ -11,6 +11,7 @@ from openseespy_studio.generator import to_openseespy
 from openseespy_studio.project import ProjectDatabase
 from openseespy_studio.rc_wall import RCWallSpec, build_rc_wall
 from openseespy_studio.ui.rc_wall_wizard import RCWallWizard
+from openseespy_studio.ui.rclms_section_dialog import RCLMSSectionDialog
 from openseespy_studio.validation import validate_project
 
 
@@ -185,6 +186,36 @@ def test_rc_wall_rejects_invalid_boundary_geometry():
         assert "Boundary width" in str(exc)
     else:
         raise AssertionError("Oversized boundary zones should be rejected.")
+
+
+def test_rclms_section_from_wizard_is_editable():
+    project, result = _benchmark_project()
+    section = project.sections[result.boundary_section_tag]
+
+    dialog = RCLMSSectionDialog(
+        section=section,
+        nd_materials=project.nd_materials,
+        units=project.units,
+    )
+    try:
+        assert dialog.steel.currentData() == section.nd_material_tag
+        assert dialog.table.rowCount() == 2
+        updated = dialog.section_data()
+        assert updated.section_type == "RCLMS"
+        assert updated.nd_material_tag == section.nd_material_tag
+        assert [
+            layer.material_tag for layer in updated.shell_layers
+        ] == [
+            layer.material_tag for layer in section.shell_layers
+        ]
+        assert math.isclose(
+            updated.shell_total_thickness(),
+            152.4,
+        )
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
 
 
 def test_rc_wall_wizard_converts_benchmark_geometry_to_project_units():
