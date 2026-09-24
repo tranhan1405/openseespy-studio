@@ -851,3 +851,70 @@ def test_motion_display_mode_supports_deformed_both_and_undeformed():
     assert 'display_mode == "undeformed_only"' in source
     assert 'display_mode == "both"' in source
     assert 'self.set_undeformed_model_visible(' in source
+
+
+def test_viewport_background_presets_and_custom_colors_are_stable():
+    assert ModelViewport.background_style_spec("Light") == (
+        "#f2f5f8",
+        None,
+    )
+    assert ModelViewport.background_style_spec("Dark") == (
+        "#20262e",
+        None,
+    )
+    assert ModelViewport.background_style_spec("ANSYS Gradient") == (
+        "#f2f5f8",
+        "#e1e8ef",
+    )
+    assert ModelViewport.background_style_spec("Publication White") == (
+        "#ffffff",
+        None,
+    )
+    assert ModelViewport.background_style_spec(
+        "Custom Solid",
+        custom_bottom="#123456",
+    ) == ("#123456", None)
+    assert ModelViewport.background_style_spec(
+        "Custom Gradient",
+        custom_bottom="#123456",
+        custom_top="#abcdef",
+    ) == ("#123456", "#abcdef")
+    assert ModelViewport.background_style_spec(
+        "Custom Solid",
+        custom_bottom="not-a-color",
+    ) == ("#f2f5f8", None)
+
+    with pytest.raises(ValueError, match="Unsupported viewport background"):
+        ModelViewport.background_style_spec("Unknown")
+
+
+def test_display_ribbon_exposes_persistent_background_controls():
+    build_source = inspect.getsource(MainWindow._build_actions_and_ribbon)
+    sync_source = inspect.getsource(
+        MainWindow._sync_background_ribbon_controls
+    )
+    save_source = inspect.getsource(
+        MainWindow._save_background_preferences
+    )
+    reset_source = inspect.getsource(ModelViewport._reset_scene)
+
+    assert '"Appearance"' in build_source
+    assert '"Publication White"' in build_source
+    assert '"Custom Solid"' in build_source
+    assert '"Custom Gradient"' in build_source
+    assert "background_bottom_button" in build_source
+    assert "background_top_button" in build_source
+    assert "background_reset_button" in build_source
+
+    assert 'preset == "Custom Solid"' in sync_source
+    assert 'preset == "Custom Gradient"' in sync_source
+    assert "set_background_style" in sync_source
+
+    assert '"display/backgroundPreset"' in save_source
+    assert '"display/backgroundBottom"' in save_source
+    assert '"display/backgroundTop"' in save_source
+
+    # Scene refreshes must preserve the selected background instead of
+    # restoring a hard-coded color.
+    assert "_apply_background(render=False)" in reset_source
+    assert "_apply_axes_widget()" in reset_source
