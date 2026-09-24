@@ -3768,7 +3768,12 @@ def build_joint_response_specs(
         if connection is None:
             continue
         settings = dict(getattr(result, "settings", {}) or {})
-        response = str(settings.get("response", "deformation"))
+        default_response = (
+            "force"
+            if connection.connection_type == "CoupledZeroLength"
+            else "deformation"
+        )
+        response = str(settings.get("response", default_response))
         allowed = CONNECTION_HISTORY_RESPONSES.get(
             connection.connection_type,
             (),
