@@ -10663,9 +10663,31 @@ class ProjectDatabase:
         # in older SARE files created before those guards were added.
         # Revalidate it on project load so invalid legacy geometry cannot be
         # silently exported to OpenSees.
+        beam_column_joint_tags: set[int] = set()
         for connection in project.connections.values():
             if connection.connection_type == "BeamColumnJoint":
                 project._validate_connection(connection)
+                beam_column_joint_tags.add(int(connection.tag))
+
+        # Legacy project files bypass add_recorder()/add_solution_result()
+        # while they are deserialized. Re-run the BeamColumnJoint-specific
+        # guards so stale/unsafe response requests cannot reach OpenSees.
+        for recorder in project.recorders.values():
+            if (
+                recorder.recorder_type == "Element"
+                and beam_column_joint_tags.intersection(
+                    int(tag) for tag in recorder.target_tags
+                )
+            ):
+                project._validate_recorder(recorder)
+        for result in project.solution_results.values():
+            if (
+                result.result_type == "JointResponse"
+                and beam_column_joint_tags.intersection(
+                    int(tag) for tag in result.element_scope
+                )
+            ):
+                project._validate_solution_result(result)
 
         if (
             project.active_analysis_tag is not None
