@@ -8562,31 +8562,64 @@ class ModelViewport(QWidget):
 
             element_points: list[tuple[float, float, float]] = []
             element_lines: list[int] = []
+            element_faces: list[int] = []
             element_node_tags: list[int] = []
             for element_tag in visible_elements:
                 element = self._model.elements.get(element_tag)
                 if element is None:
                     continue
+
+                node_tags = element.node_tags()
+                if element.element_type in QUAD_ELEMENT_TYPES:
+                    if (
+                        len(node_tags) != 4
+                        or any(
+                            node_tag not in self._model.nodes
+                            for node_tag in node_tags
+                        )
+                    ):
+                        continue
+                    index = len(element_points)
+                    element_points.extend(
+                        self._model.nodes[node_tag].xyz
+                        for node_tag in node_tags
+                    )
+                    element_node_tags.extend(node_tags)
+                    element_faces.extend(
+                        (4, index, index + 1, index + 2, index + 3)
+                    )
+                    continue
+
                 if (
-                    element.i not in self._model.nodes
-                    or element.j not in self._model.nodes
+                    len(node_tags) < 2
+                    or node_tags[0] not in self._model.nodes
+                    or node_tags[1] not in self._model.nodes
                 ):
                     continue
                 index = len(element_points)
                 element_points.extend(
                     (
-                        self._model.nodes[element.i].xyz,
-                        self._model.nodes[element.j].xyz,
+                        self._model.nodes[node_tags[0]].xyz,
+                        self._model.nodes[node_tags[1]].xyz,
                     )
                 )
-                element_node_tags.extend((element.i, element.j))
+                element_node_tags.extend((node_tags[0], node_tags[1]))
                 element_lines.extend((2, index, index + 1))
 
             if element_points:
                 mesh = pv.PolyData(
                     np.asarray(element_points, dtype=float)
                 )
-                mesh.lines = np.asarray(element_lines, dtype=np.int64)
+                if element_lines:
+                    mesh.lines = np.asarray(
+                        element_lines,
+                        dtype=np.int64,
+                    )
+                if element_faces:
+                    mesh.faces = np.asarray(
+                        element_faces,
+                        dtype=np.int64,
+                    )
                 mesh.point_data["magnitude"] = np.zeros(
                     len(element_points),
                     dtype=float,
@@ -8603,8 +8636,11 @@ class ModelViewport(QWidget):
                     scalars="magnitude",
                     cmap="turbo",
                     clim=(0.0, scalar_upper),
-                    line_width=5,
+                    show_edges=bool(element_faces),
+                    edge_color="#263746",
+                    line_width=3 if element_faces else 5,
                     render_lines_as_tubes=True,
+                    smooth_shading=False,
                     pickable=False,
                     scalar_bar_args={"title": scalar_title},
                     render=False,
