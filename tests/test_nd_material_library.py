@@ -21,7 +21,9 @@ from openseespy_studio.nd_material_library import (
     nd_material_library_facets,
 )
 from openseespy_studio.project import (
+    MaterialData,
     NDMaterialData,
+    ProjectDatabase,
     nd_material_requires_stage_update,
     nd_material_supported_formulations,
     nd_material_supports_plate_fiber,
@@ -47,10 +49,10 @@ def _record(model: str):
     )
 
 
-def test_verified_nd_library_baseline_has_six_supported_models():
+def test_verified_nd_library_baseline_has_eight_supported_models():
     records = load_verified_nd_material_library()
 
-    assert len(records) == 6
+    assert len(records) == 8
     assert {record.model for record in records} == {
         "ElasticIsotropic",
         "ElasticOrthotropic",
@@ -58,6 +60,8 @@ def test_verified_nd_library_baseline_has_six_supported_models():
         "DruckerPrager",
         "PressureIndependMultiYield",
         "PressureDependMultiYield",
+        "ASDConcrete3D",
+        "OrthotropicRAConcrete",
     }
     assert all(record.is_verified for record in records)
     assert all(record.is_starter_template for record in records)
@@ -111,6 +115,16 @@ def test_verified_nd_library_declares_formulation_compatibility():
         "PressureDependMultiYield"
     )
 
+    asd = _record("ASDConcrete3D")
+    assert asd.compatibility == ("ThreeDimensional",)
+    assert not nd_material_supports_plate_fiber("ASDConcrete3D")
+
+    ra = _record("OrthotropicRAConcrete")
+    assert ra.compatibility == ("Plane Stress",)
+    assert not nd_material_supports_plate_fiber(
+        "OrthotropicRAConcrete"
+    )
+
     for record in records:
         assert set(record.compatibility) == set(
             nd_material_supported_formulations(record.model)
@@ -122,10 +136,12 @@ def test_nd_library_facets_and_combined_filters():
     facets = nd_material_library_facets(records)
 
     assert facets["family"] == (
+        "Concrete continuum",
         "Elastic continuum",
         "Multi-yield soil",
         "Plastic continuum",
         "Pressure-sensitive plasticity",
+        "RC membrane concrete",
     )
     assert "PlateFiber" in facets["compatibility"]
     assert "BeamFiber" in facets["compatibility"]
@@ -280,7 +296,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert dialog.add_button.isEnabled()
         assert dialog.material_data().tag == 11
         assert dialog.material_data().source["status"] == "verified"
-        assert dialog.result_count.text() == "6 / 6 shown"
+        assert dialog.result_count.text() == "8 / 8 shown"
         assert dialog.copy_command.isEnabled()
         assert dialog.command_preview.text() == (
             "ops.nDMaterial('ElasticIsotropic', "
@@ -291,7 +307,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert model_index >= 0
         dialog.model_filter.setCurrentIndex(model_index)
         _APP.processEvents()
-        assert dialog.result_count.text() == "1 / 6 shown"
+        assert dialog.result_count.text() == "1 / 8 shown"
         assert dialog.material_data().material_type == "J2Plasticity"
 
         dialog.clear_filters.click()
@@ -300,7 +316,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert behavior_index >= 0
         dialog.behavior_filter.setCurrentIndex(behavior_index)
         _APP.processEvents()
-        assert dialog.result_count.text() == "1 / 6 shown"
+        assert dialog.result_count.text() == "1 / 8 shown"
         assert (
             dialog.material_data().material_type
             == "ElasticOrthotropic"
@@ -314,7 +330,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert formulation_index >= 0
         dialog.compatibility_filter.setCurrentIndex(formulation_index)
         _APP.processEvents()
-        assert dialog.result_count.text() == "1 / 6 shown"
+        assert dialog.result_count.text() == "1 / 8 shown"
         assert (
             dialog.material_data().material_type
             == "ElasticOrthotropic"
@@ -340,13 +356,13 @@ def test_nd_library_dialog_browses_and_filters_records():
 
         dialog.search.setText("definitely-no-such-material")
         _APP.processEvents()
-        assert dialog.result_count.text() == "0 / 6 shown"
+        assert dialog.result_count.text() == "0 / 8 shown"
         assert not dialog.add_button.isEnabled()
         assert not dialog.copy_command.isEnabled()
 
         dialog.clear_filters.click()
         _APP.processEvents()
-        assert dialog.result_count.text() == "6 / 6 shown"
+        assert dialog.result_count.text() == "8 / 8 shown"
         assert "Verified against source: 2026-09-24" in dialog.source.text()
 
         dialog.copy_citation.click()
@@ -535,6 +551,124 @@ def test_pressure_depend_library_searches_cyclic_mobility():
     )
     assert [record.model for record in matches] == [
         "PressureDependMultiYield"
+    ]
+
+
+def test_asd_concrete_3d_library_generator_and_editor():
+    record = _record("ASDConcrete3D")
+    material = nd_material_from_library_record(record, tag=71)
+
+    assert material.parameters["fc"] == 30.0e6
+    assert material.parameters["ft"] == 3.0e6
+    assert material.parameters["Kc"] == 2.0 / 3.0
+    assert "custom Te/Ts/Td/Ce/Cs/Cd" in " ".join(record.limitations)
+
+    command = nd_material_to_openseespy(
+        material,
+        {"length": "m", "force": "N", "time": "s"},
+    )
+    assert command.startswith(
+        "ops.nDMaterial('ASDConcrete3D', 71, "
+    )
+    assert "'-rho', 2400" in command
+    assert "'-fc', 3e+07" in command
+    assert "'-ft', 3e+06" in command
+    assert "'-Kc', 0.666667" in command
+    assert "'-cdf', 0" in command
+    assert "'-implex'" not in command
+
+    dialog = NDMaterialDialog(
+        next_tag=71,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    try:
+        index = dialog.material_type.findData("ASDConcrete3D")
+        assert index >= 0
+        dialog.material_type.setCurrentIndex(index)
+        _APP.processEvents()
+        assert dialog.material_data().material_type == "ASDConcrete3D"
+        assert dialog._parameter_widgets["implex"].decimals() == 0
+        assert dialog._parameter_widgets["Kc"].minimum() > 0.5
+        assert "Custom backbone lists" in dialog.note.text()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+
+def test_orthotropic_ra_concrete_dependency_generator_and_editor():
+    record = _record("OrthotropicRAConcrete")
+    material = nd_material_from_library_record(record, tag=72)
+    project = ProjectDatabase()
+
+    try:
+        project.add_nd_material(material)
+    except ValueError as exc:
+        assert "missing uniaxial material" in str(exc)
+    else:
+        raise AssertionError(
+            "OrthotropicRAConcrete must reject a missing concrete dependency."
+        )
+
+    project.add_material(
+        MaterialData(1, "Concrete base", "Concrete02")
+    )
+    project.add_nd_material(material)
+    assert project.nd_materials_using_material(1) == [72]
+
+    command = nd_material_to_openseespy(
+        material,
+        {"length": "m", "force": "N", "time": "s"},
+    )
+    assert command == (
+        "ops.nDMaterial('OrthotropicRAConcrete', 72, 1, "
+        "8e-05, -0.002, 0, '-damageCte1', 0.14, "
+        "'-damageCte2', 0.6)"
+    )
+
+    project.update_material(
+        1,
+        MaterialData(2, "Concrete base renamed", "Concrete02"),
+    )
+    assert project.nd_materials[72].parameters["conc"] == 2.0
+    try:
+        project.remove_material(2)
+    except ValueError as exc:
+        assert "nDMaterials 72" in str(exc)
+    else:
+        raise AssertionError(
+            "Referenced concrete material deletion should be blocked."
+        )
+
+    dialog = NDMaterialDialog(
+        next_tag=73,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    try:
+        index = dialog.material_type.findData("OrthotropicRAConcrete")
+        assert index >= 0
+        dialog.material_type.setCurrentIndex(index)
+        _APP.processEvents()
+        assert dialog._parameter_widgets["conc"].decimals() == 0
+        assert dialog._parameter_widgets["ec"].maximum() < 0.0
+        assert "Referenced uniaxial concrete tag" in dialog.note.text()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+
+def test_concrete_nd_library_search_terms():
+    asd = filter_verified_nd_material_library(
+        query="plastic-damage concrete",
+    )
+    assert [record.model for record in asd] == ["ASDConcrete3D"]
+
+    rotating = filter_verified_nd_material_library(
+        query="rotating-angle cyclic compression",
+    )
+    assert [record.model for record in rotating] == [
+        "OrthotropicRAConcrete"
     ]
 
 
