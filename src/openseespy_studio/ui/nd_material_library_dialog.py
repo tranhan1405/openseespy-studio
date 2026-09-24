@@ -4,6 +4,8 @@ from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -20,10 +22,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..generator import nd_material_to_openseespy
 from ..nd_material_library import (
     NDMaterialLibraryRecord,
+    filter_verified_nd_material_library,
     load_verified_nd_material_library,
     nd_material_from_library_record,
+    nd_material_library_facets,
 )
 from ..project import NDMaterialData, nd_material_parameter_kind
 from ..units import UnitSystem
@@ -44,8 +49,14 @@ class NDMaterialLibraryDialog(QDialog):
         self.resize(1080, 720)
         self._next_tag = int(next_tag)
         self._units = UnitSystem.from_mapping(units)
+        self._unit_mapping = {
+            "length": self._units.length,
+            "force": self._units.force,
+            "time": self._units.time,
+        }
         self._records = load_verified_nd_material_library()
         self._record_by_id = {record.id: record for record in self._records}
+        self._facets = nd_material_library_facets(self._records)
         self._selected_record: NDMaterialLibraryRecord | None = None
 
         root = QVBoxLayout(self)
@@ -75,6 +86,45 @@ class NDMaterialLibraryDialog(QDialog):
         )
         self.search.textChanged.connect(self._apply_filter)
         root.addWidget(self.search)
+
+        filters = QHBoxLayout()
+        filters.addWidget(QLabel("Family"))
+        self.family_filter = QComboBox()
+        self.family_filter.addItem("All", "")
+        for value in self._facets["family"]:
+            self.family_filter.addItem(value, value)
+        self.family_filter.currentIndexChanged.connect(
+            lambda _index: self._apply_filter()
+        )
+        filters.addWidget(self.family_filter)
+
+        filters.addWidget(QLabel("Model"))
+        self.model_filter = QComboBox()
+        self.model_filter.addItem("All", "")
+        for value in self._facets["model"]:
+            self.model_filter.addItem(value, value)
+        self.model_filter.currentIndexChanged.connect(
+            lambda _index: self._apply_filter()
+        )
+        filters.addWidget(self.model_filter)
+
+        filters.addWidget(QLabel("Formulation"))
+        self.compatibility_filter = QComboBox()
+        self.compatibility_filter.addItem("All", "")
+        for value in self._facets["compatibility"]:
+            self.compatibility_filter.addItem(value, value)
+        self.compatibility_filter.currentIndexChanged.connect(
+            lambda _index: self._apply_filter()
+        )
+        filters.addWidget(self.compatibility_filter)
+
+        filters.addStretch(1)
+        self.result_count = QLabel()
+        filters.addWidget(self.result_count)
+        self.clear_filters = QPushButton("Clear Filters")
+        self.clear_filters.clicked.connect(self._clear_filters)
+        filters.addWidget(self.clear_filters)
+        root.addLayout(filters)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         root.addWidget(splitter, 1)
@@ -149,6 +199,22 @@ class NDMaterialLibraryDialog(QDialog):
         source_row.addWidget(self.open_source)
         right_layout.addLayout(source_row)
 
+        preview_title = QLabel("OpenSeesPy Preview")
+        preview_title.setStyleSheet("font-weight: 700;")
+        right_layout.addWidget(preview_title)
+        preview_row = QHBoxLayout()
+        self.command_preview = QLineEdit()
+        self.command_preview.setReadOnly(True)
+        self.command_preview.setPlaceholderText(
+            "Select a verified nD material to preview the generated command."
+        )
+        preview_row.addWidget(self.command_preview, 1)
+        self.copy_command = QPushButton("Copy Command")
+        self.copy_command.setEnabled(False)
+        self.copy_command.clicked.connect(self._copy_command)
+        preview_row.addWidget(self.copy_command)
+        right_layout.addLayout(preview_row)
+
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
@@ -167,7 +233,7 @@ class NDMaterialLibraryDialog(QDialog):
         root.addWidget(buttons)
 
         self._populate_tree()
-        self._select_first_record()
+        self._apply_filter()
 
     def _display_parameter(
         self,
@@ -212,42 +278,64 @@ class NDMaterialLibraryDialog(QDialog):
             )
             family.addChild(item)
 
-    def _select_first_record(self) -> None:
-        if not self._records:
-            return
+    def _select_first_visible_record(self) -> None:
         root = self.tree.invisibleRootItem()
         for family_index in range(root.childCount()):
             family = root.child(family_index)
-            if family.childCount():
-                self.tree.setCurrentItem(family.child(0))
-                return
+            if family.isHidden():
+                continue
+            for record_index in range(family.childCount()):
+                item = family.child(record_index)
+                if not item.isHidden():
+                    self.tree.setCurrentItem(item)
+                    return
+        self.tree.setCurrentItem(None)
+        self._selection_changed(None, None)
 
-    def _apply_filter(self, text: str) -> None:
-        query = str(text).strip().lower()
+    def _clear_filters(self) -> None:
+        self.search.clear()
+        self.family_filter.setCurrentIndex(0)
+        self.model_filter.setCurrentIndex(0)
+        self.compatibility_filter.setCurrentIndex(0)
+        self._apply_filter()
+
+    def _apply_filter(self, _text: str | None = None) -> None:
+        matches = filter_verified_nd_material_library(
+            self._records,
+            query=self.search.text(),
+            family=str(self.family_filter.currentData() or ""),
+            model=str(self.model_filter.currentData() or ""),
+            compatibility=str(
+                self.compatibility_filter.currentData() or ""
+            ),
+        )
+        visible_ids = {record.id for record in matches}
+        self.result_count.setText(
+            f"{len(matches)} / {len(self._records)} shown"
+        )
+
         root = self.tree.invisibleRootItem()
         for family_index in range(root.childCount()):
             family = root.child(family_index)
             family_visible = False
             for record_index in range(family.childCount()):
                 item = family.child(record_index)
-                record = self._record_by_id.get(
-                    str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+                record_id = str(
+                    item.data(0, Qt.ItemDataRole.UserRole) or ""
                 )
-                haystack = ""
-                if record is not None:
-                    haystack = " ".join([
-                        record.family,
-                        record.material,
-                        record.model,
-                        record.preset_name,
-                        *record.behavior,
-                        *record.compatibility,
-                        *record.applicability,
-                    ]).lower()
-                visible = not query or query in haystack
+                visible = record_id in visible_ids
                 item.setHidden(not visible)
                 family_visible = family_visible or visible
             family.setHidden(not family_visible)
+
+        current = self.tree.currentItem()
+        current_id = (
+            str(current.data(0, Qt.ItemDataRole.UserRole) or "")
+            if current is not None
+            else ""
+        )
+        if current_id not in visible_ids:
+            self._select_first_visible_record()
 
     def _selection_changed(
         self,
@@ -272,6 +360,8 @@ class NDMaterialLibraryDialog(QDialog):
             self.compatibility.clear()
             self.scope.clear()
             self.source.clear()
+            self.command_preview.clear()
+            self.copy_command.setEnabled(False)
             return
 
         self.heading.setText(
@@ -333,6 +423,33 @@ class NDMaterialLibraryDialog(QDialog):
             + "\nEvidence: "
             + str(evidence.get("location", ""))
         )
+
+        try:
+            preview_material = nd_material_from_library_record(
+                record,
+                tag=self._next_tag,
+            )
+            preview = nd_material_to_openseespy(
+                preview_material,
+                self._unit_mapping,
+            )
+        except ValueError as exc:
+            preview = "Preview unavailable: " + str(exc)
+            self.copy_command.setEnabled(False)
+        else:
+            self.copy_command.setEnabled(True)
+        self.command_preview.setText(preview)
+        self.command_preview.setToolTip(
+            "Generated in the current project unit system: "
+            f"{self._units.length} - {self._units.force} - "
+            f"{self._units.time}"
+        )
+
+    def _copy_command(self) -> None:
+        command = self.command_preview.text().strip()
+        if not command or command.startswith("Preview unavailable:"):
+            return
+        QApplication.clipboard().setText(command)
 
     def _open_source(self) -> None:
         record = self._selected_record
