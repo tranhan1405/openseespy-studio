@@ -591,6 +591,25 @@ class ConnectionDialog(QDialog):
             self.joint_node_spins.append(spin)
             joint_nodes_form.addRow(f"{label} node:", spin)
         joint_layout.addWidget(joint_nodes_group)
+
+        self.joint_center_tag = QSpinBox()
+        self.joint_center_tag.setRange(0, 2_147_483_647)
+        self.joint_center_tag.setSpecialValueText("Auto")
+        self.joint_center_tag.setValue(
+            int(
+                connection.parameters.get("imported_center_node_tag", 0)
+            )
+            if (
+                connection is not None
+                and connection.connection_type == "Joint2D"
+            )
+            else 0
+        )
+        joint_nodes_form.addRow(
+            "Joint2D center node tag:",
+            self.joint_center_tag,
+        )
+
         joint_order_hint = QLabel(
             "When four nodes are preselected, SARE orders them cyclically "
             "and starts from the left-most node. Verify Left → Top → Right → "
@@ -1057,6 +1076,7 @@ class ConnectionDialog(QDialog):
         for combo in self.interface_material_combos:
             combo.setEnabled(joint2d_mode)
         self.large_disp.setEnabled(joint2d_mode)
+        self.joint_center_tag.setEnabled(joint2d_mode)
         for spin in (self.rigid_a, self.rigid_e, self.rigid_i):
             spin.setEnabled(kraw_mode)
 
@@ -1656,6 +1676,10 @@ class ConnectionDialog(QDialog):
                 parameters["large_disp"] = int(
                     self.large_disp.currentData()
                 )
+                if self.joint_center_tag.value() > 0:
+                    parameters["imported_center_node_tag"] = int(
+                        self.joint_center_tag.value()
+                    )
                 for index, material_tag in enumerate(interfaces, start=101):
                     if material_tag > 0:
                         referenced_materials[index] = material_tag
