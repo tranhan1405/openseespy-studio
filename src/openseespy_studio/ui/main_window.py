@@ -4839,15 +4839,61 @@ class MainWindow(QMainWindow):
         if not dialog.exec():
             return
 
-        before = self.project.to_dict()
         try:
             spec = dialog.data()
+        except (KeyError, TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "RC Wall Wizard",
+                str(exc),
+            )
+            return
+
+        if spec.replace_geometry and (
+            self.model.nodes or self.model.elements
+        ):
+            answer = QMessageBox.question(
+                self,
+                "Replace Current FE Model",
+                (
+                    "RC Wall Wizard is set to Replace mode.\n\n"
+                    "Existing FE nodes/elements and model-linked loads, "
+                    "constraints, recorders, analyses and results will be "
+                    "cleared. Material/section libraries are preserved.\n\n"
+                    "Continue and generate the wall?"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+        before = self.project.to_dict()
+        try:
             self.selection.clear()
             self._reset_runtime_results()
             result = build_rc_wall(
                 self.project,
                 spec,
             )
+            generated_errors = [
+                issue
+                for issue in validate_project(self.project)
+                if issue.severity == "ERROR"
+            ]
+            if generated_errors:
+                preview = "\n".join(
+                    f"- {issue.message}"
+                    for issue in generated_errors[:6]
+                )
+                if len(generated_errors) > 6:
+                    preview += (
+                        f"\n- ... {len(generated_errors) - 6} more error(s)"
+                    )
+                raise ValueError(
+                    "Generated RC wall failed SARE Model Check:\n"
+                    + preview
+                )
         except (KeyError, TypeError, ValueError) as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
@@ -4860,16 +4906,18 @@ class MainWindow(QMainWindow):
             return
 
         self.model = self.project.model
+        named = ", ".join(result.selection_set_names)
         self._refresh_all(
-            f"Created RC wall · {len(result.node_tags)} nodes · "
+            f"Created {spec.name} · {len(result.node_tags)} nodes · "
             f"{len(result.element_tags)} MEFI elements · "
-            f"{len(result.section_tags)} RCLMS sections"
+            f"{len(result.section_tags)} RCLMS sections · "
+            f"named selections: {named}"
         )
         self.selection.set_selection(
             nodes=set(result.top_node_tags)
         )
         self._record_project_change(
-            "Create RC wall with MEFI/RCLMS",
+            f"Create RC wall {spec.name} with MEFI/RCLMS",
             before,
         )
         self.viewport.set_view("xy")
