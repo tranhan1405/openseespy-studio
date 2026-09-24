@@ -351,6 +351,21 @@ def _validate_parameter_values(
                     f"{key} >= 0."
                 )
 
+    if model == "SmearedSteelDoubleLayer":
+        for key in ("mat1", "mat2"):
+            tag = parameters[key]
+            if not tag.is_integer() or tag <= 0.0:
+                raise ValueError(
+                    f"Official nD material record {record_id!r} requires "
+                    f"{key} to be a positive integer uniaxial tag."
+                )
+        for key in ("ratio1", "ratio2"):
+            if not 0.0 <= parameters[key] <= 1.0:
+                raise ValueError(
+                    f"Official nD material record {record_id!r} requires "
+                    f"0 <= {key} <= 1."
+                )
+
 
 def _record_from_dict(raw: dict[str, Any]) -> NDMaterialLibraryRecord:
     record_id = str(raw.get("id", "")).strip()
