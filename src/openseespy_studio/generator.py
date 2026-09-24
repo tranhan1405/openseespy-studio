@@ -3714,6 +3714,71 @@ def transformation_to_openseespy(
     )
 
 
+def build_joint_response_specs(
+    *,
+    connections: dict[int, ConnectionData] | None,
+    solution_results: dict[int, object] | None,
+    active_analysis: AnalysisSettingsData | None,
+) -> dict[int, dict[str, object]]:
+    """Return only joint histories explicitly requested for this analysis."""
+    if active_analysis is None:
+        return {}
+    requested: dict[int, set[str]] = {}
+    connection_map = connections or {}
+
+    pair_map = {
+        "force": "deformation",
+        "deformation": "force",
+        "basicForce": "basicDisplacement",
+        "basicDisplacement": "basicForce",
+        "localForce": "localDisplacement",
+        "localDisplacement": "localForce",
+    }
+
+    for result in (solution_results or {}).values():
+        if str(getattr(result, "result_type", "")) != "JointResponse":
+            continue
+        if int(getattr(result, "analysis_tag", -1)) != int(active_analysis.tag):
+            continue
+        scope = list(getattr(result, "element_scope", ()) or ())
+        if len(scope) != 1:
+            continue
+        connection_tag = int(scope[0])
+        connection = connection_map.get(connection_tag)
+        if connection is None:
+            continue
+        settings = dict(getattr(result, "settings", {}) or {})
+        response = str(settings.get("response", "deformation"))
+        allowed = CONNECTION_HISTORY_RESPONSES.get(
+            connection.connection_type,
+            (),
+        )
+        if response not in allowed:
+            continue
+        response_set = requested.setdefault(connection_tag, set())
+        response_set.add(response)
+
+        if str(settings.get("curve_mode", "history")) == "force_deformation":
+            paired = pair_map.get(response)
+            if paired in allowed:
+                response_set.add(str(paired))
+
+    return {
+        tag: {
+            "connection_type": connection_map[tag].connection_type,
+            "responses": [
+                response
+                for response in CONNECTION_HISTORY_RESPONSES.get(
+                    connection_map[tag].connection_type,
+                    (),
+                )
+                if response in responses
+            ],
+        }
+        for tag, responses in sorted(requested.items())
+    }
+
+
 def to_openseespy(
     model: StructuralModel,
     materials: dict[int, MaterialData] | None = None,
@@ -5391,6 +5456,11 @@ def to_openseespy(
             solution_results=solution_results,
             active_analysis=active,
         )
+        joint_response_specs = build_joint_response_specs(
+            connections=connections,
+            solution_results=solution_results,
+            active_analysis=active,
+        )
 
         response_spectrum_components = _response_spectrum_sources(
             active,
@@ -5473,20 +5543,7 @@ def to_openseespy(
                     for tag, connection in (connections or {}).items()
                     if connection.connection_type == "KrawinklerPanelZone"
                 ],
-                joint_response_specs={
-                    int(tag): {
-                        "connection_type": connection.connection_type,
-                        "responses": list(
-                            CONNECTION_HISTORY_RESPONSES.get(
-                                connection.connection_type,
-                                (),
-                            )
-                        ),
-                    }
-                    for tag, connection in (connections or {}).items()
-                    if connection.connection_type
-                    in CONNECTION_HISTORY_RESPONSES
-                },
+                joint_response_specs=joint_response_specs,
             )
         )
 
