@@ -34,7 +34,7 @@ node(2, *[0., 0.])
 node(3, *[0., 200.])
 node(4, *[0., 1350.])
 geomTransf("Linear", 1)
-element("zeroLength", 1, *[1, 2], "-mat", 2, "-dir", 3)
+element("zeroLength", 1, *[1, 2], "-mat", 2, "-dir", 6)
 beamIntegration("Legendre", 1, 1, 4)
 element("dispBeamColumn", 2, 2, 3, 1, 1)
 element(
