@@ -2384,3 +2384,17 @@ def test_legacy_beam_column_joint_3d_result_is_revalidated_on_load():
         raise AssertionError(
             "Expected legacy unsafe BeamColumnJoint3d result to fail load"
         )
+
+
+def test_connection_joint_tab_is_scrollable():
+    import inspect
+    from openseespy_studio.ui.connection_dialog import ConnectionDialog
+
+    source = inspect.getsource(ConnectionDialog.__init__)
+
+    assert "self.joint_scroll = QScrollArea()" in source
+    assert "self.joint_scroll.setWidgetResizable(True)" in source
+    assert "Qt.ScrollBarAsNeeded" in source
+    assert "self.joint_scroll.setWidget(joint_page)" in source
+    assert "self.tabs.addTab(" in source
+    assert "self.joint_scroll," in source
