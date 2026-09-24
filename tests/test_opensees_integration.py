@@ -8,6 +8,10 @@ import sys
 
 import pytest
 
+from openseespy_studio.crack_results import (
+    mefi_crack_panel_states,
+    mefi_crack_summary,
+)
 from openseespy_studio.generator import material_to_openseespy, to_openseespy
 from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.model import StructuralModel
@@ -2434,3 +2438,152 @@ def test_rw_a20_100kn_load_exceeds_mefi_cracking_strain_in_real_opensees(
         "Expected the 100 kN RW-A20 check to exceed the configured "
         f"cracking strain; max epsilon1/epsilon_cr={max(ratios):.6g}"
     )
+
+
+def test_imported_rc_wall_produces_crack_history_in_real_opensees(
+    tmp_path: Path,
+):
+    lines = [
+        "import openseespy.opensees as ops",
+        "ops.model('basic', '-ndm', 2, '-ndf', 3)",
+    ]
+    height = 2209.8
+    width = 1220.0
+    levels = 7
+    dy = height / levels
+    node_tag = 1
+    for level in range(levels + 1):
+        y = level * dy
+        lines.append(f"ops.node({node_tag}, 0.0, {y!r})")
+        lines.append(f"ops.node({node_tag + 1}, {width!r}, {y!r})")
+        node_tag += 2
+    lines.extend([
+        "ops.fix(1, 1, 1, 1)",
+        "ops.fix(2, 1, 1, 1)",
+        "ops.uniaxialMaterial('Steel02', 1, 469.93, 200000.0, 0.02, 20.0, 0.925, 0.15)",
+        "ops.uniaxialMaterial('Steel02', 2, 409.71, 200000.0, 0.02, 20.0, 0.925, 0.15)",
+        "ops.uniaxialMaterial('Steel02', 3, 429.78, 200000.0, 0.01, 20.0, 0.925, 0.15)",
+        "ops.uniaxialMaterial('Concrete02', 4, -47.09, -0.00232, 0.0, -0.037, 0.1, 2.13, 1738.33)",
+        "ops.uniaxialMaterial('Concrete02', 5, -53.78, -0.00397, -9.42, -0.047, 0.1, 2.13, 1827.12)",
+        "ops.nDMaterial('OrthotropicRAConcrete', 6, 4, 0.00008, -0.00232, 0.0, '-damageCte1', 0.175, '-damageCte2', 0.5)",
+        "ops.nDMaterial('OrthotropicRAConcrete', 7, 5, 0.00008, -0.00397, 0.0, '-damageCte1', 0.175, '-damageCte2', 0.5)",
+        "ops.nDMaterial('SmearedSteelDoubleLayer', 8, 1, 2, 0.0027, 0.0027, 0.0)",
+        "ops.nDMaterial('SmearedSteelDoubleLayer', 9, 1, 3, 0.0082, 0.0323, 0.0)",
+        "ops.section('RCLMS', 10, 1, 1, '-reinfSteel', 8, '-conc', 6, '-concThick', 152.4)",
+        "ops.section('RCLMS', 11, 1, 2, '-reinfSteel', 9, '-conc', 6, 7, '-concThick', 50.8, 101.6)",
+    ])
+    widths = [
+        228.6,
+        127.1333333333,
+        127.1333333333,
+        127.1333333333,
+        127.1333333333,
+        127.1333333333,
+        127.1333333335,
+        228.6,
+    ]
+    sections = [11, 10, 10, 10, 10, 10, 10, 11]
+    for element_tag in range(1, levels + 1):
+        bottom_left = 2 * element_tag - 1
+        bottom_right = 2 * element_tag
+        top_left = bottom_left + 2
+        top_right = bottom_right + 2
+        width_text = ", ".join(repr(value) for value in widths)
+        section_text = ", ".join(str(value) for value in sections)
+        lines.append(
+            f"ops.element('MEFI', {element_tag}, "
+            f"{bottom_left}, {bottom_right}, {top_right}, {top_left}, 8, "
+            f"'-width', {width_text}, '-sec', {section_text})"
+        )
+
+    imported = import_openseespy_source(
+        "\n".join(lines),
+        source_name="imported-rw-a20.py",
+        units={"length": "mm", "force": "N", "time": "s"},
+    )
+    assert imported.error_count == 0
+    assert imported.unsupported_count == 0
+
+    project = imported.project
+    time_series = {
+        1: TimeSeriesData(1, "Lateral", "Linear", factor=1.0)
+    }
+    patterns = {
+        1: LoadPatternData(
+            1,
+            "Lateral",
+            "Plain",
+            time_series_tag=1,
+        )
+    }
+    loads = {
+        1: NodalLoadData(
+            1,
+            "Top left",
+            pattern_tag=1,
+            node_tag=15,
+            values=(50000.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        ),
+        2: NodalLoadData(
+            2,
+            "Top right",
+            pattern_tag=1,
+            node_tag=16,
+            values=(50000.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        ),
+    }
+    analysis = AnalysisSettingsData(
+        1,
+        "Imported RC wall crack check",
+        analysis_type="Static",
+        constraints_handler="Transformation",
+        numberer="RCM",
+        system="UmfPack",
+        test="NormDispIncr",
+        tolerance=1.0e-8,
+        max_iterations=100,
+        algorithm="Newton",
+        integrator="LoadControl",
+        steps=100,
+        load_increment=0.01,
+        control_node=16,
+        control_dof=1,
+        recovery=True,
+        adaptive_step=False,
+        live_convergence=False,
+    )
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        time_series=time_series,
+        load_patterns=patterns,
+        nodal_loads=loads,
+        analyses={1: analysis},
+        active_analysis_tag=1,
+        nd_materials=project.nd_materials,
+        units=project.units,
+    )
+
+    script_path = tmp_path / "imported-rw-a20.py"
+    result_path = tmp_path / "imported-rw-a20-result.json"
+    script_path.write_text(script, encoding="utf-8")
+    exit_code = run_script(script_path, result_path)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0, payload.get("error", "")
+    assert payload["status"] == "completed"
+    results = payload["results"]
+
+    states = mefi_crack_panel_states(results)
+    summary = mefi_crack_summary(states)
+    assert summary["elements"] == 7
+    assert summary["panels"] == 56
+    assert summary["valid_panels"] == 56
+    assert summary["cracked"] >= 1
+    assert summary["max_ratio"] >= 1.0
+    assert len(results["history"]["mefi_panel_strains"]["1"]["1"]) == 100
