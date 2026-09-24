@@ -1322,15 +1322,13 @@ class _Importer:
                     None,
                     "beamColumnJoint",
                     (
-                        "BeamColumnJoint3d currently ignores optional "
-                        "height/width factors in OpenSees. Imported values "
-                        f"({parameters['height_factor']:g}, "
-                        f"{parameters['width_factor']:g}) were normalized "
-                        "to 1.0 for solver-faithful SARE behavior."
+                        "BeamColumnJoint3d factors were preserved for "
+                        "round-trip fidelity. In the current OpenSees source, "
+                        "HgtFac/WdtFac remain in the internal spring "
+                        "formulation, while setDomain computes elemHeight/"
+                        "elemWidth with unit geometric scale."
                     ),
                 )
-                parameters["height_factor"] = 1.0
-                parameters["width_factor"] = 1.0
             self.project.add_connection(
                 ConnectionData(
                     tag=tag,
