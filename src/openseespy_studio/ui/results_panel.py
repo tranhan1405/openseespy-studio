@@ -3810,7 +3810,12 @@ class ResultsPanel(QWidget):
             0.0,
             time.monotonic() - float(self._motion_play_anchor_time),
         )
-        elapsed_frames = int(elapsed * self._motion_effective_fps())
+        # Protect exact frame-boundary products (for example 0.05 s ×
+        # 240 fps) from binary floating-point underflow to 11.999...
+        # while preserving floor semantics for genuine fractional progress.
+        elapsed_frames = int(
+            elapsed * self._motion_effective_fps() + 1.0e-9
+        )
         if elapsed_frames <= 0:
             return
 

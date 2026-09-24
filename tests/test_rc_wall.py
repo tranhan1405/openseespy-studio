@@ -423,7 +423,7 @@ def test_rc_wall_wizard_converts_benchmark_geometry_to_project_units():
         assert math.isclose(spec.rho_x_web, 0.0027)
         assert math.isclose(spec.rho_y_boundary, 0.0323)
         assert dialog.vertical_elements.value() == 7
-        assert "7 MEFI rows" in dialog.review.text()
+        assert "Vertical MEFI elements: 7" in dialog.review.text()
     finally:
         dialog.close()
         dialog.deleteLater()

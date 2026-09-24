@@ -34,7 +34,7 @@ def test_static_generator_collects_results_and_history():
     assert "'element_section_forces': _studio_element_section_forces" in text
     assert "ops.getLoadFactor(_studio_pattern)" in text
     assert "'load_factors': _studio_load_factors" in text
-    assert "'schema_version': 12" in text
+    assert "'schema_version': 13" in text
     assert "'monitor_node': 2" in text
     assert "'base_reactions': []" in text
     assert "'nodes': {}" in text
