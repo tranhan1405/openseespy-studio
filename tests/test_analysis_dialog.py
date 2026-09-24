@@ -301,3 +301,28 @@ def test_static_displacement_control_only_serializes_preload_while_supported():
         assert dialog.data().preload_gravity is False
     finally:
         _close(dialog)
+
+
+def test_cpu_execution_controls_enable_thread_count_only_for_multithread():
+    dialog = AnalysisDialog(analysis_type="Static")
+    try:
+        assert dialog.execution_mode.currentText() == "Auto"
+        assert not dialog.num_threads.isEnabled()
+
+        dialog.execution_mode.setCurrentText("Multi-thread")
+        _APP.processEvents()
+        assert dialog.num_threads.isEnabled()
+        dialog.num_threads.setValue(4)
+        data = dialog.data()
+        assert data.execution_mode == "Multi-thread"
+        assert data.num_threads == 4
+
+        dialog.execution_mode.setCurrentText("Single Thread")
+        _APP.processEvents()
+        assert not dialog.num_threads.isEnabled()
+        assert dialog.num_threads.value() == 1
+        data = dialog.data()
+        assert data.execution_mode == "Single Thread"
+        assert data.num_threads == 1
+    finally:
+        _close(dialog)
