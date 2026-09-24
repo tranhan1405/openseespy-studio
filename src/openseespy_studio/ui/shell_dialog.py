@@ -63,6 +63,7 @@ class NDMaterialDialog(QDialog):
         ("J2 plasticity (von Mises)", "J2Plasticity"),
         ("Drucker-Prager", "DruckerPrager"),
         ("Pressure-independent multi-yield", "PressureIndependMultiYield"),
+        ("Pressure-dependent multi-yield", "PressureDependMultiYield"),
     )
 
     PARAMETER_LABELS = {
@@ -102,6 +103,19 @@ class NDMaterialDialog(QDialog):
         "refPress": "Reference pressure p'r",
         "pressDependCoe": "Pressure-dependence coefficient d",
         "noYieldSurf": "Number of yield surfaces",
+        "PTAng": "Phase transformation angle ΦPT [deg]",
+        "contrac": "Contraction parameter",
+        "dilat1": "Dilation parameter 1",
+        "dilat2": "Dilation parameter 2",
+        "liquefac1": "Liquefaction pressure threshold",
+        "liquefac2": "Liquefaction strain parameter 2",
+        "liquefac3": "Liquefaction bias parameter 3",
+        "e": "Initial void ratio e",
+        "cs1": "Critical-state parameter cs1",
+        "cs2": "Critical-state parameter cs2",
+        "cs3": "Critical-state parameter cs3",
+        "pa": "Atmospheric normalization pressure pa",
+        "c": "Numerical pressure constant c",
     }
 
     def __init__(
@@ -270,14 +284,21 @@ class NDMaterialDialog(QDialog):
                 low, decimals = 0.0, 8
                 if key == "theta":
                     high = 1.0
-            elif material_type == "PressureIndependMultiYield":
+            elif material_type in {
+                "PressureIndependMultiYield",
+                "PressureDependMultiYield",
+            }:
                 if key == "nd":
                     low, high, decimals = 2.0, 3.0, 0
                 elif key == "noYieldSurf":
                     low, high, decimals = 1.0, 39.0, 0
-                elif key == "frictionAng":
+                elif key in {"frictionAng", "PTAng"}:
                     low, high, decimals = 0.0, 89.999999, 6
-                elif key in {"peakShearStra", "pressDependCoe"}:
+                elif key in {
+                    "peakShearStra", "pressDependCoe", "contrac",
+                    "dilat1", "dilat2", "liquefac2", "liquefac3",
+                    "e", "cs1", "cs2", "cs3", "c",
+                }:
                     low = 0.0
 
             widget = _float_spin(
@@ -318,7 +339,7 @@ class NDMaterialDialog(QDialog):
                 "only; it is intentionally not available for PlateFiber "
                 "shell sections in SARE."
             )
-        else:
+        elif material_type == "PressureIndependMultiYield":
             text = (
                 "Pressure-independent multi-yield soil/clay model using "
                 "automatic nested yield surfaces. OpenSees supports nd=2 "
@@ -326,6 +347,16 @@ class NDMaterialDialog(QDialog):
                 "elastic; elastoplastic response requires updateMaterialStage. "
                 "SARE currently supports positive automatic noYieldSurf only, "
                 "not explicit custom surface pairs."
+            )
+        else:
+            text = (
+                "Pressure-dependent multi-yield sand/silt model with "
+                "contraction, dilation and cyclic-mobility parameters. "
+                "OpenSees supports nd=2 (plane strain) or nd=3 (3D). "
+                "Gravity/static loading is elastic; elastoplastic response "
+                "requires updateMaterialStage. SARE supports the automatic "
+                "yield-surface form, including documented critical-state "
+                "optional parameters, but not explicit custom surface pairs."
             )
         self.note.setText(text)
 
