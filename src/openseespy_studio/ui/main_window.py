@@ -156,7 +156,7 @@ from ..line_mesher import (
 )
 from ..section_response import section_response_sources
 from ..response_spectrum import build_period_grid
-from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LineGeometryData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SketchPlaneData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind
+from ..project import AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, LineGeometryData, LoadPatternData, MassSourceData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, PointGeometryData, ProjectDatabase, RecorderData, SketchPlaneData, SectionData, SurfaceEdgeLoadData, SurfaceEdgeSupportData, SurfaceGeometryData, SurfacePressureData, SurfaceRecorderData, SelectionSetData, SolutionResultData, TimeSeriesData, TransformationData, SHELL_SECTION_TYPES, SUPPORTED_CONNECTION_TYPES, material_parameter_kind, ND_MATERIAL_PARAMETER_ORDER, nd_material_parameter_kind
 from ..runtime import (
     build_worker_pythonpath,
     opensees_material_requires_runtime_probe,
@@ -16190,30 +16190,60 @@ class MainWindow(QMainWindow):
             return
         unit_system = UnitSystem.from_mapping(self.project.units)
         p = material.parameters
+        labels = {
+            "E": "Elastic modulus E",
+            "nu": "Poisson ratio ν",
+            "rho": "Density ρ",
+            "Ex": "Elastic modulus Ex",
+            "Ey": "Elastic modulus Ey",
+            "Ez": "Elastic modulus Ez",
+            "nu_xy": "Poisson ratio νxy",
+            "nu_yz": "Poisson ratio νyz",
+            "nu_zx": "Poisson ratio νzx",
+            "Gxy": "Shear modulus Gxy",
+            "Gyz": "Shear modulus Gyz",
+            "Gzx": "Shear modulus Gzx",
+            "K": "Bulk modulus K",
+            "G": "Shear modulus G",
+            "sig0": "Initial yield stress σ0",
+            "sigInf": "Saturation yield stress σ∞",
+            "delta": "Exponential hardening δ",
+            "H": "Linear hardening H",
+        }
         rows = [
             ("Tag", material.tag),
             ("Name", material.name),
             ("Type", material.material_type),
-            (
-                f"E [{unit_system.engineering_stress_label}]",
-                f"{unit_system.engineering_stress_from_pa(p['E']):g}",
-            ),
-            ("Poisson ratio ν", f"{p['nu']:g}"),
-            (
-                f"Density ρ [{unit_system.engineering_density_label}]",
-                f"{unit_system.engineering_density_from_kg_per_m3(p['rho']):g}",
-            ),
-            (
-                "Used by Shell sections",
-                ", ".join(
-                    map(
-                        str,
-                        self.project.sections_using_nd_material(tag),
-                    )
-                )
-                or "-",
-            ),
         ]
+        for key in ND_MATERIAL_PARAMETER_ORDER[material.material_type]:
+            value = float(p[key])
+            kind = nd_material_parameter_kind(
+                material.material_type,
+                key,
+            )
+            label = labels.get(key, key)
+            if kind == "stress":
+                rows.append((
+                    f"{label} [{unit_system.engineering_stress_label}]",
+                    f"{unit_system.engineering_stress_from_pa(value):g}",
+                ))
+            elif kind == "density":
+                rows.append((
+                    f"{label} [{unit_system.engineering_density_label}]",
+                    f"{unit_system.engineering_density_from_kg_per_m3(value):g}",
+                ))
+            else:
+                rows.append((label, f"{value:g}"))
+        rows.append((
+            "Used by Shell sections",
+            ", ".join(
+                map(
+                    str,
+                    self.project.sections_using_nd_material(tag),
+                )
+            )
+            or "-",
+        ))
         self.properties_panel.set_properties("nD Material", rows)
 
     def _create_material(self) -> None:
