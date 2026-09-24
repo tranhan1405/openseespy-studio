@@ -641,7 +641,7 @@ ND_MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
         "cohesi": 3.7e4,
         "peakShearStra": 0.10,
         "frictionAng": 0.0,
-        "refPress": 8.0e4,
+        "refPress": 1.0e5,
         "pressDependCoe": 0.0,
         "noYieldSurf": 20.0,
     },
