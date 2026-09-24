@@ -152,6 +152,7 @@ class RCWallWizard(QWizard):
         super().__init__(parent)
         self.project = project
         self.units = UnitSystem.from_mapping(project.units)
+        self._applying_preset = False
         self.setWindowTitle("RC Wall Wizard · MEFI / RCLMS")
         self.resize(760, 650)
         self.setOption(
@@ -199,6 +200,14 @@ class RCWallWizard(QWizard):
         self.preset.currentIndexChanged.connect(self._preset_changed)
         form.addRow("Preset:", self.preset)
 
+        self.wall_name = QLineEdit("RC Wall")
+        self.replace_geometry = QCheckBox(
+            "Replace current FE geometry and model-linked analysis data"
+        )
+        self.replace_geometry.setChecked(True)
+        form.addRow("Wall name:", self.wall_name)
+        form.addRow("", self.replace_geometry)
+
         self.width = _double(1220.0, 1.0e-9)
         self.height = _double(2209.8, 1.0e-9)
         self.thickness = _double(152.4, 1.0e-9)
@@ -229,7 +238,16 @@ class RCWallWizard(QWizard):
             "padding: 8px; background: #eef4fb; color: #40566c;"
         )
         layout.addWidget(note)
+        self.preview = RCWallPreview()
+        layout.addWidget(self.preview)
         layout.addStretch(1)
+
+        self.wall_name.textChanged.connect(
+            lambda _text: self._mark_custom()
+        )
+        self.replace_geometry.toggled.connect(
+            lambda _checked: self._update_review()
+        )
 
         for widget in (
             self.width,
@@ -241,7 +259,7 @@ class RCWallWizard(QWizard):
         ):
             if hasattr(widget, "valueChanged"):
                 widget.valueChanged.connect(
-                    lambda _value: self._update_review()
+                    lambda _value: self._geometry_changed()
                 )
 
         self.addPage(page)
