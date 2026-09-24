@@ -4878,8 +4878,8 @@ class MainWindow(QMainWindow):
             (
                 issue.category,
                 issue.message,
-                issue.object_kind,
-                issue.object_tag,
+                issue.entity_kind,
+                issue.entity_tag,
             )
             for issue in validate_project(self.project)
             if issue.severity == "ERROR"
@@ -4897,8 +4897,8 @@ class MainWindow(QMainWindow):
                     and (
                         issue.category,
                         issue.message,
-                        issue.object_kind,
-                        issue.object_tag,
+                        issue.entity_kind,
+                        issue.entity_tag,
                     ) not in existing_error_keys
                 )
             ]
