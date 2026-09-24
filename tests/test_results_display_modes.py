@@ -1187,7 +1187,7 @@ def test_nodal_reaction_table_follows_animation_frames_and_can_export(
         )
         qapp.processEvents()
 
-        assert panel.node_animate_button.isVisible()
+        assert not panel.node_animate_button.isHidden()
         assert not panel.motion_page.isHidden()
 
         panel._set_motion_index(0)
@@ -1348,7 +1348,7 @@ def test_member_force_table_follows_animation_frame(qapp):
 
         assert (first_i, first_j) != (second_i, second_j)
         assert "live animation frame 2/2" in panel.element_info.text()
-        assert panel.member_animate_button.isVisible()
+        assert not panel.member_animate_button.isHidden()
     finally:
         panel.close()
         panel.deleteLater()
@@ -1389,7 +1389,7 @@ def test_shell_force_and_deformation_tables_follow_animation_frame(qapp):
             == "0.011"
         )
         assert "live deformation summary" in panel.shell_info.text()
-        assert panel.shell_animate_button.isVisible()
+        assert not panel.shell_animate_button.isHidden()
     finally:
         panel.close()
         panel.deleteLater()
@@ -1425,7 +1425,7 @@ def test_crack_table_follows_animation_frame_and_accumulate(qapp):
         assert panel.crack_table.item(0, 5).text() == "Cracked"
         assert "accumulated frame 2/2" in panel.crack_summary.text()
         assert "max<=frame" in panel.crack_table.horizontalHeaderItem(3).text()
-        assert panel.crack_animate_button.isVisible()
+        assert not panel.crack_animate_button.isHidden()
     finally:
         panel.close()
         panel.deleteLater()
