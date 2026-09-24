@@ -1220,9 +1220,6 @@ class ResultsPanel(QWidget):
                     self.motion_frame_spin.blockSignals(False)
                     self.motion_slider.blockSignals(False)
             self._select_tab("Crack Pattern")
-            if hasattr(self, "crack_detail_tabs"):
-                self.crack_detail_tabs.setCurrentIndex(0)
-            self._populate_crack_evolution()
             if self._motion_display_frame_count > 0:
                 self._sync_crack_table_frame(
                     self._motion_source_index(self._motion_frame_index)
@@ -2385,11 +2382,7 @@ class ResultsPanel(QWidget):
                 "Element",
                 "Panel",
                 "εcr",
-                (
-                    "ε1 max≤frame"
-                    if accumulated
-                    else "ε1 state"
-                ),
+                "ε1 max≤frame" if accumulated else "ε1 state",
                 "ε1 / εcr",
                 "State",
             ])
@@ -2416,22 +2409,14 @@ class ResultsPanel(QWidget):
                     (
                         "Cracked"
                         if state.cracked
-                        else (
-                            "Below εcr"
-                            if state.valid
-                            else "No data"
-                        )
+                        else ("Below εcr" if state.valid else "No data")
                     ),
                 )
                 for column, value in enumerate(values):
                     item = self.crack_table.item(row_index, column)
                     if item is None:
                         item = QTableWidgetItem()
-                        self.crack_table.setItem(
-                            row_index,
-                            column,
-                            item,
-                        )
+                        self.crack_table.setItem(row_index, column, item)
                     item.setText(value)
                     if column == 0:
                         item.setData(Qt.UserRole, int(state.element_tag))
@@ -2467,14 +2452,12 @@ class ResultsPanel(QWidget):
             f"max ε1/εcr = {float(summary['max_ratio']):.3f} · "
             f"{'accumulated' if accumulated else 'active'} {frame_label}."
         )
-
         ready = (
             int(health["panels"]) > 0
             and int(health["valid"]) == int(health["panels"])
         )
-        state = "READY" if ready else "INCOMPLETE"
         self.crack_health.setText(
-            f"Data health: {state} · "
+            f"Data health: {'READY' if ready else 'INCOMPLETE'} · "
             f"specs={int(health['spec_elements'])} element(s) · "
             f"εcr={int(health['thresholds'])}/{int(health['panels'])} · "
             f"panel strain={int(health['strains'])}/{int(health['panels'])} · "
@@ -2495,8 +2478,7 @@ class ResultsPanel(QWidget):
         elif int(health["strains"]) < int(health["panels"]):
             self.crack_info.setText(
                 "Some RCPanel panel_strain responses are missing. Re-run "
-                "the analysis; if this remains, inspect the OpenSees MEFI "
-                "response support for the affected panels."
+                "the analysis and inspect the affected MEFI panels."
             )
         else:
             self.crack_info.setText(
@@ -2519,11 +2501,7 @@ class ResultsPanel(QWidget):
                     str(int(row["valid_panels"])),
                     str(int(row["cracked"])),
                     f"{float(row['max_ratio']):.3f}",
-                    (
-                        "Cracked"
-                        if int(row["cracked"]) > 0
-                        else "Below εcr"
-                    ),
+                    "Cracked" if int(row["cracked"]) > 0 else "Below εcr",
                 )
                 for column, value in enumerate(values):
                     item = self.crack_evolution_table.item(
@@ -2564,9 +2542,8 @@ class ResultsPanel(QWidget):
         item = self.crack_evolution_table.item(int(row), 0)
         if item is None:
             return
-        raw = item.data(Qt.UserRole)
         try:
-            frame_index = int(raw)
+            frame_index = int(item.data(Qt.UserRole))
         except (TypeError, ValueError):
             return
         if self._motion_display_frame_count > 0:
@@ -2587,6 +2564,1696 @@ class ResultsPanel(QWidget):
             sorted(self._active_crack_element_scope),
         )
 
+
+    def _crack_controls_changed(self, *_args) -> None:
+        if self._active_solution_kind != "CrackPattern":
+            return
+        if self._motion_display_frame_count > 0:
+            source_index = self._motion_source_index(
+                self._motion_frame_index
+            )
+        else:
+            source_index = -1
+        if self._motion_display_frame_count > 0:
+            self._sync_crack_table_frame(
+                self._motion_source_index(self._motion_frame_index)
+            )
+        self.crack_frame_requested.emit(
+            int(source_index),
+            bool(self.crack_accumulate.isChecked()),
+            float(self.crack_line_scale.value()),
+            sorted(self._active_crack_element_scope),
+        )
+
+    def _build_fiber_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Element:"))
+        self.fiber_element = QComboBox()
+        self.fiber_element.currentIndexChanged.connect(
+            self._fiber_element_changed
+        )
+        controls.addWidget(self.fiber_element)
+
+        controls.addWidget(QLabel("Section/IP:"))
+        self.fiber_section = QComboBox()
+        self.fiber_section.currentIndexChanged.connect(
+            self._update_fiber_view
+        )
+        controls.addWidget(self.fiber_section)
+
+        controls.addWidget(QLabel("Quantity:"))
+        self.fiber_quantity = QComboBox()
+        self.fiber_quantity.addItems(["Stress", "Strain"])
+        self.fiber_quantity.currentTextChanged.connect(
+            self._update_fiber_view
+        )
+        controls.addWidget(self.fiber_quantity)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.fiber_info = QLabel(
+            "Run a nonlinear beam-column model with a FiberSection "
+            "to inspect final fiber stress/strain."
+        )
+        self.fiber_info.setWordWrap(True)
+        layout.addWidget(self.fiber_info)
+
+        self.fiber_plot = FiberResponsePlot()
+        self.fiber_plot.fiber_selected.connect(
+            self._fiber_selected
+        )
+        layout.addWidget(self.fiber_plot, 1)
+
+        self.fiber_selected_info = QLabel(
+            "Click a fiber to inspect material, stress and strain."
+        )
+        self.fiber_selected_info.setWordWrap(True)
+        layout.addWidget(self.fiber_selected_info)
+
+        self.tabs.addTab(page, "Fiber Response")
+
+    def _build_hinge_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        controls = QHBoxLayout()
+        show = QPushButton("Show States on Model")
+        show.clicked.connect(self.hinge_state_requested.emit)
+        clear = QPushButton("Clear")
+        clear.clicked.connect(self.clear_overlay_requested.emit)
+        controls.addWidget(show)
+        controls.addWidget(clear)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.hinge_info = QLabel(
+            "Fiber-based diagnostic states: Elastic → Nonlinear/near yield "
+            "→ Yielding/softening → Plastic/crushing."
+        )
+        self.hinge_info.setWordWrap(True)
+        layout.addWidget(self.hinge_info)
+
+        self.hinge_table = QTableWidget(0, 6)
+        self.hinge_table.setHorizontalHeaderLabels(
+            [
+                "Element",
+                "IP",
+                "x",
+                "State",
+                "Controlling material",
+                "Controlling fiber",
+            ]
+        )
+        self.hinge_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.hinge_table.horizontalHeader().setStretchLastSection(True)
+        self.hinge_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.hinge_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.hinge_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.hinge_table.cellClicked.connect(self._hinge_row_clicked)
+        layout.addWidget(self.hinge_table)
+
+        self.tabs.addTab(page, "Hinge / Yield States")
+
+    def _build_force_displacement_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(5)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Disp. node:"))
+        self.force_disp_node = QComboBox()
+        self.force_disp_node.currentIndexChanged.connect(
+            self._update_force_displacement_plot
+        )
+        controls.addWidget(self.force_disp_node)
+
+        controls.addWidget(QLabel("DOF:"))
+        self.force_disp_dof = QComboBox()
+        self.force_disp_dof.addItems(
+            ["UX", "UY", "UZ", "RX", "RY", "RZ"]
+        )
+        self.force_disp_dof.currentIndexChanged.connect(
+            self._update_force_displacement_plot
+        )
+        controls.addWidget(self.force_disp_dof)
+
+        controls.addWidget(QLabel("Force:"))
+        self.force_disp_force_source = QComboBox()
+        self.force_disp_force_source.addItems(
+            ["Base shear", "Node reaction"]
+        )
+        self.force_disp_force_source.currentTextChanged.connect(
+            self._update_force_displacement_controls
+        )
+        controls.addWidget(self.force_disp_force_source)
+
+        controls.addWidget(QLabel("Force node:"))
+        self.force_disp_force_node = QComboBox()
+        self.force_disp_force_node.currentIndexChanged.connect(
+            self._update_force_displacement_plot
+        )
+        controls.addWidget(self.force_disp_force_node)
+
+        controls.addWidget(QLabel("DOF:"))
+        self.force_disp_force_dof = QComboBox()
+        self.force_disp_force_dof.addItems(
+            ["FX", "FY", "FZ", "MX", "MY", "MZ"]
+        )
+        self.force_disp_force_dof.currentIndexChanged.connect(
+            self._update_force_displacement_plot
+        )
+        controls.addWidget(self.force_disp_force_dof)
+
+        self.force_disp_animate_button = QPushButton("▶ Animate")
+        self.force_disp_animate_button.setToolTip(
+            "Animate the structural response and track the current "
+            "force-displacement point in red."
+        )
+        self.force_disp_animate_button.clicked.connect(
+            lambda: self._open_animation(source="force_displacement")
+        )
+        controls.addWidget(self.force_disp_animate_button)
+
+        export = QPushButton("Export CSV")
+        export.clicked.connect(self._export_force_displacement_csv)
+        controls.addWidget(export)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.force_disp_info = QLabel(
+            "Run a non-modal analysis to plot force versus displacement."
+        )
+        self.force_disp_info.setWordWrap(True)
+        layout.addWidget(self.force_disp_info)
+
+        self.force_disp_metrics = QLabel(
+            "Points: -   Peak |F|: -   Peak |u|: -"
+        )
+        self.force_disp_metrics.setWordWrap(True)
+        layout.addWidget(self.force_disp_metrics)
+
+        self.force_disp_plot = TimeHistoryPlot(
+            empty_message="No force-displacement data"
+        )
+        layout.addWidget(self.force_disp_plot, 1)
+        self.tabs.addTab(page, "Force–Displacement")
+        self._update_force_displacement_controls()
+
+    def _build_section_response_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(5)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Section source:"))
+        self.section_response_source = QComboBox()
+        self.section_response_source.currentIndexChanged.connect(
+            self._update_section_response_plot
+        )
+        controls.addWidget(self.section_response_source, 1)
+
+        export = QPushButton("Export CSV")
+        export.clicked.connect(self._export_section_response_csv)
+        controls.addWidget(export)
+        layout.addLayout(controls)
+
+        self.section_response_info = QLabel(
+            "Create a Section Response result request for a "
+            "zeroLengthSection or nonlinear beam-column section/IP."
+        )
+        self.section_response_info.setWordWrap(True)
+        layout.addWidget(self.section_response_info)
+
+        self.section_response_metrics = QLabel(
+            "Points: -   Peak |Y|: -   Peak |X|: -   Final: -"
+        )
+        self.section_response_metrics.setWordWrap(True)
+        layout.addWidget(self.section_response_metrics)
+
+        self.section_response_plot = TimeHistoryPlot(
+            empty_message="No section-response data"
+        )
+        layout.addWidget(self.section_response_plot, 1)
+        self.tabs.addTab(page, "Section Response")
+
+    def _populate_section_response_sources(self) -> None:
+        previous = self.section_response_source.currentData()
+        self.section_response_source.blockSignals(True)
+        self.section_response_source.clear()
+        specs = self._result.get("section_responses", {})
+        if isinstance(specs, dict):
+            for key, raw_spec in specs.items():
+                if not isinstance(raw_spec, dict):
+                    continue
+                spec = dict(raw_spec)
+                element_tag = spec.get("element_tag", "-")
+                element_kind = str(spec.get("element_kind", "section"))
+                section_number = spec.get("section_number", 1)
+                pair_label = str(
+                    spec.get(
+                        "pair_label",
+                        spec.get("component", "Section response"),
+                    )
+                )
+                location = (
+                    f" · IP {section_number}"
+                    if spec.get("query_mode") == "indexed"
+                    else ""
+                )
+                automatic = " · auto" if spec.get("automatic") else ""
+                self.section_response_source.addItem(
+                    f"{element_kind} {element_tag}{location} · "
+                    f"{pair_label}{automatic}",
+                    str(key),
+                )
+        if previous is not None:
+            index = self.section_response_source.findData(previous)
+            if index >= 0:
+                self.section_response_source.setCurrentIndex(index)
+        self.section_response_source.blockSignals(False)
+        self._update_section_response_plot()
+
+    def _select_section_response(
+        self,
+        options: dict[str, Any],
+    ) -> None:
+        element_scope = options.get("_element_scope", [])
+        element_tag = None
+        if isinstance(element_scope, (list, tuple)) and element_scope:
+            try:
+                element_tag = int(element_scope[0])
+            except (TypeError, ValueError):
+                element_tag = None
+        try:
+            section_number = int(options.get("section", 1))
+        except (TypeError, ValueError):
+            section_number = 1
+        component = str(options.get("component", "Mz"))
+
+        specs = self._result.get("section_responses", {})
+        if not isinstance(specs, dict):
+            return
+        for key, raw_spec in specs.items():
+            if not isinstance(raw_spec, dict):
+                continue
+            try:
+                same_element = (
+                    element_tag is None
+                    or int(raw_spec.get("element_tag")) == element_tag
+                )
+                same_section = (
+                    int(raw_spec.get("section_number", 1))
+                    == section_number
+                )
+            except (TypeError, ValueError):
+                continue
+            if (
+                same_element
+                and same_section
+                and str(raw_spec.get("component", "")) == component
+            ):
+                index = self.section_response_source.findData(str(key))
+                if index >= 0:
+                    self.section_response_source.setCurrentIndex(index)
+                return
+
+    def _current_section_response(
+        self,
+    ) -> tuple[list[float], list[float], dict[str, Any]]:
+        key = self.section_response_source.currentData()
+        specs = self._result.get("section_responses", {})
+        if key is None or not isinstance(specs, dict):
+            return [], [], {}
+        raw_spec = specs.get(str(key), {})
+        if not isinstance(raw_spec, dict):
+            return [], [], {}
+        spec = dict(raw_spec)
+        try:
+            return section_response_curve(
+                self._result,
+                element_tag=int(spec.get("element_tag")),
+                section_number=int(spec.get("section_number", 1)),
+                component=str(spec.get("component", "")),
+            )
+        except (TypeError, ValueError):
+            return [], [], spec
+
+    def _update_section_response_plot(self) -> None:
+        x, y, spec = self._current_section_response()
+        if not x or not y:
+            if self.section_response_source.count():
+                self.section_response_info.setText(
+                    "Section response was requested, but no complete "
+                    "force/deformation history is available."
+                )
+            else:
+                self.section_response_info.setText(
+                    "No Section Response was requested for this analysis. "
+                    "Select one section-capable element, insert Section "
+                    "Response, then run the analysis."
+                )
+            self.section_response_metrics.setText(
+                "Points: -   Peak |Y|: -   Peak |X|: -   Final: -"
+            )
+            self.section_response_plot.set_series([], [])
+            return
+
+        element_tag = spec.get("element_tag", "-")
+        source_kind = spec.get("element_kind", "section")
+        section_number = spec.get("section_number", 1)
+        location = (
+            f" · IP {section_number}"
+            if spec.get("query_mode") == "indexed"
+            else ""
+        )
+        x_label = str(spec.get("deformation_label", "Section deformation"))
+        y_label = str(spec.get("force_label", "Section force"))
+        pair_label = str(spec.get("pair_label", "Section response"))
+        self.section_response_info.setText(
+            f"{source_kind} element {element_tag}{location} · "
+            f"{pair_label} · X = {x_label} · Y = {y_label}"
+        )
+        self.section_response_metrics.setText(
+            f"Points: {len(x)}   Peak |Y|: {max(abs(v) for v in y):.6g}   "
+            f"Peak |X|: {max(abs(v) for v in x):.6g}   "
+            f"Final: ({x[-1]:.6g}, {y[-1]:.6g})"
+        )
+        self.section_response_plot.set_series(x, y)
+
+    def _export_section_response_csv(self) -> None:
+        x, y, spec = self._current_section_response()
+        if not x or not y:
+            self.section_response_info.setText(
+                "No section-response data is available to export."
+            )
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Section Response",
+            "section_response.csv",
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+        x_label = str(spec.get("deformation_label", "Section deformation"))
+        y_label = str(spec.get("force_label", "Section force"))
+        with open(path, "w", newline="", encoding="utf-8") as stream:
+            writer = csv.writer(stream)
+            writer.writerow([
+                x_label,
+                y_label,
+                "Element",
+                "Section / IP",
+                "Component",
+            ])
+            for x_value, y_value in zip(x, y):
+                writer.writerow([
+                    x_value,
+                    y_value,
+                    spec.get("element_tag", ""),
+                    spec.get("section_number", 1),
+                    spec.get("component", ""),
+                ])
+        self.section_response_info.setText(
+            f"Exported {len(x)} section-response point(s) to {path}."
+        )
+
+    def _build_moment_curvature_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(5)
+
+        self.moment_curvature_info = QLabel(
+            "Run a recognized zeroLengthSection moment-curvature workflow "
+            "to plot section moment versus curvature."
+        )
+        self.moment_curvature_info.setWordWrap(True)
+        layout.addWidget(self.moment_curvature_info)
+
+        self.moment_curvature_metrics = QLabel(
+            "Points: -   Peak |M|: -   Peak |κ|: -   Final: -"
+        )
+        self.moment_curvature_metrics.setWordWrap(True)
+        layout.addWidget(self.moment_curvature_metrics)
+
+        row = QHBoxLayout()
+        import_response = QPushButton("Import Response-2000...")
+        import_response.clicked.connect(self._import_response2000_data)
+        row.addWidget(import_response)
+
+        paste_response = QPushButton("Paste Response-2000")
+        paste_response.clicked.connect(self._paste_response2000_data)
+        row.addWidget(paste_response)
+
+        clear_response = QPushButton("Clear Response-2000")
+        clear_response.clicked.connect(self._clear_response2000_data)
+        row.addWidget(clear_response)
+
+        send_to_hinge = QPushButton("Send to Hinge Backbone...")
+        send_to_hinge.clicked.connect(
+            self._send_moment_curvature_to_hinge
+        )
+        row.addWidget(send_to_hinge)
+
+        row.addStretch(1)
+        export = QPushButton("Export CSV")
+        export.clicked.connect(self._export_moment_curvature_csv)
+        row.addWidget(export)
+        layout.addLayout(row)
+
+        self.moment_curvature_detail_tabs = CompactResultTabs()
+        self.moment_curvature_detail_tabs.setDocumentMode(True)
+        layout.addWidget(self.moment_curvature_detail_tabs, 1)
+
+        curve_page = QWidget()
+        curve_layout = QVBoxLayout(curve_page)
+        curve_layout.setContentsMargins(3, 3, 3, 3)
+        self.moment_curvature_plot = TimeHistoryPlot(
+            empty_message="No moment-curvature data"
+        )
+        curve_layout.addWidget(self.moment_curvature_plot, 1)
+        self.moment_curvature_detail_tabs.addTab(curve_page, "Curve")
+
+        validation_page = QWidget()
+        validation_layout = QVBoxLayout(validation_page)
+        validation_layout.setContentsMargins(3, 3, 3, 3)
+        validation_layout.setSpacing(3)
+
+        self.response2000_controls = QWidget()
+        response_controls_layout = QVBoxLayout(self.response2000_controls)
+        response_controls_layout.setContentsMargins(0, 0, 0, 0)
+        response_controls_layout.setSpacing(3)
+
+        x_row = QHBoxLayout()
+        x_row.addWidget(QLabel("Response κ:"))
+        self.response2000_curvature_column = QComboBox()
+        self.response2000_curvature_column.currentIndexChanged.connect(
+            self._update_moment_curvature_plot
+        )
+        x_row.addWidget(self.response2000_curvature_column, 1)
+
+        self.response2000_curvature_unit = QComboBox()
+        for label, value in (
+            ("Same as SARE", "same"),
+            ("rad/km", "rad_per_km"),
+            ("1/m", "per_m"),
+            ("1/mm", "per_mm"),
+            ("1/cm", "per_cm"),
+            ("1/in", "per_in"),
+            ("1/ft", "per_ft"),
+        ):
+            self.response2000_curvature_unit.addItem(label, value)
+        self.response2000_curvature_unit.currentIndexChanged.connect(
+            self._update_moment_curvature_plot
+        )
+        x_row.addWidget(self.response2000_curvature_unit)
+
+        x_row.addWidget(QLabel("×"))
+        self.response2000_curvature_factor = QDoubleSpinBox()
+        self.response2000_curvature_factor.setRange(-1.0e12, 1.0e12)
+        self.response2000_curvature_factor.setDecimals(8)
+        self.response2000_curvature_factor.setValue(1.0)
+        self.response2000_curvature_factor.setMaximumWidth(105)
+        self.response2000_curvature_factor.valueChanged.connect(
+            self._update_moment_curvature_plot
+        )
+        x_row.addWidget(self.response2000_curvature_factor)
+        response_controls_layout.addLayout(x_row)
+
+        y_row = QHBoxLayout()
+        y_row.addWidget(QLabel("Response M:"))
+        self.response2000_moment_column = QComboBox()
+        self.response2000_moment_column.currentIndexChanged.connect(
+            self._update_moment_curvature_plot
+        )
+        y_row.addWidget(self.response2000_moment_column, 1)
+
+        self.response2000_moment_unit = QComboBox()
+        for label, value in (
+            ("Same as SARE", "same"),
+            ("kN·m", "kn_m"),
+            ("N·m", "n_m"),
+            ("N·mm", "n_mm"),
+            ("kN·mm", "kn_mm"),
+            ("kip·ft", "kip_ft"),
+            ("kip·in", "kip_in"),
+            ("kgf·m", "kgf_m"),
+            ("kgf·cm", "kgf_cm"),
+        ):
+            self.response2000_moment_unit.addItem(label, value)
+        self.response2000_moment_unit.currentIndexChanged.connect(
+            self._update_moment_curvature_plot
+        )
+        y_row.addWidget(self.response2000_moment_unit)
+
+        y_row.addWidget(QLabel("×"))
+        self.response2000_moment_factor = QDoubleSpinBox()
+        self.response2000_moment_factor.setRange(-1.0e12, 1.0e12)
+        self.response2000_moment_factor.setDecimals(8)
+        self.response2000_moment_factor.setValue(1.0)
+        self.response2000_moment_factor.setMaximumWidth(105)
+        self.response2000_moment_factor.valueChanged.connect(
+            self._update_moment_curvature_plot
+        )
+        y_row.addWidget(self.response2000_moment_factor)
+        response_controls_layout.addLayout(y_row)
+
+        self.response2000_info = QLabel(
+            "Optional validation overlay: import chart data copied/exported "
+            "from Response-2000 Moment-Curvature."
+        )
+        self.response2000_info.setWordWrap(True)
+        response_controls_layout.addWidget(self.response2000_info)
+
+        self.response2000_compare_table = QTableWidget(0, 4)
+        self.response2000_compare_table.setHorizontalHeaderLabels(
+            ["Validation metric", "SARE/OpenSees", "Response-2000", "Δ [%]"]
+        )
+        self.response2000_compare_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.response2000_compare_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.response2000_compare_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.response2000_compare_table.setAlternatingRowColors(True)
+        self.response2000_compare_table.hide()
+        response_controls_layout.addWidget(
+            self.response2000_compare_table,
+            1,
+        )
+
+        validation_layout.addWidget(self.response2000_controls, 1)
+        self.moment_curvature_detail_tabs.addTab(
+            validation_page,
+            "Response-2000",
+        )
+
+        self.tabs.addTab(page, "Moment–Curvature")
+
+    def _build_pushover_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        self.pushover_info = QLabel(
+            "Run a Pushover analysis to plot applied base shear versus "
+            "control-node displacement."
+        )
+        self.pushover_info.setWordWrap(True)
+        layout.addWidget(self.pushover_info)
+
+        self.pushover_metrics = QLabel(
+            "Vpeak: -   u@Vpeak: -   ufinal: -"
+        )
+        self.pushover_metrics.setWordWrap(True)
+        layout.addWidget(self.pushover_metrics)
+
+        self.pushover_plot = TimeHistoryPlot(
+            empty_message="No pushover capacity-curve data"
+        )
+        layout.addWidget(self.pushover_plot, 1)
+        self.tabs.addTab(page, "Pushover Curve")
+
+    def _build_response_spectrum_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(5)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Curve:"))
+        self.response_spectrum_curve = QComboBox()
+        self.response_spectrum_curve.addItem("Component X", "component_x")
+        self.response_spectrum_curve.addItem("Component Y", "component_y")
+        self.response_spectrum_curve.addItem("RotD50", "rotd50")
+        self.response_spectrum_curve.addItem("RotD100", "rotd100")
+        self.response_spectrum_curve.currentIndexChanged.connect(
+            self._update_response_spectrum_plot
+        )
+        controls.addWidget(self.response_spectrum_curve)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.response_spectrum_info = QLabel(
+            "Run or select a Response Spectrum analysis."
+        )
+        self.response_spectrum_info.setWordWrap(True)
+        layout.addWidget(self.response_spectrum_info)
+
+        self.response_spectrum_tabs = QTabWidget()
+        self.response_spectrum_tabs.setDocumentMode(True)
+        layout.addWidget(self.response_spectrum_tabs, 1)
+
+        curve_page = QWidget()
+        curve_layout = QVBoxLayout(curve_page)
+        curve_layout.setContentsMargins(3, 3, 3, 3)
+        self.response_spectrum_plot = TimeHistoryPlot(
+            empty_message="No response-spectrum data"
+        )
+        curve_layout.addWidget(self.response_spectrum_plot, 1)
+        self.response_spectrum_tabs.addTab(curve_page, "Curve")
+
+        table_page = QWidget()
+        table_layout = QVBoxLayout(table_page)
+        table_layout.setContentsMargins(3, 3, 3, 3)
+        self.response_spectrum_table = QTableWidget(0, 5)
+        self.response_spectrum_table.setHorizontalHeaderLabels([
+            "T (s)",
+            "Sa-X (g)",
+            "Sa-Y (g)",
+            "RotD50 (g)",
+            "RotD100 (g)",
+        ])
+        self.response_spectrum_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.response_spectrum_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.response_spectrum_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        table_layout.addWidget(self.response_spectrum_table, 1)
+        self.response_spectrum_tabs.addTab(table_page, "Data")
+
+        self.tabs.addTab(page, "Response Spectrum")
+
+    def _update_response_spectrum_plot(self) -> None:
+        spectrum = self._result.get("response_spectrum", {})
+        if not isinstance(spectrum, dict):
+            spectrum = {}
+        periods = [
+            float(value)
+            for value in spectrum.get("period_s", [])
+        ]
+        curve = (
+            str(self.response_spectrum_curve.currentData() or "rotd50")
+            if hasattr(self, "response_spectrum_curve")
+            else "rotd50"
+        )
+        key_by_curve = {
+            "component_x": "component_x_sa_g",
+            "component_y": "component_y_sa_g",
+            "rotd50": "rotd50_sa_g",
+            "rotd100": "rotd100_sa_g",
+        }
+        label_by_curve = {
+            "component_x": "Component X",
+            "component_y": "Component Y",
+            "rotd50": "RotD50",
+            "rotd100": "RotD100",
+        }
+        values = [
+            float(value)
+            for value in spectrum.get(key_by_curve.get(curve, ""), [])
+        ]
+        if hasattr(self, "response_spectrum_plot"):
+            self.response_spectrum_plot.set_series(periods, values)
+            self.response_spectrum_plot.clear_overlay()
+
+        damping = spectrum.get("damping_ratio")
+        mode = str(spectrum.get("mode", "") or "")
+        if periods and values:
+            peak_index = max(
+                range(min(len(periods), len(values))),
+                key=lambda index: values[index],
+            )
+            damping_text = (
+                f"{100.0 * float(damping):.3g}%"
+                if damping is not None
+                else "-"
+            )
+            self.response_spectrum_info.setText(
+                f"{mode or 'Response Spectrum'} · "
+                f"{label_by_curve.get(curve, curve)} · "
+                f"damping {damping_text} · "
+                f"peak {values[peak_index]:.4g} g at "
+                f"T={periods[peak_index]:.4g} s"
+            )
+        elif hasattr(self, "response_spectrum_info"):
+            analysis = self._result.get("analysis", {})
+            analysis_type = (
+                str(analysis.get("type", ""))
+                if isinstance(analysis, dict)
+                else ""
+            )
+            if analysis_type == "Response Spectrum":
+                self.response_spectrum_info.setText(
+                    f"{label_by_curve.get(curve, curve)} was not requested "
+                    "or no spectrum data is available."
+                )
+            else:
+                self.response_spectrum_info.setText(
+                    "Run or select a Response Spectrum analysis."
+                )
+
+        if not hasattr(self, "response_spectrum_table"):
+            return
+        x = list(spectrum.get("component_x_sa_g", []))
+        y = list(spectrum.get("component_y_sa_g", []))
+        r50 = list(spectrum.get("rotd50_sa_g", []))
+        r100 = list(spectrum.get("rotd100_sa_g", []))
+        self.response_spectrum_table.setRowCount(len(periods))
+        columns = (x, y, r50, r100)
+        for row, period in enumerate(periods):
+            self.response_spectrum_table.setItem(
+                row, 0, QTableWidgetItem(f"{period:.6g}")
+            )
+            for column, series in enumerate(columns, start=1):
+                value = (
+                    f"{float(series[row]):.6g}"
+                    if row < len(series)
+                    else "-"
+                )
+                self.response_spectrum_table.setItem(
+                    row, column, QTableWidgetItem(value)
+                )
+
+    def _build_cyclic_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(5)
+
+        # Keep the essential cyclic summary visible regardless of which
+        # detail page is active.
+        self.cyclic_info = QLabel(
+            "Run a Cyclic analysis to plot applied base shear versus "
+            "control displacement."
+        )
+        self.cyclic_info.setWordWrap(True)
+        layout.addWidget(self.cyclic_info)
+
+        self.cyclic_metrics = QLabel(
+            "Peak |u|: -   +Vpeak: -   -Vpeak: -   "
+            "Hysteretic energy: -   Closed cycles: -"
+        )
+        self.cyclic_metrics.setWordWrap(True)
+        layout.addWidget(self.cyclic_metrics)
+
+        self.cyclic_detail_tabs = QTabWidget()
+        self.cyclic_detail_tabs.setDocumentMode(True)
+        layout.addWidget(self.cyclic_detail_tabs, 1)
+
+        # --------------------------------------------------------------
+        # CURVE
+        # --------------------------------------------------------------
+        curve_page = QWidget()
+        curve_layout = QVBoxLayout(curve_page)
+        curve_layout.setContentsMargins(4, 4, 4, 4)
+        curve_layout.setSpacing(4)
+
+        curve_controls = QHBoxLayout()
+        curve_controls.addWidget(QLabel("View:"))
+        self.cyclic_compare_view = QComboBox()
+        self.cyclic_compare_view.addItem("Hysteresis", "hysteresis")
+        self.cyclic_compare_view.addItem("Backbone / envelope", "backbone")
+        self.cyclic_compare_view.currentIndexChanged.connect(
+            self._update_cyclic_plot
+        )
+        curve_controls.addWidget(self.cyclic_compare_view)
+        curve_controls.addStretch(1)
+        curve_layout.addLayout(curve_controls)
+
+        self.cyclic_plot = TimeHistoryPlot(
+            empty_message="No cyclic hysteresis data"
+        )
+        self.cyclic_plot.setMinimumHeight(220)
+        curve_layout.addWidget(self.cyclic_plot, 1)
+
+        self.cyclic_detail_tabs.addTab(curve_page, "Curve")
+
+        # --------------------------------------------------------------
+        # EXPERIMENT
+        # --------------------------------------------------------------
+        experiment_page = QWidget()
+        experiment_layout = QVBoxLayout(experiment_page)
+        experiment_layout.setContentsMargins(4, 4, 4, 4)
+        experiment_layout.setSpacing(5)
+
+        experiment_buttons = QHBoxLayout()
+        import_experiment = QPushButton("Import Experiment CSV")
+        import_experiment.clicked.connect(
+            self._import_cyclic_experiment_csv
+        )
+        experiment_buttons.addWidget(import_experiment)
+
+        clear_experiment = QPushButton("Clear Experiment")
+        clear_experiment.clicked.connect(
+            self._clear_cyclic_experiment
+        )
+        experiment_buttons.addWidget(clear_experiment)
+        experiment_buttons.addStretch(1)
+        experiment_layout.addLayout(experiment_buttons)
+
+        x_row = QHBoxLayout()
+        x_row.addWidget(QLabel("Exp X:"))
+        self.cyclic_exp_x_column = QComboBox()
+        self.cyclic_exp_x_column.currentIndexChanged.connect(
+            self._update_cyclic_plot
+        )
+        x_row.addWidget(self.cyclic_exp_x_column, 1)
+        x_row.addWidget(QLabel("×"))
+        self.cyclic_exp_x_scale = QDoubleSpinBox()
+        self.cyclic_exp_x_scale.setRange(-1.0e9, 1.0e9)
+        self.cyclic_exp_x_scale.setDecimals(8)
+        self.cyclic_exp_x_scale.setValue(1.0)
+        self.cyclic_exp_x_scale.valueChanged.connect(
+            self._update_cyclic_plot
+        )
+        self.cyclic_exp_x_scale.setMaximumWidth(120)
+        x_row.addWidget(self.cyclic_exp_x_scale)
+        experiment_layout.addLayout(x_row)
+
+        y_row = QHBoxLayout()
+        y_row.addWidget(QLabel("Exp Y:"))
+        self.cyclic_exp_y_column = QComboBox()
+        self.cyclic_exp_y_column.currentIndexChanged.connect(
+            self._update_cyclic_plot
+        )
+        y_row.addWidget(self.cyclic_exp_y_column, 1)
+        y_row.addWidget(QLabel("×"))
+        self.cyclic_exp_y_scale = QDoubleSpinBox()
+        self.cyclic_exp_y_scale.setRange(-1.0e9, 1.0e9)
+        self.cyclic_exp_y_scale.setDecimals(8)
+        self.cyclic_exp_y_scale.setValue(1.0)
+        self.cyclic_exp_y_scale.valueChanged.connect(
+            self._update_cyclic_plot
+        )
+        self.cyclic_exp_y_scale.setMaximumWidth(120)
+        y_row.addWidget(self.cyclic_exp_y_scale)
+        experiment_layout.addLayout(y_row)
+
+        self.cyclic_experiment_info = QLabel(
+            "Optional: import experimental displacement-force CSV for "
+            "overlay and descriptive validation metrics."
+        )
+        self.cyclic_experiment_info.setWordWrap(True)
+        experiment_layout.addWidget(self.cyclic_experiment_info)
+
+        self.cyclic_compare_table = QTableWidget(0, 4)
+        self.cyclic_compare_table.setHorizontalHeaderLabels(
+            ["Comparison metric", "OpenSees", "Experiment", "Δ vs exp [%]"]
+        )
+        self.cyclic_compare_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.cyclic_compare_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.cyclic_compare_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.cyclic_compare_table.setAlternatingRowColors(True)
+        self.cyclic_compare_table.hide()
+        experiment_layout.addWidget(self.cyclic_compare_table, 1)
+
+        self.cyclic_detail_tabs.addTab(experiment_page, "Experiment")
+
+        # --------------------------------------------------------------
+        # REVERSALS
+        # --------------------------------------------------------------
+        reversal_page = QWidget()
+        reversal_layout = QVBoxLayout(reversal_page)
+        reversal_layout.setContentsMargins(4, 4, 4, 4)
+        reversal_layout.setSpacing(4)
+
+        research_row = QHBoxLayout()
+        self.cyclic_research_info = QLabel(
+            "1D-column research metrics appear here when specimen "
+            "instrumentation is available."
+        )
+        self.cyclic_research_info.setWordWrap(True)
+        research_row.addWidget(self.cyclic_research_info, 1)
+
+        export_research = QPushButton("Export Research CSV")
+        export_research.clicked.connect(
+            self._export_cyclic_research_csv
+        )
+        research_row.addWidget(export_research)
+        reversal_layout.addLayout(research_row)
+
+        self.cyclic_reversal_table = QTableWidget(0, 20)
+        self.cyclic_reversal_table.setHorizontalHeaderLabels(
+            [
+                "Rev",
+                "u",
+                "V",
+                "Drift",
+                "M",
+                "κ",
+                "εs",
+                "εc",
+                "Bond slip",
+                "θint",
+                "|Ksec|",
+                "Strength / 1st",
+                "Ksec / 1st",
+                "E branch",
+                "Cycle",
+                "E cycle",
+                "Vexp",
+                "V err [%]",
+                "Kexp",
+                "K err [%]",
+            ]
+        )
+        self.cyclic_reversal_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.cyclic_reversal_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.cyclic_reversal_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.cyclic_reversal_table.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded
+        )
+        self.cyclic_reversal_table.setAlternatingRowColors(True)
+        self.cyclic_reversal_table.verticalHeader().setVisible(False)
+        reversal_layout.addWidget(self.cyclic_reversal_table, 1)
+
+        self.cyclic_detail_tabs.addTab(reversal_page, "Reversals")
+
+        # --------------------------------------------------------------
+        # CYCLES
+        # --------------------------------------------------------------
+        cycle_page = QWidget()
+        cycle_layout = QVBoxLayout(cycle_page)
+        cycle_layout.setContentsMargins(4, 4, 4, 4)
+
+        self.cyclic_cycle_table = QTableWidget(0, 8)
+        self.cyclic_cycle_table.setHorizontalHeaderLabels(
+            [
+                "Cycle",
+                "End rev",
+                "|u|",
+                "Repeat",
+                "E loop",
+                "E interface",
+                "Strength / 1st",
+                "Ksec / 1st",
+            ]
+        )
+        self.cyclic_cycle_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.cyclic_cycle_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.cyclic_cycle_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.cyclic_cycle_table.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded
+        )
+        self.cyclic_cycle_table.setAlternatingRowColors(True)
+        self.cyclic_cycle_table.verticalHeader().setVisible(False)
+        cycle_layout.addWidget(self.cyclic_cycle_table, 1)
+
+        self.cyclic_detail_tabs.addTab(cycle_page, "Cycles")
+
+        self.tabs.addTab(page, "Cyclic Hysteresis")
+
+    def _build_motion_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+
+        source_row = QHBoxLayout()
+        source_row.addWidget(QLabel("Source:"))
+        self.motion_source = QComboBox()
+        self.motion_source.currentIndexChanged.connect(
+            self._motion_source_changed
+        )
+        source_row.addWidget(self.motion_source, 1)
+
+        source_row.addWidget(QLabel("Scale:"))
+        self.motion_scale = QDoubleSpinBox()
+        self.motion_scale.setRange(0.001, 1.0e6)
+        self.motion_scale.setDecimals(3)
+        self.motion_scale.setValue(1.0)
+        self.motion_scale.valueChanged.connect(
+            self._emit_current_motion_frame
+        )
+        source_row.addWidget(self.motion_scale)
+
+        self.motion_auto_scale = QCheckBox("Auto Scale")
+        self.motion_auto_scale.setChecked(True)
+        self.motion_auto_scale.toggled.connect(
+            self._emit_current_motion_frame
+        )
+        source_row.addWidget(self.motion_auto_scale)
+
+        source_row.addWidget(QLabel("Frame Rate:"))
+        self.motion_frame_rate = QSpinBox()
+        self.motion_frame_rate.setRange(1, 120)
+        self.motion_frame_rate.setValue(30)
+        self.motion_frame_rate.setSuffix(" fps")
+        self.motion_frame_rate.setToolTip(
+            "Playback frame rate only. This does not change, sample, or "
+            "truncate the result frame count."
+        )
+        self.motion_frame_rate.valueChanged.connect(
+            self._update_motion_timer
+        )
+        source_row.addWidget(self.motion_frame_rate)
+        layout.addLayout(source_row)
+
+        transport = QHBoxLayout()
+        previous = QPushButton("◀")
+        previous.setToolTip("Previous motion frame")
+        previous.clicked.connect(lambda: self._step_motion(-1))
+        transport.addWidget(previous)
+
+        self.motion_play = QPushButton("▶ Play")
+        self.motion_play.setCheckable(True)
+        self.motion_play.toggled.connect(self._toggle_motion_playback)
+        transport.addWidget(self.motion_play)
+
+        self.motion_stop = QPushButton("■ Stop")
+        self.motion_stop.setToolTip(
+            "Stop playback and keep the current frame displayed."
+        )
+        self.motion_stop.clicked.connect(self.stop_motion)
+        transport.addWidget(self.motion_stop)
+
+        next_button = QPushButton("▶")
+        next_button.setToolTip("Next motion frame")
+        next_button.clicked.connect(lambda: self._step_motion(1))
+        transport.addWidget(next_button)
+
+        transport.addWidget(QLabel("Frame:"))
+        self.motion_frame_spin = QSpinBox()
+        self.motion_frame_spin.setRange(1, 1)
+        self.motion_frame_spin.valueChanged.connect(
+            self._motion_frame_spin_changed
+        )
+        transport.addWidget(self.motion_frame_spin)
+        self.motion_counter = QLabel("/ 0")
+        transport.addWidget(self.motion_counter)
+
+        self.motion_coordinate_label = QLabel("Time: -")
+        self.motion_coordinate_label.setMinimumWidth(110)
+        self.motion_coordinate_label.setToolTip(
+            "Current physical time or analysis coordinate for the displayed "
+            "animation frame."
+        )
+        transport.addWidget(self.motion_coordinate_label)
+
+        transport.addWidget(QLabel("Speed:"))
+        self.motion_speed = QComboBox()
+        for label, speed in (
+            ("0.25×", 0.25),
+            ("0.5×", 0.5),
+            ("1×", 1.0),
+            ("2×", 2.0),
+            ("4×", 4.0),
+            ("8×", 8.0),
+            ("16×", 16.0),
+        ):
+            self.motion_speed.addItem(label, speed)
+        self.motion_speed.setCurrentIndex(2)
+        self.motion_speed.setToolTip(
+            "Playback multiplier applied to Frame Rate. It never changes "
+            "the total number of result frames."
+        )
+        self.motion_speed.currentIndexChanged.connect(
+            self._update_motion_timer
+        )
+        transport.addWidget(self.motion_speed)
+
+        self.motion_loop = QCheckBox("Loop")
+        self.motion_loop.setChecked(True)
+        transport.addWidget(self.motion_loop)
+        transport.addStretch(1)
+        layout.addLayout(transport)
+
+        slider_row = QHBoxLayout()
+        self.motion_slider = QSlider(Qt.Horizontal)
+        self.motion_slider.setRange(0, 0)
+        self.motion_slider.setToolTip(
+            "Drag the round handle to scrub the current animation frame."
+        )
+        self.motion_slider.setStyleSheet(
+            "QSlider::groove:horizontal { height: 4px; }"
+            "QSlider::handle:horizontal { width: 14px; margin: -5px 0; "
+            "border-radius: 7px; }"
+        )
+        self.motion_slider.valueChanged.connect(
+            self._motion_slider_changed
+        )
+        slider_row.addWidget(self.motion_slider, 1)
+        layout.addLayout(slider_row)
+
+        self.motion_info_label = QLabel(
+            "Result animation · applicable result tables follow the "
+            "current frame live."
+        )
+        self.motion_info_label.setWordWrap(True)
+        layout.addWidget(self.motion_info_label)
+
+        self.motion_page = page
+        self.motion_page.setVisible(False)
+
+    def _open_animation(
+        self,
+        *,
+        source: str = "",
+        autoplay: bool = True,
+    ) -> None:
+        """Open the shared animation transport from an applicable result."""
+        source = str(source)
+        if source == "mode" and hasattr(self, "mode_combo"):
+            raw_mode = self.mode_combo.currentData()
+            if raw_mode is not None:
+                try:
+                    mode = int(raw_mode)
+                except (TypeError, ValueError):
+                    mode = None
+                if mode is not None:
+                    index = self.motion_source.findData(mode)
+                    if index >= 0:
+                        self.motion_source.setCurrentIndex(index)
+        elif source == "deformation" and hasattr(self, "deformation_scale"):
+            # Keep a manual deformation scale consistent when Auto is off.
+            if not self.motion_auto_scale.isChecked():
+                self.motion_scale.setValue(self.deformation_scale.value())
+
+        self.motion_page.setVisible(
+            self._motion_display_frame_count > 0
+        )
+        self._emit_current_motion_frame()
+        if (
+            autoplay
+            and self._motion_info is not None
+            and self._motion_display_frame_count > 1
+        ):
+            self.motion_play.setChecked(True)
+
+    @staticmethod
+    def _motion_generated_frame_count() -> int:
+        """Frame count used only for synthetic modal/final interpolation."""
+        return 60
+
+    def _motion_frame_rate_value(self) -> int:
+        return max(
+            1,
+            int(self.motion_frame_rate.value())
+            if hasattr(self, "motion_frame_rate")
+            else 30,
+        )
+
+    def _motion_source_index(self, display_index: int) -> int:
+        source_count = max(0, int(self._motion_source_frame_count))
+        display_count = max(0, int(self._motion_display_frame_count))
+        if source_count <= 1 or display_count <= 1:
+            return 0
+        index = max(0, min(int(display_index), display_count - 1))
+        return int(
+            round(index * (source_count - 1) / (display_count - 1))
+        )
+
+    def _configure_motion_frames(self, *, reset: bool) -> None:
+        generated_frames = self._motion_generated_frame_count()
+        self._motion_info = motion_info(
+            self._result,
+            mode=self._motion_selected_mode(),
+            modal_frames=generated_frames,
+            fallback_frames=generated_frames,
+            scan_reference=False,
+        )
+        source_count = int(self._motion_info.frame_count)
+        # Result histories are never downsampled for animation. If a job has
+        # 1000 result frames, the transport exposes frames 1..1000.
+        display_count = source_count if source_count > 0 else 0
+        self._motion_source_frame_count = source_count
+        self._motion_display_frame_count = display_count
+
+        if reset:
+            self._motion_frame_index = 0
+        elif display_count > 0:
+            self._motion_frame_index = min(
+                self._motion_frame_index,
+                display_count - 1,
+            )
+        else:
+            self._motion_frame_index = 0
+
+        self.motion_slider.blockSignals(True)
+        self.motion_slider.setRange(0, max(0, display_count - 1))
+        self.motion_slider.setValue(self._motion_frame_index)
+        self.motion_slider.blockSignals(False)
+
+        self.motion_frame_spin.blockSignals(True)
+        self.motion_frame_spin.setRange(1, max(1, display_count))
+        self.motion_frame_spin.setValue(
+            self._motion_frame_index + 1 if display_count else 1
+        )
+        self.motion_frame_spin.setEnabled(display_count > 0)
+        self.motion_frame_spin.blockSignals(False)
+        self.motion_counter.setText(f"/ {display_count}")
+
+    def _motion_frame_spin_changed(self, value: int) -> None:
+        self._set_motion_index(int(value) - 1)
+        if self._motion_timer.isActive():
+            self._restart_motion_playback_clock()
+
+    def _motion_effective_dt(self) -> float | None:
+        if (
+            self._motion_info is None
+            or self._motion_info.transient_dt is None
+        ):
+            return None
+        return float(self._motion_info.transient_dt)
+
+    def _motion_selected_mode(self) -> int | None:
+        data = self.motion_source.currentData()
+        try:
+            return int(data) if data is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _refresh_motion_controls(self) -> None:
+        self._motion_timer.stop()
+        self.motion_play.blockSignals(True)
+        self.motion_play.setChecked(False)
+        self.motion_play.setText("▶ Play")
+        self.motion_play.blockSignals(False)
+
+        analysis = (
+            self._result.get("analysis", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        analysis_type = (
+            str(analysis.get("type", ""))
+            if isinstance(analysis, dict)
+            else ""
+        )
+
+        previous_mode = self._motion_selected_mode()
+        self.motion_source.blockSignals(True)
+        self.motion_source.clear()
+        if analysis_type == "Modal":
+            modes = available_modal_modes(self._result)
+            for mode in modes:
+                self.motion_source.addItem(f"Mode {mode}", mode)
+            if previous_mode is not None:
+                index = self.motion_source.findData(previous_mode)
+                if index >= 0:
+                    self.motion_source.setCurrentIndex(index)
+        else:
+            self.motion_source.addItem(
+                f"{analysis_type or 'Analysis'} deformation",
+                None,
+            )
+        self.motion_source.blockSignals(False)
+
+        self._configure_motion_frames(reset=True)
+        count = int(self._motion_display_frame_count)
+        enabled = count > 0
+        self.motion_play.setEnabled(enabled)
+        self.motion_slider.setEnabled(enabled)
+        for button_name in (
+            "deformation_animate_button",
+            "mode_animate_button",
+            "node_animate_button",
+            "member_animate_button",
+            "shell_animate_button",
+            "crack_animate_button",
+            "history_animate_button",
+            "force_disp_animate_button",
+        ):
+            button = getattr(self, button_name, None)
+            if button is not None:
+                button.setEnabled(enabled)
+        self.motion_source.setEnabled(
+            analysis_type == "Modal"
+            and self.motion_source.count() > 1
+        )
+        self.motion_info_label.setText(
+            (
+                f"{analysis_type or 'Analysis'} · {count} frame(s) · "
+                f"{self._motion_frame_rate_value()} fps · "
+                "all result frames retained · node tables update live · "
+                "scoped member/shell/crack tables update live."
+                if count > 0
+                else "No deformation history or modal vectors are "
+                "available for result animation."
+            )
+        )
+        if not enabled:
+            self.motion_page.setVisible(False)
+        self._sync_motion_markers(None)
+
+    def _motion_source_changed(self, *_args) -> None:
+        self._configure_motion_frames(reset=True)
+        self._emit_current_motion_frame()
+        if self._motion_timer.isActive():
+            self._restart_motion_playback_clock()
+
+    def _motion_slider_changed(self, value: int) -> None:
+        self._motion_frame_index = int(value)
+        self.motion_frame_spin.blockSignals(True)
+        self.motion_frame_spin.setValue(self._motion_frame_index + 1)
+        self.motion_frame_spin.blockSignals(False)
+        self._emit_current_motion_frame()
+        if self._motion_timer.isActive():
+            self._restart_motion_playback_clock()
+
+    def _set_motion_index(self, index: int) -> None:
+        if self._motion_info is None:
+            return
+        count = int(self._motion_display_frame_count)
+        if count <= 0:
+            return
+        target = max(0, min(int(index), count - 1))
+        self._motion_frame_index = target
+        self.motion_frame_spin.blockSignals(True)
+        self.motion_frame_spin.setValue(target + 1)
+        self.motion_frame_spin.blockSignals(False)
+        self.motion_slider.blockSignals(True)
+        self.motion_slider.setValue(target)
+        self.motion_slider.blockSignals(False)
+        self._emit_current_motion_frame()
+
+    def _step_motion(self, delta: int) -> None:
+        if self._motion_info is None:
+            return
+        count = int(self._motion_display_frame_count)
+        if count <= 0:
+            return
+        target = self._motion_frame_index + int(delta)
+        if target >= count:
+            target = 0 if self.motion_loop.isChecked() else count - 1
+        elif target < 0:
+            target = count - 1 if self.motion_loop.isChecked() else 0
+        self._set_motion_index(target)
+
+    def _motion_speed_value(self) -> float:
+        try:
+            return float(self.motion_speed.currentData())
+        except (TypeError, ValueError):
+            return 1.0
+
+    def _motion_effective_fps(self) -> float:
+        fps = float(self._motion_frame_rate_value())
+        speed = max(0.01, self._motion_speed_value())
+        return max(0.1, fps * speed)
+
+    def _motion_timer_interval_ms(self) -> int:
+        # The timer is now only a render heartbeat. Playback position is
+        # derived from elapsed wall time, so high speeds may skip rendered
+        # frames while retaining every result frame for pause/scrubbing.
+        desired = int(round(1000.0 / self._motion_effective_fps()))
+        return max(16, min(50, desired))
+
+    def _restart_motion_playback_clock(self) -> None:
+        self._motion_play_anchor_time = time.monotonic()
+        self._motion_play_anchor_index = int(self._motion_frame_index)
+
+    def _update_motion_timer(self, *_args) -> None:
+        if not self._motion_timer.isActive():
+            return
+        self._restart_motion_playback_clock()
+        self._motion_timer.setInterval(
+            self._motion_timer_interval_ms()
+        )
+
+    def stop_motion(self) -> None:
+        self._motion_timer.stop()
+        if hasattr(self, "motion_play"):
+            self.motion_play.blockSignals(True)
+            self.motion_play.setChecked(False)
+            self.motion_play.setText("▶ Play")
+            self.motion_play.blockSignals(False)
+        self._sync_active_motion_table()
+
+    def _toggle_motion_playback(self, checked: bool) -> None:
+        if checked:
+            if (
+                self._motion_info is None
+                or self._motion_display_frame_count <= 0
+            ):
+                self.motion_play.blockSignals(True)
+                self.motion_play.setChecked(False)
+                self.motion_play.blockSignals(False)
+                return
+            self.motion_play.setText("❚❚ Pause")
+            self._restart_motion_playback_clock()
+            self._motion_timer.setInterval(
+                self._motion_timer_interval_ms()
+            )
+            self._motion_timer.start()
+            if (
+                hasattr(self, "node_frame_status")
+                and self._active_solution_kind
+                in {"NodalDisplacement", "NodalReaction"}
+            ):
+                self.node_frame_status.setText(
+                    "Values follow the active animation frame live."
+                )
+        else:
+            self._motion_timer.stop()
+            self.motion_play.setText("▶ Play")
+            self._sync_active_motion_table()
+
+    def _advance_motion(self) -> None:
+        if self._motion_info is None:
+            return
+        count = int(self._motion_display_frame_count)
+        if count <= 0:
+            return
+
+        # Advance according to elapsed wall time, not one frame per timer
+        # callback. If viewport rendering cannot keep up at 4x/8x/16x, the
+        # display skips ahead to the frame that should be visible now.
+        elapsed = max(
+            0.0,
+            time.monotonic() - float(self._motion_play_anchor_time),
+        )
+        # Protect exact frame-boundary products (for example 0.05 s ×
+        # 240 fps) from binary floating-point underflow to 11.999...
+        # while preserving floor semantics for genuine fractional progress.
+        elapsed_frames = int(
+            elapsed * self._motion_effective_fps() + 1.0e-9
+        )
+        if elapsed_frames <= 0:
+            return
+
+        target = int(self._motion_play_anchor_index) + elapsed_frames
+        if target >= count:
+            if self.motion_loop.isChecked():
+                target %= count
+            else:
+                target = count - 1
+                if target != self._motion_frame_index:
+                    self._set_motion_index(target)
+                self.motion_play.setChecked(False)
+                return
+
+        if target != self._motion_frame_index:
+            self._set_motion_index(target)
+
+    def _sync_paused_motion_values(self) -> None:
+        """Compatibility alias for the former pause-only table sync."""
+        self._sync_active_motion_table()
+
+    def _sync_active_motion_table(
+        self,
+        source_index: int | None = None,
+    ) -> None:
+        """Synchronize the active result table to one solver frame."""
+        if source_index is None and self._motion_display_frame_count > 0:
+            source_index = self._motion_source_index(
+                self._motion_frame_index
+            )
+        if source_index is None:
+            return
+        kind = self._active_solution_kind
+        if kind in {"NodalDisplacement", "NodalReaction"}:
+            self._sync_motion_node_values(source_index)
+        elif kind == "MemberForce":
+            self._sync_member_force_frame(source_index)
+        elif kind in {"ShellForce", "ShellDeformation"}:
+            self._sync_shell_frame(source_index)
+        elif kind == "CrackPattern":
+            self._sync_crack_table_frame(source_index)
+
+    def _sync_member_force_frame(self, source_index: int) -> None:
+        history = (
+            self._result.get("history", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        force_history = (
+            history.get("element_local_forces", {})
+            if isinstance(history, dict)
+            else {}
+        )
+        if not isinstance(force_history, dict) or not force_history:
+            self.element_info.setText(
+                "No member-force history was captured for this result "
+                "request. Re-run the analysis with Member Force in Solution."
+            )
+            return
+
+        component = self.element_quantity.currentText()
+        rows: list[tuple[int, float, float, float]] = []
+        for raw_tag in sorted(force_history, key=lambda value: int(value)):
+            series = force_history.get(raw_tag, [])
+            if not isinstance(series, list) or source_index >= len(series):
+                continue
+            raw = series[source_index]
+            ends = component_end_resultants(
+                raw if isinstance(raw, (list, tuple)) else [],
+                component,
+            )
+            if ends is None:
+                continue
+            value_i = float(ends[0])
+            value_j = float(ends[1])
+            rows.append((
+                int(raw_tag),
+                value_i,
+                value_j,
+                max(abs(value_i), abs(value_j)),
+            ))
+
+        self.element_table.setUpdatesEnabled(False)
+        try:
+            self.element_table.setRowCount(len(rows))
+            for row, (tag, value_i, value_j, maximum) in enumerate(rows):
+                item = self.element_table.item(row, 0)
+                if item is None:
+                    item = QTableWidgetItem()
+                    self.element_table.setItem(row, 0, item)
+                item.setText(str(tag))
+                item.setData(Qt.UserRole, tag)
+                for column, value in enumerate(
+                    (value_i, value_j, maximum),
+                    start=1,
+                ):
+                    cell = self.element_table.item(row, column)
+                    if cell is None:
+                        cell = QTableWidgetItem()
+                        self.element_table.setItem(row, column, cell)
+                    cell.setText(f"{value:.6g}")
+        finally:
+            self.element_table.setUpdatesEnabled(True)
+
+        self._element_table_display_key = (
+            f"{component}@frame:{source_index}"
+        )
+        self.element_info.setText(
+            f"{component}: {len(rows)} member(s) · live animation "
+            f"frame {self._motion_frame_index + 1}/"
+            f"{self._motion_display_frame_count} · "
+            f"result frame {source_index + 1}/"
+            f"{self._motion_source_frame_count}."
+        )
+
+    def _sync_shell_frame(self, source_index: int) -> None:
+        history = (
+            self._result.get("history", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        is_force = self._active_solution_kind == "ShellForce"
+        key = (
+            "shell_section_forces"
+            if is_force
+            else "shell_section_deformations"
+        )
+        data = history.get(key, {}) if isinstance(history, dict) else {}
+        if not isinstance(data, dict) or not data:
+            self.shell_info.setText(
+                "No shell history was captured for this result request. "
+                "Re-run the analysis with this Shell result in Solution."
+            )
+            return
+
+        rows: list[tuple[int, list[float]]] = []
+        for raw_tag in sorted(data, key=lambda value: int(value)):
+            series = data.get(raw_tag, [])
+            if not isinstance(series, list) or source_index >= len(series):
+                continue
+            values = series[source_index]
+            if not isinstance(values, (list, tuple)) or len(values) < 8:
+                continue
+            try:
+                rows.append((
+                    int(raw_tag),
+                    [float(values[index]) for index in range(8)],
+                ))
+            except (TypeError, ValueError):
+                continue
+
+        groups = (
+            {
+                "Membrane": (0, 1, 2),
+                "Bending": (3, 4, 5),
+                "Shear": (6, 7),
+            }
+            if is_force
+            else {
+                "Membrane Strain": (0, 1, 2),
+                "Curvature": (3, 4, 5),
+                "Shear Strain": (6, 7),
+            }
+        )
+        for title, indices in groups.items():
+            table = self.shell_tables[title]
+            table.setUpdatesEnabled(False)
+            try:
+                table.setRowCount(len(rows))
+                for row_index, (tag, values) in enumerate(rows):
+                    cell = table.item(row_index, 0)
+                    if cell is None:
+                        cell = QTableWidgetItem()
+                        table.setItem(row_index, 0, cell)
+                    cell.setText(str(tag))
+                    for column, component_index in enumerate(
+                        indices,
+                        start=1,
+                    ):
+                        cell = table.item(row_index, column)
+                        if cell is None:
+                            cell = QTableWidgetItem()
+                            table.setItem(row_index, column, cell)
+                        cell.setText(
+                            f"{values[component_index]:.6g}"
+                        )
+            finally:
+                table.setUpdatesEnabled(True)
+
+        label = "force" if is_force else "deformation"
+        self.shell_info.setText(
+            f"{len(rows)} shell element(s) · live {label} summary · "
+            f"animation frame {self._motion_frame_index + 1}/"
+            f"{self._motion_display_frame_count} · result frame "
+            f"{source_index + 1}/{self._motion_source_frame_count}. "
+            "Gauss-point detail remains final-state."
+        )
+
     def _sync_crack_table_frame(self, source_index: int) -> None:
         accumulate = bool(self.crack_accumulate.isChecked())
         states = mefi_crack_panel_states(
@@ -2595,10 +4262,7 @@ class ResultsPanel(QWidget):
             accumulate=accumulate,
             element_tags=self._active_crack_scope(),
         )
-        self._write_crack_table(
-            states,
-            accumulated=accumulate,
-        )
+        self._write_crack_table(states, accumulated=accumulate)
         self._update_crack_overview(
             states=states,
             frame_label=(
