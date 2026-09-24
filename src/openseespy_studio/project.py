@@ -6365,6 +6365,40 @@ class ProjectDatabase:
             if target in self.material_dependencies(material)
         )
 
+    @staticmethod
+    def nd_material_uniaxial_dependencies(
+        material: NDMaterialData,
+    ) -> list[int]:
+        if material.material_type == "OrthotropicRAConcrete":
+            return [int(round(material.parameters["conc"]))]
+        return []
+
+    def _validate_nd_material_dependencies(
+        self,
+        material: NDMaterialData,
+    ) -> None:
+        dependencies = self.nd_material_uniaxial_dependencies(material)
+        missing = sorted(
+            tag for tag in dependencies
+            if tag not in self.materials
+        )
+        if missing:
+            raise ValueError(
+                f"{material.material_type} references missing uniaxial "
+                "material tag(s): " + ", ".join(map(str, missing))
+            )
+
+    def nd_materials_using_material(
+        self,
+        material_tag: int,
+    ) -> list[int]:
+        target = _strict_int(material_tag, "Material tag")
+        return sorted(
+            material.tag
+            for material in self.nd_materials.values()
+            if target in self.nd_material_uniaxial_dependencies(material)
+        )
+
     def next_nd_material_tag(self) -> int:
         return max(self.nd_materials, default=0) + 1
 
@@ -6373,6 +6407,7 @@ class ProjectDatabase:
             raise ValueError(
                 f"nDMaterial tag {material.tag} already exists."
             )
+        self._validate_nd_material_dependencies(material)
         self.nd_materials[material.tag] = material
 
     def sections_using_nd_material(self, material_tag: int) -> list[int]:
@@ -6403,6 +6438,7 @@ class ProjectDatabase:
             raise ValueError(
                 f"nDMaterial tag {material.tag} already exists."
             )
+        self._validate_nd_material_dependencies(material)
         self.nd_materials.pop(original_tag)
         self.nd_materials[material.tag] = material
         if material.tag != original_tag:
@@ -6536,11 +6572,19 @@ class ProjectDatabase:
                     and recorder.material_tag == original_tag
                 ):
                     recorder.material_tag = material.tag
+            for nd_material in self.nd_materials.values():
+                if (
+                    nd_material.material_type == "OrthotropicRAConcrete"
+                    and int(round(nd_material.parameters["conc"]))
+                    == original_tag
+                ):
+                    nd_material.parameters["conc"] = float(material.tag)
 
     def remove_material(self, tag: int) -> None:
         tag = _strict_int(tag, "Material tag")
         dependent_materials = self.materials_using_material(tag)
         dependent_sections = self.sections_using_material(tag)
+        dependent_nd_materials = self.nd_materials_using_material(tag)
         dependent_trusses = sorted(
             element.tag
             for element in self.model.elements.values()
@@ -6558,6 +6602,7 @@ class ProjectDatabase:
         if (
             dependent_materials
             or dependent_sections
+            or dependent_nd_materials
             or dependent_trusses
             or dependent_connections
             or dependent_recorders
@@ -6570,6 +6615,11 @@ class ProjectDatabase:
             if dependent_sections:
                 details.append(
                     "sections " + ", ".join(map(str, dependent_sections))
+                )
+            if dependent_nd_materials:
+                details.append(
+                    "nDMaterials "
+                    + ", ".join(map(str, dependent_nd_materials))
                 )
             if dependent_trusses:
                 details.append(
