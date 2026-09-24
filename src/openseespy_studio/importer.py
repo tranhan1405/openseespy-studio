@@ -723,6 +723,30 @@ class _Importer:
             self.count("nD Materials")
             return
 
+        if kind == "SmearedSteelDoubleLayer":
+            if len(values) != 5:
+                raise ValueError(
+                    "SmearedSteelDoubleLayer needs mat1, mat2, ratio1, "
+                    "ratio2 and orientation."
+                )
+            params = {
+                "mat1": float(values[0]),
+                "mat2": float(values[1]),
+                "ratio1": float(values[2]),
+                "ratio2": float(values[3]),
+                "orientation": float(values[4]),
+            }
+            self.project.add_nd_material(
+                NDMaterialData(
+                    tag,
+                    f"Imported {kind} {tag}",
+                    kind,
+                    parameters=params,
+                )
+            )
+            self.count("nD Materials")
+            return
+
         required_count = {
             "ElasticIsotropic": 2,
             "ElasticOrthotropic": 9,
