@@ -878,6 +878,51 @@ def section_to_openseespy(
             f"{section.tag}, {len(section.shell_layers)}, {layer_args})"
         ]
 
+    if section.section_type == "RCLMS":
+        if section.nd_material_tag is None or not section.shell_layers:
+            raise ValueError(
+                f"RCLMS section {section.tag} needs steel and concrete layers."
+            )
+        tags = section.shell_nd_material_tags()
+        missing = sorted(
+            tag
+            for tag in tags
+            if nd_materials is None or tag not in nd_materials
+        )
+        if missing:
+            raise ValueError(
+                f"RCLMS section {section.tag} references missing nDMaterial "
+                "tag(s): " + ", ".join(map(str, missing))
+            )
+        steel = nd_materials[int(section.nd_material_tag)]
+        if steel.material_type != "SmearedSteelDoubleLayer":
+            raise ValueError(
+                f"RCLMS section {section.tag} reinforcing layer must use "
+                "SmearedSteelDoubleLayer."
+            )
+        concrete_tags = [
+            int(layer.material_tag) for layer in section.shell_layers
+        ]
+        if any(
+            nd_materials[tag].material_type != "OrthotropicRAConcrete"
+            for tag in concrete_tags
+        ):
+            raise ValueError(
+                f"RCLMS section {section.tag} concrete layers must use "
+                "OrthotropicRAConcrete."
+            )
+        concrete_thicknesses = [
+            float(layer.thickness) for layer in section.shell_layers
+        ]
+        conc = ", ".join(str(tag) for tag in concrete_tags)
+        thick = ", ".join(f"{value:g}" for value in concrete_thicknesses)
+        return [
+            "ops.section('RCLMS', "
+            f"{section.tag}, 1, {len(concrete_tags)}, "
+            f"'-reinfSteel', {section.nd_material_tag}, "
+            f"'-conc', {conc}, '-concThick', {thick})"
+        ]
+
     raise ValueError(f"Unsupported section type: {section.section_type}")
 
 def constraint_to_openseespy(
