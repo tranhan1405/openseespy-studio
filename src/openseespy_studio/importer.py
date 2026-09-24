@@ -1100,7 +1100,12 @@ class _Importer:
             return
 
         if (
-            kind not in {"zeroLength", "twoNodeLink", "zeroLengthSection"}
+            kind not in {
+                "zeroLength",
+                "twoNodeLink",
+                "zeroLengthSection",
+                "Joint2D",
+            }
             and tag in self.project.connections
         ):
             raise ValueError(
@@ -1283,6 +1288,50 @@ class _Importer:
                     kwargs["force_max_iter"] = int(rest[index + 1])
                     kwargs["force_tolerance"] = float(rest[index + 2])
             self.project.model.add_element(tag, ni, nj, **kwargs)
+            self.count("Elements")
+            return
+
+        if kind == "Joint2D":
+            if len(args) < 9:
+                raise ValueError(
+                    "Joint2D needs four external nodes, a center-node tag, "
+                    "panel material, and large-displacement flag."
+                )
+            external_nodes = [int(value) for value in args[2:6]]
+            center_node_tag = int(args[6])
+            numeric_tail: list[int] = []
+            for value in args[7:]:
+                if isinstance(value, str):
+                    break
+                numeric_tail.append(int(value))
+            if len(numeric_tail) == 2:
+                interface_materials = [0, 0, 0, 0]
+                panel_material, large_disp = numeric_tail
+            elif len(numeric_tail) >= 6:
+                interface_materials = numeric_tail[:4]
+                panel_material = numeric_tail[4]
+                large_disp = numeric_tail[5]
+            else:
+                raise ValueError(
+                    "Joint2D material arguments must be MatC/LrgDspTag "
+                    "or Mat1..Mat4/MatC/LrgDspTag."
+                )
+            self.project.add_connection(
+                ConnectionData(
+                    tag=tag,
+                    name=f"Imported Joint2D {tag}",
+                    connection_type="Joint2D",
+                    node_i=external_nodes[0],
+                    node_j=external_nodes[1],
+                    parameters={
+                        "external_nodes": external_nodes,
+                        "panel_material": int(panel_material),
+                        "interface_materials": interface_materials,
+                        "large_disp": int(large_disp),
+                        "imported_center_node_tag": center_node_tag,
+                    },
+                )
+            )
             self.count("Elements")
             return
 
