@@ -979,6 +979,11 @@ def test_importer_recovers_additional_nd_material_types():
     source = """
 import openseespy.opensees as ops
 
+ops.uniaxialMaterial(
+    'Concrete02', 4,
+    -30.0e6, -0.002, -6.0e6, -0.006,
+    0.1, 3.0e6, 2.0e8
+)
 ops.nDMaterial(
     'ElasticOrthotropic', 21,
     40.0e9, 12.0e9, 8.0e9,
@@ -1027,6 +1032,22 @@ ops.nDMaterial(
     37.0, 0.10, 80.0e3, 0.5, 27.0,
     0.05, 0.6, 3.0, 5.0e3, 0.003, 1.0,
     30, 0.55, 0.95, 0.03, 0.65, 101.0e3, 0.5e3
+)
+ops.nDMaterial(
+    'ASDConcrete3D', 29,
+    30.0e9, 0.2,
+    '-rho', 2400.0,
+    '-fc', 30.0e6,
+    '-ft', 3.0e6,
+    '-implex',
+    '-Kc', 0.7,
+    '-cdf', 0.0
+)
+ops.nDMaterial(
+    'OrthotropicRAConcrete', 30,
+    4, 0.00008, -0.002, 0.0,
+    '-damageCte1', 0.175,
+    '-damageCte2', 0.5
 )
 """
 
@@ -1112,6 +1133,78 @@ ops.nDMaterial(
     assert pdmy_full.parameters["c"] == 500.0
     assert any(
         issue.construct == "PressureDependMultiYield material stage"
+        for issue in result.issues
+    )
+
+    asd = result.project.nd_materials[29]
+    assert asd.material_type == "ASDConcrete3D"
+    assert asd.parameters["E"] == 30.0e9
+    assert asd.parameters["rho"] == 2400.0
+    assert asd.parameters["fc"] == 30.0e6
+    assert asd.parameters["ft"] == 3.0e6
+    assert asd.parameters["implex"] == 1.0
+    assert asd.parameters["Kc"] == 0.7
+    assert asd.parameters["cdf"] == 0.0
+
+    ra = result.project.nd_materials[30]
+    assert ra.material_type == "OrthotropicRAConcrete"
+    assert ra.parameters["conc"] == 4.0
+    assert ra.parameters["ecr"] == 0.00008
+    assert ra.parameters["ec"] == -0.002
+    assert ra.parameters["DamageCte1"] == 0.175
+    assert ra.parameters["DamageCte2"] == 0.5
+    assert result.project.nd_materials_using_material(4) == [30]
+
+
+def test_importer_rejects_advanced_asd_concrete_backbone():
+    source = """
+import openseespy.opensees as ops
+
+ops.nDMaterial(
+    'ASDConcrete3D', 64,
+    30.0e9, 0.2,
+    '-fc', 30.0e6,
+    '-ft', 3.0e6,
+    '-Te', [0.0, 0.0001, 0.001],
+    '-Ts', [0.0, 3.0e6, 0.0]
+)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="advanced_asd_concrete.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert 64 not in result.project.nd_materials
+    assert result.unsupported_count == 1
+    issue = next(
+        item
+        for item in result.issues
+        if item.construct == "ASDConcrete3D advanced options"
+    )
+    assert "Custom backbone" in issue.message
+
+
+def test_importer_rejects_missing_orthotropic_ra_dependency():
+    source = """
+import openseespy.opensees as ops
+ops.nDMaterial(
+    'OrthotropicRAConcrete', 65,
+    99, 0.00008, -0.002, 0.0
+)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="missing_ra_dependency.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert 65 not in result.project.nd_materials
+    assert result.error_count >= 1
+    assert any(
+        "missing uniaxial material" in issue.message
         for issue in result.issues
     )
 
