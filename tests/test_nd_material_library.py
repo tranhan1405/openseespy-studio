@@ -176,7 +176,8 @@ def test_nd_library_facets_and_combined_filters():
         query="OpenSees Documentation orthotropic",
     )
     assert [record.model for record in source_search] == [
-        "ElasticOrthotropic"
+        "ElasticOrthotropic",
+        "OrthotropicRAConcrete",
     ]
 
     elastic_behavior = filter_verified_nd_material_library(
