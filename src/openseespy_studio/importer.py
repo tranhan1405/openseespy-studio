@@ -20,7 +20,10 @@ from .project import (
     FiberData,
     LoadPatternData,
     MaterialData,
+    ND_MATERIAL_DEFAULTS,
+    ND_MATERIAL_PARAMETER_ORDER,
     NDMaterialData,
+    nd_material_parameter_kind,
     NodalLoadData,
     PrescribedDisplacementData,
     ProjectDatabase,
@@ -594,13 +597,11 @@ class _Importer:
             )
 
     def add_nd_material(self, node: ast.Call, args: list[Any]) -> None:
-        if len(args) < 4:
-            raise ValueError(
-                "nDMaterial needs type, tag, E and Poisson ratio"
-            )
+        if len(args) < 2:
+            raise ValueError("nDMaterial needs type and tag")
         kind = str(args[0])
         tag = int(args[1])
-        if kind != "ElasticIsotropic":
+        if kind not in ND_MATERIAL_PARAMETER_ORDER:
             self.issue(
                 "UNSUPPORTED",
                 node,
@@ -608,22 +609,42 @@ class _Importer:
                 f"nDMaterial {kind!r} is not supported by Studio yet.",
             )
             return
-        density_model = float(args[4]) if len(args) >= 5 else 0.0
-        density_kg_m3 = (
-            density_model
-            * self.units.mass_unit_kg
-            / (self.units.length_to_m ** 3)
-        )
+
+        keys = ND_MATERIAL_PARAMETER_ORDER[kind]
+        required_count = {
+            "ElasticIsotropic": 2,
+            "ElasticOrthotropic": 9,
+            "J2Plasticity": 6,
+        }[kind]
+        values = list(args[2:])
+        if len(values) < required_count:
+            raise ValueError(
+                f"{kind} needs at least {required_count} material arguments"
+            )
+
+        params = dict(ND_MATERIAL_DEFAULTS[kind])
+        for index, key in enumerate(keys):
+            if index >= len(values):
+                break
+            raw = float(values[index])
+            dimension = nd_material_parameter_kind(kind, key)
+            if dimension == "stress":
+                params[key] = self.stress_to_pa(raw)
+            elif dimension == "density":
+                params[key] = (
+                    raw
+                    * self.units.mass_unit_kg
+                    / (self.units.length_to_m ** 3)
+                )
+            else:
+                params[key] = raw
+
         self.project.add_nd_material(
             NDMaterialData(
                 tag,
-                f"Imported ElasticIsotropic {tag}",
-                "ElasticIsotropic",
-                parameters={
-                    "E": self.stress_to_pa(args[2]),
-                    "nu": float(args[3]),
-                    "rho": density_kg_m3,
-                },
+                f"Imported {kind} {tag}",
+                kind,
+                parameters=params,
             )
         )
         self.count("nD Materials")
