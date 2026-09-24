@@ -598,6 +598,18 @@ def nd_material_to_openseespy(
             f"{material.tag}, {args})"
         )
 
+    if material.material_type == "DruckerPrager":
+        keys = (
+            "K", "G", "sigmaY", "rho", "rhoBar",
+            "Kinf", "Ko", "delta1", "delta2", "H",
+            "theta", "density", "atmPressure",
+        )
+        args = ", ".join(f"{value(key):g}" for key in keys)
+        return (
+            "ops.nDMaterial('DruckerPrager', "
+            f"{material.tag}, {args})"
+        )
+
     raise ValueError(
         f"Unsupported nDMaterial type: {material.material_type}"
     )
