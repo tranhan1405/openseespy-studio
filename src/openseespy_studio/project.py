@@ -7026,6 +7026,87 @@ class ProjectDatabase:
                     "2D frame model (ndm=2, ndf=3)."
                 )
 
+            external_tags = [
+                int(tag)
+                for tag in connection.parameters["external_nodes"]
+            ]
+            points = [
+                self.model.nodes[tag].xyz
+                for tag in external_tags
+            ]
+            xy = [
+                (float(point[0]), float(point[1]))
+                for point in points
+            ]
+            chord_a = math.hypot(
+                xy[2][0] - xy[0][0],
+                xy[2][1] - xy[0][1],
+            )
+            chord_b = math.hypot(
+                xy[3][0] - xy[1][0],
+                xy[3][1] - xy[1][1],
+            )
+            scale = max(chord_a, chord_b, 1.0)
+            tolerance = 1.0e-7 * scale
+            if chord_a <= tolerance or chord_b <= tolerance:
+                raise ValueError(
+                    f"{connection.connection_type} needs two non-zero "
+                    "opposing external-node chords."
+                )
+
+            midpoint_a = (
+                0.5 * (xy[0][0] + xy[2][0]),
+                0.5 * (xy[0][1] + xy[2][1]),
+            )
+            midpoint_b = (
+                0.5 * (xy[1][0] + xy[3][0]),
+                0.5 * (xy[1][1] + xy[3][1]),
+            )
+            midpoint_error = math.hypot(
+                midpoint_a[0] - midpoint_b[0],
+                midpoint_a[1] - midpoint_b[1],
+            )
+            if midpoint_error > tolerance:
+                raise ValueError(
+                    f"{connection.connection_type} external-node chords "
+                    "must bisect at the same joint center."
+                )
+
+            center = (
+                0.5 * (midpoint_a[0] + midpoint_b[0]),
+                0.5 * (midpoint_a[1] + midpoint_b[1]),
+            )
+            vectors = [
+                (point[0] - center[0], point[1] - center[1])
+                for point in xy
+            ]
+            cross_values = [
+                vectors[index][0] * vectors[(index + 1) % 4][1]
+                - vectors[index][1] * vectors[(index + 1) % 4][0]
+                for index in range(4)
+            ]
+            if not (
+                all(value > tolerance * tolerance for value in cross_values)
+                or all(value < -tolerance * tolerance for value in cross_values)
+            ):
+                raise ValueError(
+                    f"{connection.connection_type} external nodes must be "
+                    "entered cyclically around the joint."
+                )
+
+            if connection.connection_type == "KrawinklerPanelZone":
+                left, top, right, bottom = xy
+                if (
+                    abs(left[1] - right[1]) > tolerance
+                    or abs(top[0] - bottom[0]) > tolerance
+                    or left[0] >= right[0] - tolerance
+                    or bottom[1] >= top[1] - tolerance
+                ):
+                    raise ValueError(
+                        "KrawinklerPanelZone currently requires an axis-aligned "
+                        "Left → Top → Right → Bottom external-node layout."
+                    )
+
     def add_connection(self, connection: ConnectionData) -> None:
         if connection.tag in self.connections:
             raise ValueError(
