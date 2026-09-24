@@ -1678,6 +1678,14 @@ class SectionData:
                 int(layer.material_tag)
                 for layer in self.shell_layers
             }
+        if self.section_type == "RCLMS":
+            tags = {
+                int(layer.material_tag)
+                for layer in self.shell_layers
+            }
+            if self.nd_material_tag is not None:
+                tags.add(int(self.nd_material_tag))
+            return tags
         return set()
 
     def shell_total_thickness(self) -> float:
@@ -1685,7 +1693,7 @@ class SectionData:
             return float(self.parameters["h"])
         if self.section_type == "PlateFiber":
             return float(self.parameters["h"])
-        if self.section_type == "LayeredShell":
+        if self.section_type in {"LayeredShell", "RCLMS"}:
             return sum(
                 float(layer.thickness)
                 for layer in self.shell_layers
