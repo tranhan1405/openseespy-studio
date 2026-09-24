@@ -23246,26 +23246,29 @@ class MainWindow(QMainWindow):
     def _joint_response_choices(
         self,
         connection: ConnectionData,
-    ) -> list[tuple[str, str]]:
+    ) -> list[tuple[str, str, int]]:
         response = connection.connection_type
         if response == "BeamColumnJoint":
             return [
-                ("Total Joint Deformation", "deformation"),
-                ("Shear Panel", "shearPanel"),
-                ("Node 1 · Bar Slip Left", "node1BarSlipL"),
-                ("Node 1 · Bar Slip Right", "node1BarSlipR"),
+                ("Total Joint Deformation", "deformation", 4),
+                ("Bar-Slip Contribution", "deformation", 1),
+                ("Interface-Shear Contribution", "deformation", 2),
+                ("Shear-Panel Contribution", "deformation", 3),
+                ("Shear Panel", "shearPanel", 1),
+                ("Node 1 · Bar Slip Left", "node1BarSlipL", 1),
+                ("Node 1 · Bar Slip Right", "node1BarSlipR", 1),
                 ("Node 1 · Interface Shear", "node1InterfaceShear"),
-                ("Node 2 · Bar Slip Bottom", "node2BarSlipB"),
-                ("Node 2 · Bar Slip Top", "node2BarSlipT"),
+                ("Node 2 · Bar Slip Bottom", "node2BarSlipB", 1),
+                ("Node 2 · Bar Slip Top", "node2BarSlipT", 1),
                 ("Node 2 · Interface Shear", "node2InterfaceShear"),
-                ("Node 3 · Bar Slip Left", "node3BarSlipL"),
-                ("Node 3 · Bar Slip Right", "node3BarSlipR"),
+                ("Node 3 · Bar Slip Left", "node3BarSlipL", 1),
+                ("Node 3 · Bar Slip Right", "node3BarSlipR", 1),
                 ("Node 3 · Interface Shear", "node3InterfaceShear"),
-                ("Node 4 · Bar Slip Bottom", "node4BarSlipB"),
-                ("Node 4 · Bar Slip Top", "node4BarSlipT"),
+                ("Node 4 · Bar Slip Bottom", "node4BarSlipB", 1),
+                ("Node 4 · Bar Slip Top", "node4BarSlipT", 1),
                 ("Node 4 · Interface Shear", "node4InterfaceShear"),
-                ("Internal Displacement", "internalDisplacement"),
-                ("External Displacement", "externalDisplacement"),
+                ("Internal Displacement", "internalDisplacement", 1),
+                ("External Displacement", "externalDisplacement", 1),
             ]
         labels = {
             "deformation": "Deformation / Rotation",
@@ -23301,7 +23304,7 @@ class MainWindow(QMainWindow):
             "defoANDforce",
         )
         return [
-            (labels.get(query, query), query)
+            (labels.get(query, query), query, 1)
             for query in ordered
             if query in allowed
         ]
@@ -23311,6 +23314,7 @@ class MainWindow(QMainWindow):
         connection_tag: int,
         response: str,
         label: str | None = None,
+        component: int = 1,
     ) -> None:
         connection = self.project.connections.get(int(connection_tag))
         if connection is None:
@@ -23336,7 +23340,7 @@ class MainWindow(QMainWindow):
             ),
             {
                 "response": str(response),
-                "component": 1,
+                "component": max(1, int(component)),
                 "connection_type": connection.connection_type,
                 "curve_mode": (
                     "force_deformation"
@@ -27961,17 +27965,23 @@ class MainWindow(QMainWindow):
                 else []
             )
             joint_result_menu.setEnabled(bool(joint_result_choices))
-            for result_label, response_query in joint_result_choices:
+            for (
+                result_label,
+                response_query,
+                result_component,
+            ) in joint_result_choices:
                 action = joint_result_menu.addAction(result_label)
                 action.triggered.connect(
                     lambda checked=False,
                     connection_tag=tag,
                     response=response_query,
-                    label=result_label:
+                    label=result_label,
+                    component=result_component:
                     self._insert_connection_joint_result(
                         connection_tag,
                         response,
                         label,
+                        component,
                     )
                 )
 
