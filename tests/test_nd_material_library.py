@@ -306,7 +306,7 @@ def test_nd_library_dialog_browses_and_filters_records():
 
         dialog.search.setText("definitely-no-such-material")
         _APP.processEvents()
-        assert dialog.result_count.text() == "0 / 3 shown"
+        assert dialog.result_count.text() == "0 / 4 shown"
         assert not dialog.add_button.isEnabled()
         assert not dialog.copy_command.isEnabled()
 
