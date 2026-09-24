@@ -2034,7 +2034,7 @@ def test_project_delete_entities_cascades_node_dependencies():
             "Element recorder",
             "Element",
             target_tags=[10],
-            response="globalForce",
+            response="force",
         )
     )
     project.selection_sets["Delete"] = SelectionSetData(
@@ -2144,7 +2144,7 @@ def test_project_connection_tag_rename_cascades_references():
             "Connection force",
             "Element",
             target_tags=[10],
-            response="globalForce",
+            response="force",
         )
     )
     project.add_analysis(
@@ -3185,7 +3185,10 @@ def test_connection_rejects_dof_above_model_ndf():
 
     with pytest.raises(
         ValueError,
-        match=r"Connection DOF\(s\) 4 are not available for ndf=3",
+        match=(
+            r"zeroLength direction\(s\) 4 are not available for "
+            r"ndm=2, ndf=3"
+        ),
     ):
         project.add_connection(
             ConnectionData(
