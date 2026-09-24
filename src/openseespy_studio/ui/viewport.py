@@ -7077,24 +7077,27 @@ class ModelViewport(QWidget):
         line_scale: float = 0.82,
         element_tags: set[int] | None = None,
         cache_key: object | None = None,
-    ) -> None:
-        """Draw smeared RC crack lines for MEFI/RCLMS macro-fibers.
+    ) -> dict[str, float | int]:
+        """Draw visible smeared RC crack lines for MEFI/RCLMS macro-fibers.
 
-        A panel is shown only after its maximum principal tensile strain reaches
-        the OrthotropicRAConcrete cracking strain stored in mefi_crack_specs.
-        The displayed crack line is perpendicular to that principal tensile
-        strain direction. With accumulate enabled the orientation/intensity at
-        the largest opening reached up to the selected frame is retained.
+        Returns lightweight diagnostics so callers can distinguish "no crack"
+        from "no instrumentation/data" instead of silently showing nothing.
         """
+        stats: dict[str, float | int] = {
+            "panels": 0,
+            "valid_panels": 0,
+            "cracked": 0,
+            "max_ratio": 0.0,
+        }
         if self._model is None:
-            return
+            return stats
 
         specs = result.get("mefi_crack_specs", {})
         final = result.get("final", {})
         history = result.get("history", {})
         if not isinstance(specs, dict) or not specs:
             self.clear_result_overlay()
-            return
+            return stats
         final_panels = (
             final.get("mefi_panel_strains", {})
             if isinstance(final, dict)
@@ -7196,7 +7199,8 @@ class ModelViewport(QWidget):
             if normal_norm <= 1.0e-12:
                 continue
             normal /= normal_norm
-            visual_offset = normal * max(width_geom, height_geom) * 2.0e-4
+            # Keep crack glyphs clearly in front of the opaque MEFI surface.
+            visual_offset = normal * max(width_geom, height_geom) * 1.0e-3
 
             panels = spec.get("panels", [])
             if not isinstance(panels, list) or not panels:
@@ -7216,6 +7220,7 @@ class ModelViewport(QWidget):
             for index, panel in enumerate(panels, start=1):
                 if not isinstance(panel, dict):
                     continue
+                stats["panels"] = int(stats["panels"]) + 1
                 raw_width = max(0.0, panel_widths[index - 1])
                 try:
                     panel_no = int(panel.get("panel", index))
@@ -7238,14 +7243,23 @@ class ModelViewport(QWidget):
                         continue
                     epsilon_1, theta_1 = principal
                     ratio = epsilon_1 / threshold
-                    if ratio < 1.0:
-                        continue
                     if best is None or ratio > best[0]:
                         best = (ratio, epsilon_1, theta_1)
+
                 if best is None:
                     cumulative += raw_width
                     continue
 
+                stats["valid_panels"] = int(stats["valid_panels"]) + 1
+                stats["max_ratio"] = max(
+                    float(stats["max_ratio"]),
+                    float(best[0]),
+                )
+                if best[0] < 1.0:
+                    cumulative += raw_width
+                    continue
+
+                stats["cracked"] = int(stats["cracked"]) + 1
                 u = (cumulative + 0.5 * raw_width) / total_width
                 bottom = (1.0 - u) * pi + u * pj
                 top = (1.0 - u) * pl + u * pk
@@ -7284,7 +7298,7 @@ class ModelViewport(QWidget):
         self.set_undeformed_model_visible(True, render=False)
         if not points:
             self.plotter.render()
-            return
+            return stats
 
         mesh = pv.PolyData(np.asarray(points, dtype=float))
         mesh.lines = np.asarray(lines, dtype=np.int64)
@@ -7292,22 +7306,21 @@ class ModelViewport(QWidget):
             intensity,
             dtype=float,
         )
-        upper = max(max(intensity), 1.05)
+        # A fixed high-contrast crack color is substantially more reliable
+        # than a scalar-mapped line actor on top of an opaque shell surface.
         kwargs: dict[str, object] = {
             "name": "result-crack-pattern",
-            "scalars": "crack_intensity",
-            "preference": "cell",
-            "cmap": "autumn_r",
-            "clim": (1.0, upper),
-            "line_width": 4,
+            "color": "#c62828",
+            "line_width": 7,
             "render_lines_as_tubes": True,
+            "lighting": False,
             "pickable": False,
-            "scalar_bar_args": {"title": "Crack intensity epsilon1 / epsilon_cr"},
         }
         self.plotter.add_mesh(mesh, **kwargs, render=False)
         self._result_overlay_active = True
         self._active_result_view_key = None
         self.plotter.render()
+        return stats
 
     def show_shell_deformation_contour(
         self,
