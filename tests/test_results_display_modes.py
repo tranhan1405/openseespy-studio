@@ -7,7 +7,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 from openseespy_studio.ui.main_window import MainWindow
 from openseespy_studio.ui.results_panel import ResultsPanel
@@ -1112,3 +1112,112 @@ def test_crack_summary_reports_max_cracking_ratio(qapp):
         panel.close()
         panel.deleteLater()
         qapp.processEvents()
+
+
+def test_nodal_reaction_table_follows_animation_frames_and_can_export(
+    qapp,
+    tmp_path,
+    monkeypatch,
+):
+    panel = ResultsPanel()
+    result = {
+        "analysis": {"type": "Static"},
+        "history": {
+            "time": [0.5, 1.0],
+            "nodes": {
+                "1": {
+                    "disp": [
+                        [0.001, 0.0, 0.0],
+                        [0.002, 0.0, 0.0],
+                    ],
+                    "vel": [[], []],
+                    "accel": [[], []],
+                    "reaction": [
+                        [-10.0, -2.0, 0.0],
+                        [-25.0, -4.0, 0.0],
+                    ],
+                },
+                "2": {
+                    "disp": [
+                        [0.0015, 0.0, 0.0],
+                        [0.0030, 0.0, 0.0],
+                    ],
+                    "vel": [[], []],
+                    "accel": [[], []],
+                    "reaction": [
+                        [-12.0, -3.0, 0.0],
+                        [-30.0, -5.0, 0.0],
+                    ],
+                },
+            },
+            "base_reactions": [
+                [-22.0, -5.0, 0.0],
+                [-55.0, -9.0, 0.0],
+            ],
+            "base_shear": [-22.0, -55.0],
+            "displacement": [
+                [0.0015, 0.0, 0.0],
+                [0.0030, 0.0, 0.0],
+            ],
+        },
+        "final": {
+            "node_displacements": {
+                "1": [0.002, 0.0, 0.0],
+                "2": [0.003, 0.0, 0.0],
+            },
+            "node_reactions": {
+                "1": [-25.0, -4.0, 0.0],
+                "2": [-30.0, -5.0, 0.0],
+            },
+        },
+        "convergence": {"steps": []},
+        "modes": {},
+    }
+    target = tmp_path / "reaction_frame.csv"
+    monkeypatch.setattr(
+        QFileDialog,
+        "getSaveFileName",
+        lambda *args, **kwargs: (str(target), "CSV files (*.csv)"),
+    )
+    try:
+        panel.set_result(result)
+        panel.show_solution_result(
+            "NodalReaction",
+            {"component": "FX"},
+        )
+        qapp.processEvents()
+
+        assert panel.node_animate_button.isVisible()
+        assert not panel.motion_page.isHidden()
+
+        panel._set_motion_index(0)
+        qapp.processEvents()
+        assert panel.node_table.horizontalHeaderItem(1).text() == "FX"
+        assert panel.node_table.item(0, 1).text() == "-10"
+        assert "live animation frame 1/2" in panel.node_frame_status.text()
+
+        panel._set_motion_index(1)
+        qapp.processEvents()
+        assert panel.node_table.item(0, 1).text() == "-25"
+        assert panel.node_table.item(1, 1).text() == "-30"
+        assert "live animation frame 2/2" in panel.node_frame_status.text()
+
+        panel._export_node_table_csv()
+        exported = target.read_text(encoding="utf-8")
+        assert "Node,FX,FY,FZ,MX,MY,MZ" in exported
+        assert "1,-25,-4,0,0,0,0" in exported
+        assert "2,-30,-5,0,0,0,0" in exported
+        assert "Exported 2 nodal reaction row(s)" in panel.node_frame_status.text()
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_node_result_animation_text_no_longer_freezes_tables():
+    source = inspect.getsource(ResultsPanel)
+
+    assert "node tables update live" in source
+    assert "Values frozen during playback" not in source
+    assert "tables update on Pause" not in source
+    assert "def _export_node_table_csv" in source
