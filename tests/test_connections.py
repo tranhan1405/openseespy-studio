@@ -1,6 +1,7 @@
 from openseespy_studio.generator import (
     analysis_to_openseespy,
     connection_to_openseespy,
+    recorder_to_openseespy,
     to_openseespy,
 )
 from openseespy_studio.model import StructuralModel
@@ -263,9 +264,10 @@ def test_joint2d_round_trip_and_generator():
     assert "_sare_joint2d_center_30" in script
     assert (
         "ops.element('Joint2D', 30, 10, 11, 12, 13, "
-        "_sare_joint2d_center_30, 0, 0, 0, 0, 1, 1)"
+        "_sare_joint2d_center_30, 1, 1)"
         in script
     )
+    assert ", 0, 0, 0, 0, 1, 1)" not in script
 
 
 def test_krawinkler_panel_zone_generator_builds_expected_macro():
@@ -871,3 +873,301 @@ def test_semi_rigid_3d_ties_all_non_spring_dofs():
 
     assert "ops.equalDOF(1, 2, 1, 2, 3, 4, 5)" in script
     assert "'-dir', 6" in script
+
+
+def test_two_node_link_nonzero_length_uses_geometry_orientation_by_default():
+    project = frame2d_project()
+    connection = ConnectionData(
+        tag=70,
+        name="Geometry-oriented link",
+        connection_type="twoNodeLink",
+        node_i=10,
+        node_j=12,
+        materials_by_dof={1: 1, 3: 1},
+        parameters={
+            "orientation_override": False,
+            "p_delta": [],
+            "shear_dist": [],
+            "mass": 0.0,
+        },
+    )
+    project.add_connection(connection)
+
+    script = connection_to_openseespy(connection, ndm=2, ndf=3)
+
+    assert "ops.element('twoNodeLink', 70, 10, 12" in script
+    assert "'-dir', 1, 3" in script
+    assert "'-orient'" not in script
+
+
+def test_two_node_link_exports_advanced_options_with_native_flags():
+    project = frame2d_project()
+    connection = ConnectionData(
+        tag=71,
+        name="Advanced link",
+        connection_type="twoNodeLink",
+        node_i=10,
+        node_j=12,
+        materials_by_dof={1: 1, 3: 1},
+        orient_x=(0.0, 1.0, 0.0),
+        orient_y=(-1.0, 0.0, 0.0),
+        do_rayleigh=True,
+        parameters={
+            "orientation_override": True,
+            "p_delta": [0.4, 0.4],
+            "shear_dist": [0.35],
+            "mass": 2.5,
+        },
+    )
+    project.add_connection(connection)
+
+    script = connection_to_openseespy(connection, ndm=2, ndf=3)
+
+    assert "'-orient', 0, 1, 0, -1, 0, 0" in script
+    assert "'-pDelta', 0.4, 0.4" in script
+    assert "'-shearDist', 0.35" in script
+    assert "'-doRayleigh'" in script
+    assert "'-doRayleigh', 1" not in script
+    assert "'-mass', 2.5" in script
+
+
+def test_two_node_link_rejects_wrong_advanced_option_count_for_dimension():
+    project = frame2d_project()
+    connection = ConnectionData(
+        tag=72,
+        name="Wrong 2D PDelta",
+        connection_type="twoNodeLink",
+        node_i=10,
+        node_j=12,
+        materials_by_dof={1: 1},
+        parameters={
+            "orientation_override": False,
+            "p_delta": [0.2, 0.2, 0.2, 0.2],
+            "shear_dist": [],
+            "mass": 0.0,
+        },
+    )
+
+    try:
+        project.add_connection(connection)
+    except ValueError as exc:
+        assert "2D requires 2 p_delta" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected 2D twoNodeLink with four P-Delta ratios to fail"
+        )
+
+
+def test_importer_preserves_two_node_link_advanced_options():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+ops.node(1, 0.0, 0.0)
+ops.node(2, 2.0, 0.0)
+ops.uniaxialMaterial('Elastic', 1, 1000.0)
+ops.element(
+    'twoNodeLink', 20, 1, 2,
+    '-mat', 1, 1,
+    '-dir', 1, 3,
+    '-orient', 0.0, 1.0, 0.0, -1.0, 0.0, 0.0,
+    '-pDelta', 0.3, 0.4,
+    '-shearDist', 0.25,
+    '-doRayleigh',
+    '-mass', 3.5,
+)
+"""
+    result = import_openseespy_source(
+        source,
+        source_name="two_node_link_advanced.py",
+    )
+
+    connection = result.project.connections[20]
+    assert connection.connection_type == "twoNodeLink"
+    assert connection.materials_by_dof == {1: 1, 3: 1}
+    assert connection.parameters["orientation_override"] is True
+    assert connection.parameters["p_delta"] == [0.3, 0.4]
+    assert connection.parameters["shear_dist"] == [0.25]
+    assert connection.parameters["mass"] == 3.5
+    assert connection.do_rayleigh is True
+
+    script = connection_to_openseespy(connection, ndm=2, ndf=3)
+    assert "'-pDelta', 0.3, 0.4" in script
+    assert "'-shearDist', 0.25" in script
+    assert "'-doRayleigh'" in script
+
+
+def test_joint2d_nonzero_interface_materials_export_full_form():
+    project = frame2d_project()
+    project.add_material(elastic_material(2))
+    connection = ConnectionData(
+        tag=73,
+        name="Joint with interface springs",
+        connection_type="Joint2D",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "panel_material": 1,
+            "interface_materials": [2, 0, 2, 0],
+            "large_disp": 2,
+        },
+    )
+    project.add_connection(connection)
+
+    script = connection_to_openseespy(connection, ndm=2, ndf=3)
+
+    assert (
+        "ops.element('Joint2D', 73, 10, 11, 12, 13, "
+        "_sare_joint2d_center_73, 2, 0, 2, 0, 1, 2)"
+        in script
+    )
+
+
+def test_imported_joint2d_center_node_tag_is_preserved_on_export():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+ops.node(10, 0.0, 0.0)
+ops.node(11, 1.0, 1.0)
+ops.node(12, 2.0, 0.0)
+ops.node(13, 1.0, -1.0)
+ops.uniaxialMaterial('Elastic', 1, 1000.0)
+ops.element('Joint2D', 30, 10, 11, 12, 13, 130, 1, 0)
+"""
+    result = import_openseespy_source(
+        source,
+        source_name="joint2d_center_roundtrip.py",
+    )
+    connection = result.project.connections[30]
+
+    script = connection_to_openseespy(connection, ndm=2, ndf=3)
+
+    assert "# Preserved imported Joint2D center-node tag 130" in script
+    assert "ops.element('Joint2D', 30, 10, 11, 12, 13, 130, 1, 0)" in script
+    assert "_sare_joint2d_center_30 =" not in script
+
+
+def test_joint2d_center_node_tag_cannot_collide_with_existing_node():
+    project = frame2d_project()
+    project.model.add_node(130, 5.0, 5.0, 0.0)
+    connection = ConnectionData(
+        tag=74,
+        name="Center collision",
+        connection_type="Joint2D",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "panel_material": 1,
+            "interface_materials": [0, 0, 0, 0],
+            "large_disp": 0,
+            "imported_center_node_tag": 130,
+        },
+    )
+
+    try:
+        project.add_connection(connection)
+    except ValueError as exc:
+        assert "center node tag 130 already exists" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected Joint2D center-node collision to be rejected"
+        )
+
+
+def test_connection_specific_element_recorder_responses_are_validated():
+    project = frame2d_project()
+    project.add_connection(ConnectionData(
+        tag=75,
+        name="Link response",
+        connection_type="twoNodeLink",
+        node_i=10,
+        node_j=12,
+        materials_by_dof={1: 1},
+        parameters={
+            "orientation_override": False,
+            "p_delta": [],
+            "shear_dist": [],
+            "mass": 0.0,
+        },
+    ))
+    project.add_connection(ConnectionData(
+        tag=76,
+        name="Joint response",
+        connection_type="Joint2D",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "panel_material": 1,
+            "interface_materials": [0, 0, 0, 0],
+            "large_disp": 0,
+        },
+    ))
+
+    project.add_recorder(RecorderData(
+        tag=20,
+        name="Link basic force",
+        recorder_type="Element",
+        target_tags=[75],
+        response="basicForce",
+    ))
+    project.add_recorder(RecorderData(
+        tag=21,
+        name="Joint deformation",
+        recorder_type="Element",
+        target_tags=[76],
+        response="deformation",
+    ))
+
+    assert project.recorders[20].response == "basicForce"
+    assert project.recorders[21].response == "deformation"
+
+    bad = RecorderData(
+        tag=22,
+        name="Bad joint local force",
+        recorder_type="Element",
+        target_tags=[76],
+        response="localForce",
+    )
+    try:
+        project.add_recorder(bad)
+    except ValueError as exc:
+        assert "Joint2D" in str(exc)
+        assert "localForce" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected unsupported Joint2D recorder response to fail"
+        )
+
+
+def test_krawinkler_public_tag_records_panel_spring_deformation():
+    project = frame2d_project()
+    connection = ConnectionData(
+        tag=77,
+        name="Panel response",
+        connection_type="KrawinklerPanelZone",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "panel_material": 1,
+            "rigid_A": 1000.0,
+            "rigid_E": 2.0e11,
+            "rigid_I": 1000.0,
+        },
+    )
+    project.add_connection(connection)
+    recorder = RecorderData(
+        tag=23,
+        name="Panel distortion",
+        recorder_type="Element",
+        target_tags=[77],
+        response="deformation",
+    )
+
+    project.add_recorder(recorder)
+    commands = "\n".join(recorder_to_openseespy(recorder))
+
+    assert "'-ele', 77" in commands
+    assert "'deformation'" in commands
