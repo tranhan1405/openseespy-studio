@@ -790,7 +790,7 @@ def test_editing_semi_rigid_to_rigid_prunes_element_recorder():
         name="Spring force",
         recorder_type="Element",
         target_tags=[22],
-        response="globalForce",
+        response="force",
     ))
 
     project.update_connection(
