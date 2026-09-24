@@ -3888,13 +3888,31 @@ class MainWindow(QMainWindow):
             scale = float(self.results_panel.deformation_scale.value())
         self._sync_result_ribbon_controls(kind, display, scale)
 
+    def _current_result_display_mode(self) -> str:
+        for key in (
+            "result_deformed",
+            "result_both",
+            "result_undeformed",
+        ):
+            action = self.actions.get(key)
+            if action is not None and action.isChecked():
+                return str(
+                    action.property("resultDisplayMode")
+                    or "deformed_only"
+                )
+        return "deformed_only"
+
     def _set_result_display_mode(self, display_mode: str) -> None:
         if self._syncing_result_display_controls:
             return
         kind = self._active_result_display_kind
-        if kind not in {"deformation", "mode"} or not self._last_result:
+        if (
+            kind not in {"deformation", "mode", "node", "motion"}
+            or not self._last_result
+        ):
             self.status_message.setText(
-                "Open a Deformed Shape or Mode Shape result first"
+                "Open a deformation, nodal contour, mode, or animation "
+                "result first"
             )
             self._set_result_display_controls_enabled(False)
             return
@@ -3902,14 +3920,15 @@ class MainWindow(QMainWindow):
         mode = str(display_mode)
         self._syncing_result_display_controls = True
         try:
-            combo = (
-                self.results_panel.mode_display
-                if kind == "mode"
-                else self.results_panel.deformation_display
-            )
-            index = combo.findData(mode)
-            if index >= 0:
-                combo.setCurrentIndex(index)
+            if kind in {"deformation", "mode"}:
+                combo = (
+                    self.results_panel.mode_display
+                    if kind == "mode"
+                    else self.results_panel.deformation_display
+                )
+                index = combo.findData(mode)
+                if index >= 0:
+                    combo.setCurrentIndex(index)
             for key in (
                 "result_deformed",
                 "result_both",
@@ -3939,7 +3958,7 @@ class MainWindow(QMainWindow):
                 ),
                 self.results_panel.mode_smooth.isChecked(),
             )
-        else:
+        elif kind == "deformation":
             self.results_panel.deformation_scale.setValue(scale)
             self._show_deformation_result(
                 scale,
@@ -3949,27 +3968,33 @@ class MainWindow(QMainWindow):
                 ),
                 self.results_panel.deformation_smooth.isChecked(),
             )
+        elif kind == "node":
+            self._show_node_contour_result(
+                self.results_panel.node_quantity.currentText(),
+                self.results_panel.node_contour_component.currentText(),
+                display_mode=mode,
+                deformation_scale=scale,
+            )
+        else:
+            self.results_panel.motion_scale.blockSignals(True)
+            try:
+                self.results_panel.motion_scale.setValue(scale)
+            finally:
+                self.results_panel.motion_scale.blockSignals(False)
+            self.results_panel._emit_current_motion_frame()
 
     def _apply_result_ribbon_scale(self) -> None:
         if self._syncing_result_display_controls:
             return
         kind = self._active_result_display_kind
-        if kind not in {"deformation", "mode"} or not self._last_result:
-            return
-        checked_mode = "deformed_only"
-        for key in (
-            "result_deformed",
-            "result_both",
-            "result_undeformed",
+        if (
+            kind not in {"deformation", "mode", "node", "motion"}
+            or not self._last_result
         ):
-            action = self.actions.get(key)
-            if action is not None and action.isChecked():
-                checked_mode = str(
-                    action.property("resultDisplayMode")
-                    or "deformed_only"
-                )
-                break
-        self._set_result_display_mode(checked_mode)
+            return
+        self._set_result_display_mode(
+            self._current_result_display_mode()
+        )
 
     def _fit_view(self) -> None:
         self.viewport.fit_view()
@@ -23298,6 +23323,24 @@ class MainWindow(QMainWindow):
                 str(options.get("display_mode", "deformed_only")),
                 float(options.get("scale", 1.0)),
             )
+        elif result_type in {"NodalDisplacement", "NodalReaction"}:
+            self._sync_result_ribbon_controls(
+                "node",
+                str(options.get("display_mode", "deformed_only")),
+                float(options.get("scale", 10.0)),
+            )
+        elif (
+            result_type == "Motion"
+            or (
+                result_type == "TimeHistory"
+                and bool(options.get("probe", False))
+            )
+        ):
+            self._sync_result_ribbon_controls(
+                "motion",
+                str(options.get("display_mode", "deformed_only")),
+                float(options.get("scale", 1.0)),
+            )
         else:
             self._active_result_display_kind = None
             self._set_result_display_controls_enabled(False)
@@ -23344,6 +23387,10 @@ class MainWindow(QMainWindow):
                 payload,
                 quantity,
                 component,
+                display_mode=str(
+                    options.get("display_mode", "deformed_only")
+                ),
+                deformation_scale=float(options.get("scale", 10.0)),
                 node_tags=nodes or None,
                 element_tags=elements or None,
                 cache_key=result_cache_key,
@@ -31618,11 +31665,18 @@ class MainWindow(QMainWindow):
         if not isinstance(vectors, dict) or not vectors:
             self.status_message.setText("No motion frame data available")
             return
+        display_mode = self._current_result_display_mode()
         self.viewport.show_motion_frame(
             vectors,
             scale=float(scale),
             auto_scale=bool(auto_scale),
             reference_magnitude=float(reference_magnitude),
+            display_mode=display_mode,
+        )
+        self._sync_result_ribbon_controls(
+            "motion",
+            display_mode,
+            float(scale),
         )
         self.status_message.setText(str(label))
 
@@ -31630,20 +31684,41 @@ class MainWindow(QMainWindow):
         self,
         quantity: str,
         component: str,
+        *,
+        display_mode: str | None = None,
+        deformation_scale: float | None = None,
     ) -> None:
         if not self._last_result:
             self._offer_result_analysis_run(
                 title="Nodal Result",
             )
             return
+        mode = (
+            str(display_mode)
+            if display_mode is not None
+            else self._current_result_display_mode()
+        )
+        scale = (
+            float(deformation_scale)
+            if deformation_scale is not None
+            else float(self.result_scale_ribbon.value())
+        )
         self.viewport.show_node_contour(
             self._last_result,
             str(quantity),
             str(component),
+            display_mode=mode,
+            deformation_scale=scale,
             cache_key=self._last_result_cache_key,
         )
+        self._sync_result_ribbon_controls(
+            "node",
+            mode,
+            scale,
+        )
         self.status_message.setText(
-            f"Showing {str(quantity).lower()} contour · {component}"
+            f"Showing {str(quantity).lower()} contour · {component} · "
+            f"{mode.replace('_', ' ')} · scale {scale:g}"
         )
 
     def _select_result_element(self, tag: int) -> None:
