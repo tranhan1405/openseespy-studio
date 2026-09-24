@@ -405,13 +405,25 @@ QPushButton#MoreButton {
     max-width: 28px;
     padding: 0;
 }
-QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+QLineEdit, QSpinBox, QDoubleSpinBox {
     min-height: 24px;
     border: 1px solid #bcc7d2;
     border-radius: 3px;
     background: #ffffff;
     color: #25394c;
     padding: 1px 5px;
+}
+QComboBox {
+    min-height: 24px;
+    border: 1px solid #afc2d6;
+    border-radius: 3px;
+    background: #f2f7fc;
+    color: #25394c;
+    padding: 1px 5px;
+}
+QComboBox:hover {
+    background: #e7f1fc;
+    border-color: #86b4e7;
 }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
     border: 1px solid #2f80ed;
