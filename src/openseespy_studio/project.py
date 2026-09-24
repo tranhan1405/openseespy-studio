@@ -3852,6 +3852,7 @@ SOLUTION_RESULT_TYPES = {
     "MemberForce",
     "ShellForce",
     "ShellDeformation",
+    "CrackPattern",
     "FiberStress",
     "FiberStrain",
     "HingeState",
