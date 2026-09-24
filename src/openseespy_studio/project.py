@@ -7479,6 +7479,15 @@ class ProjectDatabase:
                     "BeamColumnJoint opposite chords must be perpendicular "
                     "within the SARE geometry tolerance."
                 )
+            if ndm == 2 and (
+                abs(chord_13[0]) > tolerance
+                or abs(chord_24[1]) > tolerance
+            ):
+                raise ValueError(
+                    "BeamColumnJoint2d uses global frame DOFs without a "
+                    "local transformation. Node 1↔3 must be vertical "
+                    "(global Y) and Node 2↔4 horizontal (global X)."
+                )
 
         if connection.connection_type in {
             "Joint2D",
