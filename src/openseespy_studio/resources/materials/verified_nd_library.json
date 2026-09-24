@@ -394,6 +394,126 @@
         "pressDependCoe": "dimensionless",
         "noYieldSurf": "count"
       }
+    },
+    {
+      "id": "opensees-pressure-depend-multi-yield-medium-sand-starter",
+      "family": "Multi-yield soil",
+      "material": "Medium sand pressure-dependent multi-yield starter",
+      "model": "PressureDependMultiYield",
+      "preset_name": "Pressure Dependent Multi Yield · Medium Sand Starter",
+      "parameters_si": {
+        "nd": 2,
+        "rho": 1900,
+        "refShearModul": 75000000,
+        "refBulkModul": 200000000,
+        "frictionAng": 33,
+        "peakShearStra": 0.1,
+        "refPress": 80000,
+        "pressDependCoe": 0.5,
+        "PTAng": 27,
+        "contrac": 0.07,
+        "dilat1": 0.4,
+        "dilat2": 2,
+        "liquefac1": 10000,
+        "liquefac2": 0.01,
+        "liquefac3": 1,
+        "noYieldSurf": 20,
+        "e": 0.7,
+        "cs1": 0.9,
+        "cs2": 0.02,
+        "cs3": 0.7,
+        "pa": 101000,
+        "c": 300
+      },
+      "verified_parameters": [
+        "nd",
+        "rho",
+        "refShearModul",
+        "refBulkModul",
+        "frictionAng",
+        "peakShearStra",
+        "refPress",
+        "pressDependCoe",
+        "PTAng",
+        "contrac",
+        "dilat1",
+        "dilat2",
+        "liquefac1",
+        "liquefac2",
+        "liquefac3",
+        "noYieldSurf",
+        "e",
+        "cs1",
+        "cs2",
+        "cs3",
+        "pa",
+        "c"
+      ],
+      "behavior": [
+        "Elasto-plastic",
+        "Pressure sensitive",
+        "Multi-yield surface",
+        "Contraction / dilation",
+        "Cyclic mobility"
+      ],
+      "compatibility": [
+        "ThreeDimensional",
+        "PlaneStrain"
+      ],
+      "applicability": [
+        "Sand or silt under monotonic or cyclic loading",
+        "Drained response in regular solid elements",
+        "Undrained or partially drained response when paired with an appropriate coupled solid-fluid formulation"
+      ],
+      "limitations": [
+        "Gravity and initial static loading is elastic until updateMaterialStage switches the material stage.",
+        "SARE currently supports only the automatic positive noYieldSurf form; explicit custom yield-surface pairs are not imported/generated.",
+        "Not compatible with PlateFiber shell sections.",
+        "Medium-sand values are documented suggested initialization values, not a project-specific calibration."
+      ],
+      "primary_reference": {
+        "type": "official_documentation",
+        "title": "Pressure Dependent Multi Yield — OpenSees Documentation",
+        "authors": "OpenSees / UC San Diego",
+        "url": "https://opensees.github.io/OpenSeesDocumentation/user/manual/material/ndMaterials/PressureDependentMultiYield.html",
+        "doi": ""
+      },
+      "parameter_evidence": {
+        "location": "Official command syntax, argument table, material-stage notes, critical-state defaults and suggested parameter table",
+        "note": "Required parameters and the medium-sand starter follow the documented suggested values. noYieldSurf and critical-state values use documented command defaults where not part of the suggested medium-sand table."
+      },
+      "verification": {
+        "status": "verified",
+        "model_definition_checked": true,
+        "compatibility_checked": true,
+        "units_checked": true,
+        "parameter_status": "starter_template",
+        "checked_on": "2026-09-24"
+      },
+      "source_units": {
+        "nd": "dimensionless",
+        "rho": "kg/m^3",
+        "refShearModul": "Pa",
+        "refBulkModul": "Pa",
+        "frictionAng": "degree",
+        "peakShearStra": "dimensionless",
+        "refPress": "Pa",
+        "pressDependCoe": "dimensionless",
+        "PTAng": "degree",
+        "contrac": "dimensionless",
+        "dilat1": "dimensionless",
+        "dilat2": "dimensionless",
+        "liquefac1": "Pa",
+        "liquefac2": "dimensionless",
+        "liquefac3": "dimensionless",
+        "noYieldSurf": "count",
+        "e": "dimensionless",
+        "cs1": "dimensionless",
+        "cs2": "dimensionless",
+        "cs3": "dimensionless",
+        "pa": "Pa",
+        "c": "Pa"
+      }
     }
   ]
 }
