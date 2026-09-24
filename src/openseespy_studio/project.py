@@ -7398,9 +7398,75 @@ class ProjectDatabase:
                     "coincident. Use rigid/twoNodeLink for separated nodes."
                 )
 
+        if connection.connection_type == "BeamColumnJoint":
+            ndm = int(self.model.ndm)
+            ndf = int(self.model.ndf)
+            if (ndm, ndf) not in {(2, 3), (3, 6)}:
+                raise ValueError(
+                    "BeamColumnJoint requires either a 2D frame "
+                    "(ndm=2, ndf=3) or a 3D frame (ndm=3, ndf=6)."
+                )
+
+            external_tags = [
+                int(tag)
+                for tag in connection.parameters["external_nodes"]
+            ]
+            points = [
+                tuple(float(value) for value in self.model.nodes[tag].xyz)
+                for tag in external_tags
+            ]
+            chord_13 = tuple(
+                points[2][axis] - points[0][axis]
+                for axis in range(3)
+            )
+            chord_24 = tuple(
+                points[1][axis] - points[3][axis]
+                for axis in range(3)
+            )
+            length_13 = math.sqrt(
+                sum(value * value for value in chord_13)
+            )
+            length_24 = math.sqrt(
+                sum(value * value for value in chord_24)
+            )
+            scale = max(length_13, length_24, 1.0)
+            tolerance = 1.0e-7 * scale
+            if length_13 <= tolerance or length_24 <= tolerance:
+                raise ValueError(
+                    "BeamColumnJoint needs two non-zero opposite chords "
+                    "(Node 1↔3 and Node 2↔4)."
+                )
+
+            midpoint_13 = tuple(
+                0.5 * (points[0][axis] + points[2][axis])
+                for axis in range(3)
+            )
+            midpoint_24 = tuple(
+                0.5 * (points[1][axis] + points[3][axis])
+                for axis in range(3)
+            )
+            midpoint_error = math.sqrt(sum(
+                (midpoint_13[axis] - midpoint_24[axis]) ** 2
+                for axis in range(3)
+            ))
+            if midpoint_error > tolerance:
+                raise ValueError(
+                    "BeamColumnJoint opposite chords must bisect at the "
+                    "same joint center."
+                )
+
+            orthogonality = abs(sum(
+                chord_13[axis] * chord_24[axis]
+                for axis in range(3)
+            )) / (length_13 * length_24)
+            if orthogonality > 1.0e-6:
+                raise ValueError(
+                    "BeamColumnJoint opposite chords must be perpendicular "
+                    "within the SARE geometry tolerance."
+                )
+
         if connection.connection_type in {
             "Joint2D",
-            "BeamColumnJoint",
             "LehighJoint2D",
             "KrawinklerPanelZone",
         }:
