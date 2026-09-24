@@ -6806,6 +6806,11 @@ class ProjectDatabase:
             for element in self.model.elements.values():
                 if element.section_tag == original_tag:
                     element.section_tag = section.tag
+                if element.element_type == "MEFI":
+                    element.mefi_section_tags = tuple(
+                        section.tag if int(tag) == original_tag else int(tag)
+                        for tag in element.mefi_section_tags
+                    )
                 if element.hinge_i_section_tag == original_tag:
                     element.hinge_i_section_tag = section.tag
                 if element.hinge_j_section_tag == original_tag:
@@ -6834,12 +6839,18 @@ class ProjectDatabase:
         element_users = sorted(
             element.tag
             for element in self.model.elements.values()
-            if tag in {
-                element.section_tag,
-                element.hinge_i_section_tag,
-                element.hinge_j_section_tag,
-                element.interior_section_tag,
-            }
+            if (
+                tag in {
+                    element.section_tag,
+                    element.hinge_i_section_tag,
+                    element.hinge_j_section_tag,
+                    element.interior_section_tag,
+                }
+                or (
+                    element.element_type == "MEFI"
+                    and tag in element.mefi_section_tags
+                )
+            )
         )
         connection_users = self.connections_using_section(tag)
         if element_users or connection_users:
