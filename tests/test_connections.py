@@ -2058,3 +2058,82 @@ def test_beam_column_joint_result_component_range_is_validated():
         raise AssertionError(
             "Expected BeamColumnJoint deformation component 5 to fail"
         )
+
+
+def test_beam_column_joint_invalid_legacy_node_order_is_rejected_on_load():
+    project = frame2d_project()
+    add_elastic_materials(project, 2, 13)
+    project.add_connection(ConnectionData(
+        tag=197,
+        name="Valid RC joint before legacy mutation",
+        connection_type="BeamColumnJoint",
+        node_i=11,
+        node_j=12,
+        parameters={
+            "external_nodes": [11, 12, 13, 10],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    ))
+    data = project.to_dict()
+    connection_data = next(
+        item for item in data["connections"] if item["tag"] == 197
+    )
+    # Reproduce the old generic Left → Top → Right → Bottom ordering.
+    connection_data["node_i"] = 10
+    connection_data["node_j"] = 11
+    connection_data["parameters"]["external_nodes"] = [10, 11, 12, 13]
+
+    try:
+        ProjectDatabase.from_dict(data)
+    except ValueError as exc:
+        assert "global Y" in str(exc)
+        assert "global X" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected invalid legacy BeamColumnJoint node order to fail load"
+        )
+
+
+def test_beam_column_joint_total_result_menu_targets_component_four():
+    from openseespy_studio.ui.main_window import MainWindow
+
+    connection = ConnectionData(
+        tag=198,
+        name="Result mapping joint",
+        connection_type="BeamColumnJoint",
+        node_i=11,
+        node_j=12,
+        parameters={
+            "external_nodes": [11, 12, 13, 10],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    )
+
+    choices = MainWindow._joint_response_choices(None, connection)
+    total = next(
+        item for item in choices
+        if item[0] == "Total Joint Deformation"
+    )
+
+    assert total == ("Total Joint Deformation", "deformation", 4)
+
+
+def test_results_panel_labels_beam_column_joint_deformation_components():
+    from openseespy_studio.ui.results_panel import ResultsPanel
+
+    labels = ResultsPanel._joint_component_labels(
+        "BeamColumnJoint",
+        "deformation",
+        4,
+    )
+
+    assert labels == [
+        "Bar-slip contribution",
+        "Interface shear contribution",
+        "Shear-panel contribution",
+        "Total joint deformation",
+    ]
