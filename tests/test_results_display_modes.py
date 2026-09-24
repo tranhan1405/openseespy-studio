@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -7,7 +8,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication
 
+from openseespy_studio.ui.main_window import MainWindow
 from openseespy_studio.ui.results_panel import ResultsPanel
+from openseespy_studio.ui.viewport import ModelViewport
 
 
 @pytest.fixture(scope="module")
@@ -810,3 +813,41 @@ def test_clear_all_resets_dense_result_state(qapp):
         panel.deleteLater()
         qapp.processEvents()
 
+
+
+def test_result_ribbon_display_modes_cover_nodal_contours_and_motion():
+    set_mode_source = inspect.getsource(MainWindow._set_result_display_mode)
+    render_source = inspect.getsource(MainWindow._render_result_data)
+    node_source = inspect.getsource(MainWindow._show_node_contour_result)
+    motion_source = inspect.getsource(MainWindow._show_motion_frame_result)
+
+    assert '{"deformation", "mode", "node", "motion"}' in set_mode_source
+    assert 'kind == "node"' in set_mode_source
+    assert 'self.results_panel._emit_current_motion_frame()' in set_mode_source
+    assert 'result_type in {"NodalDisplacement", "NodalReaction"}' in render_source
+    assert '"node",' in render_source
+    assert 'result_type == "Motion"' in render_source
+    assert 'options.get("probe", False)' in render_source
+    assert 'display_mode=mode' in node_source
+    assert 'deformation_scale=scale' in node_source
+    assert 'display_mode=display_mode' in motion_source
+
+
+def test_node_contour_display_mode_changes_result_geometry():
+    source = inspect.getsource(ModelViewport.show_node_contour)
+
+    assert 'display_mode: str = "deformed_only"' in source
+    assert 'deformation_scale: float = 10.0' in source
+    assert 'display_mode == "undeformed_only"' in source
+    assert 'final.get("node_displacements", {})' in source
+    assert 'deformation_scale * dx' in source
+    assert 'display_mode == "both"' in source
+
+
+def test_motion_display_mode_supports_deformed_both_and_undeformed():
+    source = inspect.getsource(ModelViewport.show_motion_frame)
+
+    assert 'display_mode: str = "deformed_only"' in source
+    assert 'display_mode == "undeformed_only"' in source
+    assert 'display_mode == "both"' in source
+    assert 'self.set_undeformed_model_visible(' in source
