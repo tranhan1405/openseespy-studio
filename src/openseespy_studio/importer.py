@@ -616,12 +616,29 @@ class _Importer:
             "ElasticOrthotropic": 9,
             "J2Plasticity": 6,
             "DruckerPrager": 12,
+            "PressureIndependMultiYield": 6,
         }[kind]
         values = list(args[2:])
         if len(values) < required_count:
             raise ValueError(
                 f"{kind} needs at least {required_count} material arguments"
             )
+
+        if (
+            kind == "PressureIndependMultiYield"
+            and len(values) >= 10
+            and float(values[9]) < 0.0
+        ):
+            self.issue(
+                "UNSUPPORTED",
+                node,
+                "PressureIndependMultiYield custom yield surfaces",
+                "SARE currently supports the automatic-surface form only. "
+                "Negative noYieldSurf with explicit (strain, modulus-ratio) "
+                "pairs is preserved as unsupported rather than imported "
+                "incorrectly.",
+            )
+            return
 
         params = dict(ND_MATERIAL_DEFAULTS[kind])
         for index, key in enumerate(keys):
@@ -649,6 +666,16 @@ class _Importer:
             )
         )
         self.count("nD Materials")
+        if kind == "PressureIndependMultiYield":
+            self.issue(
+                "WARNING",
+                node,
+                "PressureIndependMultiYield material stage",
+                "The material definition was imported. OpenSees uses "
+                "updateMaterialStage to switch from elastic gravity loading "
+                "to elastoplastic response; that stage command is not stored "
+                "as part of this nDMaterial definition.",
+            )
 
     def add_section(self, node: ast.Call, args: list[Any]) -> None:
         if len(args) < 2:
