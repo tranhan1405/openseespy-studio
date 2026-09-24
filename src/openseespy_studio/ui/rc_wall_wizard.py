@@ -197,7 +197,10 @@ class RCWallWizard(QWizard):
             "RW-A20-P10-S38 · wall-only benchmark preset",
             "rw-a20",
         )
-        self.preset.addItem("Custom / keep current values", "custom")
+        self.preset.addItem(
+            "Custom · exposed inputs override current starter values",
+            "custom",
+        )
         self.preset.currentIndexChanged.connect(self._preset_changed)
         form.addRow("Preset:", self.preset)
 
@@ -409,9 +412,14 @@ class RCWallWizard(QWizard):
         )
         layout.addWidget(self.review)
         warning = QLabel(
-            "V1 creates the physical wall model only (7 MEFI rows for the 2209.8 mm benchmark wall). The two loading-transfer rows in the full OpenSees benchmark are intentionally excluded. Gravity, pushover, "
-            "cyclic and time-history analyses remain in SARE's normal "
-            "Analysis workflow."
+            "V1 creates the physical wall model only. The RW-A20 preset uses "
+            "7 physical-wall MEFI rows; the two loading-transfer rows in the "
+            "full OpenSees benchmark are intentionally excluded. Gravity, "
+            "pushover, cyclic and time-history analyses remain in SARE's "
+            "normal Analysis workflow. In Custom mode, advanced Concrete02/"
+            "Steel02 parameters not shown here retain the current starter "
+            "values and remain editable as ordinary SARE materials after "
+            "generation."
         )
         warning.setWordWrap(True)
         warning.setStyleSheet(
