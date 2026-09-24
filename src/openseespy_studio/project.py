@@ -516,6 +516,43 @@ class MaterialData:
 
 ND_MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "ElasticIsotropic": ("E", "nu", "rho"),
+    "ElasticOrthotropic": (
+        "Ex", "Ey", "Ez",
+        "nu_xy", "nu_yz", "nu_zx",
+        "Gxy", "Gyz", "Gzx",
+        "rho",
+    ),
+    "J2Plasticity": (
+        "K", "G", "sig0", "sigInf", "delta", "H",
+    ),
+}
+
+ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
+    "ElasticIsotropic": {
+        "E": "stress",
+        "nu": "dimensionless",
+        "rho": "density",
+    },
+    "ElasticOrthotropic": {
+        "Ex": "stress",
+        "Ey": "stress",
+        "Ez": "stress",
+        "nu_xy": "dimensionless",
+        "nu_yz": "dimensionless",
+        "nu_zx": "dimensionless",
+        "Gxy": "stress",
+        "Gyz": "stress",
+        "Gzx": "stress",
+        "rho": "density",
+    },
+    "J2Plasticity": {
+        "K": "stress",
+        "G": "stress",
+        "sig0": "stress",
+        "sigInf": "stress",
+        "delta": "dimensionless",
+        "H": "stress",
+    },
 }
 
 ND_MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
@@ -524,7 +561,45 @@ ND_MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
         "nu": 0.30,
         "rho": 0.0,
     },
+    "ElasticOrthotropic": {
+        "Ex": 2.0e11,
+        "Ey": 2.0e11,
+        "Ez": 2.0e11,
+        "nu_xy": 0.30,
+        "nu_yz": 0.30,
+        "nu_zx": 0.30,
+        "Gxy": 7.6923e10,
+        "Gyz": 7.6923e10,
+        "Gzx": 7.6923e10,
+        "rho": 0.0,
+    },
+    "J2Plasticity": {
+        "K": 1.6667e11,
+        "G": 7.6923e10,
+        "sig0": 2.50e8,
+        "sigInf": 3.50e8,
+        "delta": 16.0,
+        "H": 1.0e9,
+    },
 }
+
+
+def nd_material_parameter_kind(
+    material_type: str,
+    parameter: str,
+) -> str:
+    return ND_MATERIAL_PARAMETER_KINDS.get(
+        str(material_type),
+        {},
+    ).get(str(parameter), "dimensionless")
+
+
+def nd_material_supports_plate_fiber(material_type: str) -> bool:
+    return str(material_type) in {
+        "ElasticIsotropic",
+        "ElasticOrthotropic",
+        "J2Plasticity",
+    }
 
 
 @dataclass
@@ -571,6 +646,32 @@ class NDMaterialData:
                 raise ValueError(
                     "ElasticIsotropic density rho cannot be negative."
                 )
+        elif self.material_type == "ElasticOrthotropic":
+            for key in ("Ex", "Ey", "Ez", "Gxy", "Gyz", "Gzx"):
+                if self.parameters[key] <= 0.0:
+                    raise ValueError(
+                        f"ElasticOrthotropic {key} must be positive."
+                    )
+            for key in ("nu_xy", "nu_yz", "nu_zx"):
+                if not -1.0 < self.parameters[key] < 1.0:
+                    raise ValueError(
+                        f"ElasticOrthotropic {key} must lie between -1 and 1."
+                    )
+            if self.parameters["rho"] < 0.0:
+                raise ValueError(
+                    "ElasticOrthotropic density rho cannot be negative."
+                )
+        elif self.material_type == "J2Plasticity":
+            for key in ("K", "G"):
+                if self.parameters[key] <= 0.0:
+                    raise ValueError(
+                        f"J2Plasticity {key} must be positive."
+                    )
+            for key in ("sig0", "sigInf", "delta", "H"):
+                if self.parameters[key] < 0.0:
+                    raise ValueError(
+                        f"J2Plasticity {key} cannot be negative."
+                    )
         if not isinstance(self.source, dict):
             raise ValueError("nDMaterial source metadata must be an object.")
         self.source = deepcopy(self.source)
