@@ -6985,16 +6985,42 @@ class ProjectDatabase:
                 + ", ".join(map(str, missing_nodes))
             )
 
+        connection_directions = set(connection.materials_by_dof)
+        if connection.connection_type in {"zeroLength", "semiRigid"}:
+            if int(self.model.ndm) == 2 and int(self.model.ndf) == 3:
+                allowed_directions = {1, 2, 6}
+            elif int(self.model.ndm) == 3 and int(self.model.ndf) >= 6:
+                allowed_directions = {1, 2, 3, 4, 5, 6}
+            else:
+                allowed_directions = {
+                    direction
+                    for direction in (1, 2, 3)
+                    if direction <= int(self.model.ndf)
+                }
+        elif connection.connection_type == "twoNodeLink":
+            # twoNodeLink uses element basic directions. In a 2D/3-DOF
+            # frame its rotational direction is 3, unlike zeroLength where
+            # local RZ is direction 6.
+            allowed_directions = set(
+                range(1, min(int(self.model.ndf), 6) + 1)
+            )
+        else:
+            allowed_directions = set()
+
         invalid_dofs = sorted(
-            dof
-            for dof in connection.materials_by_dof
-            if dof > int(self.model.ndf)
+            direction
+            for direction in connection_directions
+            if direction not in allowed_directions
         )
         if invalid_dofs:
             raise ValueError(
-                "Connection DOF(s) "
+                f"{connection.connection_type} direction(s) "
                 + ", ".join(map(str, invalid_dofs))
-                + f" are not available for ndf={self.model.ndf}."
+                + (
+                    " are not available for "
+                    f"ndm={self.model.ndm}, ndf={self.model.ndf}. "
+                    f"Allowed directions: {sorted(allowed_directions)}."
+                )
             )
 
         referenced_materials = set(connection.materials_by_dof.values())
