@@ -225,6 +225,125 @@ def _element_geometry_checks(
             )
             continue
 
+        if element.element_type == "MEFI":
+            if (int(model.ndm), int(model.ndf)) not in {
+                (2, 3), (3, 6),
+            }:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "MEFI",
+                        f"MEFI element {tag} requires ndm=2/ndf=3 or "
+                        "ndm=3/ndf=6.",
+                        "element",
+                        tag,
+                        "Use the RC Wall Wizard 2D model signature or a "
+                        "compatible 3D/6DOF domain.",
+                    )
+                )
+            points = [
+                tuple(float(value) for value in model.nodes[node_tag].xyz)
+                for node_tag in node_tags
+            ]
+            if len(points) != 4:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "MEFI geometry",
+                        f"MEFI element {tag} does not have four nodes.",
+                        "element",
+                        tag,
+                        "Recreate the element with four counter-clockwise nodes.",
+                    )
+                )
+                continue
+            ordering_issue = _shell_quad_ordering_issue(points)
+            if ordering_issue is not None:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "MEFI geometry",
+                        f"MEFI element {tag} has {ordering_issue}.",
+                        "element",
+                        tag,
+                        "Order MEFI nodes counter-clockwise around the panel.",
+                    )
+                )
+            edge_width = _norm(tuple(
+                points[1][axis] - points[0][axis]
+                for axis in range(3)
+            ))
+            width_sum = sum(float(value) for value in element.mefi_widths)
+            if abs(width_sum - edge_width) > max(
+                1.0e-9,
+                1.0e-6 * max(edge_width, 1.0),
+            ):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "MEFI macro-fibers",
+                        f"MEFI element {tag} macro-fiber widths sum to "
+                        f"{width_sum:g}, but its i-j edge width is "
+                        f"{edge_width:g}.",
+                        "element",
+                        tag,
+                        "Make the macro-fiber widths sum to the panel width.",
+                    )
+                )
+            if len(element.mefi_widths) != len(element.mefi_section_tags):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "MEFI macro-fibers",
+                        f"MEFI element {tag} width/section arrays differ "
+                        "in length.",
+                        "element",
+                        tag,
+                        "Assign one RCLMS section to every macro-fiber.",
+                    )
+                )
+            missing_sections = sorted({
+                int(section_tag)
+                for section_tag in element.mefi_section_tags
+                if int(section_tag) not in project.sections
+            })
+            if missing_sections:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "MEFI Section",
+                        f"MEFI element {tag} references missing section "
+                        "tag(s): " + ", ".join(map(str, missing_sections)),
+                        "element",
+                        tag,
+                        "Create or reassign the missing RCLMS sections.",
+                    )
+                )
+            incompatible = sorted({
+                int(section_tag)
+                for section_tag in element.mefi_section_tags
+                if (
+                    int(section_tag) in project.sections
+                    and project.sections[
+                        int(section_tag)
+                    ].section_type != "RCLMS"
+                )
+            })
+            if incompatible:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "MEFI Section",
+                        f"MEFI element {tag} requires RCLMS sections; "
+                        "incompatible tag(s): "
+                        + ", ".join(map(str, incompatible)),
+                        "element",
+                        tag,
+                        "Assign RCLMS sections to all MEFI macro-fibers.",
+                    )
+                )
+            continue
+
         if element.element_type in SHELL_ELEMENT_TYPES:
             shell_node_tags.update(node_tags)
             if (int(model.ndm), int(model.ndf)) != (3, 6):
@@ -830,7 +949,10 @@ def _support_and_connectivity_checks(
 
     for element in model.elements.values():
         node_tags = element.node_tags()
-        if element.element_type in SHELL_ELEMENT_TYPES:
+        if (
+            element.element_type in SHELL_ELEMENT_TYPES
+            or element.element_type == "MEFI"
+        ):
             for left, right in zip(
                 node_tags,
                 node_tags[1:] + node_tags[:1],
