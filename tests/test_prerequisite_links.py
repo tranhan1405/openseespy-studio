@@ -264,17 +264,22 @@ def test_fifth_prerequisite_link_batch():
     assert "beam_load.setEnabled(bool(tags) and not is_truss_group)" not in tree_source
     assert "assign.setEnabled(bool(tags))" not in tree_source
 
-    assert "not is_truss_group and not is_shell_group" in tree_source
-    assert "material.setEnabled(is_truss_group)" in tree_source
-    assert "section.setEnabled(not is_truss_group)" in tree_source
+    assert 'if not is_truss_group:' in tree_source
+    assert 'if is_shell_group:' in tree_source
+    assert 'if not is_shell_group:' in tree_source
     assert "self._assign_shell_section_to_selection()" in tree_source
-    assert "is_shell_group" in tree_source
+    assert "self._assign_truss_material_to_selection()" in tree_source
+    assert "self._assign_transformation_to_selection()" in tree_source
+    assert "self._create_element_load()" in tree_source
+    assert "self._create_shell_pressure()" in tree_source
 
-    # Mixed Frame + Truss selections may still operate on the eligible frames.
+    # Element-type groups now route Frame, Truss, and Shell to explicit
+    # formulation/assignment/load actions rather than keeping disabled
+    # generic actions around for ineligible families.
     assert "formulation.setEnabled(has_frame and not has_truss)" not in tree_source
     assert "beam_load.setEnabled(has_frame and not has_truss)" not in tree_source
-    assert "formulation.setEnabled(has_frame)" in tree_source
-    assert "beam_load.setEnabled(has_frame)" in tree_source
+    assert "formulation.setEnabled(has_frame)" not in tree_source
+    assert "beam_load.setEnabled(has_frame)" not in tree_source
 
     result_methods = {
         "_show_deformation_result": "Deformed Shape",
