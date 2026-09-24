@@ -2034,7 +2034,9 @@ def analysis_to_openseespy(
         f"        'rayleigh_damping_ratio': {settings.rayleigh_damping_ratio:g},",
         f"        'rayleigh_mode_i': {settings.rayleigh_mode_i},",
         f"        'rayleigh_mode_j': {settings.rayleigh_mode_j},",
-        f"        'eigen_solver': {settings.eigen_solver!r},"
+        f"        'eigen_solver': {settings.eigen_solver!r},",
+        f"        'execution_mode': {settings.execution_mode!r},",
+        f"        'num_threads': {settings.num_threads},"
         "    },",
         "    'specimen': " + repr(specimen_response_spec) + ",",
         "    'moment_curvature': " + repr(moment_curvature_spec) + ",",
@@ -2086,6 +2088,15 @@ def analysis_to_openseespy(
         f"_studio_section_response_specs = {section_response_catalog!r}",
         f"_studio_joint_response_specs = {joint_response_catalog!r}",
         f"_studio_monitor_node = {monitor_node}",
+        (
+            "# OpenSees threads: Auto (runtime/default)"
+            if settings.execution_mode == "Auto"
+            else (
+                "ops.setNumThreads(1)"
+                if settings.execution_mode == "Single Thread"
+                else f"ops.setNumThreads({settings.num_threads})"
+            )
+        ),
         (
             (
                 "# Joint2D requires Transformation/Penalty; SARE uses "
