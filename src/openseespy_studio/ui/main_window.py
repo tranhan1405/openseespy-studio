@@ -27351,13 +27351,11 @@ class MainWindow(QMainWindow):
                 self._preview_line_mesh(t)
             )
             select_fe = menu.addAction("Select Generated FE")
-            select_fe.setEnabled(live_mesh)
             select_fe.triggered.connect(
                 lambda checked=False, t=tag:
                 self._select_line_generated_fe(t)
             )
             quality = menu.addAction("Mesh Quality...")
-            quality.setEnabled(live_mesh)
             quality.triggered.connect(
                 lambda checked=False, t=tag:
                 self._show_line_mesh_quality(t)
@@ -27474,7 +27472,6 @@ class MainWindow(QMainWindow):
                 select_generated = mesh_menu.addAction(
                     "Select Generated FE"
                 )
-                select_generated.setEnabled(has_live_line_mesh)
                 select_generated.triggered.connect(
                     lambda checked=False, t=tag:
                     self._select_line_generated_fe(t)
@@ -27696,7 +27693,6 @@ class MainWindow(QMainWindow):
                 ("Warpage", "warpage"),
             ):
                 quality_action = quality_menu.addAction(label)
-                quality_action.setEnabled(live_mesh)
                 quality_action.triggered.connect(
                     lambda checked=False, m=metric, t=tag:
                     self._show_surface_quality_map([t], m)
@@ -27894,7 +27890,6 @@ class MainWindow(QMainWindow):
                 select_generated = mesh_menu.addAction(
                     "Select Generated FE"
                 )
-                select_generated.setEnabled(has_live_surface_mesh)
                 select_generated.triggered.connect(
                     lambda checked=False, t=tag:
                     self._select_generated_fe_for_surfaces([t])
@@ -27903,7 +27898,6 @@ class MainWindow(QMainWindow):
                 select_edge_nodes = mesh_menu.addAction(
                     "Select Edge FE Nodes..."
                 )
-                select_edge_nodes.setEnabled(has_live_surface_mesh)
                 select_edge_nodes.triggered.connect(
                     lambda checked=False, t=tag:
                     self._select_surface_edge_nodes(t)
@@ -27913,7 +27907,6 @@ class MainWindow(QMainWindow):
                 if count == 1
                 else f"Select Outer Boundary FE Nodes ({count} Surfaces)"
             )
-            select_boundary_nodes.setEnabled(has_live_surface_mesh)
             select_boundary_nodes.triggered.connect(
                 lambda checked=False, tags=tuple(surface_tags):
                 self._select_surface_boundary_nodes(tags)
@@ -28275,9 +28268,6 @@ class MainWindow(QMainWindow):
             create = menu.addAction(
                 "Create Direct FE Selection from Current Selection..."
             )
-            create.setEnabled(
-                bool(self.selection.nodes or self.selection.elements)
-            )
             create.triggered.connect(self._create_named_selection)
             exec_menu()
             return
@@ -28291,7 +28281,6 @@ class MainWindow(QMainWindow):
             support = menu.addAction(
                 "Apply / Edit Support on Current Selection..."
             )
-            support.setEnabled(bool(self.selection.nodes))
             support.triggered.connect(self._apply_restraint)
             constraint = menu.addAction("New Constraint...")
             constraint.triggered.connect(self._create_constraint)
@@ -28329,7 +28318,6 @@ class MainWindow(QMainWindow):
             apply_support = menu.addAction(
                 "Apply / Edit Support on Current Selection..."
             )
-            apply_support.setEnabled(bool(self.selection.nodes))
             apply_support.triggered.connect(self._apply_restraint)
             clear_support = menu.addAction(
                 "Clear Support on Current Selection"
@@ -29412,13 +29400,13 @@ class MainWindow(QMainWindow):
                 )
             )
             activate = menu.addAction("Set as Active Result Source")
-            activate.setEnabled(has_results)
+            activate.setEnabled(job is not None)
             activate.triggered.connect(
                 lambda: self._activate_job_result(job_id)
             )
 
             plot_menu = menu.addMenu("Plot")
-            plot_menu.setEnabled(has_results)
+            plot_menu.setEnabled(job is not None)
             if job is not None:
                 self._populate_result_choice_menu(
                     plot_menu,
@@ -29443,7 +29431,7 @@ class MainWindow(QMainWindow):
             clear_display = menu.addAction("Clear Result Display")
             clear_display.triggered.connect(self._clear_result_display)
             export = menu.addAction("Export Results JSON...")
-            export.setEnabled(has_results)
+            export.setEnabled(job is not None)
             export.triggered.connect(
                 lambda: self._export_job_result_json(job_id)
             )
