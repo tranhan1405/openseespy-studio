@@ -1272,3 +1272,38 @@ def test_two_imported_joint2d_center_tags_must_be_unique():
         raise AssertionError(
             "Expected duplicate imported Joint2D center tag to fail"
         )
+
+
+def test_krawinkler_internal_members_are_excluded_from_rayleigh_damping():
+    settings = AnalysisSettingsData(
+        tag=1,
+        name="Panel-zone transient",
+        analysis_type="Transient",
+        constraints_handler="Transformation",
+        rayleigh_model="DirectCoefficients",
+        rayleigh_alpha_m=0.0,
+        rayleigh_beta_k=0.02,
+        rayleigh_beta_k_init=0.0,
+        rayleigh_beta_k_comm=0.0,
+    )
+
+    script = "\n".join(analysis_to_openseespy(
+        settings,
+        ndm=2,
+        node_tags=[1],
+        element_tags=[40],
+        krawinkler_panel_zone_tags=[40],
+    ))
+
+    rayleigh_index = script.index("ops.rayleigh(0, 0.02, 0, 0)")
+    region_text = (
+        "ops.region(40, '-eleOnly', "
+        "_sare_pz_40_ebase + 0, _sare_pz_40_ebase + 1, "
+        "_sare_pz_40_ebase + 2, _sare_pz_40_ebase + 3, "
+        "_sare_pz_40_ebase + 4, _sare_pz_40_ebase + 5, "
+        "_sare_pz_40_ebase + 6, _sare_pz_40_ebase + 7, "
+        "'-rayleigh', 0.0, 0.0, 0.0, 0.0)"
+    )
+    region_index = script.index(region_text)
+
+    assert region_index > rayleigh_index
