@@ -6,6 +6,7 @@ from openseespy_studio.generator import (
 )
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.importer import import_openseespy_source
+from openseespy_studio.result_catalog import result_choices_for_analysis
 from openseespy_studio.project import (
     AnalysisSettingsData,
     ConnectionData,
@@ -1307,3 +1308,299 @@ def test_krawinkler_internal_members_are_excluded_from_rayleigh_damping():
     region_index = script.index(region_text)
 
     assert region_index > rayleigh_index
+
+
+def add_elastic_materials(
+    project: ProjectDatabase,
+    start: int,
+    stop: int,
+) -> None:
+    for tag in range(start, stop + 1):
+        if tag in project.materials:
+            continue
+        project.add_material(elastic_material(tag))
+
+
+def test_beam_column_joint_exports_13_material_components_and_factors():
+    project = frame2d_project()
+    add_elastic_materials(project, 2, 13)
+    connection = ConnectionData(
+        tag=90,
+        name="RC beam-column joint",
+        connection_type="BeamColumnJoint",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 0.85,
+            "width_factor": 0.9,
+        },
+    )
+    project.add_connection(connection)
+
+    script = connection_to_openseespy(connection, ndm=2, ndf=3)
+
+    assert (
+        "ops.element('beamColumnJoint', 90, 10, 11, 12, 13, "
+        + ", ".join(str(tag) for tag in range(1, 14))
+        + ", 0.85, 0.9)"
+        in script
+    )
+    assert project.connections_using_material(13) == [90]
+
+
+def test_beam_column_joint_omits_default_geometry_factors():
+    connection = ConnectionData(
+        tag=91,
+        name="Default factors",
+        connection_type="BeamColumnJoint",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    )
+
+    script = connection_to_openseespy(connection, ndm=2, ndf=3)
+
+    assert script.endswith(", 11, 12, 13)")
+    assert ", 1, 1)" not in script[-12:]
+
+
+def test_importer_recovers_beam_column_joint():
+    material_lines = "\n".join(
+        f"ops.uniaxialMaterial('Elastic', {tag}, {1000.0 + tag})"
+        for tag in range(1, 14)
+    )
+    source = f"""
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+ops.node(10, 0.0, 0.0)
+ops.node(11, 1.0, 1.0)
+ops.node(12, 2.0, 0.0)
+ops.node(13, 1.0, -1.0)
+{material_lines}
+ops.element(
+    'beamColumnJoint', 90, 10, 11, 12, 13,
+    {", ".join(str(tag) for tag in range(1, 14))},
+    0.8, 0.9,
+)
+"""
+    result = import_openseespy_source(
+        source,
+        source_name="beam_column_joint.py",
+    )
+    connection = result.project.connections[90]
+
+    assert connection.connection_type == "BeamColumnJoint"
+    assert connection.parameters["component_materials"] == list(
+        range(1, 14)
+    )
+    assert connection.parameters["height_factor"] == 0.8
+    assert connection.parameters["width_factor"] == 0.9
+
+
+def test_lehigh_joint2d_exports_nine_mode_materials_ccw():
+    project = frame2d_project()
+    add_elastic_materials(project, 2, 9)
+    connection = ConnectionData(
+        tag=92,
+        name="Lehigh joint",
+        connection_type="LehighJoint2D",
+        node_i=10,
+        node_j=13,
+        parameters={
+            "external_nodes": [10, 13, 12, 11],
+            "mode_materials": list(range(1, 10)),
+        },
+    )
+    project.add_connection(connection)
+
+    script = connection_to_openseespy(connection, ndm=2, ndf=3)
+
+    assert (
+        "ops.element('LehighJoint2D', 92, 10, 13, 12, 11, "
+        + ", ".join(str(tag) for tag in range(1, 10))
+        + ")"
+        in script
+    )
+
+
+def test_lehigh_joint2d_rejects_clockwise_node_order():
+    project = frame2d_project()
+    add_elastic_materials(project, 2, 9)
+    connection = ConnectionData(
+        tag=93,
+        name="Clockwise Lehigh",
+        connection_type="LehighJoint2D",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "mode_materials": list(range(1, 10)),
+        },
+    )
+
+    try:
+        project.add_connection(connection)
+    except ValueError as exc:
+        assert "counter-clockwise" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected clockwise LehighJoint2D node order to fail"
+        )
+
+
+def test_importer_recovers_lehigh_joint2d():
+    material_lines = "\n".join(
+        f"ops.uniaxialMaterial('Elastic', {tag}, {1000.0 + tag})"
+        for tag in range(1, 10)
+    )
+    source = f"""
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+ops.node(10, 0.0, 0.0)
+ops.node(13, 1.0, -1.0)
+ops.node(12, 2.0, 0.0)
+ops.node(11, 1.0, 1.0)
+{material_lines}
+ops.element(
+    'LehighJoint2D', 92, 10, 13, 12, 11,
+    {", ".join(str(tag) for tag in range(1, 10))}
+)
+"""
+    result = import_openseespy_source(
+        source,
+        source_name="lehigh_joint.py",
+    )
+    connection = result.project.connections[92]
+
+    assert connection.connection_type == "LehighJoint2D"
+    assert connection.parameters["external_nodes"] == [10, 13, 12, 11]
+    assert connection.parameters["mode_materials"] == list(range(1, 10))
+
+
+def test_joint_response_result_catalog_is_available_for_nonlinear_analysis():
+    choices = result_choices_for_analysis(
+        "Cyclic",
+        "NormUnbalance",
+    )
+
+    joint_choices = [
+        choice
+        for choice in choices
+        if choice.result_type == "JointResponse"
+    ]
+
+    assert len(joint_choices) == 1
+    assert joint_choices[0].category == "Connections & Joints"
+
+
+def test_joint_response_validates_target_and_response_query():
+    project = frame2d_project()
+    add_elastic_materials(project, 2, 13)
+    project.add_connection(ConnectionData(
+        tag=94,
+        name="RC response joint",
+        connection_type="BeamColumnJoint",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    ))
+    project.add_analysis(AnalysisSettingsData(
+        tag=1,
+        name="Cyclic",
+        analysis_type="Cyclic",
+        constraints_handler="Transformation",
+        control_node=12,
+        control_dof=1,
+        cyclic_targets=[0.01, -0.01],
+        cyclic_increment=0.005,
+    ))
+
+    from openseespy_studio.project import SolutionResultData
+
+    result = SolutionResultData(
+        tag=1,
+        analysis_tag=1,
+        name="Panel shear",
+        result_type="JointResponse",
+        element_scope=[94],
+        settings={
+            "response": "shearPanel",
+            "component": 1,
+            "curve_mode": "force_deformation",
+        },
+    )
+    project.add_solution_result(result)
+    assert project.solution_results[1].settings["response"] == "shearPanel"
+
+    bad = SolutionResultData(
+        tag=2,
+        analysis_tag=1,
+        name="Bad query",
+        result_type="JointResponse",
+        element_scope=[94],
+        settings={"response": "localForce"},
+    )
+    try:
+        project.add_solution_result(bad)
+    except ValueError as exc:
+        assert "localForce" in str(exc)
+        assert "BeamColumnJoint" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected unsupported BeamColumnJoint result query to fail"
+        )
+
+
+def test_generated_analysis_captures_joint_histories_without_recorder():
+    project = frame2d_project()
+    add_elastic_materials(project, 2, 13)
+    project.add_connection(ConnectionData(
+        tag=95,
+        name="Captured joint",
+        connection_type="BeamColumnJoint",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    ))
+    analysis = AnalysisSettingsData(
+        tag=1,
+        name="Static",
+        analysis_type="Static",
+        constraints_handler="Transformation",
+        steps=1,
+        load_increment=1.0,
+    )
+    project.add_analysis(analysis)
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        connections=project.connections,
+        analyses=project.analyses,
+        active_analysis_tag=project.active_analysis_tag,
+    )
+
+    assert "'joints':" in script
+    assert "_studio_joint_response_specs" in script
+    assert "'shearPanel'" in script
+    assert (
+        "ops.eleResponse(_studio_joint_tag, _studio_joint_response)"
+        in script
+    )
