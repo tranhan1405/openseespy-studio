@@ -2246,8 +2246,19 @@ def test_beam_column_joint_ui_uses_opensees_reference_node_order():
 
     assert "N1 Bottom → N2 Right → " in source
     assert "N3 Top → N4 Left" in source
+    assert "N1↔N3 height chord · N2↔N4 width chord" in source
     assert "ordered = [bottom, right, top, left]" in source
     assert "ordered = [top, right, bottom, left]" not in source
+
+
+def test_beam_column_joint_edit_preserves_stored_external_node_order():
+    import inspect
+    from openseespy_studio.ui.connection_dialog import ConnectionDialog
+
+    source = inspect.getsource(ConnectionDialog.__init__)
+
+    assert "connection is None" in source
+    assert "and len(saved_external) == 4" in source
 
 
 def test_beam_column_joint_ui_puts_node1_on_lower_3d_height_chord_end():
