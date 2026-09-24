@@ -3663,6 +3663,54 @@ class MainWindow(QMainWindow):
                 "solver_output_view",
             ),
         )
+
+        self.analysis_cpu_mode_ribbon = QComboBox()
+        self.analysis_cpu_mode_ribbon.addItems([
+            "Auto",
+            "Single Thread",
+            "Multi-thread",
+        ])
+        self.analysis_cpu_mode_ribbon.setFixedWidth(126)
+        self.analysis_cpu_mode_ribbon.setToolTip(
+            "CPU/thread mode for the active analysis. Auto leaves the "
+            "OpenSees runtime default unchanged."
+        )
+
+        self.analysis_threads_ribbon = QSpinBox()
+        self.analysis_threads_ribbon.setRange(
+            1,
+            max(256, int(os.cpu_count() or 1)),
+        )
+        self.analysis_threads_ribbon.setValue(
+            max(1, int(os.cpu_count() or 1))
+        )
+        self.analysis_threads_ribbon.setPrefix("Threads ")
+        self.analysis_threads_ribbon.setFixedWidth(126)
+        self.analysis_threads_ribbon.setToolTip(
+            "Number of OpenSees threads for the active analysis. "
+            "Effective speed-up depends on the OpenSees build and solver."
+        )
+
+        cpu_holder = QWidget()
+        cpu_layout = QVBoxLayout(cpu_holder)
+        cpu_layout.setContentsMargins(1, 1, 1, 1)
+        cpu_layout.setSpacing(2)
+        cpu_layout.addWidget(self.analysis_cpu_mode_ribbon)
+        cpu_layout.addWidget(self.analysis_threads_ribbon)
+        add_group(
+            analysis_page,
+            "Compute",
+            widgets=(cpu_holder,),
+        )
+        self._syncing_analysis_cpu_ribbon = False
+        self.analysis_cpu_mode_ribbon.currentTextChanged.connect(
+            self._apply_analysis_ribbon_cpu_mode
+        )
+        self.analysis_threads_ribbon.editingFinished.connect(
+            self._apply_analysis_ribbon_threads
+        )
+        self._sync_analysis_ribbon_cpu_controls()
+
         add_group(
             analysis_page,
             "Research",
@@ -4124,6 +4172,131 @@ class MainWindow(QMainWindow):
     def _show_solver_output(self) -> None:
         self.console_dock.show()
         self.console_dock.raise_()
+
+    def _sync_analysis_ribbon_cpu_controls(self) -> None:
+        mode_widget = getattr(self, "analysis_cpu_mode_ribbon", None)
+        thread_widget = getattr(self, "analysis_threads_ribbon", None)
+        if mode_widget is None or thread_widget is None:
+            return
+
+        active_tag = self.project.active_analysis_tag
+        settings = (
+            self.project.analyses.get(int(active_tag))
+            if active_tag is not None
+            else None
+        )
+        self._syncing_analysis_cpu_ribbon = True
+        try:
+            if settings is None:
+                mode_widget.setCurrentText("Auto")
+                mode_widget.setEnabled(False)
+                thread_widget.setValue(
+                    max(1, min(thread_widget.maximum(), int(os.cpu_count() or 1)))
+                )
+                thread_widget.setEnabled(False)
+                mode_widget.setToolTip(
+                    "Create or activate an analysis to configure CPU threads."
+                )
+                thread_widget.setToolTip(
+                    "Create or activate an analysis to configure CPU threads."
+                )
+                return
+
+            mode_widget.setEnabled(True)
+            mode_widget.setToolTip(
+                f"CPU/thread mode for active analysis {settings.tag}: "
+                f"{settings.name}."
+            )
+            mode_widget.setCurrentText(str(settings.execution_mode))
+            if int(settings.num_threads) > thread_widget.maximum():
+                thread_widget.setMaximum(int(settings.num_threads))
+            thread_widget.setValue(max(1, int(settings.num_threads)))
+            thread_widget.setEnabled(
+                settings.execution_mode == "Multi-thread"
+            )
+            thread_widget.setToolTip(
+                f"OpenSees thread count for active analysis {settings.tag}. "
+                "Only editable in Multi-thread mode."
+            )
+        finally:
+            self._syncing_analysis_cpu_ribbon = False
+
+    def _update_active_analysis_cpu(
+        self,
+        *,
+        execution_mode: str | None = None,
+        num_threads: int | None = None,
+        message: str,
+    ) -> None:
+        if getattr(self, "_syncing_analysis_cpu_ribbon", False):
+            return
+        active_tag = self.project.active_analysis_tag
+        if active_tag is None:
+            self._sync_analysis_ribbon_cpu_controls()
+            return
+        settings = self.project.analyses.get(int(active_tag))
+        if settings is None:
+            self._sync_analysis_ribbon_cpu_controls()
+            return
+
+        payload = settings.to_dict()
+        if execution_mode is not None:
+            payload["execution_mode"] = str(execution_mode)
+        if num_threads is not None:
+            payload["num_threads"] = int(num_threads)
+
+        if payload["execution_mode"] == "Single Thread":
+            payload["num_threads"] = 1
+        elif (
+            payload["execution_mode"] == "Multi-thread"
+            and int(payload.get("num_threads", 1)) <= 1
+        ):
+            payload["num_threads"] = max(1, int(os.cpu_count() or 1))
+
+        before = self.project.to_dict()
+        try:
+            updated = AnalysisSettingsData.from_dict(payload)
+            self.project.update_analysis(int(active_tag), updated)
+        except ValueError as exc:
+            QMessageBox.warning(self, "CPU / Threads", str(exc))
+            self._sync_analysis_ribbon_cpu_controls()
+            return
+
+        self._refresh_project_metadata(message)
+        self._show_analysis_properties(updated.tag)
+        self._record_project_change(message, before)
+
+    def _apply_analysis_ribbon_cpu_mode(self, mode: str) -> None:
+        if getattr(self, "_syncing_analysis_cpu_ribbon", False):
+            return
+        mode = str(mode)
+        threads = None
+        if mode == "Multi-thread":
+            current = int(self.analysis_threads_ribbon.value())
+            threads = (
+                current
+                if current > 1
+                else max(1, int(os.cpu_count() or 1))
+            )
+        elif mode == "Single Thread":
+            threads = 1
+        self._update_active_analysis_cpu(
+            execution_mode=mode,
+            num_threads=threads,
+            message=f"CPU execution mode: {mode}",
+        )
+
+    def _apply_analysis_ribbon_threads(self) -> None:
+        if getattr(self, "_syncing_analysis_cpu_ribbon", False):
+            return
+        if self.analysis_cpu_mode_ribbon.currentText() != "Multi-thread":
+            self._sync_analysis_ribbon_cpu_controls()
+            return
+        threads = int(self.analysis_threads_ribbon.value())
+        self._update_active_analysis_cpu(
+            num_threads=threads,
+            message=f"OpenSees threads: {threads}",
+        )
 
     def _set_ribbon_tab(self, name: str) -> None:
         tabs = getattr(self, "ribbon_tabs", None)
@@ -4642,6 +4815,7 @@ class MainWindow(QMainWindow):
             self.project.transformations,
         )
         self._refresh_tree()
+        self._sync_analysis_ribbon_cpu_controls()
         try:
             generated_script = self._generate_project_script()
         except (KeyError, TypeError, ValueError) as exc:
@@ -22564,6 +22738,15 @@ class MainWindow(QMainWindow):
             ("Active", "Yes" if tag == self.project.active_analysis_tag else "No"),
             ("Constraints", settings.constraints_handler),
             ("Numberer", settings.numberer), ("System", settings.system),
+            ("CPU execution", settings.execution_mode),
+            (
+                "Threads",
+                (
+                    settings.num_threads
+                    if settings.execution_mode != "Auto"
+                    else "Runtime default"
+                ),
+            ),
             (
                 "Gravity preload",
                 (
