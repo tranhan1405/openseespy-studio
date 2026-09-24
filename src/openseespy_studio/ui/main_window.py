@@ -20790,8 +20790,9 @@ class MainWindow(QMainWindow):
                         "Active in BeamColumnJoint2d"
                         if int(self.model.ndm) == 2
                         else (
-                            "Fixed at 1.0 · current OpenSees "
-                            "BeamColumnJoint3d ignores optional factors"
+                            "Preserved · current OpenSees3d retains the "
+                            "factors internally, but setDomain does not use "
+                            "them to scale elemHeight/elemWidth"
                         )
                     ),
                 ),
