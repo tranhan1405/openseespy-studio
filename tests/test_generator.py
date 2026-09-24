@@ -2,6 +2,7 @@ import pytest
 
 from openseespy_studio.generator import (
     FrameGridSpec,
+    analysis_to_openseespy,
     generate_frame_grid,
     material_to_openseespy,
     to_openseespy,
@@ -22,6 +23,7 @@ from openseespy_studio.project import (
     SectionData,
     TimeSeriesData,
     TransformationData,
+    SolutionResultData,
 )
 
 
@@ -2966,3 +2968,62 @@ def test_new_uniaxial_material_commands_generate(material_type, expected):
         material,
         {"length": "mm", "force": "N", "time": "s"},
     )
+
+
+def test_analysis_generator_captures_scoped_frame_and_shell_histories():
+    settings = AnalysisSettingsData(
+        901,
+        "Frame-aware result history",
+        analysis_type="Static",
+        steps=2,
+        integrator="LoadControl",
+        load_increment=0.5,
+        control_node=1,
+        control_dof=1,
+    )
+    code = "\n".join(
+        analysis_to_openseespy(
+            settings,
+            ndm=3,
+            node_tags=[1],
+            element_tags=[10, 20],
+            frame_element_tags=[10],
+            shell_element_tags=[20],
+            frame_history_tags=[10],
+            shell_force_history_tags=[20],
+            shell_deformation_history_tags=[20],
+        )
+    )
+
+    assert "_studio_frame_history_tags = [10]" in code
+    assert "_studio_shell_force_history_tags = [20]" in code
+    assert "_studio_shell_deformation_history_tags = [20]" in code
+    assert "'element_local_forces': {'10': []}" in code
+    assert "'shell_section_forces': {'20': []}" in code
+    assert "'shell_section_deformations': {'20': []}" in code
+    assert (
+        "_studio_results['history']['element_local_forces']"
+        "[str(_studio_element)].append(_studio_local)"
+    ) in code
+    assert (
+        "_studio_results['history']['shell_section_forces']"
+        "[str(_studio_element)].append(_studio_average)"
+    ) in code
+    assert (
+        "_studio_results['history']['shell_section_deformations']"
+        "[str(_studio_element)].append(_studio_average)"
+    ) in code
+
+
+def test_crack_pattern_is_a_persistable_solution_result_type():
+    result = SolutionResultData(
+        902,
+        1,
+        "Crack Pattern",
+        "CrackPattern",
+        element_scope=[1, 2],
+        settings={"accumulate": True, "line_scale": 0.8},
+    )
+
+    assert result.result_type == "CrackPattern"
+    assert result.element_scope == [1, 2]
