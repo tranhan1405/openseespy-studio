@@ -10057,6 +10057,75 @@ class MainWindow(QMainWindow):
             if element is None:
                 return
 
+            if element.element_type == "MEFI":
+                unique_sections = []
+                for section_tag in element.mefi_section_tags:
+                    if int(section_tag) in unique_sections:
+                        continue
+                    unique_sections.append(int(section_tag))
+                section_labels = []
+                for section_tag in unique_sections:
+                    section = self.project.sections.get(section_tag)
+                    section_labels.append(
+                        (
+                            f"{section_tag} - {section.name}"
+                            if section is not None
+                            else f"{section_tag} (missing)"
+                        )
+                    )
+                self.properties_panel.set_properties(
+                    "MEFI RC Wall Element",
+                    [
+                        ("Tag", tag),
+                        ("Type", "MEFI"),
+                        (
+                            "Nodes",
+                            ", ".join(map(str, element.node_tags())),
+                        ),
+                        ("Topology", "4-node membrane fiber panel"),
+                        ("Macro-fibers", len(element.mefi_widths)),
+                        (
+                            "Fiber widths",
+                            ", ".join(
+                                f"{float(value):g}"
+                                for value in element.mefi_widths
+                            ),
+                        ),
+                        (
+                            "Width sum",
+                            f"{sum(element.mefi_widths):g}",
+                        ),
+                        (
+                            "RCLMS mapping",
+                            ", ".join(
+                                str(int(value))
+                                for value in element.mefi_section_tags
+                            ),
+                        ),
+                        (
+                            "Referenced sections",
+                            "; ".join(section_labels) or "-",
+                        ),
+                        (
+                            "Group",
+                            element.group,
+                            {
+                                "id": "group",
+                                "editable": True,
+                                "kind": "text",
+                            },
+                        ),
+                        ("Transformation", "Not used by MEFI"),
+                        (
+                            "Edit",
+                            "Macro-fiber layout is managed by the RC Wall "
+                            "Wizard / project data.",
+                        ),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
             if element.element_type in SHELL_ELEMENT_TYPES:
                 section_text = "Unassigned"
                 if element.section_tag is not None:
