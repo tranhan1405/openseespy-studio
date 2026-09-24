@@ -392,3 +392,84 @@ def test_joint2d_forces_compatible_constraint_handler_on_export():
     assert "ops.constraints('Transformation')" in script
     assert "'constraints_handler': 'Transformation'" in script
     assert "Joint2D requires Transformation/Penalty" in script
+
+
+def test_joint2d_rejects_external_chords_that_do_not_bisect():
+    project = frame2d_project()
+    connection = ConnectionData(
+        tag=33,
+        name="Bad joint geometry",
+        connection_type="Joint2D",
+        node_i=10,
+        node_j=12,
+        parameters={
+            "external_nodes": [10, 12, 11, 13],
+            "panel_material": 1,
+            "interface_materials": [0, 0, 0, 0],
+            "large_disp": 0,
+        },
+    )
+
+    try:
+        project.add_connection(connection)
+    except ValueError as exc:
+        assert "bisect" in str(exc) or "cyclically" in str(exc)
+    else:
+        raise AssertionError("Expected invalid Joint2D geometry to fail")
+
+
+def test_krawinkler_requires_axis_aligned_left_top_right_bottom_layout():
+    model = StructuralModel(name="Rotated panel", ndm=2, ndf=3)
+    model.add_node(20, -1.0, -1.0, 0.0)
+    model.add_node(21, -1.0, 1.0, 0.0)
+    model.add_node(22, 1.0, 1.0, 0.0)
+    model.add_node(23, 1.0, -1.0, 0.0)
+    project = ProjectDatabase(model=model)
+    project.add_material(elastic_material())
+    connection = ConnectionData(
+        tag=41,
+        name="Rotated Krawinkler layout",
+        connection_type="KrawinklerPanelZone",
+        node_i=20,
+        node_j=21,
+        parameters={
+            "external_nodes": [20, 21, 22, 23],
+            "panel_material": 1,
+            "rigid_A": 1000.0,
+            "rigid_E": 2.0e11,
+            "rigid_I": 1000.0,
+        },
+    )
+
+    try:
+        project.add_connection(connection)
+    except ValueError as exc:
+        assert "axis-aligned" in str(exc)
+    else:
+        raise AssertionError("Expected non-axis-aligned Krawinkler layout to fail")
+
+
+def test_joint_external_node_edit_revalidates_joint_geometry():
+    project = frame2d_project()
+    connection = ConnectionData(
+        tag=34,
+        name="Editable joint",
+        connection_type="Joint2D",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "panel_material": 1,
+            "interface_materials": [0, 0, 0, 0],
+            "large_disp": 0,
+        },
+    )
+    project.add_connection(connection)
+    project.model.set_coordinates(12, 3.0, 0.0, 0.0)
+
+    try:
+        project.validate_node_state(12)
+    except ValueError as exc:
+        assert "bisect" in str(exc)
+    else:
+        raise AssertionError("Expected edited external node to invalidate Joint2D")
