@@ -2676,10 +2676,10 @@ class MainWindow(QMainWindow):
         )
         self._make_action(
             "connection",
-            "ZeroLength / Link...",
+            "Connection / Joint...",
             "model-connection",
             self._create_connection,
-            "Create a research zeroLength spring/interface or twoNodeLink",
+            "Create rigid, pinned, semi-rigid, spring/link, Joint2D, or panel-zone connections",
         )
         self._make_action(
             "recorder",
@@ -4987,6 +4987,16 @@ class MainWindow(QMainWindow):
         connections_root.setExpanded(True)
         fe_model.addChild(connections_root)
 
+        connection_display_names = {
+            "rigid": "Rigid",
+            "pinned": "Pinned",
+            "semiRigid": "Semi-Rigid",
+            "zeroLength": "ZeroLength Spring",
+            "zeroLengthSection": "ZeroLength Section",
+            "twoNodeLink": "Two-Node Link",
+            "Joint2D": "Joint2D",
+            "KrawinklerPanelZone": "Krawinkler Panel Zone",
+        }
         connection_groups: dict[str, QTreeWidgetItem] = {}
         for connection_type in SUPPORTED_CONNECTION_TYPES:
             tags = [
@@ -4997,7 +5007,8 @@ class MainWindow(QMainWindow):
             if not tags:
                 continue
             group = QTreeWidgetItem([
-                f"{connection_type} ({len(tags)})"
+                f"{connection_display_names.get(connection_type, connection_type)} "
+                f"({len(tags)})"
             ])
             group.setIcon(0, studio_icon("connection-group"))
             group.setData(
@@ -5012,7 +5023,8 @@ class MainWindow(QMainWindow):
         for tag in sorted(self.project.connections):
             connection = self.project.connections[tag]
             item = QTreeWidgetItem([
-                f"{connection.connection_type} [{tag}]  {connection.name}"
+                f"{connection_display_names.get(connection.connection_type, connection.connection_type)} "
+                f"[{tag}]  {connection.name}"
             ])
             item.setIcon(0, studio_icon("connection-item"))
             item.setData(0, Qt.UserRole, ("connection", tag))
@@ -10002,7 +10014,7 @@ class MainWindow(QMainWindow):
         constraint_action = menu.addAction("Create Constraint...")
         constraint_action.triggered.connect(self._create_constraint)
 
-        connection_action = menu.addAction("Create ZeroLength / Link...")
+        connection_action = menu.addAction("Create Connection / Joint...")
         connection_action.triggered.connect(self._create_connection)
 
         mass_action = menu.addAction("Assign Mass...")
@@ -20290,6 +20302,7 @@ class MainWindow(QMainWindow):
             next_tag=self.project.next_connection_tag(),
             initial_node_i=node_i,
             initial_node_j=node_j,
+            initial_joint_nodes=sorted(self.selection.nodes)[:4],
             default_to_ground=to_ground,
             node_positions={
                 tag: node.xyz
@@ -25519,7 +25532,7 @@ class MainWindow(QMainWindow):
             shell_action = menu.addAction("New Shell Element...")
             shell_action.triggered.connect(self._create_shell)
             connection_action = menu.addAction(
-                "New ZeroLength / Link Element..."
+                "New Connection / Joint..."
             )
             connection_action.triggered.connect(self._create_connection)
             exec_menu()
@@ -26666,7 +26679,7 @@ class MainWindow(QMainWindow):
             create_shell = menu.addAction("New Shell Element...")
             create_shell.triggered.connect(self._create_shell)
             create_connection = menu.addAction(
-                "New ZeroLength / Link Element..."
+                "New Connection / Joint..."
             )
             create_connection.triggered.connect(self._create_connection)
             properties = menu.addAction("Properties")
@@ -26965,11 +26978,18 @@ class MainWindow(QMainWindow):
                 int(node_tag)
                 for connection in self.project.connections.values()
                 if connection.connection_type == connection_type
-                for node_tag in (connection.node_i, connection.node_j)
+                for node_tag in (
+                    connection.parameters.get("external_nodes", ())
+                    if connection.connection_type in {
+                        "Joint2D",
+                        "KrawinklerPanelZone",
+                    }
+                    else (connection.node_i, connection.node_j)
+                )
                 if int(node_tag) in self.model.nodes
             }
 
-            create = menu.addAction("New ZeroLength / Link...")
+            create = menu.addAction("New Connection / Joint...")
             create.triggered.connect(self._create_connection)
             properties = menu.addAction("Properties")
             properties.triggered.connect(
@@ -27075,8 +27095,8 @@ class MainWindow(QMainWindow):
             nodal_load.triggered.connect(self._create_nodal_load)
             constraint = create_menu.addAction("Constraint...")
             constraint.triggered.connect(self._create_constraint)
-            connection = create_menu.addAction("ZeroLength / Link...")
-            connection.setEnabled(1 <= len(self.selection.nodes) <= 2)
+            connection = create_menu.addAction("Connection / Joint...")
+            connection.setEnabled(1 <= len(self.selection.nodes) <= 4)
             connection.triggered.connect(self._create_connection)
 
             modify = menu.addMenu("Modify")
@@ -27336,7 +27356,7 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "connections_root":
-            create_action = menu.addAction("New ZeroLength / Link...")
+            create_action = menu.addAction("New Connection / Joint...")
             create_action.triggered.connect(self._create_connection)
             properties = menu.addAction("Properties")
             properties.triggered.connect(
@@ -27351,7 +27371,17 @@ class MainWindow(QMainWindow):
             tag = int(value)
             connection = self.project.connections.get(tag)
             connection_nodes = (
-                {int(connection.node_i), int(connection.node_j)}
+                {
+                    int(node_tag)
+                    for node_tag in (
+                        connection.parameters.get("external_nodes", ())
+                        if connection.connection_type in {
+                            "Joint2D",
+                            "KrawinklerPanelZone",
+                        }
+                        else (connection.node_i, connection.node_j)
+                    )
+                }
                 if connection is not None
                 else set()
             )
