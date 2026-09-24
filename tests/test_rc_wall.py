@@ -122,6 +122,37 @@ def test_rc_wall_append_mode_respects_origin_and_preserves_model():
     assert "Appended Wall · Top" in project.selection_sets
 
 
+def test_rc_wall_append_mode_rejects_coordinate_overlap():
+    project = ProjectDatabase()
+    project.model.ndm = 2
+    project.model.ndf = 3
+    project.model.add_node(1, 0.0, 0.0, 0.0)
+    before = project.to_dict()
+
+    spec = RCWallSpec(
+        width=1.2,
+        height=2.4,
+        thickness=0.2,
+        boundary_width=0.2,
+        vertical_elements=2,
+        macro_fibers=4,
+        boundary_unconfined_thickness=0.05,
+        boundary_confined_thickness=0.15,
+        replace_geometry=False,
+    )
+
+    try:
+        build_rc_wall(project, spec)
+    except ValueError as exc:
+        assert "overlaps an existing model node" in str(exc)
+    else:
+        raise AssertionError(
+            "Append mode should reject coincident wall/model nodes."
+        )
+
+    assert project.to_dict() == before
+
+
 def test_rc_wall_rejects_invalid_material_input_before_mutation():
     project = ProjectDatabase()
     before = project.to_dict()
