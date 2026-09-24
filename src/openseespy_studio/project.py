@@ -7166,7 +7166,22 @@ class ProjectDatabase:
         for tag, connection in self.connections.items():
             if tag == excluding_connection:
                 continue
-            if node_tag in {connection.node_i, connection.node_j}:
+            referenced_connection_nodes = {
+                connection.node_i,
+                connection.node_j,
+            }
+            if connection.connection_type in {
+                "Joint2D",
+                "KrawinklerPanelZone",
+            }:
+                referenced_connection_nodes.update(
+                    int(value)
+                    for value in connection.parameters.get(
+                        "external_nodes",
+                        (),
+                    )
+                )
+            if node_tag in referenced_connection_nodes:
                 return True
         for constraint in self.constraints.values():
             if (
@@ -7355,7 +7370,22 @@ class ProjectDatabase:
             raise ValueError(f"Node {node_tag} does not exist.")
 
         for connection in self.connections.values():
-            if node_tag in {connection.node_i, connection.node_j}:
+            referenced_connection_nodes = {
+                connection.node_i,
+                connection.node_j,
+            }
+            if connection.connection_type in {
+                "Joint2D",
+                "KrawinklerPanelZone",
+            }:
+                referenced_connection_nodes.update(
+                    int(tag)
+                    for tag in connection.parameters.get(
+                        "external_nodes",
+                        (),
+                    )
+                )
+            if node_tag in referenced_connection_nodes:
                 self._validate_connection(connection)
 
         incident_elements = sorted(
