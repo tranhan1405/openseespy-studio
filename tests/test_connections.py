@@ -2258,3 +2258,118 @@ def test_beam_column_joint_ui_puts_node1_on_lower_3d_height_chord_end():
 
     assert "if float(a[2]) > float(c[2]):" in source
     assert "if float(c[2]) > float(a[2]):" not in source
+
+
+def test_beam_column_joint_3d_blocks_external_displacement_recorder():
+    project = beam_column_joint_3d_project()
+    project.add_connection(ConnectionData(
+        tag=201,
+        name="3D recorder guard",
+        connection_type="BeamColumnJoint",
+        node_i=101,
+        node_j=102,
+        parameters={
+            "external_nodes": [101, 102, 103, 104],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    ))
+
+    recorder = RecorderData(
+        tag=41,
+        name="Unsafe 3D external displacement",
+        recorder_type="Element",
+        target_tags=[201],
+        response="externalDisplacement",
+    )
+    try:
+        project.add_recorder(recorder)
+    except ValueError as exc:
+        assert "BeamColumnJoint3d externalDisplacement is disabled" in str(exc)
+        assert "writes 24 external DOFs" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected BeamColumnJoint3d externalDisplacement recorder to fail"
+        )
+
+
+def test_legacy_beam_column_joint_3d_recorder_is_revalidated_on_load():
+    project = beam_column_joint_3d_project()
+    project.add_connection(ConnectionData(
+        tag=202,
+        name="Legacy recorder joint",
+        connection_type="BeamColumnJoint",
+        node_i=101,
+        node_j=102,
+        parameters={
+            "external_nodes": [101, 102, 103, 104],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    ))
+    data = project.to_dict()
+    data["recorders"].append(RecorderData(
+        tag=42,
+        name="Legacy unsafe external displacement",
+        recorder_type="Element",
+        target_tags=[202],
+        response="externalDisplacement",
+    ).to_dict())
+
+    try:
+        ProjectDatabase.from_dict(data)
+    except ValueError as exc:
+        assert "BeamColumnJoint3d externalDisplacement is disabled" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected legacy unsafe BeamColumnJoint3d recorder to fail load"
+        )
+
+
+def test_legacy_beam_column_joint_3d_result_is_revalidated_on_load():
+    project = beam_column_joint_3d_project()
+    project.add_connection(ConnectionData(
+        tag=203,
+        name="Legacy result joint",
+        connection_type="BeamColumnJoint",
+        node_i=101,
+        node_j=102,
+        parameters={
+            "external_nodes": [101, 102, 103, 104],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    ))
+    project.add_analysis(AnalysisSettingsData(
+        tag=1,
+        name="Static",
+        analysis_type="Static",
+        constraints_handler="Transformation",
+        steps=1,
+        load_increment=1.0,
+    ))
+    data = project.to_dict()
+    data["solution_results"].append(SolutionResultData(
+        tag=12,
+        analysis_tag=1,
+        name="Legacy unsafe joint result",
+        result_type="JointResponse",
+        element_scope=[203],
+        settings={
+            "response": "externalDisplacement",
+            "component": 1,
+        },
+    ).to_dict())
+
+    try:
+        ProjectDatabase.from_dict(data)
+    except ValueError as exc:
+        assert "BeamColumnJoint3d externalDisplacement is disabled" in str(exc)
+        assert "24 external DOFs" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected legacy unsafe BeamColumnJoint3d result to fail load"
+        )
