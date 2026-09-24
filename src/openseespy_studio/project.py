@@ -7151,8 +7151,16 @@ class ProjectDatabase:
         if active_transformation is None:
             return
 
+        effective_vecxz = (
+            resolve_transformation_vecxz(
+                self.model,
+                active_transformation,
+            )
+            if active_transformation.orientation_mode == "auto"
+            else active_transformation.vecxz
+        )
         vx, vy, vz = (
-            float(value) for value in active_transformation.vecxz
+            float(value) for value in effective_vecxz
         )
         dx, dy, dz = delta
         cross = (
