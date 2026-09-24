@@ -934,6 +934,79 @@ class _Importer:
             self.current_fiber_section = None
             self.count("Sections")
             return
+
+        if kind in {
+            "RCLMS",
+            "RCLayeredMembraneSection",
+            "ReinforcedConcreteLayeredMembraneSection",
+        }:
+            if len(args) < 9:
+                raise ValueError(
+                    "RCLMS needs steel/concrete layer counts and flags."
+                )
+            n_steel = int(args[2])
+            n_conc = int(args[3])
+            if n_steel != 1:
+                self.issue(
+                    "UNSUPPORTED",
+                    node,
+                    "RCLMS multiple steel layers",
+                    "SARE V1 currently supports one "
+                    "SmearedSteelDoubleLayer per RCLMS section.",
+                )
+                return
+            if n_conc < 1:
+                raise ValueError("RCLMS requires at least one concrete layer.")
+            try:
+                steel_index = args.index("-reinfSteel")
+                conc_index = args.index("-conc")
+                thick_index = args.index("-concThick")
+            except ValueError as exc:
+                raise ValueError(
+                    "RCLMS requires -reinfSteel, -conc and -concThick."
+                ) from exc
+            steel_tags = [
+                int(value)
+                for value in args[
+                    steel_index + 1:steel_index + 1 + n_steel
+                ]
+            ]
+            conc_tags = [
+                int(value)
+                for value in args[
+                    conc_index + 1:conc_index + 1 + n_conc
+                ]
+            ]
+            thicknesses = [
+                float(value)
+                for value in args[
+                    thick_index + 1:thick_index + 1 + n_conc
+                ]
+            ]
+            if (
+                len(steel_tags) != n_steel
+                or len(conc_tags) != n_conc
+                or len(thicknesses) != n_conc
+            ):
+                raise ValueError(
+                    "RCLMS layer arrays do not match the declared counts."
+                )
+            self.project.add_section(
+                SectionData(
+                    tag,
+                    f"Imported RCLMS {tag}",
+                    "RCLMS",
+                    nd_material_tag=steel_tags[0],
+                    shell_layers=[
+                        ShellLayerData(mat_tag, thickness)
+                        for mat_tag, thickness
+                        in zip(conc_tags, thicknesses)
+                    ],
+                )
+            )
+            self.current_fiber_section = None
+            self.count("Sections")
+            return
         if kind == "Fiber":
             gj = self.flag_value(args[2:], "-GJ", 1.0e6)
             self.project.add_section(
@@ -1293,6 +1366,50 @@ class _Importer:
             raise ValueError(
                 f"Element tag {tag} is already used by a connection."
             )
+
+        if kind == "MEFI":
+            if len(args) < 11:
+                raise ValueError(
+                    "MEFI needs four nodes, numFib, -width and -sec arrays."
+                )
+            nk = int(args[4])
+            nl = int(args[5])
+            num_fib = int(args[6])
+            rest = args[7:]
+            if num_fib < 1:
+                raise ValueError("MEFI numFib must be positive.")
+            try:
+                width_index = rest.index("-width")
+                sec_index = rest.index("-sec")
+            except ValueError as exc:
+                raise ValueError("MEFI requires -width and -sec.") from exc
+            if sec_index <= width_index:
+                raise ValueError("MEFI -width must precede -sec.")
+            widths = [
+                float(value)
+                for value in rest[width_index + 1:sec_index]
+            ]
+            sec_tags = [
+                int(value)
+                for value in rest[sec_index + 1:]
+            ]
+            if len(widths) != num_fib or len(sec_tags) != num_fib:
+                raise ValueError(
+                    "MEFI width/section arrays must match numFib."
+                )
+            self.project.model.add_element(
+                tag,
+                ni,
+                nj,
+                element_type="MEFI",
+                group="rc-wall",
+                k=nk,
+                l=nl,
+                mefi_widths=tuple(widths),
+                mefi_section_tags=tuple(sec_tags),
+            )
+            self.count("Elements")
+            return
 
         if kind in {
             "ASDShellQ4",
