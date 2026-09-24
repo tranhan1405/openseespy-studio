@@ -6614,6 +6614,7 @@ class ModelViewport(QWidget):
             "result-contour",
             "result-contour-nodes",
             "result-shell-contour",
+            "result-crack-pattern",
             "result-hinge-members",
             "result-hinge-points",
             "motion-overlay",
@@ -7038,6 +7039,274 @@ class ModelViewport(QWidget):
 
         self._remember_result_view(view_cache_key, entries)
         self._result_overlay_active = True
+        self.plotter.render()
+
+
+    @staticmethod
+    def _principal_tensile_strain(
+        values: object,
+    ) -> tuple[float, float] | None:
+        """Return maximum in-plane principal strain and its direction."""
+        if not isinstance(values, (list, tuple, np.ndarray)):
+            return None
+        raw = list(values)
+        if len(raw) < 3:
+            return None
+        try:
+            ex = float(raw[0])
+            ey = float(raw[1])
+            gxy = float(raw[2])
+        except (TypeError, ValueError):
+            return None
+        if not np.all(np.isfinite((ex, ey, gxy))):
+            return None
+        average = 0.5 * (ex + ey)
+        radius = math.sqrt(
+            (0.5 * (ex - ey)) ** 2 + (0.5 * gxy) ** 2
+        )
+        epsilon_1 = average + radius
+        theta_1 = 0.5 * math.atan2(gxy, ex - ey)
+        return float(epsilon_1), float(theta_1)
+
+    def show_crack_pattern(
+        self,
+        result: dict[str, object],
+        *,
+        frame_index: int | None = None,
+        accumulate: bool = False,
+        line_scale: float = 0.82,
+        element_tags: set[int] | None = None,
+        cache_key: object | None = None,
+    ) -> None:
+        """Draw smeared RC crack lines for MEFI/RCLMS macro-fibers.
+
+        A panel is shown only after its maximum principal tensile strain reaches
+        the OrthotropicRAConcrete cracking strain stored in mefi_crack_specs.
+        The displayed crack line is perpendicular to that principal tensile
+        strain direction. With accumulate enabled the orientation/intensity at
+        the largest opening reached up to the selected frame is retained.
+        """
+        if self._model is None:
+            return
+
+        specs = result.get("mefi_crack_specs", {})
+        final = result.get("final", {})
+        history = result.get("history", {})
+        if not isinstance(specs, dict) or not specs:
+            self.clear_result_overlay()
+            return
+        final_panels = (
+            final.get("mefi_panel_strains", {})
+            if isinstance(final, dict)
+            else {}
+        )
+        history_panels = (
+            history.get("mefi_panel_strains", {})
+            if isinstance(history, dict)
+            else {}
+        )
+        if not isinstance(final_panels, dict):
+            final_panels = {}
+        if not isinstance(history_panels, dict):
+            history_panels = {}
+
+        requested = (
+            {int(tag) for tag in element_tags}
+            if element_tags
+            else None
+        )
+        line_scale = max(0.05, min(1.0, float(line_scale)))
+        points: list[np.ndarray] = []
+        lines: list[int] = []
+        intensity: list[float] = []
+
+        def panel_rows(
+            element_key: str,
+            panel_key: str,
+        ) -> list[object]:
+            final_element = final_panels.get(element_key, {})
+            final_row = (
+                final_element.get(panel_key, [])
+                if isinstance(final_element, dict)
+                else []
+            )
+            history_element = history_panels.get(element_key, {})
+            rows = (
+                history_element.get(panel_key, [])
+                if isinstance(history_element, dict)
+                else []
+            )
+            rows = list(rows) if isinstance(rows, list) else []
+
+            if frame_index is None:
+                if accumulate and rows:
+                    return rows
+                return [final_row] if final_row else []
+            if not rows:
+                return [final_row] if final_row else []
+
+            index = max(0, min(int(frame_index), len(rows) - 1))
+            return rows[: index + 1] if accumulate else [rows[index]]
+
+        for raw_tag, spec in sorted(
+            specs.items(),
+            key=lambda item: int(item[0]),
+        ):
+            try:
+                tag = int(raw_tag)
+            except (TypeError, ValueError):
+                continue
+            if requested is not None and tag not in requested:
+                continue
+            element = self._model.elements.get(tag)
+            if (
+                element is None
+                or element.element_type != "MEFI"
+                or element.k is None
+                or element.l is None
+                or not isinstance(spec, dict)
+            ):
+                continue
+
+            node_i = self._model.nodes.get(element.i)
+            node_j = self._model.nodes.get(element.j)
+            node_k = self._model.nodes.get(element.k)
+            node_l = self._model.nodes.get(element.l)
+            if any(node is None for node in (node_i, node_j, node_k, node_l)):
+                continue
+
+            pi = np.asarray(node_i.xyz, dtype=float)
+            pj = np.asarray(node_j.xyz, dtype=float)
+            pk = np.asarray(node_k.xyz, dtype=float)
+            pl = np.asarray(node_l.xyz, dtype=float)
+            edge_x = 0.5 * ((pj - pi) + (pk - pl))
+            width_geom = float(np.linalg.norm(edge_x))
+            if width_geom <= 1.0e-12:
+                continue
+            local_x = edge_x / width_geom
+
+            edge_y = 0.5 * ((pl - pi) + (pk - pj))
+            edge_y = edge_y - float(np.dot(edge_y, local_x)) * local_x
+            height_geom = float(np.linalg.norm(edge_y))
+            if height_geom <= 1.0e-12:
+                continue
+            local_y = edge_y / height_geom
+            normal = np.cross(local_x, local_y)
+            normal_norm = float(np.linalg.norm(normal))
+            if normal_norm <= 1.0e-12:
+                continue
+            normal /= normal_norm
+            visual_offset = normal * max(width_geom, height_geom) * 2.0e-4
+
+            panels = spec.get("panels", [])
+            if not isinstance(panels, list) or not panels:
+                continue
+            panel_widths: list[float] = []
+            for panel in panels:
+                try:
+                    panel_widths.append(float(panel.get("width", 0.0)))
+                except (AttributeError, TypeError, ValueError):
+                    panel_widths.append(0.0)
+            total_width = sum(max(0.0, value) for value in panel_widths)
+            if total_width <= 1.0e-12:
+                continue
+
+            cumulative = 0.0
+            element_key = str(tag)
+            for index, panel in enumerate(panels, start=1):
+                if not isinstance(panel, dict):
+                    continue
+                raw_width = max(0.0, panel_widths[index - 1])
+                try:
+                    panel_no = int(panel.get("panel", index))
+                    threshold = float(panel.get("cracking_strain"))
+                except (TypeError, ValueError):
+                    cumulative += raw_width
+                    continue
+                if threshold <= 0.0 or not math.isfinite(threshold):
+                    cumulative += raw_width
+                    continue
+
+                candidates = panel_rows(
+                    element_key,
+                    str(panel_no),
+                )
+                best: tuple[float, float, float] | None = None
+                for candidate in candidates:
+                    principal = self._principal_tensile_strain(candidate)
+                    if principal is None:
+                        continue
+                    epsilon_1, theta_1 = principal
+                    ratio = epsilon_1 / threshold
+                    if ratio < 1.0:
+                        continue
+                    if best is None or ratio > best[0]:
+                        best = (ratio, epsilon_1, theta_1)
+                if best is None:
+                    cumulative += raw_width
+                    continue
+
+                u = (cumulative + 0.5 * raw_width) / total_width
+                bottom = (1.0 - u) * pi + u * pj
+                top = (1.0 - u) * pl + u * pk
+                center = 0.5 * (bottom + top) + visual_offset
+                panel_width_geom = (
+                    raw_width / total_width * width_geom
+                )
+
+                crack_angle = best[2] + 0.5 * math.pi
+                dx = math.cos(crack_angle)
+                dy = math.sin(crack_angle)
+                limits: list[float] = []
+                if abs(dx) > 1.0e-12:
+                    limits.append(
+                        0.5 * panel_width_geom / abs(dx)
+                    )
+                if abs(dy) > 1.0e-12:
+                    limits.append(
+                        0.5 * height_geom / abs(dy)
+                    )
+                if not limits:
+                    cumulative += raw_width
+                    continue
+                half_length = line_scale * min(limits)
+                direction = dx * local_x + dy * local_y
+                start = center - half_length * direction
+                end = center + half_length * direction
+
+                base = len(points)
+                points.extend((start, end))
+                lines.extend((2, base, base + 1))
+                intensity.append(float(best[0]))
+                cumulative += raw_width
+
+        self.clear_result_overlay(render=False)
+        self.set_undeformed_model_visible(True, render=False)
+        if not points:
+            self.plotter.render()
+            return
+
+        mesh = pv.PolyData(np.asarray(points, dtype=float))
+        mesh.lines = np.asarray(lines, dtype=np.int64)
+        mesh.cell_data["crack_intensity"] = np.asarray(
+            intensity,
+            dtype=float,
+        )
+        upper = max(max(intensity), 1.05)
+        kwargs: dict[str, object] = {
+            "name": "result-crack-pattern",
+            "scalars": "crack_intensity",
+            "preference": "cell",
+            "cmap": "autumn_r",
+            "clim": (1.0, upper),
+            "line_width": 4,
+            "render_lines_as_tubes": True,
+            "pickable": False,
+            "scalar_bar_args": {"title": "Crack intensity epsilon1 / epsilon_cr"},
+        }
+        self.plotter.add_mesh(mesh, **kwargs, render=False)
+        self._result_overlay_active = True
+        self._active_result_view_key = None
         self.plotter.render()
 
     def show_shell_deformation_contour(

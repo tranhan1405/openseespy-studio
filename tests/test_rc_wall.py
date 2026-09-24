@@ -7,8 +7,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from openseespy_studio.generator import to_openseespy
-from openseespy_studio.project import ProjectDatabase
+from openseespy_studio.generator import build_mefi_crack_specs, to_openseespy
+from openseespy_studio.project import AnalysisSettingsData, ProjectDatabase
 from openseespy_studio.rc_wall import RCWallSpec, build_rc_wall
 from openseespy_studio.ui.rc_wall_wizard import RCWallWizard
 from openseespy_studio.ui.rclms_section_dialog import RCLMSSectionDialog
@@ -244,6 +244,64 @@ def test_rc_wall_export_contains_native_opensees_workflow():
         f"{result.web_section_tag}"
         in script
     )
+
+
+
+def test_rc_wall_builds_mefi_crack_specs_from_material_ecr():
+    project, result = _benchmark_project()
+
+    specs = build_mefi_crack_specs(
+        project.model,
+        sections=project.sections,
+        nd_materials=project.nd_materials,
+    )
+
+    assert set(specs) == set(result.element_tags)
+    first = specs[result.element_tags[0]]
+    assert first["source"] == "MEFI RCPanel panel_strain"
+    assert len(first["panels"]) == 8
+    assert [panel["panel"] for panel in first["panels"]] == list(range(1, 9))
+    assert math.isclose(
+        sum(float(panel["width"]) for panel in first["panels"]),
+        1220.0,
+    )
+    assert all(
+        math.isclose(float(panel["cracking_strain"]), 8.0e-5)
+        for panel in first["panels"]
+    )
+
+
+def test_rc_wall_analysis_script_captures_mefi_panel_strain_history():
+    project, result = _benchmark_project()
+    analysis = AnalysisSettingsData(
+        1,
+        "RC Wall Static",
+        analysis_type="Static",
+        steps=1,
+        integrator="LoadControl",
+        load_increment=1.0,
+    )
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+        analyses={1: analysis},
+        active_analysis_tag=1,
+    )
+
+    assert "_studio_mefi_crack_specs" in script
+    assert "'mefi_crack_specs':" in script
+    assert "'mefi_panel_strains':" in script
+    assert "'RCPanel'" in script
+    assert "'panel_strain'" in script
+    assert str(result.element_tags[0]) in script
+
 
 
 def test_rc_wall_passes_core_model_validation():
