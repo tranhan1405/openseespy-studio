@@ -653,3 +653,55 @@ ops.element('zeroLength', 20, 1, 2, '-mat', 1, '-dir', 6)
 
     assert 20 in result.project.connections
     assert result.project.connections[20].materials_by_dof == {6: 1}
+
+
+def test_offset_rigid_connection_requires_transformation_handler():
+    project = frame2d_project()
+    project.add_analysis(
+        AnalysisSettingsData(
+            tag=1,
+            name="Plain analysis",
+            analysis_type="Static",
+            constraints_handler="Plain",
+        )
+    )
+    connection = ConnectionData(
+        tag=60,
+        name="Offset rigid arm",
+        connection_type="rigid",
+        node_i=10,
+        node_j=12,
+    )
+
+    try:
+        project.add_connection(connection)
+    except ValueError as exc:
+        assert "Rigid connections between separated nodes" in str(exc)
+        assert "Transformation" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected offset rigid connection with Plain handler to fail"
+        )
+
+
+def test_coincident_rigid_connection_can_coexist_with_plain_handler():
+    project = frame2d_project()
+    project.add_analysis(
+        AnalysisSettingsData(
+            tag=1,
+            name="Plain analysis",
+            analysis_type="Static",
+            constraints_handler="Plain",
+        )
+    )
+    connection = ConnectionData(
+        tag=61,
+        name="Coincident rigid joint",
+        connection_type="rigid",
+        node_i=1,
+        node_j=2,
+    )
+
+    project.add_connection(connection)
+
+    assert project.connections[61].connection_type == "rigid"
