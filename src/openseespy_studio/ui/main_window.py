@@ -21982,6 +21982,10 @@ class MainWindow(QMainWindow):
             return
 
         result_settings = dict(settings or {})
+        generic_joint_request = (
+            str(result_type) == "JointResponse"
+            and "connection_type" not in result_settings
+        )
         if str(result_type) == "JointResponse":
             if len(element_scope) != 1:
                 QMessageBox.warning(
@@ -22034,6 +22038,15 @@ class MainWindow(QMainWindow):
                 return
             result_settings["response"] = requested
             result_settings.setdefault("component", 1)
+            if (
+                generic_joint_request
+                and connection.connection_type == "BeamColumnJoint"
+                and requested == "deformation"
+                and int(result_settings.get("component", 1) or 1) == 1
+            ):
+                # Generic Connection / Joint Response means the total RC
+                # joint deformation (component 4), not bar-slip only.
+                result_settings["component"] = 4
             result_settings.setdefault("curve_mode", "history")
             result_settings["connection_type"] = connection.connection_type
 
