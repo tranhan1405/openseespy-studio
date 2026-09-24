@@ -610,6 +610,24 @@ def nd_material_to_openseespy(
             f"{material.tag}, {args})"
         )
 
+    if material.material_type == "PressureIndependMultiYield":
+        keys = (
+            "nd", "rho", "refShearModul", "refBulkModul",
+            "cohesi", "peakShearStra", "frictionAng", "refPress",
+            "pressDependCoe", "noYieldSurf",
+        )
+        rendered: list[str] = []
+        for key in keys:
+            number = value(key)
+            if key in {"nd", "noYieldSurf"}:
+                rendered.append(str(int(round(number))))
+            else:
+                rendered.append(f"{number:g}")
+        return (
+            "ops.nDMaterial('PressureIndependMultiYield', "
+            f"{material.tag}, {', '.join(rendered)})"
+        )
+
     raise ValueError(
         f"Unsupported nDMaterial type: {material.material_type}"
     )
