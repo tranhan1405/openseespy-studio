@@ -1077,6 +1077,7 @@ class ResultsPanel(QWidget):
                     kind in {
                         "DeformedShape",
                         "NodalDisplacement",
+                        "NodalReaction",
                         "ModeShape",
                         "Motion",
                         "ForceDisplacement",
@@ -1873,21 +1874,28 @@ class ResultsPanel(QWidget):
         )
         self.node_animate_button = QPushButton("▶ Animate")
         self.node_animate_button.setToolTip(
-            "Animate the nodal deformation history for the current result set."
+            "Animate the deformation while the active displacement/reaction "
+            "table follows the current result frame."
         )
         self.node_animate_button.clicked.connect(
             lambda: self._open_animation(source="node")
         )
+        export = QPushButton("Export CSV...")
+        export.setToolTip(
+            "Export the node-result table exactly as currently displayed."
+        )
+        export.clicked.connect(self._export_node_table_csv)
         clear = QPushButton("Clear")
         clear.clicked.connect(self.clear_overlay_requested.emit)
         row.addWidget(show)
         row.addWidget(self.node_animate_button)
+        row.addWidget(export)
         row.addWidget(clear)
         row.addStretch(1)
         layout.addLayout(row)
 
         self.node_frame_status = QLabel(
-            "Values: final result · animation values update on Pause."
+            "Values: final result · animation values update live."
         )
         self.node_frame_status.setWordWrap(True)
         layout.addWidget(self.node_frame_status)
@@ -1909,8 +1917,10 @@ class ResultsPanel(QWidget):
     def _node_quantity_changed(self, quantity: str) -> None:
         self.node_contour_component.clear()
         if hasattr(self, "node_animate_button"):
-            self.node_animate_button.setVisible(
-                str(quantity) == "Displacement"
+            self.node_animate_button.setVisible(True)
+            self.node_animate_button.setToolTip(
+                "Animate the deformation while the "
+                f"{str(quantity).lower()} table follows each result frame."
             )
         if str(quantity) == "Reaction":
             self.node_contour_component.addItems(
@@ -1921,6 +1931,68 @@ class ResultsPanel(QWidget):
                 ["|U|", "UX", "UY", "UZ", "|R|", "RX", "RY", "RZ"]
             )
         self._populate_node_table()
+
+    def _export_node_table_csv(self) -> None:
+        """Export the currently displayed node-result table to CSV."""
+        if self.node_table.rowCount() <= 0:
+            self.node_frame_status.setText(
+                "No node-result table data is available to export."
+            )
+            return
+
+        quantity = self.node_quantity.currentText()
+        frame_label = (
+            f"frame_{self._motion_source_index(self._motion_frame_index) + 1}"
+            if (
+                self._motion_info is not None
+                and self._active_solution_kind
+                in {"NodalDisplacement", "NodalReaction"}
+                and self._motion_display_frame_count > 0
+            )
+            else "final"
+        )
+        suggested = (
+            f"nodal_{quantity.lower()}_{frame_label}.csv"
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Export Nodal {quantity}",
+            suggested,
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+
+        headers = [
+            (
+                self.node_table.horizontalHeaderItem(column).text()
+                if self.node_table.horizontalHeaderItem(column) is not None
+                else f"Column {column + 1}"
+            )
+            for column in range(self.node_table.columnCount())
+        ]
+        rows: list[list[str]] = []
+        for row in range(self.node_table.rowCount()):
+            rows.append([
+                (
+                    self.node_table.item(row, column).text()
+                    if self.node_table.item(row, column) is not None
+                    else ""
+                )
+                for column in range(self.node_table.columnCount())
+            ])
+
+        with open(path, "w", newline="", encoding="utf-8") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(headers)
+            writer.writerows(rows)
+
+        self.node_frame_status.setText(
+            f"Exported {len(rows)} nodal {quantity.lower()} row(s) "
+            f"to {path}"
+        )
 
     def _build_element_tab(self) -> None:
         page = QWidget()
@@ -3687,7 +3759,7 @@ class ResultsPanel(QWidget):
             (
                 f"{analysis_type or 'Analysis'} · {count} frame(s) · "
                 f"{self._motion_frame_rate_value()} fps · "
-                "all result frames retained · tables update on Pause."
+                "all result frames retained · node tables update live."
                 if count > 0
                 else "No deformation history or modal vectors are "
                 "available for result animation."
@@ -3778,7 +3850,7 @@ class ResultsPanel(QWidget):
             self.motion_play.setChecked(False)
             self.motion_play.setText("▶ Play")
             self.motion_play.blockSignals(False)
-        self._sync_paused_motion_values()
+        self._sync_motion_node_values()
 
     def _toggle_motion_playback(self, checked: bool) -> None:
         if checked:
@@ -3796,10 +3868,13 @@ class ResultsPanel(QWidget):
                 self._motion_timer_interval_ms()
             )
             self._motion_timer.start()
-            if hasattr(self, "node_frame_status"):
+            if (
+                hasattr(self, "node_frame_status")
+                and self._active_solution_kind
+                in {"NodalDisplacement", "NodalReaction"}
+            ):
                 self.node_frame_status.setText(
-                    "Values frozen during playback · Pause to update the "
-                    "current displacement frame."
+                    "Values follow the active animation frame live."
                 )
         else:
             self._motion_timer.stop()
@@ -3843,13 +3918,20 @@ class ResultsPanel(QWidget):
         if target != self._motion_frame_index:
             self._set_motion_index(target)
 
-    def _sync_paused_motion_values(self) -> None:
+    def _sync_motion_node_values(
+        self,
+        source_index: int | None = None,
+    ) -> None:
+        """Synchronize the node table with the active animation frame."""
         if (
             not hasattr(self, "node_frame_status")
             or self._motion_info is None
             or self._motion_info.kind == "Modal"
+            or self._active_solution_kind
+            not in {"NodalDisplacement", "NodalReaction"}
         ):
             return
+
         history = (
             self._result.get("history", {})
             if isinstance(self._result, dict)
@@ -3857,30 +3939,40 @@ class ResultsPanel(QWidget):
         )
         nodes = history.get("nodes", {}) if isinstance(history, dict) else {}
         if not isinstance(nodes, dict) or not nodes:
-            return
-
-        source_index = self._motion_source_index(
-            self._motion_frame_index
-        )
-        if self.node_quantity.currentText() != "Displacement":
             self.node_frame_status.setText(
-                f"Animation paused at frame "
-                f"{self._motion_frame_index + 1}/"
-                f"{self._motion_display_frame_count}."
+                "No nodal result history is available for animation."
             )
             return
+
+        if source_index is None:
+            source_index = self._motion_source_index(
+                self._motion_frame_index
+            )
+        source_index = max(0, int(source_index))
+
+        quantity = self.node_quantity.currentText()
+        displacement = quantity == "Displacement"
+        history_key = "disp" if displacement else "reaction"
+        headers = (
+            ["Node", "UX", "UY", "UZ", "RX", "RY", "RZ"]
+            if displacement
+            else ["Node", "FX", "FY", "FZ", "MX", "MY", "MZ"]
+        )
 
         rows: list[tuple[str, ...]] = []
         for tag in sorted(nodes, key=lambda value: int(value)):
             node_data = nodes.get(tag, {})
-            disp = (
-                node_data.get("disp", [])
+            series = (
+                node_data.get(history_key, [])
                 if isinstance(node_data, dict)
                 else []
             )
-            if not isinstance(disp, list) or source_index >= len(disp):
+            if (
+                not isinstance(series, list)
+                or source_index >= len(series)
+            ):
                 continue
-            values = list(disp[source_index])
+            values = list(series[source_index])
             while len(values) < 6:
                 values.append(0.0)
             rows.append(
@@ -3891,31 +3983,50 @@ class ResultsPanel(QWidget):
             )
 
         if rows:
-            headers = ["Node", "UX", "UY", "UZ", "RX", "RY", "RZ"]
             self.node_table.setUpdatesEnabled(False)
             try:
                 self.node_table.setHorizontalHeaderLabels(headers)
                 self.node_table.setRowCount(len(rows))
                 for row_index, values in enumerate(rows):
                     for column, value in enumerate(values):
-                        self.node_table.setItem(
-                            row_index,
-                            column,
-                            QTableWidgetItem(value),
-                        )
+                        item = self.node_table.item(row_index, column)
+                        if item is None:
+                            item = QTableWidgetItem()
+                            self.node_table.setItem(
+                                row_index,
+                                column,
+                                item,
+                            )
+                        item.setText(value)
             finally:
                 self.node_table.setUpdatesEnabled(True)
             self._node_table_display_key = (
-                f"Displacement@frame:{source_index}"
+                f"{quantity}@frame:{source_index}"
             )
 
+        coordinate_text = ""
+        times = history.get("time", []) if isinstance(history, dict) else []
+        if (
+            isinstance(times, list)
+            and source_index < len(times)
+        ):
+            try:
+                coordinate_text = (
+                    f" · t={float(times[source_index]):.6g} "
+                    f"{self._project_units.get('time', 's')}"
+                )
+            except (TypeError, ValueError):
+                coordinate_text = ""
+
         self.node_frame_status.setText(
-            f"Values: animation frame "
+            f"Values: live animation frame "
             f"{self._motion_frame_index + 1}/"
             f"{self._motion_display_frame_count} "
             f"(result frame {source_index + 1}/"
-            f"{self._motion_source_frame_count})."
+            f"{self._motion_source_frame_count})"
+            f"{coordinate_text}."
         )
+
 
     def _sync_motion_markers(self, index: int | None) -> None:
         self.history_plot.set_marker(index)
@@ -3997,6 +4108,11 @@ class ResultsPanel(QWidget):
         self._sync_motion_markers(
             None if self._motion_info.kind == "Modal" else source_index
         )
+        if self._active_solution_kind in {
+            "NodalDisplacement",
+            "NodalReaction",
+        }:
+            self._sync_motion_node_values(source_index)
         if self._active_solution_kind == "CrackPattern":
             self.crack_frame_requested.emit(
                 int(source_index),
