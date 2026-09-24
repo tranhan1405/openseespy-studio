@@ -138,3 +138,15 @@ def test_animation_transport_shows_time_or_analysis_coordinate():
     assert 'return f"Coordinate: {value:.6g}"' in coordinate_source
     assert 'return f"Value: {100.0 * value:.1f}%"' in coordinate_source
     assert 'self.motion_coordinate_label.setText(' in emit_source
+
+
+def test_force_displacement_curve_tracks_animation_frame():
+    build_source = inspect.getsource(ResultsPanel._build_force_displacement_tab)
+    show_source = inspect.getsource(ResultsPanel.show_solution_result)
+    sync_source = inspect.getsource(ResultsPanel._sync_motion_markers)
+
+    assert 'self.force_disp_animate_button = QPushButton("▶ Animate")' in build_source
+    assert '_open_animation(source="force_displacement")' in build_source
+    assert '"ForceDisplacement"' in show_source
+    assert 'self.motion_page.setVisible(' in show_source
+    assert 'self.force_disp_plot.set_marker(index)' in sync_source
