@@ -809,6 +809,44 @@ def connection_to_openseespy(
             f"'-doRayleigh', {1 if connection.do_rayleigh else 0})"
         )
 
+    if connection_type == "twoNodeLink":
+        directions = sorted(connection.materials_by_dof)
+        materials = [connection.materials_by_dof[dof] for dof in directions]
+        args = [
+            f"ops.element('twoNodeLink', {connection.tag}, "
+            f"{connection.node_i}, {connection.node_j}, '-mat', "
+            + ", ".join(str(tag) for tag in materials)
+            + ", '-dir', "
+            + ", ".join(str(dof) for dof in directions)
+        ]
+        if bool(connection.parameters.get("orientation_override", True)):
+            args.append(f", '-orient', {ox}, {oy}")
+        p_delta = [
+            float(value)
+            for value in connection.parameters.get("p_delta", ())
+        ]
+        if p_delta:
+            args.append(
+                ", '-pDelta', "
+                + ", ".join(f"{value:g}" for value in p_delta)
+            )
+        shear_dist = [
+            float(value)
+            for value in connection.parameters.get("shear_dist", ())
+        ]
+        if shear_dist:
+            args.append(
+                ", '-shearDist', "
+                + ", ".join(f"{value:g}" for value in shear_dist)
+            )
+        if connection.do_rayleigh:
+            args.append(", '-doRayleigh'")
+        link_mass = float(connection.parameters.get("mass", 0.0))
+        if link_mass > 0.0:
+            args.append(f", '-mass', {link_mass:g}")
+        args.append(")")
+        return "".join(args)
+
     if connection_type == "Joint2D":
         nodes = [
             int(tag)
@@ -825,15 +863,19 @@ def connection_to_openseespy(
         large_disp = int(connection.parameters.get("large_disp", 0))
         center_var = f"_sare_joint2d_center_{connection.tag}"
         args = ", ".join(str(tag) for tag in nodes)
-        mats = ", ".join(str(tag) for tag in interface)
+        command_args = [
+            f"ops.element('Joint2D', {connection.tag}, {args}, {center_var}"
+        ]
+        if any(interface):
+            command_args.append(
+                ", " + ", ".join(str(tag) for tag in interface)
+            )
+        command_args.append(f", {panel_material}, {large_disp})")
         return "\n".join([
             f"# Joint2D connection {connection.tag}: external nodes are "
             "clockwise/counter-clockwise around the joint.",
             f"{center_var} = max(list(ops.getNodeTags()) or [0]) + 1",
-            (
-                f"ops.element('Joint2D', {connection.tag}, {args}, "
-                f"{center_var}, {mats}, {panel_material}, {large_disp})"
-            ),
+            "".join(command_args),
         ])
 
     if connection_type == "KrawinklerPanelZone":
@@ -851,8 +893,9 @@ def connection_to_openseespy(
 
         # The macro follows the Gupta-Krawinkler topology used by the
         # OpenSees panel-zone example: eight very-stiff elastic frame
-        # segments, translational equalDOF constraints at all four corners,
-        # and one zeroLength rotational spring at one duplicated corner.
+        # segments, translational equalDOF constraints at the duplicated
+        # corners, and one zeroLength rotational spring. The public SARE
+        # connection tag is the spring tag; internal frame tags stay hidden.
         return "\n".join([
             f"# Krawinkler panel-zone macro {connection.tag}",
             f"{p}_left = ops.nodeCoord({left})",
