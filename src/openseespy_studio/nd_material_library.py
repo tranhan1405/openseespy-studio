@@ -11,6 +11,7 @@ from typing import Any
 from .project import (
     ND_MATERIAL_PARAMETER_ORDER,
     NDMaterialData,
+    nd_material_supported_formulations,
 )
 
 
@@ -374,6 +375,14 @@ def _record_from_dict(raw: dict[str, Any]) -> NDMaterialLibraryRecord:
         raise ValueError(
             f"Official nD material record {record_id!r} has no "
             "compatibility metadata."
+        )
+    core_compatibility = set(
+        nd_material_supported_formulations(model)
+    )
+    if set(compatibility) != core_compatibility:
+        raise ValueError(
+            f"Official nD material record {record_id!r} compatibility "
+            "does not match SARE core formulations."
         )
 
     applicability = tuple(
