@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import math
 import os
+import pytest
 from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -13,6 +14,7 @@ from openseespy_studio.generator import build_mefi_crack_specs, to_openseespy
 from openseespy_studio.project import AnalysisSettingsData, ProjectDatabase
 from openseespy_studio.rc_wall import RCWallSpec, build_rc_wall
 import openseespy_studio.ui.main_window as main_window_module
+from openseespy_studio.ui import viewport as viewport_module
 from openseespy_studio.ui.main_window import MainWindow
 from openseespy_studio.ui.rc_wall_wizard import RCWallWizard
 from openseespy_studio.ui.rclms_section_dialog import RCLMSSectionDialog
@@ -574,6 +576,10 @@ def test_rc_wall_mainwindow_handler_builds_live_project(monkeypatch):
     assert selected["elements"] == set(project.model.elements)
 
 
+@pytest.mark.skipif(
+    viewport_module.QtInteractor is None,
+    reason="PyVista/pyvistaqt not installed in lightweight unit-test job",
+)
 def test_rc_wall_qaction_trigger_generates_wall_in_real_mainwindow(monkeypatch):
     class _FakeWizard:
         def __init__(self, project, parent=None):
