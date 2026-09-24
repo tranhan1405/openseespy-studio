@@ -204,6 +204,9 @@ class ConnectionDialog(QDialog):
         self.units = dict(units or {})
         self.ndm = int(ndm)
         self.ndf = int(ndf)
+        self._original_connection_type = (
+            connection.connection_type if connection is not None else None
+        )
         # These labels are element-direction labels, not raw nodal DOF
         # indices. zeroLength and twoNodeLink use different direction
         # numbering for 2D rotational response, so the rows are refreshed
@@ -1332,7 +1335,15 @@ class ConnectionDialog(QDialog):
             labels = ("Node 1:", "Node 2:", "Node 3:", "Node 4:")
         elif bcj_mode:
             self.joint_nodes_group.setTitle(
-                "External nodes · opposite chords 1↔3 and 2↔4"
+                (
+                    "External nodes · N1 Top → N2 Right → "
+                    "N3 Bottom → N4 Left"
+                    if self.ndm == 2
+                    else (
+                        "External nodes · N1↔N3 height/column chord · "
+                        "N2↔N4 width/beam chord"
+                    )
+                )
             )
             labels = ("Node 1:", "Node 2:", "Node 3:", "Node 4:")
         elif joint2d_mode:
@@ -1348,6 +1359,92 @@ class ConnectionDialog(QDialog):
             labels,
         ):
             label_widget.setText(text_value)
+
+        if (
+            bcj_mode
+            and self._original_connection_type != "BeamColumnJoint"
+        ):
+            current_tags = [spin.value() for spin in self.joint_node_spins]
+            if (
+                len(set(current_tags)) == 4
+                and all(tag in self.node_positions for tag in current_tags)
+            ):
+                if self.ndm == 2:
+                    top = max(
+                        current_tags,
+                        key=lambda tag: float(
+                            self.node_positions[tag][1]
+                        ),
+                    )
+                    bottom = min(
+                        current_tags,
+                        key=lambda tag: float(
+                            self.node_positions[tag][1]
+                        ),
+                    )
+                    right = max(
+                        current_tags,
+                        key=lambda tag: float(
+                            self.node_positions[tag][0]
+                        ),
+                    )
+                    left = min(
+                        current_tags,
+                        key=lambda tag: float(
+                            self.node_positions[tag][0]
+                        ),
+                    )
+                    ordered = [top, right, bottom, left]
+                    if len(set(ordered)) == 4:
+                        for spin, tag in zip(
+                            self.joint_node_spins,
+                            ordered,
+                        ):
+                            spin.setValue(int(tag))
+                else:
+                    # Start from the current cyclic order, then make the
+                    # opposite chord with the strongest global-Z alignment
+                    # Node 1↔3. This matches the usual vertical-column
+                    # convention while preserving a cyclic node sequence.
+                    cycle = list(current_tags)
+                    pair_13 = (cycle[0], cycle[2])
+                    pair_24 = (cycle[1], cycle[3])
+
+                    def _verticality(pair: tuple[int, int]) -> float:
+                        a = self.node_positions[pair[0]]
+                        b = self.node_positions[pair[1]]
+                        vector = tuple(
+                            float(b[axis]) - float(a[axis])
+                            for axis in range(3)
+                        )
+                        length = _norm(vector)
+                        return (
+                            abs(vector[2]) / length
+                            if length > 1.0e-14
+                            else -1.0
+                        )
+
+                    if _verticality(pair_24) > _verticality(pair_13):
+                        cycle = [
+                            cycle[1],
+                            cycle[2],
+                            cycle[3],
+                            cycle[0],
+                        ]
+                    a = self.node_positions[cycle[0]]
+                    c = self.node_positions[cycle[2]]
+                    if float(c[2]) > float(a[2]):
+                        cycle = [
+                            cycle[2],
+                            cycle[3],
+                            cycle[0],
+                            cycle[1],
+                        ]
+                    for spin, tag in zip(
+                        self.joint_node_spins,
+                        cycle,
+                    ):
+                        spin.setValue(int(tag))
 
         if lehigh_mode:
             current_tags = [spin.value() for spin in self.joint_node_spins]
